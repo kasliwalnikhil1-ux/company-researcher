@@ -9,7 +9,7 @@ interface FundingDisplayProps {
 }
 
 export default function FundingDisplay({ fundingData }: FundingDisplayProps) {
-  if (fundingData.summary.startsWith("NO")) {
+  if (!fundingData?.summary || fundingData.summary.startsWith("NO")) {
     return null;
   }
 

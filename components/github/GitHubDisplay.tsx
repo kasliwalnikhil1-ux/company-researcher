@@ -53,27 +53,73 @@ export default function GitHubDisplay({ githubUrl }: GitHubDisplayProps) {
 
   useEffect(() => {
     const fetchGitHubData = async () => {
+      if (!githubUrl) {
+        setError('No GitHub URL provided');
+        setLoading(false);
+        return;
+      }
+
+      // Check if the URL is a valid GitHub URL
+      const githubRegex = /^https?:\/\/(www\.)?github\.com\/[^/]+/i;
+      if (!githubRegex.test(githubUrl)) {
+        setError('Invalid GitHub URL format. Please provide a full GitHub profile URL.');
+        setLoading(false);
+        return;
+      }
+
       try {
         // Extract username from GitHub URL
-        const username = githubUrl.split('/').pop();
-        if (!username) throw new Error('Invalid GitHub URL');
+        const url = new URL(githubUrl);
+        const pathParts = url.pathname.split('/').filter(Boolean);
+        const username = pathParts[0];
+        
+        if (!username) throw new Error('Could not extract username from GitHub URL');
 
-        const headers = {
-          'Authorization': `Bearer ${process.env.NEXT_PUBLIC_GITHUB_TOKEN}`,
+        const headers: HeadersInit = {
           'Accept': 'application/vnd.github.v3+json',
         };
 
+        // Add auth token if available
+        if (process.env.NEXT_PUBLIC_GITHUB_TOKEN) {
+          headers['Authorization'] = `token ${process.env.NEXT_PUBLIC_GITHUB_TOKEN}`;
+        }
+
         // Fetch profile data
-        const profileResponse = await fetch(`https://api.github.com/users/${username}`, { headers });
-        if (!profileResponse.ok) throw new Error('Failed to fetch GitHub profile');
+        const profileResponse = await fetch(`https://api.github.com/users/${username}`, { 
+          headers,
+          cache: 'no-store' 
+        });
+        
+        if (profileResponse.status === 404) {
+          throw new Error('GitHub profile not found');
+        }
+        
+        if (!profileResponse.ok) {
+          const errorData = await profileResponse.json().catch(() => ({}));
+          throw new Error(errorData.message || 'Failed to fetch GitHub profile');
+        }
+        
         const profileData = await profileResponse.json();
 
         // Fetch repositories with sort parameter in the API URL
         const reposResponse = await fetch(
           `https://api.github.com/users/${username}/repos?sort=stars&direction=desc&per_page=6`,
-          { headers }
+          { 
+            headers,
+            cache: 'no-store' 
+          }
         );
-        if (!reposResponse.ok) throw new Error('Failed to fetch repositories');
+        
+        if (!reposResponse.ok) {
+          console.error('Failed to fetch repositories, continuing without them');
+          // Continue with just the profile data if repos fail
+          setProfile({
+            ...profileData,
+            repositories: []
+          });
+          return;
+        }
+        
         const reposData = await reposResponse.json();
 
         setProfile({
@@ -81,6 +127,7 @@ export default function GitHubDisplay({ githubUrl }: GitHubDisplayProps) {
           repositories: reposData
         });
       } catch (err) {
+        console.error('GitHub API error:', err);
         setError(err instanceof Error ? err.message : 'Failed to fetch GitHub data');
       } finally {
         setLoading(false);
@@ -88,6 +135,8 @@ export default function GitHubDisplay({ githubUrl }: GitHubDisplayProps) {
     };
 
     if (githubUrl) {
+      setLoading(true);
+      setError(null);
       fetchGitHubData();
     }
   }, [githubUrl]);
