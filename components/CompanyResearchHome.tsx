@@ -1,129 +1,25 @@
 // CompanyResearchHome.tsx
 
 "use client";
-import { useState, FormEvent, useCallback, useEffect } from "react";
-import LinkedInDisplay from "./linkedin/LinkedinDisplay";
-import CompetitorsDisplay from "./competitors/CompetitorsDisplay";
-import NewsDisplay from "./news/NewsDisplay";
-import CompanySummary from "./companycontent/CompanySummar";
-import FundingDisplay from "./companycontent/FundingDisplay";
-import ProfileDisplay from "./twitter/TwitterProfileDisplay";
-import RecentTweetsDisplay from "./twitter/RecentTweetsDisplay";
-import YoutubeVideosDisplay from "./youtube/YoutubeVideosDisplay";
-import RedditDisplay from "./reddit/RedditDisplay";
-import GitHubDisplay from "./github/GitHubDisplay";
-import FinancialReportDisplay from './financial/FinancialReportDisplay';
-import TikTokDisplay from './tiktok/TikTokDisplay';
-import WikipediaDisplay from './wikipedia/WikipediaDisplay';
-import CrunchbaseDisplay from './crunchbase/CrunchbaseDisplay';
-import PitchBookDisplay from './pitchbook/PitchBookDisplay';
-import TracxnDisplay from "./tracxn/TracxnDisplay";
-import FoundersDisplay from "./founders/FoundersDisplay";
-import {
-  LinkedInSkeleton,
-  YouTubeSkeleton,
-  TikTokSkeleton,
-  GitHubSkeleton,
-  RedditSkeleton,
-  TwitterSkeleton,
-  CompetitorsSkeleton,
-  NewsSkeleton,
-  FoundersSkeleton,
-  WikipediaSkeleton,
-  FinancialSkeleton,
-  FundingSkeleton,
-  CompanySummarySkeleton,
-} from "./skeletons/ResearchSkeletons";
-import CompanyMindMap from './mindmap/CompanyMindMap';
+import { useState, FormEvent, useCallback, useMemo, useRef } from "react";
+import QualificationDisplay from './qualification/QualificationDisplay';
+import Image from "next/image";
+import { fetchCompanyMap, sendSlackNotification } from "../lib/api";
 import ExportCsvButton from './ui/ExportCsvButton';
-import Link from "next/link";
+import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
+import ConfirmationModal from './ui/ConfirmationModal';
+import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvRow } from "../lib/csvImport";
+import { downloadCsv } from "../lib/csvExport";
 
-// Import API functions
-import {
-  scrapeMainPage,
-  fetchCompanyDetails,
-  fetchCompetitors,
-  fetchLinkedInData,
-  fetchNews,
-  fetchTwitterProfile,
-  fetchYoutubeVideos,
-  fetchRedditPosts,
-  fetchGitHubUrl,
-  fetchFunding,
-  fetchFinancialReport,
-  fetchTikTokProfile,
-  fetchWikipedia,
-  fetchCrunchbase,
-  fetchPitchbook,
-  fetchTracxn,
-  fetchFounders,
-  fetchCompanyMap
-} from "../lib/api";
-
-interface LinkedInData {
-  text: string;
-  url: string;
-  image: string;
-  title: string;
-  [key: string]: any;
-}
-
-interface Video {
-  id: string;
-  url: string;
-  title: string;
-  author: string;
-  [key: string]: any;
-}
-
-interface RedditPost {
-  url: string;
-  title: string;
-  [key: string]: any;
-}
-
-interface Tweet {
-  id: string;
-  url: string;
-  title: string;
-  author: string;
-  [key: string]: any;
-}
-
-interface Competitor {
-  title: string;
-  url: string;
-  summary: string;
-  [key: string]: any;
-}
-
-interface NewsItem {
-  url: string;
-  title: string;
-  image: string;
-  [key: string]: any;
-}
-
-interface Founder {
-  url: string;
-  title: string;
-  [key: string]: any;
-}
-
-// Add new interface for company map data
-interface CompanyMapData {
-  companyName: string;
-  rootNode: {
-    title: string;
-    children: Array<{
-      title: string;
-      description: string;
-      children: Array<{
-        title: string;
-        description: string;
-      }>;
-    }>;
-  };
+// Interface for qualification data
+interface QualificationData {
+  company_summary: string;
+  company_industry: string;
+  sales_opener_sentence: string;
+  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
+  confidence_score: number;
+  product_types: string[] | null;
+  sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
 }
 
 // Utility functions
@@ -139,30 +35,28 @@ const extractDomain = (url: string): string | null => {
   }
 };
 
-const fetchTwitterProfileData = async (domain: string): Promise<any> => {
+// Clean URL to base domain with protocol (remove paths, query params, etc.)
+const cleanUrl = (url: string): string | null => {
+  if (!url) return null;
   try {
-    const response = await fetch(`/api/twitter/profile?domain=${encodeURIComponent(domain)}`);
-    if (!response.ok) throw new Error('Failed to fetch Twitter profile');
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching Twitter profile:', error);
+    // Remove any whitespace
+    url = url.trim();
+    
+    // Add protocol if missing
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://' + url;
+    }
+    
+    // Parse URL to extract just the origin (protocol + hostname)
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    
+    // Return base URL with protocol
+    return `${urlObj.protocol}//${hostname}`;
+  } catch (e) {
+    console.error('Error cleaning URL:', e);
     return null;
   }
-};
-
-const parseCompanySize = (sizeStr: string): number => {
-  if (!sizeStr) return 0;
-  const match = sizeStr.match(/\d+/);
-  return match ? parseInt(match[0], 10) : 0;
-};
-
-const processLinkedInText = (data: any): { companySize: string } => {
-  if (!data) return { companySize: '0' };
-  // Extract company size from LinkedIn data
-  const sizeMatch = data.text?.match(/(\d+(?:,\d+)*)\s+employees/i);
-  return {
-    companySize: sizeMatch ? sizeMatch[1].replace(/,/g, '') : '0'
-  };
 };
 
 export default function CompanyResearcher() {
@@ -171,87 +65,45 @@ export default function CompanyResearcher() {
   const [submittedCompanies, setSubmittedCompanies] = useState<string[]>([]);
   const [activeCompany, setActiveCompany] = useState<string>('');
   const [isSearching, setIsSearching] = useState(false);
-  const [companyUrl, setCompanyUrl] = useState(''); // Keep for backward compatibility
   
   // Results and errors by company
   const [resultsByCompany, setResultsByCompany] = useState<{
     [company: string]: {
-      linkedinData: LinkedInData | null;
-      competitors: Competitor[] | null;
-      news: NewsItem[] | null;
-      companySummary: any;
-      twitterProfileText: any;
-      recentTweets: Tweet[] | null;
-      youtubeVideos: Video[] | null;
-      redditPosts: RedditPost[] | null;
-      githubUrl: string | null;
-      fundingData: any;
-      financialReport: any;
-      tiktokData: any;
-      wikipediaData: any;
-      crunchbaseData: any;
-      pitchbookData: any;
-      tracxnData: any;
-      founders: Founder[] | null;
-      companyMap: CompanyMapData | null;
+      qualificationData: QualificationData | null;
     }
   }>({});
   
   const [errorsByCompany, setErrorsByCompany] = useState<{[company: string]: Record<string, string>}>({});
   
+  // CSV import state
+  const [csvData, setCsvData] = useState<{ headers: string[]; rows: CsvRow[] } | null>(null);
+  const [showColumnSelector, setShowColumnSelector] = useState(false);
+  const [selectedUrlColumn, setSelectedUrlColumn] = useState<string | null>(null);
+  const [isProcessingCsv, setIsProcessingCsv] = useState(false);
+  const [csvProcessingProgress, setCsvProcessingProgress] = useState({ current: 0, total: 0 });
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   // Helper to get current company data
   const getCurrentCompanyData = useCallback((company: string) => {
     return resultsByCompany[company] || {
-      linkedinData: null,
-      competitors: null,
-      news: null,
-      companySummary: null,
-      twitterProfileText: null,
-      recentTweets: null,
-      youtubeVideos: null,
-      redditPosts: null,
-      githubUrl: null,
-      fundingData: null,
-      financialReport: null,
-      tiktokData: null,
-      wikipediaData: null,
-      crunchbaseData: null,
-      pitchbookData: null,
-      tracxnData: null,
-      founders: null,
-      companyMap: null
+      qualificationData: null
     };
   }, [resultsByCompany]);
   
   // Get data for active company
-  const {
-    linkedinData,
-    competitors,
-    news,
-    companySummary,
-    twitterProfileText,
-    recentTweets,
-    youtubeVideos,
-    redditPosts,
-    githubUrl,
-    fundingData,
-    financialReport,
-    tiktokData,
-    wikipediaData,
-    crunchbaseData,
-    pitchbookData,
-    tracxnData,
-    founders,
-    companyMap
-  } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
+  const { qualificationData } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
 
-  useEffect(() => {
-    console.log('Active Company Data:', {
-      hasWikipediaData: !!wikipediaData,
-      hasYoutubeVideos: Array.isArray(youtubeVideos) ? youtubeVideos.length : 0,
-      activeCompany
-    });
-  }, [wikipediaData, youtubeVideos, activeCompany]);
+  // Prepare companies data for CSV export
+  const companiesForExport = useMemo(() => {
+    return submittedCompanies.map(company => ({
+      companyName: company,
+      data: {
+        qualificationData: resultsByCompany[company]?.qualificationData || null
+      }
+    }));
+  }, [submittedCompanies, resultsByCompany]);
 
   // Function to check if a string is a valid URL
   const isValidUrl = useCallback(async (url: string): Promise<boolean> => {
@@ -283,6 +135,11 @@ export default function CompanyResearcher() {
       .split(/[,\n]/) // Split by comma or newline
       .map(company => company.trim())
       .filter(company => company.length > 0) // Remove empty entries
+      .map(company => {
+        // Clean URL to base domain
+        const cleaned = cleanUrl(company);
+        return cleaned || company; // Fallback to original if cleaning fails
+      })
       .filter((company, index, self) => 
         index === self.findIndex(c => c.toLowerCase() === company.toLowerCase()) // Deduplicate case-insensitive
       );
@@ -290,7 +147,7 @@ export default function CompanyResearcher() {
 
   // Research a single company
   const researchCompany = useCallback(async (company: string) => {
-    const domainName = await extractDomain(company);
+    const domainName = extractDomain(company);
     if (!domainName) {
       setErrorsByCompany(prev => ({
         ...prev,
@@ -303,24 +160,7 @@ export default function CompanyResearcher() {
     setResultsByCompany(prev => ({
       ...prev,
       [company]: {
-        linkedinData: null,
-        competitors: null,
-        news: null,
-        companySummary: null,
-        twitterProfileText: null,
-        recentTweets: null,
-        youtubeVideos: null,
-        redditPosts: null,
-        githubUrl: null,
-        fundingData: null,
-        financialReport: null,
-        tiktokData: null,
-        wikipediaData: null,
-        crunchbaseData: null,
-        pitchbookData: null,
-        tracxnData: null,
-        founders: null,
-        companyMap: null
+        qualificationData: null
       }
     }));
     
@@ -330,151 +170,30 @@ export default function CompanyResearcher() {
     }));
 
     try {
-      // First, fetch the main page data which is needed for company details and map
-      const mainPageData = await scrapeMainPage(domainName);
-      
-      // Initialize companyMapData as null in case of errors
-      let companyMapData = null;
+      // Fetch company qualification data
+      let qualificationData = null;
       
       try {
-        // Try to fetch company map data using the main page data
-        companyMapData = await fetchCompanyMap(domainName, mainPageData);
+        qualificationData = await fetchCompanyMap(domainName);
       } catch (error) {
-        console.error('Error fetching company map:', error);
-        // Set error state but don't block other data loading
+        console.error('Error fetching company qualification:', error);
         setErrorsByCompany(prev => ({
           ...prev,
           [company]: {
             ...prev[company],
-            companyMap: 'Could not load mindmap data. Using fallback data.'
-          }
-        }));
-      }
-      
-      // Now fetch all other data in parallel
-      const [
-        linkedinData,
-        newsData,
-        twitterProfile,
-        youtubeVideos,
-        redditPosts,
-        githubUrl,
-        fundingData,
-        financialReport,
-        tiktokData,
-        wikipediaData,
-        crunchbaseData,
-        pitchbookData,
-        tracxnData,
-        founders
-      ] = await Promise.allSettled([
-        // Independent API calls
-        fetchLinkedInData(domainName),
-        fetchNews(domainName),
-        fetchTwitterProfileData(domainName),
-        fetchYoutubeVideos(domainName),
-        fetchRedditPosts(domainName),
-        fetchGitHubUrl(domainName),
-        fetchFunding(domainName),
-        fetchFinancialReport(domainName),
-        fetchTikTokProfile(domainName),
-        fetchWikipedia(domainName),
-        fetchCrunchbase(domainName),
-        fetchPitchbook(domainName),
-        fetchTracxn(domainName),
-        fetchFounders(domainName)
-      ]);
-
-      // Process main page data and dependent calls
-      let companyDetails = null;
-      let competitors = null;
-      
-      if (mainPageData.status === 'fulfilled' && mainPageData.value && mainPageData.value[0]?.summary) {
-        try {
-          companyDetails = await fetchCompanyDetails(mainPageData.value, domainName);
-        } catch (error) {
-          setErrorsByCompany(prev => ({
-            ...prev,
-            [company]: {
-              ...prev[company],
-              companyDetails: error instanceof Error ? error.message : 'An error occurred with company details'
-            }
-          }));
-        }
-
-        try {
-          competitors = await fetchCompetitors(mainPageData.value[0].summary, domainName);
-        } catch (error) {
-          setErrorsByCompany(prev => ({
-            ...prev,
-            [company]: {
-              ...prev[company],
-              competitors: error instanceof Error ? error.message : 'An error occurred with competitors'
-            }
-          }));
-        }
-      } else if (mainPageData.status === 'rejected') {
-        setErrorsByCompany(prev => ({
-          ...prev,
-          [company]: {
-            ...prev[company],
-            websiteData: mainPageData.reason instanceof Error ? mainPageData.reason.message : 'An error occurred with website data'
+            qualificationData: 'Could not load qualification data.'
           }
         }));
       }
 
-      // Update results with all data
+      // Update results with qualification data
       setResultsByCompany(prev => ({
         ...prev,
         [company]: {
           ...prev[company],
-          ...(companyDetails && { companySummary: companyDetails }),
-          ...(competitors && { competitors }),
-          ...(companyMapData && { companyMap: companyMapData }),
-          ...(linkedinData.status === 'fulfilled' && { linkedinData: linkedinData.value }),
-          ...(newsData.status === 'fulfilled' && { news: newsData.value }),
-          ...(twitterProfile.status === 'fulfilled' && { twitterProfileText: twitterProfile.value }),
-          ...(youtubeVideos.status === 'fulfilled' && { youtubeVideos: youtubeVideos.value }),
-          ...(redditPosts.status === 'fulfilled' && { redditPosts: redditPosts.value }),
-          ...(githubUrl.status === 'fulfilled' && { githubUrl: githubUrl.value }),
-          ...(fundingData.status === 'fulfilled' && { fundingData: fundingData.value }),
-          ...(financialReport.status === 'fulfilled' && { financialReport: financialReport.value }),
-          ...(tiktokData.status === 'fulfilled' && { tiktokData: tiktokData.value }),
-          ...(wikipediaData.status === 'fulfilled' && { wikipediaData: wikipediaData.value }),
-          ...(crunchbaseData.status === 'fulfilled' && { crunchbaseData: crunchbaseData.value }),
-          ...(pitchbookData.status === 'fulfilled' && { pitchbookData: pitchbookData.value }),
-          ...(tracxnData.status === 'fulfilled' && { tracxnData: tracxnData.value }),
-          ...(founders.status === 'fulfilled' && { founders: founders.value })
+          ...(qualificationData && { qualificationData: qualificationData })
         }
       }));
-
-      // Handle errors for failed promises
-      const handleError = (result: PromiseSettledResult<any>, key: string) => {
-        if (result.status === 'rejected') {
-          setErrorsByCompany(prev => ({
-            ...prev,
-            [company]: {
-              ...prev[company],
-              [key]: result.reason instanceof Error ? result.reason.message : `An error occurred with ${key}`
-            }
-          }));
-        }
-      };
-
-      handleError(linkedinData, 'linkedin');
-      handleError(newsData, 'news');
-      handleError(twitterProfile, 'twitter');
-      handleError(youtubeVideos, 'youtube');
-      handleError(redditPosts, 'reddit');
-      handleError(githubUrl, 'github');
-      handleError(fundingData, 'funding');
-      handleError(financialReport, 'financial');
-      handleError(tiktokData, 'tiktok');
-      handleError(wikipediaData, 'wikipedia');
-      handleError(crunchbaseData, 'crunchbase');
-      handleError(pitchbookData, 'pitchbook');
-      handleError(tracxnData, 'tracxn');
-      handleError(founders, 'founders');
 
     } catch (error) {
       setErrorsByCompany(prev => ({
@@ -485,7 +204,300 @@ export default function CompanyResearcher() {
         }
       }));
     }
-  }, [activeCompany, resultsByCompany, setResultsByCompany, setErrorsByCompany]);
+  }, []);
+
+  // Handle CSV file upload
+  const handleCsvUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const parsed = parseCsv(text);
+      
+      if (parsed.headers.length === 0 || parsed.rows.length === 0) {
+        alert('CSV file is empty or invalid');
+        return;
+      }
+
+      setCsvData(parsed);
+      setShowColumnSelector(true);
+      setSelectedUrlColumn(null);
+    } catch (error) {
+      console.error('Error parsing CSV:', error);
+      alert('Failed to parse CSV file. Please check the file format.');
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
+
+  // Process CSV rows
+  const processCsvRows = useCallback(async () => {
+    if (!csvData || !selectedUrlColumn) return;
+
+    setIsProcessingCsv(true);
+    setCsvProcessingProgress({ current: 0, total: csvData.rows.length });
+
+    // Collect all valid URLs from CSV for display in textarea (cleaned)
+    const allValidUrls: string[] = [];
+    csvData.rows.forEach(row => {
+      const url = row[selectedUrlColumn]?.trim() || '';
+      if (url && url.includes('.')) {
+        const cleaned = cleanUrl(url);
+        if (cleaned) {
+          allValidUrls.push(cleaned);
+        }
+      }
+    });
+
+    // Filter rows: skip if Classification is filled, skip if no valid URL
+    const rowsToProcess = csvData.rows.filter((row, index) => {
+      const url = row[selectedUrlColumn]?.trim() || '';
+      const classification = row['Classification']?.trim() || '';
+      
+      // Skip if Classification is already filled
+      if (classification) {
+        return false;
+      }
+      
+      // Skip if no valid URL
+      if (!url || !url.includes('.')) {
+        return false;
+      }
+      
+      return true;
+    });
+
+    // Extract unique domains from URLs (clean URLs first)
+    const urlToDomainMap = new Map<string, string>();
+    const uniqueDomains = new Set<string>();
+    
+    rowsToProcess.forEach(row => {
+      const url = row[selectedUrlColumn]?.trim() || '';
+      if (url) {
+        // Clean URL first
+        const cleanedUrl = cleanUrl(url);
+        if (cleanedUrl) {
+          const domainName = extractDomain(cleanedUrl);
+          if (domainName) {
+            // Map both original and cleaned URL to domain
+            urlToDomainMap.set(url, domainName);
+            urlToDomainMap.set(cleanedUrl, domainName);
+            uniqueDomains.add(domainName);
+          }
+        }
+      }
+    });
+
+    // Fetch qualification data for all unique domains
+    const qualificationDataMap = new Map<string, any>();
+    const errorMap = new Map<string, string>(); // Track errors for each domain
+    
+    const uniqueDomainsArray = Array.from(uniqueDomains);
+    for (let i = 0; i < uniqueDomainsArray.length; i++) {
+      const domainName = uniqueDomainsArray[i];
+      setCsvProcessingProgress({ current: i + 1, total: uniqueDomainsArray.length });
+      
+      try {
+        const data = await fetchCompanyMap(domainName);
+        if (data) {
+          qualificationDataMap.set(domainName, data);
+        } else {
+          // Data fetch returned null, indicating an error
+          errorMap.set(domainName, 'Failed to fetch company qualification data');
+        }
+      } catch (error) {
+        console.error(`Error fetching data for ${domainName}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+        errorMap.set(domainName, errorMessage);
+      }
+    }
+
+    // Merge qualification data into CSV rows
+    const updatedRows = csvData.rows.map(row => {
+      const url = row[selectedUrlColumn]?.trim() || '';
+      const classification = row['Classification']?.trim() || '';
+      const updatedRow = { ...row };
+      
+      // Skip if Classification is already filled
+      if (classification) {
+        // Still update Research Status if not set or if we want to track skipped rows
+        if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+          updatedRow['Research Status'] = 'skipped (already classified)';
+        }
+        return updatedRow;
+      }
+      
+      // Skip if no valid URL
+      if (!url || !url.includes('.')) {
+        // Still update Research Status if not set
+        if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+          updatedRow['Research Status'] = 'skipped (invalid URL)';
+        }
+        return updatedRow;
+      }
+
+      // Clean URL and extract domain
+      const cleanedUrl = cleanUrl(url);
+      const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+      const qualificationData = domainName 
+        ? qualificationDataMap.get(domainName)
+        : null;
+
+      // Determine research status for processed rows
+      let researchStatus = '';
+      if (qualificationData) {
+        researchStatus = 'completed';
+      } else if (domainName) {
+        // Check if there's an error for this domain
+        const error = errorMap.get(domainName);
+        researchStatus = error || 'Failed to fetch company qualification data';
+      } else {
+        researchStatus = 'Invalid URL';
+      }
+      
+      // Update Research Status for processed rows (always update to reflect current status)
+      updatedRow['Research Status'] = researchStatus;
+      
+      if (qualificationData) {
+        // We have qualification data, use it
+        updatedRow['Company Summary'] = qualificationData.company_summary || updatedRow['Company Summary'] || '';
+        updatedRow['Company Industry'] = qualificationData.company_industry || updatedRow['Company Industry'] || '';
+        updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
+        updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
+        updatedRow['Confidence Score'] = String((qualificationData.confidence_score ?? updatedRow['Confidence Score']) || '');
+        
+        // Handle product types
+        if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
+          const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+          if (productTypes.length > 0) {
+            // Format product types as string
+            if (productTypes.length === 1) {
+              updatedRow['Product Types'] = productTypes[0];
+            } else if (productTypes.length === 2) {
+              updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+            } else {
+              const allButLast = productTypes.slice(0, -1).join(', ');
+              updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+            }
+            
+            // Add individual product type columns
+            productTypes.forEach((pt: string, index: number) => {
+              updatedRow[`PRODUCT${index + 1}`] = pt;
+            });
+          }
+        }
+        
+        updatedRow['Sales Action'] = qualificationData.sales_action || updatedRow['Sales Action'] || '';
+      } else {
+        // No qualification data, but still add empty columns to maintain structure
+        updatedRow['Company Summary'] = updatedRow['Company Summary'] || '';
+        updatedRow['Company Industry'] = updatedRow['Company Industry'] || '';
+        updatedRow['Sales Opener Sentence'] = updatedRow['Sales Opener Sentence'] || '';
+        updatedRow['Classification'] = updatedRow['Classification'] || '';
+        updatedRow['Confidence Score'] = updatedRow['Confidence Score'] || '';
+        updatedRow['Product Types'] = updatedRow['Product Types'] || '';
+        updatedRow['Sales Action'] = updatedRow['Sales Action'] || '';
+      }
+      
+      return updatedRow;
+    });
+
+    // Ensure all required columns exist
+    const updatedHeaders = ensureColumnsExist(csvData.headers);
+    
+    // Add PRODUCT columns if needed
+    const maxProductTypes = updatedRows.reduce((max, row) => {
+      let count = 0;
+      Object.keys(row).forEach(key => {
+        if (key.startsWith('PRODUCT')) {
+          const num = parseInt(key.replace('PRODUCT', ''));
+          if (!isNaN(num)) count = Math.max(count, num);
+        }
+      });
+      return Math.max(max, count);
+    }, 0);
+
+    const finalHeaders = [...updatedHeaders];
+    for (let i = 1; i <= maxProductTypes; i++) {
+      const colName = `PRODUCT${i}`;
+      if (!finalHeaders.includes(colName)) {
+        finalHeaders.push(colName);
+      }
+    }
+
+    // Generate updated CSV
+    const updatedCsv = csvToString(finalHeaders, updatedRows);
+    
+    // Download updated CSV
+    downloadCsv(updatedCsv, 'updated-companies.csv');
+    
+    // Add URLs to textarea for visual display (all valid URLs from CSV)
+    const uniqueUrls = Array.from(new Set(allValidUrls));
+    const existingUrls = parseCompanyInput(rawCompanyInput);
+    const combinedUrls = Array.from(new Set([...existingUrls, ...uniqueUrls]));
+    setRawCompanyInput(combinedUrls.join(', '));
+    
+    // Set as submitted companies and active company for display
+    setSubmittedCompanies(combinedUrls);
+    if (combinedUrls.length > 0 && !activeCompany) {
+      setActiveCompany(combinedUrls[0]);
+    }
+    
+    // Store results for display (only for processed URLs that have data, using cleaned URLs)
+    const newResults: typeof resultsByCompany = {};
+    rowsToProcess.forEach(row => {
+      const url = row[selectedUrlColumn]?.trim() || '';
+      if (url) {
+        const cleanedUrl = cleanUrl(url);
+        const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+        const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
+        if (qualificationData) {
+          // Use cleaned URL as key for display
+          const displayUrl = cleanedUrl || url;
+          newResults[displayUrl] = {
+            qualificationData: qualificationData
+          };
+        }
+      }
+    });
+    setResultsByCompany(prev => ({ ...prev, ...newResults }));
+    
+    setIsProcessingCsv(false);
+    setCsvData(null);
+    setShowColumnSelector(false);
+    setSelectedUrlColumn(null);
+    
+    // Show confirmation modal
+    const message = `CSV processing complete! Processed ${rowsToProcess.length} rows.`;
+    setConfirmationMessage(message);
+    setShowConfirmationModal(true);
+    
+    // Send Slack notification
+    sendSlackNotification(`✅ CSV Processing Complete: Processed ${rowsToProcess.length} rows.`).catch(
+      (error) => console.error('Failed to send Slack notification:', error)
+    );
+  }, [csvData, selectedUrlColumn]);
+
+  // Clear all data function
+  const handleClearAll = useCallback(() => {
+    setRawCompanyInput('');
+    setSubmittedCompanies([]);
+    setActiveCompany('');
+    setResultsByCompany({});
+    setErrorsByCompany({});
+    setCsvData(null);
+    setSelectedUrlColumn(null);
+    setIsSearching(false);
+    setIsProcessingCsv(false);
+    setCsvProcessingProgress({ current: 0, total: 0 });
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }, []);
 
   // Main Research Function
   const handleResearch = useCallback(async (e: FormEvent) => {
@@ -511,24 +523,7 @@ export default function CompanyResearcher() {
       companies.forEach(company => {
         if (!newState[company]) {
           newState[company] = {
-            linkedinData: null,
-            competitors: null,
-            news: null,
-            companySummary: null,
-            twitterProfileText: null,
-            recentTweets: null,
-            youtubeVideos: null,
-            redditPosts: null,
-            githubUrl: null,
-            fundingData: null,
-            financialReport: null,
-            tiktokData: null,
-            wikipediaData: null,
-            crunchbaseData: null,
-            pitchbookData: null,
-            tracxnData: null,
-            founders: null,
-            companyMap: null
+            qualificationData: null
           };
         }
       });
@@ -541,24 +536,85 @@ export default function CompanyResearcher() {
     await Promise.all(companies.map(company => researchCompany(company)));
     
     setIsSearching(false);
-  }, [rawCompanyInput, researchCompany, setIsSearching, setSubmittedCompanies, setActiveCompany, setResultsByCompany, setErrorsByCompany]);
+  }, [rawCompanyInput, researchCompany]);
 
   return (
     <div className="w-full max-w-5xl p-6 z-10 mb-20 mt-6">
-      <h1 className="md:text-6xl text-4xl pb-5 font-medium opacity-0 animate-fade-up [animation-delay:200ms]">
-        <span className="text-brand-default"> Company </span>
-        Researcher
-      </h1>
+      <div className="flex items-center justify-between mb-4 pb-5 opacity-0 animate-fade-up [animation-delay:200ms]">
+        <div className="flex items-center gap-4">
+          <Image 
+            src="/logo.png" 
+            alt="Logo" 
+            width={60} 
+            height={60} 
+            className="object-contain"
+          />
+          <h1 className="md:text-6xl text-4xl font-medium">
+            <span className="text-brand-default"> Company </span>
+            Researcher
+          </h1>
+        </div>
+        {(submittedCompanies.length > 0 || rawCompanyInput.trim().length > 0) && (
+          <button
+            onClick={handleClearAll}
+            className="px-4 py-2 bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors font-medium text-sm whitespace-nowrap"
+          >
+            CLEAR ALL
+          </button>
+        )}
+      </div>
 
       <p className="text-black mb-12 opacity-0 animate-fade-up [animation-delay:400ms]">
-        Enter company URLs (comma or newline separated) for detailed research. Instantly compare companies.
+        Enter company URLs (comma or newline separated) for qualification assessment, or upload a CSV file.
       </p>
+
+      {/* CSV Import Section */}
+      <div className="mb-8 opacity-0 animate-fade-up [animation-delay:500ms]">
+        <div className="border-2 border-dashed border-gray-300 rounded-sm p-6 bg-gray-50">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-lg font-semibold mb-1">Import from CSV</h3>
+              <p className="text-sm text-gray-600">
+                Upload a CSV file to process multiple companies. Select the column containing website URLs.
+              </p>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleCsvUpload}
+              className="hidden"
+              id="csv-upload"
+            />
+            <label
+              htmlFor="csv-upload"
+              className="px-4 py-2 bg-brand-default text-white rounded-sm cursor-pointer hover:bg-opacity-90 transition-colors"
+            >
+              Choose CSV File
+            </label>
+          </div>
+          {isProcessingCsv && (
+            <div className="mt-4 p-3 bg-blue-50 text-blue-700 rounded-sm">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
+                <span>Processing CSV: {csvProcessingProgress.current} / {csvProcessingProgress.total}</span>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all"
+                  style={{ width: `${(csvProcessingProgress.current / csvProcessingProgress.total) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       <form onSubmit={handleResearch} className="space-y-6 mb-8">
         <textarea
           value={rawCompanyInput}
           onChange={(e) => setRawCompanyInput(e.target.value)}
-          placeholder="Enter company URLs (e.g., example.com, another-company.com)\nthird-company.com"
+          placeholder="Enter company URLs (e.g., example.com, another-company.com)"
           rows={4}
           className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-brand-default resize-none opacity-0 animate-fade-up [animation-delay:600ms]"
         />
@@ -569,27 +625,15 @@ export default function CompanyResearcher() {
           } transition-colors`}
           disabled={isSearching}
         >
-          {isSearching ? 'Researching...' : 'Research Companies'}
+          {isSearching ? 'Analyzing...' : 'Analyze Companies'}
         </button>
-
-        <div className="flex items-center justify-end gap-2 sm:gap-3 pt-4 opacity-0 animate-fade-up [animation-delay:1000ms]">
-          <span className="text-gray-800">Powered by</span>
-          <a 
-            href="https://exa.ai" 
-            target="_blank" 
-            rel="origin"
-            className="hover:opacity-80 transition-opacity"
-          >
-            <img src="/exa_logo.png" alt="Exa Logo" className="h-6 sm:h-7 object-contain" />
-          </a>
-        </div>
       </form>
       
       {/* Global loading indicator */}
       {isSearching && (
         <div className="mb-6 p-3 bg-blue-50 text-blue-700 rounded-sm flex items-center gap-2">
           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
-          <span>Gathering research data...</span>
+          <span>Analyzing company qualification...</span>
         </div>
       )}
       
@@ -597,7 +641,7 @@ export default function CompanyResearcher() {
       {submittedCompanies.length > 0 && (
         <div className="mb-6 border-b border-gray-200">
           <nav className="-mb-px flex space-x-8 overflow-x-auto">
-            {submittedCompanies.map((company, index) => (
+            {submittedCompanies.map((company) => (
               <button
                 key={company}
                 onClick={() => setActiveCompany(company)}
@@ -632,202 +676,38 @@ export default function CompanyResearcher() {
       )}
       
       <div className="space-y-12">
-        {/* Company Overview Section */}
-        
-          <div className="space-y-16">
-          {(linkedinData || companySummary || founders || financialReport || 
-          fundingData || crunchbaseData || pitchbookData || tracxnData || 
-          wikipediaData) && (
-            <div className="flex items-center">
-              <h2 className="text-4xl font-medium">Company Overview</h2>
-            </div>
-            )}
-
-            {isSearching && linkedinData === null ? (
-              <LinkedInSkeleton />
-            ) : linkedinData && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <LinkedInDisplay data={linkedinData} />
-              </div>
-            )}
-
-            {isSearching && founders === null ? (
-              <FoundersSkeleton />
-            ) : founders && founders.length > 0 && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <FoundersDisplay founders={founders} />
-              </div>
-            )}
-
-            {linkedinData && parseCompanySize(processLinkedInText(linkedinData).companySize) >= 1000 && (
-            // Fetch financial reports from API
-            <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-              <FinancialReportDisplay 
-                report={financialReport} 
-                error={errorsByCompany[activeCompany || '']?.financial}
-              />
-            </div>
-            )}
-
-            <div className="space-y-6">
-              {isSearching && fundingData === null ? (
-                <FundingSkeleton />
-              ) : fundingData && (
-                <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                  <FundingDisplay fundingData={fundingData} />
-                </div>
-              )}
-
-              {isSearching && crunchbaseData === null ? (
-                <FundingSkeleton />
-              ) : crunchbaseData && (
-                <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                  <CrunchbaseDisplay data={crunchbaseData} />
-                </div>
-              )}
-
-              {isSearching && pitchbookData === null ? (
-                <FundingSkeleton />
-              ) : pitchbookData && (
-                <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                  <PitchBookDisplay data={pitchbookData} />
-                </div>
-              )}
-
-              {isSearching && tracxnData === null ? (
-                <FundingSkeleton />
-              ) : tracxnData && (
-                <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                  <TracxnDisplay data={tracxnData} />
-                </div>
-              )}
-            </div>
-
-            {isSearching && wikipediaData === null ? (
-              <WikipediaSkeleton />
-            ) : wikipediaData ? (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <WikipediaDisplay 
-                  data={wikipediaData} 
-                  websiteUrl={activeCompany || ''} 
-                />
-              </div>
-            ) : null}
-
-            {isSearching && competitors === null ? (
-              <CompetitorsSkeleton />
-            ) : competitors && competitors.length > 0 && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <CompetitorsDisplay competitors={competitors} />
-              </div>
-            )}
-
-            {isSearching && news === null ? (
-              <NewsSkeleton />
-            ) : news && news.length > 0 && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <NewsDisplay news={news} />
-              </div>
-            )}
-          </div>
-      
-
-        {/* Company Socials Section */}
-          <div className="space-y-16 pt-12">
-
-          {(twitterProfileText || youtubeVideos || /* tiktokData || */
-          redditPosts || githubUrl) && (
-            <div className="flex items-center">
-              <h2 className="text-4xl font-medium">Company Socials</h2>
-            </div>
-            )}
-
-            {isSearching && youtubeVideos === null ? (
-              <YouTubeSkeleton />
-            ) : youtubeVideos && youtubeVideos.length > 0 ? (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <YoutubeVideosDisplay videos={youtubeVideos} />
-              </div>
-            ) : !isSearching && youtubeVideos && youtubeVideos.length === 0 && (
-              <div className="text-gray-500 text-center py-4">
-                No YouTube videos found for this company.
-              </div>
-            )}
-
-            {isSearching && redditPosts === null ? (
-              <RedditSkeleton />
-            ) : redditPosts && redditPosts.length > 0 && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <RedditDisplay posts={redditPosts} />
-              </div>
-            )}
-
-            {/* {isSearching && tiktokData === null ? (
-              <TikTokSkeleton />
-            ) : tiktokData && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <TikTokDisplay data={tiktokData} />
-              </div>
-            )} */}
-
-            {isSearching && githubUrl === null ? (
-              <GitHubSkeleton />
-            ) : githubUrl && (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <GitHubDisplay githubUrl={githubUrl} />
-              </div>
-            )}
-          </div>
-        
-
-        {/* Summary and Mind Map Section */}
-        {(isSearching || companySummary || companyMap) && (
+        {/* Qualification Section */}
+        {(isSearching || qualificationData) && (
           <div className="space-y-8">
             <div className="flex items-center">
-              <h2 className="text-3xl font-medium">Summary and Mind Map</h2>
+              <h2 className="text-3xl font-medium">Qualification Assessment</h2>
             </div>
 
-            {isSearching && companySummary === null ? (
-              <CompanySummarySkeleton />
-            ) : companySummary ? (
-              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <CompanySummary summary={companySummary} />
-              </div>
-            ) : null}
-
             <div className="opacity-0 animate-fade-up [animation-delay:300ms]">
-              {isSearching && companyMap === null ? (
+              {isSearching && qualificationData === null ? (
                 <div className="animate-pulse">
-                  <div className="h-[500px] bg-gray-100 rounded-lg flex items-center justify-center">
+                  <div className="h-[300px] bg-gray-100 rounded-lg flex items-center justify-center">
                     <div className="text-center">
-                      <div className="text-gray-500 mb-2">Generating mind map...</div>
+                      <div className="text-gray-500 mb-2">Analyzing company qualification...</div>
                       <div className="flex justify-center">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700"></div>
                       </div>
                     </div>
                   </div>
                 </div>
-              ) : companyMap ? (
-                <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="p-4 border-b border-gray-200 bg-gray-50">
-                    <h3 className="text-lg font-medium text-gray-900">Company Mind Map</h3>
-                    <p className="text-sm text-gray-500 mt-1">Interactive visualization of company structure and relationships</p>
-                  </div>
-                  <div className="p-4">
-                    <CompanyMindMap data={companyMap} />
-                  </div>
-                </div>
+              ) : qualificationData ? (
+                <QualificationDisplay data={qualificationData} />
               ) : (
                 <div className="h-[300px] bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
                   <div className="text-center p-6">
                     <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <h3 className="mt-2 text-sm font-medium text-gray-900">No mind map available</h3>
-                    <p className="mt-1 text-sm text-gray-500">We couldn't generate a mind map for this company.</p>
-                    {errorsByCompany[activeCompany || '']?.companyMap && (
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No qualification data available</h3>
+                    <p className="mt-1 text-sm text-gray-500">We couldn't generate qualification data for this company.</p>
+                    {errorsByCompany[activeCompany || '']?.qualificationData && (
                       <p className="mt-2 text-sm text-red-600">
-                        {errorsByCompany[activeCompany || ''].companyMap}
+                        {errorsByCompany[activeCompany || ''].qualificationData}
                       </p>
                     )}
                   </div>
@@ -836,15 +716,41 @@ export default function CompanyResearcher() {
             </div>
           </div>
         )}
-
       </div>
-      
+
       {/* Export CSV Button */}
-      <ExportCsvButton 
-        companies={submittedCompanies.map(companyName => ({
-          companyName,
-          data: resultsByCompany[companyName] || {}
-        }))}
+      {submittedCompanies.length > 0 && companiesForExport.length > 0 && (
+        <ExportCsvButton companies={companiesForExport} />
+      )}
+
+      {/* Column Selector Dialog */}
+      <ColumnSelectorDialog
+        isOpen={showColumnSelector}
+        columns={csvData?.headers || []}
+        rows={csvData?.rows || []}
+        selectedColumn={selectedUrlColumn}
+        onSelectColumn={(column) => {
+          setSelectedUrlColumn(column);
+        }}
+        onConfirm={() => {
+          if (selectedUrlColumn) {
+            setShowColumnSelector(false);
+            processCsvRows();
+          }
+        }}
+        onClose={() => {
+          setShowColumnSelector(false);
+          setCsvData(null);
+          setSelectedUrlColumn(null);
+        }}
+      />
+
+      {/* Confirmation Modal */}
+      <ConfirmationModal
+        isOpen={showConfirmationModal}
+        title="CSV Processing Complete"
+        message={confirmationMessage}
+        onClose={() => setShowConfirmationModal(false)}
       />
     </div>  
   );

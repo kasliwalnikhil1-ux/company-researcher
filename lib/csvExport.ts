@@ -11,6 +11,14 @@ type ExportableCompany = {
   github: string;
   summary: string;
   mindMap: string;
+  productTypes: string[];
+  companySummary: string;
+  companyIndustry: string;
+  salesOpenerSentence: string;
+  classification: string;
+  confidenceScore: number;
+  productTypesFormatted: string;
+  salesAction: string;
 };
 
 // Normalize company data from the app's state to our exportable format
@@ -80,6 +88,32 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
     }
   }
 
+  // Extract product_types from qualificationData
+  const productTypes: string[] = [];
+  if (data?.qualificationData?.product_types && Array.isArray(data.qualificationData.product_types)) {
+    productTypes.push(...data.qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string'));
+  }
+
+  // Extract qualification data fields
+  const qualificationData = data?.qualificationData || {};
+  const companySummary = qualificationData.company_summary || '';
+  const companyIndustry = qualificationData.company_industry || '';
+  const salesOpenerSentence = qualificationData.sales_opener_sentence || '';
+  const classification = qualificationData.classification || '';
+  const confidenceScore = qualificationData.confidence_score ?? '';
+  const salesAction = qualificationData.sales_action || '';
+
+  // Format product types as string: "A", "A and B", or "A, B, and C"
+  const formatProductTypes = (types: string[]): string => {
+    if (!types || types.length === 0) return '';
+    if (types.length === 1) return types[0];
+    if (types.length === 2) return `${types[0]} and ${types[1]}`;
+    // For 3 or more: "A, B, and C"
+    const allButLast = types.slice(0, -1).join(', ');
+    return `${allButLast}, and ${types[types.length - 1]}`;
+  };
+  const productTypesFormatted = formatProductTypes(productTypes);
+
   return {
     companyName,
     linkedInProfile,
@@ -91,7 +125,15 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
     companyMentionsOnReddit,
     github,
     summary,
-    mindMap
+    mindMap,
+    productTypes,
+    companySummary,
+    companyIndustry,
+    salesOpenerSentence,
+    classification,
+    confidenceScore,
+    productTypesFormatted,
+    salesAction
   };
 };
 
@@ -116,37 +158,50 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
     normalizeCompanyData(companyName, data)
   );
 
+  // Calculate maximum number of product types across all companies
+  const maxProductTypes = normalizedCompanies.reduce((max, company) => {
+    return Math.max(max, company.productTypes?.length || 0);
+  }, 0);
+
   // Define CSV headers in the required order
   const headers = [
     'Company Name',
-    'Company LinkedIn Profile',
-    'CEO Profile',
-    'CTO Profile',
-    'Founders',
-    'Similar Companies',
-    'Latest News',
-    'Company Mentions on Reddit',
-    'GitHub',
-    'Summary',
-    'Mind Map'
+    'Company Summary',
+    'Company Industry',
+    'Sales Opener Sentence',
+    'Classification',
+    'Confidence Score',
+    'Product Types',
+    'Sales Action'
   ];
+
+  // Add dynamic product type headers if there are any product types
+  if (maxProductTypes > 0) {
+    for (let i = 1; i <= maxProductTypes; i++) {
+      headers.push(`PRODUCT${i}`);
+    }
+  }
 
   // Convert each company to a CSV row
   const rows = normalizedCompanies.map(company => {
     // Join array fields with appropriate separators
     const row = [
       company.companyName,
-      company.linkedInProfile,
-      company.ceoProfile,
-      company.ctoProfile,
-      company.founders.join('; '),
-      company.similarCompanies.join('; '),
-      company.latestNews.join('\n'),
-      company.companyMentionsOnReddit.join('\n'),
-      company.github,
-      company.summary,
-      company.mindMap
+      company.companySummary,
+      company.companyIndustry,
+      company.salesOpenerSentence,
+      company.classification,
+      company.confidenceScore,
+      company.productTypesFormatted,
+      company.salesAction
     ];
+
+    // Add product types as separate columns
+    if (maxProductTypes > 0) {
+      for (let i = 0; i < maxProductTypes; i++) {
+        row.push(company.productTypes?.[i] || '');
+      }
+    }
     
     // Escape each field and join with commas
     return row.map(escapeCsvField).join(',');

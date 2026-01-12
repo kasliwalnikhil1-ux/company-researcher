@@ -46,6 +46,7 @@ export default function RootLayout({
     <html lang="en">
       <body
         className={`${abcdDiatype.variable} ${reckless.variable} antialiased`}
+        suppressHydrationWarning
       >
         {children}
         <Analytics />
