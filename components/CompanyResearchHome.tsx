@@ -1,7 +1,7 @@
 // CompanyResearchHome.tsx
 
 "use client";
-import { useState, FormEvent, useCallback } from "react";
+import { useState, FormEvent, useCallback, useEffect } from "react";
 import LinkedInDisplay from "./linkedin/LinkedinDisplay";
 import CompetitorsDisplay from "./competitors/CompetitorsDisplay";
 import NewsDisplay from "./news/NewsDisplay";
@@ -56,7 +56,8 @@ import {
   fetchCrunchbase,
   fetchPitchbook,
   fetchTracxn,
-  fetchFounders
+  fetchFounders,
+  fetchCompanyMap
 } from "../lib/api";
 
 interface LinkedInData {
@@ -129,15 +130,22 @@ interface CompanyMapData {
 const extractDomain = (url: string): string | null => {
   if (!url) return null;
   try {
-    // Remove protocol and www
-    let domain = url.replace(/^https?:\/\//, '').replace(/^www\./, '');
-    // Remove path and query string
-    domain = domain.split('/')[0];
-    // Remove port if present
-    domain = domain.split(':')[0];
+    // Remove protocol, www, and any path/query parameters
+    let domain = url.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?]/)[0];
     return domain || null;
   } catch (e) {
     console.error('Error extracting domain:', e);
+    return null;
+  }
+};
+
+const fetchTwitterProfileData = async (domain: string): Promise<any> => {
+  try {
+    const response = await fetch(`/api/twitter/profile?domain=${encodeURIComponent(domain)}`);
+    if (!response.ok) throw new Error('Failed to fetch Twitter profile');
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching Twitter profile:', error);
     return null;
   }
 };
@@ -237,8 +245,16 @@ export default function CompanyResearcher() {
     companyMap
   } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
 
+  useEffect(() => {
+    console.log('Active Company Data:', {
+      hasWikipediaData: !!wikipediaData,
+      hasYoutubeVideos: Array.isArray(youtubeVideos) ? youtubeVideos.length : 0,
+      activeCompany
+    });
+  }, [wikipediaData, youtubeVideos, activeCompany]);
+
   // Function to check if a string is a valid URL
-  const isValidUrl = useCallback((url: string): boolean => {
+  const isValidUrl = useCallback(async (url: string): Promise<boolean> => {
     try {
       // Remove any whitespace
       url = url.trim();
@@ -274,7 +290,7 @@ export default function CompanyResearcher() {
 
   // Research a single company
   const researchCompany = useCallback(async (company: string) => {
-    const domainName = extractDomain(company);
+    const domainName = await extractDomain(company);
     if (!domainName) {
       setErrorsByCompany(prev => ({
         ...prev,
@@ -314,9 +330,29 @@ export default function CompanyResearcher() {
     }));
 
     try {
-      // Run all API calls in parallel
+      // First, fetch the main page data which is needed for company details and map
+      const mainPageData = await scrapeMainPage(domainName);
+      
+      // Initialize companyMapData as null in case of errors
+      let companyMapData = null;
+      
+      try {
+        // Try to fetch company map data using the main page data
+        companyMapData = await fetchCompanyMap(domainName, mainPageData);
+      } catch (error) {
+        console.error('Error fetching company map:', error);
+        // Set error state but don't block other data loading
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: {
+            ...prev[company],
+            companyMap: 'Could not load mindmap data. Using fallback data.'
+          }
+        }));
+      }
+      
+      // Now fetch all other data in parallel
       const [
-        mainPageData,
         linkedinData,
         newsData,
         twitterProfile,
@@ -332,13 +368,10 @@ export default function CompanyResearcher() {
         tracxnData,
         founders
       ] = await Promise.allSettled([
-        // Main page scraping
-        scrapeMainPage(domainName),
-        
         // Independent API calls
         fetchLinkedInData(domainName),
         fetchNews(domainName),
-        fetchTwitterProfile(domainName),
+        fetchTwitterProfileData(domainName),
         fetchYoutubeVideos(domainName),
         fetchRedditPosts(domainName),
         fetchGitHubUrl(domainName),
@@ -397,6 +430,7 @@ export default function CompanyResearcher() {
           ...prev[company],
           ...(companyDetails && { companySummary: companyDetails }),
           ...(competitors && { competitors }),
+          ...(companyMapData && { companyMap: companyMapData }),
           ...(linkedinData.status === 'fulfilled' && { linkedinData: linkedinData.value }),
           ...(newsData.status === 'fulfilled' && { news: newsData.value }),
           ...(twitterProfile.status === 'fulfilled' && { twitterProfileText: twitterProfile.value }),
@@ -626,13 +660,13 @@ export default function CompanyResearcher() {
             )}
 
             {linkedinData && parseCompanySize(processLinkedInText(linkedinData).companySize) >= 1000 && (
-              isSearching && financialReport === null ? (
-                <FinancialSkeleton />
-              ) : financialReport && (
-                <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                  <FinancialReportDisplay report={financialReport} />
-                </div>
-              )
+            // Fetch financial reports from API
+            <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
+              <FinancialReportDisplay 
+                report={financialReport} 
+                error={errorsByCompany[activeCompany || '']?.financial}
+              />
+            </div>
             )}
 
             <div className="space-y-6">
@@ -671,11 +705,14 @@ export default function CompanyResearcher() {
 
             {isSearching && wikipediaData === null ? (
               <WikipediaSkeleton />
-            ) : wikipediaData && (
+            ) : wikipediaData ? (
               <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                <WikipediaDisplay data={wikipediaData} websiteUrl={companyUrl} />
+                <WikipediaDisplay 
+                  data={wikipediaData} 
+                  websiteUrl={activeCompany || ''} 
+                />
               </div>
-            )}
+            ) : null}
 
             {isSearching && competitors === null ? (
               <CompetitorsSkeleton />
@@ -707,9 +744,13 @@ export default function CompanyResearcher() {
 
             {isSearching && youtubeVideos === null ? (
               <YouTubeSkeleton />
-            ) : youtubeVideos && youtubeVideos.length > 0 && (
+            ) : youtubeVideos && youtubeVideos.length > 0 ? (
               <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
                 <YoutubeVideosDisplay videos={youtubeVideos} />
+              </div>
+            ) : !isSearching && youtubeVideos && youtubeVideos.length === 0 && (
+              <div className="text-gray-500 text-center py-4">
+                No YouTube videos found for this company.
               </div>
             )}
 
@@ -740,33 +781,61 @@ export default function CompanyResearcher() {
         
 
         {/* Summary and Mind Map Section */}
-        {(isSearching || companySummary) && (
-              <div className="space-y-8">
-                <div className="flex items-center">
-                  <h2 className="text-3xl font-medium mt-6">Summary and Mind Map</h2>
-                </div>
+        {(isSearching || companySummary || companyMap) && (
+          <div className="space-y-8">
+            <div className="flex items-center">
+              <h2 className="text-3xl font-medium">Summary and Mind Map</h2>
+            </div>
 
-                {isSearching && companySummary === null ? (
-                  <CompanySummarySkeleton />
-                ) : companySummary && (
-                  <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
-                    <CompanySummary summary={companySummary} />
-                  </div>
-                )}
+            {isSearching && companySummary === null ? (
+              <CompanySummarySkeleton />
+            ) : companySummary ? (
+              <div className="opacity-0 animate-fade-up [animation-delay:200ms]">
+                <CompanySummary summary={companySummary} />
+              </div>
+            ) : null}
 
-                {isSearching && companyMap === null ? (
-                  <div className="hidden sm:block animate-pulse">
-                    <div className="h-64 bg-secondary-darkest rounded-lg flex items-center justify-center">
-                      <p className="text-gray-400 text-md">Loading...</p>
+            <div className="opacity-0 animate-fade-up [animation-delay:300ms]">
+              {isSearching && companyMap === null ? (
+                <div className="animate-pulse">
+                  <div className="h-[500px] bg-gray-100 rounded-lg flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-gray-500 mb-2">Generating mind map...</div>
+                      <div className="flex justify-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700"></div>
+                      </div>
                     </div>
                   </div>
-                ) : companyMap && (
-                  <div className="hidden sm:block opacity-0 animate-fade-up [animation-delay:200ms]">
+                </div>
+              ) : companyMap ? (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="p-4 border-b border-gray-200 bg-gray-50">
+                    <h3 className="text-lg font-medium text-gray-900">Company Mind Map</h3>
+                    <p className="text-sm text-gray-500 mt-1">Interactive visualization of company structure and relationships</p>
+                  </div>
+                  <div className="p-4">
                     <CompanyMindMap data={companyMap} />
                   </div>
-                )}
-              </div>
-            )}
+                </div>
+              ) : (
+                <div className="h-[300px] bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
+                  <div className="text-center p-6">
+                    <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No mind map available</h3>
+                    <p className="mt-1 text-sm text-gray-500">We couldn't generate a mind map for this company.</p>
+                    {errorsByCompany[activeCompany || '']?.companyMap && (
+                      <p className="mt-2 text-sm text-red-600">
+                        {errorsByCompany[activeCompany || ''].companyMap}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
       </div>
       

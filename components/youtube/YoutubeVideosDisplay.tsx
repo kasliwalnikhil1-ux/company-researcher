@@ -29,16 +29,57 @@ interface YoutubeVideosDisplayProps {
 export default function YoutubeVideosDisplay({ videos }: YoutubeVideosDisplayProps) {
   const [videoDetails, setVideoDetails] = useState<Record<string, VideoDetails>>({});
 
-  const getVideoId = (url: string) => {
-    const match = url.match(/(?:youtu\.be\/|youtube\.com(?:\/embed\/|\/v\/|\/watch\?v=|\/user\/\S+|\/ytscreeningroom\?v=|\/sandalsResorts#\w\/\w\/.*\/))([^\/&\?]{10,12})/);
-    return match?.[1] || null;
+  const getVideoId = (url: string): string | null => {
+    if (!url) return null;
+    
+    // Handle youtu.be links
+    if (url.includes('youtu.be/')) {
+      const match = url.match(/youtu\.be\/([^\/&\?]{10,12})/);
+      return match ? match[1] : null;
+    }
+    
+    // Handle youtube.com links
+    if (url.includes('youtube.com')) {
+      // Handle v= parameter
+      const vMatch = url.match(/[?&]v=([^&#]{10,12})/);
+      if (vMatch) return vMatch[1];
+      
+      // Handle embed links
+      const embedMatch = url.match(/youtube\.com\/embed\/([^\/&\?]{10,12})/);
+      if (embedMatch) return embedMatch[1];
+      
+      // Handle /v/ links
+      const vPathMatch = url.match(/youtube\.com\/v\/([^\/&\?]{10,12})/);
+      if (vPathMatch) return vPathMatch[1];
+    }
+    
+    console.warn('Could not extract video ID from URL:', url);
+    return null;
   };
 
   const validVideos = useMemo(() => {
-    return videos.filter(video => getVideoId(video.url) !== null);
+    if (!videos || !Array.isArray(videos)) {
+      console.log('No videos array provided');
+      return [];
+    }
+    
+    const valid = videos.filter(video => {
+      const videoId = getVideoId(video.url);
+      const isValid = videoId !== null;
+      if (!isValid) {
+        console.warn('Invalid YouTube video URL:', video.url);
+      }
+      return isValid;
+    });
+    
+    console.log(`Filtered ${videos.length} videos to ${valid.length} valid videos`);
+    return valid;
   }, [videos]);
 
-  if (!validVideos || validVideos.length === 0) return null;
+  if (!validVideos || validVideos.length === 0) {
+    console.log('No valid YouTube videos to display');
+    return null;
+  }
 
   useEffect(() => {
     const fetchVideoDetails = async () => {

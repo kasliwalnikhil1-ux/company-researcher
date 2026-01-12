@@ -19,7 +19,7 @@ interface CompanyMapData {
 }
 
 interface CompanyMindMapProps {
-  data: CompanyMapData;
+  data: CompanyMapData | null;
 }
 
 interface TreeNode {
@@ -56,6 +56,18 @@ const CustomNode = ({ nodeDatum, isMobile }: any) => (
 );
 
 const CompanyMindMap: React.FC<CompanyMindMapProps> = ({ data }) => {
+  if (!data || !data.rootNode || !Array.isArray(data.rootNode.children)) {
+    return (
+      <div className="w-full h-[400px] bg-[var(--white)] rounded-md shadow-inner relative 
+                  border border-[var(--secondary-darker)] flex items-center justify-center">
+        <div className="text-center p-4">
+          <h3 className="text-lg font-medium text-gray-800 mb-2">Mind Map</h3>
+          <div className="text-gray-500">No mindmap data available for this company</div>
+        </div>
+      </div>
+    );
+  }
+  
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -75,16 +87,16 @@ const CompanyMindMap: React.FC<CompanyMindMapProps> = ({ data }) => {
 
   const transformData = (node: MindMapNode): TreeNode => {
     return {
-      name: node.title,
-      description: node.description,
-      children: node.children ? node.children.map(transformData) : [],
+      name: node.title || 'Untitled',
+      description: node.description || '',
+      children: (node.children || []).map(transformData),
     };
   };
 
   const treeData: TreeNode = {
-    name: data.companyName,
-    description: data.rootNode.title,
-    children: data.rootNode.children.map(transformData),
+    name: data.companyName || 'Company',
+    description: data.rootNode?.title || '',
+    children: (data.rootNode?.children || []).map(transformData),
   };
 
   const handleNodeClick = useCallback((nodeData: any) => {
@@ -96,8 +108,11 @@ const CompanyMindMap: React.FC<CompanyMindMapProps> = ({ data }) => {
   );
 
   return (
-    <div className="w-full h-[400px] md:h-[700px] bg-[var(--white)] rounded-md shadow-inner relative 
+    <div className="w-full h-[500px] bg-[var(--white)] rounded-md shadow-inner relative 
                     border border-[var(--secondary-darker)]">
+      <div className="absolute top-4 left-4 z-10 bg-white/80 px-3 py-1 rounded-md shadow-sm">
+        <h3 className="text-lg font-medium text-gray-800">Company Mind Map</h3>
+      </div>
       <Tree
         data={treeData}
         orientation="horizontal"
@@ -124,4 +139,4 @@ const CompanyMindMap: React.FC<CompanyMindMapProps> = ({ data }) => {
   );
 };
 
-export default CompanyMindMap; 
+export default CompanyMindMap;

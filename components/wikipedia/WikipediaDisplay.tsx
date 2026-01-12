@@ -17,30 +17,49 @@ interface CompanyInfo {
   headquarters?: string;
 }
 
-// Function to extract company name from website URL
+// Function to extract company name from website URL with improved matching
 const extractCompanyName = (url: string): string => {
   try {
-    // Remove protocol and www if present
-    const cleanUrl = url.replace(/^(https?:\/\/)?(www\.)?/, '');
-    // Get domain without TLD
-    const domain = cleanUrl.split('.')[0];
-    return domain.toLowerCase();
+    if (!url) return '';
+    // Remove protocol, www, and common subdomains
+    let cleanUrl = url.replace(/^(https?:\/\/)?(www\.)?/i, '');
+    // Remove path and query parameters
+    cleanUrl = cleanUrl.split('/')[0];
+    // Remove TLD and any subdomains
+    const domainParts = cleanUrl.split('.');
+    // Get the main domain (usually the second-to-last part)
+    const mainDomain = domainParts.length > 1 ? domainParts[domainParts.length - 2] : domainParts[0];
+    return mainDomain.toLowerCase().replace(/[^a-z0-9]/g, '');
   } catch (error) {
+    console.error('Error extracting company name:', error);
     return '';
   }
 };
 
-// Function to check if company name exists in Wikipedia URL
+// More lenient function to check if Wikipedia page is relevant to company
 const isCompanyWikipedia = (wikiUrl: string, companyName: string): boolean => {
+  if (!wikiUrl || !companyName) return true; // Skip validation if data is missing
+  
   try {
-    // Extract the part after /wiki/
-    const wikiPath = wikiUrl.split('/wiki/')[1];
-    // Decode URI component to handle special characters
-    const decodedPath = decodeURIComponent(wikiPath).toLowerCase();
-    // Check if company name exists in the path
-    return decodedPath.includes(companyName);
+    const url = new URL(wikiUrl);
+    // Check if it's a Wikipedia URL
+    if (!url.hostname.includes('wikipedia.org')) return false;
+    
+    // Extract the article title from the URL
+    const pathParts = url.pathname.split('/');
+    const articleTitle = pathParts[pathParts.length - 1];
+    if (!articleTitle) return false;
+    
+    // Decode URL-encoded characters and convert to lowercase for comparison
+    const decodedTitle = decodeURIComponent(articleTitle).toLowerCase();
+    const cleanCompanyName = companyName.toLowerCase().replace(/[^a-z0-9]/g, '');
+    
+    // Check if company name exists in the title (more lenient matching)
+    return decodedTitle.includes(cleanCompanyName) || 
+           cleanCompanyName.includes(decodedTitle.replace(/_/g, ''));
   } catch (error) {
-    return false;
+    console.error('Error validating Wikipedia URL:', error);
+    return true; // Default to showing the content if validation fails
   }
 };
 
@@ -50,13 +69,30 @@ const WikipediaDisplay: React.FC<WikipediaDisplayProps> = ({ data, websiteUrl })
   // Check for empty API response or missing data
   if (!data || (!data.text && !data.url) || (Array.isArray(data) && data.length === 0) || 
       (data.hasOwnProperty('results') && Array.isArray((data as any).results) && (data as any).results.length === 0)) {
+    console.log('WikipediaDisplay: No data available');
     return null;
   }
 
-  // Extract company name and check if Wikipedia article matches
+  // Extract company name from website URL
   const companyName = extractCompanyName(websiteUrl);
-  if (!companyName || !data.url || !isCompanyWikipedia(data.url, companyName)) {
-    return null;
+  
+  // Log data for debugging
+  console.log('Wikipedia data received:', { 
+    hasData: !!data, 
+    hasText: !!data.text, 
+    hasUrl: !!data.url,
+    companyName,
+    wikiUrl: data.url
+  });
+  
+  // Only validate URL if we have both URLs
+  if (data.url && websiteUrl) {
+    const isValid = isCompanyWikipedia(data.url, companyName);
+    console.log('Wikipedia URL validation result:', { url: data.url, isValid });
+    if (!isValid) {
+      console.log('Wikipedia article does not appear to be about the company');
+      return null;
+    }
   }
 
   // Function to decode HTML entities

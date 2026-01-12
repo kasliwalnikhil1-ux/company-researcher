@@ -5,12 +5,49 @@ import { z } from 'zod';
 
 export const maxDuration = 100;
 
+// Check if API key is available
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+  console.warn('GEMINI_API_KEY is not set in environment variables. Using fallback data.');
+}
+
+// Fallback data when API key is not available
+const FALLBACK_MINDMAP = {
+  companyName: 'Example Company',
+  rootNode: {
+    title: 'Main Product/Service',
+    children: [
+      {
+        title: 'Core Products',
+        description: 'Main offerings and services',
+        children: [
+          { title: 'Product 1', description: 'Description of product 1' },
+          { title: 'Product 2', description: 'Description of product 2' }
+        ]
+      },
+      {
+        title: 'Technology',
+        description: 'Key technologies used',
+        children: [
+          { title: 'Frontend', description: 'Frontend technologies' },
+          { title: 'Backend', description: 'Backend technologies' }
+        ]
+      }
+    ]
+  }
+};
+
 export async function POST(req: NextRequest) {
   try {
     const { mainpage, websiteurl } = await req.json();
     
     if (!mainpage) {
       return NextResponse.json({ error: 'Mainpage content is required' }, { status: 400 });
+    }
+
+    // If no API key, return fallback data
+    if (!GEMINI_API_KEY) {
+      return NextResponse.json(FALLBACK_MINDMAP);
     }
 
     const mainpageText = JSON.stringify(mainpage, null, 2);
@@ -34,8 +71,11 @@ export async function POST(req: NextRequest) {
     });
 
     // Initialize the Google Generative AI client
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+    console.log('Initializing Google Generative AI with API key:', GEMINI_API_KEY ? '***key set***' : 'no key');
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
+    
+    console.log('Sending request to Gemini API...');
 
     const prompt = `You are an expert at creating insightful mind maps about companies.
     
@@ -80,59 +120,96 @@ export async function POST(req: NextRequest) {
       }
     }`;
 
-    const result = await model.generateContent({
-      contents: [{
-        role: 'user',
-        parts: [{
-          text: prompt
-        }]
-      }],
-      generationConfig: {
-        temperature: 0.7,
-        topK: 32,
-        topP: 1,
-        maxOutputTokens: 4096,
-      },
-    });
+    let result;
+    try {
+      result = await model.generateContent({
+        contents: [{
+          role: 'user',
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 32,
+          topP: 1,
+          maxOutputTokens: 4096,
+        },
+      });
+      console.log('Received response from Gemini API');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorName = error instanceof Error ? error.name : 'Error';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      
+      console.error('Error calling Gemini API:', error);
+      console.error('Error details:', {
+        message: errorMessage,
+        name: errorName,
+        stack: errorStack,
+        // @ts-ignore - These properties might exist on some error types
+        status: (error as any)?.status,
+        // @ts-ignore
+        response: (error as any)?.response?.data
+      });
+      throw new Error(`Failed to generate content: ${errorMessage}`);
+    }
 
     const response = result.response;
-    const text = response.text();
-    
-    // Parse the response and validate against the schema
-    let parsedResponse;
+    let text;
     try {
-      // Try to extract JSON from markdown code blocks if present
-      const jsonMatch = text.match(/```(?:json)?\n([\s\S]*?)\n```/);
-      const jsonString = jsonMatch ? jsonMatch[1] : text;
-      parsedResponse = JSON.parse(jsonString);
-    } catch (e) {
-      console.error('Failed to parse response as JSON:', e);
-      // Fallback to trying to extract just the JSON part if parsing fails
+      text = await response.text();
+      
+      // Parse the response text as JSON
+      let jsonResponse;
       try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsedResponse = JSON.parse(jsonMatch[0]);
-        } else {
-          throw new Error('No valid JSON found in response');
-        }
-      } catch (err) {
-        console.error('Failed to extract JSON from response:', err);
-        throw new Error('Failed to parse model response as valid JSON');
+        // Extract JSON from markdown code block if present
+        const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/);
+        const jsonString = jsonMatch ? jsonMatch[1] : text;
+        jsonResponse = JSON.parse(jsonString);
+      } catch (e) {
+        console.error('Failed to parse response as JSON:', e);
+        console.error('Raw response:', text);
+        return NextResponse.json(FALLBACK_MINDMAP);
       }
-    }
-    
-    // Validate the parsed response against our schema
-    const validation = mindMapSchema.safeParse(parsedResponse);
-    if (!validation.success) {
-      console.error('Response validation failed:', validation.error);
-      throw new Error('Invalid response format from model');
-    }
-    
-    console.log(validation.data);
-    return NextResponse.json({ result: validation.data });
 
-  } catch (error) {
-    console.error('Company mind map API error:', error);
-    return NextResponse.json({ error: `Company mind map API Failed | ${error}` }, { status: 500 });
+      // Validate the parsed response against our schema
+      const validation = mindMapSchema.safeParse(jsonResponse);
+      if (!validation.success) {
+        console.error('Response validation failed:', validation.error);
+        console.error('Raw response:', jsonResponse);
+        return NextResponse.json(FALLBACK_MINDMAP);
+      }
+      
+      console.log('Generated mind map data:', validation.data);
+      return NextResponse.json(validation.data);
+    } catch (error) {
+      console.error('Error processing AI response:', error);
+      return NextResponse.json(FALLBACK_MINDMAP);
+    }
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      console.error('Company mind map API error:', {
+        message: error.message,
+        name: error.name,
+        stack: error.stack
+      });
+      return NextResponse.json({ 
+        error: 'Company mind map API Failed',
+        details: error.message,
+        type: error.name
+      }, { 
+        status: 500 
+      });
+    }
+    
+    // Handle non-Error thrown values
+    console.error('Unexpected error type:', error);
+    return NextResponse.json({ 
+      error: 'Unexpected error occurred',
+      details: String(error)
+    }, { 
+      status: 500 
+    });
   }
 }

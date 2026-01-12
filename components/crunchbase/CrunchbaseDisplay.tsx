@@ -8,7 +8,11 @@ interface CrunchbaseDisplayProps {
 }
 
 export default function CrunchbaseDisplay({ data }: CrunchbaseDisplayProps) {
-  if (!data || !data.url) return null;
+  console.log('Crunchbase data received:', data);
+  if (!data || !data.url) {
+    console.log('No data or URL provided to CrunchbaseDisplay');
+    return null;
+  }
 
   // Extract organization name from title
   const orgName = data.title.split(' - ')[0];
