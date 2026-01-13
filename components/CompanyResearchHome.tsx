@@ -129,7 +129,7 @@ export default function CompanyResearcher() {
     }
   }, []);
 
-  // Parse company input into array of company names
+  // Parse company input into array of company names 
   const parseCompanyInput = useCallback((input: string): string[] => {
     return input
       .split(/[,\n]/) // Split by comma or newline
