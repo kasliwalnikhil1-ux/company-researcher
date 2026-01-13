@@ -63,7 +63,7 @@ async function makeExaCall(
     
     return response;
   } catch (error) {
-    console.error(`Exa API call failed for ${url}:`, error);
+    console.error(`Exa API call with key failed for ${url}:`, error);
     throw error;
   }
 }
