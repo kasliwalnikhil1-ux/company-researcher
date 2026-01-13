@@ -113,6 +113,7 @@ GEMINI_API_KEY=your_gemini_api_key
 # Optional - for additional features
 YOUTUBE_API_KEY=your_youtube_api_key
 NEXT_PUBLIC_GITHUB_TOKEN=your_github_token
+SLACK_WEBHOOK_URL=your_slack_webhook_url
 ```
 
 > For deployment on platforms like Vercel, add these environment variables in your platform's settings.
