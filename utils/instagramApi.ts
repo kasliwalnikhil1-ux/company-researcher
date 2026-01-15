@@ -1,0 +1,247 @@
+/**
+ * Instagram API helper functions
+ * Fetches Instagram profile data using RapidAPI
+ * Qualifies Instagram profiles using Azure OpenAI
+ */
+
+import { fetchWithRapidApi } from './rapidApiHelper';
+import { getJsonCompletion, Message } from './azureOpenAiHelper';
+
+const RAPIDAPI_HOST = 'instagram120.p.rapidapi.com';
+const PROFILE_API_URL = 'https://instagram120.p.rapidapi.com/api/instagram/profile';
+
+export interface InstagramProfileResponse {
+  result: {
+    id: string;
+    username: string;
+    is_private: boolean;
+    profile_pic_url: string;
+    profile_pic_url_hd: string;
+    biography: string;
+    full_name: string;
+    edge_owner_to_timeline_media: {
+      count: number;
+    };
+    edge_followed_by: {
+      count: number;
+    };
+    edge_follow: {
+      count: number;
+    };
+    profile_pic_url_wrapped?: string;
+    profile_pic_url_hd_wrapped?: string;
+  };
+}
+
+/**
+ * Extracts username from Instagram URL
+ * Supports formats:
+ * - https://www.instagram.com/username/
+ * - https://instagram.com/username/
+ * - instagram.com/username/
+ * - /username/
+ * - username
+ */
+export function extractUsernameFromUrl(urlOrUsername: string): string | null {
+  if (!urlOrUsername || typeof urlOrUsername !== 'string') {
+    return null;
+  }
+
+  const trimmed = urlOrUsername.trim();
+  
+  // If it's already a username (no slashes, no protocol, no @), return as-is
+  if (!trimmed.includes('/') && !trimmed.includes('http') && !trimmed.includes('@')) {
+    return trimmed.replace('@', '');
+  }
+
+  // Try to extract from URL patterns
+  const patterns = [
+    /instagram\.com\/([^\/\?]+)/,
+    /\/([^\/\?]+)/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match && match[1]) {
+      const username = match[1].replace('@', '');
+      // Filter out common non-username paths
+      if (username && !['p', 'reel', 'tv', 'stories'].includes(username.toLowerCase())) {
+        return username;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Fetches Instagram profile information by username
+ */
+export async function fetchInstagramProfile(
+  username: string
+): Promise<InstagramProfileResponse> {
+  if (!username) {
+    throw new Error('Username is required');
+  }
+
+  // Remove @ if present
+  const cleanUsername = username.replace('@', '');
+
+  console.log(`[Instagram API] Fetching profile for username: ${cleanUsername}`);
+  console.log(`[Instagram API] API URL: ${PROFILE_API_URL}`);
+  console.log(`[Instagram API] RapidAPI Host: ${RAPIDAPI_HOST}`);
+
+  const response = await fetchWithRapidApi(PROFILE_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username: cleanUsername }),
+    rapidApiHost: RAPIDAPI_HOST,
+  });
+
+  console.log(`[Instagram API] Response status: ${response.status}`);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[Instagram API] Error response: ${errorText}`);
+    throw new Error(
+      `Failed to fetch Instagram profile: ${response.status} ${response.statusText}. ${errorText}`
+    );
+  }
+
+  const data = await response.json();
+  console.log(`[Instagram API] Successfully fetched profile data`);
+  return data;
+}
+
+/**
+ * Qualification result interface for Instagram profiles
+ */
+export interface InstagramQualificationResult {
+  profile_summary: string;
+  profile_industry: string;
+  sales_opener_sentence: string;
+  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
+  confidence_score: number;
+  product_types: string[] | null;
+  sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
+}
+
+/**
+ * Qualifies an Instagram profile using Azure OpenAI (similar to Exa's summary call)
+ * Analyzes the profile data to determine if it's a qualified fashion/apparel/jewelry brand
+ */
+export async function qualifyInstagramProfile(
+  profileData: InstagramProfileResponse,
+  provider: 'azure' | 'gemini' = 'azure'
+): Promise<InstagramQualificationResult> {
+  const profile = profileData.result;
+
+  // Build profile context for the LLM
+  const profileContext = `
+Instagram Profile Data:
+- Username: ${profile.username}
+- Full Name: ${profile.full_name}
+- Biography: ${profile.biography || 'No biography'}
+- Is Private: ${profile.is_private}
+- Posts Count: ${profile.edge_owner_to_timeline_media.count}
+- Followers: ${profile.edge_followed_by.count}
+- Following: ${profile.edge_follow.count}
+- Profile Picture URL: ${profile.profile_pic_url_hd || profile.profile_pic_url}
+`;
+
+  // System prompt similar to Exa's qualification query
+  const systemPrompt = `You are a sales qualification assistant for Kaptured.ai.
+
+Kaptured.ai sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.
+
+Your job: classify the input Instagram profile as:
+- QUALIFIED (sells physical fashion/apparel/jewelry products)
+- NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)
+- MAYBE (unclear)
+
+CRITICAL RULE:
+Only mark QUALIFIED if the profile represents a brand/company that sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.
+If the profile is for software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider (including Kaptured.ai itself), it is NOT_QUALIFIED.
+
+Return STRICT JSON only following the schema.
+
+Qualification Rules (Updated)
+QUALIFIED ✅
+
+Mark QUALIFIED only if you see evidence of physical product commerce, such as:
+- product categories mentioned in bio (e.g., "shirts", "kurtas", "rings", "earrings")
+- shop links, website links, or e-commerce indicators
+- product-focused content in bio
+- brand/store indicators
+- fashion/apparel/jewelry business signals
+
+NOT_QUALIFIED ❌ (Expanded)
+
+Mark NOT_QUALIFIED if ANY are true:
+- Software / SaaS / app / platform / AI tool / subscription
+- IT services / development / agency / studio / consulting
+- Manufacturer / exporter / OEM / ODM / supplier / wholesaler
+- "We provide services to brands" (not selling products)
+- No physical products indicated
+- Personal account without business focus
+
+Only return product_types when classification = "QUALIFIED".
+
+product_types must be EXACTLY 2 items:
+- generic physical product types (e.g., "earrings", "rings", "kurtas", "shirts")
+- NOT "apparel", "jewelry", "fashion" (too broad)
+- NOT services ("photoshoots", "videography")
+- NOT software ("platform", "tool", "API")
+
+If you cannot find 2 real product types from the profile information, then:
+- classification must be MAYBE (not QUALIFIED)
+- product_types must be null
+
+sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with "I think your..."`;
+
+  const userMessage = `Analyze this Instagram profile and provide qualification assessment:
+
+${profileContext}
+
+Return the assessment in the exact JSON schema format.`;
+
+  const messages: Message[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage },
+  ];
+
+  console.log(`[Instagram Qualification] Calling ${provider} API for profile: ${profile.username}`);
+
+  try {
+    const result = await getJsonCompletion(messages, {
+      provider,
+      temperature: 0.5,
+      top_p: 0.85,
+      max_tokens: 2000,
+    });
+
+    // Validate the result structure
+    if (result.error) {
+      throw new Error(`API returned error: ${result.error}`);
+    }
+
+    // Ensure all required fields are present
+    const qualification: InstagramQualificationResult = {
+      profile_summary: result.profile_summary || '',
+      profile_industry: result.profile_industry || '',
+      sales_opener_sentence: result.sales_opener_sentence || '',
+      classification: result.classification || 'MAYBE',
+      confidence_score: result.confidence_score ?? 0.5,
+      product_types: result.product_types || null,
+      sales_action: result.sales_action || 'MANUAL_REVIEW',
+    };
+
+    console.log(`[Instagram Qualification] Successfully qualified profile: ${profile.username} as ${qualification.classification}`);
+    return qualification;
+  } catch (error) {
+    console.error(`[Instagram Qualification] Error qualifying profile ${profile.username}:`, error);
+    throw error;
+  }
+}

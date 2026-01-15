@@ -94,6 +94,8 @@ yarn dev
 ### Required API Keys
 * **Exa API Key**: Get from [Exa Dashboard](https://dashboard.exa.ai/api-keys)
 * **Gemini API Key**: Get from [Google AI Studio](https://makersuite.google.com/app/apikey)
+* **Supabase URL**: Get from [Supabase Dashboard](https://supabase.com/dashboard) (for authentication)
+* **Supabase Anon Key**: Get from [Supabase Dashboard](https://supabase.com/dashboard) (for authentication)
 
 ### Optional API Keys (for additional features)
 * **YouTube API Key**: Get from [Google Cloud Console](https://console.cloud.google.com/apis/credentials) (for YouTube video fetching)
@@ -109,6 +111,8 @@ Create a `.env.local` file in the root directory with the following structure:
 # Required
 EXA_API_KEY=your_exa_api_key
 GEMINI_API_KEY=your_gemini_api_key
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 # Optional - for additional features
 YOUTUBE_API_KEY=your_youtube_api_key

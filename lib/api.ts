@@ -34,17 +34,32 @@ export const fetchCompanyMap = async (domain: string): Promise<any> => {
         : errorMessage;
       
       console.error(`API Error for ${domain}:`, fullErrorMessage, `Status: ${response.status}`);
+      
+      // Send Slack notification for API error
+      const slackMessage = `❌ API Error for ${domain}\nStatus: ${response.status}\nError: ${fullErrorMessage}`;
+      sendSlackNotification(slackMessage).catch(
+        (slackError) => console.error('Failed to send Slack notification:', slackError)
+      );
+      
       return null;
     }
     
     return await response.json();
   } catch (error) {
     // Handle network errors or other exceptions
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      console.error('Network error fetching company qualification:', error);
-    } else {
-      console.error('Error fetching company qualification:', error);
-    }
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorType = error instanceof TypeError && error.message.includes('fetch') 
+      ? 'Network error' 
+      : 'Error';
+    
+    console.error(`${errorType} fetching company qualification:`, error);
+    
+    // Send Slack notification for network/other errors
+    const slackMessage = `❌ ${errorType} for ${domain}\nError: ${errorMessage}`;
+    sendSlackNotification(slackMessage).catch(
+      (slackError) => console.error('Failed to send Slack notification:', slackError)
+    );
+    
     return null;
   }
 };
@@ -68,5 +83,65 @@ export const sendSlackNotification = async (message: string): Promise<boolean> =
   } catch (error) {
     console.error('Error sending Slack notification:', error);
     return false;
+  }
+};
+
+// Fetch Instagram profile data
+export const fetchInstagramProfile = async (instagramUrl: string): Promise<any> => {
+  try {
+    const response = await fetch('/api/instagram-profile', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        instagramUrl: instagramUrl
+      }),
+    });
+    
+    if (!response.ok) {
+      let errorMessage = `Failed to fetch Instagram profile (${response.status})`;
+      let errorDetails = '';
+      try {
+        const errorData = await response.json();
+        if (errorData.error || errorData.message) {
+          errorMessage = errorData.error || errorData.message;
+        }
+        if (errorData.details) {
+          errorDetails = errorData.details;
+        }
+      } catch (e) {
+        errorMessage = response.statusText || errorMessage;
+      }
+      
+      const fullErrorMessage = errorDetails 
+        ? `${errorMessage}. ${errorDetails}`
+        : errorMessage;
+      
+      console.error(`Instagram API Error for ${instagramUrl}:`, fullErrorMessage, `Status: ${response.status}`);
+      
+      const slackMessage = `❌ Instagram API Error for ${instagramUrl}\nStatus: ${response.status}\nError: ${fullErrorMessage}`;
+      sendSlackNotification(slackMessage).catch(
+        (slackError) => console.error('Failed to send Slack notification:', slackError)
+      );
+      
+      return null;
+    }
+    
+    return await response.json();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorType = error instanceof TypeError && error.message.includes('fetch') 
+      ? 'Network error' 
+      : 'Error';
+    
+    console.error(`${errorType} fetching Instagram profile:`, error);
+    
+    const slackMessage = `❌ ${errorType} for ${instagramUrl}\nError: ${errorMessage}`;
+    sendSlackNotification(slackMessage).catch(
+      (slackError) => console.error('Failed to send Slack notification:', slackError)
+    );
+    
+    return null;
   }
 };

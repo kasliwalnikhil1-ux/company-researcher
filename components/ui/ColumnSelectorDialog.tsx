@@ -14,6 +14,7 @@ interface ColumnSelectorDialogProps {
   onSelectColumn: (column: string) => void;
   onConfirm: () => void;
   onClose: () => void;
+  mode?: 'domain' | 'instagram';
 }
 
 const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
@@ -24,6 +25,7 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
   onSelectColumn,
   onConfirm,
   onClose,
+  mode = 'domain',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -71,6 +73,13 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
     }
   };
 
+  // Check if URL contains instagram.com
+  const isInstagramUrl = (url: string): boolean => {
+    if (!url || typeof url !== 'string') return false;
+    const urlLower = url.toLowerCase().trim();
+    return urlLower.includes('instagram.com');
+  };
+
   // Get valid URLs from a column (first 5 rows)
   const getValidUrls = (columnName: string): string[] => {
     if (!rows || rows.length === 0) return [];
@@ -83,11 +92,19 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
       const value = row[columnName]?.trim() || '';
       if (!value) continue;
       
-      // Check if it looks like a URL (contains a dot)
-      if (value.includes('.')) {
-        // Check if it's NOT an excluded domain
-        if (!isExcludedDomain(value)) {
+      if (mode === 'instagram') {
+        // In Instagram mode, only include Instagram URLs
+        if (isInstagramUrl(value)) {
           validUrls.push(value);
+        }
+      } else {
+        // In domain mode, exclude social media domains
+        // Check if it looks like a URL (contains a dot)
+        if (value.includes('.')) {
+          // Check if it's NOT an excluded domain
+          if (!isExcludedDomain(value)) {
+            validUrls.push(value);
+          }
         }
       }
     }
@@ -95,7 +112,7 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
     return validUrls;
   };
 
-  // Check if a column contains valid company URLs (not social media)
+  // Check if a column contains valid URLs
   const hasValidUrls = (columnName: string): boolean => {
     return getValidUrls(columnName).length > 0;
   };
@@ -129,9 +146,13 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6">
-        <h2 className="text-2xl font-semibold mb-4">Select URL Column</h2>
+        <h2 className="text-2xl font-semibold mb-4">
+          {mode === 'instagram' ? 'Select Instagram Column' : 'Select URL Column'}
+        </h2>
         <p className="text-gray-600 mb-4">
-          Please select the column that contains company website URLs. Columns with no URLs or social media links (LinkedIn, Twitter, Facebook, etc.) are excluded.
+          {mode === 'instagram' 
+            ? 'Please select the column that contains Instagram URLs. Only columns with Instagram URLs (instagram.com) are shown.'
+            : 'Please select the column that contains company website URLs. Columns with no URLs or social media links (LinkedIn, Twitter, Facebook, etc.) are excluded.'}
         </p>
         
         {/* Search Input */}

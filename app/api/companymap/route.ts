@@ -9,6 +9,30 @@ const EXA_API_KEYS = process.env.EXA_API_KEYS
   ? process.env.EXA_API_KEYS.split(',').map(key => key.trim()).filter(key => key.length > 0)
   : [];
 
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+
+// Helper function to send Slack notification
+async function sendSlackNotification(message: string): Promise<void> {
+  if (!SLACK_WEBHOOK_URL) {
+    console.warn('SLACK_WEBHOOK_URL not configured, skipping notification');
+    return;
+  }
+
+  try {
+    await fetch(SLACK_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        text: message,
+      }),
+    });
+  } catch (error) {
+    console.error('Failed to send Slack notification:', error);
+  }
+}
+
 // Helper function to check if error is due to insufficient credits
 function isCreditError(error: unknown): boolean {
   if (error instanceof Error) {
@@ -42,7 +66,7 @@ async function makeExaCall(
     const response = await exa.getContents(
       [url],
       {
-        livecrawl: "fallback",
+        livecrawl: "preferred",
         summary: {
           query,
           schema
@@ -78,7 +102,11 @@ async function processUrlsWithKeys(
   const numKeys = EXA_API_KEYS.length;
 
   if (numKeys === 0) {
-    throw new Error('No API keys configured');
+    const errorMessage = 'No API keys configured';
+    sendSlackNotification(`❌ API Key Error\n${errorMessage}`).catch(
+      (err) => console.error('Failed to send Slack notification:', err)
+    );
+    throw new Error(errorMessage);
   }
 
   // If URLs < keys: randomly pick a key and retry with others on credit failure
@@ -100,16 +128,28 @@ async function processUrlsWithKeys(
       } catch (error) {
         if (isCreditError(error)) {
           console.warn(`Key failed due to credits, trying next key...`);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          sendSlackNotification(`⚠️ API Key Credit Error\nKey index: ${shuffledKeys.indexOf(key) + 1}\nError: ${errorMessage}\nTrying next key...`).catch(
+            (err) => console.error('Failed to send Slack notification:', err)
+          );
           failedKeys.push(key);
           continue; // Try next key
         }
-        // If it's not a credit error, throw it
+        // If it's not a credit error, send notification and throw it
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        sendSlackNotification(`❌ API Key Error\nKey index: ${shuffledKeys.indexOf(key) + 1}\nError: ${errorMessage}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         throw error;
       }
     }
 
     // All keys failed due to credits
-    throw new Error(`All ${failedKeys.length} API keys exhausted due to insufficient credits`);
+    const errorMessage = `All ${failedKeys.length} API keys exhausted due to insufficient credits`;
+    sendSlackNotification(`❌ All API Keys Exhausted\n${errorMessage}`).catch(
+      (err) => console.error('Failed to send Slack notification:', err)
+    );
+    throw new Error(errorMessage);
   }
 
   // If URLs >= keys: run all keys in parallel, handling credit failures
@@ -135,8 +175,16 @@ async function processUrlsWithKeys(
       } catch (error) {
         if (isCreditError(error)) {
           console.warn(`Key ${i + 1} failed due to credits, will retry with other keys`);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          sendSlackNotification(`⚠️ API Key Credit Error\nKey index: ${i + 1}\nError: ${errorMessage}\nWill retry with other keys`).catch(
+            (err) => console.error('Failed to send Slack notification:', err)
+          );
           return { success: false, error, keyIndex: i, urls: urlsForThisKey };
         }
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        sendSlackNotification(`❌ API Key Error\nKey index: ${i + 1}\nError: ${errorMessage}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         throw error;
       }
     })();
@@ -171,7 +219,11 @@ async function processUrlsWithKeys(
     const remainingKeys = availableKeys.filter((_, idx) => !usedKeyIndices.has(idx));
 
     if (remainingKeys.length === 0) {
-      throw new Error('All API keys exhausted due to insufficient credits');
+      const errorMessage = 'All API keys exhausted due to insufficient credits';
+      sendSlackNotification(`❌ All API Keys Exhausted\n${errorMessage}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
+      throw new Error(errorMessage);
     }
 
     console.log(`Retrying ${failedTasks.length} failed task(s) with ${remainingKeys.length} remaining key(s)`);
@@ -192,14 +244,26 @@ async function processUrlsWithKeys(
           break;
         } catch (error) {
           if (isCreditError(error)) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            sendSlackNotification(`⚠️ API Key Credit Error (Retry)\nKey index: ${availableKeys.indexOf(retryKey)}\nError: ${errorMessage}\nTrying next key...`).catch(
+              (err) => console.error('Failed to send Slack notification:', err)
+            );
             continue; // Try next remaining key
           }
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          sendSlackNotification(`❌ API Key Error (Retry)\nKey index: ${availableKeys.indexOf(retryKey)}\nError: ${errorMessage}`).catch(
+            (err) => console.error('Failed to send Slack notification:', err)
+          );
           throw error;
         }
       }
 
       if (!retried) {
-        throw new Error(`Failed to process URLs with any available key`);
+        const errorMessage = `Failed to process URLs with any available key`;
+        sendSlackNotification(`❌ API Key Error\n${errorMessage}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
+        throw new Error(errorMessage);
       }
     }
   }
@@ -307,8 +371,12 @@ export async function POST(req: NextRequest) {
       // Check if result is null or undefined
       if (!result) {
         console.error('Exa API returned null or undefined result');
+        const errorMessage = 'No results returned from Exa API - API returned null/undefined';
+        sendSlackNotification(`❌ Exa API Error\n${errorMessage}\nURL: ${normalizedUrls[0]}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ 
-          error: 'No results returned from Exa API - API returned null/undefined' 
+          error: errorMessage
         }, { 
           status: 500 
         });
@@ -322,6 +390,10 @@ export async function POST(req: NextRequest) {
           resultKeys: Object.keys(result || {}),
           resultType: typeof result
         });
+        const errorMessage = 'No results returned from Exa API - The API response does not contain any results in the expected format';
+        sendSlackNotification(`❌ Exa API Error\n${errorMessage}\nURL: ${normalizedUrls[0]}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ 
           error: 'No results returned from Exa API',
           details: 'The API response does not contain any results in the expected format'
@@ -334,6 +406,10 @@ export async function POST(req: NextRequest) {
       
       if (!firstResult) {
         console.error('No first result found in results array');
+        const errorMessage = 'No results returned from Exa API - The results array is empty';
+        sendSlackNotification(`❌ Exa API Error\n${errorMessage}\nURL: ${normalizedUrls[0]}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ 
           error: 'No results returned from Exa API',
           details: 'The results array is empty'
@@ -347,6 +423,10 @@ export async function POST(req: NextRequest) {
           resultKeys: Object.keys(firstResult),
           resultStructure: JSON.stringify(firstResult, null, 2).substring(0, 500)
         });
+        const errorMessage = 'No summary in Exa API response - The API response does not contain a summary field';
+        sendSlackNotification(`❌ Exa API Error\n${errorMessage}\nURL: ${normalizedUrls[0]}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ 
           error: 'No summary in Exa API response',
           details: 'The API response does not contain a summary field'
@@ -362,6 +442,10 @@ export async function POST(req: NextRequest) {
       } catch (parseError) {
         console.error('Failed to parse summary JSON:', parseError);
         console.error('Raw summary:', firstResult.summary);
+        const parseErrorMessage = parseError instanceof Error ? parseError.message : String(parseError);
+        sendSlackNotification(`❌ Exa API Parse Error\nFailed to parse summary data\nError: ${parseErrorMessage}\nURL: ${normalizedUrls[0]}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ 
           error: 'Failed to parse summary data',
           raw_summary: firstResult.summary
@@ -396,6 +480,10 @@ export async function POST(req: NextRequest) {
           keys: Object.keys(r || {})
         }))
       });
+      const errorMessage = 'No results returned from Exa API - The API response array does not contain any valid results';
+      sendSlackNotification(`❌ Exa API Error\n${errorMessage}\nURLs: ${normalizedUrls.join(', ')}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json({ 
         error: 'No results returned from Exa API',
         details: 'The API response array does not contain any valid results'
@@ -427,6 +515,12 @@ export async function POST(req: NextRequest) {
         name: error.name,
         stack: error.stack
       });
+      
+      // Send Slack notification for API errors
+      sendSlackNotification(`❌ Company Mind Map API Error\nError: ${error.message}\nType: ${error.name}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
+      
       return NextResponse.json({ 
         error: 'Company mind map API Failed',
         details: error.message,
@@ -438,9 +532,14 @@ export async function POST(req: NextRequest) {
     
     // Handle non-Error thrown values
     console.error('Unexpected error type:', error);
+    const errorString = String(error);
+    sendSlackNotification(`❌ Unexpected API Error\nError: ${errorString}`).catch(
+      (err) => console.error('Failed to send Slack notification:', err)
+    );
+    
     return NextResponse.json({ 
       error: 'Unexpected error occurred',
-      details: String(error)
+      details: errorString
     }, { 
       status: 500 
     });
