@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import Image from 'next/image';
+import React, { useState } from 'react';
+import { generateMessageTemplates } from '../../lib/messageTemplates';
 
 export interface InstagramProfileData {
   id: string;
@@ -27,7 +27,7 @@ interface InstagramQualificationData {
   profile_industry: string;
   sales_opener_sentence: string;
   classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
-  confidence_score: number;
+  confidence_score?: number; // Optional - only show if present
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
 }
@@ -39,6 +39,18 @@ interface InstagramProfileDisplayProps {
 }
 
 const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data, instagramUrl, qualificationData }) => {
+  const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
+
+  const handleCopy = async (text: string, messageNumber: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessage(messageNumber);
+      setTimeout(() => setCopiedMessage(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  };
+
   if (!data) {
     return (
       <div className="w-full bg-white border shadow-sm p-4 sm:p-8 mt-2 rounded-lg">
@@ -56,21 +68,6 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
 
         {/* Profile Header */}
         <div className="flex items-start gap-6 pb-6 border-b border-gray-200">
-          <div className="relative w-24 h-24 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
-            {data.profile_pic_url_hd ? (
-              <Image
-                src={data.profile_pic_url_hd}
-                alt={data.username}
-                fill
-                className="object-cover"
-                unoptimized
-              />
-            ) : (
-              <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                <span className="text-2xl text-gray-400">@{data.username[0]?.toUpperCase()}</span>
-              </div>
-            )}
-          </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3 mb-2">
               <h2 className="text-2xl font-bold text-gray-900">{data.full_name || data.username}</h2>
@@ -166,7 +163,7 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className={`grid ${qualificationData.confidence_score !== undefined ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'} gap-4 mb-6`}>
               {/* Classification */}
               <div className="space-y-2">
                 <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Classification</h4>
@@ -181,36 +178,38 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
                 </div>
               </div>
 
-              {/* Confidence Score */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Confidence Score</h4>
-                <div className="flex items-center gap-2">
-                  <span className={`text-2xl font-bold ${
-                    qualificationData.confidence_score >= 0.8
-                      ? 'text-green-600'
-                      : qualificationData.confidence_score >= 0.6
-                      ? 'text-yellow-600'
-                      : 'text-red-600'
-                  }`}>
-                    {(qualificationData.confidence_score * 100).toFixed(0)}%
-                  </span>
-                  <div className="flex-1 bg-gray-200 rounded-full h-2.5">
-                    <div
-                      className={`h-2.5 rounded-full ${
-                        qualificationData.confidence_score >= 0.8
-                          ? 'bg-green-600'
-                          : qualificationData.confidence_score >= 0.6
-                          ? 'bg-yellow-600'
-                          : 'bg-red-600'
-                      }`}
-                      style={{ width: `${qualificationData.confidence_score * 100}%` }}
-                    ></div>
+              {/* Confidence Score - Only show if present */}
+              {qualificationData.confidence_score !== undefined && (
+                <div className="space-y-2">
+                  <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Confidence Score</h4>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-2xl font-bold ${
+                      qualificationData.confidence_score >= 0.8
+                        ? 'text-green-600'
+                        : qualificationData.confidence_score >= 0.6
+                        ? 'text-yellow-600'
+                        : 'text-red-600'
+                    }`}>
+                      {(qualificationData.confidence_score * 100).toFixed(0)}%
+                    </span>
+                    <div className="flex-1 bg-gray-200 rounded-full h-2.5">
+                      <div
+                        className={`h-2.5 rounded-full ${
+                          qualificationData.confidence_score >= 0.8
+                            ? 'bg-green-600'
+                            : qualificationData.confidence_score >= 0.6
+                            ? 'bg-yellow-600'
+                            : 'bg-red-600'
+                        }`}
+                        style={{ width: `${qualificationData.confidence_score * 100}%` }}
+                      ></div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
 
-            {/* Product Types - Only show when QUALIFIED and product_types exist */}
+            {/* Product Types - Show when QUALIFIED and product_types exist (can be 1 or more items) */}
             {qualificationData.classification === 'QUALIFIED' && qualificationData.product_types && Array.isArray(qualificationData.product_types) && qualificationData.product_types.length > 0 && (
               <div className="space-y-2 mb-6">
                 <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Product Types</h4>
@@ -242,6 +241,47 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
                 {qualificationData.sales_action.replace('_', ' ')}
               </div>
             </div>
+
+            {/* Message Templates for Instagram Research */}
+            {qualificationData.classification === 'QUALIFIED' && qualificationData.product_types && qualificationData.product_types.length > 0 && (() => {
+              const messages = generateMessageTemplates(qualificationData, true); // true = Instagram research
+              
+              return (
+                <div className="pt-6 mt-6 border-t border-gray-200">
+                  <h3 className="text-xl font-semibold text-gray-900 mb-4">Instagram Research Message Templates</h3>
+                  <div className="space-y-4">
+                    {messages.map((message, index) => (
+                      <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-sm font-semibold text-gray-700">Message {index + 1}</h4>
+                          <button
+                            onClick={() => handleCopy(message, index + 1)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                          >
+                            {copiedMessage === index + 1 ? (
+                              <>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                Copied!
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                Copy
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <p className="text-gray-800 text-sm whitespace-pre-wrap leading-relaxed">{message}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         ) : (
           <div className="pt-6 mt-6 border-t border-gray-200">

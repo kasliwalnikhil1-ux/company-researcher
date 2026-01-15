@@ -89,7 +89,7 @@ export default function CompanyResearcher() {
         profile_industry: string;
         sales_opener_sentence: string;
         classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
-        confidence_score: number;
+        confidence_score?: number; // Optional
         product_types: string[] | null;
         sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
       } | null;
@@ -587,10 +587,13 @@ export default function CompanyResearcher() {
                 updatedRow['Company Industry'] = qual.profile_industry || '';
                 updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
                 updatedRow['Classification'] = qual.classification || '';
-                updatedRow['Confidence Score'] = String(qual.confidence_score ?? '');
+                // Only add confidence score if it exists
+                if (qual.confidence_score !== undefined) {
+                  updatedRow['Confidence Score'] = String(qual.confidence_score);
+                }
                 updatedRow['Sales Action'] = qual.sales_action || '';
                 
-                // Handle product types
+                // Handle product types (can be 1 or more items)
                 if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
                   const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
                   if (productTypes.length === 1) {

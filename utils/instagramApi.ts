@@ -123,7 +123,7 @@ export interface InstagramQualificationResult {
   profile_industry: string;
   sales_opener_sentence: string;
   classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
-  confidence_score: number;
+  confidence_score?: number; // Optional - only include if provided by LLM
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
 }
@@ -152,55 +152,52 @@ Instagram Profile Data:
 `;
 
   // System prompt similar to Exa's qualification query
-  const systemPrompt = `You are a sales qualification assistant for Kaptured.ai.
-
-Kaptured.ai sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.
+  const systemPrompt = `You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.
 
 Your job: classify the input Instagram profile as:
 - QUALIFIED (sells physical fashion/apparel/jewelry products)
 - NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)
-- MAYBE (unclear)
 
 CRITICAL RULE:
 Only mark QUALIFIED if the profile represents a brand/company that sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.
-If the profile is for software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider (including Kaptured.ai itself), it is NOT_QUALIFIED.
+If the profile is for software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider, it is NOT_QUALIFIED.
 
-Return STRICT JSON only following the schema.
+Reply as a JSON object with keys: 
+{sales_opener_sentence: 
+classification: QUALIFIED, NOT_QUALIFIED
+product_types: Array of product types [""]
+sales_action: OUTREACH, EXCLUDE, PARTNERSHIP, MANUAL_REVIEW
+}
 
-Qualification Rules (Updated)
+Qualification Rules
 QUALIFIED ✅
 
-Mark QUALIFIED only if you see evidence of physical product commerce, such as:
+Mark QUALIFIED only if you see some evidence of physical product commerce in the profile, such as:
 - product categories mentioned in bio (e.g., "shirts", "kurtas", "rings", "earrings")
 - shop links, website links, or e-commerce indicators
 - product-focused content in bio
 - brand/store indicators
 - fashion/apparel/jewelry business signals
+- fashion/apparel/jewelry Manufacturer / exporter / OEM / ODM / supplier / wholesaler
+- fashion/apparel/jewelry marketplace indicators (e.g., "shop on Amazon", "shop on Flipkart", "shop on Myntra", "shop on Etsy")
 
-NOT_QUALIFIED ❌ (Expanded)
+NOT_QUALIFIED ❌
 
 Mark NOT_QUALIFIED if ANY are true:
-- Software / SaaS / app / platform / AI tool / subscription
-- IT services / development / agency / studio / consulting
-- Manufacturer / exporter / OEM / ODM / supplier / wholesaler
-- "We provide services to brands" (not selling products)
-- No physical products indicated
-- Personal account without business focus
+- Sells software subscription / Is SaaS / Is app / Is AI tool
+- "We provide services to brands" (not selling products, like IT services / marketing agency / consulting)
 
 Only return product_types when classification = "QUALIFIED".
 
-product_types must be EXACTLY 2 items:
-- generic physical product types (e.g., "earrings", "rings", "kurtas", "shirts")
-- NOT "apparel", "jewelry", "fashion" (too broad)
+product_types must be 1 item:
+- generic physical product type (e.g., "earrings", "rings", "kurtas", "shirts", "jewelry", "clothing")
 - NOT services ("photoshoots", "videography")
 - NOT software ("platform", "tool", "API")
 
-If you cannot find 2 real product types from the profile information, then:
-- classification must be MAYBE (not QUALIFIED)
-- product_types must be null
-
-sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with "I think your..."`;
-
+sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with "I think your..."
+[usp, specialization, history // anything ] unique/impressive/stunning/special/different/etc, <10 words only.
+Don't use words that feel AI like captivating, captivating, transforming, etc.`;
+        
   const userMessage = `Analyze this Instagram profile and provide qualification assessment:
 
 ${profileContext}
@@ -233,10 +230,18 @@ Return the assessment in the exact JSON schema format.`;
       profile_industry: result.profile_industry || '',
       sales_opener_sentence: result.sales_opener_sentence || '',
       classification: result.classification || 'MAYBE',
-      confidence_score: result.confidence_score ?? 0.5,
-      product_types: result.product_types || null,
+      // Only include confidence_score if provided by LLM
+      ...(result.confidence_score !== undefined && { confidence_score: result.confidence_score }),
+      product_types: result.product_types && Array.isArray(result.product_types) && result.product_types.length > 0 
+        ? result.product_types.filter((pt: any) => pt && typeof pt === 'string')
+        : null,
       sales_action: result.sales_action || 'MANUAL_REVIEW',
     };
+    
+    // Log product_types for debugging
+    if (qualification.classification === 'QUALIFIED') {
+      console.log(`[Instagram Qualification] Product types for ${profile.username}:`, qualification.product_types);
+    }
 
     console.log(`[Instagram Qualification] Successfully qualified profile: ${profile.username} as ${qualification.classification}`);
     return qualification;

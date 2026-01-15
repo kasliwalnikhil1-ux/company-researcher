@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+import { generateMessageTemplates } from '../../lib/messageTemplates';
 
 interface QualificationData {
   company_summary: string;
@@ -17,6 +18,18 @@ interface QualificationDisplayProps {
 }
 
 const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => {
+  const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
+
+  const handleCopy = async (text: string, messageNumber: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessage(messageNumber);
+      setTimeout(() => setCopiedMessage(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
+  };
+
   if (!data) {
     return (
       <div className="w-full bg-white border shadow-sm p-4 sm:p-8 mt-2 rounded-lg">
@@ -150,6 +163,47 @@ const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => 
             {data.sales_action.replace('_', ' ')}
           </div>
         </div>
+
+        {/* Message Templates for Domain Research */}
+        {data.classification === 'QUALIFIED' && data.product_types && data.product_types.length > 0 && (() => {
+          const messages = generateMessageTemplates(data, false); // false = domain research
+          
+          return (
+            <div className="pt-6 mt-6 border-t border-gray-200">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">Domain Research Message Templates</h3>
+              <div className="space-y-4">
+                {messages.map((message, index) => (
+                  <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <h4 className="text-sm font-semibold text-gray-700">Message {index + 1}</h4>
+                      <button
+                        onClick={() => handleCopy(message, index + 1)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
+                      >
+                        {copiedMessage === index + 1 ? (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                            </svg>
+                            Copy
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-gray-800 text-sm whitespace-pre-wrap leading-relaxed">{message}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );

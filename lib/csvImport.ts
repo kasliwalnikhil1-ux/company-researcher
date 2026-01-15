@@ -105,11 +105,14 @@ export const mergeQualificationData = (
     const updatedRow = { ...row };
     
     // Add or update qualification columns
-    updatedRow['Company Summary'] = qualificationData.company_summary || updatedRow['Company Summary'] || '';
-    updatedRow['Company Industry'] = qualificationData.company_industry || updatedRow['Company Industry'] || '';
+    updatedRow['Company Summary'] = qualificationData.company_summary || qualificationData.profile_summary || updatedRow['Company Summary'] || '';
+    updatedRow['Company Industry'] = qualificationData.company_industry || qualificationData.profile_industry || updatedRow['Company Industry'] || '';
     updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
     updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
-    updatedRow['Confidence Score'] = String((qualificationData.confidence_score ?? updatedRow['Confidence Score']) || '');
+    // Only update confidence score if it exists
+    if (qualificationData.confidence_score !== undefined) {
+      updatedRow['Confidence Score'] = String(qualificationData.confidence_score);
+    }
     
     // Handle product types
     if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {

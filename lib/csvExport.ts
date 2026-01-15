@@ -1,3 +1,5 @@
+import { generateMessageTemplates } from './messageTemplates';
+
 // Types for our normalized company data
 type ExportableCompany = {
   companyName: string;
@@ -16,9 +18,10 @@ type ExportableCompany = {
   companyIndustry: string;
   salesOpenerSentence: string;
   classification: string;
-  confidenceScore: number;
+  confidenceScore: string;
   productTypesFormatted: string;
   salesAction: string;
+  messageTemplates: string[]; // Array of message templates
 };
 
 // Normalize company data from the app's state to our exportable format
@@ -96,11 +99,11 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
 
   // Extract qualification data fields
   const qualificationData = data?.qualificationData || {};
-  const companySummary = qualificationData.company_summary || '';
-  const companyIndustry = qualificationData.company_industry || '';
+  const companySummary = qualificationData.company_summary || qualificationData.profile_summary || '';
+  const companyIndustry = qualificationData.company_industry || qualificationData.profile_industry || '';
   const salesOpenerSentence = qualificationData.sales_opener_sentence || '';
   const classification = qualificationData.classification || '';
-  const confidenceScore = qualificationData.confidence_score ?? '';
+  const confidenceScore = qualificationData.confidence_score !== undefined ? String(qualificationData.confidence_score) : '';
   const salesAction = qualificationData.sales_action || '';
 
   // Format product types as string: "A", "A and B", or "A, B, and C"
@@ -113,6 +116,16 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
     return `${allButLast}, and ${types[types.length - 1]}`;
   };
   const productTypesFormatted = formatProductTypes(productTypes);
+
+  // Determine if this is Instagram research (check for profile_summary vs company_summary)
+  const isInstagram = !!qualificationData.profile_summary && !qualificationData.company_summary;
+  
+  // Generate message templates - only for QUALIFIED companies
+  // CSV export only includes messages for the correct mode (domain vs Instagram)
+  const messageTemplates =
+    qualificationData.classification === 'QUALIFIED'
+      ? generateMessageTemplates(qualificationData, isInstagram)
+      : [];
 
   return {
     companyName,
@@ -133,20 +146,17 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
     classification,
     confidenceScore,
     productTypesFormatted,
-    salesAction
+    salesAction,
+    messageTemplates
   };
 };
 
-// Escape a CSV field value
-const escapeCsvField = (value: any): string => {
-  if (value === null || value === undefined) return '';
-  
+// Safe helper function to escape and quote CSV field values
+// Always quotes fields and escapes existing quotes by doubling them
+const csvEscape = (value: any): string => {
+  if (value == null) return "";
   const str = String(value);
-  // If the string contains commas, quotes, or newlines, wrap it in quotes and escape existing quotes
-  if (/[,\n"]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
+  return `"${str.replace(/"/g, '""')}"`;
 };
 
 // Convert an array of companies to CSV string
@@ -161,6 +171,11 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
   // Calculate maximum number of product types across all companies
   const maxProductTypes = normalizedCompanies.reduce((max, company) => {
     return Math.max(max, company.productTypes?.length || 0);
+  }, 0);
+
+  // Calculate maximum number of message templates across all companies
+  const maxMessages = normalizedCompanies.reduce((max, company) => {
+    return Math.max(max, company.messageTemplates?.length || 0);
   }, 0);
 
   // Define CSV headers in the required order
@@ -179,6 +194,13 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
   if (maxProductTypes > 0) {
     for (let i = 1; i <= maxProductTypes; i++) {
       headers.push(`PRODUCT${i}`);
+    }
+  }
+
+  // Add dynamic message template headers if there are any messages
+  if (maxMessages > 0) {
+    for (let i = 1; i <= maxMessages; i++) {
+      headers.push(`Message ${i}`);
     }
   }
 
@@ -202,14 +224,21 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
         row.push(company.productTypes?.[i] || '');
       }
     }
+
+    // Add message templates as separate columns
+    if (maxMessages > 0) {
+      for (let i = 0; i < maxMessages; i++) {
+        row.push(company.messageTemplates?.[i] || '');
+      }
+    }
     
     // Escape each field and join with commas
-    return row.map(escapeCsvField).join(',');
+    return row.map(csvEscape).join(',');
   });
 
   // Combine headers and rows
   return [
-    headers.map(escapeCsvField).join(','),
+    headers.map(csvEscape).join(','),
     ...rows
   ].join('\n');
 };
