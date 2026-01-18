@@ -1,13 +1,13 @@
-# 🔎 Company Researcher
+# 🔎 Kaptured.AI CRM
 ### Powered by [Exa.ai](https://exa.ai) - The Search Engine for AI Applications
 
 ![Screenshot](https://companyresearcher.exa.ai/opengraph-image.jpg)
 
 <br>
 
-## 🎯 What is Company Researcher?
+## 🎯 What is Kaptured.AI CRM?
 
-Company Researcher is a free and open-source tool that helps you instantly understand any company inside out. Simply input a company's URL, and the tool gathers comprehensive information from across the web, presenting you with detailed insights about the organization, its products, funding, social presence, and more.
+Kaptured.AI CRM is a free and open-source tool that helps you instantly understand any company inside out. Simply input a company's URL, and the tool gathers comprehensive information from across the web, presenting you with detailed insights about the organization, its products, funding, social presence, and more.
 
 <br>
 

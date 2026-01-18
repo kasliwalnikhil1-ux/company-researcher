@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { generateMessageTemplates } from '../../lib/messageTemplates';
+import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 
 interface QualificationData {
   company_summary: string;
@@ -19,6 +20,7 @@ interface QualificationDisplayProps {
 
 const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => {
   const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
+  const { templates } = useMessageTemplates();
 
   const handleCopy = async (text: string, messageNumber: number) => {
     try {
@@ -166,7 +168,13 @@ const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => 
 
         {/* Message Templates for Domain Research */}
         {data.classification === 'QUALIFIED' && data.product_types && data.product_types.length > 0 && (() => {
-          const messages = generateMessageTemplates(data, false); // false = domain research
+          // Get all templates from database for 'direct' channel, or use undefined to fallback to hard-coded
+          const dbTemplates = templates
+            .filter(t => t.channel === 'direct')
+            .map(t => t.template)
+            .filter(t => t && t.trim().length > 0);
+          const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
+          const messages = generateMessageTemplates(data, false, templateStrings); // false = domain research
           
           return (
             <div className="pt-6 mt-6 border-t border-gray-200">

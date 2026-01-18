@@ -16,8 +16,9 @@ export const fetchCompanyMap = async (domain: string): Promise<any> => {
       // Try to get error message from response
       let errorMessage = `Failed to fetch company qualification data (${response.status})`;
       let errorDetails = '';
+      let errorData: any = null;
       try {
-        const errorData = await response.json();
+        errorData = await response.json();
         if (errorData.error || errorData.message) {
           errorMessage = errorData.error || errorData.message;
         }
@@ -32,6 +33,21 @@ export const fetchCompanyMap = async (domain: string): Promise<any> => {
       const fullErrorMessage = errorDetails 
         ? `${errorMessage}. ${errorDetails}`
         : errorMessage;
+      
+      // Check if this is the "No results returned from Exa API" error with status 500
+      // In this case, return an EXPIRED classification instead of null
+      if (response.status === 500 && errorMessage.includes('No results returned from Exa API')) {
+        console.warn(`Marking ${domain} as EXPIRED due to Exa API returning no results`);
+        return {
+          classification: 'EXPIRED',
+          company_summary: '',
+          company_industry: '',
+          sales_opener_sentence: '',
+          confidence_score: 0,
+          product_types: null,
+          sales_action: 'MANUAL_REVIEW'
+        };
+      }
       
       console.error(`API Error for ${domain}:`, fullErrorMessage, `Status: ${response.status}`);
       

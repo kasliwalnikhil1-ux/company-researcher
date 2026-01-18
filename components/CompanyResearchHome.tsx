@@ -13,13 +13,15 @@ import ResumeDialog from './ui/ResumeDialog';
 import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvRow } from "../lib/csvImport";
 import { downloadCsv } from "../lib/csvExport";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
+import { useCompanies } from "@/contexts/CompaniesContext";
+import { extractUsernameFromUrl } from "../utils/instagramApi";
 
 // Interface for qualification data
 interface QualificationData {
   company_summary: string;
   company_industry: string;
   sales_opener_sentence: string;
-  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
+  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
   confidence_score: number;
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
@@ -70,6 +72,9 @@ const cleanUrl = (url: string, mode: 'domain' | 'instagram' = 'domain'): string 
 };
 
 export default function CompanyResearcher() {
+  // Companies context for saving summaries
+  const { companies, createCompany, updateCompany } = useCompanies();
+  
   // Research mode: 'domain' or 'instagram'
   const [researchMode, setResearchMode] = useState<'domain' | 'instagram'>('domain');
   
@@ -88,7 +93,7 @@ export default function CompanyResearcher() {
         profile_summary: string;
         profile_industry: string;
         sales_opener_sentence: string;
-        classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
+        classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
         confidence_score?: number; // Optional
         product_types: string[] | null;
         sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
@@ -259,6 +264,35 @@ export default function CompanyResearcher() {
           }
         }));
 
+        // Save/update company in database after summary is generated
+        if (instagramQualificationData) {
+          try {
+            const username = extractUsernameFromUrl(company);
+            if (username) {
+              // Check if company exists with this instagram username
+              const existingCompany = companies.find(c => c.instagram === username);
+              
+              if (existingCompany) {
+                // Update existing company
+                await updateCompany(existingCompany.id, {
+                  summary: instagramQualificationData,
+                  domain: existingCompany.domain || '', // Keep existing domain if any
+                });
+              } else {
+                // Create new company
+                await createCompany({
+                  domain: '',
+                  instagram: username,
+                  summary: instagramQualificationData,
+                });
+              }
+            }
+          } catch (saveError) {
+            console.error('Error saving company to database:', saveError);
+            // Don't fail the whole operation if save fails
+          }
+        }
+
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         setErrorsByCompany(prev => ({
@@ -342,6 +376,32 @@ export default function CompanyResearcher() {
           }
         }));
 
+        // Save/update company in database after summary is generated
+        if (qualificationData) {
+          try {
+            // Check if company exists with this domain
+            const existingCompany = companies.find(c => c.domain === domainName);
+            
+            if (existingCompany) {
+              // Update existing company
+              await updateCompany(existingCompany.id, {
+                summary: qualificationData,
+                instagram: existingCompany.instagram || '', // Keep existing instagram if any
+              });
+            } else {
+              // Create new company
+              await createCompany({
+                domain: domainName,
+                instagram: '',
+                summary: qualificationData,
+              });
+            }
+          } catch (saveError) {
+            console.error('Error saving company to database:', saveError);
+            // Don't fail the whole operation if save fails
+          }
+        }
+
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
         setErrorsByCompany(prev => ({
@@ -358,7 +418,7 @@ export default function CompanyResearcher() {
         );
       }
     }
-  }, [researchMode]);
+  }, [researchMode, companies, createCompany, updateCompany]);
 
   // Handle CSV file upload
   const handleCsvUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -537,6 +597,35 @@ export default function CompanyResearcher() {
           const data = await fetchInstagramProfile(instagramUrl);
           if (data) {
             qualificationDataMap.set(instagramUrl, data); // Reusing map for Instagram profiles
+            
+            // Save/update company in database after summary is generated
+            if (data.qualificationData) {
+              try {
+                const username = extractUsernameFromUrl(instagramUrl);
+                if (username) {
+                  // Check if company exists with this instagram username
+                  const existingCompany = companies.find(c => c.instagram === username);
+                  
+                  if (existingCompany) {
+                    // Update existing company
+                    await updateCompany(existingCompany.id, {
+                      summary: data.qualificationData,
+                      domain: existingCompany.domain || '', // Keep existing domain if any
+                    });
+                  } else {
+                    // Create new company
+                    await createCompany({
+                      domain: '',
+                      instagram: username,
+                      summary: data.qualificationData,
+                    });
+                  }
+                }
+              } catch (saveError) {
+                console.error('Error saving company to database during CSV processing:', saveError);
+                // Don't fail the whole operation if save fails
+              }
+            }
           } else {
             errorMap.set(instagramUrl, 'Failed to fetch Instagram profile data');
           }
@@ -678,6 +767,30 @@ export default function CompanyResearcher() {
           const data = await fetchCompanyMap(domainName);
           if (data) {
             qualificationDataMap.set(domainName, data);
+            
+            // Save/update company in database after summary is generated
+            try {
+              // Check if company exists with this domain
+              const existingCompany = companies.find(c => c.domain === domainName);
+              
+              if (existingCompany) {
+                // Update existing company
+                await updateCompany(existingCompany.id, {
+                  summary: data,
+                  instagram: existingCompany.instagram || '', // Keep existing instagram if any
+                });
+              } else {
+                // Create new company
+                await createCompany({
+                  domain: domainName,
+                  instagram: '',
+                  summary: data,
+                });
+              }
+            } catch (saveError) {
+              console.error('Error saving company to database during CSV processing:', saveError);
+              // Don't fail the whole operation if save fails
+            }
           } else {
             // Data fetch returned null, indicating an error
             // (error notification already sent from fetchCompanyMap)

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { generateMessageTemplates } from '../../lib/messageTemplates';
+import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 
 export interface InstagramProfileData {
   id: string;
@@ -40,6 +41,7 @@ interface InstagramProfileDisplayProps {
 
 const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data, instagramUrl, qualificationData }) => {
   const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
+  const { templates } = useMessageTemplates();
 
   const handleCopy = async (text: string, messageNumber: number) => {
     try {
@@ -244,7 +246,13 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
 
             {/* Message Templates for Instagram Research */}
             {qualificationData.classification === 'QUALIFIED' && qualificationData.product_types && qualificationData.product_types.length > 0 && (() => {
-              const messages = generateMessageTemplates(qualificationData, true); // true = Instagram research
+              // Get all templates from database for 'instagram' channel, or use undefined to fallback to hard-coded
+              const dbTemplates = templates
+                .filter(t => t.channel === 'instagram')
+                .map(t => t.template)
+                .filter(t => t && t.trim().length > 0);
+              const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
+              const messages = generateMessageTemplates(qualificationData, true, templateStrings); // true = Instagram research
               
               return (
                 <div className="pt-6 mt-6 border-t border-gray-200">
