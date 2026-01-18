@@ -27,7 +27,7 @@ interface InstagramQualificationData {
   profile_summary: string;
   profile_industry: string;
   sales_opener_sentence: string;
-  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
+  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
   confidence_score?: number; // Optional - only show if present
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
@@ -176,7 +176,9 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
                     ? 'bg-green-100 text-green-800 border-green-300'
                     : qualificationData.classification === 'NOT_QUALIFIED'
                     ? 'bg-red-100 text-red-800 border-red-300'
-                    : 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                    : qualificationData.classification === 'MAYBE'
+                    ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                    : 'bg-gray-100 text-gray-800 border-gray-300'
                 }`}>
                   {qualificationData.classification}
                 </div>

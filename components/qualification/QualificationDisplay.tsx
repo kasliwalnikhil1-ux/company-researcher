@@ -8,7 +8,7 @@ interface QualificationData {
   company_summary: string;
   company_industry: string;
   sales_opener_sentence: string;
-  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
+  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
   confidence_score: number;
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';

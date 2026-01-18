@@ -296,6 +296,7 @@ export default function CompanyResearcher() {
                   summary: instagramQualificationData,
                   email: email || '',
                   phone: phone || '',
+                  set_name: null,
                   owner: selectedOwner,
                 });
               }
@@ -416,6 +417,7 @@ export default function CompanyResearcher() {
                 summary: qualificationData,
                 email: email || '',
                 phone: phone || '',
+                set_name: null,
                 owner: selectedOwner,
               });
             }
@@ -642,6 +644,9 @@ export default function CompanyResearcher() {
                       domain: '',
                       instagram: username,
                       summary: data.qualificationData,
+                      email: '',
+                      phone: '',
+                      set_name: null,
                       owner: selectedOwner,
                     });
                   }
@@ -819,6 +824,7 @@ export default function CompanyResearcher() {
                   summary: data,
                   email: email || '',
                   phone: phone || '',
+                  set_name: null,
                   owner: selectedOwner,
                 });
               }
