@@ -18,7 +18,7 @@ export interface Company {
 }
 
 type SortOrder = 'newest' | 'oldest';
-type DateFilter = 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month';
+type DateFilter = 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom';
 type ClassificationFilter = 'all' | 'QUALIFIED' | 'NOT_QUALIFIED' | 'EXPIRED' | 'empty';
 type AnalyticsPeriod = 'today' | 'yesterday' | 'week' | 'month';
 
@@ -39,6 +39,8 @@ interface CompaniesContextType {
   totalPages: number;
   dateFilter: DateFilter;
   setDateFilter: (filter: DateFilter) => void;
+  customDateRange: { start: Date | null; end: Date | null };
+  setCustomDateRange: (range: { start: Date | null; end: Date | null }) => void;
   classificationFilter: ClassificationFilter;
   setClassificationFilter: (filter: ClassificationFilter) => void;
   setNameFilter: string | null;
@@ -65,6 +67,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [customDateRange, setCustomDateRange] = useState<{ start: Date | null; end: Date | null }>({ start: null, end: null });
   const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>('all');
   const [setNameFilter, setSetNameFilter] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
@@ -103,6 +106,16 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
             const monthAgo = new Date(today);
             monthAgo.setMonth(monthAgo.getMonth() - 1);
             return { start: monthAgo, end: null };
+          case 'custom':
+            // For custom range, adjust end date to next day at 00:00:00 to match query pattern
+            // This ensures the entire selected end day is included when using .lt() in queries
+            if (customDateRange.end) {
+              const adjustedEnd = new Date(customDateRange.end);
+              adjustedEnd.setDate(adjustedEnd.getDate() + 1);
+              adjustedEnd.setHours(0, 0, 0, 0);
+              return { start: customDateRange.start, end: adjustedEnd };
+            }
+            return customDateRange;
           default:
             return { start: null, end: null };
         }
@@ -248,7 +261,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, [user, sortOrder, currentPage, pageSize, dateFilter, classificationFilter, setNameFilter, ownerFilter]);
+  }, [user, sortOrder, currentPage, pageSize, dateFilter, customDateRange, classificationFilter, setNameFilter, ownerFilter]);
 
   // Fetch available set names
   const fetchAvailableSetNames = useCallback(async () => {
@@ -505,7 +518,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   // Reset to page 1 when sort order or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [sortOrder, dateFilter, classificationFilter, setNameFilter, ownerFilter]);
+  }, [sortOrder, dateFilter, customDateRange, classificationFilter, setNameFilter, ownerFilter]);
 
   // Refresh available set names and owners after create/update/delete
   useEffect(() => {
@@ -529,6 +542,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     totalPages,
     dateFilter,
     setDateFilter,
+    customDateRange,
+    setCustomDateRange,
     classificationFilter,
     setClassificationFilter,
     setNameFilter,

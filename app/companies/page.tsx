@@ -130,6 +130,8 @@ function CompaniesContent() {
     pageSize,
     dateFilter,
     setDateFilter,
+    customDateRange,
+    setCustomDateRange,
     classificationFilter,
     setClassificationFilter,
     setNameFilter,
@@ -139,6 +141,22 @@ function CompaniesContent() {
     availableSetNames,
     availableOwners
   } = useCompanies();
+  
+  // Helper function to format date for date input (YYYY-MM-DD)
+  const formatDateForInput = (date: Date | null): string => {
+    if (!date) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  // Helper function to parse date input value to local Date object
+  const parseDateFromInput = (value: string): Date | null => {
+    if (!value) return null;
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day, 0, 0, 0, 0);
+  };
   const { templates } = useMessageTemplates();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1303,20 +1321,35 @@ function CompaniesContent() {
         </div>
       )}
 
-      {/* Search, Filters, and Sort */}
-      <div className="mb-4 flex flex-wrap items-center gap-4">
+      {/* Search and Sort */}
+      <div className="mb-4 flex items-center gap-4">
         <input
           type="text"
           placeholder="Search companies..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="block w-full max-w-md px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          className="block flex-1 max-w-md px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
         />
         <div className="flex items-center gap-2">
+          <ArrowUpDown className="w-4 h-4 text-gray-500" />
+          <select
+            value={sortOrder}
+            onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="mb-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2 flex-wrap">
           <Filter className="w-4 h-4 text-gray-500" />
           <select
             value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month')}
+            onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom')}
             className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="all">All Dates</option>
@@ -1324,7 +1357,37 @@ function CompaniesContent() {
             <option value="yesterday">Created Yesterday</option>
             <option value="last_week">Created Last Week</option>
             <option value="last_month">Created Last Month</option>
+            <option value="custom">Custom Range</option>
           </select>
+          {dateFilter === 'custom' && (
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={formatDateForInput(customDateRange.start)}
+                onChange={(e) => {
+                  setCustomDateRange({ 
+                    ...customDateRange, 
+                    start: parseDateFromInput(e.target.value) 
+                  });
+                }}
+                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Start date"
+              />
+              <span className="text-gray-500 text-sm">to</span>
+              <input
+                type="date"
+                value={formatDateForInput(customDateRange.end)}
+                onChange={(e) => {
+                  setCustomDateRange({ 
+                    ...customDateRange, 
+                    end: parseDateFromInput(e.target.value) 
+                  });
+                }}
+                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="End date"
+              />
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -1367,17 +1430,6 @@ function CompaniesContent() {
                 {owner}
               </option>
             ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2">
-          <ArrowUpDown className="w-4 h-4 text-gray-500" />
-          <select
-            value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="newest">Newest First</option>
-            <option value="oldest">Oldest First</option>
           </select>
         </div>
       </div>
