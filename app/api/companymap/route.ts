@@ -316,12 +316,12 @@ export async function POST(req: NextRequest) {
 
     console.log(`Making Exa API call(s) to ${normalizedUrls.length} URL(s)`);
 
-    const query = "You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.\n\nYour job: classify the input company as:\n- QUALIFIED (sells physical fashion/apparel/jewelry products)\n- NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)\n- MAYBE (unclear)\n\nCRITICAL RULE:\nOnly mark QUALIFIED if the company sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.\nIf the company sells software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider, it is NOT_QUALIFIED.\n\nReturn STRICT JSON only following the schema.\nQualification Rules\nQUALIFIED ✅\n\nMark QUALIFIED only if you see some evidence of physical product commerce in the profile, such as:\n- product categories mentioned in bio (e.g., \"shirts\", \"kurtas\", \"rings\", \"earrings\")\n- shop links, website links, or e-commerce indicators\n- product-focused content in bio\n- brand/store indicators\n- fashion/apparel/jewelry business signals\n- fashion/apparel/jewelry Manufacturer / exporter / OEM / ODM / supplier / wholesaler\n- fashion/apparel/jewelry marketplace indicators (e.g., \"shop on Amazon\", \"shop on Flipkart\", \"shop on Myntra\", \"shop on Etsy\")\n\nNOT_QUALIFIED ❌\n\nMark NOT_QUALIFIED if ANY are true:\n- Sells software subscription / Is SaaS / Is app / Is AI tool\n- \"We provide services to brands\" (not selling products, like IT services / marketing agency / consulting)\n\nOnly return product_types when classification = \"QUALIFIED\".\n\nproduct_types must be EXACTLY 2 items:\n- generic physical product types (e.g., \"earrings\", \"rings\", \"kurtas\", \"shirts\")\n- NOT \"apparel\", \"jewelry\", \"fashion\" (too broad)\n- NOT services (\"photoshoots\", \"videography\")\n- NOT software (\"platform\", \"tool\", \"API\")\n\nIf you cannot find 2 real product types on the website text, then:\n- classification must be MAYBE (not QUALIFIED)\n- product_types must be null\n- sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with I think your...";
+    const query = "You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.\n\nYour job: classify the input company as:\n- QUALIFIED (sells physical fashion/apparel/jewelry products)\n- NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)\n- MAYBE (unclear)\n\nCRITICAL RULE:\nOnly mark QUALIFIED if the company sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.\nIf the company sells software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider, it is NOT_QUALIFIED.\n\nReturn STRICT JSON only following the schema.\nQualification Rules\nQUALIFIED ✅\n\nMark QUALIFIED only if you see some evidence of physical product commerce in the profile, such as:\n- product categories mentioned in bio (e.g., \"shirts\", \"kurtas\", \"rings\", \"earrings\")\n- shop links, website links, or e-commerce indicators\n- product-focused content in bio\n- brand/store indicators\n- fashion/apparel/jewelry business signals\n- fashion/apparel/jewelry Manufacturer / exporter / OEM / ODM / supplier / wholesaler\n- fashion/apparel/jewelry marketplace indicators (e.g., \"shop on Amazon\", \"shop on Flipkart\", \"shop on Myntra\", \"shop on Etsy\")\n\nNOT_QUALIFIED ❌\n\nMark NOT_QUALIFIED if ANY are true:\n- Sells software subscription / Is SaaS / Is app / Is AI tool\n- \"We provide services to brands\" (not selling products, like IT services / marketing agency / consulting)\n\nOnly return product_types when classification = \"QUALIFIED\".\n\nproduct_types must be EXACTLY 2 items:\n- generic physical product types (e.g., \"earrings\", \"rings\", \"kurtas\", \"shirts\")\n- NOT \"apparel\", \"jewelry\", \"fashion\" (too broad)\n- NOT services (\"photoshoots\", \"videography\")\n- NOT software (\"platform\", \"tool\", \"API\")\n\nIf you cannot find 2 real product types on the website text, then:\n- classification must be MAYBE (not QUALIFIED)\n- product_types must be null\n- sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with I think your...\n\nemail and phone as strings if present on the website else null";
 
     const schema = {
       description: "Schema for company qualification assessment with classification and recommended actions",
       type: "object",
-      required: ["company_summary",  "sales_opener_sentence", "company_industry", "classification", "confidence_score", "product_types", "sales_action"],
+      required: ["company_summary",  "sales_opener_sentence", "company_industry", "classification", "confidence_score", "product_types", "sales_action", "email", "phone"],
       additionalProperties: false,
       properties: {
         company_summary: {
@@ -355,6 +355,14 @@ export async function POST(req: NextRequest) {
           type: "string",
           enum: ["OUTREACH", "EXCLUDE", "PARTNERSHIP", "MANUAL_REVIEW"],
           description: "Recommended sales action to take"
+        },
+        email: {
+          type: ["string", "null"],
+          description: "Email address if present on the website, else null"
+        },
+        phone: {
+          type: ["string", "null"],
+          description: "Phone number if present on the website, else null"
         }
       }
     };

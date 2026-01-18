@@ -12,6 +12,8 @@ interface QualificationData {
   confidence_score: number;
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
+  email?: string | null;
+  phone?: string | null;
 }
 
 interface QualificationDisplayProps {
@@ -165,6 +167,34 @@ const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => 
             {data.sales_action.replace('_', ' ')}
           </div>
         </div>
+
+        {/* Contact Information */}
+        {(data.email || data.phone) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6 mt-6 border-t border-gray-200">
+            {data.email && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Email</h4>
+                <a 
+                  href={`mailto:${data.email}`}
+                  className="text-blue-600 hover:text-blue-800 hover:underline break-all"
+                >
+                  {data.email}
+                </a>
+              </div>
+            )}
+            {data.phone && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Phone</h4>
+                <a 
+                  href={`tel:${data.phone}`}
+                  className="text-blue-600 hover:text-blue-800 hover:underline"
+                >
+                  {data.phone}
+                </a>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Message Templates for Domain Research */}
         {data.classification === 'QUALIFIED' && data.product_types && data.product_types.length > 0 && (() => {

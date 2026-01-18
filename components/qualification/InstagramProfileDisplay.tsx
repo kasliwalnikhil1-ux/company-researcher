@@ -31,6 +31,8 @@ interface InstagramQualificationData {
   confidence_score?: number; // Optional - only show if present
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
+  email?: string | null;
+  phone?: string | null;
 }
 
 interface InstagramProfileDisplayProps {
@@ -229,7 +231,7 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
             )}
 
             {/* Sales Action */}
-            <div className="space-y-2">
+            <div className="space-y-2 mb-6">
               <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Recommended Sales Action</h4>
               <div className={`inline-flex items-center px-4 py-2 rounded-lg border font-semibold ${
                 qualificationData.sales_action === 'OUTREACH'
@@ -243,6 +245,34 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
                 {qualificationData.sales_action.replace('_', ' ')}
               </div>
             </div>
+
+            {/* Contact Information */}
+            {(qualificationData.email || qualificationData.phone) && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                {qualificationData.email && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Email</h4>
+                    <a 
+                      href={`mailto:${qualificationData.email}`}
+                      className="text-blue-600 hover:text-blue-800 hover:underline break-all"
+                    >
+                      {qualificationData.email}
+                    </a>
+                  </div>
+                )}
+                {qualificationData.phone && (
+                  <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Phone</h4>
+                    <a 
+                      href={`tel:${qualificationData.phone}`}
+                      className="text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      {qualificationData.phone}
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Message Templates for Instagram Research */}
             {qualificationData.classification === 'QUALIFIED' && qualificationData.product_types && qualificationData.product_types.length > 0 && (() => {

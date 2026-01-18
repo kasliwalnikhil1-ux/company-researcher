@@ -126,6 +126,8 @@ export interface InstagramQualificationResult {
   confidence_score?: number; // Optional - only include if provided by LLM
   product_types: string[] | null;
   sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
+  email: string | null;
+  phone: string | null;
 }
 
 /**
@@ -167,6 +169,8 @@ Reply as a JSON object with keys:
 classification: QUALIFIED, NOT_QUALIFIED
 product_types: Array of product types [""]
 sales_action: OUTREACH, EXCLUDE, PARTNERSHIP, MANUAL_REVIEW
+email: string else null
+phone: string else null
 }
 
 Qualification Rules
@@ -196,7 +200,10 @@ product_types must be 1 item:
 
 sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with "I think your..."
 [usp, specialization, history // anything ] unique/impressive/stunning/special/different/etc, <10 words only.
-Don't use words that feel AI like captivating, captivating, transforming, etc.`;
+Don't use words that feel AI like captivating, captivating, transforming, etc.
+
+email and phone as strings if present in bio else null
+`;
         
   const userMessage = `Analyze this Instagram profile and provide qualification assessment:
 
@@ -236,6 +243,8 @@ Return the assessment in the exact JSON schema format.`;
         ? result.product_types.filter((pt: any) => pt && typeof pt === 'string')
         : null,
       sales_action: result.sales_action || 'MANUAL_REVIEW',
+      email: result.email || null,
+      phone: result.phone || null,
     };
     
     // Log product_types for debugging

@@ -21,6 +21,8 @@ type ExportableCompany = {
   confidenceScore: string;
   productTypesFormatted: string;
   salesAction: string;
+  email: string;
+  phone: string;
   messageTemplates: string[]; // Array of message templates
 };
 
@@ -105,6 +107,9 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
   const classification = qualificationData.classification || '';
   const confidenceScore = qualificationData.confidence_score !== undefined ? String(qualificationData.confidence_score) : '';
   const salesAction = qualificationData.sales_action || '';
+  // Extract email and phone from qualification data, or fall back to top-level data
+  const email = qualificationData.email || data?.email || '';
+  const phone = qualificationData.phone || data?.phone || '';
 
   // Format product types as string: "A", "A and B", or "A, B, and C"
   const formatProductTypes = (types: string[]): string => {
@@ -147,6 +152,8 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
     confidenceScore,
     productTypesFormatted,
     salesAction,
+    email,
+    phone,
     messageTemplates
   };
 };
@@ -187,7 +194,9 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
     'Classification',
     'Confidence Score',
     'Product Types',
-    'Sales Action'
+    'Sales Action',
+    'Email',
+    'Phone'
   ];
 
   // Add dynamic product type headers if there are any product types
@@ -215,7 +224,9 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
       company.classification,
       company.confidenceScore,
       company.productTypesFormatted,
-      company.salesAction
+      company.salesAction,
+      company.email,
+      company.phone
     ];
 
     // Add product types as separate columns

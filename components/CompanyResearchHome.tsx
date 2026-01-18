@@ -14,6 +14,7 @@ import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvR
 import { downloadCsv } from "../lib/csvExport";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
 import { useCompanies } from "@/contexts/CompaniesContext";
+import { useOwner } from "@/contexts/OwnerContext";
 import { extractUsernameFromUrl } from "../utils/instagramApi";
 
 // Interface for qualification data
@@ -74,6 +75,8 @@ const cleanUrl = (url: string, mode: 'domain' | 'instagram' = 'domain'): string 
 export default function CompanyResearcher() {
   // Companies context for saving summaries
   const { companies, createCompany, updateCompany } = useCompanies();
+  // Owner context for selected owner
+  const { selectedOwner } = useOwner();
   
   // Research mode: 'domain' or 'instagram'
   const [researchMode, setResearchMode] = useState<'domain' | 'instagram'>('domain');
@@ -272,11 +275,18 @@ export default function CompanyResearcher() {
               // Check if company exists with this instagram username
               const existingCompany = companies.find(c => c.instagram === username);
               
+              // Extract email and phone from qualification data
+              const email = instagramQualificationData.email || null;
+              const phone = instagramQualificationData.phone || null;
+              
               if (existingCompany) {
                 // Update existing company
                 await updateCompany(existingCompany.id, {
                   summary: instagramQualificationData,
                   domain: existingCompany.domain || '', // Keep existing domain if any
+                  email: email || existingCompany.email || '',
+                  phone: phone || existingCompany.phone || '',
+                  owner: selectedOwner,
                 });
               } else {
                 // Create new company
@@ -284,6 +294,9 @@ export default function CompanyResearcher() {
                   domain: '',
                   instagram: username,
                   summary: instagramQualificationData,
+                  email: email || '',
+                  phone: phone || '',
+                  owner: selectedOwner,
                 });
               }
             }
@@ -382,11 +395,18 @@ export default function CompanyResearcher() {
             // Check if company exists with this domain
             const existingCompany = companies.find(c => c.domain === domainName);
             
+            // Extract email and phone from qualification data
+            const email = qualificationData.email || null;
+            const phone = qualificationData.phone || null;
+            
             if (existingCompany) {
               // Update existing company
               await updateCompany(existingCompany.id, {
                 summary: qualificationData,
                 instagram: existingCompany.instagram || '', // Keep existing instagram if any
+                email: email || existingCompany.email || '',
+                phone: phone || existingCompany.phone || '',
+                owner: selectedOwner,
               });
             } else {
               // Create new company
@@ -394,6 +414,9 @@ export default function CompanyResearcher() {
                 domain: domainName,
                 instagram: '',
                 summary: qualificationData,
+                email: email || '',
+                phone: phone || '',
+                owner: selectedOwner,
               });
             }
           } catch (saveError) {
@@ -418,7 +441,7 @@ export default function CompanyResearcher() {
         );
       }
     }
-  }, [researchMode, companies, createCompany, updateCompany]);
+  }, [researchMode, companies, createCompany, updateCompany, selectedOwner]);
 
   // Handle CSV file upload
   const handleCsvUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -611,6 +634,7 @@ export default function CompanyResearcher() {
                     await updateCompany(existingCompany.id, {
                       summary: data.qualificationData,
                       domain: existingCompany.domain || '', // Keep existing domain if any
+                      owner: selectedOwner,
                     });
                   } else {
                     // Create new company
@@ -618,6 +642,7 @@ export default function CompanyResearcher() {
                       domain: '',
                       instagram: username,
                       summary: data.qualificationData,
+                      owner: selectedOwner,
                     });
                   }
                 }
@@ -773,11 +798,18 @@ export default function CompanyResearcher() {
               // Check if company exists with this domain
               const existingCompany = companies.find(c => c.domain === domainName);
               
+              // Extract email and phone from qualification data
+              const email = data.email || null;
+              const phone = data.phone || null;
+              
               if (existingCompany) {
                 // Update existing company
                 await updateCompany(existingCompany.id, {
                   summary: data,
                   instagram: existingCompany.instagram || '', // Keep existing instagram if any
+                  email: email || existingCompany.email || '',
+                  phone: phone || existingCompany.phone || '',
+                  owner: selectedOwner,
                 });
               } else {
                 // Create new company
@@ -785,6 +817,9 @@ export default function CompanyResearcher() {
                   domain: domainName,
                   instagram: '',
                   summary: data,
+                  email: email || '',
+                  phone: phone || '',
+                  owner: selectedOwner,
                 });
               }
             } catch (saveError) {
@@ -1119,7 +1154,7 @@ export default function CompanyResearcher() {
     sendSlackNotification(`✅ CSV Processing Complete: Processed ${rowsToProcess.length} rows.`).catch(
       (error) => console.error('Failed to send Slack notification:', error)
     );
-  }, [csvData, selectedUrlColumn, rawCompanyInput, activeCompany, parseCompanyInput, researchMode]);
+  }, [csvData, selectedUrlColumn, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, companies, createCompany, updateCompany, selectedOwner]);
 
   // Clear all data function
   const handleClearAll = useCallback(() => {

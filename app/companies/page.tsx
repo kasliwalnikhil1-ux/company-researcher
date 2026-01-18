@@ -6,9 +6,11 @@ import MainLayout from '@/components/MainLayout';
 import { useCompanies, Company } from '@/contexts/CompaniesContext';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import Toast from '@/components/ui/Toast';
+import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
-import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, Eye, GitMerge } from 'lucide-react';
+import { extractPhoneNumber } from '@/lib/utils';
 import {
   DndContext,
   closestCenter,
@@ -30,6 +32,8 @@ import { CSS } from '@dnd-kit/utilities';
 const COLUMN_ORDER_KEY = 'companies-column-order';
 const COLUMN_VISIBILITY_KEY = 'companies-column-visibility';
 const CLIPBOARD_COLUMN_KEY = 'companies-clipboard-column';
+const SUBJECT_COLUMN_KEY = 'companies-subject-column';
+const PHONE_CLICK_BEHAVIOR_KEY = 'companies-phone-click-behavior';
 
 // Sortable Column Item Component
 interface SortableColumnItemProps {
@@ -116,6 +120,7 @@ function CompaniesContent() {
     createCompany, 
     updateCompany, 
     deleteCompany, 
+    bulkUpdateSetName,
     sortOrder, 
     setSortOrder,
     currentPage,
@@ -126,22 +131,48 @@ function CompaniesContent() {
     dateFilter,
     setDateFilter,
     classificationFilter,
-    setClassificationFilter
+    setClassificationFilter,
+    setNameFilter,
+    setSetNameFilter,
+    ownerFilter,
+    setOwnerFilter,
+    availableSetNames,
+    availableOwners
   } = useCompanies();
   const { templates } = useMessageTemplates();
   const [isCreating, setIsCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [companyToDelete, setCompanyToDelete] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [companyToView, setCompanyToView] = useState<Company | null>(null);
   const [formData, setFormData] = useState<{
     domain: string;
     instagram: string;
+    phone: string;
+    email: string;
     summary: string;
+    set_name: string;
   }>({
     domain: '',
     instagram: '',
+    phone: '',
+    email: '',
     summary: '',
+    set_name: '',
   });
+  
+  // Sync companyToView with updated companies array when drawer is open
+  useEffect(() => {
+    if (companyToView && drawerOpen) {
+      const updatedCompany = companies.find(c => c.id === companyToView.id);
+      if (updatedCompany) {
+        // Update companyToView with the latest data from companies array
+        setCompanyToView(updatedCompany);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [companies, drawerOpen]);
   
   // Toast state
   const [toastMessage, setToastMessage] = useState('');
@@ -151,8 +182,18 @@ function CompaniesContent() {
   const [editingCell, setEditingCell] = useState<{ companyId: string; columnKey: string; value: string } | null>(null);
   const editInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   
-  // Row hover state
-  const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
+  // Cell hover state - tracks which cell is hovered (only for truncated cells)
+  const [hoveredCell, setHoveredCell] = useState<{ companyId: string; columnKey: string } | null>(null);
+  
+  // Track click timeouts for phone/email double-click detection
+  const clickTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  
+  // Multi-select state
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(new Set());
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
+  const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
+  const [assignSetName, setAssignSetName] = useState('');
   
   // Generate template-based column keys
   const getTemplateColumnKeys = useCallback(() => {
@@ -169,6 +210,9 @@ function CompaniesContent() {
   const baseColumnOrder = [
     'domain',
     'instagram',
+    'phone',
+    'email',
+    'set_name',
     'company_summary',
     'company_industry',
     'profile_summary',
@@ -196,6 +240,7 @@ function CompaniesContent() {
     const initialDefault = [...baseColumnOrder, ...initialTemplateColumns];
     
     if (typeof window !== 'undefined') {
+      const savedClipboardColumn = localStorage.getItem(CLIPBOARD_COLUMN_KEY);
       const saved = localStorage.getItem(COLUMN_ORDER_KEY);
       let order: string[] = initialDefault;
       
@@ -203,9 +248,14 @@ function CompaniesContent() {
         try {
           const parsed = JSON.parse(saved);
           // Merge with current template columns to handle new templates
-          const savedBase = parsed.filter((col: string) => !col.startsWith('template_'));
+          const savedBase = parsed.filter((col: string) => !col.startsWith('template_') && col !== savedClipboardColumn);
+          
+          // Ensure all current base columns are included (add missing ones like phone/email)
+          const missingBaseColumns = baseColumnOrder.filter(col => !savedBase.includes(col));
+          const mergedBase = [...savedBase, ...missingBaseColumns];
+          
           const currentTemplates = initialTemplateColumns;
-          const merged = [...savedBase, ...currentTemplates.filter(t => parsed.includes(t))];
+          const merged = [...mergedBase, ...currentTemplates.filter(t => parsed.includes(t))];
           // Add any new template columns that weren't in saved
           const newTemplates = currentTemplates.filter(t => !parsed.includes(t));
           order = [...merged, ...newTemplates];
@@ -215,7 +265,6 @@ function CompaniesContent() {
       }
       
       // Check for clipboard column and move it to first position
-      const savedClipboardColumn = localStorage.getItem(CLIPBOARD_COLUMN_KEY);
       if (savedClipboardColumn && order.includes(savedClipboardColumn)) {
         const filtered = order.filter(col => col !== savedClipboardColumn);
         order = [savedClipboardColumn, ...filtered];
@@ -278,7 +327,22 @@ function CompaniesContent() {
       const saved = localStorage.getItem(COLUMN_VISIBILITY_KEY);
       if (saved) {
         try {
-          return new Set(JSON.parse(saved));
+          const parsed = JSON.parse(saved) as string[];
+          const savedSet = new Set<string>(parsed);
+          // Ensure all base columns are visible by default (add missing ones like phone/email)
+          const visibleSet = new Set<string>(savedSet);
+          baseColumnOrder.forEach(col => {
+            if (!visibleSet.has(col)) {
+              visibleSet.add(col);
+            }
+          });
+          // Also ensure template columns are visible
+          initialTemplateColumns.forEach(col => {
+            if (!visibleSet.has(col)) {
+              visibleSet.add(col);
+            }
+          });
+          return visibleSet;
         } catch {
           return new Set(initialDefault);
         }
@@ -297,6 +361,24 @@ function CompaniesContent() {
       return saved || null;
     }
     return null;
+  });
+  
+  // Subject column state
+  const [subjectColumn, setSubjectColumn] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(SUBJECT_COLUMN_KEY);
+      return saved || null;
+    }
+    return null;
+  });
+  
+  // Phone click behavior state (default: 'whatsapp')
+  const [phoneClickBehavior, setPhoneClickBehavior] = useState<'whatsapp' | 'call'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(PHONE_CLICK_BEHAVIOR_KEY);
+      return (saved === 'whatsapp' || saved === 'call') ? saved : 'whatsapp';
+    }
+    return 'whatsapp';
   });
   
   // Reset to page 1 when search query changes
@@ -332,6 +414,24 @@ function CompaniesContent() {
     }
   }, [clipboardColumn]);
   
+  // Save subject column selection to localStorage (persists forever)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (subjectColumn) {
+        localStorage.setItem(SUBJECT_COLUMN_KEY, subjectColumn);
+      } else {
+        localStorage.removeItem(SUBJECT_COLUMN_KEY);
+      }
+    }
+  }, [subjectColumn]);
+  
+  // Save phone click behavior to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(PHONE_CLICK_BEHAVIOR_KEY, phoneClickBehavior);
+    }
+  }, [phoneClickBehavior]);
+  
   // Reorder columns to put clipboard column first when it changes
   // This change will automatically trigger the columnOrder save effect above
   useEffect(() => {
@@ -363,6 +463,9 @@ function CompaniesContent() {
     const baseLabels: Record<string, string> = {
       domain: 'Domain',
       instagram: 'Instagram',
+      phone: 'Phone',
+      email: 'Email',
+      set_name: 'Set Name',
       company_summary: 'Company Summary',
       company_industry: 'Company Industry',
       profile_summary: 'Profile Summary',
@@ -453,6 +556,12 @@ function CompaniesContent() {
         return company.domain || '-';
       case 'instagram':
         return company.instagram || '-';
+      case 'phone':
+        return company.phone || '-';
+      case 'email':
+        return company.email || '-';
+      case 'set_name':
+        return company.set_name || '-';
       case 'company_summary':
         return summaryData.company_summary || '-';
       case 'company_industry':
@@ -536,6 +645,12 @@ function CompaniesContent() {
       return;
     }
     
+    // Domain and instagram are not directly editable (they have special link behavior)
+    // But phone and email can be edited
+    if (columnKey === 'domain' || columnKey === 'instagram') {
+      return;
+    }
+    
     const currentValue = getCellValue(company, columnKey);
     setEditingCell({
       companyId: company.id,
@@ -553,6 +668,30 @@ function CompaniesContent() {
     if (!company) return;
     
     try {
+      // Handle direct company fields (not in summary)
+      if (columnKey === 'phone') {
+        const cleanedPhone = extractPhoneNumber(value);
+        await updateCompany(companyId, { [columnKey]: cleanedPhone });
+        setEditingCell(null);
+        setToastMessage(`${columnLabels[columnKey]} updated successfully`);
+        setToastVisible(true);
+        return;
+      }
+      if (columnKey === 'email') {
+        await updateCompany(companyId, { [columnKey]: value.trim() });
+        setEditingCell(null);
+        setToastMessage(`${columnLabels[columnKey]} updated successfully`);
+        setToastVisible(true);
+        return;
+      }
+      if (columnKey === 'set_name') {
+        await updateCompany(companyId, { [columnKey]: value.trim() || null });
+        setEditingCell(null);
+        setToastMessage(`${columnLabels[columnKey]} updated successfully`);
+        setToastVisible(true);
+        return;
+      }
+      
       const summaryData = getSummaryData(company);
       const updatedSummary = { ...summaryData };
       
@@ -616,6 +755,36 @@ function CompaniesContent() {
       }
     }
   }, [editingCell]);
+
+  // Handle 'o' key to open drawer when a cell is hovered
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input/textarea
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          (activeElement instanceof HTMLElement && activeElement.isContentEditable))
+      ) {
+        return;
+      }
+
+      // Check if 'o' key is pressed and a cell is hovered
+      if (event.key === 'o' && hoveredCell) {
+        const company = companies.find(c => c.id === hoveredCell.companyId);
+        if (company) {
+          setCompanyToView(company);
+          setDrawerOpen(true);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [hoveredCell, companies]);
   
   const handleCreate = async () => {
     try {
@@ -636,11 +805,15 @@ function CompaniesContent() {
       await createCompany({
         domain: formData.domain.trim(),
         instagram: formData.instagram.trim(),
+        phone: extractPhoneNumber(formData.phone),
+        email: formData.email.trim(),
         summary: summaryValue,
+        set_name: formData.set_name.trim() || null,
+        owner: null,
       });
       
       setIsCreating(false);
-      setFormData({ domain: '', instagram: '', summary: '' });
+      setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
     } catch (error: any) {
       alert(`Error creating company: ${error.message}`);
     }
@@ -665,11 +838,14 @@ function CompaniesContent() {
       await updateCompany(id, {
         domain: formData.domain.trim(),
         instagram: formData.instagram.trim(),
+        phone: extractPhoneNumber(formData.phone),
+        email: formData.email.trim(),
         summary: summaryValue,
+        set_name: formData.set_name.trim() || null,
       });
       
       setEditingId(null);
-      setFormData({ domain: '', instagram: '', summary: '' });
+      setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
     } catch (error: any) {
       alert(`Error updating company: ${error.message}`);
     }
@@ -699,19 +875,228 @@ function CompaniesContent() {
     setCompanyToDelete(null);
   };
 
+  // Handle row selection
+  const handleRowSelect = (companyId: string, isSelected: boolean) => {
+    setSelectedCompanyIds(prev => {
+      const newSet = new Set(prev);
+      if (isSelected) {
+        newSet.add(companyId);
+      } else {
+        newSet.delete(companyId);
+      }
+      return newSet;
+    });
+  };
+
+  // Handle select all
+  const handleSelectAll = (isSelected: boolean) => {
+    if (isSelected) {
+      setSelectedCompanyIds(new Set(filteredCompanies.map(c => c.id)));
+    } else {
+      setSelectedCompanyIds(new Set());
+    }
+  };
+
+  // Helper function to check if a value is empty (null, undefined, empty string, or whitespace-only)
+  const isEmpty = (value: any): boolean => {
+    if (value === null || value === undefined) return true;
+    if (typeof value === 'string') {
+      return value.trim().length === 0;
+    }
+    if (Array.isArray(value)) {
+      return value.length === 0;
+    }
+    return false;
+  };
+
+  // Helper function to check if a value is not empty
+  const isNotEmpty = (value: any): boolean => {
+    return !isEmpty(value);
+  };
+
+  // Handle bulk delete
+  const handleBulkDelete = async () => {
+    if (selectedCompanyIds.size === 0) {
+      setToastMessage('Please select at least one company to delete');
+      setToastVisible(true);
+      return;
+    }
+
+    try {
+      const count = selectedCompanyIds.size;
+      // Delete all selected companies
+      const deletePromises = Array.from(selectedCompanyIds).map(id => deleteCompany(id));
+      await Promise.all(deletePromises);
+
+      // Clear selection
+      setSelectedCompanyIds(new Set());
+      setBulkDeleteModalOpen(false);
+      setToastMessage(`Successfully deleted ${count} ${count === 1 ? 'company' : 'companies'}`);
+      setToastVisible(true);
+    } catch (error: any) {
+      console.error('Error deleting companies:', error);
+      setToastMessage(`Error deleting companies: ${error.message}`);
+      setToastVisible(true);
+    }
+  };
+
+  // Handle assign set
+  const handleAssignSet = async () => {
+    if (selectedCompanyIds.size === 0) {
+      setToastMessage('Please select at least one company to assign set');
+      setToastVisible(true);
+      return;
+    }
+
+    try {
+      const count = selectedCompanyIds.size;
+      const setName = assignSetName.trim() || null;
+      
+      // Update set_name for all selected companies
+      await bulkUpdateSetName(Array.from(selectedCompanyIds), setName);
+
+      // Clear selection and close modal
+      setSelectedCompanyIds(new Set());
+      setAssignSetModalOpen(false);
+      setAssignSetName('');
+      setToastMessage(`Successfully assigned set "${setName || 'empty'}" to ${count} ${count === 1 ? 'company' : 'companies'}`);
+      setToastVisible(true);
+    } catch (error: any) {
+      console.error('Error assigning set:', error);
+      setToastMessage(`Error assigning set: ${error.message}`);
+      setToastVisible(true);
+    }
+  };
+
+  // Handle merge
+  const handleMerge = async () => {
+    if (selectedCompanyIds.size < 2) {
+      setToastMessage('Please select at least 2 companies to merge');
+      setToastVisible(true);
+      return;
+    }
+
+    try {
+      // Get all selected companies
+      const selectedCompanies = companies.filter(c => selectedCompanyIds.has(c.id));
+      
+      // Sort by created_at to find the newest (keep this one)
+      const sortedCompanies = [...selectedCompanies].sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return dateB - dateA; // Newest first
+      });
+
+      const newestCompany = sortedCompanies[0];
+      const companiesToMerge = sortedCompanies.slice(1);
+
+      // Start with the newest company's data
+      // Normalize empty strings to empty strings (keep as is, isEmpty will handle them)
+      const mergedData: Partial<Company> = {
+        domain: newestCompany.domain ?? '',
+        instagram: newestCompany.instagram ?? '',
+        phone: newestCompany.phone ?? '',
+        email: newestCompany.email ?? '',
+        summary: newestCompany.summary ? { ...newestCompany.summary } : null,
+      };
+
+      // Merge data from other companies
+      for (const company of companiesToMerge) {
+        // Merge direct fields (only if newest is empty and other has value)
+        if (isEmpty(mergedData.domain) && isNotEmpty(company.domain)) {
+          mergedData.domain = company.domain;
+        }
+        if (isEmpty(mergedData.instagram) && isNotEmpty(company.instagram)) {
+          mergedData.instagram = company.instagram;
+        }
+        if (isEmpty(mergedData.phone) && isNotEmpty(company.phone)) {
+          mergedData.phone = company.phone;
+        }
+        if (isEmpty(mergedData.email) && isNotEmpty(company.email)) {
+          mergedData.email = company.email;
+        }
+
+        // Merge summary data
+        if (company.summary && typeof company.summary === 'object') {
+          const otherSummary = company.summary as SummaryData;
+          const currentSummary = mergedData.summary as SummaryData | null;
+
+          if (!currentSummary) {
+            mergedData.summary = { ...otherSummary };
+          } else {
+            // Merge summary fields - for conflicts, keep newest (already in currentSummary)
+            const mergedSummary: SummaryData = { ...currentSummary };
+
+            // Only add non-empty values from other company if current is empty
+            if (isEmpty(mergedSummary.company_summary) && isNotEmpty(otherSummary.company_summary)) {
+              mergedSummary.company_summary = otherSummary.company_summary;
+            }
+            if (isEmpty(mergedSummary.company_industry) && isNotEmpty(otherSummary.company_industry)) {
+              mergedSummary.company_industry = otherSummary.company_industry;
+            }
+            if (isEmpty(mergedSummary.profile_summary) && isNotEmpty(otherSummary.profile_summary)) {
+              mergedSummary.profile_summary = otherSummary.profile_summary;
+            }
+            if (isEmpty(mergedSummary.profile_industry) && isNotEmpty(otherSummary.profile_industry)) {
+              mergedSummary.profile_industry = otherSummary.profile_industry;
+            }
+            if (isEmpty(mergedSummary.sales_opener_sentence) && isNotEmpty(otherSummary.sales_opener_sentence)) {
+              mergedSummary.sales_opener_sentence = otherSummary.sales_opener_sentence;
+            }
+            if (isEmpty(mergedSummary.classification) && isNotEmpty(otherSummary.classification)) {
+              mergedSummary.classification = otherSummary.classification;
+            }
+            if ((mergedSummary.confidence_score === undefined || mergedSummary.confidence_score === null) && (otherSummary.confidence_score !== undefined && otherSummary.confidence_score !== null)) {
+              mergedSummary.confidence_score = otherSummary.confidence_score;
+            }
+            if (isEmpty(mergedSummary.product_types) && isNotEmpty(otherSummary.product_types)) {
+              mergedSummary.product_types = otherSummary.product_types;
+            }
+            if (isEmpty(mergedSummary.sales_action) && isNotEmpty(otherSummary.sales_action)) {
+              mergedSummary.sales_action = otherSummary.sales_action;
+            }
+
+            mergedData.summary = mergedSummary;
+          }
+        }
+      }
+
+      // Update the newest company with merged data
+      await updateCompany(newestCompany.id, mergedData);
+
+      // Delete the other companies
+      for (const company of companiesToMerge) {
+        await deleteCompany(company.id);
+      }
+
+      // Clear selection
+      setSelectedCompanyIds(new Set());
+      setMergeModalOpen(false);
+      setToastMessage(`Successfully merged ${companiesToMerge.length} ${companiesToMerge.length === 1 ? 'company' : 'companies'} into ${newestCompany.domain || 'selected company'}`);
+      setToastVisible(true);
+    } catch (error: any) {
+      console.error('Error merging companies:', error);
+      setToastMessage(`Error merging companies: ${error.message}`);
+      setToastVisible(true);
+    }
+  };
+
   const startEditing = (company: Company) => {
     setEditingId(company.id);
     setFormData({
       domain: company.domain || '',
       instagram: company.instagram || '',
+      phone: company.phone || '',
+      email: company.email || '',
       summary: company.summary ? JSON.stringify(company.summary, null, 2) : '',
+      set_name: company.set_name || '',
     });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setIsCreating(false);
-    setFormData({ domain: '', instagram: '', summary: '' });
+    setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
   };
 
   // Filter companies based on search query
@@ -724,6 +1109,8 @@ function CompaniesContent() {
       return (
         company.domain?.toLowerCase().includes(query) ||
         company.instagram?.toLowerCase().includes(query) ||
+        company.phone?.toLowerCase().includes(query) ||
+        company.email?.toLowerCase().includes(query) ||
         JSON.stringify(company.summary)?.toLowerCase().includes(query) ||
         summaryData.company_summary?.toLowerCase().includes(query) ||
         summaryData.company_industry?.toLowerCase().includes(query) ||
@@ -763,24 +1150,51 @@ function CompaniesContent() {
           Companies
         </h1>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => setColumnFilterOpen(!columnFilterOpen)}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-          >
-            <Filter className="w-4 h-4 mr-2" />
-            Manage Columns
-          </button>
-          {!isCreating && (
-            <button
-              onClick={() => {
-                setIsCreating(true);
-                setFormData({ domain: '', instagram: '', summary: '' });
-              }}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Company
-            </button>
+          {selectedCompanyIds.size > 0 ? (
+            <>
+              <button
+                onClick={() => setAssignSetModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+              >
+                Assign Set ({selectedCompanyIds.size})
+              </button>
+              <button
+                onClick={() => setMergeModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+              >
+                <GitMerge className="w-4 h-4 mr-2" />
+                Merge Selected ({selectedCompanyIds.size})
+              </button>
+              <button
+                onClick={() => setBulkDeleteModalOpen(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Selected ({selectedCompanyIds.size})
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setColumnFilterOpen(!columnFilterOpen)}
+                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+              >
+                <Filter className="w-4 h-4 mr-2" />
+                Manage Columns
+              </button>
+              {!isCreating && (
+                <button
+                  onClick={() => {
+                    setIsCreating(true);
+                    setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
+                  }}
+                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add Company
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -811,15 +1225,57 @@ function CompaniesContent() {
               <option value="">None</option>
               {columnOrder.map((column) => (
                 <option key={column} value={column}>
-                  {columnLabels[column]}
+                  {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                 </option>
               ))}
             </select>
             {clipboardColumn && (
               <p className="mt-1 text-xs text-gray-500">
-                Selected: {columnLabels[clipboardColumn]}
+                Selected: {columnLabels[clipboardColumn] || clipboardColumn.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
               </p>
             )}
+          </div>
+          
+          {/* Subject Column Selection */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Subject Column (used as email subject when opening email links)
+            </label>
+            <select
+              value={subjectColumn || ''}
+              onChange={(e) => setSubjectColumn(e.target.value || null)}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="">None</option>
+              {columnOrder.map((column) => (
+                <option key={column} value={column}>
+                  {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </option>
+              ))}
+            </select>
+            {subjectColumn && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected: {columnLabels[subjectColumn] || subjectColumn.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              </p>
+            )}
+          </div>
+          
+          {/* Phone Click Behavior Selection */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Phone Click Behavior
+            </label>
+            <select
+              value={phoneClickBehavior}
+              onChange={(e) => setPhoneClickBehavior(e.target.value as 'whatsapp' | 'call')}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="whatsapp">WhatsApp (opens WhatsApp and copies Clipboard Column)</option>
+              <option value="call">Call (uses tel: link)</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              Selected: {phoneClickBehavior === 'whatsapp' ? 'WhatsApp' : 'Call'}
+            </p>
           </div>
           
           <DndContext
@@ -836,7 +1292,7 @@ function CompaniesContent() {
                   <SortableColumnItem
                     key={column}
                     column={column}
-                    columnLabel={columnLabels[column]}
+                    columnLabel={columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                     isVisible={visibleColumns.has(column)}
                     onToggle={() => toggleColumn(column)}
                   />
@@ -881,6 +1337,36 @@ function CompaniesContent() {
             <option value="NOT_QUALIFIED">NOT QUALIFIED</option>
             <option value="EXPIRED">EXPIRED</option>
             <option value="empty">Empty/Null Summary</option>
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={setNameFilter || 'all'}
+            onChange={(e) => setSetNameFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="all">All Sets</option>
+            <option value="">No Set (null/empty)</option>
+            {availableSetNames.map((setName) => (
+              <option key={setName} value={setName}>
+                {setName}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <select
+            value={ownerFilter || 'all'}
+            onChange={(e) => setOwnerFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
+            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="all">All Owners</option>
+            <option value="">No Owner (null/empty)</option>
+            {availableOwners.map((owner) => (
+              <option key={owner} value={owner}>
+                {owner}
+              </option>
+            ))}
           </select>
         </div>
         <div className="flex items-center gap-2">
@@ -932,6 +1418,50 @@ function CompaniesContent() {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
+                Phone
+              </label>
+              <input
+                type="text"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="+1234567890"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Email
+              </label>
+              <input
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="contact@example.com"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Set Name
+              </label>
+              <select
+                value={formData.set_name}
+                onChange={(e) => setFormData({ ...formData, set_name: e.target.value })}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="">No Set (null/empty)</option>
+                {availableSetNames.map((setName) => (
+                  <option key={setName} value={setName}>
+                    {setName}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 Summary (JSON)
               </label>
               <textarea
@@ -975,14 +1505,30 @@ function CompaniesContent() {
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
               <thead className="bg-gray-50">
                 <tr>
-                  {orderedVisibleColumns.map((column) => (
-                    <th key={column} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      {columnLabels[column]}
-                    </th>
-                  ))}
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <input
+                      type="checkbox"
+                      checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === filteredCompanies.length}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </th>
+                  {orderedVisibleColumns.map((column) => {
+                    const isPhoneColumn = column === 'phone';
+                    const isEmailColumn = column === 'email';
+                    return (
+                      <th 
+                        key={column} 
+                        className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${(isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : ''}`}
+                      >
+                        {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                      </th>
+                    );
+                  })}
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Actions
                   </th>
@@ -991,8 +1537,6 @@ function CompaniesContent() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {filteredCompanies.map((company) => {
                   const isEditingThisCell = editingCell?.companyId === company.id && editingCell?.columnKey;
-                  
-                  const isRowHovered = hoveredRowId === company.id;
                   
                   // Get classification for row styling
                   const summaryData = getSummaryData(company);
@@ -1008,17 +1552,37 @@ function CompaniesContent() {
                     return 'hover:bg-gray-50';
                   };
                   
+                  // Handle row click with Ctrl/Cmd to open drawer
+                  const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
+                    // Only open drawer if Ctrl (Windows/Linux) or Cmd (Mac) is pressed
+                    if (e.ctrlKey || e.metaKey) {
+                      e.preventDefault();
+                      setCompanyToView(company);
+                      setDrawerOpen(true);
+                    }
+                  };
+                  
                   return (
                     <tr 
                       key={company.id} 
                       className={getRowBgColor()}
-                      onMouseEnter={() => setHoveredRowId(company.id)}
-                      onMouseLeave={() => setHoveredRowId(null)}
+                      onClick={handleRowClick}
                     >
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedCompanyIds.has(company.id)}
+                          onChange={(e) => handleRowSelect(company.id, e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </td>
                       {orderedVisibleColumns.map((columnKey) => {
                         const isEditing = isEditingThisCell === columnKey;
                         const isTemplateColumn = columnKey.startsWith('template_');
                         const isLinkColumn = columnKey === 'domain' || columnKey === 'instagram';
+                        const isPhoneColumn = columnKey === 'phone';
+                        const isEmailColumn = columnKey === 'email';
                         
                         // Regular columns and template columns
                         const value = getCellValue(company, columnKey);
@@ -1033,6 +1597,45 @@ function CompaniesContent() {
                         } else if (columnKey === 'instagram' && company.instagram && company.instagram !== '-') {
                           const instagram = company.instagram.trim().replace(/^@/, '');
                           linkUrl = `https://instagram.com/${instagram}`;
+                        } else if (isPhoneColumn && company.phone && company.phone !== '-') {
+                          // Generate phone link based on behavior
+                          const phone = company.phone.trim().replace(/[^\d+]/g, ''); // Remove non-digit chars except +
+                          if (phoneClickBehavior === 'call') {
+                            linkUrl = `tel:${phone}`;
+                          } else if (phoneClickBehavior === 'whatsapp') {
+                            // WhatsApp web URL format: https://wa.me/{phone}?text={message}
+                            let whatsappUrl = `https://wa.me/${phone}`;
+                            // Add clipboard column value as pre-filled message if available
+                            if (clipboardColumn) {
+                              const clipboardValue = getCellValue(company, clipboardColumn);
+                              if (clipboardValue && clipboardValue !== '-') {
+                                const encodedMessage = encodeURIComponent(clipboardValue);
+                                whatsappUrl += `?text=${encodedMessage}`;
+                              }
+                            }
+                            linkUrl = whatsappUrl;
+                          }
+                        } else if (isEmailColumn && company.email && company.email !== '-') {
+                          // Generate Gmail compose URL with email pre-filled
+                          const email = company.email.trim();
+                          let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
+                          // Add subject column value as email subject if available
+                          if (subjectColumn) {
+                            const subjectValue = getCellValue(company, subjectColumn);
+                            if (subjectValue && subjectValue !== '-') {
+                              const encodedSubject = encodeURIComponent(subjectValue);
+                              gmailUrl += `&su=${encodedSubject}`;
+                            }
+                          }
+                          // Add clipboard column value as email body if available
+                          if (clipboardColumn) {
+                            const clipboardValue = getCellValue(company, clipboardColumn);
+                            if (clipboardValue && clipboardValue !== '-') {
+                              const encodedBody = encodeURIComponent(clipboardValue);
+                              gmailUrl += `&body=${encodedBody}`;
+                            }
+                          }
+                          linkUrl = gmailUrl;
                         }
                         
                         // Get classification color classes
@@ -1051,15 +1654,41 @@ function CompaniesContent() {
                           return '';
                         };
                         
+                        const isCellHovered = hoveredCell?.companyId === company.id && hoveredCell?.columnKey === columnKey;
+                        
+                        // Helper to check if content is truncated and handle hover
+                        const handleCellMouseEnter = (e: React.MouseEvent<HTMLDivElement | HTMLAnchorElement>) => {
+                          const element = e.currentTarget;
+                          // Check if content is truncated
+                          const isTruncated = element.scrollWidth > element.clientWidth;
+                          if (isTruncated) {
+                            setHoveredCell({ companyId: company.id, columnKey });
+                          }
+                        };
+                        
+                        const handleCellMouseLeave = () => {
+                          setHoveredCell(null);
+                        };
+                        
                         return (
                           <td
                             key={columnKey}
-                            className={`${isLinkColumn && linkUrl ? 'p-0 relative' : 'px-6 py-4'} text-sm ${isClassificationColumn ? getClassificationColorClasses() : 'text-gray-900'} ${
-                              isEditing ? '' : isTemplateColumn ? 'cursor-pointer hover:bg-blue-50' : isLinkColumn && linkUrl ? 'cursor-pointer' : isClassificationColumn ? 'cursor-pointer hover:opacity-80' : 'cursor-pointer hover:bg-blue-50'
-                            } transition-colors ${isTemplateColumn ? 'max-w-xl' : 'max-w-md'}`}
-                            onClick={!isEditing && !isLinkColumn ? () => handleCellClick(company, columnKey) : undefined}
-                            onDoubleClick={!isEditing && !isTemplateColumn && !isLinkColumn ? () => handleCellDoubleClick(company, columnKey) : undefined}
-                            title={!isEditing ? (isTemplateColumn ? "Click to copy message" : isLinkColumn && linkUrl ? "Click to open link and copy clipboard column" : "Single click to copy, double click to edit") : undefined}
+                            className={`${(isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? 'p-0 relative' : 'px-6 py-4'} text-sm ${isClassificationColumn ? getClassificationColorClasses() : 'text-gray-900'} ${
+                              isEditing ? '' : isTemplateColumn ? 'cursor-pointer hover:bg-blue-50' : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? 'cursor-pointer' : isClassificationColumn ? 'cursor-pointer hover:opacity-80' : 'cursor-pointer hover:bg-blue-50'
+                            } transition-colors ${isTemplateColumn ? 'max-w-xl' : (isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : 'max-w-md'}`}
+                            onClick={!isEditing && !isLinkColumn && !isPhoneColumn && !isEmailColumn ? (e) => {
+                              // If Ctrl/Cmd is pressed, let the row handler handle it (for opening drawer)
+                              if (e.ctrlKey || e.metaKey) {
+                                return; // Let event bubble to row handler
+                              }
+                              e.stopPropagation();
+                              handleCellClick(company, columnKey);
+                            } : undefined}
+                            onDoubleClick={!isEditing && !isTemplateColumn && !isLinkColumn && !isPhoneColumn && !isEmailColumn ? (e) => {
+                              e.stopPropagation();
+                              handleCellDoubleClick(company, columnKey);
+                            } : undefined}
+                            title={!isEditing ? (isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Click to open WhatsApp and copy clipboard column" : isPhoneColumn ? "Click to call" : isEmailColumn ? "Click to open Gmail with pre-filled email and body" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -1117,12 +1746,67 @@ function CompaniesContent() {
                             ) : linkUrl ? (
                               <a
                                 href={linkUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                                target={isPhoneColumn && phoneClickBehavior === 'call' ? undefined : "_blank"}
+                                rel={isPhoneColumn && phoneClickBehavior === 'call' ? undefined : "noopener noreferrer"}
                                 onClick={async (e) => {
+                                  // For phone and email, prevent default to allow double-click to work
+                                  if (isPhoneColumn || isEmailColumn) {
+                                    e.preventDefault();
+                                  }
+                                  
+                                  // If Ctrl/Cmd is pressed, let the row handler handle it (for opening drawer)
+                                  if (e.ctrlKey || e.metaKey) {
+                                    if (isPhoneColumn || isEmailColumn) {
+                                      // Already prevented, just return
+                                    } else {
+                                      e.preventDefault();
+                                    }
+                                    return; // Let event bubble to row handler
+                                  }
                                   e.stopPropagation();
-                                  // Copy clipboard column value if set
-                                  if (clipboardColumn) {
+                                  
+                                  // Use a small delay for phone/email to detect double-click
+                                  if (isPhoneColumn || isEmailColumn) {
+                                    const timeoutKey = `${company.id}-${columnKey}`;
+                                    
+                                    // Clear any existing timeout for this cell
+                                    const existingTimeout = clickTimeoutsRef.current.get(timeoutKey);
+                                    if (existingTimeout) {
+                                      clearTimeout(existingTimeout);
+                                    }
+                                    
+                                    const clickDelay = setTimeout(async () => {
+                                      // Open the link after delay (if no double-click occurred)
+                                      clickTimeoutsRef.current.delete(timeoutKey);
+                                      
+                                      if (phoneClickBehavior === 'call') {
+                                        window.location.href = linkUrl;
+                                      } else {
+                                        window.open(linkUrl, '_blank', 'noopener,noreferrer');
+                                      }
+                                      
+                                      // For phone column with WhatsApp behavior, copy clipboard column
+                                      if (isPhoneColumn && phoneClickBehavior === 'whatsapp' && clipboardColumn) {
+                                        const clipboardValue = getCellValue(company, clipboardColumn);
+                                        if (clipboardValue && clipboardValue !== '-') {
+                                          try {
+                                            await navigator.clipboard.writeText(clipboardValue);
+                                            setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+                                            setToastVisible(true);
+                                          } catch (error) {
+                                            console.error('Failed to copy to clipboard:', error);
+                                          }
+                                        }
+                                      }
+                                    }, 300); // 300ms delay to detect double-click
+                                    
+                                    // Store timeout ID in ref for this cell
+                                    clickTimeoutsRef.current.set(timeoutKey, clickDelay);
+                                    return;
+                                  }
+                                  
+                                  // For domain/instagram columns, copy clipboard column value if set
+                                  if (!isPhoneColumn && clipboardColumn) {
                                     const clipboardValue = getCellValue(company, clipboardColumn);
                                     if (clipboardValue && clipboardValue !== '-') {
                                       try {
@@ -1135,13 +1819,34 @@ function CompaniesContent() {
                                     }
                                   }
                                 }}
-                                className={`absolute inset-0 flex items-center w-full h-full px-6 py-4 text-indigo-600 hover:text-indigo-800 hover:underline hover:bg-indigo-50 ${isRowHovered ? "whitespace-normal break-words" : "truncate"}`}
-                                title={value}
+                                onDoubleClick={(isPhoneColumn || isEmailColumn) ? (e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  
+                                  // Clear the click timeout if it exists
+                                  const timeoutKey = `${company.id}-${columnKey}`;
+                                  const existingTimeout = clickTimeoutsRef.current.get(timeoutKey);
+                                  if (existingTimeout) {
+                                    clearTimeout(existingTimeout);
+                                    clickTimeoutsRef.current.delete(timeoutKey);
+                                  }
+                                  
+                                  handleCellDoubleClick(company, columnKey);
+                                } : undefined}
+                                onMouseEnter={handleCellMouseEnter}
+                                onMouseLeave={handleCellMouseLeave}
+                                className={`absolute inset-0 flex items-center w-full h-full px-6 py-4 text-indigo-600 hover:text-indigo-800 hover:underline hover:bg-indigo-50 ${isCellHovered ? "whitespace-normal break-words" : "truncate"}`}
+                                title={(isPhoneColumn || isEmailColumn) ? "Single click to open link, double click to edit" : value}
                               >
                                 {value}
                               </a>
                             ) : (
-                              <div className={`${isRowHovered ? "whitespace-normal break-words" : "truncate"} ${isClassificationColumn && (classificationValue === 'QUALIFIED' || classificationValue === 'NOT_QUALIFIED' || classificationValue === 'EXPIRED') ? 'font-medium' : ''}`} title={value}>
+                              <div 
+                                onMouseEnter={handleCellMouseEnter}
+                                onMouseLeave={handleCellMouseLeave}
+                                className={`${isCellHovered ? "whitespace-normal break-words" : "truncate"} ${isClassificationColumn && (classificationValue === 'QUALIFIED' || classificationValue === 'NOT_QUALIFIED' || classificationValue === 'EXPIRED') ? 'font-medium' : ''}`} 
+                                title={value}
+                              >
                                 {value}
                               </div>
                             )}
@@ -1151,14 +1856,31 @@ function CompaniesContent() {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center justify-end gap-2">
                           <button
-                            onClick={() => startEditing(company)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCompanyToView(company);
+                              setDrawerOpen(true);
+                            }}
+                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                            title="View Details"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditing(company);
+                            }}
                             className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
                             title="Edit"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => handleDeleteClick(company.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(company.id);
+                            }}
                             className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
                             title="Delete"
                           >
@@ -1271,6 +1993,89 @@ function CompaniesContent() {
         onCancel={handleDeleteCancel}
         confirmText="Delete"
         cancelText="Cancel"
+      />
+
+      {/* Merge Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={mergeModalOpen}
+        title="Merge Companies"
+        message={`Are you sure you want to merge ${selectedCompanyIds.size} selected companies? The newest company will be kept, and data from others will be merged into it. The other companies will be deleted. This action cannot be undone.`}
+        onConfirm={handleMerge}
+        onCancel={() => {
+          setMergeModalOpen(false);
+        }}
+        confirmText="Merge"
+        cancelText="Cancel"
+      />
+
+      {/* Bulk Delete Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={bulkDeleteModalOpen}
+        title="Delete Companies"
+        message={`Are you sure you want to delete ${selectedCompanyIds.size} selected ${selectedCompanyIds.size === 1 ? 'company' : 'companies'}? This action cannot be undone.`}
+        onConfirm={handleBulkDelete}
+        onCancel={() => {
+          setBulkDeleteModalOpen(false);
+        }}
+        confirmText="Delete"
+        cancelText="Cancel"
+      />
+
+      {/* Assign Set Modal */}
+      {assignSetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Set</h2>
+            <p className="text-gray-600 mb-4">
+              Assign a set name to {selectedCompanyIds.size} selected {selectedCompanyIds.size === 1 ? 'company' : 'companies'}. Leave empty to clear the set name.
+            </p>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Set Name
+              </label>
+              <textarea
+                value={assignSetName}
+                onChange={(e) => setAssignSetName(e.target.value)}
+                placeholder="Enter set name (leave empty to clear)"
+                rows={3}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setAssignSetModalOpen(false);
+                  setAssignSetName('');
+                }}
+                className="px-6 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAssignSet}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Details Drawer */}
+      <CompanyDetailsDrawer
+        isOpen={drawerOpen}
+        company={companyToView}
+        onClose={() => {
+          setDrawerOpen(false);
+          setCompanyToView(null);
+        }}
+        getSummaryData={getSummaryData}
+        columnLabels={columnLabels}
+        getCellValue={getCellValue}
+        columnOrder={columnOrder}
+        updateCompany={updateCompany}
       />
     </div>
   );

@@ -57,6 +57,50 @@ export function extractInstagramId(input: string): string {
 }
 
 /**
+ * Extracts and cleans phone numbers from text
+ * Matches phone number patterns and normalizes them
+ * 
+ * @param text - Text that may contain phone numbers
+ * @returns Array of cleaned phone numbers (with + prefix and digits only)
+ */
+export function extractPhoneNumbers(text: string): string[] {
+  if (!text) return [];
+
+  // Match possible phone numbers
+  const matches = text.match(
+    /(\+?\d[\d\s().-]{7,}\d)/g
+  );
+
+  if (!matches) return [];
+
+  return matches.map(num =>
+    num
+      .replace(/[^\d+]/g, '')   // remove spaces, dashes, brackets
+      .replace(/^00/, '+')      // convert 00 prefix to +
+  );
+}
+
+/**
+ * Extracts and cleans a single phone number from text
+ * Returns the first phone number found, or the cleaned input if no match
+ * 
+ * @param text - Text that may contain a phone number
+ * @returns The first cleaned phone number, or empty string if none found
+ */
+export function extractPhoneNumber(text: string): string {
+  if (!text) return '';
+  
+  const numbers = extractPhoneNumbers(text);
+  if (numbers.length > 0) {
+    return numbers[0];
+  }
+  
+  // If no match, try to clean the input directly (might already be a number)
+  const cleaned = text.trim().replace(/[^\d+]/g, '').replace(/^00/, '+');
+  return cleaned;
+}
+
+/**
  * Extracts domain from various input formats
  * Supports:
  * - Full URLs: https://example.com, https://www.example.com/path

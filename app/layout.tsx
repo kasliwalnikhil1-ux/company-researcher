@@ -5,6 +5,7 @@ import { Analytics } from '@vercel/analytics/next';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { MessageTemplatesProvider } from '@/contexts/MessageTemplatesContext';
 import { CompaniesProvider } from '@/contexts/CompaniesContext';
+import { OwnerProvider } from '@/contexts/OwnerContext';
 
 // Load the ABCDiatype font (Regular and Bold only)
 const abcdDiatype = localFont({
@@ -52,12 +53,14 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
-          <MessageTemplatesProvider>
-            <CompaniesProvider>
-              {children}
-              <Analytics />
-            </CompaniesProvider>
-          </MessageTemplatesProvider>
+          <OwnerProvider>
+            <MessageTemplatesProvider>
+              <CompaniesProvider>
+                {children}
+                <Analytics />
+              </CompaniesProvider>
+            </MessageTemplatesProvider>
+          </OwnerProvider>
         </AuthProvider>
       </body>
     </html>
