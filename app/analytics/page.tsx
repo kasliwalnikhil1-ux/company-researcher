@@ -44,7 +44,7 @@ export default function AnalyticsPage() {
         'Aarushi': '#2563eb', // blue-600
         'Naman': '#9333ea', // purple-600
         'Ram': '#16a34a', // green-600
-        'Deepak': '#ea580c', // orange-600
+        'Harshit': '#ea580c', // orange-600
       };
       return colorMap[ownerKey] || '#64748b';
     }
