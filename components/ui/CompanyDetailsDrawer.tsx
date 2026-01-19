@@ -14,6 +14,7 @@ interface CompanyDetailsDrawerProps {
   getCellValue: (company: Company, columnKey: string) => string;
   columnOrder: string[];
   updateCompany: (id: string, updates: Partial<Company>) => Promise<void>;
+  getCurrentCompanyData?: (companyId: string) => Company | null;
 }
 
 const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
@@ -25,6 +26,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   getCellValue,
   columnOrder,
   updateCompany,
+  getCurrentCompanyData,
 }) => {
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{ companyId: string; columnKey: string; value: string } | null>(null);
@@ -61,10 +63,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
   // Handle inline edit save
   const handleInlineEditSave = useCallback(async () => {
-    if (!editingCell || !company) return;
-    
+    if (!editingCell) return;
+
     const { companyId, columnKey, value } = editingCell;
-    
+
     try {
       // Handle direct company fields (not in summary)
       if (columnKey === 'phone') {
@@ -92,10 +94,16 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         setTimeout(() => setToastVisible(false), 3000);
         return;
       }
-      
-      const summaryData = getSummaryData(company);
+
+      // For summary fields, get the current company data to ensure we have the latest state
+      const currentCompany = getCurrentCompanyData ? getCurrentCompanyData(companyId) : company;
+      if (!currentCompany) {
+        throw new Error('Company data not available');
+      }
+
+      const summaryData = getSummaryData(currentCompany);
       const updatedSummary = { ...summaryData };
-      
+
       // Update the specific field
       switch (columnKey) {
         case 'company_summary':
@@ -133,7 +141,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           }
           break;
       }
-      
+
       await updateCompany(companyId, { summary: updatedSummary });
       setEditingCell(null);
       setToastMessage(`${columnLabels[columnKey]} updated successfully`);
@@ -145,7 +153,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       setToastVisible(true);
       setTimeout(() => setToastVisible(false), 3000);
     }
-  }, [editingCell, company, getSummaryData, updateCompany, columnLabels]);
+  }, [editingCell, company, getSummaryData, updateCompany, columnLabels, getCurrentCompanyData]);
 
   // Focus input when editing starts
   useEffect(() => {

@@ -6,6 +6,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { MessageTemplatesProvider } from '@/contexts/MessageTemplatesContext';
 import { CompaniesProvider } from '@/contexts/CompaniesContext';
 import { OwnerProvider } from '@/contexts/OwnerContext';
+import { CountryProvider } from '@/contexts/CountryContext';
 
 // Load the ABCDiatype font (Regular and Bold only)
 const abcdDiatype = localFont({
@@ -53,14 +54,16 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
-          <OwnerProvider>
-            <MessageTemplatesProvider>
-              <CompaniesProvider>
-                {children}
-                <Analytics />
-              </CompaniesProvider>
-            </MessageTemplatesProvider>
-          </OwnerProvider>
+          <CountryProvider>
+            <OwnerProvider>
+              <MessageTemplatesProvider>
+                <CompaniesProvider>
+                  {children}
+                  <Analytics />
+                </CompaniesProvider>
+              </MessageTemplatesProvider>
+            </OwnerProvider>
+          </CountryProvider>
         </AuthProvider>
       </body>
     </html>
