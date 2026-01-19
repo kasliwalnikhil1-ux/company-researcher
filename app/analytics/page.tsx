@@ -41,7 +41,7 @@ export default function AnalyticsPage() {
     if (OWNER_COLORS[ownerKey]) {
       // Extract color from Tailwind classes - use blue, purple, green, orange
       const colorMap: Record<string, string> = {
-        'Aarushi': '#2563eb', // blue-600
+        'Deepak': '#2563eb', // blue-600
         'Naman': '#9333ea', // purple-600
         'Ram': '#16a34a', // green-600
         'Harshit': '#ea580c', // orange-600

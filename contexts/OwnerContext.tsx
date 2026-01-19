@@ -2,13 +2,13 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 
-export type Owner = 'Aarushi' | 'Naman' | 'Ram' | 'Harshit';
+export type Owner = 'Deepak' | 'Naman' | 'Ram' | 'Harshit';
 
 const OWNER_STORAGE_KEY = 'selected-owner';
 
 // Color mapping for each owner
 export const OWNER_COLORS: Record<Owner, { bg: string; text: string; border: string }> = {
-  Aarushi: {
+  Deepak: {
     bg: 'bg-blue-50',
     text: 'text-blue-700',
     border: 'border-blue-200',
@@ -39,11 +39,11 @@ type OwnerContextType = {
 const OwnerContext = createContext<OwnerContextType | undefined>(undefined);
 
 export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
-  const [selectedOwner, setSelectedOwnerState] = useState<Owner>('Aarushi');
+  const [selectedOwner, setSelectedOwnerState] = useState<Owner>('Deepak');
   const [isHydrated, setIsHydrated] = useState(false);
 
   // Available owners list
-  const availableOwners: Owner[] = ['Aarushi', 'Naman', 'Ram', 'Harshit'];
+  const availableOwners: Owner[] = ['Deepak', 'Naman', 'Ram', 'Harshit'];
 
   // Load from localStorage on mount
   useEffect(() => {
