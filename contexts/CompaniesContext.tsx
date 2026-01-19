@@ -39,6 +39,7 @@ export interface CompanyCountByOwner {
 interface CompaniesContextType {
   companies: Company[];
   loading: boolean;
+  searchLoading: boolean;
   sortOrder: SortOrder;
   setSortOrder: (order: SortOrder) => void;
   currentPage: number;
@@ -56,6 +57,8 @@ interface CompaniesContextType {
   setSetNameFilter: (filter: string | null) => void;
   ownerFilter: string | null;
   setOwnerFilter: (filter: string | null) => void;
+  searchQuery: string;
+  setSearchQuery: (query: string) => void;
   availableSetNames: string[];
   availableOwners: string[];
   refreshCompanies: () => Promise<void>;
@@ -86,6 +89,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
 
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchLoading, setSearchLoading] = useState(false);
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -97,6 +101,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>('all');
   const [setNameFilter, setSetNameFilter] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [previousSearchQuery, setPreviousSearchQuery] = useState<string>('');
   const [availableSetNames, setAvailableSetNames] = useState<string[]>([]);
   const [availableOwners, setAvailableOwners] = useState<string[]>([]);
   const pageSize = 25;
@@ -145,18 +151,36 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     if (!userId) {
       setCompanies([]);
       setLoading(false);
+      setSearchLoading(false);
       setTotalCount(0);
       return;
     }
 
     try {
-      setLoading(true);
+      // Determine if this is a search operation (search query changed)
+      const isSearchOperation = searchQuery !== previousSearchQuery;
+      setPreviousSearchQuery(searchQuery);
+
+      if (isSearchOperation) {
+        setSearchLoading(true);
+      } else {
+        setLoading(true);
+      }
 
       // Build base query for count
       let countQuery = supabase
         .from('companies')
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId);
+
+      // Apply search filter
+      if (searchQuery.trim()) {
+        const query = searchQuery.trim().toLowerCase();
+        // Search across multiple fields using OR conditions
+        countQuery = countQuery.or(
+          `domain.ilike.%${query}%,instagram.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%,summary->>company_summary.ilike.%${query}%,summary->>company_industry.ilike.%${query}%,summary->>profile_summary.ilike.%${query}%,summary->>profile_industry.ilike.%${query}%,summary->>sales_opener_sentence.ilike.%${query}%`
+        );
+      }
 
       // Apply date filter
       if (dateFilter !== 'all') {
@@ -210,6 +234,15 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         .select('*')
         .eq('user_id', userId)
         .range(offset, offset + pageSize - 1);
+
+      // Apply search filter
+      if (searchQuery.trim()) {
+        const query_text = searchQuery.trim().toLowerCase();
+        // Search across multiple fields using OR conditions
+        query = query.or(
+          `domain.ilike.%${query_text}%,instagram.ilike.%${query_text}%,phone.ilike.%${query_text}%,email.ilike.%${query_text}%,summary->>company_summary.ilike.%${query_text}%,summary->>company_industry.ilike.%${query_text}%,summary->>profile_summary.ilike.%${query_text}%,summary->>profile_industry.ilike.%${query_text}%,summary->>sales_opener_sentence.ilike.%${query_text}%`
+        );
+      }
 
       // Apply date filter
       if (dateFilter !== 'all') {
@@ -268,6 +301,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
       console.error('Error in fetchCompanies:', error);
     } finally {
       setLoading(false);
+      setSearchLoading(false);
     }
   }, [
     userId,
@@ -279,6 +313,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     classificationFilter,
     setNameFilter,
     ownerFilter,
+    searchQuery,
   ]);
 
   // Fetch available set names
@@ -385,14 +420,83 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     const { error } = await supabase.from('companies').insert(payload);
 
     if (error) {
-      console.error('Error creating company:', {
-        message: error?.message || 'Unknown error',
-        details: error?.details || null,
-        hint: error?.hint || null,
-        code: error?.code || null,
-        payload,
-      });
-      throw new Error(error?.message || 'Failed to create company');
+      // Check if this is a duplicate key error (unique constraint violation)
+      if (error.code === '23505') {
+        console.log('Company already exists, attempting to update instead...');
+
+        // Find the existing company with the same domain and instagram
+        const { data: existingCompany } = await supabase
+          .from('companies')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('domain', payload.domain)
+          .eq('instagram', payload.instagram)
+          .single();
+
+        if (existingCompany) {
+          // Update the existing company with the new data
+          // Always update summary, but only update other fields if they have non-empty values
+          const updatePayload: any = {
+            summary: payload.summary, // Always update summary with new research data
+          };
+
+          // Only update phone if it's not empty/null/undefined
+          if (payload.phone && payload.phone.trim() !== '') {
+            updatePayload.phone = payload.phone;
+          }
+
+          // Only update email if it's not empty/null/undefined
+          if (payload.email && payload.email.trim() !== '') {
+            updatePayload.email = payload.email;
+          }
+
+          // Only update set_name if it's not null/undefined
+          if (payload.set_name !== null && payload.set_name !== undefined) {
+            updatePayload.set_name = payload.set_name;
+          }
+
+          // Only update owner if it's not null/undefined
+          if (payload.owner !== null && payload.owner !== undefined) {
+            updatePayload.owner = payload.owner;
+          }
+
+          const { error: updateError } = await supabase
+            .from('companies')
+            .update(updatePayload)
+            .eq('id', existingCompany.id)
+            .eq('user_id', userId);
+
+          if (updateError) {
+            console.error('Error updating existing company:', {
+              message: updateError?.message || 'Unknown error',
+              details: updateError?.details || null,
+              hint: updateError?.hint || null,
+              code: updateError?.code || null,
+              id: existingCompany.id,
+              updates: updatePayload,
+            });
+            throw new Error(updateError?.message || 'Failed to update existing company');
+          }
+
+          console.log('Successfully updated existing company');
+        } else {
+          // This shouldn't happen if the constraint is working properly, but handle it anyway
+          console.error('Duplicate key error but could not find existing company:', {
+            payload,
+            error,
+          });
+          throw new Error('Company already exists but could not update it');
+        }
+      } else {
+        console.error('Error creating company:', {
+          message: error?.message || 'Unknown error',
+          details: error?.details || null,
+          hint: error?.hint || null,
+          code: error?.code || null,
+          payload,
+        });
+        throw new Error(error?.message || 'Failed to create company');
+      }
     }
 
     await fetchCompanies();
@@ -513,13 +617,14 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   // Reset to page 1 when sort order or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [sortOrder, dateFilter, customDateRange, classificationFilter, setNameFilter, ownerFilter]);
+  }, [sortOrder, dateFilter, customDateRange, classificationFilter, setNameFilter, ownerFilter, searchQuery]);
 
   const totalPages = useMemo(() => Math.ceil(totalCount / pageSize), [totalCount, pageSize]);
 
   const value: CompaniesContextType = {
     companies,
     loading,
+    searchLoading,
     sortOrder,
     setSortOrder,
     currentPage,
@@ -537,6 +642,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     setSetNameFilter,
     ownerFilter,
     setOwnerFilter,
+    searchQuery,
+    setSearchQuery,
     availableSetNames,
     availableOwners,
     refreshCompanies: fetchCompanies,
