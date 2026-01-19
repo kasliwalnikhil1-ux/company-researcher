@@ -56,8 +56,8 @@ export async function POST(req: NextRequest) {
           }
           
           return {
-            username,
             ...profileResponse.result,
+            username,
             qualificationData,
           };
         } catch (error) {
