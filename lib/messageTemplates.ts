@@ -18,17 +18,162 @@ function unescapeString(str: string): string {
     .replace(/\\\\/g, '\\'); // Convert \\ to single \
 }
 
-// Template substitution helper
-// Replaces ${variable} syntax with actual values and unescapes escape sequences
-function substituteVariables(template: string, variables: Record<string, string>): string {
+/**
+ * Get common US holidays for a given year
+ * @param year - The year to get holidays for (defaults to current year)
+ * @returns Array of holiday dates in YYYY-MM-DD format
+ */
+export function getCommonUSHolidays(year: number = new Date().getFullYear()): string[] {
+  const holidays = [
+    `${year}-01-01`, // New Year's Day
+    `${year}-01-15`, // Martin Luther King Jr. Day (approximate)
+    `${year}-01-26`, // Republic Day / Australia Day
+    `${year}-02-14`, // Valentine's Day (business holiday for some)
+    `${year}-02-17`, // Presidents' Day (approximate)
+    `${year}-05-27`, // Memorial Day (approximate)
+    `${year}-07-04`, // Independence Day
+    `${year}-09-02`, // Labor Day (approximate)
+    `${year}-11-11`, // Veterans Day
+    `${year}-11-28`, // Thanksgiving (approximate)
+    `${year}-12-25`, // Christmas Day
+    `${year}-12-31`, // New Year's Eve (business holiday for some)
+  ];
+  return holidays;
+}
+
+/**
+ * Calculate follow-up date (2 days from base date, skipping holidays/weekends) and return various date formats
+ * @param baseDate - The base date to calculate from (defaults to today)
+ * @param holidays - Array of holiday dates in YYYY-MM-DD format to skip
+ * @returns Object with different date format representations
+ */
+export function getFollowUpDate(baseDate = new Date(), holidays: string[] = []) {
+  let result = new Date(baseDate);
+  let daysAdded = 0;
+
+  // Convert holidays to Date objects for comparison
+  const holidayDates = holidays.map(holiday => {
+    const [year, month, day] = holiday.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  });
+
+  // Helper function to check if a date is a holiday
+  const isHoliday = (date: Date) => {
+    return holidayDates.some(holiday =>
+      holiday.getFullYear() === date.getFullYear() &&
+      holiday.getMonth() === date.getMonth() &&
+      holiday.getDate() === date.getDate()
+    );
+  };
+
+  // Helper function to check if a date is a weekend
+  const isWeekend = (date: Date) => {
+    const day = date.getDay();
+    return day === 0 || day === 6; // Sunday = 0, Saturday = 6
+  };
+
+  // Add days until we have 2 business days (excluding weekends and holidays)
+  while (daysAdded < 2) {
+    result.setDate(result.getDate() + 1);
+
+    // Skip if it's a weekend or holiday
+    if (!isWeekend(result) && !isHoliday(result)) {
+      daysAdded++;
+    }
+  }
+
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const shortDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Calculate if the follow-up date is in the same week
+  // Get the week number (Monday-based)
+  const getWeekNumber = (date: Date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+    const yearStart = new Date(d.getFullYear(), 0, 1);
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+
+  const sameWeek = getWeekNumber(baseDate) === getWeekNumber(result);
+
+  const thisOrNext = sameWeek ? "this" : "next";
+
+  return {
+    fullDate: `${days[result.getDay()]}, ${months[result.getMonth()]} ${result.getDate()}`,
+    weekdayDate: `${days[result.getDay()]} ${months[result.getMonth()]} ${result.getDate()}`,
+    shortDay: shortDays[result.getDay()],
+    relativeDay: `${thisOrNext} ${days[result.getDay()]}`,
+    relativeShortDay: `${thisOrNext} ${shortDays[result.getDay()]}`,
+    dateOnly: `${months[result.getMonth()]} ${result.getDate()}`
+  };
+}
+
+/**
+ * Template substitution helper function
+ * Replaces ${variable} syntax with actual values and unescapes escape sequences
+ *
+ * If a placeholder is immediately followed by punctuation (`,`, `!`, `.`), and the variable
+ * value ends with any punctuation, the trailing punctuation is removed from the value
+ * to avoid duplication (regardless of whether it matches the following punctuation).
+ *
+ * @param template - Template string with ${variable} placeholders
+ * @param variables - Object mapping variable names to their values
+ * @returns Template string with variables substituted and escape sequences unescaped
+ *
+ * @example
+ * ```typescript
+ * const template = "Hello ${name}, welcome to ${product}";
+ * const variables = { name: "John", product: "Company Researcher" };
+ * const result = substituteVariables(template, variables);
+ * // Returns: "Hello John, welcome to Company Researcher"
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Removes duplicate punctuation
+ * const template = "${sales_opener_sentence}, we can help";
+ * const variables = { sales_opener_sentence: "Hello." };
+ * const result = substituteVariables(template, variables);
+ * // Returns: "Hello, we can help" (removed . since followed by ,)
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Date placeholders
+ * const template = "Let's schedule a call ${followUpRelativeDay} at 2 PM";
+ * const result = substituteVariables(template, { followUpRelativeDay: "this Tuesday" });
+ * // Returns: "Let's schedule a call this Tuesday at 2 PM"
+ * ```
+ */
+export function substituteVariables(template: string, variables: Record<string, string>): string {
   // First unescape the template string to convert \n to actual newlines
   let result = unescapeString(template);
-  
+
   Object.entries(variables).forEach(([key, value]) => {
-    // Match ${variable} syntax (e.g., ${PRODUCT1}, ${sales_opener_sentence})
-    const regex = new RegExp(`\\$\\{${key}\\}`, 'g');
-    result = result.replace(regex, value);
+    // Match ${variable} followed by optional punctuation (`,`, `!`, `.`)
+    // Use a capturing group to check what follows the placeholder
+    const regex = new RegExp(`\\$\\{${key}\\}([,\\!.])?`, 'g');
+
+    result = result.replace(regex, (match, followingPunctuation) => {
+      let substitutedValue = value;
+
+      // If placeholder is followed by punctuation, remove any trailing punctuation from value
+      // This prevents "sentence.," situations by removing punctuation from value when followed by punctuation
+      if (followingPunctuation) {
+        const lastChar = substitutedValue.slice(-1);
+        // Remove trailing punctuation (comma, period, exclamation mark)
+        if ([',', '.', '!'].includes(lastChar)) {
+          substitutedValue = substitutedValue.slice(0, -1);
+        }
+      }
+
+      // Return substituted value with the following punctuation (if any)
+      return substitutedValue + (followingPunctuation || '');
+    });
   });
+
   return result;
 }
 
@@ -37,12 +182,14 @@ function substituteVariables(template: string, variables: Record<string, string>
  * @param qualificationData - The qualification data containing product types, sales opener, etc.
  * @param isInstagram - Whether this is Instagram research (true) or domain research (false)
  * @param dbTemplates - Optional array of template strings from database
+ * @param holidays - Optional array of holiday dates in YYYY-MM-DD format to skip when calculating follow-up dates
  * @returns Array of message template strings
  */
 export const generateMessageTemplates = (
   qualificationData: QualificationData | null | undefined,
   isInstagram: boolean = false,
-  dbTemplates?: string[]
+  dbTemplates?: string[],
+  holidays: string[] = []
 ): string[] => {
   // Only generate messages if QUALIFIED and product_types exist
   if (
@@ -67,7 +214,10 @@ export const generateMessageTemplates = (
       : productTypes.length === 2
       ? `${productTypes[0]} and ${productTypes[1]}`
       : `${productTypes.slice(0, -1).join(', ')}, and ${productTypes[productTypes.length - 1]}`;
-    
+
+    // Get follow-up date formats
+    const followUpDate = getFollowUpDate(new Date(), holidays);
+
     const variables: Record<string, string> = {
       // Support both camelCase and snake_case naming conventions
       PRODUCT1,
@@ -80,6 +230,13 @@ export const generateMessageTemplates = (
       profileIndustry, // camelCase variant
       product_types: productTypesFormatted,
       productTypes: productTypesFormatted, // camelCase variant
+      // Follow-up date placeholders
+      followUpFullDate: followUpDate.fullDate,
+      followUpWeekdayDate: followUpDate.weekdayDate,
+      followUpShortDay: followUpDate.shortDay,
+      followUpRelativeDay: followUpDate.relativeDay,
+      followUpRelativeShortDay: followUpDate.relativeShortDay,
+      followUpDateOnly: followUpDate.dateOnly,
     };
 
     // Process all database templates and filter out empty ones
