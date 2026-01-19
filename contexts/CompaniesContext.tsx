@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
+import { useCountry } from './CountryContext';
 
 export interface Company {
   id: string;
@@ -61,6 +62,7 @@ const CompaniesContext = createContext<CompaniesContextType | undefined>(undefin
 
 export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
+  const { getEffectiveCountryCode } = useCountry();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
@@ -348,11 +350,17 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const createCompany = async (company: Omit<Company, 'id' | 'user_id'>) => {
     if (!user) throw new Error('User must be logged in');
 
+    // Prepend country code to phone number
+    let phoneWithCountryCode = company.phone || '';
+    if (phoneWithCountryCode && !phoneWithCountryCode.startsWith('+')) {
+      phoneWithCountryCode = `${getEffectiveCountryCode()}${phoneWithCountryCode}`;
+    }
+
     const payload = {
       user_id: user.id,
       domain: company.domain || '',
       instagram: company.instagram || '',
-      phone: company.phone || '',
+      phone: phoneWithCountryCode,
       email: company.email || '',
       summary: company.summary || null,
       set_name: company.set_name || null,
@@ -392,9 +400,19 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const updateCompany = async (id: string, updates: Partial<Omit<Company, 'id' | 'user_id'>>) => {
     if (!user) throw new Error('User must be logged in');
 
+    // Prepend country code to phone if it's being updated
+    const processedUpdates = { ...updates };
+    if (processedUpdates.phone !== undefined) {
+      let phoneWithCountryCode = processedUpdates.phone || '';
+      if (phoneWithCountryCode && !phoneWithCountryCode.startsWith('+')) {
+        phoneWithCountryCode = `${getEffectiveCountryCode()}${phoneWithCountryCode}`;
+      }
+      processedUpdates.phone = phoneWithCountryCode;
+    }
+
     const { error } = await supabase
       .from('companies')
-      .update(updates)
+      .update(processedUpdates)
       .eq('id', id)
       .eq('user_id', user.id);
 
@@ -411,7 +429,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         hint: error?.hint || null,
         code: error?.code || null,
         id,
-        updates,
+        updates: processedUpdates,
         errorString: error ? JSON.stringify(error, null, 2) : 'null',
       };
       

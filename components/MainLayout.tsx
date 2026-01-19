@@ -2,6 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner, OWNER_COLORS, Owner } from '@/contexts/OwnerContext';
+import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -10,6 +11,7 @@ import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3 } fro
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const { selectedOwner, setSelectedOwner, availableOwners } = useOwner();
+  const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const router = useRouter();
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -126,6 +128,24 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                   {availableOwners.map((owner) => (
                     <option key={owner} value={owner} className="bg-white text-gray-900">
                       {owner}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Country Dropdown */}
+              <div>
+                <p className="text-xs text-gray-500 mb-2">Country Code</p>
+                <select
+                  value={selectedCountry}
+                  onChange={(e) => {
+                    setSelectedCountry(e.target.value as Country);
+                  }}
+                  className="w-full px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                >
+                  {availableCountries.map((country) => (
+                    <option key={country} value={country} className="bg-white text-gray-900">
+                      {COUNTRY_DATA[country].flag} {country} {country === 'Auto' ? '(Auto-detect)' : `(${COUNTRY_DATA[country].code})`}
                     </option>
                   ))}
                 </select>
