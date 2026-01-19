@@ -23,9 +23,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
 
   useEffect(() => {
-    // Check active sessions and sets the user
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
@@ -33,14 +35,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     getSession();
 
-    // Listen for changes on auth state
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      }
-    );
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+      // Keep session updated for token refresh, etc.
+      setSession((prev) => {
+        const prevToken = prev?.access_token ?? null;
+        const nextToken = newSession?.access_token ?? null;
+        if (prevToken === nextToken) return prev;
+        return newSession;
+      });
+
+      // Only update user state if the user identity changes
+      setUser((prevUser) => {
+        const prevId = prevUser?.id ?? null;
+        const nextId = newSession?.user?.id ?? null;
+        if (prevId === nextId) return prevUser;
+        return newSession?.user ?? null;
+      });
+
+      setLoading(false);
+    });
 
     return () => {
       subscription?.unsubscribe();
@@ -78,11 +93,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signOut,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {!loading && children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
 };
 
 export const useAuth = () => {
