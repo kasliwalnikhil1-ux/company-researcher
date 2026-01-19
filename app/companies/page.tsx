@@ -812,8 +812,8 @@ function CompaniesContent() {
   
   const handleCreate = async () => {
     try {
-      if (!formData.domain.trim() && !formData.instagram.trim()) {
-        alert('Please enter either a domain or an Instagram handle.');
+      if (!formData.domain.trim()) {
+        alert('Please enter a domain.');
         return;
       }
 
@@ -845,8 +845,8 @@ function CompaniesContent() {
 
   const handleUpdate = async (id: string) => {
     try {
-      if (!formData.domain.trim() && !formData.instagram.trim()) {
-        alert('Please enter either a domain or an Instagram handle.');
+      if (!formData.domain.trim()) {
+        alert('Please enter a domain.');
         return;
       }
 
@@ -1450,7 +1450,7 @@ function CompaniesContent() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Domain
+                Domain <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
@@ -1933,7 +1933,6 @@ function CompaniesContent() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              window.scrollTo(0, 0);
                               startEditing(company);
                             }}
                             className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
@@ -2141,7 +2140,6 @@ function CompaniesContent() {
         getCellValue={getCellValue}
         columnOrder={columnOrder}
         updateCompany={updateCompany}
-        getCurrentCompanyData={(companyId: string) => companies.find(c => c.id === companyId) || null}
       />
     </div>
   );
