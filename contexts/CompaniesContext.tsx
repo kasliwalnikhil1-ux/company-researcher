@@ -60,6 +60,19 @@ interface CompaniesContextType {
 
 const CompaniesContext = createContext<CompaniesContextType | undefined>(undefined);
 
+// Helper function to clean Instagram username
+const cleanInstagramUsername = (instagram: string | undefined): string => {
+  if (!instagram) return '';
+
+  // Remove any URL prefix, trailing slashes, and @ symbol
+  let cleaned = instagram
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//, '') // Remove URL prefix
+    .replace(/\/+$/, '') // Remove trailing slashes
+    .replace(/^@/, ''); // Remove leading @ symbol
+
+  return cleaned;
+};
+
 export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
   const { getEffectiveCountryCode } = useCountry();
@@ -359,7 +372,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     const payload = {
       user_id: user.id,
       domain: company.domain || '',
-      instagram: company.instagram || '',
+      instagram: cleanInstagramUsername(company.instagram),
       phone: phoneWithCountryCode,
       email: company.email || '',
       summary: company.summary || null,
@@ -408,6 +421,11 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         phoneWithCountryCode = `${getEffectiveCountryCode()}${phoneWithCountryCode}`;
       }
       processedUpdates.phone = phoneWithCountryCode;
+    }
+
+    // Clean Instagram username if it's being updated
+    if (processedUpdates.instagram !== undefined) {
+      processedUpdates.instagram = cleanInstagramUsername(processedUpdates.instagram);
     }
 
     const { error } = await supabase
