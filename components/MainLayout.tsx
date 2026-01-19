@@ -34,7 +34,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className={`${isCollapsed ? 'w-16' : 'w-64'} bg-white border-r border-gray-200 flex flex-col transition-all duration-300 relative`}>
+      <aside className={`${isCollapsed ? 'w-16' : 'w-64'} h-screen bg-white border-r border-gray-200 flex flex-col transition-all duration-300 fixed top-0 left-0 z-10`}>
         {/* Toggle Button */}
         <button
           onClick={toggleSidebar}
@@ -155,7 +155,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} flex-1 flex flex-col overflow-hidden transition-all duration-300`}>
         {children}
       </main>
     </div>

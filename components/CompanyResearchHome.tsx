@@ -99,6 +99,9 @@ export default function CompanyResearcher() {
   
   // Research mode: 'domain' or 'instagram'
   const [researchMode, setResearchMode] = useState<'domain' | 'instagram'>('domain');
+
+  // Set name for batch processing
+  const [setName, setSetName] = useState('');
   
   // Company input and state
   const [rawCompanyInput, setRawCompanyInput] = useState('');
@@ -343,7 +346,7 @@ export default function CompanyResearcher() {
                   summary: instagramQualificationData,
                   email: email || '',
                   phone: phone || '',
-                  set_name: null,
+                  set_name: setName || null,
                   owner: selectedOwner,
                 });
               }
@@ -464,7 +467,7 @@ export default function CompanyResearcher() {
                 summary: qualificationData,
                 email: email || '',
                 phone: phone || '',
-                set_name: null,
+                set_name: setName || null,
                 owner: selectedOwner,
               });
             }
@@ -693,7 +696,7 @@ export default function CompanyResearcher() {
                       summary: data.qualificationData,
                       email: '',
                       phone: '',
-                      set_name: null,
+                      set_name: setName || null,
                       owner: selectedOwner,
                     });
                   }
@@ -871,7 +874,7 @@ export default function CompanyResearcher() {
                   summary: data,
                   email: email || '',
                   phone: phone || '',
-                  set_name: null,
+                  set_name: setName || null,
                   owner: selectedOwner,
                 });
               }
@@ -1223,6 +1226,7 @@ export default function CompanyResearcher() {
     setCsvProcessingProgress({ current: 0, total: 0 });
     clearCsvProgress();
     setHasSavedProgress(false);
+    setSetName('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -1359,8 +1363,26 @@ export default function CompanyResearcher() {
         </div>
       </div>
 
+      {/* Set Name Input */}
+      <div className="mb-6 opacity-0 animate-fade-up [animation-delay:400ms]">
+        <label htmlFor="set-name" className="block text-sm font-medium text-gray-700 mb-2">
+          Set Name (Optional)
+        </label>
+        <input
+          id="set-name"
+          type="text"
+          value={setName}
+          onChange={(e) => setSetName(e.target.value)}
+          placeholder="Enter a name for this batch of companies (optional)"
+          className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          All processed companies will be tagged with this set name for easy identification and grouping.
+        </p>
+      </div>
+
       <p className="text-black mb-12 opacity-0 animate-fade-up [animation-delay:400ms]">
-        {researchMode === 'instagram' 
+        {researchMode === 'instagram'
           ? 'Enter Instagram URLs (comma or newline separated) for profile research, or upload a CSV file with Instagram columns.'
           : 'Enter company URLs (comma or newline separated) for qualification assessment, or upload a CSV file.'}
       </p>
