@@ -260,7 +260,13 @@ function TemplatesContent() {
                 placeholder={`Just visited your page - \${salesOpenerSentence} We can create KILLER product photos/videos for your \${PRODUCT1} products using AI, and have worked with top brands like Polki Stories, Onya, and Armuse. Worth a chat?`}
               />
               <p className="mt-1 text-xs text-gray-500">
-                Enter your template message. Use $&#123;variable&#125; syntax for variables like $&#123;PRODUCT1&#125;, $&#123;salesOpenerSentence&#125;, $&#123;product_types&#125;, etc.
+                Enter your template message. Use $&#123;variable&#125; syntax for variables like $&#123;PRODUCT1&#125;, $&#123;salesOpenerSentence&#125;, $&#123;product_types&#125;, $&#123;followUpFullDate&#125;, etc.
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Available date placeholders: $&#123;followUpFullDate&#125; (e.g., "Tuesday, Jan 15"), $&#123;followUpWeekdayDate&#125; (e.g., "Tuesday Jan 15"), $&#123;followUpShortDay&#125; (e.g., "Tue"), $&#123;followUpRelativeDay&#125; (e.g., "this Tuesday"), $&#123;followUpRelativeShortDay&#125; (e.g., "this Tue"), $&#123;followUpDateOnly&#125; (e.g., "Jan 15")
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Note: Follow-up dates automatically skip weekends and holidays for business-appropriate scheduling.
               </p>
             </div>
 
