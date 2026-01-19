@@ -14,7 +14,7 @@ export interface InstagramProfileData {
   full_name: string;
   edge_owner_to_timeline_media?: {
     count: number;
-  };
+  }; 
   edge_followed_by?: {
     count: number;
   };
