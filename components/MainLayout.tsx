@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { useOwner, OWNER_COLORS } from '@/contexts/OwnerContext';
+import { useOwner, OWNER_COLORS, Owner } from '@/contexts/OwnerContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -118,7 +118,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 <select
                   value={selectedOwner}
                   onChange={(e) => {
-                    const newOwner = e.target.value as 'Deepak' | 'Naman' | 'Ram' | 'Harshit';
+                    const newOwner = e.target.value as Owner;
                     setSelectedOwner(newOwner);
                   }}
                   className={`w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors ${OWNER_COLORS[selectedOwner].bg} ${OWNER_COLORS[selectedOwner].text} ${OWNER_COLORS[selectedOwner].border} hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-offset-1 ${OWNER_COLORS[selectedOwner].border.replace('border-', 'focus:ring-')}`}
