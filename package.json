@@ -27,6 +27,7 @@
     "nanoid": "^5.1.5",
     "next": "^16.1.0",
     "openai": "^6.16.0",
+    "papaparse": "^5.5.3",
     "react": "^18.2.0",
     "react-d3-tree": "^3.6.2",
     "react-dom": "^18.2.0",
@@ -35,6 +36,7 @@
     "recharts": "^3.6.0",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
+    "uuid": "^13.0.0",
     "zod": "^3.22.4"
   },
   "devDependencies": {
