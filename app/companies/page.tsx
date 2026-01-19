@@ -1689,7 +1689,8 @@ function CompaniesContent() {
                           if (clipboardColumn) {
                             const clipboardValue = getCellValue(company, clipboardColumn);
                             if (clipboardValue && clipboardValue !== '-') {
-                              const encodedBody = encodeURIComponent(clipboardValue);
+                              const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
+                              const encodedBody = encodeURIComponent(emailBody);
                               gmailUrl += `&body=${encodedBody}`;
                             }
                           }
