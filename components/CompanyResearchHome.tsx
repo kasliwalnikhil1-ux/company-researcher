@@ -126,7 +126,7 @@ export default function CompanyResearcher() {
       instagramProfileData: null,
       instagramQualificationData: null
     };
-  }, [resultsByCompany]);
+  }, [resultsByCompany]); 
 
   // Get data for active company
   const { qualificationData, instagramProfileData, instagramQualificationData } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
