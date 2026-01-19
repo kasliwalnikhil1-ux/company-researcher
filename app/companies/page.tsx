@@ -10,7 +10,7 @@ import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, Eye, GitMerge } from 'lucide-react';
-import { extractPhoneNumber } from '@/lib/utils';
+import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
 import {
   DndContext,
   closestCenter,
@@ -650,9 +650,15 @@ function CompaniesContent() {
   const handleCellClick = useCallback(async (company: Company, columnKey: string) => {
     const value = getCellValue(company, columnKey);
     if (value && value !== '-') {
-      await navigator.clipboard.writeText(value);
-      setToastMessage(`${columnLabels[columnKey]} copied to clipboard`);
-      setToastVisible(true);
+      try {
+        await copyToClipboard(value);
+        setToastMessage(`${columnLabels[columnKey]} copied to clipboard`);
+        setToastVisible(true);
+      } catch (error) {
+        console.error('Failed to copy to clipboard:', error);
+        setToastMessage('Failed to copy to clipboard');
+        setToastVisible(true);
+      }
     }
   }, [getCellValue, columnLabels]);
   
@@ -1827,7 +1833,24 @@ function CompaniesContent() {
                                       clearTimeout(existingTimeout);
                                     }
                                     
-                                    const clickDelay = setTimeout(async () => {
+                                    // Copy clipboard column immediately (must happen synchronously in user gesture)
+                                    // For phone column with WhatsApp behavior, copy clipboard column
+                                    if (isPhoneColumn && phoneClickBehavior === 'whatsapp' && clipboardColumn) {
+                                      const clipboardValue = getCellValue(company, clipboardColumn);
+                                      if (clipboardValue && clipboardValue !== '-') {
+                                        try {
+                                          await copyToClipboard(clipboardValue);
+                                          setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+                                          setToastVisible(true);
+                                        } catch (error) {
+                                          console.error('Failed to copy to clipboard:', error);
+                                          setToastMessage('Failed to copy to clipboard');
+                                          setToastVisible(true);
+                                        }
+                                      }
+                                    }
+                                    
+                                    const clickDelay = setTimeout(() => {
                                       // Open the link after delay (if no double-click occurred)
                                       clickTimeoutsRef.current.delete(timeoutKey);
                                       
@@ -1835,20 +1858,6 @@ function CompaniesContent() {
                                         window.location.href = linkUrl;
                                       } else {
                                         window.open(linkUrl, '_blank', 'noopener,noreferrer');
-                                      }
-                                      
-                                      // For phone column with WhatsApp behavior, copy clipboard column
-                                      if (isPhoneColumn && phoneClickBehavior === 'whatsapp' && clipboardColumn) {
-                                        const clipboardValue = getCellValue(company, clipboardColumn);
-                                        if (clipboardValue && clipboardValue !== '-') {
-                                          try {
-                                            await navigator.clipboard.writeText(clipboardValue);
-                                            setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
-                                            setToastVisible(true);
-                                          } catch (error) {
-                                            console.error('Failed to copy to clipboard:', error);
-                                          }
-                                        }
                                       }
                                     }, 300); // 300ms delay to detect double-click
                                     
@@ -1862,11 +1871,13 @@ function CompaniesContent() {
                                     const clipboardValue = getCellValue(company, clipboardColumn);
                                     if (clipboardValue && clipboardValue !== '-') {
                                       try {
-                                        await navigator.clipboard.writeText(clipboardValue);
+                                        await copyToClipboard(clipboardValue);
                                         setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
                                         setToastVisible(true);
                                       } catch (error) {
                                         console.error('Failed to copy to clipboard:', error);
+                                        setToastMessage('Failed to copy to clipboard');
+                                        setToastVisible(true);
                                       }
                                     }
                                   }

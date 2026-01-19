@@ -357,12 +357,12 @@ export async function POST(req: NextRequest) {
           description: "Recommended sales action to take"
         },
         email: {
-          type: ["string", "null"],
-          description: "Email address if present on the website, else null"
+          type: "string",
+          description: "Email address if present on the website, else empty string"
         },
         phone: {
-          type: ["string", "null"],
-          description: "Phone number if present on the website, else null"
+          type: "string",
+          description: "Phone number if present on the website, else empty string"
         }
       }
     };

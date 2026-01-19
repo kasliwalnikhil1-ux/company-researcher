@@ -169,8 +169,8 @@ Reply as a JSON object with keys:
 classification: QUALIFIED, NOT_QUALIFIED
 product_types: Array of product types [""]
 sales_action: OUTREACH, EXCLUDE, PARTNERSHIP, MANUAL_REVIEW
-email: string else null
-phone: string else null
+email: string (empty string if not present)
+phone: string (empty string if not present)
 }
 
 Qualification Rules
@@ -202,7 +202,7 @@ sales_opener_sentence: Message to send to founder, follow exact sentence structu
 [usp, specialization, history // anything ] unique/impressive/stunning/special/different/etc, <10 words only.
 Don't use words that feel AI like captivating, captivating, transforming, etc.
 
-email and phone as strings if present in bio else null
+email and phone as strings if present in bio, otherwise use empty string ""
 `;
         
   const userMessage = `Analyze this Instagram profile and provide qualification assessment:

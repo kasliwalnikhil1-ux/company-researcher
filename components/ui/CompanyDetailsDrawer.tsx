@@ -265,55 +265,53 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       <p className="text-sm text-gray-900">{company.instagram}</p>
                     </div>
                   )}
-                  {company.phone && (
-                    <div className="border-l-4 border-indigo-500 pl-4">
-                      <p className="text-sm font-medium text-gray-500">{columnLabels.phone || 'Phone'}</p>
-                      {editingCell?.companyId === company.id && editingCell?.columnKey === 'phone' ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            ref={editInputRef as React.RefObject<HTMLInputElement>}
-                            type="text"
-                            value={editingCell.value}
-                            onChange={(e) => setEditingCell({ ...editingCell, value: e.target.value })}
-                            onBlur={handleInlineEditSave}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                handleInlineEditSave();
-                              } else if (e.key === 'Escape') {
-                                setEditingCell(null);
-                              }
-                            }}
-                            className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                          />
-                          <button
-                            onClick={handleInlineEditSave}
-                            className="text-green-600 hover:text-green-800"
-                            title="Save (Enter)"
-                          >
-                            ✓
-                          </button>
-                          <button
-                            onMouseDown={(e) => {
-                              e.preventDefault();
+                  <div className="border-l-4 border-indigo-500 pl-4">
+                    <p className="text-sm font-medium text-gray-500">{columnLabels.phone || 'Phone'}</p>
+                    {editingCell?.companyId === company.id && editingCell?.columnKey === 'phone' ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={editInputRef as React.RefObject<HTMLInputElement>}
+                          type="text"
+                          value={editingCell.value}
+                          onChange={(e) => setEditingCell({ ...editingCell, value: e.target.value })}
+                          onBlur={handleInlineEditSave}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleInlineEditSave();
+                            } else if (e.key === 'Escape') {
                               setEditingCell(null);
-                            }}
-                            className="text-red-600 hover:text-red-800"
-                            title="Cancel (Esc)"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ) : (
-                        <p 
-                          className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
-                          onDoubleClick={() => handleCellDoubleClick(company, 'phone')}
-                          title="Double click to edit"
+                            }
+                          }}
+                          className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                        <button
+                          onClick={handleInlineEditSave}
+                          className="text-green-600 hover:text-green-800"
+                          title="Save (Enter)"
                         >
-                          {company.phone}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                          ✓
+                        </button>
+                        <button
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setEditingCell(null);
+                          }}
+                          className="text-red-600 hover:text-red-800"
+                          title="Cancel (Esc)"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <p 
+                        className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
+                        onDoubleClick={() => handleCellDoubleClick(company, 'phone')}
+                        title="Double click to edit"
+                      >
+                        {company.phone || '-'}
+                      </p>
+                    )}
+                  </div>
                   <div className="border-l-4 border-indigo-500 pl-4">
                     <p className="text-sm font-medium text-gray-500">{columnLabels.email || 'Email'}</p>
                     {editingCell?.companyId === company.id && editingCell?.columnKey === 'email' ? (
