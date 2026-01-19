@@ -2,33 +2,67 @@
 
 import { createContext, useContext, useEffect, useState } from 'react';
 
-export type Owner = 'Deepak' | 'Naman' | 'Ram' | 'Harshit';
+// Single source of truth - define owners and their colors here only
+const OWNER_CONFIG = [
+  {
+    name: 'Deepak' as const,
+    colors: {
+      bg: 'bg-blue-50',
+      text: 'text-blue-700',
+      border: 'border-blue-200',
+      hex: '#2563eb', // blue-600
+    },
+  },
+  {
+    name: 'Naman' as const,
+    colors: {
+      bg: 'bg-purple-50',
+      text: 'text-purple-700',
+      border: 'border-purple-200',
+      hex: '#9333ea', // purple-600
+    },
+  },
+  {
+    name: 'Ram' as const,
+    colors: {
+      bg: 'bg-green-50',
+      text: 'text-green-700',
+      border: 'border-green-200',
+      hex: '#16a34a', // green-600
+    },
+  },
+  {
+    name: 'Harshit' as const,
+    colors: {
+      bg: 'bg-orange-50',
+      text: 'text-orange-700',
+      border: 'border-orange-200',
+      hex: '#ea580c', // orange-600
+    },
+  },
+] as const;
+
+// Extract owners array from config
+const OWNERS = OWNER_CONFIG.map(config => config.name) as readonly string[];
+
+// Derive type from the config
+export type Owner = typeof OWNER_CONFIG[number]['name'];
+
+// Export the owners array
+export const AVAILABLE_OWNERS: Owner[] = OWNER_CONFIG.map(config => config.name);
 
 const OWNER_STORAGE_KEY = 'selected-owner';
 
-// Color mapping for each owner
-export const OWNER_COLORS: Record<Owner, { bg: string; text: string; border: string }> = {
-  Deepak: {
-    bg: 'bg-blue-50',
-    text: 'text-blue-700',
-    border: 'border-blue-200',
-  },
-  Naman: {
-    bg: 'bg-purple-50',
-    text: 'text-purple-700',
-    border: 'border-purple-200',
-  },
-  Ram: {
-    bg: 'bg-green-50',
-    text: 'text-green-700',
-    border: 'border-green-200',
-  },
-  Harshit: {
-    bg: 'bg-orange-50',
-    text: 'text-orange-700',
-    border: 'border-orange-200',
-  },
-};
+// Build color mapping from config - ensures single source of truth
+export const OWNER_COLORS: Record<Owner, { 
+  bg: string; 
+  text: string; 
+  border: string; 
+  hex: string; 
+}> = OWNER_CONFIG.reduce((acc, config) => {
+  acc[config.name] = config.colors;
+  return acc;
+}, {} as Record<Owner, { bg: string; text: string; border: string; hex: string }>);
 
 type OwnerContextType = {
   selectedOwner: Owner;
@@ -39,17 +73,15 @@ type OwnerContextType = {
 const OwnerContext = createContext<OwnerContextType | undefined>(undefined);
 
 export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
-  const [selectedOwner, setSelectedOwnerState] = useState<Owner>('Deepak');
+  // Use first available owner as default instead of hardcoding
+  const [selectedOwner, setSelectedOwnerState] = useState<Owner>(AVAILABLE_OWNERS[0]);
   const [isHydrated, setIsHydrated] = useState(false);
-
-  // Available owners list
-  const availableOwners: Owner[] = ['Deepak', 'Naman', 'Ram', 'Harshit'];
 
   // Load from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem(OWNER_STORAGE_KEY);
-      if (stored && availableOwners.includes(stored as Owner)) {
+      if (stored && AVAILABLE_OWNERS.includes(stored as Owner)) {
         setSelectedOwnerState(stored as Owner);
       }
       setIsHydrated(true);
@@ -66,7 +98,7 @@ export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
   const value = {
     selectedOwner,
     setSelectedOwner,
-    availableOwners,
+    availableOwners: AVAILABLE_OWNERS,
   };
 
   return (

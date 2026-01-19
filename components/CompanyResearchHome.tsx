@@ -10,6 +10,7 @@ import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
 import ConfirmationModal from './ui/ConfirmationModal';
 import ResumeDialog from './ui/ResumeDialog';
+import Toast from './ui/Toast';
 import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvRow } from "../lib/csvImport";
 import { downloadCsv } from "../lib/csvExport";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
@@ -72,6 +73,24 @@ const cleanUrl = (url: string, mode: 'domain' | 'instagram' = 'domain'): string 
   }
 };
 
+// Invalid domains that should be blocked
+const INVALID_DOMAINS = [
+  'x.com',
+  'twitter.com',
+  'linkedin.com',
+  'whatsapp.com',
+  'facebook.com',
+  "fb.com",
+  'tiktok.com',
+  'youtube.com',
+  'snapchat.com',
+  'discord.com',
+  'telegram.org',
+  'slack.com',
+  'reddit.com',
+  'pinterest.com'
+];
+
 export default function CompanyResearcher() {
   // Companies context for saving summaries
   const { companies, createCompany, updateCompany } = useCompanies();
@@ -118,6 +137,10 @@ export default function CompanyResearcher() {
   const [showResumeDialog, setShowResumeDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvDataRef = useRef<{ headers: string[]; rows: CsvRow[] } | null>(null);
+
+  // Toast state
+  const [toastMessage, setToastMessage] = useState('');
+  const [showToast, setShowToast] = useState(false);
   
   // Helper to get current company data
   const getCurrentCompanyData = useCallback((company: string) => {
@@ -173,6 +196,30 @@ export default function CompanyResearcher() {
     const instagramPattern = /instagram\.com\/[\w.]+/i;
     return instagramPattern.test(text);
   }, []);
+
+  // Function to filter out invalid domains from input
+  const filterInvalidDomains = useCallback((input: string): { filteredInput: string; removedDomains: string[] } => {
+    const lines = input.split(/[,\n]/).map(line => line.trim()).filter(line => line.length > 0);
+    const validLines: string[] = [];
+    const removedDomains: string[] = [];
+
+    lines.forEach(line => {
+      // Extract domain from URL
+      const cleanedUrl = cleanUrl(line, researchMode);
+      const domain = cleanedUrl ? extractDomain(cleanedUrl) : null;
+
+      if (domain && INVALID_DOMAINS.some(invalidDomain => domain.toLowerCase().includes(invalidDomain.toLowerCase()))) {
+        // This is an invalid domain, add to removed list
+        removedDomains.push(line);
+      } else {
+        // This is valid, keep it
+        validLines.push(line);
+      }
+    });
+
+    const filteredInput = validLines.join(', ');
+    return { filteredInput, removedDomains };
+  }, [researchMode]);
 
   // Parse company input into array of company names 
   const parseCompanyInput = useCallback((input: string): string[] => {
@@ -1402,14 +1449,30 @@ export default function CompanyResearcher() {
             value={rawCompanyInput}
             onChange={(e) => {
               const newValue = e.target.value;
-              setRawCompanyInput(newValue);
-              // Check if input contains Instagram URL and switch mode accordingly
-              if (containsInstagramUrl(newValue)) {
+
+              // Filter out invalid domains
+              const { filteredInput, removedDomains } = filterInvalidDomains(newValue);
+
+              // Set the filtered input
+              setRawCompanyInput(filteredInput);
+
+              // Show toast if any invalid domains were removed
+              if (removedDomains.length > 0) {
+                const removedDomainsText = removedDomains.length === 1
+                  ? `"${removedDomains[0]}"`
+                  : `"${removedDomains.slice(0, -1).join('", "')}" and "${removedDomains[removedDomains.length - 1]}"`;
+
+                setToastMessage(`Removed invalid domain${removedDomains.length > 1 ? 's' : ''}: ${removedDomainsText}`);
+                setShowToast(true);
+              }
+
+              // Check if filtered input contains Instagram URL and switch mode accordingly
+              if (containsInstagramUrl(filteredInput)) {
                 // Switch to Instagram mode if Instagram URL is detected
                 if (researchMode !== 'instagram') {
                   setResearchMode('instagram');
                 }
-              } else if (newValue.trim().length > 0 && researchMode === 'instagram') {
+              } else if (filteredInput.trim().length > 0 && researchMode === 'instagram') {
                 // Switch back to Domain mode if no Instagram URL and there's content
                 setResearchMode('domain');
               }
@@ -1627,6 +1690,14 @@ export default function CompanyResearcher() {
           return undefined;
         })()}
       />
-    </div>  
+
+      {/* Toast Notification */}
+      <Toast
+        message={toastMessage}
+        isVisible={showToast}
+        onClose={() => setShowToast(false)}
+        duration={4000}
+      />
+    </div>
   );
 }

@@ -38,17 +38,7 @@ export default function AnalyticsPage() {
   // Map owner colors for the chart
   const getBarColor = (owner: string) => {
     const ownerKey = owner as keyof typeof OWNER_COLORS;
-    if (OWNER_COLORS[ownerKey]) {
-      // Extract color from Tailwind classes - use blue, purple, green, orange
-      const colorMap: Record<string, string> = {
-        'Deepak': '#2563eb', // blue-600
-        'Naman': '#9333ea', // purple-600
-        'Ram': '#16a34a', // green-600
-        'Harshit': '#ea580c', // orange-600
-      };
-      return colorMap[ownerKey] || '#64748b';
-    }
-    return '#64748b';
+    return OWNER_COLORS[ownerKey]?.hex || '#64748b';
   };
 
   // Format period label
