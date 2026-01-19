@@ -366,7 +366,9 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     // Prepend country code to phone number
     let phoneWithCountryCode = company.phone || '';
     if (phoneWithCountryCode && !phoneWithCountryCode.startsWith('+')) {
-      phoneWithCountryCode = `${getEffectiveCountryCode()}${phoneWithCountryCode}`;
+      // Clean phone number: remove spaces and leading zeros
+      const cleanedPhone = phoneWithCountryCode.replace(/\s+/g, '').replace(/^0+/, '');
+      phoneWithCountryCode = `${getEffectiveCountryCode()}${cleanedPhone}`;
     }
 
     const payload = {
@@ -418,7 +420,9 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     if (processedUpdates.phone !== undefined) {
       let phoneWithCountryCode = processedUpdates.phone || '';
       if (phoneWithCountryCode && !phoneWithCountryCode.startsWith('+')) {
-        phoneWithCountryCode = `${getEffectiveCountryCode()}${phoneWithCountryCode}`;
+        // Clean phone number: remove spaces and leading zeros
+        const cleanedPhone = phoneWithCountryCode.replace(/\s+/g, '').replace(/^0+/, '');
+        phoneWithCountryCode = `${getEffectiveCountryCode()}${cleanedPhone}`;
       }
       processedUpdates.phone = phoneWithCountryCode;
     }
