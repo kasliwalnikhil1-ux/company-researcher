@@ -147,3 +147,48 @@ export function extractDomain(input: string): string {
     return cleaned;
   }
 }
+
+/**
+ * Copies text to clipboard with fallback support
+ * Uses the modern Clipboard API if available, otherwise falls back to the legacy method
+ * 
+ * @param text - Text to copy to clipboard
+ * @returns Promise that resolves when text is copied, or rejects if copying fails
+ */
+export async function copyToClipboard(text: string): Promise<void> {
+  if (!text) {
+    throw new Error('No text provided to copy');
+  }
+
+  // Try modern Clipboard API first (must be called synchronously within user gesture)
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      // If Clipboard API fails (e.g., permission denied), fall back to legacy method
+      console.warn('Clipboard API failed, trying fallback method:', error);
+    }
+  }
+
+  // Fallback: Use legacy execCommand method
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    const successful = document.execCommand('copy');
+    document.body.removeChild(textArea);
+    
+    if (!successful) {
+      throw new Error('execCommand copy failed');
+    }
+  } catch (error) {
+    throw new Error(`Failed to copy text to clipboard: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}

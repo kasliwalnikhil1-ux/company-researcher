@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { generateMessageTemplates } from '../../lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
+import { copyToClipboard } from '@/lib/utils';
 
 interface QualificationData {
   company_summary: string;
@@ -26,7 +27,7 @@ const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => 
 
   const handleCopy = async (text: string, messageNumber: number) => {
     try {
-      await navigator.clipboard.writeText(text);
+      await copyToClipboard(text);
       setCopiedMessage(messageNumber);
       setTimeout(() => setCopiedMessage(null), 2000);
     } catch (err) {
