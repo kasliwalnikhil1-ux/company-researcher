@@ -139,7 +139,7 @@ export default function CompanyResearcher() {
         qualificationData: resultsByCompany[company]?.qualificationData || resultsByCompany[company]?.instagramQualificationData || null
       }
     }));
-  }, [submittedCompanies, resultsByCompany]);
+  }, [submittedCompanies, resultsByCompany]); 
 
   // Function to check if a string is a valid URL
   const isValidUrl = useCallback(async (url: string): Promise<boolean> => {
