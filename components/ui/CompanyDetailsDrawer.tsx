@@ -1,9 +1,10 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { X } from "lucide-react";
+import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
+import { supabase } from "@/utils/supabase/client";
 
 interface CompanyDetailsDrawerProps {
   isOpen: boolean;
@@ -14,6 +15,11 @@ interface CompanyDetailsDrawerProps {
   getCellValue: (company: Company, columnKey: string) => string;
   columnOrder: string[];
   updateCompany: (id: string, updates: Partial<Company>) => Promise<void>;
+  companies?: Company[];
+  onCompanyChange?: (company: Company) => void;
+  currentPage?: number;
+  totalPages?: number;
+  onPageChange?: (page: number) => void;
 }
 
 const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
@@ -25,6 +31,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   getCellValue,
   columnOrder,
   updateCompany,
+  companies = [],
+  onCompanyChange,
+  currentPage = 1,
+  totalPages = 1,
+  onPageChange,
 }) => {
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{
@@ -38,6 +49,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [toastMessage, setToastMessage] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const [classificationValue, setClassificationValue] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<"overview" | "contacts">("overview");
+  const [contacts, setContacts] = useState<any[] | null>(null);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactToRemove, setContactToRemove] = useState<{
+    contactId: string | number;
+    contactName: string;
+  } | null>(null);
 
   // Handle cell double click (edit)
   const handleCellDoubleClick = useCallback(
@@ -271,6 +289,566 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     [company, getSummaryData, updateCompany]
   );
 
+  // Track if we've already fetched contacts for this company/domain
+  const fetchedDomainsRef = useRef<Set<string>>(new Set());
+  // Track previous tab to only fetch when switching TO contacts tab
+  const prevTabRef = useRef<"overview" | "contacts">("overview");
+
+  // Fetch contacts from API or localStorage
+  const fetchContacts = useCallback(async () => {
+    if (!company?.domain) return;
+
+    const domain = company.domain;
+    const storageKey = `contacts_${domain}`;
+
+    // If we've already fetched for this domain, use cached data
+    if (fetchedDomainsRef.current.has(domain)) {
+      const cachedContacts = localStorage.getItem(storageKey);
+      if (cachedContacts) {
+        try {
+          const parsed = JSON.parse(cachedContacts);
+          setContacts(parsed);
+          return;
+        } catch (e) {
+          console.error("Error parsing cached contacts:", e);
+        }
+      }
+      return;
+    }
+
+    // Check if contacts exist in company data
+    if (company.contacts && Array.isArray(company.contacts)) {
+      setContacts(company.contacts);
+      localStorage.setItem(storageKey, JSON.stringify(company.contacts));
+      fetchedDomainsRef.current.add(domain);
+      return;
+    }
+
+    // Check localStorage first
+    const cachedContacts = localStorage.getItem(storageKey);
+    if (cachedContacts) {
+      try {
+        const parsed = JSON.parse(cachedContacts);
+        setContacts(parsed);
+        fetchedDomainsRef.current.add(domain);
+        return;
+      } catch (e) {
+        console.error("Error parsing cached contacts:", e);
+      }
+    }
+
+    setContactsLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        throw new Error("Not authenticated");
+      }
+
+      const response = await fetch(
+        "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/people_search",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ domain }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch contacts: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const contactsList = data.results || [];
+
+      // Merge with existing company contacts to preserve checked state
+      let mergedContacts = contactsList;
+      if (company.contacts && Array.isArray(company.contacts)) {
+        // Create a map of existing contacts by their identifier
+        const existingContactsMap = new Map();
+        company.contacts.forEach((existingContact) => {
+          const id = existingContact.person_id || existingContact.email || existingContact.full_name;
+          if (id) {
+            existingContactsMap.set(id, existingContact);
+          }
+        });
+
+        // Merge: preserve checked state and other properties from existing contacts
+        mergedContacts = contactsList.map((newContact: any) => {
+          const id = newContact.person_id || newContact.email || newContact.full_name;
+          const existingContact = id ? existingContactsMap.get(id) : null;
+          if (existingContact) {
+            // Merge: keep new contact data but preserve checked state and any other custom fields
+            return { ...newContact, checked: existingContact.checked };
+          }
+          return newContact;
+        });
+      }
+
+      // Store in localStorage
+      localStorage.setItem(storageKey, JSON.stringify(mergedContacts));
+
+      // Mark this domain as fetched
+      fetchedDomainsRef.current.add(domain);
+
+      // Set merged contacts
+      setContacts(mergedContacts);
+    } catch (error: any) {
+      console.error("Error fetching contacts:", error);
+      setToastMessage(`Error fetching contacts: ${error.message}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } finally {
+      setContactsLoading(false);
+    }
+  }, [company?.domain]);
+
+  // Fetch contacts only when user switches TO contacts tab (not when drawer opens)
+  useEffect(() => {
+    // Only fetch if:
+    // 1. Current tab is "contacts"
+    // 2. Previous tab was NOT "contacts" (i.e., user just switched to contacts)
+    // 3. Company domain exists
+    if (
+      activeTab === "contacts" &&
+      prevTabRef.current !== "contacts" &&
+      company?.domain
+    ) {
+      fetchContacts();
+    }
+    // Update previous tab reference
+    prevTabRef.current = activeTab;
+  }, [activeTab, company?.domain, fetchContacts]);
+
+  // Reset tab when company changes
+  useEffect(() => {
+    if (company) {
+      setActiveTab("overview");
+      setContacts(null);
+      prevTabRef.current = "overview"; // Reset previous tab reference
+      // Don't clear fetchedDomainsRef - we want to keep the cache across company switches
+    }
+  }, [company?.id]);
+
+  // Handle contact checkbox toggle
+  const handleContactToggle = useCallback(
+    async (contactId: string | number, checked: boolean) => {
+      if (!company || !contacts) return;
+
+      try {
+        // Update the contact in the array
+        const updatedContacts = contacts.map((contact) => {
+          // Match by person_id or email or full_name as identifier
+          const matches =
+            contact.person_id === contactId ||
+            contact.email === contactId ||
+            contact.full_name === contactId;
+          
+          if (matches) {
+            return { ...contact, checked };
+          }
+          return contact;
+        });
+
+        // Update local state
+        setContacts(updatedContacts);
+
+        // Update localStorage cache
+        const domain = company.domain;
+        const storageKey = `contacts_${domain}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
+
+        // Update database
+        await updateCompany(company.id, { contacts: updatedContacts });
+
+        setToastMessage(checked ? "Contact checked" : "Contact unchecked");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 2000);
+      } catch (error: any) {
+        console.error("Error toggling contact:", error);
+        setToastMessage(`Error updating contact: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        // Revert local state on error
+        setContacts(contacts);
+      }
+    },
+    [company, contacts, updateCompany]
+  );
+
+  // Handle contact removal confirmation (shows modal)
+  const handleContactRemoveClick = useCallback(
+    (contactId: string | number, contactName: string) => {
+      setContactToRemove({ contactId, contactName });
+    },
+    []
+  );
+
+  // Handle contact removal (actually removes)
+  const handleContactRemoveConfirm = useCallback(
+    async () => {
+      if (!company || !contacts || !contactToRemove) return;
+
+      const { contactId } = contactToRemove;
+
+      try {
+        // Filter out the contact
+        const updatedContacts = contacts.filter((contact) => {
+          const matches =
+            contact.person_id === contactId ||
+            contact.email === contactId ||
+            contact.full_name === contactId;
+          return !matches;
+        });
+
+        // Update local state
+        setContacts(updatedContacts);
+
+        // Update localStorage cache
+        const domain = company.domain;
+        const storageKey = `contacts_${domain}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
+
+        // Update database
+        await updateCompany(company.id, { contacts: updatedContacts });
+
+        // Close modal and show success message
+        setContactToRemove(null);
+        setToastMessage("Contact removed");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 2000);
+      } catch (error: any) {
+        console.error("Error removing contact:", error);
+        setToastMessage(`Error removing contact: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        // Revert local state on error
+        setContacts(contacts);
+      }
+    },
+    [company, contacts, contactToRemove, updateCompany]
+  );
+
+  // Handle cancel removal
+  const handleContactRemoveCancel = useCallback(() => {
+    setContactToRemove(null);
+  }, []);
+
+  // Calculate current index and navigation helpers (must be before early return)
+  const currentIndex = company ? companies.findIndex((c) => c.id === company.id) : -1;
+  const hasNextInPage = currentIndex < companies.length - 1 && currentIndex >= 0;
+  const hasNextPage = currentPage < totalPages;
+  const hasNext = hasNextInPage || hasNextPage;
+  const hasPreviousPage = currentPage > 1;
+  const hasPreviousInPage = currentIndex > 0;
+  const hasPrevious = hasPreviousInPage || hasPreviousPage;
+
+  const handlePrevious = useCallback(() => {
+    if (!onCompanyChange || !company) return;
+
+    // If we're at the first company of current page, go to previous page
+    if (currentIndex === 0 && hasPreviousPage && onPageChange) {
+      onPageChange(currentPage - 1);
+      // The company will be updated when the new page loads
+      return;
+    }
+
+    // Otherwise, navigate to previous company in current page
+    if (currentIndex > 0) {
+      const previousCompany = companies[currentIndex - 1];
+      if (previousCompany) {
+        onCompanyChange(previousCompany);
+      }
+    }
+  }, [currentIndex, hasPreviousPage, onPageChange, currentPage, onCompanyChange, companies, company]);
+
+  const handleNext = useCallback(() => {
+    if (!onCompanyChange || !company) return;
+
+    // If we're at the last company of current page, go to next page
+    if (currentIndex === companies.length - 1 && hasNextPage && onPageChange) {
+      onPageChange(currentPage + 1);
+      // The company will be updated when the new page loads
+      return;
+    }
+
+    // Otherwise, navigate to next company in current page
+    if (currentIndex < companies.length - 1) {
+      const nextCompany = companies[currentIndex + 1];
+      if (nextCompany) {
+        onCompanyChange(nextCompany);
+      }
+    }
+  }, [currentIndex, companies.length, hasNextPage, onPageChange, currentPage, onCompanyChange, company]);
+
+  // Handle keyboard navigation (must be before early return)
+  useEffect(() => {
+    if (!isOpen || !company) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if no input is focused
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      if (e.key === 'ArrowLeft' && hasPrevious) {
+        e.preventDefault();
+        handlePrevious();
+      } else if (e.key === 'ArrowRight' && hasNext) {
+        e.preventDefault();
+        handleNext();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, company, hasPrevious, hasNext, handlePrevious, handleNext]);
+
+  // Contact Card Component (needs to be defined before the main component uses it)
+  const ContactCard = ({ 
+    contact, 
+    index,
+    onToggle,
+    onRemove
+  }: { 
+    contact: any; 
+    index: number;
+    onToggle: (contactId: string | number, checked: boolean) => void;
+    onRemove: (contactId: string | number, contactName: string) => void;
+  }) => {
+    const [imageError, setImageError] = useState(false);
+    const [copiedItem, setCopiedItem] = useState<string | null>(null);
+    const showPlaceholder = !contact.photo_url || imageError;
+    
+    // Get unique identifier for this contact
+    const contactId = contact.person_id || contact.email || contact.full_name || index;
+    const isChecked = contact.checked === true;
+    const contactName = contact.full_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || contact.email || "Unknown";
+
+    const handleCopy = async (text: string, itemType: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopiedItem(itemType);
+        setTimeout(() => setCopiedItem(null), 2000);
+      } catch (err) {
+        console.error("Failed to copy:", err);
+      }
+    };
+
+    // Generate Gmail compose URL with pre-filled fields (exactly like companies page)
+    const getGmailUrl = (email: string): string => {
+      if (!company) {
+        return `mailto:${email}`;
+      }
+      
+      // Trim email exactly like companies page
+      const trimmedEmail = email.trim();
+      // Use exact same URL format as companies page
+      let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(trimmedEmail)}`;
+      
+      // Get subject and clipboard columns from localStorage (same keys as companies page)
+      const subjectColumn = typeof window !== 'undefined' 
+        ? localStorage.getItem('companies-subject-column') 
+        : null;
+      const clipboardColumn = typeof window !== 'undefined' 
+        ? localStorage.getItem('companies-clipboard-column') 
+        : null;
+
+      // Add subject column value as email subject if available (exactly like companies page)
+      if (subjectColumn) {
+        try {
+          const subjectValue = getCellValue(company, subjectColumn);
+          console.log('Subject column:', subjectColumn, 'Subject value:', subjectValue, 'Length:', subjectValue?.length);
+          // Match companies page exactly: only check for truthy and not '-'
+          if (subjectValue && subjectValue !== '-') {
+            const encodedSubject = encodeURIComponent(subjectValue);
+            gmailUrl += `&su=${encodedSubject}`;
+          } else {
+            console.log('Subject value skipped - empty or "-"');
+          }
+        } catch (error) {
+          console.error('Error getting subject value:', error);
+        }
+      } else {
+        console.log('No subject column configured');
+      }
+
+      // Add clipboard column value as email body if available (exactly like companies page)
+      if (clipboardColumn) {
+        try {
+          const clipboardValue = getCellValue(company, clipboardColumn);
+          console.log('Clipboard column:', clipboardColumn, 'Clipboard value:', clipboardValue, 'Length:', clipboardValue?.length);
+          // Match companies page exactly: only check for truthy and not '-'
+          if (clipboardValue && clipboardValue !== '-') {
+            // Extract first name from contact
+            let firstName = '';
+            if (contact.first_name) {
+              firstName = contact.first_name;
+            } else if (contact.full_name) {
+              // Extract first name from full name (first word)
+              const nameParts = contact.full_name.trim().split(/\s+/);
+              firstName = nameParts[0] || '';
+            }
+            
+            // Use personalized greeting with first name if available
+            const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
+            const emailBody = `${greeting} \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
+            const encodedBody = encodeURIComponent(emailBody);
+            gmailUrl += `&body=${encodedBody}`;
+          } else {
+            console.log('Clipboard value skipped - empty or "-"');
+          }
+        } catch (error) {
+          console.error('Error getting clipboard value:', error);
+        }
+      } else {
+        console.log('No clipboard column configured');
+      }
+
+      console.log('Final Gmail URL:', gmailUrl);
+
+      return gmailUrl;
+    };
+
+    return (
+      <div
+        className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
+          isChecked ? "border-indigo-500 bg-indigo-50/30" : "border-gray-200"
+        }`}
+      >
+        <div className="flex items-start gap-4">
+          <div className="flex items-start gap-2 pt-1">
+            <input
+              type="checkbox"
+              checked={isChecked}
+              onChange={(e) => onToggle(contactId, e.target.checked)}
+              className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
+              title={isChecked ? "Uncheck contact" : "Check contact"}
+            />
+          </div>
+          <div className="relative w-20 h-20 flex-shrink-0">
+            {contact.photo_url && !imageError && (
+              <img
+                src={contact.photo_url}
+                alt={contact.full_name || "Contact"}
+                className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
+                onError={() => setImageError(true)}
+              />
+            )}
+            {showPlaceholder && (
+              <div className="w-20 h-20 rounded-full bg-indigo-100 flex items-center justify-center border-2 border-gray-200">
+                <User className="w-10 h-10 text-indigo-600" />
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                <h4 className="text-base font-semibold text-gray-900">
+                  {contact.full_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || "Unknown"}
+                </h4>
+                {contact.title && (
+                  <p className="text-sm text-gray-600 mt-1 font-medium">
+                    {contact.title}
+                  </p>
+                )}
+                {contact.headline && (
+                  <p className="text-sm text-gray-500 mt-1 italic">
+                    {contact.headline}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => onRemove(contactId, contactName)}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+                title="Remove contact"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {contact.email && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <a
+                    href={getGmailUrl(contact.email)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      const gmailUrl = getGmailUrl(contact.email);
+                      window.open(gmailUrl, '_blank', 'noopener,noreferrer');
+                    }}
+                    className="text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                  >
+                    {contact.email}
+                  </a>
+                  {contact.email_status && (
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${
+                        contact.email_status === "verified"
+                          ? "bg-green-100 text-green-700"
+                          : "bg-gray-100 text-gray-700"
+                      }`}
+                    >
+                      {contact.email_status}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleCopy(contact.email, `email-${index}`)}
+                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                    title="Copy email"
+                  >
+                    {copiedItem === `email-${index}` ? (
+                      <Check className="w-4 h-4 text-green-600" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              )}
+              {contact.phone && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <a
+                    href={`tel:${contact.phone}`}
+                    className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                  >
+                    {contact.phone}
+                  </a>
+                </div>
+              )}
+              {contact.linkedin_url && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Linkedin className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                  <a
+                    href={contact.linkedin_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                  >
+                    LinkedIn Profile
+                  </a>
+                  <button
+                    onClick={() => handleCopy(contact.linkedin_url, `linkedin-${index}`)}
+                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                    title="Copy LinkedIn URL"
+                  >
+                    {copiedItem === `linkedin-${index}` ? (
+                      <Check className="w-4 h-4 text-green-600" />
+                    ) : (
+                      <Copy className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Early return AFTER all hooks have been called
   if (!isOpen || !company) return null;
 
@@ -295,23 +873,93 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         <div className="flex flex-col h-full">
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <h2 className="text-2xl font-semibold text-gray-900">
-              Company Details
-            </h2>
+            <div className="flex items-center gap-3 flex-wrap flex-1">
+              <div className="flex items-center gap-3 flex-wrap">
+                <h2 className="text-2xl font-semibold text-gray-900">
+                  Company Details
+                </h2>
+                {companies.length > 0 && currentIndex >= 0 && (
+                  <span className="text-sm text-gray-500">
+                    Company {currentIndex + 1} of {companies.length}
+                    {totalPages > 1 && ` • Page ${currentPage} of ${totalPages}`}
+                  </span>
+                )}
+                {company.domain && (
+                  <span className="px-2.5 py-1 text-xs font-medium bg-indigo-100 text-indigo-700 rounded-full">
+                    {company.domain}
+                  </span>
+                )}
+                {company.instagram && (
+                  <span className="px-2.5 py-1 text-xs font-medium bg-pink-100 text-pink-700 rounded-full">
+                    {company.instagram}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* Navigation Buttons - before close button */}
+              {(companies.length > 1 || totalPages > 1) && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handlePrevious}
+                    disabled={!hasPrevious}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Previous company"
+                    title="Previous company (←)"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    disabled={!hasNext}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Next company"
+                    title="Next company (→)"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
+              <button
+                onClick={onClose}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+                aria-label="Close drawer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200">
             <button
-              onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-              aria-label="Close drawer"
+              onClick={() => setActiveTab("overview")}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === "overview"
+                  ? "text-indigo-600 border-b-2 border-indigo-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
             >
-              <X className="w-5 h-5" />
+              Overview
+            </button>
+            <button
+              onClick={() => setActiveTab("contacts")}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === "contacts"
+                  ? "text-indigo-600 border-b-2 border-indigo-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Contacts
             </button>
           </div>
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-6">
-            <div className="space-y-6">
-              {/* Basic Information */}
-              <div>
+            {activeTab === "overview" ? (
+              <div className="space-y-6">
+                {/* Basic Information */}
+                <div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">
                   Basic Information
                 </h3>
@@ -747,6 +1395,39 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 </div>
               </div>
             </div>
+            ) : (
+              /* Contacts Tab */
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Contacts
+                  </h3>
+                  {contactsLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
+                      <span className="ml-2 text-gray-600">Loading contacts...</span>
+                    </div>
+                  ) : contacts && contacts.length > 0 ? (
+                    <div className="grid gap-4">
+                      {contacts.map((contact, index) => (
+                        <ContactCard 
+                          key={contact.person_id || index} 
+                          contact={contact} 
+                          index={index}
+                          onToggle={handleContactToggle}
+                          onRemove={handleContactRemoveClick}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <User className="w-12 h-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-gray-600">No contacts found for this company.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -766,6 +1447,47 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded-md shadow-lg z-50 transition-opacity duration-300">
           {toastMessage}
         </div>
+      )}
+
+      {/* Remove Contact Confirmation Modal */}
+      {contactToRemove && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
+            onClick={handleContactRemoveCancel}
+          />
+          
+          {/* Modal */}
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Remove Contact
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Are you sure you want to remove <span className="font-semibold text-gray-900">{contactToRemove.contactName}</span> from the contacts list? This action cannot be undone.
+              </p>
+              
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={handleContactRemoveCancel}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleContactRemoveConfirm}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </>
   );

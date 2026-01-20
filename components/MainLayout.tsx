@@ -5,16 +5,44 @@ import { useOwner, OWNER_COLORS, Owner } from '@/contexts/OwnerContext';
 import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, Shield, Lock, LogOut } from 'lucide-react';
+import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
-  const { user, signOut } = useAuth();
+  const { user, signOut, signOutAll, changePassword } = useAuth();
   const { selectedOwner, setSelectedOwner, availableOwners } = useOwner();
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const router = useRouter();
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
+
+  // Detect mobile screen size
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+      if (window.innerWidth >= 768) {
+        setIsMobileMenuOpen(false);
+      }
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Close mobile menu when route changes
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
 
   const handleSignOut = async () => {
     try {
@@ -22,6 +50,54 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.push('/login');
     } catch (error) {
       console.error('Error signing out:', error);
+    }
+  };
+
+  const handleSignOutAll = async () => {
+    setShowLogoutAllConfirm(true);
+  };
+
+  const confirmSignOutAll = async () => {
+    try {
+      await signOutAll();
+      router.push('/login');
+    } catch (error) {
+      console.error('Error signing out from all devices:', error);
+      alert('Failed to sign out from all devices. Please try again.');
+      setShowLogoutAllConfirm(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError('');
+    
+    if (!newPassword || !confirmPassword) {
+      setPasswordError('Please fill in all fields');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters long');
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      await changePassword(newPassword);
+      setShowChangePasswordDialog(false);
+      setNewPassword('');
+      setConfirmPassword('');
+      alert('Password changed successfully!');
+    } catch (error) {
+      console.error('Error changing password:', error);
+      setPasswordError(error instanceof Error ? error.message : 'Failed to change password. Please try again.');
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -35,110 +111,177 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen flex">
-      {/* Sidebar */}
-      <aside className={`${isCollapsed ? 'w-16' : 'w-64'} h-screen bg-white border-r border-gray-200 flex flex-col transition-all duration-300 fixed top-0 left-0 z-10`}>
-        {/* Toggle Button */}
+      {/* Mobile Menu Button */}
+      {isMobile && (
         <button
-          onClick={toggleSidebar}
-          className="absolute -right-3 top-6 z-10 bg-white border border-gray-200 rounded-full p-1.5 shadow-sm hover:shadow-md transition-shadow"
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="fixed top-4 left-4 z-50 bg-white border border-gray-200 rounded-lg p-2 shadow-md hover:shadow-lg transition-shadow md:hidden"
+          aria-label="Toggle menu"
         >
-          {isCollapsed ? (
-            <ChevronRight className="w-4 h-4 text-gray-600" />
+          {isMobileMenuOpen ? (
+            <X className="w-5 h-5 text-gray-600" />
           ) : (
-            <ChevronLeft className="w-4 h-4 text-gray-600" />
+            <Menu className="w-5 h-5 text-gray-600" />
           )}
         </button>
+      )}
 
-        <div className={`p-6 border-b border-gray-200 ${isCollapsed ? 'px-2' : ''}`}>
-          <h1 className={`text-xl font-bold text-gray-900 transition-opacity duration-300 ${isCollapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
-            Kaptured.AI CRM
-          </h1>
+      {/* Mobile Overlay */}
+      {isMobile && isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={`
+        ${isMobile 
+          ? `fixed top-0 left-0 h-screen z-40 transform transition-transform duration-300 ${
+              isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+            }`
+          : `${isCollapsed ? 'w-16' : 'w-64'} fixed top-0 left-0`
+        }
+        w-64 h-screen bg-white border-r border-gray-200 flex flex-col
+      `}>
+        {/* Toggle Button - Desktop only */}
+        {!isMobile && (
+          <button
+            onClick={toggleSidebar}
+            className="absolute -right-3 top-6 z-10 bg-white border border-gray-200 rounded-full p-1.5 shadow-sm hover:shadow-md transition-shadow"
+            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {isCollapsed ? (
+              <ChevronRight className="w-4 h-4 text-gray-600" />
+            ) : (
+              <ChevronLeft className="w-4 h-4 text-gray-600" />
+            )}
+          </button>
+        )}
+
+        <div className={`p-6 border-b border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+          <div className="flex items-center justify-between">
+            <h1 className={`text-xl font-bold text-gray-900 transition-opacity duration-300 ${isCollapsed && !isMobile ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
+              Kaptured.AI CRM
+            </h1>
+            {isMobile && (
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="p-1 text-gray-500 hover:text-gray-700"
+                aria-label="Close menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         </div>
         
-        <nav className="flex-1 px-4 py-6 space-y-2">
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
           <Link
             href="/"
-            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/')
                 ? 'bg-indigo-50 text-indigo-700'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
             title="Research"
           >
-            <Search className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
-            {!isCollapsed && <span>Research</span>}
+            <Search className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Research</span>}
           </Link>
           
           <Link
             href="/templates"
-            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/templates')
                 ? 'bg-indigo-50 text-indigo-700'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
             title="Templates"
           >
-            <FileText className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
-            {!isCollapsed && <span>Templates</span>}
+            <FileText className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Templates</span>}
           </Link>
           
           <Link
             href="/companies"
-            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/companies')
                 ? 'bg-indigo-50 text-indigo-700'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
             title="Companies"
           >
-            <Building2 className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
-            {!isCollapsed && <span>Companies</span>}
+            <Building2 className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Companies</span>}
           </Link>
           
           <Link
             href="/analytics"
-            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/analytics')
                 ? 'bg-indigo-50 text-indigo-700'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
             title="Analytics"
           >
-            <BarChart3 className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
-            {!isCollapsed && <span>Analytics</span>}
+            <BarChart3 className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Analytics</span>}
           </Link>
           
           <Link
             href="/domains-extractor"
-            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/domains-extractor')
                 ? 'bg-indigo-50 text-indigo-700'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
             title="Extract Domains"
           >
-            <Globe className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
-            {!isCollapsed && <span>Extract Domains</span>}
+            <Globe className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
           </Link>
           
           <Link
             href="/enrich"
-            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/enrich')
                 ? 'bg-indigo-50 text-indigo-700'
                 : 'text-gray-700 hover:bg-gray-50'
             }`}
             title="Enrich CSV"
           >
-            <Sparkles className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
-            {!isCollapsed && <span>Enrich</span>}
+            <Sparkles className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Enrich</span>}
           </Link>
+
+          {/* Security Section */}
+          <div className={`pt-4 mt-4 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+            <div className={`px-4 mb-2 ${isCollapsed && !isMobile ? 'hidden' : ''}`}>
+              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Security</h2>
+            </div>
+            <button
+              onClick={handleSignOutAll}
+              className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors text-orange-700 hover:bg-orange-50`}
+              title="Logout All Devices"
+            >
+              <LogOut className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Logout All</span>}
+            </button>
+            <button
+              onClick={() => setShowChangePasswordDialog(true)}
+              className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors text-blue-700 hover:bg-blue-50`}
+              title="Change Password"
+            >
+              <Lock className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Change Password</span>}
+            </button>
+          </div>
         </nav>
 
         {/* User info and logout at bottom */}
-        <div className={`p-4 border-t border-gray-200 space-y-3 ${isCollapsed ? 'px-2' : ''}`}>
-          {!isCollapsed && (
+        <div className={`p-4 border-t border-gray-200 space-y-3 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+          {(!isCollapsed || isMobile) && (
             <div className="px-4 py-2 space-y-3">
               {/* Owner Dropdown */}
               <div>
@@ -188,10 +331,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           )}
           <button
             onClick={handleSignOut}
-            className={`w-full flex items-center ${isCollapsed ? 'justify-center px-2' : 'justify-center px-4'} py-2.5 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors`}
+            className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'justify-center px-4'} py-2.5 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors`}
             title="Logout"
           >
-            {isCollapsed ? (
+            {isCollapsed && !isMobile ? (
               <span className="text-lg">🚪</span>
             ) : (
               <span>Logout</span>
@@ -201,9 +344,108 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       </aside>
 
       {/* Main content */}
-      <main className={`${isCollapsed ? 'ml-16' : 'ml-64'} flex-1 flex flex-col overflow-hidden transition-all duration-300`}>
+      <main className={`
+        ${isMobile ? 'ml-0' : isCollapsed ? 'ml-16' : 'ml-64'}
+        flex-1 flex flex-col overflow-hidden transition-all duration-300
+        ${isMobile ? 'pt-16' : ''}
+      `}>
         {children}
       </main>
+
+      {/* Logout All Confirmation Modal */}
+      <DeleteConfirmationModal
+        isOpen={showLogoutAllConfirm}
+        title="Logout All Devices"
+        message="Are you sure you want to log out from all devices? This will end all active sessions."
+        onConfirm={confirmSignOutAll}
+        onCancel={() => setShowLogoutAllConfirm(false)}
+        confirmText="Logout All"
+        cancelText="Cancel"
+      />
+
+      {/* Change Password Dialog */}
+      {showChangePasswordDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-blue-600" />
+                Change Password
+              </h2>
+              <button
+                onClick={() => {
+                  setShowChangePasswordDialog(false);
+                  setNewPassword('');
+                  setConfirmPassword('');
+                  setPasswordError('');
+                }}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label="Close dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                  New Password
+                </label>
+                <input
+                  id="newPassword"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter new password"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                  Confirm Password
+                </label>
+                <input
+                  id="confirmPassword"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Confirm new password"
+                />
+              </div>
+
+              {passwordError && (
+                <div className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
+                  {passwordError}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={handleChangePassword}
+                  disabled={isChangingPassword}
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isChangingPassword ? 'Changing...' : 'Change Password'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowChangePasswordDialog(false);
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setPasswordError('');
+                  }}
+                  disabled={isChangingPassword}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

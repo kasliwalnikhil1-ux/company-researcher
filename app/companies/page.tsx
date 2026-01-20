@@ -181,6 +181,8 @@ function CompaniesContent() {
     setSetNameFilter,
     ownerFilter,
     setOwnerFilter,
+    domainInstagramFilter,
+    setDomainInstagramFilter,
     searchQuery,
     setSearchQuery,
     availableSetNames,
@@ -209,6 +211,7 @@ function CompaniesContent() {
   const [companyToDelete, setCompanyToDelete] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [companyToView, setCompanyToView] = useState<Company | null>(null);
+  const [pendingPageDirection, setPendingPageDirection] = useState<'next' | 'prev' | null>(null);
   const [formData, setFormData] = useState<{
     domain: string;
     instagram: string;
@@ -232,6 +235,20 @@ function CompaniesContent() {
       if (updatedCompany) {
         // Update companyToView with the latest data from companies array
         setCompanyToView(updatedCompany);
+      } else if (drawerOpen && companies.length > 0) {
+        // If current company is not in the new page's companies, select appropriate company
+        // This happens when navigating to a new page
+        if (pendingPageDirection === 'next') {
+          // When going to next page, select first company
+          setCompanyToView(companies[0]);
+        } else if (pendingPageDirection === 'prev') {
+          // When going to previous page, select last company
+          setCompanyToView(companies[companies.length - 1]);
+        } else {
+          // Default: select first company
+          setCompanyToView(companies[0]);
+        }
+        setPendingPageDirection(null);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1279,44 +1296,45 @@ function CompaniesContent() {
   }
 
   return (
-    <div className="p-8 max-w-full mx-auto">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
-          <Building2 className="w-8 h-8" />
+    <div className="p-4 md:p-8 max-w-full mx-auto">
+      <div className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
+          <Building2 className="w-6 h-6 md:w-8 md:h-8" />
           Companies
         </h1>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 md:gap-3">
           {selectedCompanyIds.size > 0 ? (
             <>
               <button
                 onClick={() => setAssignSetModalOpen(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
               >
-                Assign Set ({selectedCompanyIds.size})
+                <span className="hidden sm:inline">Assign Set </span>({selectedCompanyIds.size})
               </button>
               <button
                 onClick={() => setMergeModalOpen(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
               >
-                <GitMerge className="w-4 h-4 mr-2" />
-                Merge Selected ({selectedCompanyIds.size})
+                <GitMerge className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Merge Selected </span>({selectedCompanyIds.size})
               </button>
               <button
                 onClick={() => setBulkDeleteModalOpen(true)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
               >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete Selected ({selectedCompanyIds.size})
+                <Trash2 className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Delete Selected </span>({selectedCompanyIds.size})
               </button>
             </>
           ) : (
             <>
               <button
                 onClick={() => setColumnFilterOpen(!columnFilterOpen)}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
               >
-                <Filter className="w-4 h-4 mr-2" />
-                Manage Columns
+                <Filter className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Manage Columns</span>
+                <span className="sm:hidden">Columns</span>
               </button>
               {!isCreating && (
                 <button
@@ -1324,10 +1342,11 @@ function CompaniesContent() {
                     setIsCreating(true);
                     setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
                   }}
-                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+                  className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
                 >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add Company
+                  <Plus className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Add Company</span>
+                  <span className="sm:hidden">Add</span>
                 </button>
               )}
             </>
@@ -1337,7 +1356,7 @@ function CompaniesContent() {
 
       {/* Column Management Dropdown */}
       {columnFilterOpen && (
-        <div className="mb-4 bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+        <div className="mb-4 bg-white border border-gray-200 rounded-lg p-3 md:p-4 shadow-sm max-h-[70vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-gray-900">Manage Columns</h3>
             <button
@@ -1440,15 +1459,15 @@ function CompaniesContent() {
       )}
 
       {/* Search and Sort */}
-      <div className="mb-4 flex items-center gap-4">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+        <div className="relative flex-1 max-w-full sm:max-w-md">
           <input
             type="text"
             placeholder="Search companies..."
             value={localSearchInput}
             onChange={handleSearchChange}
             onKeyDown={handleSearchKeyDown}
-            className="block w-full px-4 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            className="block w-full px-4 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
           />
           {localSearchInput && (
             <button
@@ -1460,12 +1479,12 @@ function CompaniesContent() {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <ArrowUpDown className="w-4 h-4 text-gray-500" />
+        <div className="flex items-center gap-2 sm:flex-shrink-0">
+          <ArrowUpDown className="w-4 h-4 text-gray-500 hidden sm:block" />
           <select
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            className="flex-1 sm:flex-none px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
@@ -1474,23 +1493,25 @@ function CompaniesContent() {
       </div>
 
       {/* Filters */}
-      <div className="mb-4 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Filter className="w-4 h-4 text-gray-500" />
-          <select
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom')}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="all">All Dates</option>
-            <option value="today">Created Today</option>
-            <option value="yesterday">Created Yesterday</option>
-            <option value="last_week">Created Last Week</option>
-            <option value="last_month">Created Last Month</option>
-            <option value="custom">Custom Range</option>
-          </select>
+      <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 sm:flex-initial">
+          <div className="flex items-center gap-2">
+            <Filter className="w-4 h-4 text-gray-500 flex-shrink-0" />
+            <select
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom')}
+              className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="all">All Dates</option>
+              <option value="today">Created Today</option>
+              <option value="yesterday">Created Yesterday</option>
+              <option value="last_week">Created Last Week</option>
+              <option value="last_month">Created Last Month</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
           {dateFilter === 'custom' && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 sm:ml-0">
               <input
                 type="date"
                 value={formatDateForInput(customDateRange.start)}
@@ -1500,10 +1521,10 @@ function CompaniesContent() {
                     start: parseDateFromInput(e.target.value) 
                   });
                 }}
-                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 placeholder="Start date"
               />
-              <span className="text-gray-500 text-sm">to</span>
+              <span className="text-gray-500 text-sm flex-shrink-0">to</span>
               <input
                 type="date"
                 value={formatDateForInput(customDateRange.end)}
@@ -1513,17 +1534,17 @@ function CompaniesContent() {
                     end: parseDateFromInput(e.target.value) 
                   });
                 }}
-                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 placeholder="End date"
               />
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
           <select
             value={classificationFilter}
             onChange={(e) => setClassificationFilter(e.target.value as 'all' | 'QUALIFIED' | 'NOT_QUALIFIED' | 'EXPIRED' | 'empty')}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="all">All Classifications</option>
             <option value="QUALIFIED">QUALIFIED</option>
@@ -1532,11 +1553,11 @@ function CompaniesContent() {
             <option value="empty">Empty/Null Summary</option>
           </select>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
           <select
             value={setNameFilter || 'all'}
             onChange={(e) => setSetNameFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="all">All Sets</option>
             <option value="">No Set (null/empty)</option>
@@ -1547,11 +1568,11 @@ function CompaniesContent() {
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
           <select
             value={ownerFilter || 'all'}
             onChange={(e) => setOwnerFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
-            className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="all">All Owners</option>
             <option value="">No Owner (null/empty)</option>
@@ -1562,12 +1583,25 @@ function CompaniesContent() {
             ))}
           </select>
         </div>
+        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
+          <select
+            value={domainInstagramFilter}
+            onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email')}
+            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="any">Any</option>
+            <option value="has_valid_domain">Has Valid Domain</option>
+            <option value="has_valid_instagram">Has Valid Instagram</option>
+            <option value="has_valid_phone">Has Valid Phone</option>
+            <option value="has_valid_email">Has Valid Email</option>
+          </select>
+        </div>
       </div>
 
       {/* Create/Edit Form */}
       {(isCreating || editingId) && (
-        <div className="mb-8 bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">
+        <div className="mb-6 md:mb-8 bg-white border border-gray-200 rounded-lg p-4 md:p-6 shadow-sm">
+          <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">
             {isCreating ? 'Add New Company' : 'Edit Company'}
           </h2>
           
@@ -1678,9 +1712,9 @@ function CompaniesContent() {
 
       {/* Companies Table */}
       {companies.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
-          <Building2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-gray-500 mb-4">
+        <div className="bg-white border border-gray-200 rounded-lg p-8 md:p-12 text-center">
+          <Building2 className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-sm md:text-base text-gray-500 mb-4">
             {searchQuery ? 'No companies found matching your search.' : 'No companies found. Create your first company to get started.'}
           </p>
         </div>
@@ -1691,52 +1725,54 @@ function CompaniesContent() {
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500"></div>
             </div>
           )}
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
-              <colgroup>
-                <col style={{ width: '48px' }} />
-                {orderedVisibleColumns.map((column) => {
-                  const isPhoneColumn = column === 'phone';
-                  const isEmailColumn = column === 'email';
-                  const isTemplateColumn = column.startsWith('template_');
-                  if (isPhoneColumn || isEmailColumn) {
-                    return <col key={column} style={{ width: '192px', minWidth: '192px' }} />;
-                  } else if (isTemplateColumn) {
-                    return <col key={column} style={{ width: '400px', minWidth: '300px' }} />;
-                  } else {
-                    return <col key={column} style={{ width: '200px', minWidth: '150px' }} />;
-                  }
-                })}
-                <col style={{ width: '140px' }} />
-              </colgroup>
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      <input
-                        type="checkbox"
-                        checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === companies.length}
-                        onChange={(e) => handleSelectAll(e.target.checked)}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                  </th>
+          <div className="overflow-x-auto -mx-4 md:mx-0">
+            <div className="inline-block min-w-full align-middle">
+              <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
+                <colgroup>
+                  <col style={{ width: '48px' }} />
                   {orderedVisibleColumns.map((column) => {
                     const isPhoneColumn = column === 'phone';
                     const isEmailColumn = column === 'email';
-                    return (
-                      <th 
-                        key={column} 
-                        className={`px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${(isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : ''}`}
-                      >
-                        {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                      </th>
-                    );
+                    const isTemplateColumn = column.startsWith('template_');
+                    if (isPhoneColumn || isEmailColumn) {
+                      return <col key={column} style={{ width: '192px', minWidth: '192px' }} />;
+                    } else if (isTemplateColumn) {
+                      return <col key={column} style={{ width: '400px', minWidth: '300px' }} />;
+                    } else {
+                      return <col key={column} style={{ width: '200px', minWidth: '150px' }} />;
+                    }
                   })}
-                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
+                  <col style={{ width: '140px' }} />
+                </colgroup>
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-2 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        <input
+                          type="checkbox"
+                          checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === companies.length}
+                          onChange={(e) => handleSelectAll(e.target.checked)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                    </th>
+                    {orderedVisibleColumns.map((column) => {
+                      const isPhoneColumn = column === 'phone';
+                      const isEmailColumn = column === 'email';
+                      return (
+                        <th 
+                          key={column} 
+                          className={`px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${(isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : ''}`}
+                        >
+                          <span className="hidden sm:inline">{columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                          <span className="sm:hidden">{columnLabels[column]?.split(' ')[0] || column.split('_')[0]}</span>
+                        </th>
+                      );
+                    })}
+                    <th className="px-3 md:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {companies.map((company) => {
                   const isEditingThisCell = editingCell?.companyId === company.id && editingCell?.columnKey;
@@ -1746,11 +1782,11 @@ function CompaniesContent() {
                   const classification = summaryData.classification?.toUpperCase();
                   const getRowBgColor = () => {
                     if (classification === 'QUALIFIED') {
-                      return 'bg-green-50/30 hover:bg-green-50/60';
+                      return 'bg-green-200 hover:bg-green-300';
                     } else if (classification === 'NOT_QUALIFIED') {
-                      return 'bg-red-50/30 hover:bg-red-50/60';
+                      return 'bg-red-200 hover:bg-red-300';
                     } else if (classification === 'EXPIRED') {
-                      return 'bg-amber-50/30 hover:bg-amber-50/60';
+                      return 'bg-amber-100 hover:bg-amber-200';
                     }
                     return 'hover:bg-gray-50';
                   };
@@ -1771,7 +1807,7 @@ function CompaniesContent() {
                       className={getRowBgColor()}
                       onClick={handleRowClick}
                     >
-                      <td className="px-4 py-4 whitespace-nowrap">
+                      <td className="px-2 md:px-4 py-4 whitespace-nowrap">
                         <input
                           type="checkbox"
                           checked={selectedCompanyIds.has(company.id)}
@@ -1877,7 +1913,7 @@ function CompaniesContent() {
                         return (
                           <td
                             key={columnKey}
-                            className={`${(isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? 'p-0 relative' : 'px-6 py-4'} text-sm ${isClassificationColumn ? getClassificationColorClasses() : 'text-gray-900'} ${
+                            className={`${(isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? 'p-0 relative' : 'px-3 md:px-6 py-4'} text-xs md:text-sm ${isClassificationColumn ? getClassificationColorClasses() : 'text-gray-900'} ${
                               isEditing ? '' : isTemplateColumn ? 'cursor-pointer hover:bg-blue-50' : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? 'cursor-pointer' : isClassificationColumn ? 'cursor-pointer hover:opacity-80' : 'cursor-pointer hover:bg-blue-50'
                             } transition-colors ${isTemplateColumn ? 'max-w-xl' : (isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : 'max-w-md'}`}
                             onClick={!isEditing && !isLinkColumn && !isPhoneColumn && !isEmailColumn ? (e) => {
@@ -2061,7 +2097,7 @@ function CompaniesContent() {
                                 } : undefined}
                                 onMouseEnter={handleCellMouseEnter}
                                 onMouseLeave={handleCellMouseLeave}
-                                className={`absolute inset-0 flex items-center w-full h-full px-6 py-4 text-indigo-600 hover:text-indigo-800 hover:underline hover:bg-indigo-50 ${isCellHovered ? "whitespace-normal break-words" : "truncate"}`}
+                                className={`absolute inset-0 flex items-center w-full h-full px-3 md:px-6 py-4 text-indigo-600 hover:text-indigo-800 hover:underline hover:bg-indigo-50 ${isCellHovered ? "whitespace-normal break-words" : "truncate"}`}
                                 title={(isPhoneColumn || isEmailColumn) ? "Single click to open link, double click to edit" : value}
                               >
                                 {value}
@@ -2079,38 +2115,38 @@ function CompaniesContent() {
                           </td>
                         );
                       })}
-                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="px-3 md:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex items-center justify-end gap-1 md:gap-2">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setCompanyToView(company);
                               setDrawerOpen(true);
                             }}
-                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                            className="inline-flex items-center px-2 md:px-3 py-1.5 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
                             title="View Details"
                           >
-                            <Eye className="w-4 h-4" />
+                            <Eye className="w-3 h-3 md:w-4 md:h-4" />
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               startEditing(company);
                             }}
-                            className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                            className="inline-flex items-center px-2 md:px-3 py-1.5 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
                             title="Edit"
                           >
-                            <Edit2 className="w-4 h-4" />
+                            <Edit2 className="w-3 h-3 md:w-4 md:h-4" />
                           </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDeleteClick(company.id);
                             }}
-                            className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+                            className="inline-flex items-center px-2 md:px-3 py-1.5 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
                             title="Delete"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Trash2 className="w-3 h-3 md:w-4 md:h-4" />
                           </button>
                         </div>
                       </td>
@@ -2118,7 +2154,8 @@ function CompaniesContent() {
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
           
           {/* Pagination Controls */}
@@ -2249,8 +2286,8 @@ function CompaniesContent() {
 
       {/* Assign Set Modal */}
       {assignSetModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Set</h2>
             <p className="text-gray-600 mb-4">
               Assign a set name to {selectedCompanyIds.size} selected {selectedCompanyIds.size === 1 ? 'company' : 'companies'}. Leave empty to clear the set name.
@@ -2302,6 +2339,19 @@ function CompaniesContent() {
         getCellValue={getCellValue}
         columnOrder={columnOrder}
         updateCompany={updateCompany}
+        companies={companies}
+        onCompanyChange={(company) => {
+          setCompanyToView(company);
+        }}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={(page) => {
+          const direction = page > currentPage ? 'next' : 'prev';
+          setPendingPageDirection(direction);
+          setCurrentPage(page);
+          // When page changes, select the appropriate company of the new page
+          // The companies will update after the page loads, and useEffect will handle selection
+        }}
       />
     </div>
   );

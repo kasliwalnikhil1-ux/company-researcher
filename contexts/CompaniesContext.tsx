@@ -21,6 +21,7 @@ export interface Company {
   phone: string;
   email: string;
   summary: any; // jsonb
+  contacts?: any; // jsonb - array of contact objects
   set_name: string | null;
   owner: string | null;
   created_at?: string;
@@ -29,6 +30,7 @@ export interface Company {
 type SortOrder = 'newest' | 'oldest';
 type DateFilter = 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom';
 type ClassificationFilter = 'all' | 'QUALIFIED' | 'NOT_QUALIFIED' | 'EXPIRED' | 'empty';
+type DomainInstagramFilter = 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email';
 type AnalyticsPeriod = 'today' | 'yesterday' | 'week' | 'month';
 
 export interface CompanyCountByOwner {
@@ -57,6 +59,8 @@ interface CompaniesContextType {
   setSetNameFilter: (filter: string | null) => void;
   ownerFilter: string | null;
   setOwnerFilter: (filter: string | null) => void;
+  domainInstagramFilter: DomainInstagramFilter;
+  setDomainInstagramFilter: (filter: DomainInstagramFilter) => void;
   searchQuery: string;
   setSearchQuery: (query: string) => void;
   availableSetNames: string[];
@@ -101,6 +105,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>('all');
   const [setNameFilter, setSetNameFilter] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
+  const [domainInstagramFilter, setDomainInstagramFilter] = useState<DomainInstagramFilter>('any');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [previousSearchQuery, setPreviousSearchQuery] = useState<string>('');
   const [availableSetNames, setAvailableSetNames] = useState<string[]>([]);
@@ -216,6 +221,17 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         }
       }
 
+      // Apply domain/instagram/phone/email filter
+      if (domainInstagramFilter === 'has_valid_domain') {
+        countQuery = countQuery.not('domain', 'is', null).neq('domain', '').neq('domain', '-');
+      } else if (domainInstagramFilter === 'has_valid_instagram') {
+        countQuery = countQuery.not('instagram', 'is', null).neq('instagram', '').neq('instagram', '-');
+      } else if (domainInstagramFilter === 'has_valid_phone') {
+        countQuery = countQuery.not('phone', 'is', null).neq('phone', '').neq('phone', '-');
+      } else if (domainInstagramFilter === 'has_valid_email') {
+        countQuery = countQuery.not('email', 'is', null).neq('email', '').neq('email', '-');
+      }
+
       const { count, error: countError } = await countQuery;
 
       if (countError) {
@@ -278,6 +294,17 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         }
       }
 
+      // Apply domain/instagram/phone/email filter
+      if (domainInstagramFilter === 'has_valid_domain') {
+        query = query.not('domain', 'is', null).neq('domain', '').neq('domain', '-');
+      } else if (domainInstagramFilter === 'has_valid_instagram') {
+        query = query.not('instagram', 'is', null).neq('instagram', '').neq('instagram', '-');
+      } else if (domainInstagramFilter === 'has_valid_phone') {
+        query = query.not('phone', 'is', null).neq('phone', '').neq('phone', '-');
+      } else if (domainInstagramFilter === 'has_valid_email') {
+        query = query.not('email', 'is', null).neq('email', '').neq('email', '-');
+      }
+
       // Sorting
       query =
         sortOrder === 'newest'
@@ -313,6 +340,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     classificationFilter,
     setNameFilter,
     ownerFilter,
+    domainInstagramFilter,
     searchQuery,
   ]);
 
@@ -617,7 +645,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   // Reset to page 1 when sort order or filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [sortOrder, dateFilter, customDateRange, classificationFilter, setNameFilter, ownerFilter, searchQuery]);
+  }, [sortOrder, dateFilter, customDateRange, classificationFilter, setNameFilter, ownerFilter, domainInstagramFilter, searchQuery]);
 
   const totalPages = useMemo(() => Math.ceil(totalCount / pageSize), [totalCount, pageSize]);
 
@@ -642,6 +670,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     setSetNameFilter,
     ownerFilter,
     setOwnerFilter,
+    domainInstagramFilter,
+    setDomainInstagramFilter,
     searchQuery,
     setSearchQuery,
     availableSetNames,

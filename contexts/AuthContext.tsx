@@ -12,6 +12,8 @@ type AuthContextType = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  signOutAll: () => Promise<void>;
+  changePassword: (newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -84,6 +86,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     router.push('/login');
   };
 
+  const signOutAll = async () => {
+    await supabase.auth.signOut({ scope: 'global' });
+    router.push('/login');
+  };
+
+  const changePassword = async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) throw error;
+  };
+
   const value = {
     user,
     session,
@@ -91,6 +105,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signIn,
     signUp,
     signOut,
+    signOutAll,
+    changePassword,
   };
 
   return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;

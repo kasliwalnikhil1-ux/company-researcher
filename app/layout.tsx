@@ -48,7 +48,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
         className={`${abcdDiatype.variable} ${reckless.variable} antialiased`}
         suppressHydrationWarning
