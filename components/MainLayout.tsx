@@ -6,7 +6,7 @@ import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles } from 'lucide-react';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
@@ -107,6 +107,32 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           >
             <BarChart3 className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
             {!isCollapsed && <span>Analytics</span>}
+          </Link>
+          
+          <Link
+            href="/domains-extractor"
+            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/domains-extractor')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Extract Domains"
+          >
+            <Globe className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
+            {!isCollapsed && <span>Extract Domains</span>}
+          </Link>
+          
+          <Link
+            href="/enrich"
+            className={`flex items-center ${isCollapsed ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/enrich')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Enrich CSV"
+          >
+            <Sparkles className={`w-5 h-5 ${isCollapsed ? '' : 'mr-3'}`} />
+            {!isCollapsed && <span>Enrich</span>}
           </Link>
         </nav>
 

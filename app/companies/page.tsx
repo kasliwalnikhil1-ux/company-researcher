@@ -35,6 +35,48 @@ const CLIPBOARD_COLUMN_KEY = 'companies-clipboard-column';
 const SUBJECT_COLUMN_KEY = 'companies-subject-column';
 const PHONE_CLICK_BEHAVIOR_KEY = 'companies-phone-click-behavior';
 
+// Helper function to extract domain from URL
+const extractDomainFromUrl = (url: string): string => {
+  if (!url) return url;
+  try {
+    // Remove protocol, www, and any path/query parameters
+    let domain = url.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?]/)[0];
+    return domain || url;
+  } catch (e) {
+    console.error('Error extracting domain:', e);
+    return url;
+  }
+};
+
+// Helper function to clean Instagram username
+const cleanInstagramUsernameForSearch = (instagram: string): string => {
+  if (!instagram) return instagram;
+
+  return instagram
+    .replace(/^https?:\/\/(www\.)?instagram\.com\//, '')
+    .replace(/\/+$/, '')
+    .replace(/^@/, '');
+};
+
+// Clean search query by detecting and cleaning URLs/Instagram handles
+const cleanSearchQuery = (query: string): string => {
+  if (!query || query.trim() === '') return query;
+
+  const trimmed = query.trim();
+
+  // Check if it's an Instagram URL or handle
+  if (trimmed.includes('instagram.com') || trimmed.startsWith('@')) {
+    return cleanInstagramUsernameForSearch(trimmed);
+  }
+
+  // Check if it's a URL (contains protocol or www)
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('www.')) {
+    return extractDomainFromUrl(trimmed);
+  }
+
+  return trimmed;
+};
+
 // Sortable Column Item Component
 interface SortableColumnItemProps {
   column: string;
@@ -114,14 +156,15 @@ export default function CompaniesPage() {
 }
 
 function CompaniesContent() {
-  const { 
-    companies, 
-    loading, 
-    createCompany, 
-    updateCompany, 
-    deleteCompany, 
+  const {
+    companies,
+    loading,
+    searchLoading,
+    createCompany,
+    updateCompany,
+    deleteCompany,
     bulkUpdateSetName,
-    sortOrder, 
+    sortOrder,
     setSortOrder,
     currentPage,
     setCurrentPage,
@@ -138,6 +181,8 @@ function CompaniesContent() {
     setSetNameFilter,
     ownerFilter,
     setOwnerFilter,
+    searchQuery,
+    setSearchQuery,
     availableSetNames,
     availableOwners
   } = useCompanies();
@@ -205,7 +250,16 @@ function CompaniesContent() {
   
   // Track click timeouts for phone/email double-click detection
   const clickTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  // Track if double-click is in progress to prevent single-click action
+  const doubleClickInProgressRef = useRef<Map<string, boolean>>(new Map());
+
+  // Search debouncing refs
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   
+  // Local search input state (updates immediately for responsive UI)
+  const [localSearchInput, setLocalSearchInput] = useState(searchQuery);
+
   // Multi-select state
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(new Set());
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
@@ -370,8 +424,7 @@ function CompaniesContent() {
   });
   
   const [columnFilterOpen, setColumnFilterOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  
+
   // Clipboard column state
   const [clipboardColumn, setClipboardColumn] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -399,13 +452,6 @@ function CompaniesContent() {
     return 'whatsapp';
   });
   
-  // Reset to page 1 when search query changes
-  useEffect(() => {
-    if (searchQuery && currentPage !== 1) {
-      setCurrentPage(1);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery]);
   
   // Save column order to localStorage (saves automatically whenever columnOrder changes)
   useEffect(() => {
@@ -809,7 +855,92 @@ function CompaniesContent() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [hoveredCell, companies]);
-  
+
+  // Sync local search input with context searchQuery when it changes externally
+  useEffect(() => {
+    setLocalSearchInput(searchQuery);
+  }, [searchQuery]);
+
+  // Debounced search functions
+  const performSearch = useCallback((query: string) => {
+    // Cancel any previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+
+    // Clean the search query before searching
+    const cleanedQuery = cleanSearchQuery(query);
+
+    // Perform the search
+    setSearchQuery(cleanedQuery);
+  }, [setSearchQuery]);
+
+  const debouncedSearch = useCallback((query: string) => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    // For empty query, search immediately
+    if (query.length === 0) {
+      performSearch(query);
+      return;
+    }
+
+    // For all other inputs, debounce
+    searchTimeoutRef.current = setTimeout(() => {
+      performSearch(query);
+    }, 400);
+  }, [performSearch]);
+
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const query = e.target.value;
+    // Update local input immediately for responsive UI
+    setLocalSearchInput(query);
+    // Debounce the actual search
+    debouncedSearch(query);
+  }, [debouncedSearch]);
+
+  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      // Clear debounce timeout and perform immediate search
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+        searchTimeoutRef.current = null;
+      }
+      const query = (e.target as HTMLInputElement).value;
+      setLocalSearchInput(query);
+      performSearch(query);
+    }
+  }, [performSearch]);
+
+  const handleClearSearch = useCallback(() => {
+    // Clear debounce timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    }
+    // Clear local input immediately
+    setLocalSearchInput('');
+    // Clear search query
+    performSearch('');
+  }, [performSearch]);
+
+  // Cleanup timeouts and abort controllers on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   const handleCreate = async () => {
     try {
       if (!formData.domain.trim()) {
@@ -915,7 +1046,7 @@ function CompaniesContent() {
   // Handle select all
   const handleSelectAll = (isSelected: boolean) => {
     if (isSelected) {
-      setSelectedCompanyIds(new Set(filteredCompanies.map(c => c.id)));
+      setSelectedCompanyIds(new Set(companies.map(c => c.id)));
     } else {
       setSelectedCompanyIds(new Set());
     }
@@ -1123,25 +1254,6 @@ function CompaniesContent() {
     setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
   };
 
-  // Filter companies based on search query
-  const filteredCompanies = useMemo(() => {
-    if (!searchQuery.trim()) return companies;
-    
-    const query = searchQuery.toLowerCase();
-    return companies.filter(company => {
-      const summaryData = getSummaryData(company);
-      return (
-        company.domain?.toLowerCase().includes(query) ||
-        company.instagram?.toLowerCase().includes(query) ||
-        company.phone?.toLowerCase().includes(query) ||
-        company.email?.toLowerCase().includes(query) ||
-        JSON.stringify(company.summary)?.toLowerCase().includes(query) ||
-        summaryData.company_summary?.toLowerCase().includes(query) ||
-        summaryData.company_industry?.toLowerCase().includes(query) ||
-        summaryData.sales_opener_sentence?.toLowerCase().includes(query)
-      );
-    });
-  }, [companies, searchQuery, getSummaryData]);
 
   const toggleColumn = (column: string) => {
     const newVisibleColumns = new Set(visibleColumns);
@@ -1329,13 +1441,25 @@ function CompaniesContent() {
 
       {/* Search and Sort */}
       <div className="mb-4 flex items-center gap-4">
-        <input
-          type="text"
-          placeholder="Search companies..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="block flex-1 max-w-md px-4 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-        />
+        <div className="relative flex-1 max-w-md">
+          <input
+            type="text"
+            placeholder="Search companies..."
+            value={localSearchInput}
+            onChange={handleSearchChange}
+            onKeyDown={handleSearchKeyDown}
+            className="block w-full px-4 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+          />
+          {localSearchInput && (
+            <button
+              onClick={handleClearSearch}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+              aria-label="Clear search"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <ArrowUpDown className="w-4 h-4 text-gray-500" />
           <select
@@ -1553,7 +1677,7 @@ function CompaniesContent() {
       )}
 
       {/* Companies Table */}
-      {filteredCompanies.length === 0 ? (
+      {companies.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
           <Building2 className="w-12 h-12 text-gray-400 mx-auto mb-4" />
           <p className="text-gray-500 mb-4">
@@ -1561,19 +1685,40 @@ function CompaniesContent() {
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden relative">
+          {searchLoading && (
+            <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500"></div>
+            </div>
+          )}
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed' }}>
+            <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
+              <colgroup>
+                <col style={{ width: '48px' }} />
+                {orderedVisibleColumns.map((column) => {
+                  const isPhoneColumn = column === 'phone';
+                  const isEmailColumn = column === 'email';
+                  const isTemplateColumn = column.startsWith('template_');
+                  if (isPhoneColumn || isEmailColumn) {
+                    return <col key={column} style={{ width: '192px', minWidth: '192px' }} />;
+                  } else if (isTemplateColumn) {
+                    return <col key={column} style={{ width: '400px', minWidth: '300px' }} />;
+                  } else {
+                    return <col key={column} style={{ width: '200px', minWidth: '150px' }} />;
+                  }
+                })}
+                <col style={{ width: '140px' }} />
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    <input
-                      type="checkbox"
-                      checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === filteredCompanies.length}
-                      onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      onClick={(e) => e.stopPropagation()}
-                    />
+                      <input
+                        type="checkbox"
+                        checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === companies.length}
+                        onChange={(e) => handleSelectAll(e.target.checked)}
+                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        onClick={(e) => e.stopPropagation()}
+                      />
                   </th>
                   {orderedVisibleColumns.map((column) => {
                     const isPhoneColumn = column === 'phone';
@@ -1593,7 +1738,7 @@ function CompaniesContent() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredCompanies.map((company) => {
+                {companies.map((company) => {
                   const isEditingThisCell = editingCell?.companyId === company.id && editingCell?.columnKey;
                   
                   // Get classification for row styling
@@ -1747,7 +1892,7 @@ function CompaniesContent() {
                               e.stopPropagation();
                               handleCellDoubleClick(company, columnKey);
                             } : undefined}
-                            title={!isEditing ? (isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Click to open WhatsApp and copy clipboard column" : isPhoneColumn ? "Click to call" : isEmailColumn ? "Click to open Gmail with pre-filled email and body" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
+                            title={!isEditing ? (isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Single click to open WhatsApp and copy clipboard column, double click to edit" : isPhoneColumn ? "Single click to call, double click to edit" : isEmailColumn ? "Single click to open Gmail with pre-filled email and body, double click to edit" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -1852,10 +1997,22 @@ function CompaniesContent() {
                                     }
                                     
                                     const clickDelay = setTimeout(() => {
-                                      // Open the link after delay (if no double-click occurred)
-                                      clickTimeoutsRef.current.delete(timeoutKey);
+                                      // Check if timeout was cleared (double-click occurred) or if double-click flag is set
+                                      const timeoutStillExists = clickTimeoutsRef.current.has(timeoutKey);
+                                      const isDoubleClick = doubleClickInProgressRef.current.get(timeoutKey);
                                       
-                                      if (phoneClickBehavior === 'call') {
+                                      // Clean up
+                                      clickTimeoutsRef.current.delete(timeoutKey);
+                                      if (isDoubleClick) {
+                                        doubleClickInProgressRef.current.delete(timeoutKey);
+                                      }
+                                      
+                                      // Don't open link if double-click occurred (timeout was cleared or flag is set)
+                                      if (!timeoutStillExists || isDoubleClick) {
+                                        return;
+                                      }
+                                      
+                                      if (isPhoneColumn && phoneClickBehavior === 'call') {
                                         window.location.href = linkUrl;
                                       } else {
                                         window.open(linkUrl, '_blank', 'noopener,noreferrer');
@@ -1890,6 +2047,11 @@ function CompaniesContent() {
                                   // Clear the click timeout if it exists
                                   const timeoutKey = `${company.id}-${columnKey}`;
                                   const existingTimeout = clickTimeoutsRef.current.get(timeoutKey);
+                                  
+                                  // Mark that double-click is in progress BEFORE clearing timeout
+                                  // This ensures the flag is set even if timeout callback is already queued
+                                  doubleClickInProgressRef.current.set(timeoutKey, true);
+                                  
                                   if (existingTimeout) {
                                     clearTimeout(existingTimeout);
                                     clickTimeoutsRef.current.delete(timeoutKey);
