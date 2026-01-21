@@ -22,6 +22,7 @@ export interface Company {
   email: string;
   summary: any; // jsonb
   contacts?: any; // jsonb - array of contact objects
+  notes?: any; // jsonb - array of note objects: [{ message: string, date: string }]
   set_name: string | null;
   owner: string | null;
   created_at?: string;
@@ -568,8 +569,21 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
       throw new Error(error?.message || 'Failed to update company');
     }
 
-    await fetchCompanies();
-    await Promise.all([fetchAvailableSetNames(), fetchAvailableOwners()]);
+    // Optimistically update local state without refetching all companies
+    setCompanies((prevCompanies) =>
+      prevCompanies.map((company) =>
+        company.id === id ? { ...company, ...processedUpdates } : company
+      )
+    );
+
+    // Only refetch set names and owners if relevant fields changed
+    const shouldRefreshMetadata = 
+      processedUpdates.set_name !== undefined || 
+      processedUpdates.owner !== undefined;
+    
+    if (shouldRefreshMetadata) {
+      await Promise.all([fetchAvailableSetNames(), fetchAvailableOwners()]);
+    }
   };
 
   const deleteCompany = async (id: string) => {

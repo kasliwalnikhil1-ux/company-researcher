@@ -9,7 +9,7 @@ import Toast from '@/components/ui/Toast';
 import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
-import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, Eye, GitMerge } from 'lucide-react';
+import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail } from 'lucide-react';
 import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
 import {
   DndContext,
@@ -33,6 +33,7 @@ const COLUMN_ORDER_KEY = 'companies-column-order';
 const COLUMN_VISIBILITY_KEY = 'companies-column-visibility';
 const CLIPBOARD_COLUMN_KEY = 'companies-clipboard-column';
 const SUBJECT_COLUMN_KEY = 'companies-subject-column';
+const COMPACT_COLUMN_KEY = 'companies-compact-column';
 const PHONE_CLICK_BEHAVIOR_KEY = 'companies-phone-click-behavior';
 
 // Helper function to extract domain from URL
@@ -271,6 +272,10 @@ function CompaniesContent() {
   // Cell hover state - tracks which cell is hovered (only for truncated cells)
   const [hoveredCell, setHoveredCell] = useState<{ companyId: string; columnKey: string } | null>(null);
   
+  // Calling mode note editing state
+  const [editingNoteState, setEditingNoteState] = useState<{ companyId: string; noteIndex: number; text: string } | null>(null);
+  const [newNoteState, setNewNoteState] = useState<Record<string, string>>({});
+  
   // Track click timeouts for phone/email double-click detection
   const clickTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   // Track if double-click is in progress to prevent single-click action
@@ -283,12 +288,19 @@ function CompaniesContent() {
   // Local search input state (updates immediately for responsive UI)
   const [localSearchInput, setLocalSearchInput] = useState(searchQuery);
 
+  // Table drag-to-pan state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [scrollStartX, setScrollStartX] = useState(0);
+  const tableScrollContainerRef = useRef<HTMLDivElement>(null);
+
   // Multi-select state
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<Set<string>>(new Set());
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
   const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
   const [assignSetName, setAssignSetName] = useState('');
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   
   // Generate template-based column keys
   const getTemplateColumnKeys = useCallback(() => {
@@ -308,6 +320,7 @@ function CompaniesContent() {
     'phone',
     'email',
     'set_name',
+    'notes',
     'company_summary',
     'company_industry',
     'profile_summary',
@@ -466,6 +479,15 @@ function CompaniesContent() {
     return null;
   });
   
+  // Compact column state
+  const [compactColumn, setCompactColumn] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(COMPACT_COLUMN_KEY);
+      return saved || null;
+    }
+    return null;
+  });
+  
   // Phone click behavior state (default: 'whatsapp')
   const [phoneClickBehavior, setPhoneClickBehavior] = useState<'whatsapp' | 'call'>(() => {
     if (typeof window !== 'undefined') {
@@ -474,6 +496,22 @@ function CompaniesContent() {
     }
     return 'whatsapp';
   });
+  
+  // Calling mode state
+  const [callingMode, setCallingMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('companies-calling-mode');
+      return saved === 'true';
+    }
+    return false;
+  });
+  
+  // Save calling mode to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('companies-calling-mode', callingMode.toString());
+    }
+  }, [callingMode]);
   
   
   // Save column order to localStorage (saves automatically whenever columnOrder changes)
@@ -511,6 +549,34 @@ function CompaniesContent() {
       }
     }
   }, [subjectColumn]);
+  
+  // Save compact column selection to localStorage (persists forever)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (compactColumn) {
+        localStorage.setItem(COMPACT_COLUMN_KEY, compactColumn);
+      } else {
+        localStorage.removeItem(COMPACT_COLUMN_KEY);
+      }
+    }
+  }, [compactColumn]);
+  
+  // Set default compact column to "Call Message - Direct Message" if present and not already set
+  useEffect(() => {
+    if (!compactColumn && templates.length > 0 && columnOrder.length > 0) {
+      // Find template with title "Call Message" and channel "direct"
+      const callMessageDirectTemplate = templates.find(
+        t => t.title === 'Call Message' && t.channel === 'direct'
+      );
+      if (callMessageDirectTemplate) {
+        const columnKey = `template_${callMessageDirectTemplate.id}`;
+        // Check if this column exists in columnOrder
+        if (columnOrder.includes(columnKey)) {
+          setCompactColumn(columnKey);
+        }
+      }
+    }
+  }, [templates, columnOrder, compactColumn]);
   
   // Save phone click behavior to localStorage
   useEffect(() => {
@@ -553,6 +619,7 @@ function CompaniesContent() {
       phone: 'Phone',
       email: 'Email',
       set_name: 'Set Name',
+      notes: 'Notes',
       company_summary: 'Company Summary',
       company_industry: 'Company Industry',
       profile_summary: 'Profile Summary',
@@ -649,6 +716,14 @@ function CompaniesContent() {
         return company.email || '-';
       case 'set_name':
         return company.set_name || '-';
+      case 'notes':
+        if (!company.notes || !Array.isArray(company.notes) || company.notes.length === 0) {
+          return '-';
+        }
+        // Show count and latest note preview
+        const latestNote = company.notes[company.notes.length - 1];
+        const notePreview = latestNote?.message ? latestNote.message.substring(0, 50) : '';
+        return `${company.notes.length} note${company.notes.length !== 1 ? 's' : ''}${notePreview ? `: ${notePreview}${notePreview.length >= 50 ? '...' : ''}` : ''}`;
       case 'company_summary':
         return summaryData.company_summary || '-';
       case 'company_industry':
@@ -741,6 +816,13 @@ function CompaniesContent() {
     // Domain and instagram are not directly editable (they have special link behavior)
     // But phone and email can be edited
     if (columnKey === 'domain' || columnKey === 'instagram') {
+      return;
+    }
+    
+    // Notes column opens drawer instead of inline editing
+    if (columnKey === 'notes') {
+      setCompanyToView(company);
+      setDrawerOpen(true);
       return;
     }
     
@@ -1075,6 +1157,71 @@ function CompaniesContent() {
     }
   };
 
+  // Table drag-to-pan handlers
+  const handleTableMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    // Only start drag on left mouse button
+    if (e.button !== 0) return;
+    
+    // Don't start drag if clicking on interactive elements (buttons, inputs, links, etc.)
+    const target = e.target as HTMLElement;
+    if (
+      target.tagName === 'BUTTON' ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'A' ||
+      target.tagName === 'SELECT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.closest('button, input, a, select, textarea')
+    ) {
+      return;
+    }
+
+    setIsDragging(true);
+    setDragStartX(e.clientX);
+    if (tableScrollContainerRef.current) {
+      setScrollStartX(tableScrollContainerRef.current.scrollLeft);
+    }
+    e.preventDefault();
+  }, []);
+
+  const handleTableMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || !tableScrollContainerRef.current) return;
+    
+    const deltaX = e.clientX - dragStartX;
+    tableScrollContainerRef.current.scrollLeft = scrollStartX - deltaX;
+    e.preventDefault();
+  }, [isDragging, dragStartX, scrollStartX]);
+
+  const handleTableMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleTableMouseLeave = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Global mouse handlers to handle dragging when mouse moves outside container
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!tableScrollContainerRef.current) return;
+      const deltaX = e.clientX - dragStartX;
+      tableScrollContainerRef.current.scrollLeft = scrollStartX - deltaX;
+    };
+
+    const handleGlobalMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isDragging, dragStartX, scrollStartX]);
+
   // Helper function to check if a value is empty (null, undefined, empty string, or whitespace-only)
   const isEmpty = (value: any): boolean => {
     if (value === null || value === undefined) return true;
@@ -1292,6 +1439,100 @@ function CompaniesContent() {
   const orderedVisibleColumns = useMemo(() => {
     return columnOrder.filter(col => visibleColumns.has(col));
   }, [columnOrder, visibleColumns]);
+  
+  // Helper function to handle phone call click
+  const handlePhoneCall = useCallback((phone: string) => {
+    const cleanedPhone = phone.trim().replace(/[^\d+]/g, '');
+    window.location.href = `tel:${cleanedPhone}`;
+  }, []);
+  
+  // Helper function to handle WhatsApp click (with pre-filled text)
+  const handleWhatsAppClick = useCallback(async (company: Company) => {
+    if (!company.phone || company.phone === '-') return;
+    
+    const phone = company.phone.trim().replace(/[^\d+]/g, '');
+    let whatsappUrl = `https://wa.me/${phone}`;
+    
+    // Add clipboard column value as pre-filled message if available
+    if (clipboardColumn) {
+      const clipboardValue = getCellValue(company, clipboardColumn);
+      if (clipboardValue && clipboardValue !== '-') {
+        const encodedMessage = encodeURIComponent(clipboardValue);
+        whatsappUrl += `?text=${encodedMessage}`;
+        // Copy to clipboard
+        try {
+          await copyToClipboard(clipboardValue);
+          setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+          setToastVisible(true);
+        } catch (error) {
+          console.error('Failed to copy to clipboard:', error);
+        }
+      }
+    }
+    
+    window.open(whatsappUrl, '_blank');
+  }, [clipboardColumn, getCellValue, columnLabels]);
+  
+  // Helper function to handle WhatsApp click without pre-filled text
+  const handleWhatsAppClickNoText = useCallback((company: Company) => {
+    if (!company.phone || company.phone === '-') return;
+    
+    const phone = company.phone.trim().replace(/[^\d+]/g, '');
+    const whatsappUrl = `https://wa.me/${phone}`;
+    
+    window.open(whatsappUrl, '_blank');
+  }, []);
+  
+  // Helper function to handle email click
+  const handleEmailClick = useCallback((company: Company) => {
+    if (!company.email || company.email === '-') return;
+    
+    const email = company.email.trim();
+    let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
+    
+    // Add subject column value as email subject if available
+    if (subjectColumn) {
+      const subjectValue = getCellValue(company, subjectColumn);
+      if (subjectValue && subjectValue !== '-') {
+        const encodedSubject = encodeURIComponent(subjectValue);
+        gmailUrl += `&su=${encodedSubject}`;
+      }
+    }
+    
+    // Add clipboard column value as email body if available
+    if (clipboardColumn) {
+      const clipboardValue = getCellValue(company, clipboardColumn);
+      if (clipboardValue && clipboardValue !== '-') {
+        const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
+        const encodedBody = encodeURIComponent(emailBody);
+        gmailUrl += `&body=${encodedBody}`;
+      }
+    }
+    
+    window.open(gmailUrl, '_blank');
+  }, [subjectColumn, clipboardColumn, getCellValue]);
+  
+  // Helper function to handle notes update in cards
+  const handleNotesUpdate = useCallback(async (companyId: string, newNote: string) => {
+    const company = companies.find(c => c.id === companyId);
+    if (!company) return;
+    
+    const currentNotes = company.notes && Array.isArray(company.notes) ? company.notes : [];
+    const updatedNotes = [...currentNotes, { 
+      message: newNote.trim(), 
+      date: new Date().toISOString() 
+    }];
+    
+    try {
+      await updateCompany(companyId, { notes: updatedNotes });
+      setToastMessage('Note added successfully');
+      setToastVisible(true);
+    } catch (error: any) {
+      console.error('Failed to update notes:', error);
+      setToastMessage(`Error updating notes: ${error.message}`);
+      setToastVisible(true);
+    }
+  }, [companies, updateCompany]);
 
   if (loading) {
     return (
@@ -1334,6 +1575,18 @@ function CompaniesContent() {
             </>
           ) : (
             <>
+              <button
+                onClick={() => setCallingMode(!callingMode)}
+                className={`inline-flex items-center px-3 md:px-4 py-2 border text-xs md:text-sm font-medium rounded-md transition-colors ${
+                  callingMode
+                    ? 'border-indigo-500 text-white bg-indigo-600 hover:bg-indigo-700'
+                    : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+                }`}
+              >
+                <Phone className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Calling Mode</span>
+                <span className="sm:hidden">Call</span>
+              </button>
               <button
                 onClick={() => setColumnFilterOpen(!columnFilterOpen)}
                 className="inline-flex items-center px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
@@ -1421,6 +1674,30 @@ function CompaniesContent() {
             )}
           </div>
           
+          {/* Compact Column Selection */}
+          <div className="mb-4 pb-4 border-b border-gray-200">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Compact Column
+            </label>
+            <select
+              value={compactColumn || ''}
+              onChange={(e) => setCompactColumn(e.target.value || null)}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="">None</option>
+              {columnOrder.map((column) => (
+                <option key={column} value={column}>
+                  {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                </option>
+              ))}
+            </select>
+            {compactColumn && (
+              <p className="mt-1 text-xs text-gray-500">
+                Selected: {columnLabels[compactColumn] || compactColumn.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+              </p>
+            )}
+          </div>
+          
           {/* Phone Click Behavior Selection */}
           <div className="mb-4 pb-4 border-b border-gray-200">
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1464,7 +1741,7 @@ function CompaniesContent() {
         </div>
       )}
 
-      {/* Search and Sort */}
+      {/* Search and Filter & Sort Button (Mobile) */}
       <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
         <div className="relative flex-1 max-w-full sm:max-w-md">
           <input
@@ -1485,12 +1762,22 @@ function CompaniesContent() {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2 sm:flex-shrink-0">
-          <ArrowUpDown className="w-4 h-4 text-gray-500 hidden sm:block" />
+        {/* Mobile Filter & Sort Button */}
+        <button
+          onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
+          className="sm:hidden flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+        >
+          <Filter className="w-4 h-4" />
+          <span>Filter & Sort</span>
+          <ChevronDown className={`w-4 h-4 transition-transform ${mobileFiltersOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {/* Desktop Sort */}
+        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
+          <ArrowUpDown className="w-4 h-4 text-gray-500" />
           <select
             value={sortOrder}
             onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-            className="flex-1 sm:flex-none px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            className="flex-none px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
@@ -1498,8 +1785,26 @@ function CompaniesContent() {
         </div>
       </div>
 
+      {/* Mobile Sort and Filters - Collapsible */}
+      <div className={`sm:hidden mb-4 ${mobileFiltersOpen ? 'block' : 'hidden'}`}>
+        <div className="flex flex-col gap-3">
+          {/* Mobile Sort */}
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       {/* Filters */}
-      <div className="mb-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4">
+      <div className={`mb-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4 ${mobileFiltersOpen ? 'sm:flex' : 'hidden sm:flex'}`}>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 sm:flex-initial">
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-gray-500 flex-shrink-0" />
@@ -1716,13 +2021,180 @@ function CompaniesContent() {
         </div>
       )}
 
-      {/* Companies Table */}
+      {/* Companies Table or Cards */}
       {companies.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-lg p-8 md:p-12 text-center">
           <Building2 className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
           <p className="text-sm md:text-base text-gray-500 mb-4">
             {searchQuery ? 'No companies found matching your search.' : 'No companies found. Create your first company to get started.'}
           </p>
+        </div>
+      ) : callingMode ? (
+        /* Calling Mode - Compact Cards */
+        <div className="space-y-4">
+          {companies.map((company) => {
+            const domain = company.domain && company.domain !== '-' ? company.domain.trim() : null;
+            const instagram = company.instagram && company.instagram !== '-' ? company.instagram.trim().replace(/^@/, '') : null;
+            const phone = company.phone && company.phone !== '-' ? company.phone.trim() : null;
+            const email = company.email && company.email !== '-' ? company.email.trim() : null;
+            const compactValue = compactColumn ? getCellValue(company, compactColumn) : null;
+            const notes = company.notes && Array.isArray(company.notes) ? company.notes : [];
+            const isEditingThisNote = editingNoteState?.companyId === company.id;
+            const editingNoteIndex = isEditingThisNote ? editingNoteState!.noteIndex : null;
+            const editingNoteText = isEditingThisNote ? editingNoteState!.text : '';
+            const newNote = newNoteState[company.id] || '';
+            
+            return (
+              <div
+                key={company.id}
+                className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
+              >
+                {/* Domain/Instagram Tags */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {domain && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      {domain.startsWith('http://') || domain.startsWith('https://') ? domain : `https://${domain}`}
+                    </span>
+                  )}
+                  {instagram && (
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-pink-100 text-pink-800">
+                      @{instagram}
+                    </span>
+                  )}
+                </div>
+                
+                {/* Phone with Call and WhatsApp Icons */}
+                {phone && (
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-sm text-gray-900 flex-1">{phone}</span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handlePhoneCall(phone)}
+                        className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                        title="Call"
+                      >
+                        <Phone className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => handleWhatsAppClick(company)}
+                        className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                        title="WhatsApp (with pre-filled text)"
+                      >
+                        <MessageCircle className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => handleWhatsAppClickNoText(company)}
+                        className="p-2 rounded-full bg-gray-200 text-gray-700 border border-gray-400 hover:bg-gray-300 transition-colors"
+                        title="WhatsApp (no text)"
+                      >
+                        <MessageCircle className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Email */}
+                {email && (
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="text-sm font-medium text-gray-700 min-w-[80px]">Email:</span>
+                    <button
+                      onClick={() => handleEmailClick(company)}
+                      className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                    >
+                      <Mail className="w-4 h-4" />
+                      {email}
+                    </button>
+                  </div>
+                )}
+                
+                {/* Compact Column */}
+                {compactColumn && compactValue && compactValue !== '-' && (
+                  <div className="mb-3 p-2 bg-gray-50 rounded border border-gray-200">
+                    <div className="text-sm text-gray-900 whitespace-pre-wrap">{compactValue}</div>
+                  </div>
+                )}
+                
+                {/* Notes Section */}
+                <div className="border-t border-gray-200 pt-3 mt-3">
+                  <div className="text-xs font-medium text-gray-700 mb-2">Notes:</div>
+                  <div className="space-y-2 mb-3">
+                    {notes.map((note: any, index: number) => (
+                      <div key={index} className="text-sm text-gray-700 bg-gray-50 p-2 rounded">
+                        {editingNoteIndex === index ? (
+                          <div className="flex gap-2">
+                            <input
+                              type="text"
+                              value={editingNoteText}
+                              onChange={(e) => setEditingNoteState({ companyId: company.id, noteIndex: index, text: e.target.value })}
+                              onBlur={async () => {
+                                const updatedNotes = [...notes];
+                                updatedNotes[index] = { ...note, message: editingNoteText.trim() };
+                                try {
+                                  await updateCompany(company.id, { notes: updatedNotes });
+                                  setEditingNoteState(null);
+                                  setToastMessage('Note updated successfully');
+                                  setToastVisible(true);
+                                } catch (error: any) {
+                                  console.error('Failed to update note:', error);
+                                  setToastMessage(`Error updating note: ${error.message}`);
+                                  setToastVisible(true);
+                                }
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.currentTarget.blur();
+                                } else if (e.key === 'Escape') {
+                                  setEditingNoteState(null);
+                                }
+                              }}
+                              className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                              autoFocus
+                            />
+                          </div>
+                        ) : (
+                          <div 
+                            className="flex items-start justify-between cursor-pointer hover:bg-gray-100 p-1 rounded"
+                            onClick={() => {
+                              setEditingNoteState({ companyId: company.id, noteIndex: index, text: note.message || '' });
+                            }}
+                          >
+                            <span className="flex-1">{note.message || ''}</span>
+                            <Edit2 className="w-3 h-3 text-gray-400 ml-2 flex-shrink-0" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newNote}
+                      onChange={(e) => setNewNoteState({ ...newNoteState, [company.id]: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newNote.trim()) {
+                          handleNotesUpdate(company.id, newNote);
+                          setNewNoteState({ ...newNoteState, [company.id]: '' });
+                        }
+                      }}
+                      placeholder="Add a note..."
+                      className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                    <button
+                      onClick={() => {
+                        if (newNote.trim()) {
+                          handleNotesUpdate(company.id, newNote);
+                          setNewNoteState({ ...newNoteState, [company.id]: '' });
+                        }
+                      }}
+                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                    >
+                      Add
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden relative">
@@ -1731,7 +2203,15 @@ function CompaniesContent() {
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500"></div>
             </div>
           )}
-          <div className="overflow-x-auto -mx-4 md:mx-0">
+          <div 
+            ref={tableScrollContainerRef}
+            className={`overflow-x-auto -mx-4 md:mx-0 ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+            onMouseDown={handleTableMouseDown}
+            onMouseMove={handleTableMouseMove}
+            onMouseUp={handleTableMouseUp}
+            onMouseLeave={handleTableMouseLeave}
+            style={{ userSelect: isDragging ? 'none' : 'auto' }}
+          >
             <div className="inline-block min-w-full align-middle">
               <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
                 <colgroup>
@@ -1828,6 +2308,7 @@ function CompaniesContent() {
                         const isLinkColumn = columnKey === 'domain' || columnKey === 'instagram';
                         const isPhoneColumn = columnKey === 'phone';
                         const isEmailColumn = columnKey === 'email';
+                        const isNotesColumn = columnKey === 'notes';
                         
                         // Regular columns and template columns
                         const value = getCellValue(company, columnKey);
@@ -1928,13 +2409,19 @@ function CompaniesContent() {
                                 return; // Let event bubble to row handler
                               }
                               e.stopPropagation();
-                              handleCellClick(company, columnKey);
+                              // Notes column opens drawer instead of copying
+                              if (isNotesColumn) {
+                                setCompanyToView(company);
+                                setDrawerOpen(true);
+                              } else {
+                                handleCellClick(company, columnKey);
+                              }
                             } : undefined}
-                            onDoubleClick={!isEditing && !isTemplateColumn && !isLinkColumn && !isPhoneColumn && !isEmailColumn ? (e) => {
+                            onDoubleClick={!isEditing && !isTemplateColumn && !isLinkColumn && !isPhoneColumn && !isEmailColumn && !isNotesColumn ? (e) => {
                               e.stopPropagation();
                               handleCellDoubleClick(company, columnKey);
                             } : undefined}
-                            title={!isEditing ? (isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Single click to open WhatsApp and copy clipboard column, double click to edit" : isPhoneColumn ? "Single click to call, double click to edit" : isEmailColumn ? "Single click to open Gmail with pre-filled email and body, double click to edit" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
+                            title={!isEditing ? (isNotesColumn ? "Click to open notes management" : isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Single click to open WhatsApp and copy clipboard column, double click to edit" : isPhoneColumn ? "Single click to call, double click to edit" : isEmailColumn ? "Single click to open Gmail with pre-filled email and body, double click to edit" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -2163,10 +2650,13 @@ function CompaniesContent() {
               </table>
             </div>
           </div>
-          
-          {/* Pagination Controls */}
-          {totalPages > 1 && (
-            <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+        </div>
+      )}
+      
+      {/* Pagination Controls - Show for both table and card views */}
+      {totalPages > 1 && (
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm mt-4">
+          <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
               <div className="flex-1 flex justify-between sm:hidden">
                 <button
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
@@ -2242,9 +2732,8 @@ function CompaniesContent() {
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      )}
+          </div>
+        )}
 
       {/* Toast Notification */}
       <Toast

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight, Plus, Edit2 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
 import { supabase } from "@/utils/supabase/client";
@@ -56,6 +56,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     contactId: string | number;
     contactName: string;
   } | null>(null);
+  
+  // Notes management state
+  const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
+  const [isAddingNote, setIsAddingNote] = useState(false);
+  const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
+  const [newNoteMessage, setNewNoteMessage] = useState('');
+  const [noteToDelete, setNoteToDelete] = useState<number | null>(null);
 
   // Handle cell double click (edit)
   const handleCellDoubleClick = useCallback(
@@ -72,6 +79,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
       // Classification uses a dropdown, not double-click editing
       if (columnKey === "classification") {
+        return;
+      }
+
+      // Notes are managed in the Notes section, not via double-click
+      if (columnKey === "notes") {
         return;
       }
 
@@ -422,13 +434,52 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     prevTabRef.current = activeTab;
   }, [activeTab, company?.domain, fetchContacts]);
 
+  // Track if we've made local notes changes to prevent overwriting
+  const notesChangedLocallyRef = useRef(false);
+
+  // Track previous company ID to detect when we switch companies
+  const prevCompanyIdRef = useRef<string | null>(null);
+
   // Reset tab when company changes
   useEffect(() => {
     if (company) {
+      const companyIdChanged = prevCompanyIdRef.current !== company.id;
+      
+      // If company ID changed, reset the local changes flag
+      if (companyIdChanged) {
+        notesChangedLocallyRef.current = false;
+        prevCompanyIdRef.current = company.id;
+      }
+      
       setActiveTab("overview");
       setContacts(null);
       prevTabRef.current = "overview"; // Reset previous tab reference
       // Don't clear fetchedDomainsRef - we want to keep the cache across company switches
+      
+      // Only load notes from company if we haven't made local changes
+      // This prevents overwriting local state when parent refreshes after our update
+      if (!notesChangedLocallyRef.current) {
+        if (company.notes && Array.isArray(company.notes)) {
+          setNotes(company.notes);
+        } else {
+          setNotes([]);
+        }
+      } else {
+        // If we have local changes, check if the company prop has been updated to match
+        // This happens when the parent refreshes after our update
+        const propNotes = company.notes && Array.isArray(company.notes) ? company.notes : [];
+        const notesMatch = JSON.stringify(propNotes) === JSON.stringify(notes);
+        if (notesMatch) {
+          // Parent has synced our changes, reset the flag
+          notesChangedLocallyRef.current = false;
+        }
+      }
+      setIsAddingNote(false);
+      setEditingNoteIndex(null);
+      setNewNoteMessage('');
+    } else {
+      prevCompanyIdRef.current = null;
+      notesChangedLocallyRef.current = false;
     }
   }, [company?.id]);
 
@@ -534,6 +585,116 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   // Handle cancel removal
   const handleContactRemoveCancel = useCallback(() => {
     setContactToRemove(null);
+  }, []);
+
+  // Notes management handlers
+  const handleAddNote = useCallback(() => {
+    setIsAddingNote(true);
+    setNewNoteMessage('');
+  }, []);
+
+  const handleCancelAddNote = useCallback(() => {
+    setIsAddingNote(false);
+    setNewNoteMessage('');
+  }, []);
+
+  const handleSaveNote = useCallback(async () => {
+    if (!company || !newNoteMessage.trim()) return;
+
+    try {
+      const updatedNotes = [...notes];
+      
+      if (editingNoteIndex !== null) {
+        // Update existing note - keep original date
+        const originalNote = notes[editingNoteIndex];
+        updatedNotes[editingNoteIndex] = {
+          message: newNoteMessage.trim(),
+          date: originalNote.date, // Keep original date when editing
+        };
+      } else {
+        // Add new note - automatically set today's date
+        const today = new Date().toISOString().split('T')[0];
+        updatedNotes.push({
+          message: newNoteMessage.trim(),
+          date: today,
+        });
+      }
+
+      // Sort notes by date (newest first)
+      updatedNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      await updateCompany(company.id, { notes: updatedNotes });
+      setNotes(updatedNotes);
+      notesChangedLocallyRef.current = true;
+      
+      // Update the company prop if onCompanyChange is available
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, notes: updatedNotes });
+      }
+      
+      setIsAddingNote(false);
+      setEditingNoteIndex(null);
+      setNewNoteMessage('');
+      setToastMessage(editingNoteIndex !== null ? 'Note updated successfully' : 'Note added successfully');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } catch (error: any) {
+      console.error('Error saving note:', error);
+      setToastMessage(`Error saving note: ${error.message}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    }
+  }, [company, notes, newNoteMessage, editingNoteIndex, updateCompany]);
+
+  const handleEditNote = useCallback((index: number) => {
+    const note = notes[index];
+    if (note) {
+      setEditingNoteIndex(index);
+      setNewNoteMessage(note.message);
+      setIsAddingNote(true);
+    }
+  }, [notes]);
+
+  const handleCancelEditNote = useCallback(() => {
+    setEditingNoteIndex(null);
+    setIsAddingNote(false);
+    setNewNoteMessage('');
+  }, []);
+
+  const handleDeleteNoteClick = useCallback((index: number) => {
+    setNoteToDelete(index);
+  }, []);
+
+  const handleDeleteNoteConfirm = useCallback(async () => {
+    if (!company || noteToDelete === null) return;
+
+    try {
+      const updatedNotes = notes.filter((_, index) => index !== noteToDelete);
+      const finalNotes = updatedNotes.length > 0 ? updatedNotes : null;
+      await updateCompany(company.id, { notes: finalNotes });
+      setNotes(updatedNotes);
+      notesChangedLocallyRef.current = true;
+      
+      // Update the company prop if onCompanyChange is available
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, notes: finalNotes });
+      }
+      
+      setNoteToDelete(null);
+      setToastMessage('Note deleted successfully');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } catch (error: any) {
+      console.error('Error deleting note:', error);
+      setToastMessage(`Error deleting note: ${error.message}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+      setNoteToDelete(null);
+    }
+  }, [company, notes, noteToDelete, updateCompany]);
+
+  const handleDeleteNoteCancel = useCallback(() => {
+    setNoteToDelete(null);
   }, []);
 
   // Calculate current index and navigation helpers (must be before early return)
@@ -1153,6 +1314,173 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 </div>
               </div>
 
+              {/* Notes Section */}
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Notes
+                  </h3>
+                  {!isAddingNote && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleAddNote();
+                      }}
+                      className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors"
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Add Note
+                    </button>
+                  )}
+                </div>
+
+                {isAddingNote ? (
+                  <div className="border border-indigo-200 rounded-lg p-4 bg-indigo-50/30 mb-4">
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Message
+                        </label>
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setNewNoteMessage('Not Picked');
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                          >
+                            Not Picked
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setNewNoteMessage('Interested');
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded-md hover:bg-green-100 transition-colors"
+                          >
+                            Interested
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setNewNoteMessage('Not Interested');
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-300 rounded-md hover:bg-red-100 transition-colors"
+                          >
+                            Not Interested
+                          </button>
+                        </div>
+                        <textarea
+                          value={newNoteMessage}
+                          onChange={(e) => setNewNoteMessage(e.target.value)}
+                          placeholder="Enter note message..."
+                          rows={3}
+                          className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        {editingNoteIndex === null && (
+                          <p className="mt-1 text-xs text-gray-500">
+                            Date will be automatically set to today
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            editingNoteIndex !== null ? handleCancelEditNote() : handleCancelAddNote();
+                          }}
+                          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleSaveNote();
+                          }}
+                          disabled={!newNoteMessage.trim()}
+                          className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {editingNoteIndex !== null ? 'Update' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {notes.length > 0 ? (
+                  <div className="space-y-3">
+                    {notes.map((note, index) => (
+                      <div
+                        key={index}
+                        className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-md transition-shadow"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xs font-medium text-gray-500">
+                                {new Date(note.date).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric',
+                                })}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-900 whitespace-pre-wrap">
+                              {note.message}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleEditNote(index);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              title="Edit note"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDeleteNoteClick(index);
+                              }}
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              title="Delete note"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  !isAddingNote && (
+                    <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
+                      <p className="text-sm text-gray-600">No notes yet. Click "Add Note" to create one.</p>
+                    </div>
+                  )
+                )}
+              </div>
+
               {/* Summary Data */}
               {((summaryData && Object.keys(summaryData).length > 0) ||
                 columnOrder.includes("classification")) && (
@@ -1164,12 +1492,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   <div className="space-y-3">
                     {columnOrder
                       .filter((column) => {
-                        // Only show columns that are not domain/instagram/phone/email (already shown above)
+                        // Only show columns that are not domain/instagram/phone/email/notes (already shown above or separately)
                         if (
                           column === "domain" ||
                           column === "instagram" ||
                           column === "phone" ||
-                          column === "email"
+                          column === "email" ||
+                          column === "notes"
                         )
                           return false;
 
@@ -1483,6 +1812,71 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors"
                 >
                   Remove
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete Note Confirmation Modal */}
+      {noteToDelete !== null && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
+            onClick={handleDeleteNoteCancel}
+          />
+          
+          {/* Modal */}
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Delete Note
+              </h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Are you sure you want to delete this note? This action cannot be undone.
+                {notes[noteToDelete] && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200">
+                    <p className="text-xs text-gray-500 mb-1">
+                      {new Date(notes[noteToDelete].date).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </p>
+                    <p className="text-sm text-gray-900">
+                      {notes[noteToDelete].message}
+                    </p>
+                  </div>
+                )}
+              </p>
+              
+              <div className="flex gap-3 justify-end">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDeleteNoteCancel();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleDeleteNoteConfirm();
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors"
+                >
+                  Delete
                 </button>
               </div>
             </div>
