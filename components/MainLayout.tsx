@@ -254,6 +254,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             <Sparkles className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Enrich</span>}
           </Link>
+          
+          <Link
+            href="/personalization"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/personalization')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Personalization"
+          >
+            <FileText className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Personalization</span>}
+          </Link>
 
           {/* Security Section */}
           <div className={`pt-4 mt-4 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>

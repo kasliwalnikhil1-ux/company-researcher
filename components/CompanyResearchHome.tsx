@@ -16,7 +16,9 @@ import { downloadCsv } from "../lib/csvExport";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
 import { useCompanies } from "@/contexts/CompaniesContext";
 import { useOwner } from "@/contexts/OwnerContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { extractUsernameFromUrl } from "../utils/instagramApi";
+import { supabase } from "@/utils/supabase/client";
 
 // Interface for qualification data
 interface QualificationData {
@@ -92,10 +94,18 @@ const INVALID_DOMAINS = [
 ];
 
 export default function CompanyResearcher() {
-  // Companies context for saving summaries
-  const { companies, createCompany, updateCompany } = useCompanies();
+  // Companies context for saving summaries (but don't fetch companies list on mount)
+  const { createCompany, updateCompany } = useCompanies();
   // Owner context for selected owner
   const { selectedOwner } = useOwner();
+  // Auth context for user ID
+  const { user } = useAuth();
+  
+  // Personalization settings (fetched once on page load)
+  const [personalizationSettings, setPersonalizationSettings] = useState<{
+    direct?: { query?: string; schema?: any };
+    instagram?: { systemPrompt?: string; userMessage?: string };
+  } | null>(null);
   
   // Research mode: 'domain' or 'instagram'
   const [researchMode, setResearchMode] = useState<'domain' | 'instagram'>('domain');
@@ -144,6 +154,50 @@ export default function CompanyResearcher() {
   // Toast state
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
+
+  // Fetch personalization settings on page load
+  useEffect(() => {
+    const fetchPersonalization = async () => {
+      if (!user) {
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('user_settings')
+          .select('personalization')
+          .eq('id', user.id)
+          .single();
+
+        // PGRST116 = no rows returned (user hasn't set personalization yet)
+        if (error && error.code === 'PGRST116') {
+          // No personalization set yet, use null (will use defaults in API)
+          setPersonalizationSettings(null);
+          return;
+        }
+
+        if (error || !data?.personalization) {
+          // Other error or no personalization data, use null
+          setPersonalizationSettings(null);
+          return;
+        }
+
+        const personalization = typeof data.personalization === 'string'
+          ? JSON.parse(data.personalization)
+          : data.personalization;
+
+        setPersonalizationSettings({
+          direct: personalization.direct || null,
+          instagram: personalization.instagram || null,
+        });
+      } catch (error) {
+        console.error('Error fetching personalization settings:', error);
+        setPersonalizationSettings(null);
+      }
+    };
+
+    fetchPersonalization();
+  }, [user]);
   
   // Helper to get current company data
   const getCurrentCompanyData = useCallback((company: string) => {
@@ -271,7 +325,7 @@ export default function CompanyResearcher() {
         let instagramProfileData = null;
         
         try {
-          instagramProfileData = await fetchInstagramProfile(company);
+          instagramProfileData = await fetchInstagramProfile(company, user?.id, personalizationSettings?.instagram || null);
           if (!instagramProfileData) {
             setErrorsByCompany(prev => ({
               ...prev,
@@ -321,9 +375,16 @@ export default function CompanyResearcher() {
         if (instagramQualificationData) {
           try {
             const username = extractUsernameFromUrl(company);
-            if (username) {
-              // Check if company exists with this instagram username
-              const existingCompany = companies.find(c => c.instagram === username);
+            if (username && user) {
+              // Check if company exists with this instagram username (query database directly)
+              const { data: existingCompanyData } = await supabase
+                .from('companies')
+                .select('id, instagram, domain, email, phone')
+                .eq('user_id', user.id)
+                .eq('instagram', username)
+                .maybeSingle();
+              
+              const existingCompany = existingCompanyData;
               
               // Extract email and phone from qualification data
               const email = instagramQualificationData.email || null;
@@ -402,7 +463,7 @@ export default function CompanyResearcher() {
         let qualificationData = null;
         
         try {
-          qualificationData = await fetchCompanyMap(domainName);
+          qualificationData = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
           // If fetchCompanyMap returns null, it means there was an error
           // (error notification already sent from fetchCompanyMap)
           if (!qualificationData) {
@@ -443,8 +504,20 @@ export default function CompanyResearcher() {
         // Save/update company in database after summary is generated
         if (qualificationData) {
           try {
-            // Check if company exists with this domain
-            const existingCompany = companies.find(c => c.domain === domainName);
+            // Check if company exists with this domain (query database directly)
+            if (!user) {
+              console.error('User not available, cannot save company');
+              return;
+            }
+            
+            const { data: existingCompanyData } = await supabase
+              .from('companies')
+              .select('id, instagram, domain, email, phone')
+              .eq('user_id', user.id)
+              .eq('domain', domainName)
+              .maybeSingle();
+            
+            const existingCompany = existingCompanyData;
             
             // Extract email and phone from qualification data
             const email = qualificationData.email || null;
@@ -493,7 +566,7 @@ export default function CompanyResearcher() {
         );
       }
     }
-  }, [researchMode, companies, createCompany, updateCompany, selectedOwner]);
+  }, [researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings]);
 
   // Handle CSV file upload
   const handleCsvUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -669,7 +742,7 @@ export default function CompanyResearcher() {
         setCsvProcessingProgress({ current: i + 1, total: uniqueDomainsArray.length });
         
         try {
-          const data = await fetchInstagramProfile(instagramUrl);
+          const data = await fetchInstagramProfile(instagramUrl, user?.id, personalizationSettings?.instagram || null);
           if (data) {
             qualificationDataMap.set(instagramUrl, data); // Reusing map for Instagram profiles
             
@@ -677,9 +750,16 @@ export default function CompanyResearcher() {
             if (data.qualificationData) {
               try {
                 const username = extractUsernameFromUrl(instagramUrl);
-                if (username) {
-                  // Check if company exists with this instagram username
-                  const existingCompany = companies.find(c => c.instagram === username);
+                if (username && user) {
+                  // Check if company exists with this instagram username (query database directly)
+                  const { data: existingCompanyData } = await supabase
+                    .from('companies')
+                    .select('id, instagram, domain, email, phone')
+                    .eq('user_id', user.id)
+                    .eq('instagram', username)
+                    .maybeSingle();
+                  
+                  const existingCompany = existingCompanyData;
                   
                   if (existingCompany) {
                     // Update existing company
@@ -844,14 +924,26 @@ export default function CompanyResearcher() {
         setCsvProcessingProgress({ current: i + 1, total: uniqueDomainsArray.length });
         
         try {
-          const data = await fetchCompanyMap(domainName);
+          const data = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
           if (data) {
             qualificationDataMap.set(domainName, data);
             
             // Save/update company in database after summary is generated
             try {
-              // Check if company exists with this domain
-              const existingCompany = companies.find(c => c.domain === domainName);
+              if (!user) {
+                console.error('User not available, cannot save company');
+                return;
+              }
+              
+              // Check if company exists with this domain (query database directly)
+              const { data: existingCompanyData } = await supabase
+                .from('companies')
+                .select('id, instagram, domain, email, phone')
+                .eq('user_id', user.id)
+                .eq('domain', domainName)
+                .maybeSingle();
+              
+              const existingCompany = existingCompanyData;
               
               // Extract email and phone from qualification data
               const email = data.email || null;
@@ -1210,7 +1302,7 @@ export default function CompanyResearcher() {
     sendSlackNotification(`✅ CSV Processing Complete: Processed ${rowsToProcess.length} rows.`).catch(
       (error) => console.error('Failed to send Slack notification:', error)
     );
-  }, [csvData, selectedUrlColumn, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, companies, createCompany, updateCompany, selectedOwner]);
+  }, [csvData, selectedUrlColumn, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings]);
 
   // Clear all data function
   const handleClearAll = useCallback(() => {

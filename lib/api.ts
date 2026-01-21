@@ -1,6 +1,10 @@
 // API client for fetching company qualification data
 
-export const fetchCompanyMap = async (domain: string): Promise<any> => {
+export const fetchCompanyMap = async (
+  domain: string, 
+  userId?: string | null,
+  personalization?: { query?: string; schema?: any } | null
+): Promise<any> => {
   try {
     const response = await fetch('/api/companymap', {
       method: 'POST',
@@ -8,7 +12,9 @@ export const fetchCompanyMap = async (domain: string): Promise<any> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ 
-        websiteurl: domain
+        websiteurl: domain,
+        userId: userId || null,
+        personalization: personalization || null
       }),
     });
     
@@ -103,7 +109,11 @@ export const sendSlackNotification = async (message: string): Promise<boolean> =
 };
 
 // Fetch Instagram profile data
-export const fetchInstagramProfile = async (instagramUrl: string): Promise<any> => {
+export const fetchInstagramProfile = async (
+  instagramUrl: string, 
+  userId?: string | null,
+  personalization?: { systemPrompt?: string; userMessage?: string } | null
+): Promise<any> => {
   try {
     const response = await fetch('/api/instagram-profile', {
       method: 'POST',
@@ -111,7 +121,9 @@ export const fetchInstagramProfile = async (instagramUrl: string): Promise<any> 
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ 
-        instagramUrl: instagramUrl
+        instagramUrl: instagramUrl,
+        userId: userId || null,
+        personalization: personalization || null
       }),
     });
     

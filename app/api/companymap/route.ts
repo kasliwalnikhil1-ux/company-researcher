@@ -1,6 +1,7 @@
 // /app/api/companymap/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import Exa from "exa-js";
+import { createClient } from '@supabase/supabase-js';
 
 export const maxDuration = 100;
 
@@ -10,6 +11,75 @@ const EXA_API_KEYS = process.env.EXA_API_KEYS
   : [];
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+
+// Helper function to get Supabase client for server-side operations
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  
+  if (!supabaseUrl || !supabaseServiceKey) {
+    console.warn('Supabase credentials not configured for server-side operations');
+    return null;
+  }
+  
+  return createClient(supabaseUrl, supabaseServiceKey);
+}
+
+// Helper function to fetch personalization settings
+async function fetchPersonalizationSettings(userId: string | null): Promise<{ query: string; schema: any } | null> {
+  if (!userId) {
+    return null;
+  }
+
+  try {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('personalization')
+      .eq('id', userId)
+      .single();
+
+    // PGRST116 = no rows returned (user hasn't set personalization yet)
+    if (error && error.code === 'PGRST116') {
+      // No personalization set yet, return null to use defaults
+      return null;
+    }
+
+    if (error || !data?.personalization) {
+      // Other error or no personalization data
+      return null;
+    }
+
+    const personalization = typeof data.personalization === 'string'
+      ? JSON.parse(data.personalization)
+      : data.personalization;
+
+    if (personalization?.direct?.query && personalization?.direct?.schema) {
+      try {
+        const schema = typeof personalization.direct.schema === 'string'
+          ? JSON.parse(personalization.direct.schema)
+          : personalization.direct.schema;
+        
+        return {
+          query: personalization.direct.query,
+          schema: schema,
+        };
+      } catch (e) {
+        console.error('Error parsing personalization schema:', e);
+        return null;
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.error('Error fetching personalization settings:', error);
+    return null;
+  }
+}
 
 // Helper function to send Slack notification
 async function sendSlackNotification(message: string): Promise<void> {
@@ -273,7 +343,7 @@ async function processUrlsWithKeys(
 
 export async function POST(req: NextRequest) {
   try {
-    const { websiteurl, websiteurls } = await req.json();
+    const { websiteurl, websiteurls, userId, personalization } = await req.json();
     
     // Support both single URL and multiple URLs
     let urls: string[] = [];
@@ -316,9 +386,10 @@ export async function POST(req: NextRequest) {
 
     console.log(`Making Exa API call(s) to ${normalizedUrls.length} URL(s)`);
 
-    const query = "You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.\n\nYour job: classify the input company as:\n- QUALIFIED (sells physical fashion/apparel/jewelry products)\n- NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)\n- MAYBE (unclear)\n\nCRITICAL RULE:\nOnly mark QUALIFIED if the company sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.\nIf the company sells software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider, it is NOT_QUALIFIED.\n\nReturn STRICT JSON only following the schema.\nQualification Rules\nQUALIFIED ✅\n\nMark QUALIFIED only if you see some evidence of physical product commerce in the profile, such as:\n- product categories mentioned in bio (e.g., \"shirts\", \"kurtas\", \"rings\", \"earrings\")\n- shop links, website links, or e-commerce indicators\n- product-focused content in bio\n- brand/store indicators\n- fashion/apparel/jewelry business signals\n- fashion/apparel/jewelry Manufacturer / exporter / OEM / ODM / supplier / wholesaler\n- fashion/apparel/jewelry marketplace indicators (e.g., \"shop on Amazon\", \"shop on Flipkart\", \"shop on Myntra\", \"shop on Etsy\")\n\nNOT_QUALIFIED ❌\n\nMark NOT_QUALIFIED if ANY are true:\n- Sells software subscription / Is SaaS / Is app / Is AI tool\n- \"We provide services to brands\" (not selling products, like IT services / marketing agency / consulting)\n\nOnly return product_types when classification = \"QUALIFIED\".\n\nproduct_types must be EXACTLY 2 items:\n- generic physical product types (e.g., \"earrings\", \"rings\", \"kurtas\", \"shirts\")\n- NOT \"apparel\", \"jewelry\", \"fashion\" (too broad)\n- NOT services (\"photoshoots\", \"videography\")\n- NOT software (\"platform\", \"tool\", \"API\")\n\nIf you cannot find 2 real product types on the website text, then:\n- classification must be MAYBE (not QUALIFIED)\n- product_types must be null\n- sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with I think your...\n\nemail and phone as strings if present on the website else null";
+    // Default query and schema
+    const defaultQuery = "You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.\n\nYour job: classify the input company as:\n- QUALIFIED (sells physical fashion/apparel/jewelry products)\n- NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)\n- MAYBE (unclear)\n\nCRITICAL RULE:\nOnly mark QUALIFIED if the company sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.\nIf the company sells software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider, it is NOT_QUALIFIED.\n\nReturn STRICT JSON only following the schema.\nQualification Rules\nQUALIFIED ✅\n\nMark QUALIFIED only if you see some evidence of physical product commerce in the profile, such as:\n- product categories mentioned in bio (e.g., \"shirts\", \"kurtas\", \"rings\", \"earrings\")\n- shop links, website links, or e-commerce indicators\n- product-focused content in bio\n- brand/store indicators\n- fashion/apparel/jewelry business signals\n- fashion/apparel/jewelry Manufacturer / exporter / OEM / ODM / supplier / wholesaler\n- fashion/apparel/jewelry marketplace indicators (e.g., \"shop on Amazon\", \"shop on Flipkart\", \"shop on Myntra\", \"shop on Etsy\")\n\nNOT_QUALIFIED ❌\n\nMark NOT_QUALIFIED if ANY are true:\n- Sells software subscription / Is SaaS / Is app / Is AI tool\n- \"We provide services to brands\" (not selling products, like IT services / marketing agency / consulting)\n\nOnly return product_types when classification = \"QUALIFIED\".\n\nproduct_types must be EXACTLY 2 items:\n- generic physical product types (e.g., \"earrings\", \"rings\", \"kurtas\", \"shirts\")\n- NOT \"apparel\", \"jewelry\", \"fashion\" (too broad)\n- NOT services (\"photoshoots\", \"videography\")\n- NOT software (\"platform\", \"tool\", \"API\")\n\nIf you cannot find 2 real product types on the website text, then:\n- classification must be MAYBE (not QUALIFIED)\n- product_types must be null\n- sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with I think your...\n\nemail and phone as strings if present on the website else null";
 
-    const schema = {
+    const defaultSchema = {
       description: "Schema for company qualification assessment with classification and recommended actions",
       type: "object",
       required: ["company_summary",  "sales_opener_sentence", "company_industry", "classification", "confidence_score", "product_types", "sales_action", "email", "phone"],
@@ -366,6 +437,28 @@ export async function POST(req: NextRequest) {
         }
       }
     };
+
+    // Use passed personalization settings if available, otherwise fetch from database
+    let personalizationSettings = personalization;
+    if (!personalizationSettings) {
+      personalizationSettings = await fetchPersonalizationSettings(userId || null);
+    }
+    
+    const query = personalizationSettings?.query || defaultQuery;
+    // Parse schema if it's a string, otherwise use as-is
+    let schema = defaultSchema;
+    if (personalizationSettings?.schema) {
+      if (typeof personalizationSettings.schema === 'string') {
+        try {
+          schema = JSON.parse(personalizationSettings.schema);
+        } catch (e) {
+          console.error('Error parsing passed schema, using default:', e);
+          schema = defaultSchema;
+        }
+      } else {
+        schema = personalizationSettings.schema;
+      }
+    }
 
     // Process URLs with multi-key logic
     const result = await processUrlsWithKeys(normalizedUrls, query, schema);

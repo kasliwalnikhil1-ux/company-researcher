@@ -186,8 +186,14 @@ function CompaniesContent() {
     searchQuery,
     setSearchQuery,
     availableSetNames,
-    availableOwners
+    availableOwners,
+    initializeCompanies
   } = useCompanies();
+
+  // Initialize companies on mount (only on Companies page)
+  useEffect(() => {
+    initializeCompanies();
+  }, [initializeCompanies]);
   
   // Helper function to format date for date input (YYYY-MM-DD)
   const formatDateForInput = (date: Date | null): string => {

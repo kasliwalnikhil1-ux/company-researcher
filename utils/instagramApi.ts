@@ -136,7 +136,8 @@ export interface InstagramQualificationResult {
  */
 export async function qualifyInstagramProfile(
   profileData: InstagramProfileResponse,
-  provider: 'azure' | 'gemini' = 'azure'
+  provider: 'azure' | 'gemini' = 'azure',
+  personalizedPrompts?: { systemPrompt?: string; userMessage?: string }
 ): Promise<InstagramQualificationResult> {
   const profile = profileData.result;
 
@@ -153,8 +154,8 @@ Instagram Profile Data:
 - Profile Picture URL: ${profile.profile_pic_url_hd || profile.profile_pic_url}
 `;
 
-  // System prompt similar to Exa's qualification query
-  const systemPrompt = `You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.
+  // Default system prompt
+  const defaultSystemPrompt = `You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.
 
 Your job: classify the input Instagram profile as:
 - QUALIFIED (sells physical fashion/apparel/jewelry products)
@@ -204,12 +205,33 @@ Don't use words that feel AI like captivating, captivating, transforming, etc.
 
 email and phone as strings if present in bio, otherwise use empty string ""
 `;
-        
-  const userMessage = `Analyze this Instagram profile and provide qualification assessment:
+
+  // Use personalized system prompt if provided, otherwise use default
+  const systemPrompt = personalizedPrompts?.systemPrompt || defaultSystemPrompt;
+  
+  // Default user message
+  const defaultUserMessage = `Analyze this Instagram profile and provide qualification assessment:
 
 ${profileContext}
 
 Return the assessment in the exact JSON schema format.`;
+
+  // Use personalized user message if provided, otherwise use default
+  // Replace placeholders in personalized user message
+  let userMessage = personalizedPrompts?.userMessage || defaultUserMessage;
+  if (personalizedPrompts?.userMessage) {
+    userMessage = userMessage
+      .replace(/{username}/g, profile.username)
+      .replace(/{full_name}/g, profile.full_name || '')
+      .replace(/{biography}/g, profile.biography || 'No biography')
+      .replace(/{is_private}/g, String(profile.is_private))
+      .replace(/{posts_count}/g, String(profile.edge_owner_to_timeline_media.count))
+      .replace(/{followers}/g, String(profile.edge_followed_by.count))
+      .replace(/{following}/g, String(profile.edge_follow.count))
+      .replace(/{profile_pic_url}/g, profile.profile_pic_url_hd || profile.profile_pic_url || '');
+  } else {
+    userMessage = defaultUserMessage;
+  }
 
   const messages: Message[] = [
     { role: 'system', content: systemPrompt },

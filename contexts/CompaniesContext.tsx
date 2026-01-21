@@ -71,6 +71,7 @@ interface CompaniesContextType {
   deleteCompany: (id: string) => Promise<void>;
   bulkUpdateSetName: (ids: string[], setName: string | null) => Promise<void>;
   getCompanyCountsByOwner: (period: AnalyticsPeriod) => Promise<CompanyCountByOwner[]>;
+  initializeCompanies: () => Promise<void>; // Lazy initialization
 }
 
 const CompaniesContext = createContext<CompaniesContextType | undefined>(undefined);
@@ -632,15 +633,22 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     return data || [];
   };
 
-  useEffect(() => {
+  // Lazy initialization - only fetch when initializeCompanies is called
+  const initializeCompanies = useCallback(async () => {
     if (userId) {
-      fetchCompanies();
-    } else {
+      await fetchCompanies();
+    }
+  }, [userId, fetchCompanies]);
+
+  // Don't auto-fetch on mount - only fetch when explicitly requested
+  // This prevents fetching on Research page
+  useEffect(() => {
+    if (!userId) {
       setCompanies([]);
       setLoading(false);
       setTotalCount(0);
     }
-  }, [userId, fetchCompanies]);
+  }, [userId]);
 
   // Reset to page 1 when sort order or filters change
   useEffect(() => {
@@ -682,6 +690,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     deleteCompany,
     bulkUpdateSetName,
     getCompanyCountsByOwner,
+    initializeCompanies,
   };
 
   return <CompaniesContext.Provider value={value}>{children}</CompaniesContext.Provider>;
