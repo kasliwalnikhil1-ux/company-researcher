@@ -7,6 +7,7 @@ import { useCompanies, Company } from '@/contexts/CompaniesContext';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import Toast from '@/components/ui/Toast';
 import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
+import WhatsAppTemplateModal from '@/components/ui/WhatsAppTemplateModal';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail } from 'lucide-react';
@@ -164,6 +165,7 @@ function CompaniesContent() {
     createCompany,
     updateCompany,
     deleteCompany,
+    bulkDeleteCompany,
     bulkUpdateSetName,
     sortOrder,
     setSortOrder,
@@ -301,6 +303,10 @@ function CompaniesContent() {
   const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
   const [assignSetName, setAssignSetName] = useState('');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  
+  // WhatsApp template modal state
+  const [whatsappTemplateModalOpen, setWhatsappTemplateModalOpen] = useState(false);
+  const [selectedCompanyForWhatsApp, setSelectedCompanyForWhatsApp] = useState<Company | null>(null);
   
   // Generate template-based column keys
   const getTemplateColumnKeys = useCallback(() => {
@@ -1249,9 +1255,9 @@ function CompaniesContent() {
 
     try {
       const count = selectedCompanyIds.size;
-      // Delete all selected companies
-      const deletePromises = Array.from(selectedCompanyIds).map(id => deleteCompany(id));
-      await Promise.all(deletePromises);
+      const idsArray = Array.from(selectedCompanyIds);
+      // Delete all selected companies in one operation
+      await bulkDeleteCompany(idsArray);
 
       // Clear selection
       setSelectedCompanyIds(new Set());
@@ -1477,11 +1483,29 @@ function CompaniesContent() {
   const handleWhatsAppClickNoText = useCallback((company: Company) => {
     if (!company.phone || company.phone === '-') return;
     
-    const phone = company.phone.trim().replace(/[^\d+]/g, '');
-    const whatsappUrl = `https://wa.me/${phone}`;
+    // Open modal to select message template
+    setSelectedCompanyForWhatsApp(company);
+    setWhatsappTemplateModalOpen(true);
+  }, []);
+  
+  // Helper function to handle template selection and open WhatsApp
+  const handleTemplateSelect = useCallback((columnKey: string) => {
+    if (!selectedCompanyForWhatsApp || !selectedCompanyForWhatsApp.phone || selectedCompanyForWhatsApp.phone === '-') return;
+    
+    const phone = selectedCompanyForWhatsApp.phone.trim().replace(/[^\d+]/g, '');
+    const message = getCellValue(selectedCompanyForWhatsApp, columnKey);
+    
+    let whatsappUrl = `https://wa.me/${phone}`;
+    
+    // If message exists and is not empty, add it to the URL
+    if (message && message !== '-' && message.trim() !== '') {
+      const encodedMessage = encodeURIComponent(message.trim());
+      whatsappUrl += `?text=${encodedMessage}`;
+    }
     
     window.open(whatsappUrl, '_blank');
-  }, []);
+    setSelectedCompanyForWhatsApp(null);
+  }, [selectedCompanyForWhatsApp, getCellValue]);
   
   // Helper function to handle email click
   const handleEmailClick = useCallback((company: Company) => {
@@ -1511,7 +1535,23 @@ function CompaniesContent() {
     
     window.open(gmailUrl, '_blank');
   }, [subjectColumn, clipboardColumn, getCellValue]);
-  
+
+  // Copy clipboard column on domain/Instagram link click (same logic as table cells)
+  const handleDomainInstagramLinkClick = useCallback(async (company: Company) => {
+    if (!clipboardColumn) return;
+    const clipboardValue = getCellValue(company, clipboardColumn);
+    if (!clipboardValue || clipboardValue === '-') return;
+    try {
+      await copyToClipboard(clipboardValue);
+      setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+      setToastVisible(true);
+    } catch (error) {
+      console.error('Failed to copy to clipboard:', error);
+      setToastMessage('Failed to copy to clipboard');
+      setToastVisible(true);
+    }
+  }, [clipboardColumn, getCellValue, columnLabels]);
+
   // Helper function to handle notes update in cards
   const handleNotesUpdate = useCallback(async (companyId: string, newNote: string) => {
     const company = companies.find(c => c.id === companyId);
@@ -2049,17 +2089,33 @@ function CompaniesContent() {
                 key={company.id}
                 className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
               >
-                {/* Domain/Instagram Tags */}
+                {/* Domain/Instagram Tags - click to open, same copy-to-clipboard logic as table */}
                 <div className="flex flex-wrap gap-2 mb-3">
                   {domain && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    <a
+                      href={domain.startsWith('http://') || domain.startsWith('https://') ? domain : `https://${domain}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={async (e) => {
+                        await handleDomainInstagramLinkClick(company);
+                      }}
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer transition-colors"
+                    >
                       {domain.startsWith('http://') || domain.startsWith('https://') ? domain : `https://${domain}`}
-                    </span>
+                    </a>
                   )}
                   {instagram && (
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-pink-100 text-pink-800">
+                    <a
+                      href={`https://instagram.com/${instagram}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={async (e) => {
+                        await handleDomainInstagramLinkClick(company);
+                      }}
+                      className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-pink-100 text-pink-800 hover:bg-pink-200 cursor-pointer transition-colors"
+                    >
                       @{instagram}
-                    </span>
+                    </a>
                   )}
                 </div>
                 
@@ -2197,7 +2253,7 @@ function CompaniesContent() {
           })}
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden relative">
+        <div className="bg-white border border-gray-200 rounded-lg shadow-sm relative">
           {searchLoading && (
             <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500"></div>
@@ -2205,61 +2261,61 @@ function CompaniesContent() {
           )}
           <div 
             ref={tableScrollContainerRef}
-            className={`overflow-x-auto -mx-4 md:mx-0 ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+            className={`overflow-x-auto overflow-y-auto max-h-[calc(100vh-300px)] -mx-4 md:mx-0 ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
             onMouseDown={handleTableMouseDown}
             onMouseMove={handleTableMouseMove}
             onMouseUp={handleTableMouseUp}
             onMouseLeave={handleTableMouseLeave}
             style={{ userSelect: isDragging ? 'none' : 'auto' }}
           >
-            <div className="inline-block min-w-full align-middle">
-              <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
-                <colgroup>
-                  <col style={{ width: '48px' }} />
-                  {orderedVisibleColumns.map((column) => {
-                    const isPhoneColumn = column === 'phone';
-                    const isEmailColumn = column === 'email';
-                    const isTemplateColumn = column.startsWith('template_');
-                    if (isPhoneColumn || isEmailColumn) {
-                      return <col key={column} style={{ width: '192px', minWidth: '192px' }} />;
-                    } else if (isTemplateColumn) {
-                      return <col key={column} style={{ width: '400px', minWidth: '300px' }} />;
-                    } else {
-                      return <col key={column} style={{ width: '200px', minWidth: '150px' }} />;
-                    }
-                  })}
-                  <col style={{ width: '140px' }} />
-                </colgroup>
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-2 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        <input
-                          type="checkbox"
-                          checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === companies.length}
-                          onChange={(e) => handleSelectAll(e.target.checked)}
-                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                    </th>
+              <div className="inline-block min-w-full align-middle">
+                <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
+                  <colgroup>
+                    <col style={{ width: '48px' }} />
                     {orderedVisibleColumns.map((column) => {
                       const isPhoneColumn = column === 'phone';
                       const isEmailColumn = column === 'email';
-                      return (
-                        <th 
-                          key={column} 
-                          className={`px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider ${(isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : ''}`}
-                        >
-                          <span className="hidden sm:inline">{columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
-                          <span className="sm:hidden">{columnLabels[column]?.split(' ')[0] || column.split('_')[0]}</span>
-                        </th>
-                      );
+                      const isTemplateColumn = column.startsWith('template_');
+                      if (isPhoneColumn || isEmailColumn) {
+                        return <col key={column} style={{ width: '192px', minWidth: '192px' }} />;
+                      } else if (isTemplateColumn) {
+                        return <col key={column} style={{ width: '400px', minWidth: '300px' }} />;
+                      } else {
+                        return <col key={column} style={{ width: '200px', minWidth: '150px' }} />;
+                      }
                     })}
-                    <th className="px-3 md:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
+                    <col style={{ width: '140px' }} />
+                  </colgroup>
+                  <thead className="bg-gray-50 sticky top-0 z-20 shadow-sm">
+                    <tr>
+                      <th className="px-2 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                          <input
+                            type="checkbox"
+                            checked={selectedCompanyIds.size > 0 && selectedCompanyIds.size === companies.length}
+                            onChange={(e) => handleSelectAll(e.target.checked)}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                      </th>
+                      {orderedVisibleColumns.map((column) => {
+                        const isPhoneColumn = column === 'phone';
+                        const isEmailColumn = column === 'email';
+                        return (
+                          <th 
+                            key={column} 
+                            className={`px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 ${(isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : ''}`}
+                          >
+                            <span className="hidden sm:inline">{columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</span>
+                            <span className="sm:hidden">{columnLabels[column]?.split(' ')[0] || column.split('_')[0]}</span>
+                          </th>
+                        );
+                      })}
+                      <th className="px-3 md:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
                 {companies.map((company) => {
                   const isEditingThisCell = editingCell?.companyId === company.id && editingCell?.columnKey;
                   
@@ -2740,6 +2796,18 @@ function CompaniesContent() {
         message={toastMessage}
         isVisible={toastVisible}
         onClose={() => setToastVisible(false)}
+      />
+
+      {/* WhatsApp Template Modal */}
+      <WhatsAppTemplateModal
+        isOpen={whatsappTemplateModalOpen}
+        templateColumns={templateColumns}
+        columnLabels={columnLabels}
+        onSelectTemplate={handleTemplateSelect}
+        onClose={() => {
+          setWhatsappTemplateModalOpen(false);
+          setSelectedCompanyForWhatsApp(null);
+        }}
       />
 
       {/* Delete Confirmation Modal */}

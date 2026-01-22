@@ -70,6 +70,7 @@ interface CompaniesContextType {
   createCompany: (company: Omit<Company, 'id' | 'user_id'>) => Promise<void>;
   updateCompany: (id: string, company: Partial<Omit<Company, 'id' | 'user_id'>>) => Promise<void>;
   deleteCompany: (id: string) => Promise<void>;
+  bulkDeleteCompany: (ids: string[]) => Promise<void>;
   bulkUpdateSetName: (ids: string[], setName: string | null) => Promise<void>;
   getCompanyCountsByOwner: (period: AnalyticsPeriod) => Promise<CompanyCountByOwner[]>;
   initializeCompanies: () => Promise<void>; // Lazy initialization
@@ -602,7 +603,45 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
       throw new Error(error?.message || 'Failed to delete company');
     }
 
-    await fetchCompanies();
+    // Optimistically remove company from local state without refetching
+    setCompanies((prevCompanies) => prevCompanies.filter((company) => company.id !== id));
+    
+    // Update total count
+    setTotalCount((prevCount) => Math.max(0, prevCount - 1));
+
+    // Only refetch set names and owners if needed (they might have changed)
+    await Promise.all([fetchAvailableSetNames(), fetchAvailableOwners()]);
+  };
+
+  const bulkDeleteCompany = async (ids: string[]) => {
+    if (!userId) throw new Error('User must be logged in');
+    if (ids.length === 0) return;
+
+    const { error } = await supabase
+      .from('companies')
+      .delete()
+      .in('id', ids)
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('Error bulk deleting companies:', {
+        message: error?.message || 'Unknown error',
+        details: error?.details || null,
+        hint: error?.hint || null,
+        code: error?.code || null,
+        ids,
+      });
+      throw new Error(error?.message || 'Failed to bulk delete companies');
+    }
+
+    // Optimistically remove all deleted companies from local state without refetching
+    const idsSet = new Set(ids);
+    setCompanies((prevCompanies) => prevCompanies.filter((company) => !idsSet.has(company.id)));
+    
+    // Update total count
+    setTotalCount((prevCount) => Math.max(0, prevCount - ids.length));
+
+    // Only refetch set names and owners if needed (they might have changed)
     await Promise.all([fetchAvailableSetNames(), fetchAvailableOwners()]);
   };
 
@@ -702,6 +741,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     createCompany,
     updateCompany,
     deleteCompany,
+    bulkDeleteCompany,
     bulkUpdateSetName,
     getCompanyCountsByOwner,
     initializeCompanies,

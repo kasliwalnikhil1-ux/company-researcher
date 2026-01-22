@@ -142,6 +142,7 @@ export default function CompanyResearcher() {
   const [csvData, setCsvData] = useState<{ headers: string[]; rows: CsvRow[] } | null>(null);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [selectedUrlColumn, setSelectedUrlColumn] = useState<string | null>(null);
+  const [selectedColumns, setSelectedColumns] = useState<{ domain: string | null; instagram: string | null }>({ domain: null, instagram: null });
   const [isProcessingCsv, setIsProcessingCsv] = useState(false);
   const [csvProcessingProgress, setCsvProcessingProgress] = useState({ current: 0, total: 0 });
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
@@ -150,6 +151,7 @@ export default function CompanyResearcher() {
   const [showResumeDialog, setShowResumeDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvDataRef = useRef<{ headers: string[]; rows: CsvRow[] } | null>(null);
+  const shouldStopProcessingRef = useRef<boolean>(false);
 
   // Toast state
   const [toastMessage, setToastMessage] = useState('');
@@ -585,6 +587,7 @@ export default function CompanyResearcher() {
       setCsvData(parsed);
       setShowColumnSelector(true);
       setSelectedUrlColumn(null);
+      setSelectedColumns({ domain: null, instagram: null });
     } catch (error) {
       console.error('Error parsing CSV:', error);
       alert('Failed to parse CSV file. Please check the file format.');
@@ -598,253 +601,156 @@ export default function CompanyResearcher() {
 
   // Check for saved progress on mount and when CSV data changes
   useEffect(() => {
-    if (csvData && selectedUrlColumn) {
+    if (csvData && (selectedUrlColumn || (selectedColumns.domain || selectedColumns.instagram))) {
       const saved = hasCsvProgress();
       setHasSavedProgress(saved);
     } else {
       setHasSavedProgress(false);
     }
-  }, [csvData, selectedUrlColumn]);
+  }, [csvData, selectedUrlColumn, selectedColumns]);
 
-  // Process CSV rows with progress saving
-  const processCsvRows = useCallback(async (resumeFromSaved: boolean = false) => {
-    if (!csvData || !selectedUrlColumn) return;
+  // Utility function to process items in parallel batches
+  const processInBatches = async <T, R>(
+    items: T[],
+    processor: (item: T, index: number) => Promise<R>,
+    concurrency: number = 10,
+    onProgress?: (processed: number, total: number) => void,
+    onBatchComplete?: (processed: number, total: number) => void
+  ): Promise<R[]> => {
+    const results: R[] = [];
+    const errors: { item: T; error: any }[] = [];
+    
+    for (let i = 0; i < items.length; i += concurrency) {
+      // Check if processing should stop
+      if (shouldStopProcessingRef.current) {
+        break;
+      }
+      
+      const batch = items.slice(i, i + concurrency);
+      const batchPromises = batch.map((item, batchIndex) => 
+        processor(item, i + batchIndex).catch(error => {
+          errors.push({ item, error });
+          return null as R;
+        })
+      );
+      
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults.filter(r => r !== null));
+      
+      const processed = Math.min(i + concurrency, items.length);
+      if (onProgress) {
+        onProgress(processed, items.length);
+      }
+      
+      if (onBatchComplete) {
+        onBatchComplete(processed, items.length);
+      }
+      
+      // Check again after batch completes
+      if (shouldStopProcessingRef.current) {
+        break;
+      }
+    }
+    
+    return results;
+  };
 
-    // Helper function to check if URL is Instagram URL
+  // Function to generate and download processed and pending CSVs
+  const generateProcessedAndPendingCsvs = useCallback((
+    allRows: CsvRow[],
+    headers: string[],
+    qualificationDataMap: Map<string, any>,
+    errorMap: Map<string, string>,
+    useDualColumns: boolean,
+    selectedColumns: { domain: string | null; instagram: string | null },
+    selectedUrlColumn: string | null,
+    researchMode: 'domain' | 'instagram'
+  ) => {
     const isInstagramUrl = (url: string): boolean => {
       if (!url || typeof url !== 'string') return false;
       return url.toLowerCase().includes('instagram.com');
     };
 
-    setIsProcessingCsv(true);
-    
-    // Use a ref to track current CSV data during processing
-    csvDataRef.current = csvData;
-    
-    // Try to load saved progress if resuming
-    let savedProgress: CsvProgressState | null = null;
-    let startFromIndex = 0;
-    let qualificationDataMap = new Map<string, any>();
-    let errorMap = new Map<string, string>();
-    let processedDomainIndices: number[] = [];
-    let uniqueDomainsArray: string[] = [];
-    let lastSavedAt: number | null = null;
+    // Separate rows into processed and pending
+    const processedRows: CsvRow[] = [];
+    const pendingRows: CsvRow[] = [];
 
-    if (resumeFromSaved) {
-      savedProgress = loadCsvProgress();
-      if (savedProgress && savedProgress.selectedUrlColumn === selectedUrlColumn) {
-        // Validate that headers match and row count matches
-        const headersMatch = JSON.stringify(savedProgress.headers) === JSON.stringify(csvData.headers);
-        if (headersMatch && savedProgress.rows.length === csvData.rows.length) {
-          // Resume from saved progress
-          qualificationDataMap = deserializeQualificationDataMap(savedProgress.qualificationDataMap);
-          errorMap = new Map(Object.entries(savedProgress.errorMap || {}));
-          processedDomainIndices = savedProgress.processedDomainIndices || [];
-          uniqueDomainsArray = savedProgress.uniqueDomains || [];
-          startFromIndex = savedProgress.currentDomainIndex || 0;
-          lastSavedAt = savedProgress.lastSavedAt;
-          
-          // Merge saved progress into current CSV data (preserve any new data in current CSV)
-          const mergedRows = csvData.rows.map((row, index) => {
-            const savedRow = savedProgress!.rows[index];
-            if (savedRow && savedRow['Research Status']) {
-              // Use saved row if it has been processed
-              return savedRow;
-            }
-            return row;
-          });
-          
-          const mergedCsvData = { headers: csvData.headers, rows: mergedRows };
-          setCsvData(mergedCsvData);
-          csvDataRef.current = mergedCsvData;
-        } else {
-          // Data structure changed, can't resume
-          clearCsvProgress();
-          savedProgress = null;
-        }
-      } else {
-        savedProgress = null;
-      }
-    }
+    allRows.forEach(row => {
+      let isProcessed = false;
+      let domainName: string | null = null;
+      let instagramUrl: string | null = null;
 
-    // Collect all valid URLs from CSV for display in textarea
-    const allValidUrls: string[] = [];
-    csvData.rows.forEach(row => {
-      const url = row[selectedUrlColumn]?.trim() || '';
-      if (researchMode === 'instagram') {
-        if (url && isInstagramUrl(url)) {
-          allValidUrls.push(url);
-        }
-      } else {
-        if (url && url.includes('.')) {
-          const cleaned = cleanUrl(url, researchMode);
-          if (cleaned) {
-            allValidUrls.push(cleaned);
-          }
-        }
-      }
-    });
-
-    // If not resuming or resume failed, start fresh
-    if (!savedProgress) {
-      setCsvProcessingProgress({ current: 0, total: csvData.rows.length });
-      lastSavedAt = null;
-    } else {
-      setCsvProcessingProgress({ current: startFromIndex, total: uniqueDomainsArray.length });
-    }
-
-    // Filter rows based on mode
-    const rowsToProcess = csvData.rows.filter((row, index) => {
-      const url = row[selectedUrlColumn]?.trim() || '';
-      
-      if (researchMode === 'instagram') {
-        // Instagram mode: only include Instagram URLs
-        if (!url || !isInstagramUrl(url)) {
-          return false;
-        }
-      } else {
-        // Domain mode: existing logic
-        const classification = row['Classification']?.trim() || '';
+      if (useDualColumns) {
+        const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+        const instagramUrlValue = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
         
-        // Skip if Classification is already filled
-        if (classification) {
-          return false;
+        if (domainUrl) {
+          const cleanedUrl = cleanUrl(domainUrl, 'domain');
+          domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
         }
         
-        // Skip if no valid URL
-        if (!url || !url.includes('.')) {
-          return false;
+        if (instagramUrlValue && isInstagramUrl(instagramUrlValue)) {
+          instagramUrl = instagramUrlValue;
         }
-      }
-      
-      return true;
-    });
 
-    if (researchMode === 'instagram') {
-      // Instagram mode processing
-      // Extract unique Instagram URLs - only if not resuming
-      if (!savedProgress) {
-        const uniqueUrls = new Set<string>();
+        // Check if row is processed (has qualification data or error)
+        isProcessed = !!(domainName && (qualificationDataMap.has(domainName) || errorMap.has(domainName))) ||
+                      !!(instagramUrl && (qualificationDataMap.has(instagramUrl) || errorMap.has(instagramUrl))) ||
+                      !!(row['Research Status'] && row['Research Status'].trim() !== '');
+      } else {
+        const url = selectedUrlColumn ? row[selectedUrlColumn]?.trim() || '' : '';
         
-        rowsToProcess.forEach(row => {
-          const url = row[selectedUrlColumn]?.trim() || '';
+        if (researchMode === 'instagram') {
           if (url && isInstagramUrl(url)) {
-            uniqueUrls.add(url);
+            instagramUrl = url;
+            isProcessed = qualificationDataMap.has(url) || errorMap.has(url) || 
+                         !!(row['Research Status'] && row['Research Status'].trim() !== '');
           }
-        });
-
-        uniqueDomainsArray = Array.from(uniqueUrls);
+        } else {
+          if (url) {
+            const cleanedUrl = cleanUrl(url, researchMode);
+            domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+            isProcessed = !!(domainName && (qualificationDataMap.has(domainName) || errorMap.has(domainName))) ||
+                         !!(row['Research Status'] && row['Research Status'].trim() !== '');
+          }
+        }
       }
 
-      // Fetch Instagram profile data for all unique URLs (starting from saved index if resuming)
-      for (let i = startFromIndex; i < uniqueDomainsArray.length; i++) {
-        const instagramUrl = uniqueDomainsArray[i];
-        setCsvProcessingProgress({ current: i + 1, total: uniqueDomainsArray.length });
+      // Update processed rows with qualification data
+      if (isProcessed) {
+        const updatedRow = { ...row };
         
-        try {
-          const data = await fetchInstagramProfile(instagramUrl, user?.id, personalizationSettings?.instagram || null);
-          if (data) {
-            qualificationDataMap.set(instagramUrl, data); // Reusing map for Instagram profiles
-            
-            // Save/update company in database after summary is generated
-            if (data.qualificationData) {
-              try {
-                const username = extractUsernameFromUrl(instagramUrl);
-                if (username && user) {
-                  // Check if company exists with this instagram username (query database directly)
-                  const { data: existingCompanyData } = await supabase
-                    .from('companies')
-                    .select('id, instagram, domain, email, phone')
-                    .eq('user_id', user.id)
-                    .eq('instagram', username)
-                    .maybeSingle();
-                  
-                  const existingCompany = existingCompanyData;
-                  
-                  if (existingCompany) {
-                    // Update existing company
-                    await updateCompany(existingCompany.id, {
-                      summary: data.qualificationData,
-                      domain: existingCompany.domain || '', // Keep existing domain if any
-                      owner: selectedOwner,
-                    });
-                  } else {
-                    // Create new company
-                    await createCompany({
-                      domain: '',
-                      instagram: username,
-                      summary: data.qualificationData,
-                      email: '',
-                      phone: '',
-                      set_name: setName || null,
-                      owner: selectedOwner,
-                    });
-                  }
-                }
-              } catch (saveError) {
-                console.error('Error saving company to database during CSV processing:', saveError);
-                // Don't fail the whole operation if save fails
-              }
-            }
-          } else {
-            errorMap.set(instagramUrl, 'Failed to fetch Instagram profile data');
-          }
-        } catch (error) {
-          console.error(`Error fetching Instagram profile for ${instagramUrl}:`, error);
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-          errorMap.set(instagramUrl, errorMessage);
+        if (useDualColumns) {
+          let domainQualificationData: any = null;
+          let instagramData: any = null;
+          let instagramQualificationData: any = null;
           
-          sendSlackNotification(`❌ CSV Processing Error for ${instagramUrl}\nError: ${errorMessage}`).catch(
-            (slackError) => console.error('Failed to send Slack notification:', slackError)
-          );
-        }
-
-        processedDomainIndices.push(i);
-        
-        // Auto-save progress periodically (inside loop to save after each item)
-        const processedCountInstagram = processedDomainIndices.length;
-        if (shouldAutoSave(lastSavedAt, processedCountInstagram)) {
-          // Merge Instagram data into rows for saving
-          // Use ref to get latest CSV data
-          const currentCsvDataInstagram: { headers: string[]; rows: CsvRow[] } = csvDataRef.current || csvData;
-          const currentRowsInstagram = currentCsvDataInstagram.rows.map((row: CsvRow) => {
-            const url = row[selectedUrlColumn]?.trim() || '';
-            const updatedRow = { ...row };
-            
-            if (!url || !isInstagramUrl(url)) {
-              if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
-                updatedRow['Research Status'] = 'skipped (not Instagram URL)';
-              }
-              return updatedRow;
+          if (domainName) {
+            domainQualificationData = qualificationDataMap.get(domainName);
+          }
+          
+          if (instagramUrl) {
+            instagramData = qualificationDataMap.get(instagramUrl);
+            if (instagramData && instagramData.qualificationData) {
+              instagramQualificationData = instagramData.qualificationData;
             }
-
-            const profileData = qualificationDataMap.get(url);
-            if (profileData && !('error' in profileData)) {
-              updatedRow['Research Status'] = 'completed';
-              updatedRow['Instagram Username'] = profileData.username || '';
-              updatedRow['Instagram Full Name'] = profileData.full_name || '';
-              updatedRow['Instagram Bio'] = profileData.biography || '';
-              updatedRow['Instagram Posts'] = String(profileData.edge_owner_to_timeline_media?.count || 0);
-              updatedRow['Instagram Followers'] = String(profileData.edge_followed_by?.count || 0);
-              updatedRow['Instagram Following'] = String(profileData.edge_follow?.count || 0);
-              updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
+          }
+          
+          const finalQualificationData = domainQualificationData || instagramQualificationData;
+          
+          if (finalQualificationData) {
+            updatedRow['Research Status'] = 'completed';
+            if (domainQualificationData) {
+              updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
+              updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
+              updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
+              updatedRow['Classification'] = domainQualificationData.classification || '';
+              updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
+              updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
               
-              // Add qualification data if present
-              if (profileData.qualificationData) {
-                const qual = profileData.qualificationData;
-                updatedRow['Company Summary'] = qual.profile_summary || '';
-                updatedRow['Company Industry'] = qual.profile_industry || '';
-                updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
-                updatedRow['Classification'] = qual.classification || '';
-                // Only add confidence score if it exists
-                if (qual.confidence_score !== undefined) {
-                  updatedRow['Confidence Score'] = String(qual.confidence_score);
-                }
-                updatedRow['Sales Action'] = qual.sales_action || '';
-                
-                // Handle product types (can be 1 or more items)
-                if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
-                  const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
+              if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
+                const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                if (productTypes.length > 0) {
                   if (productTypes.length === 1) {
                     updatedRow['Product Types'] = productTypes[0];
                   } else if (productTypes.length === 2) {
@@ -854,185 +760,115 @@ export default function CompanyResearcher() {
                     updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
                   }
                   
-                  // Add individual product type columns
                   productTypes.forEach((pt: string, index: number) => {
                     updatedRow[`PRODUCT${index + 1}`] = pt;
                   });
                 }
               }
-            } else {
-              const error = errorMap.get(url);
-              updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
             }
             
-            return updatedRow;
-          });
-
-          // Save progress
-          const progressStateInstagram: CsvProgressState = {
-            headers: currentCsvDataInstagram.headers,
-            rows: currentRowsInstagram,
-            selectedUrlColumn,
-            processedDomainIndices: [...processedDomainIndices],
-            uniqueDomains: uniqueDomainsArray,
-            qualificationDataMap: serializeQualificationDataMap(qualificationDataMap),
-            errorMap: Object.fromEntries(errorMap),
-            lastSavedAt: Date.now(),
-            totalDomains: uniqueDomainsArray.length,
-            currentDomainIndex: processedDomainIndices.length
-          };
-          
-          saveCsvProgress(progressStateInstagram);
-          lastSavedAt = Date.now();
-          
-          // Update CSV data state with current progress
-          const updatedCsvDataInstagram: { headers: string[]; rows: CsvRow[] } = { headers: currentCsvDataInstagram.headers, rows: currentRowsInstagram };
-          setCsvData(updatedCsvDataInstagram);
-          csvDataRef.current = updatedCsvDataInstagram;
-        }
-      }
-    } else {
-      // Domain mode processing (existing logic)
-      // Extract unique domains from URLs (clean URLs first) - only if not resuming
-      if (!savedProgress) {
-        const urlToDomainMap = new Map<string, string>();
-        const uniqueDomains = new Set<string>();
-        
-        rowsToProcess.forEach(row => {
-          const url = row[selectedUrlColumn]?.trim() || '';
-          if (url) {
-            // Clean URL first
-            const cleanedUrl = cleanUrl(url, researchMode);
-            if (cleanedUrl) {
-              const domainName = extractDomain(cleanedUrl);
-              if (domainName) {
-                // Map both original and cleaned URL to domain
-                urlToDomainMap.set(url, domainName);
-                urlToDomainMap.set(cleanedUrl, domainName);
-                uniqueDomains.add(domainName);
-              }
+            if (instagramData && !('error' in instagramData)) {
+              updatedRow['Instagram Username'] = instagramData.username || '';
+              updatedRow['Instagram Full Name'] = instagramData.full_name || '';
+              updatedRow['Instagram Bio'] = instagramData.biography || '';
+              updatedRow['Instagram Posts'] = String(instagramData.edge_owner_to_timeline_media?.count || 0);
+              updatedRow['Instagram Followers'] = String(instagramData.edge_followed_by?.count || 0);
+              updatedRow['Instagram Following'] = String(instagramData.edge_follow?.count || 0);
+              updatedRow['Instagram Private'] = instagramData.is_private ? 'Yes' : 'No';
             }
-          }
-        });
-
-        uniqueDomainsArray = Array.from(uniqueDomains);
-      }
-
-      // Fetch qualification data for all unique domains (starting from saved index if resuming)
-      for (let i = startFromIndex; i < uniqueDomainsArray.length; i++) {
-        const domainName = uniqueDomainsArray[i];
-        setCsvProcessingProgress({ current: i + 1, total: uniqueDomainsArray.length });
-        
-        try {
-          const data = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
-          if (data) {
-            qualificationDataMap.set(domainName, data);
             
-            // Save/update company in database after summary is generated
-            try {
-              if (!user) {
-                console.error('User not available, cannot save company');
-                return;
+            if (!domainQualificationData && instagramQualificationData) {
+              updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
+              updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
+              updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
+              updatedRow['Classification'] = instagramQualificationData.classification || '';
+              if (instagramQualificationData.confidence_score !== undefined) {
+                updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
               }
+              updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
               
-              // Check if company exists with this domain (query database directly)
-              const { data: existingCompanyData } = await supabase
-                .from('companies')
-                .select('id, instagram, domain, email, phone')
-                .eq('user_id', user.id)
-                .eq('domain', domainName)
-                .maybeSingle();
-              
-              const existingCompany = existingCompanyData;
-              
-              // Extract email and phone from qualification data
-              const email = data.email || null;
-              const phone = data.phone || null;
-              
-              if (existingCompany) {
-                // Update existing company
-                await updateCompany(existingCompany.id, {
-                  summary: data,
-                  instagram: existingCompany.instagram || '', // Keep existing instagram if any
-                  email: email || existingCompany.email || '',
-                  phone: phone || existingCompany.phone || '',
-                  owner: selectedOwner,
-                });
-              } else {
-                // Create new company
-                await createCompany({
-                  domain: domainName,
-                  instagram: '',
-                  summary: data,
-                  email: email || '',
-                  phone: phone || '',
-                  set_name: setName || null,
-                  owner: selectedOwner,
-                });
+              if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
+                const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                if (productTypes.length > 0) {
+                  if (productTypes.length === 1) {
+                    updatedRow['Product Types'] = productTypes[0];
+                  } else if (productTypes.length === 2) {
+                    updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                  } else {
+                    const allButLast = productTypes.slice(0, -1).join(', ');
+                    updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                  }
+                  
+                  productTypes.forEach((pt: string, index: number) => {
+                    updatedRow[`PRODUCT${index + 1}`] = pt;
+                  });
+                }
               }
-            } catch (saveError) {
-              console.error('Error saving company to database during CSV processing:', saveError);
-              // Don't fail the whole operation if save fails
             }
           } else {
-            // Data fetch returned null, indicating an error
-            // (error notification already sent from fetchCompanyMap)
-            errorMap.set(domainName, 'Failed to fetch company qualification data');
+            const error = domainName ? errorMap.get(domainName) : (instagramUrl ? errorMap.get(instagramUrl) : null);
+            updatedRow['Research Status'] = error || 'Failed to fetch data';
           }
-        } catch (error) {
-          console.error(`Error fetching data for ${domainName}:`, error);
-          const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-          errorMap.set(domainName, errorMessage);
+        } else {
+          const url = row[selectedUrlColumn!]?.trim() || '';
           
-          // Send Slack notification for CSV processing errors
-          sendSlackNotification(`❌ CSV Processing Error for ${domainName}\nError: ${errorMessage}`).catch(
-            (slackError) => console.error('Failed to send Slack notification:', slackError)
-          );
-        }
-
-        // Update processed indices
-        processedDomainIndices.push(i);
-        
-        // Auto-save progress periodically (inside loop to save after each item)
-        const processedCount = processedDomainIndices.length;
-        if (shouldAutoSave(lastSavedAt, processedCount)) {
-          // Merge data into rows for saving
-          // Use ref to get latest CSV data
-          const currentCsvData: { headers: string[]; rows: CsvRow[] } = csvDataRef.current || csvData;
-          const currentRows = currentCsvData.rows.map((row: CsvRow) => {
-            const url = row[selectedUrlColumn]?.trim() || '';
-            const updatedRow = { ...row };
-            
-            // Domain mode auto-save logic (inside domain mode loop)
-            const classification = row['Classification']?.trim() || '';
-            
-            // Skip if Classification is already filled
-            if (classification) {
-              if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
-                updatedRow['Research Status'] = 'skipped (already classified)';
+          if (researchMode === 'instagram') {
+            if (url && isInstagramUrl(url)) {
+              const profileData = qualificationDataMap.get(url);
+              if (profileData && !('error' in profileData)) {
+                updatedRow['Research Status'] = 'completed';
+                updatedRow['Instagram Username'] = profileData.username || '';
+                updatedRow['Instagram Full Name'] = profileData.full_name || '';
+                updatedRow['Instagram Bio'] = profileData.biography || '';
+                updatedRow['Instagram Posts'] = String(profileData.edge_owner_to_timeline_media?.count || 0);
+                updatedRow['Instagram Followers'] = String(profileData.edge_followed_by?.count || 0);
+                updatedRow['Instagram Following'] = String(profileData.edge_follow?.count || 0);
+                updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
+                
+                if (profileData.qualificationData) {
+                  const qual = profileData.qualificationData;
+                  updatedRow['Company Summary'] = qual.profile_summary || '';
+                  updatedRow['Company Industry'] = qual.profile_industry || '';
+                  updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
+                  updatedRow['Classification'] = qual.classification || '';
+                  if (qual.confidence_score !== undefined) {
+                    updatedRow['Confidence Score'] = String(qual.confidence_score);
+                  }
+                  updatedRow['Sales Action'] = qual.sales_action || '';
+                  
+                  if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
+                    const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              } else {
+                const error = errorMap.get(url);
+                updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
               }
-              return updatedRow;
             }
-            
-            // Skip if no valid URL
-            if (!url || !url.includes('.')) {
-              if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
-                updatedRow['Research Status'] = 'skipped (invalid URL)';
-              }
-              return updatedRow;
-            }
-
+          } else {
             const cleanedUrl = cleanUrl(url, researchMode);
-            const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
-            const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
+            const domainNameValue = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+            const qualificationData = domainNameValue ? qualificationDataMap.get(domainNameValue) : null;
 
             if (qualificationData) {
               updatedRow['Research Status'] = 'completed';
-              updatedRow['Company Summary'] = qualificationData.company_summary || updatedRow['Company Summary'] || '';
-              updatedRow['Company Industry'] = qualificationData.company_industry || updatedRow['Company Industry'] || '';
-              updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
-              updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
-              updatedRow['Confidence Score'] = String((qualificationData.confidence_score ?? updatedRow['Confidence Score']) || '');
+              updatedRow['Company Summary'] = qualificationData.company_summary || '';
+              updatedRow['Company Industry'] = qualificationData.company_industry || '';
+              updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || '';
+              updatedRow['Classification'] = qualificationData.classification || '';
+              updatedRow['Confidence Score'] = String(qualificationData.confidence_score || '');
               
               if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
                 const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
@@ -1052,29 +888,327 @@ export default function CompanyResearcher() {
                 }
               }
               
-              updatedRow['Sales Action'] = qualificationData.sales_action || updatedRow['Sales Action'] || '';
-            } else if (domainName) {
-              const error = errorMap.get(domainName);
+              updatedRow['Sales Action'] = qualificationData.sales_action || '';
+            } else if (domainNameValue) {
+              const error = errorMap.get(domainNameValue);
               updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
-            } else {
-              updatedRow['Research Status'] = 'Invalid URL';
             }
+          }
+        }
+        
+        processedRows.push(updatedRow);
+      } else {
+        pendingRows.push(row);
+      }
+    });
+
+    // Ensure all required columns exist
+    const updatedHeaders = ensureColumnsExist(headers);
+    
+    // Add PRODUCT columns if needed
+    const allRowsForProductCheck = [...processedRows, ...pendingRows];
+    const maxProductTypes = allRowsForProductCheck.reduce((max, row) => {
+      let count = 0;
+      Object.keys(row).forEach(key => {
+        if (key.startsWith('PRODUCT')) {
+          const num = parseInt(key.replace('PRODUCT', ''));
+          if (!isNaN(num)) count = Math.max(count, num);
+        }
+      });
+      return Math.max(max, count);
+    }, 0);
+
+    const finalHeaders = [...updatedHeaders];
+    for (let i = 1; i <= maxProductTypes; i++) {
+      const colName = `PRODUCT${i}`;
+      if (!finalHeaders.includes(colName)) {
+        finalHeaders.push(colName);
+      }
+    }
+
+    // Generate CSVs
+    if (processedRows.length > 0) {
+      const processedCsv = csvToString(finalHeaders, processedRows);
+      downloadCsv(processedCsv, `processed-rows-${new Date().toISOString().split('T')[0]}.csv`);
+    }
+    
+    if (pendingRows.length > 0) {
+      const pendingCsv = csvToString(finalHeaders, pendingRows);
+      downloadCsv(pendingCsv, `pending-rows-${new Date().toISOString().split('T')[0]}.csv`);
+    }
+  }, []);
+
+  // Process CSV rows with progress saving
+  const processCsvRows = useCallback(async (resumeFromSaved: boolean = false) => {
+    // Check if we have either the old single column selection or the new dual column selection
+    const hasColumnSelection = selectedUrlColumn || (selectedColumns.domain || selectedColumns.instagram);
+    if (!csvData || !hasColumnSelection) return;
+    
+    // Determine if we're using dual column mode
+    const useDualColumns: boolean = !!(selectedColumns.domain || selectedColumns.instagram);
+
+    // Helper function to check if URL is Instagram URL
+    const isInstagramUrl = (url: string): boolean => {
+      if (!url || typeof url !== 'string') return false;
+      return url.toLowerCase().includes('instagram.com');
+    };
+    
+    // Concurrency limit for parallel processing (adjust based on API rate limits)
+    const CONCURRENCY_LIMIT = 10;
+
+    // Helper function to save progress after each row is processed
+    const saveProgressAfterRow = (mode: 'domain' | 'instagram', identifier: string) => {
+      const processedCount = processedDomainIndices.length;
+      if (shouldAutoSave(lastSavedAt, processedCount)) {
+        // Merge data into rows for saving
+        const currentCsvData: { headers: string[]; rows: CsvRow[] } = csvDataRef.current || csvData;
+        const currentRows = currentCsvData.rows.map((row: CsvRow) => {
+          const updatedRow = { ...row };
           
-          return updatedRow;
+          if (useDualColumns) {
+            // Dual column mode
+            const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+            const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+            
+            const classification = row['Classification']?.trim() || '';
+            if (classification) {
+              if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+                updatedRow['Research Status'] = 'skipped (already classified)';
+              }
+              return updatedRow;
+            }
+            
+            let domainName: string | null = null;
+            let domainQualificationData: any = null;
+            let instagramData: any = null;
+            let instagramQualificationData: any = null;
+            
+            if (domainUrl) {
+              const cleanedUrl = cleanUrl(domainUrl, 'domain');
+              domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+              if (domainName) {
+                domainQualificationData = qualificationDataMap.get(domainName);
+              }
+            }
+            
+            if (instagramUrl && isInstagramUrl(instagramUrl)) {
+              instagramData = qualificationDataMap.get(instagramUrl);
+              if (instagramData && instagramData.qualificationData) {
+                instagramQualificationData = instagramData.qualificationData;
+              }
+            }
+            
+            const finalQualificationData = domainQualificationData || instagramQualificationData;
+            
+            if (finalQualificationData) {
+              updatedRow['Research Status'] = 'completed';
+              if (domainQualificationData) {
+                updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
+                updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
+                updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
+                updatedRow['Classification'] = domainQualificationData.classification || '';
+                updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
+                updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
+                
+                if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
+                  const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length > 0) {
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              }
+              
+              if (instagramData && !('error' in instagramData)) {
+                updatedRow['Instagram Username'] = instagramData.username || '';
+                updatedRow['Instagram Full Name'] = instagramData.full_name || '';
+                updatedRow['Instagram Bio'] = instagramData.biography || '';
+                updatedRow['Instagram Posts'] = String(instagramData.edge_owner_to_timeline_media?.count || 0);
+                updatedRow['Instagram Followers'] = String(instagramData.edge_followed_by?.count || 0);
+                updatedRow['Instagram Following'] = String(instagramData.edge_follow?.count || 0);
+                updatedRow['Instagram Private'] = instagramData.is_private ? 'Yes' : 'No';
+              }
+              
+              if (!domainQualificationData && instagramQualificationData) {
+                updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
+                updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
+                updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
+                updatedRow['Classification'] = instagramQualificationData.classification || '';
+                if (instagramQualificationData.confidence_score !== undefined) {
+                  updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
+                }
+                updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
+                
+                if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
+                  const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length > 0) {
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              }
+            } else {
+              const hasValidDomain = domainUrl && domainUrl.includes('.');
+              const hasValidInstagram = instagramUrl && isInstagramUrl(instagramUrl);
+              
+              if (hasValidDomain || hasValidInstagram) {
+                const error = domainName ? errorMap.get(domainName) : (instagramUrl ? errorMap.get(instagramUrl) : null);
+                updatedRow['Research Status'] = error || 'Failed to fetch data';
+              } else {
+                updatedRow['Research Status'] = 'skipped (no valid URLs)';
+              }
+            }
+            
+            return updatedRow;
+          } else {
+            // Single column mode
+            const url = (selectedUrlColumn ? row[selectedUrlColumn]?.trim() : '') || '';
+            
+            if (mode === 'instagram') {
+              if (!url || !isInstagramUrl(url)) {
+                if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+                  updatedRow['Research Status'] = 'skipped (not Instagram URL)';
+                }
+                return updatedRow;
+              }
+
+              const profileData = qualificationDataMap.get(url);
+              if (profileData && !('error' in profileData)) {
+                updatedRow['Research Status'] = 'completed';
+                updatedRow['Instagram Username'] = profileData.username || '';
+                updatedRow['Instagram Full Name'] = profileData.full_name || '';
+                updatedRow['Instagram Bio'] = profileData.biography || '';
+                updatedRow['Instagram Posts'] = String(profileData.edge_owner_to_timeline_media?.count || 0);
+                updatedRow['Instagram Followers'] = String(profileData.edge_followed_by?.count || 0);
+                updatedRow['Instagram Following'] = String(profileData.edge_follow?.count || 0);
+                updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
+                
+                if (profileData.qualificationData) {
+                  const qual = profileData.qualificationData;
+                  updatedRow['Company Summary'] = qual.profile_summary || '';
+                  updatedRow['Company Industry'] = qual.profile_industry || '';
+                  updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
+                  updatedRow['Classification'] = qual.classification || '';
+                  if (qual.confidence_score !== undefined) {
+                    updatedRow['Confidence Score'] = String(qual.confidence_score);
+                  }
+                  updatedRow['Sales Action'] = qual.sales_action || '';
+                  
+                  if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
+                    const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              } else {
+                const error = errorMap.get(url);
+                updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
+              }
+            } else {
+              // Domain mode
+              const classification = row['Classification']?.trim() || '';
+              
+              if (classification) {
+                if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+                  updatedRow['Research Status'] = 'skipped (already classified)';
+                }
+                return updatedRow;
+              }
+              
+              if (!url || !url.includes('.')) {
+                if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+                  updatedRow['Research Status'] = 'skipped (invalid URL)';
+                }
+                return updatedRow;
+              }
+
+              const cleanedUrl = cleanUrl(url, researchMode);
+              const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+              const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
+
+              if (qualificationData) {
+                updatedRow['Research Status'] = 'completed';
+                updatedRow['Company Summary'] = qualificationData.company_summary || updatedRow['Company Summary'] || '';
+                updatedRow['Company Industry'] = qualificationData.company_industry || updatedRow['Company Industry'] || '';
+                updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
+                updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
+                updatedRow['Confidence Score'] = String((qualificationData.confidence_score ?? updatedRow['Confidence Score']) || '');
+                
+                if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
+                  const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length > 0) {
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+                
+                updatedRow['Sales Action'] = qualificationData.sales_action || updatedRow['Sales Action'] || '';
+              } else if (domainName) {
+                const error = errorMap.get(domainName);
+                updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
+              } else {
+                updatedRow['Research Status'] = 'Invalid URL';
+              }
+            }
+            
+            return updatedRow;
+          }
         });
 
-        // Save progress
+        // Save progress (without rows array to save space)
         const progressState: CsvProgressState = {
           headers: currentCsvData.headers,
-          rows: currentRows,
-          selectedUrlColumn,
+          // rows: currentRows, // Removed to save localStorage space - will reconstruct on load
+          selectedUrlColumn: selectedUrlColumn || '',
           processedDomainIndices: [...processedDomainIndices],
           uniqueDomains: uniqueDomainsArray,
           qualificationDataMap: serializeQualificationDataMap(qualificationDataMap),
           errorMap: Object.fromEntries(errorMap),
           lastSavedAt: Date.now(),
           totalDomains: uniqueDomainsArray.length,
-          currentDomainIndex: processedDomainIndices.length
+          currentDomainIndex: processedDomainIndices.length,
+          selectedColumns: useDualColumns ? selectedColumns : undefined,
+          researchMode: researchMode
         };
         
         saveCsvProgress(progressState);
@@ -1084,14 +1218,956 @@ export default function CompanyResearcher() {
         const updatedCsvData: { headers: string[]; rows: CsvRow[] } = { headers: currentCsvData.headers, rows: currentRows };
         setCsvData(updatedCsvData);
         csvDataRef.current = updatedCsvData;
+      }
+    };
+
+    setIsProcessingCsv(true);
+    shouldStopProcessingRef.current = false; // Reset stop flag
+    
+    // Use a ref to track current CSV data during processing
+    csvDataRef.current = csvData;
+    
+    // Try to load saved progress if resuming
+    let savedProgress: CsvProgressState | null = null;
+    let startFromIndex = 0;
+    let qualificationDataMap = new Map<string, any>();
+    let errorMap = new Map<string, string>();
+    let processedDomainIndices: number[] = [];
+    let uniqueDomainsArray: string[] = [];
+    let lastSavedAt: number | null = null;
+
+    if (resumeFromSaved) {
+      savedProgress = loadCsvProgress();
+      // Check if saved progress matches current CSV structure
+      const headersMatch = savedProgress && JSON.stringify(savedProgress.headers) === JSON.stringify(csvData.headers);
+      const columnMatch = savedProgress && (
+        (useDualColumns && savedProgress.selectedColumns?.domain === selectedColumns.domain && savedProgress.selectedColumns?.instagram === selectedColumns.instagram) ||
+        (!useDualColumns && savedProgress.selectedUrlColumn === selectedUrlColumn)
+      );
+      
+      if (savedProgress && headersMatch && columnMatch) {
+        // Resume from saved progress
+        qualificationDataMap = deserializeQualificationDataMap(savedProgress.qualificationDataMap);
+        errorMap = new Map(Object.entries(savedProgress.errorMap || {}));
+        processedDomainIndices = savedProgress.processedDomainIndices || [];
+        uniqueDomainsArray = savedProgress.uniqueDomains || [];
+        startFromIndex = savedProgress.currentDomainIndex || 0;
+        lastSavedAt = savedProgress.lastSavedAt;
+        
+        // Reconstruct rows by merging qualification data into original CSV rows
+        const mergedRows = csvData.rows.map((row: CsvRow) => {
+          const updatedRow = { ...row };
+          
+          if (useDualColumns) {
+            const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+            const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+            
+            let domainName: string | null = null;
+            let domainQualificationData: any = null;
+            let instagramData: any = null;
+            let instagramQualificationData: any = null;
+            
+            if (domainUrl) {
+              const cleanedUrl = cleanUrl(domainUrl, 'domain');
+              domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+              if (domainName) {
+                domainQualificationData = qualificationDataMap.get(domainName);
+              }
+            }
+            
+            if (instagramUrl && isInstagramUrl(instagramUrl)) {
+              instagramData = qualificationDataMap.get(instagramUrl);
+              if (instagramData && instagramData.qualificationData) {
+                instagramQualificationData = instagramData.qualificationData;
+              }
+            }
+            
+            const finalQualificationData = domainQualificationData || instagramQualificationData;
+            
+            if (finalQualificationData) {
+              updatedRow['Research Status'] = 'completed';
+              if (domainQualificationData) {
+                updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
+                updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
+                updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
+                updatedRow['Classification'] = domainQualificationData.classification || '';
+                updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
+                updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
+                
+                if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
+                  const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length > 0) {
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              }
+              
+              if (instagramData && !('error' in instagramData)) {
+                updatedRow['Instagram Username'] = instagramData.username || '';
+                updatedRow['Instagram Full Name'] = instagramData.full_name || '';
+                updatedRow['Instagram Bio'] = instagramData.biography || '';
+                updatedRow['Instagram Posts'] = String(instagramData.edge_owner_to_timeline_media?.count || 0);
+                updatedRow['Instagram Followers'] = String(instagramData.edge_followed_by?.count || 0);
+                updatedRow['Instagram Following'] = String(instagramData.edge_follow?.count || 0);
+                updatedRow['Instagram Private'] = instagramData.is_private ? 'Yes' : 'No';
+              }
+              
+              if (!domainQualificationData && instagramQualificationData) {
+                updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
+                updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
+                updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
+                updatedRow['Classification'] = instagramQualificationData.classification || '';
+                if (instagramQualificationData.confidence_score !== undefined) {
+                  updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
+                }
+                updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
+                
+                if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
+                  const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length > 0) {
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              }
+            } else {
+              const hasValidDomain = domainUrl && domainUrl.includes('.');
+              const hasValidInstagram = instagramUrl && isInstagramUrl(instagramUrl);
+              
+              if (hasValidDomain || hasValidInstagram) {
+                const error = domainName ? errorMap.get(domainName) : (instagramUrl ? errorMap.get(instagramUrl) : null);
+                updatedRow['Research Status'] = error || 'Failed to fetch data';
+              }
+            }
+          } else {
+            // Single column mode
+            const url = (selectedUrlColumn ? row[selectedUrlColumn]?.trim() : '') || '';
+            
+            if (researchMode === 'instagram') {
+              if (url && isInstagramUrl(url)) {
+                const profileData = qualificationDataMap.get(url);
+                if (profileData && !('error' in profileData)) {
+                  updatedRow['Research Status'] = 'completed';
+                  updatedRow['Instagram Username'] = profileData.username || '';
+                  updatedRow['Instagram Full Name'] = profileData.full_name || '';
+                  updatedRow['Instagram Bio'] = profileData.biography || '';
+                  updatedRow['Instagram Posts'] = String(profileData.edge_owner_to_timeline_media?.count || 0);
+                  updatedRow['Instagram Followers'] = String(profileData.edge_followed_by?.count || 0);
+                  updatedRow['Instagram Following'] = String(profileData.edge_follow?.count || 0);
+                  updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
+                  
+                  if (profileData.qualificationData) {
+                    const qual = profileData.qualificationData;
+                    updatedRow['Company Summary'] = qual.profile_summary || '';
+                    updatedRow['Company Industry'] = qual.profile_industry || '';
+                    updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
+                    updatedRow['Classification'] = qual.classification || '';
+                    if (qual.confidence_score !== undefined) {
+                      updatedRow['Confidence Score'] = String(qual.confidence_score);
+                    }
+                    updatedRow['Sales Action'] = qual.sales_action || '';
+                    
+                    if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
+                      const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                      if (productTypes.length === 1) {
+                        updatedRow['Product Types'] = productTypes[0];
+                      } else if (productTypes.length === 2) {
+                        updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                      } else {
+                        const allButLast = productTypes.slice(0, -1).join(', ');
+                        updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                      }
+                      
+                      productTypes.forEach((pt: string, index: number) => {
+                        updatedRow[`PRODUCT${index + 1}`] = pt;
+                      });
+                    }
+                  }
+                } else {
+                  const error = errorMap.get(url);
+                  updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
+                }
+              }
+            } else {
+              // Domain mode
+              const cleanedUrl = cleanUrl(url, researchMode);
+              const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+              const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
+              
+              if (qualificationData) {
+                updatedRow['Research Status'] = 'completed';
+                updatedRow['Company Summary'] = qualificationData.company_summary || '';
+                updatedRow['Company Industry'] = qualificationData.company_industry || '';
+                updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || '';
+                updatedRow['Classification'] = qualificationData.classification || '';
+                updatedRow['Confidence Score'] = String(qualificationData.confidence_score || '');
+                updatedRow['Sales Action'] = qualificationData.sales_action || '';
+                
+                if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
+                  const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length > 0) {
+                    if (productTypes.length === 1) {
+                      updatedRow['Product Types'] = productTypes[0];
+                    } else if (productTypes.length === 2) {
+                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                    } else {
+                      const allButLast = productTypes.slice(0, -1).join(', ');
+                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                    }
+                    
+                    productTypes.forEach((pt: string, index: number) => {
+                      updatedRow[`PRODUCT${index + 1}`] = pt;
+                    });
+                  }
+                }
+              } else if (domainName) {
+                const error = errorMap.get(domainName);
+                updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
+              }
+            }
+          }
+          
+          return updatedRow;
+        });
+        
+        const mergedCsvData = { headers: csvData.headers, rows: mergedRows };
+        setCsvData(mergedCsvData);
+        csvDataRef.current = mergedCsvData;
+      } else {
+        // Data structure changed, can't resume
+        clearCsvProgress();
+        savedProgress = null;
+      }
+    }
+
+    // Collect all valid URLs from CSV for display in textarea
+    const allValidUrls: string[] = [];
+    if (useDualColumns) {
+      csvData.rows.forEach(row => {
+        // Collect from domain column
+        if (selectedColumns.domain) {
+          const domainUrl = row[selectedColumns.domain]?.trim() || '';
+          if (domainUrl && domainUrl.includes('.')) {
+            const cleaned = cleanUrl(domainUrl, 'domain');
+            if (cleaned) {
+              allValidUrls.push(cleaned);
+            }
+          }
         }
+        // Collect from Instagram column
+        if (selectedColumns.instagram) {
+          const instagramUrl = row[selectedColumns.instagram]?.trim() || '';
+          if (instagramUrl && isInstagramUrl(instagramUrl)) {
+            allValidUrls.push(instagramUrl);
+          }
+        }
+      });
+    } else {
+      csvData.rows.forEach(row => {
+        const url = row[selectedUrlColumn!]?.trim() || '';
+        if (researchMode === 'instagram') {
+          if (url && isInstagramUrl(url)) {
+            allValidUrls.push(url);
+          }
+        } else {
+          if (url && url.includes('.')) {
+            const cleaned = cleanUrl(url, researchMode);
+            if (cleaned) {
+              allValidUrls.push(cleaned);
+            }
+          }
+        }
+      });
+    }
+
+    // If not resuming or resume failed, start fresh
+    if (!savedProgress) {
+      setCsvProcessingProgress({ current: 0, total: csvData.rows.length });
+      lastSavedAt = null;
+    } else {
+      setCsvProcessingProgress({ current: startFromIndex, total: uniqueDomainsArray.length });
+    }
+
+    // Filter rows based on mode
+    const rowsToProcess = csvData.rows.filter((row, index) => {
+      if (useDualColumns) {
+        // Dual column mode: include rows that have either domain or Instagram URL
+        const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+        const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+        
+        const classification = row['Classification']?.trim() || '';
+        // Skip if Classification is already filled
+        if (classification) {
+          return false;
+        }
+        
+        // Include if we have at least one valid URL
+        const hasValidDomain = domainUrl && domainUrl.includes('.');
+        const hasValidInstagram = instagramUrl && isInstagramUrl(instagramUrl);
+        
+        return hasValidDomain || hasValidInstagram;
+      } else {
+        // Single column mode: existing logic
+        const url = row[selectedUrlColumn!]?.trim() || '';
+        
+        if (researchMode === 'instagram') {
+          // Instagram mode: only include Instagram URLs
+          if (!url || !isInstagramUrl(url)) {
+            return false;
+          }
+        } else {
+          // Domain mode: existing logic
+          const classification = row['Classification']?.trim() || '';
+          
+          // Skip if Classification is already filled
+          if (classification) {
+            return false;
+          }
+          
+          // Skip if no valid URL
+          if (!url || !url.includes('.')) {
+            return false;
+          }
+        }
+        
+        return true;
+      }
+    });
+
+    if (useDualColumns) {
+      // Dual column mode: process based on research mode, but save both values
+      // Create mappings from domain/Instagram URL to rows for immediate saving
+      const domainToRowsMap = new Map<string, CsvRow[]>();
+      const instagramUrlToRowsMap = new Map<string, CsvRow[]>();
+      
+      rowsToProcess.forEach(row => {
+        const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+        const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+        
+        if (domainUrl) {
+          const cleanedUrl = cleanUrl(domainUrl, 'domain');
+          if (cleanedUrl) {
+            const domainName = extractDomain(cleanedUrl);
+            if (domainName) {
+              if (!domainToRowsMap.has(domainName)) {
+                domainToRowsMap.set(domainName, []);
+              }
+              domainToRowsMap.get(domainName)!.push(row);
+            }
+          }
+        }
+        
+        if (instagramUrl && isInstagramUrl(instagramUrl)) {
+          if (!instagramUrlToRowsMap.has(instagramUrl)) {
+            instagramUrlToRowsMap.set(instagramUrl, []);
+          }
+          instagramUrlToRowsMap.get(instagramUrl)!.push(row);
+        }
+      });
+
+      // Helper function to save company for a row immediately after API response
+      const saveCompanyForRow = async (row: CsvRow, qualificationData: any, source: 'domain' | 'instagram', identifier: string) => {
+        if (!user) return;
+        
+        const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+        const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+        
+        let domainName: string | null = null;
+        let instagramUsername: string | null = null;
+        
+        if (domainUrl) {
+          const cleanedUrl = cleanUrl(domainUrl, 'domain');
+          domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+        }
+        
+        if (instagramUrl && isInstagramUrl(instagramUrl)) {
+          instagramUsername = extractUsernameFromUrl(instagramUrl);
+        }
+        
+        if (!domainName && !instagramUsername) return;
+        
+        try {
+          const email = qualificationData?.email || null;
+          const phone = qualificationData?.phone || null;
+          
+          // Use domain as primary identifier if available, otherwise use Instagram
+          const primaryIdentifier = domainName || instagramUsername!;
+          const isDomain = !!domainName;
+          
+          // Check if company exists
+          const { data: existingCompanyData } = await supabase
+            .from('companies')
+            .select('id, instagram, domain, email, phone')
+            .eq('user_id', user.id)
+            .eq(isDomain ? 'domain' : 'instagram', primaryIdentifier)
+            .maybeSingle();
+          
+          const existingCompany = existingCompanyData;
+          
+          if (existingCompany) {
+            // Update existing company, combining both fields from CSV
+            await updateCompany(existingCompany.id, {
+              summary: qualificationData,
+              // Always save both values from CSV, even if we didn't research them
+              domain: domainName || existingCompany.domain || '',
+              instagram: instagramUsername || existingCompany.instagram || '',
+              email: email || existingCompany.email || '',
+              phone: phone || existingCompany.phone || '',
+              owner: selectedOwner,
+            });
+          } else {
+            // Create new company with both fields from CSV
+            await createCompany({
+              domain: domainName || '',
+              instagram: instagramUsername || '',
+              summary: qualificationData,
+              email: email || '',
+              phone: phone || '',
+              set_name: setName || null,
+              owner: selectedOwner,
+            });
+          }
+        } catch (saveError) {
+          console.error('Error saving company to database during CSV processing:', saveError);
+        }
+      };
+
+      // Process domains from domain column (only if Domain Research mode)
+      if (selectedColumns.domain && researchMode === 'domain') {
+        if (!savedProgress) {
+          const uniqueDomains = new Set<string>();
+          domainToRowsMap.forEach((_, domainName) => {
+            uniqueDomains.add(domainName);
+          });
+          uniqueDomainsArray = Array.from(uniqueDomains);
+        }
+
+        // Fetch qualification data for all unique domains in parallel batches
+        const domainsToProcess = uniqueDomainsArray.slice(startFromIndex);
+        await processInBatches(
+          domainsToProcess,
+          async (domainName, batchIndex) => {
+            const actualIndex = startFromIndex + batchIndex;
+            try {
+              const data = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+              if (data) {
+                qualificationDataMap.set(domainName, data);
+                
+                // Save companies immediately after getting response for all rows with this domain
+                const rowsForDomain = domainToRowsMap.get(domainName) || [];
+                for (const row of rowsForDomain) {
+                  await saveCompanyForRow(row, data, 'domain', domainName);
+                }
+              } else {
+                errorMap.set(domainName, 'Failed to fetch company qualification data');
+              }
+            } catch (error) {
+              console.error(`Error fetching data for ${domainName}:`, error);
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+              errorMap.set(domainName, errorMessage);
+            }
+            processedDomainIndices.push(actualIndex);
+            // Save progress after each row is processed
+            saveProgressAfterRow('domain', domainName);
+            return domainName;
+          },
+          CONCURRENCY_LIMIT,
+          (processed, total) => {
+            setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+          }
+        );
+        
+        // Check if processing was stopped
+        if (shouldStopProcessingRef.current) {
+          // Get latest CSV data from ref
+          const currentCsvData = csvDataRef.current || csvData;
+          // Generate and download processed and pending CSVs
+          generateProcessedAndPendingCsvs(
+            currentCsvData.rows,
+            currentCsvData.headers,
+            qualificationDataMap,
+            errorMap,
+            useDualColumns,
+            selectedColumns,
+            selectedUrlColumn || null,
+            researchMode
+          );
+          
+          setIsProcessingCsv(false);
+          setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+          setShowConfirmationModal(true);
+          return;
+        }
+      }
+
+      // Process Instagram URLs from Instagram column (only if Instagram Research mode)
+      if (selectedColumns.instagram && researchMode === 'instagram') {
+        if (!savedProgress) {
+          const uniqueInstagramUrls = new Set<string>();
+          instagramUrlToRowsMap.forEach((_, url) => {
+            uniqueInstagramUrls.add(url);
+          });
+          uniqueDomainsArray = Array.from(uniqueInstagramUrls);
+        }
+        
+        const instagramUrlsToProcess = uniqueDomainsArray.slice(startFromIndex);
+        
+        // Process Instagram URLs in parallel batches
+        await processInBatches(
+          instagramUrlsToProcess,
+          async (instagramUrl, index) => {
+            const actualIndex = startFromIndex + index;
+            try {
+              const data = await fetchInstagramProfile(instagramUrl, user?.id, personalizationSettings?.instagram || null);
+              if (data) {
+                qualificationDataMap.set(instagramUrl, data);
+                
+                // Save companies immediately after getting response for all rows with this Instagram URL
+                const rowsForInstagram = instagramUrlToRowsMap.get(instagramUrl) || [];
+                for (const row of rowsForInstagram) {
+                  if (data.qualificationData) {
+                    await saveCompanyForRow(row, data.qualificationData, 'instagram', instagramUrl);
+                  }
+                }
+              } else {
+                errorMap.set(instagramUrl, 'Failed to fetch Instagram profile data');
+              }
+            } catch (error) {
+              console.error(`Error fetching Instagram profile for ${instagramUrl}:`, error);
+              const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+              errorMap.set(instagramUrl, errorMessage);
+            }
+            processedDomainIndices.push(actualIndex);
+            // Save progress after each row is processed
+            saveProgressAfterRow('instagram', instagramUrl);
+            return instagramUrl;
+          },
+          CONCURRENCY_LIMIT,
+          (processed, total) => {
+            setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+          }
+        );
+        
+        // Check if processing was stopped
+        if (shouldStopProcessingRef.current) {
+          // Get latest CSV data from ref
+          const currentCsvData = csvDataRef.current || csvData;
+          // Generate and download processed and pending CSVs
+          generateProcessedAndPendingCsvs(
+            currentCsvData.rows,
+            currentCsvData.headers,
+            qualificationDataMap,
+            errorMap,
+            useDualColumns,
+            selectedColumns,
+            selectedUrlColumn || null,
+            researchMode
+          );
+          
+          setIsProcessingCsv(false);
+          setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+          setShowConfirmationModal(true);
+          return;
+        }
+      }
+    } else if (researchMode === 'instagram') {
+      // Instagram mode processing
+      // Extract unique Instagram URLs - only if not resuming
+      if (!savedProgress) {
+        const uniqueUrls = new Set<string>();
+        
+        rowsToProcess.forEach(row => {
+          const url = row[selectedUrlColumn!]?.trim() || '';
+          if (url && isInstagramUrl(url)) {
+            uniqueUrls.add(url);
+          }
+        });
+
+        uniqueDomainsArray = Array.from(uniqueUrls);
+      }
+
+      // Fetch Instagram profile data for all unique URLs in parallel batches (starting from saved index if resuming)
+      const instagramUrlsToProcess = uniqueDomainsArray.slice(startFromIndex);
+      await processInBatches(
+        instagramUrlsToProcess,
+        async (instagramUrl, batchIndex) => {
+          const actualIndex = startFromIndex + batchIndex;
+          try {
+            const data = await fetchInstagramProfile(instagramUrl, user?.id, personalizationSettings?.instagram || null);
+            if (data) {
+              qualificationDataMap.set(instagramUrl, data); // Reusing map for Instagram profiles
+              
+              // Save/update company in database after summary is generated
+              if (data.qualificationData) {
+                try {
+                  const username = extractUsernameFromUrl(instagramUrl);
+                  if (username && user) {
+                    // Check if company exists with this instagram username (query database directly)
+                    const { data: existingCompanyData } = await supabase
+                      .from('companies')
+                      .select('id, instagram, domain, email, phone')
+                      .eq('user_id', user.id)
+                      .eq('instagram', username)
+                      .maybeSingle();
+                    
+                    const existingCompany = existingCompanyData;
+                    
+                    if (existingCompany) {
+                      // Update existing company
+                      await updateCompany(existingCompany.id, {
+                        summary: data.qualificationData,
+                        domain: existingCompany.domain || '', // Keep existing domain if any
+                        owner: selectedOwner,
+                      });
+                    } else {
+                      // Create new company
+                      await createCompany({
+                        domain: '',
+                        instagram: username,
+                        summary: data.qualificationData,
+                        email: '',
+                        phone: '',
+                        set_name: setName || null,
+                        owner: selectedOwner,
+                      });
+                    }
+                  }
+                } catch (saveError) {
+                  console.error('Error saving company to database during CSV processing:', saveError);
+                  // Don't fail the whole operation if save fails
+                }
+              }
+            } else {
+              errorMap.set(instagramUrl, 'Failed to fetch Instagram profile data');
+            }
+          } catch (error) {
+            console.error(`Error fetching Instagram profile for ${instagramUrl}:`, error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+            errorMap.set(instagramUrl, errorMessage);
+            
+            sendSlackNotification(`❌ CSV Processing Error for ${instagramUrl}\nError: ${errorMessage}`).catch(
+              (slackError) => console.error('Failed to send Slack notification:', slackError)
+            );
+          }
+
+          processedDomainIndices.push(actualIndex);
+          // Save progress after each row is processed
+          saveProgressAfterRow('instagram', instagramUrl);
+          return instagramUrl;
+        },
+        CONCURRENCY_LIMIT,
+        (processed, total) => {
+          setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+        }
+      );
+      
+      // Check if processing was stopped
+      if (shouldStopProcessingRef.current) {
+        // Get latest CSV data from ref
+        const currentCsvData = csvDataRef.current || csvData;
+        // Generate and download processed and pending CSVs
+        generateProcessedAndPendingCsvs(
+          currentCsvData.rows,
+          currentCsvData.headers,
+          qualificationDataMap,
+          errorMap,
+          false,
+          { domain: null, instagram: null },
+          selectedUrlColumn || null,
+          researchMode
+        );
+        
+        setIsProcessingCsv(false);
+        setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+        setShowConfirmationModal(true);
+        return;
+      }
+    } else {
+      // Domain mode processing (existing logic)
+      // Extract unique domains from URLs (clean URLs first) - only if not resuming
+      if (!savedProgress) {
+        const urlToDomainMap = new Map<string, string>();
+        const uniqueDomains = new Set<string>();
+        
+        rowsToProcess.forEach(row => {
+          const url = (selectedUrlColumn ? row[selectedUrlColumn]?.trim() : '') || '';
+          if (url) {
+            // Clean URL first
+            const cleanedUrl = cleanUrl(url, researchMode);
+            if (cleanedUrl) {
+              const domainName = extractDomain(cleanedUrl);
+              if (domainName) {
+                // Map both original and cleaned URL to domain
+                urlToDomainMap.set(url, domainName);
+                urlToDomainMap.set(cleanedUrl, domainName);
+                uniqueDomains.add(domainName);
+              }
+            }
+          }
+        });
+
+        uniqueDomainsArray = Array.from(uniqueDomains);
+      }
+
+      // Fetch qualification data for all unique domains in parallel batches (starting from saved index if resuming)
+      const domainsToProcess = uniqueDomainsArray.slice(startFromIndex);
+      await processInBatches(
+        domainsToProcess,
+        async (domainName, batchIndex) => {
+          const actualIndex = startFromIndex + batchIndex;
+          try {
+            const data = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+            if (data) {
+              qualificationDataMap.set(domainName, data);
+              
+              // Save/update company in database after summary is generated
+              try {
+                if (!user) {
+                  console.error('User not available, cannot save company');
+                  return domainName;
+                }
+                
+                // Check if company exists with this domain (query database directly)
+                const { data: existingCompanyData } = await supabase
+                  .from('companies')
+                  .select('id, instagram, domain, email, phone')
+                  .eq('user_id', user.id)
+                  .eq('domain', domainName)
+                  .maybeSingle();
+                
+                const existingCompany = existingCompanyData;
+                
+                // Extract email and phone from qualification data
+                const email = data.email || null;
+                const phone = data.phone || null;
+                
+                if (existingCompany) {
+                  // Update existing company
+                  await updateCompany(existingCompany.id, {
+                    summary: data,
+                    instagram: existingCompany.instagram || '', // Keep existing instagram if any
+                    email: email || existingCompany.email || '',
+                    phone: phone || existingCompany.phone || '',
+                    owner: selectedOwner,
+                  });
+                } else {
+                  // Create new company
+                  await createCompany({
+                    domain: domainName,
+                    instagram: '',
+                    summary: data,
+                    email: email || '',
+                    phone: phone || '',
+                    set_name: setName || null,
+                    owner: selectedOwner,
+                  });
+                }
+              } catch (saveError) {
+                console.error('Error saving company to database during CSV processing:', saveError);
+                // Don't fail the whole operation if save fails
+              }
+            } else {
+              // Data fetch returned null, indicating an error
+              // (error notification already sent from fetchCompanyMap)
+              errorMap.set(domainName, 'Failed to fetch company qualification data');
+            }
+          } catch (error) {
+            console.error(`Error fetching data for ${domainName}:`, error);
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+            errorMap.set(domainName, errorMessage);
+            
+            // Send Slack notification for CSV processing errors
+            sendSlackNotification(`❌ CSV Processing Error for ${domainName}\nError: ${errorMessage}`).catch(
+              (slackError) => console.error('Failed to send Slack notification:', slackError)
+            );
+          }
+
+          // Update processed indices
+          processedDomainIndices.push(actualIndex);
+          // Save progress after each row is processed
+          saveProgressAfterRow('domain', domainName);
+          return domainName;
+        },
+        CONCURRENCY_LIMIT,
+        (processed, total) => {
+          setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+        }
+      );
+      
+      // Check if processing was stopped
+      if (shouldStopProcessingRef.current) {
+        // Get latest CSV data from ref
+        const currentCsvData = csvDataRef.current || csvData;
+        // Generate and download processed and pending CSVs
+        generateProcessedAndPendingCsvs(
+          currentCsvData.rows,
+          currentCsvData.headers,
+          qualificationDataMap,
+          errorMap,
+          false,
+          { domain: null, instagram: null },
+          selectedUrlColumn || null,
+          researchMode
+        );
+        
+        setIsProcessingCsv(false);
+        setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+        setShowConfirmationModal(true);
+        return;
       }
     }
 
     // Merge data into CSV rows
     const updatedRows = csvData.rows.map(row => {
-      const url = row[selectedUrlColumn]?.trim() || '';
       const updatedRow = { ...row };
+      
+      if (useDualColumns) {
+        // Dual column mode: combine data from both columns
+        const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+        const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+        
+        const classification = row['Classification']?.trim() || '';
+        if (classification) {
+          if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+            updatedRow['Research Status'] = 'skipped (already classified)';
+          }
+          return updatedRow;
+        }
+        
+        let domainName: string | null = null;
+        let domainQualificationData: any = null;
+        let instagramData: any = null;
+        let instagramQualificationData: any = null;
+        
+        // Get domain data
+        if (domainUrl) {
+          const cleanedUrl = cleanUrl(domainUrl, 'domain');
+          domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+          if (domainName) {
+            domainQualificationData = qualificationDataMap.get(domainName);
+          }
+        }
+        
+        // Get Instagram data
+        if (instagramUrl && isInstagramUrl(instagramUrl)) {
+          instagramData = qualificationDataMap.get(instagramUrl);
+          if (instagramData && instagramData.qualificationData) {
+            instagramQualificationData = instagramData.qualificationData;
+          }
+        }
+        
+        // Use domain qualification data if available, otherwise use Instagram
+        const finalQualificationData = domainQualificationData || instagramQualificationData;
+        
+        if (finalQualificationData) {
+          updatedRow['Research Status'] = 'completed';
+          
+          // Add domain-based fields if we have domain data
+          if (domainQualificationData) {
+            updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
+            updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
+            updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
+            updatedRow['Classification'] = domainQualificationData.classification || '';
+            updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
+            updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
+            
+            if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
+              const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+              if (productTypes.length > 0) {
+                if (productTypes.length === 1) {
+                  updatedRow['Product Types'] = productTypes[0];
+                } else if (productTypes.length === 2) {
+                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                } else {
+                  const allButLast = productTypes.slice(0, -1).join(', ');
+                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                }
+                
+                productTypes.forEach((pt: string, index: number) => {
+                  updatedRow[`PRODUCT${index + 1}`] = pt;
+                });
+              }
+            }
+          }
+          
+          // Add Instagram-based fields if we have Instagram data
+          if (instagramData && !('error' in instagramData)) {
+            updatedRow['Instagram Username'] = instagramData.username || '';
+            updatedRow['Instagram Full Name'] = instagramData.full_name || '';
+            updatedRow['Instagram Bio'] = instagramData.biography || '';
+            updatedRow['Instagram Posts'] = String(instagramData.edge_owner_to_timeline_media?.count || 0);
+            updatedRow['Instagram Followers'] = String(instagramData.edge_followed_by?.count || 0);
+            updatedRow['Instagram Following'] = String(instagramData.edge_follow?.count || 0);
+            updatedRow['Instagram Private'] = instagramData.is_private ? 'Yes' : 'No';
+          }
+          
+          // If we only have Instagram qualification data, use those fields
+          if (!domainQualificationData && instagramQualificationData) {
+            updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
+            updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
+            updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
+            updatedRow['Classification'] = instagramQualificationData.classification || '';
+            if (instagramQualificationData.confidence_score !== undefined) {
+              updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
+            }
+            updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
+            
+            if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
+              const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+              if (productTypes.length > 0) {
+                if (productTypes.length === 1) {
+                  updatedRow['Product Types'] = productTypes[0];
+                } else if (productTypes.length === 2) {
+                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                } else {
+                  const allButLast = productTypes.slice(0, -1).join(', ');
+                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                }
+                
+                productTypes.forEach((pt: string, index: number) => {
+                  updatedRow[`PRODUCT${index + 1}`] = pt;
+                });
+              }
+            }
+          }
+        } else {
+          // No qualification data found
+          const hasValidDomain = domainUrl && domainUrl.includes('.');
+          const hasValidInstagram = instagramUrl && isInstagramUrl(instagramUrl);
+          
+          if (hasValidDomain || hasValidInstagram) {
+            const error = domainName ? errorMap.get(domainName) : (instagramUrl ? errorMap.get(instagramUrl) : null);
+            updatedRow['Research Status'] = error || 'Failed to fetch data';
+          } else {
+            updatedRow['Research Status'] = 'skipped (no valid URLs)';
+          }
+        }
+        
+        return updatedRow;
+      }
+      
+      const url = row[selectedUrlColumn!]?.trim() || '';
       
       if (researchMode === 'instagram') {
         // Instagram mode: update with Instagram profile data
@@ -1254,34 +2330,75 @@ export default function CompanyResearcher() {
     // Store results for display (only for processed URLs that have data)
     const newResults: typeof resultsByCompany = {};
     rowsToProcess.forEach(row => {
-      const url = row[selectedUrlColumn]?.trim() || '';
-      if (url) {
-        if (researchMode === 'instagram') {
-          const profileData = qualificationDataMap.get(url);
-          if (profileData && !('error' in profileData)) {
-            // Extract qualification data from profile response if present
-            const instagramQualificationData = profileData.qualificationData || null;
-            // Remove qualificationData from profile data to keep it separate
-            const { qualificationData: _, ...profileDataWithoutQualification } = profileData || {};
-            
-            newResults[url] = {
-              qualificationData: null,
-              instagramProfileData: profileDataWithoutQualification,
-              instagramQualificationData: instagramQualificationData
-            };
+      if (useDualColumns) {
+        // Dual column mode: combine data from both columns
+        const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
+        const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
+        
+        let domainName: string | null = null;
+        let domainQualificationData: any = null;
+        let instagramData: any = null;
+        let instagramQualificationData: any = null;
+        
+        // Get domain data
+        if (domainUrl) {
+          const cleanedUrl = cleanUrl(domainUrl, 'domain');
+          domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+          if (domainName) {
+            domainQualificationData = qualificationDataMap.get(domainName);
           }
-        } else {
-          const cleanedUrl = cleanUrl(url, researchMode);
-          const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
-          const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
-          if (qualificationData) {
-            // Use cleaned URL as key for display
-            const displayUrl = cleanedUrl || url;
-            newResults[displayUrl] = {
-              qualificationData: qualificationData,
-              instagramProfileData: null,
-              instagramQualificationData: null
-            };
+        }
+        
+        // Get Instagram data
+        if (instagramUrl && isInstagramUrl(instagramUrl)) {
+          instagramData = qualificationDataMap.get(instagramUrl);
+          if (instagramData && instagramData.qualificationData) {
+            instagramQualificationData = instagramData.qualificationData;
+          }
+        }
+        
+        // Store results - prefer domain URL for key, fallback to Instagram
+        const displayUrl = domainUrl || instagramUrl;
+        if (displayUrl && (domainQualificationData || instagramData)) {
+          const { qualificationData: _, ...profileDataWithoutQualification } = instagramData || {};
+          
+          newResults[displayUrl] = {
+            qualificationData: domainQualificationData || null,
+            instagramProfileData: profileDataWithoutQualification || null,
+            instagramQualificationData: instagramQualificationData || null
+          };
+        }
+      } else {
+        // Single column mode: existing logic
+        const url = (selectedUrlColumn ? row[selectedUrlColumn]?.trim() : '') || '';
+        if (url) {
+          if (researchMode === 'instagram') {
+            const profileData = qualificationDataMap.get(url);
+            if (profileData && !('error' in profileData)) {
+              // Extract qualification data from profile response if present
+              const instagramQualificationData = profileData.qualificationData || null;
+              // Remove qualificationData from profile data to keep it separate
+              const { qualificationData: _, ...profileDataWithoutQualification } = profileData || {};
+              
+              newResults[url] = {
+                qualificationData: null,
+                instagramProfileData: profileDataWithoutQualification,
+                instagramQualificationData: instagramQualificationData
+              };
+            }
+          } else {
+            const cleanedUrl = cleanUrl(url, researchMode);
+            const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+            const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
+            if (qualificationData) {
+              // Use cleaned URL as key for display
+              const displayUrl = cleanedUrl || url;
+              newResults[displayUrl] = {
+                qualificationData: qualificationData,
+                instagramProfileData: null,
+                instagramQualificationData: null
+              };
+            }
           }
         }
       }
@@ -1292,6 +2409,7 @@ export default function CompanyResearcher() {
     setCsvData(null);
     setShowColumnSelector(false);
     setSelectedUrlColumn(null);
+    setSelectedColumns({ domain: null, instagram: null });
     
     // Show confirmation modal
     const message = `CSV processing complete! Processed ${rowsToProcess.length} rows.`;
@@ -1302,7 +2420,7 @@ export default function CompanyResearcher() {
     sendSlackNotification(`✅ CSV Processing Complete: Processed ${rowsToProcess.length} rows.`).catch(
       (error) => console.error('Failed to send Slack notification:', error)
     );
-  }, [csvData, selectedUrlColumn, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings]);
+  }, [csvData, selectedUrlColumn, selectedColumns, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings]);
 
   // Clear all data function
   const handleClearAll = useCallback(() => {
@@ -1327,13 +2445,223 @@ export default function CompanyResearcher() {
   // Download partial progress
   const handleDownloadPartialProgress = useCallback(() => {
     const savedProgress = loadCsvProgress();
-    if (!savedProgress) return;
+    if (!savedProgress || !csvData) return;
+
+    // Helper function to check if URL is Instagram URL
+    const isInstagramUrl = (url: string): boolean => {
+      if (!url || typeof url !== 'string') return false;
+      return url.toLowerCase().includes('instagram.com');
+    };
+
+    // Reconstruct rows from qualification data (same logic as in load progress)
+    const qualificationDataMap = deserializeQualificationDataMap(savedProgress.qualificationDataMap);
+    const errorMap = new Map(Object.entries(savedProgress.errorMap || {}));
+    const useDualColumns = !!savedProgress.selectedColumns;
+    const savedSelectedColumns = savedProgress.selectedColumns || { domain: null, instagram: null };
+    const savedSelectedUrlColumn = savedProgress.selectedUrlColumn;
+    const savedResearchMode = savedProgress.researchMode || 'domain';
+
+    const reconstructedRows = csvData.rows.map((row: CsvRow) => {
+      const updatedRow = { ...row };
+      
+      if (useDualColumns) {
+        const domainUrl = savedSelectedColumns.domain ? row[savedSelectedColumns.domain]?.trim() || '' : '';
+        const instagramUrl = savedSelectedColumns.instagram ? row[savedSelectedColumns.instagram]?.trim() || '' : '';
+        
+        let domainName: string | null = null;
+        let domainQualificationData: any = null;
+        let instagramData: any = null;
+        let instagramQualificationData: any = null;
+        
+        if (domainUrl) {
+          const cleanedUrl = cleanUrl(domainUrl, 'domain');
+          domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+          if (domainName) {
+            domainQualificationData = qualificationDataMap.get(domainName);
+          }
+        }
+        
+        if (instagramUrl && isInstagramUrl(instagramUrl)) {
+          instagramData = qualificationDataMap.get(instagramUrl);
+          if (instagramData && instagramData.qualificationData) {
+            instagramQualificationData = instagramData.qualificationData;
+          }
+        }
+        
+        const finalQualificationData = domainQualificationData || instagramQualificationData;
+        
+        if (finalQualificationData) {
+          updatedRow['Research Status'] = 'completed';
+          if (domainQualificationData) {
+            updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
+            updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
+            updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
+            updatedRow['Classification'] = domainQualificationData.classification || '';
+            updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
+            updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
+            
+            if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
+              const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+              if (productTypes.length > 0) {
+                if (productTypes.length === 1) {
+                  updatedRow['Product Types'] = productTypes[0];
+                } else if (productTypes.length === 2) {
+                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                } else {
+                  const allButLast = productTypes.slice(0, -1).join(', ');
+                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                }
+                
+                productTypes.forEach((pt: string, index: number) => {
+                  updatedRow[`PRODUCT${index + 1}`] = pt;
+                });
+              }
+            }
+          }
+          
+          if (instagramData && !('error' in instagramData)) {
+            updatedRow['Instagram Username'] = instagramData.username || '';
+            updatedRow['Instagram Full Name'] = instagramData.full_name || '';
+            updatedRow['Instagram Bio'] = instagramData.biography || '';
+            updatedRow['Instagram Posts'] = String(instagramData.edge_owner_to_timeline_media?.count || 0);
+            updatedRow['Instagram Followers'] = String(instagramData.edge_followed_by?.count || 0);
+            updatedRow['Instagram Following'] = String(instagramData.edge_follow?.count || 0);
+            updatedRow['Instagram Private'] = instagramData.is_private ? 'Yes' : 'No';
+          }
+          
+          if (!domainQualificationData && instagramQualificationData) {
+            updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
+            updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
+            updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
+            updatedRow['Classification'] = instagramQualificationData.classification || '';
+            if (instagramQualificationData.confidence_score !== undefined) {
+              updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
+            }
+            updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
+            
+            if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
+              const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+              if (productTypes.length > 0) {
+                if (productTypes.length === 1) {
+                  updatedRow['Product Types'] = productTypes[0];
+                } else if (productTypes.length === 2) {
+                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                } else {
+                  const allButLast = productTypes.slice(0, -1).join(', ');
+                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                }
+                
+                productTypes.forEach((pt: string, index: number) => {
+                  updatedRow[`PRODUCT${index + 1}`] = pt;
+                });
+              }
+            }
+          }
+        } else {
+          const hasValidDomain = domainUrl && domainUrl.includes('.');
+          const hasValidInstagram = instagramUrl && isInstagramUrl(instagramUrl);
+          
+          if (hasValidDomain || hasValidInstagram) {
+            const error = domainName ? errorMap.get(domainName) : (instagramUrl ? errorMap.get(instagramUrl) : null);
+            updatedRow['Research Status'] = error || 'Failed to fetch data';
+          }
+        }
+      } else {
+        // Single column mode
+        const url = (savedSelectedUrlColumn ? row[savedSelectedUrlColumn]?.trim() : '') || '';
+        
+        if (savedResearchMode === 'instagram') {
+          if (url && isInstagramUrl(url)) {
+            const profileData = qualificationDataMap.get(url);
+            if (profileData && !('error' in profileData)) {
+              updatedRow['Research Status'] = 'completed';
+              updatedRow['Instagram Username'] = profileData.username || '';
+              updatedRow['Instagram Full Name'] = profileData.full_name || '';
+              updatedRow['Instagram Bio'] = profileData.biography || '';
+              updatedRow['Instagram Posts'] = String(profileData.edge_owner_to_timeline_media?.count || 0);
+              updatedRow['Instagram Followers'] = String(profileData.edge_followed_by?.count || 0);
+              updatedRow['Instagram Following'] = String(profileData.edge_follow?.count || 0);
+              updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
+              
+              if (profileData.qualificationData) {
+                const qual = profileData.qualificationData;
+                updatedRow['Company Summary'] = qual.profile_summary || '';
+                updatedRow['Company Industry'] = qual.profile_industry || '';
+                updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
+                updatedRow['Classification'] = qual.classification || '';
+                if (qual.confidence_score !== undefined) {
+                  updatedRow['Confidence Score'] = String(qual.confidence_score);
+                }
+                updatedRow['Sales Action'] = qual.sales_action || '';
+                
+                if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
+                  const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
+                  if (productTypes.length === 1) {
+                    updatedRow['Product Types'] = productTypes[0];
+                  } else if (productTypes.length === 2) {
+                    updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                  } else {
+                    const allButLast = productTypes.slice(0, -1).join(', ');
+                    updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                  }
+                  
+                  productTypes.forEach((pt: string, index: number) => {
+                    updatedRow[`PRODUCT${index + 1}`] = pt;
+                  });
+                }
+              }
+            } else {
+              const error = errorMap.get(url);
+              updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
+            }
+          }
+        } else {
+          // Domain mode
+          const cleanedUrl = cleanUrl(url, savedResearchMode);
+          const domainName = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
+          const qualificationData = domainName ? qualificationDataMap.get(domainName) : null;
+          
+          if (qualificationData) {
+            updatedRow['Research Status'] = 'completed';
+            updatedRow['Company Summary'] = qualificationData.company_summary || '';
+            updatedRow['Company Industry'] = qualificationData.company_industry || '';
+            updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || '';
+            updatedRow['Classification'] = qualificationData.classification || '';
+            updatedRow['Confidence Score'] = String(qualificationData.confidence_score || '');
+            updatedRow['Sales Action'] = qualificationData.sales_action || '';
+            
+            if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
+              const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
+              if (productTypes.length > 0) {
+                if (productTypes.length === 1) {
+                  updatedRow['Product Types'] = productTypes[0];
+                } else if (productTypes.length === 2) {
+                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
+                } else {
+                  const allButLast = productTypes.slice(0, -1).join(', ');
+                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
+                }
+                
+                productTypes.forEach((pt: string, index: number) => {
+                  updatedRow[`PRODUCT${index + 1}`] = pt;
+                });
+              }
+            }
+          } else if (domainName) {
+            const error = errorMap.get(domainName);
+            updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
+          }
+        }
+      }
+      
+      return updatedRow;
+    });
 
     // Ensure all required columns exist
     const updatedHeaders = ensureColumnsExist(savedProgress.headers);
     
     // Add PRODUCT columns if needed
-    const maxProductTypes = savedProgress.rows.reduce((max, row) => {
+    const maxProductTypes = reconstructedRows.reduce((max: number, row: CsvRow) => {
       let count = 0;
       Object.keys(row).forEach(key => {
         if (key.startsWith('PRODUCT')) {
@@ -1352,9 +2680,9 @@ export default function CompanyResearcher() {
       }
     }
 
-    const csvString = csvToString(finalHeaders, savedProgress.rows);
+    const csvString = csvToString(finalHeaders, reconstructedRows);
     downloadCsv(csvString, `partial-progress-${new Date().toISOString().split('T')[0]}.csv`);
-  }, []);
+  }, [csvData]);
 
   // Main Research Function
   const handleResearch = useCallback(async (e: FormEvent) => {
@@ -1508,9 +2836,19 @@ export default function CompanyResearcher() {
           </div>
           {isProcessingCsv && (
             <div className="mt-4 p-3 bg-blue-50 text-blue-700 rounded-sm">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
-                <span>Processing CSV: {csvProcessingProgress.current} / {csvProcessingProgress.total}</span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
+                  <span>Processing CSV: {csvProcessingProgress.current} / {csvProcessingProgress.total}</span>
+                </div>
+                <button
+                  onClick={() => {
+                    shouldStopProcessingRef.current = true;
+                  }}
+                  className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors"
+                >
+                  Stop Processing
+                </button>
               </div>
               <div className="w-full bg-blue-200 rounded-full h-2">
                 <div
@@ -1751,12 +3089,17 @@ export default function CompanyResearcher() {
         columns={csvData?.headers || []}
         rows={csvData?.rows || []}
         selectedColumn={selectedUrlColumn}
+        selectedColumns={selectedColumns}
         mode={researchMode}
+        allowBoth={true}
         onSelectColumn={(column) => {
           setSelectedUrlColumn(column);
         }}
+        onSelectColumns={(columns) => {
+          setSelectedColumns(columns);
+        }}
         onConfirm={() => {
-          if (selectedUrlColumn) {
+          if (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) {
             setShowColumnSelector(false);
             if (hasSavedProgress) {
               setShowResumeDialog(true);
@@ -1769,6 +3112,7 @@ export default function CompanyResearcher() {
           setShowColumnSelector(false);
           setCsvData(null);
           setSelectedUrlColumn(null);
+          setSelectedColumns({ domain: null, instagram: null });
         }}
       />
 
