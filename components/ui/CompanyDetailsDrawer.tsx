@@ -1190,13 +1190,33 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         </button>
                       </div>
                     ) : (
-                      <p
-                        className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
+                      <div 
+                        className="space-y-2 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
                         onDoubleClick={() => handleCellDoubleClick(company, "phone")}
                         title="Double click to edit"
                       >
-                        {company.phone || "-"}
-                      </p>
+                        {(company.phone || "-").split(',').map((phoneNum, index) => {
+                          const trimmedPhone = phoneNum.trim();
+                          if (!trimmedPhone || trimmedPhone === '-') return null;
+                          const cleanedPhone = trimmedPhone.replace(/[^\d+]/g, '');
+                          return (
+                            <div key={index} className="flex items-center gap-2">
+                              <p className="text-sm text-gray-900 flex-1">{trimmedPhone}</p>
+                              <a
+                                href={`tel:${cleanedPhone}`}
+                                className="p-1.5 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors flex-shrink-0"
+                                title="Call"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Phone className="w-4 h-4" />
+                              </a>
+                            </div>
+                          );
+                        })}
+                        {(!company.phone || company.phone === '-') && (
+                          <p className="text-sm text-gray-900">-</p>
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -1246,13 +1266,73 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         </button>
                       </div>
                     ) : (
-                      <p
-                        className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
+                      <div 
+                        className="space-y-2 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
                         onDoubleClick={() => handleCellDoubleClick(company, "email")}
                         title="Double click to edit"
                       >
-                        {company.email || "-"}
-                      </p>
+                        {(company.email || "-").split(',').map((emailAddr, index) => {
+                          const trimmedEmail = emailAddr.trim();
+                          if (!trimmedEmail || trimmedEmail === '-') return null;
+                          
+                          // Generate Gmail compose URL with pre-filled fields
+                          let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(trimmedEmail)}`;
+                          
+                          // Add subject column value as email subject if available
+                          const subjectColumn = typeof window !== 'undefined' 
+                            ? localStorage.getItem('companies-subject-column') 
+                            : null;
+                          if (subjectColumn) {
+                            try {
+                              const subjectValue = getCellValue(company, subjectColumn);
+                              if (subjectValue && subjectValue !== '-') {
+                                const encodedSubject = encodeURIComponent(subjectValue);
+                                gmailUrl += `&su=${encodedSubject}`;
+                              }
+                            } catch (error) {
+                              console.error('Error getting subject value:', error);
+                            }
+                          }
+                          
+                          // Add clipboard column value as email body if available
+                          const clipboardColumn = typeof window !== 'undefined' 
+                            ? localStorage.getItem('companies-clipboard-column') 
+                            : null;
+                          if (clipboardColumn) {
+                            try {
+                              const clipboardValue = getCellValue(company, clipboardColumn);
+                              if (clipboardValue && clipboardValue !== '-') {
+                                const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
+                                const encodedBody = encodeURIComponent(emailBody);
+                                gmailUrl += `&body=${encodedBody}`;
+                              }
+                            } catch (error) {
+                              console.error('Error getting clipboard value:', error);
+                            }
+                          }
+                          
+                          return (
+                            <div key={index} className="flex items-center gap-2">
+                              <a
+                                href={gmailUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  window.open(gmailUrl, '_blank', 'noopener,noreferrer');
+                                }}
+                                className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline flex-1"
+                                title="Click to open Gmail"
+                              >
+                                {trimmedEmail}
+                              </a>
+                            </div>
+                          );
+                        })}
+                        {(!company.email || company.email === '-') && (
+                          <p className="text-sm text-gray-900">-</p>
+                        )}
+                      </div>
                     )}
                   </div>
 

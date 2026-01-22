@@ -10,7 +10,7 @@ import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
 import WhatsAppTemplateModal from '@/components/ui/WhatsAppTemplateModal';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
-import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail } from 'lucide-react';
+import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
 import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
 import {
   DndContext,
@@ -274,9 +274,10 @@ function CompaniesContent() {
   // Cell hover state - tracks which cell is hovered (only for truncated cells)
   const [hoveredCell, setHoveredCell] = useState<{ companyId: string; columnKey: string } | null>(null);
   
-  // Calling mode note editing state
+  // List view note editing state
   const [editingNoteState, setEditingNoteState] = useState<{ companyId: string; noteIndex: number; text: string } | null>(null);
   const [newNoteState, setNewNoteState] = useState<Record<string, string>>({});
+  const [noteToDelete, setNoteToDelete] = useState<{ companyId: string; noteIndex: number } | null>(null);
   
   // Track click timeouts for phone/email double-click detection
   const clickTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
@@ -503,21 +504,21 @@ function CompaniesContent() {
     return 'whatsapp';
   });
   
-  // Calling mode state
-  const [callingMode, setCallingMode] = useState<boolean>(() => {
+  // View mode state (table or list)
+  const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('companies-calling-mode');
-      return saved === 'true';
+      const saved = localStorage.getItem('companies-view-mode');
+      return (saved === 'list' || saved === 'table') ? saved : 'table';
     }
-    return false;
+    return 'table';
   });
   
-  // Save calling mode to localStorage
+  // Save view mode to localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      localStorage.setItem('companies-calling-mode', callingMode.toString());
+      localStorage.setItem('companies-view-mode', viewMode);
     }
-  }, [callingMode]);
+  }, [viewMode]);
   
   
   // Save column order to localStorage (saves automatically whenever columnOrder changes)
@@ -1453,10 +1454,11 @@ function CompaniesContent() {
   }, []);
   
   // Helper function to handle WhatsApp click (with pre-filled text)
-  const handleWhatsAppClick = useCallback(async (company: Company) => {
-    if (!company.phone || company.phone === '-') return;
+  const handleWhatsAppClick = useCallback(async (company: Company, phoneOverride?: string) => {
+    const phoneToUse = phoneOverride || company.phone;
+    if (!phoneToUse || phoneToUse === '-') return;
     
-    const phone = company.phone.trim().replace(/[^\d+]/g, '');
+    const phone = phoneToUse.trim().replace(/[^\d+]/g, '');
     let whatsappUrl = `https://wa.me/${phone}`;
     
     // Add clipboard column value as pre-filled message if available
@@ -1480,11 +1482,15 @@ function CompaniesContent() {
   }, [clipboardColumn, getCellValue, columnLabels]);
   
   // Helper function to handle WhatsApp click without pre-filled text
-  const handleWhatsAppClickNoText = useCallback((company: Company) => {
-    if (!company.phone || company.phone === '-') return;
+  const handleWhatsAppClickNoText = useCallback((company: Company, phoneOverride?: string) => {
+    const phoneToUse = phoneOverride || company.phone;
+    if (!phoneToUse || phoneToUse === '-') return;
+    
+    // Create a temporary company object with the specific phone number for the modal
+    const companyWithPhone = { ...company, phone: phoneToUse };
     
     // Open modal to select message template
-    setSelectedCompanyForWhatsApp(company);
+    setSelectedCompanyForWhatsApp(companyWithPhone);
     setWhatsappTemplateModalOpen(true);
   }, []);
   
@@ -1508,10 +1514,11 @@ function CompaniesContent() {
   }, [selectedCompanyForWhatsApp, getCellValue]);
   
   // Helper function to handle email click
-  const handleEmailClick = useCallback((company: Company) => {
-    if (!company.email || company.email === '-') return;
+  const handleEmailClick = useCallback((company: Company, emailOverride?: string) => {
+    const emailToUse = emailOverride || company.email;
+    if (!emailToUse || emailToUse === '-') return;
     
-    const email = company.email.trim();
+    const email = emailToUse.trim();
     let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
     
     // Add subject column value as email subject if available
@@ -1560,7 +1567,7 @@ function CompaniesContent() {
     const currentNotes = company.notes && Array.isArray(company.notes) ? company.notes : [];
     const updatedNotes = [...currentNotes, { 
       message: newNote.trim(), 
-      date: new Date().toISOString() 
+      date: new Date().toISOString().split('T')[0] 
     }];
     
     try {
@@ -1573,6 +1580,39 @@ function CompaniesContent() {
       setToastVisible(true);
     }
   }, [companies, updateCompany]);
+
+  // Delete note (list view) - open confirm modal
+  const handleDeleteNoteClick = useCallback((companyId: string, noteIndex: number) => {
+    setNoteToDelete({ companyId, noteIndex });
+  }, []);
+
+  // Delete note (list view) - confirm and persist
+  const handleDeleteNoteConfirm = useCallback(async () => {
+    if (!noteToDelete) return;
+    const company = companies.find(c => c.id === noteToDelete.companyId);
+    if (!company) {
+      setNoteToDelete(null);
+      return;
+    }
+    const notes = company.notes && Array.isArray(company.notes) ? company.notes : [];
+    const updatedNotes = notes.filter((_, i) => i !== noteToDelete.noteIndex);
+    const finalNotes = updatedNotes.length > 0 ? updatedNotes : null;
+    try {
+      await updateCompany(noteToDelete.companyId, { notes: finalNotes });
+      setNoteToDelete(null);
+      setToastMessage('Note deleted successfully');
+      setToastVisible(true);
+    } catch (error: any) {
+      console.error('Failed to delete note:', error);
+      setToastMessage(`Error deleting note: ${error.message}`);
+      setToastVisible(true);
+      setNoteToDelete(null);
+    }
+  }, [noteToDelete, companies, updateCompany]);
+
+  const handleDeleteNoteCancel = useCallback(() => {
+    setNoteToDelete(null);
+  }, []);
 
   if (loading) {
     return (
@@ -1615,18 +1655,32 @@ function CompaniesContent() {
             </>
           ) : (
             <>
-              <button
-                onClick={() => setCallingMode(!callingMode)}
-                className={`inline-flex items-center px-3 md:px-4 py-2 border text-xs md:text-sm font-medium rounded-md transition-colors ${
-                  callingMode
-                    ? 'border-indigo-500 text-white bg-indigo-600 hover:bg-indigo-700'
-                    : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
-                }`}
-              >
-                <Phone className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Calling Mode</span>
-                <span className="sm:hidden">Call</span>
-              </button>
+              {/* View Toggle: Table/List */}
+              <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center ${
+                    viewMode === 'table'
+                      ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Table View"
+                >
+                  <Table className="w-4 h-4" />
+                </button>
+                <div className="h-6 w-px bg-gray-300"></div>
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center ${
+                    viewMode === 'list'
+                      ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="List View"
+                >
+                  <List className="w-4 h-4" />
+                </button>
+              </div>
               <button
                 onClick={() => setColumnFilterOpen(!columnFilterOpen)}
                 className="inline-flex items-center px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
@@ -2069,8 +2123,8 @@ function CompaniesContent() {
             {searchQuery ? 'No companies found matching your search.' : 'No companies found. Create your first company to get started.'}
           </p>
         </div>
-      ) : callingMode ? (
-        /* Calling Mode - Compact Cards */
+      ) : viewMode === 'list' ? (
+        /* List View - Compact Cards */
         <div className="space-y-4">
           {companies.map((company) => {
             const domain = company.domain && company.domain !== '-' ? company.domain.trim() : null;
@@ -2121,45 +2175,61 @@ function CompaniesContent() {
                 
                 {/* Phone with Call and WhatsApp Icons */}
                 {phone && (
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="text-sm text-gray-900 flex-1">{phone}</span>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => handlePhoneCall(phone)}
-                        className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
-                        title="Call"
-                      >
-                        <Phone className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => handleWhatsAppClick(company)}
-                        className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
-                        title="WhatsApp (with pre-filled text)"
-                      >
-                        <MessageCircle className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => handleWhatsAppClickNoText(company)}
-                        className="p-2 rounded-full bg-gray-200 text-gray-700 border border-gray-400 hover:bg-gray-300 transition-colors"
-                        title="WhatsApp (no text)"
-                      >
-                        <MessageCircle className="w-5 h-5" />
-                      </button>
-                    </div>
+                  <div className="mb-3">
+                    {phone.split(',').map((phoneNum, index) => {
+                      const trimmedPhone = phoneNum.trim();
+                      if (!trimmedPhone) return null;
+                      return (
+                        <div key={index} className="flex items-center gap-3 mb-2">
+                          <span className="text-sm text-gray-900 flex-1">{trimmedPhone}</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handlePhoneCall(trimmedPhone)}
+                              className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                              title="Call"
+                            >
+                              <Phone className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => handleWhatsAppClick(company, trimmedPhone)}
+                              className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors"
+                              title="WhatsApp (with pre-filled text)"
+                            >
+                              <MessageCircle className="w-5 h-5" />
+                            </button>
+                            <button
+                              onClick={() => handleWhatsAppClickNoText(company, trimmedPhone)}
+                              className="p-2 rounded-full bg-gray-200 text-gray-700 border border-gray-400 hover:bg-gray-300 transition-colors"
+                              title="WhatsApp (no text)"
+                            >
+                              <MessageCircle className="w-5 h-5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 
                 {/* Email */}
                 {email && (
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="text-sm font-medium text-gray-700 min-w-[80px]">Email:</span>
-                    <button
-                      onClick={() => handleEmailClick(company)}
-                      className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      <Mail className="w-4 h-4" />
-                      {email}
-                    </button>
+                  <div className="mb-3">
+                    {email.split(',').map((emailAddr, index) => {
+                      const trimmedEmail = emailAddr.trim();
+                      if (!trimmedEmail) return null;
+                      return (
+                        <div key={index} className="flex items-center gap-3 mb-2">
+                          <span className="text-sm font-medium text-gray-700 min-w-[80px]">Email:</span>
+                          <button
+                            onClick={() => handleEmailClick(company, trimmedEmail)}
+                            className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                          >
+                            <Mail className="w-4 h-4" />
+                            {trimmedEmail}
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 
@@ -2209,43 +2279,94 @@ function CompaniesContent() {
                           </div>
                         ) : (
                           <div 
-                            className="flex items-start justify-between cursor-pointer hover:bg-gray-100 p-1 rounded"
+                            className="flex items-start justify-between gap-1 cursor-pointer hover:bg-gray-100 p-1 rounded"
                             onClick={() => {
                               setEditingNoteState({ companyId: company.id, noteIndex: index, text: note.message || '' });
                             }}
                           >
                             <span className="flex-1">{note.message || ''}</span>
-                            <Edit2 className="w-3 h-3 text-gray-400 ml-2 flex-shrink-0" />
+                            <div className="flex items-center gap-0.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleDeleteNoteClick(company.id, index);
+                                }}
+                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                title="Delete note"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                              <Edit2 className="w-3 h-3 text-gray-400" />
+                            </div>
                           </div>
                         )}
                       </div>
                     ))}
                   </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newNote}
-                      onChange={(e) => setNewNoteState({ ...newNoteState, [company.id]: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && newNote.trim()) {
-                          handleNotesUpdate(company.id, newNote);
-                          setNewNoteState({ ...newNoteState, [company.id]: '' });
-                        }
-                      }}
-                      placeholder="Add a note..."
-                      className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                    />
-                    <button
-                      onClick={() => {
-                        if (newNote.trim()) {
-                          handleNotesUpdate(company.id, newNote);
-                          setNewNoteState({ ...newNoteState, [company.id]: '' });
-                        }
-                      }}
-                      className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                    >
-                      Add
-                    </button>
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setNewNoteState({ ...newNoteState, [company.id]: 'Not Picked' });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                      >
+                        Not Picked
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setNewNoteState({ ...newNoteState, [company.id]: 'Interested' });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded-md hover:bg-green-100 transition-colors"
+                      >
+                        Interested
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setNewNoteState({ ...newNoteState, [company.id]: 'Not Interested' });
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 border border-red-300 rounded-md hover:bg-red-100 transition-colors"
+                      >
+                        Not Interested
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={newNote}
+                        onChange={(e) => setNewNoteState({ ...newNoteState, [company.id]: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && newNote.trim()) {
+                            handleNotesUpdate(company.id, newNote);
+                            setNewNoteState({ ...newNoteState, [company.id]: '' });
+                          }
+                        }}
+                        placeholder="Add a note..."
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                      />
+                      <button
+                        onClick={() => {
+                          if (newNote.trim()) {
+                            handleNotesUpdate(company.id, newNote);
+                            setNewNoteState({ ...newNoteState, [company.id]: '' });
+                          }
+                        }}
+                        className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      >
+                        Add
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2380,8 +2501,9 @@ function CompaniesContent() {
                           const instagram = company.instagram.trim().replace(/^@/, '');
                           linkUrl = `https://instagram.com/${instagram}`;
                         } else if (isPhoneColumn && company.phone && company.phone !== '-') {
-                          // Generate phone link based on behavior
-                          const phone = company.phone.trim().replace(/[^\d+]/g, ''); // Remove non-digit chars except +
+                          // For phone column, we'll handle multiple phones in the rendering section
+                          // Generate phone link based on behavior (for single phone or first phone)
+                          const phone = company.phone.trim().split(',')[0].trim().replace(/[^\d+]/g, ''); // Get first phone, remove non-digit chars except +
                           if (phoneClickBehavior === 'call') {
                             linkUrl = `tel:${phone}`;
                           } else if (phoneClickBehavior === 'whatsapp') {
@@ -2398,8 +2520,9 @@ function CompaniesContent() {
                             linkUrl = whatsappUrl;
                           }
                         } else if (isEmailColumn && company.email && company.email !== '-') {
-                          // Generate Gmail compose URL with email pre-filled
-                          const email = company.email.trim();
+                          // For email column, we'll handle multiple emails in the rendering section
+                          // Generate Gmail compose URL with email pre-filled (for single email or first email)
+                          const email = company.email.trim().split(',')[0].trim();
                           let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
                           // Add subject column value as email subject if available
                           if (subjectColumn) {
@@ -2532,85 +2655,125 @@ function CompaniesContent() {
                                   ✕
                                 </button>
                               </div>
+                            ) : (isPhoneColumn || isEmailColumn) && value && value !== '-' ? (
+                              // Handle multiple phone numbers or emails
+                              <div className="flex flex-col gap-1 py-2">
+                                {(isPhoneColumn ? (company.phone || '').split(',') : (company.email || '').split(',')).map((item: string, index: number) => {
+                                  const trimmedItem = item.trim();
+                                  if (!trimmedItem) return null;
+                                  
+                                  if (isPhoneColumn) {
+                                    const cleanedPhone = trimmedItem.replace(/[^\d+]/g, '');
+                                    let phoneLinkUrl = null;
+                                    if (phoneClickBehavior === 'call') {
+                                      phoneLinkUrl = `tel:${cleanedPhone}`;
+                                    } else if (phoneClickBehavior === 'whatsapp') {
+                                      let whatsappUrl = `https://wa.me/${cleanedPhone}`;
+                                      if (clipboardColumn) {
+                                        const clipboardValue = getCellValue(company, clipboardColumn);
+                                        if (clipboardValue && clipboardValue !== '-') {
+                                          const encodedMessage = encodeURIComponent(clipboardValue);
+                                          whatsappUrl += `?text=${encodedMessage}`;
+                                        }
+                                      }
+                                      phoneLinkUrl = whatsappUrl;
+                                    }
+                                    
+                                    return (
+                                      <div key={index} className="flex items-center gap-2">
+                                        <span className="text-xs md:text-sm text-gray-900 flex-1 truncate">{trimmedItem}</span>
+                                        {phoneLinkUrl && (
+                                          <button
+                                            onClick={async (e) => {
+                                              e.stopPropagation();
+                                              if (phoneClickBehavior === 'call') {
+                                                window.location.href = phoneLinkUrl;
+                                              } else {
+                                                if (phoneClickBehavior === 'whatsapp' && clipboardColumn) {
+                                                  const clipboardValue = getCellValue(company, clipboardColumn);
+                                                  if (clipboardValue && clipboardValue !== '-') {
+                                                    try {
+                                                      await copyToClipboard(clipboardValue);
+                                                      setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+                                                      setToastVisible(true);
+                                                    } catch (error) {
+                                                      console.error('Failed to copy to clipboard:', error);
+                                                    }
+                                                  }
+                                                }
+                                                window.open(phoneLinkUrl, '_blank', 'noopener,noreferrer');
+                                              }
+                                            }}
+                                            onDoubleClick={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                              handleCellDoubleClick(company, columnKey);
+                                            }}
+                                            className="p-1 rounded bg-green-100 text-green-700 hover:bg-green-200 transition-colors flex-shrink-0"
+                                            title={phoneClickBehavior === 'call' ? 'Call' : 'WhatsApp'}
+                                          >
+                                            <Phone className="w-3 h-3 md:w-4 md:h-4" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  } else {
+                                    // Email column
+                                    const trimmedEmail = trimmedItem;
+                                    let emailLinkUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(trimmedEmail)}`;
+                                    if (subjectColumn) {
+                                      const subjectValue = getCellValue(company, subjectColumn);
+                                      if (subjectValue && subjectValue !== '-') {
+                                        const encodedSubject = encodeURIComponent(subjectValue);
+                                        emailLinkUrl += `&su=${encodedSubject}`;
+                                      }
+                                    }
+                                    if (clipboardColumn) {
+                                      const clipboardValue = getCellValue(company, clipboardColumn);
+                                      if (clipboardValue && clipboardValue !== '-') {
+                                        const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
+                                        const encodedBody = encodeURIComponent(emailBody);
+                                        emailLinkUrl += `&body=${encodedBody}`;
+                                      }
+                                    }
+                                    
+                                    return (
+                                      <div key={index} className="flex items-center gap-2">
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            window.open(emailLinkUrl, '_blank', 'noopener,noreferrer');
+                                          }}
+                                          onDoubleClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            handleCellDoubleClick(company, columnKey);
+                                          }}
+                                          className="text-xs md:text-sm text-indigo-600 hover:text-indigo-800 hover:underline flex-1 text-left truncate"
+                                          title="Click to open Gmail"
+                                        >
+                                          {trimmedEmail}
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+                                })}
+                              </div>
                             ) : linkUrl ? (
                               <a
                                 href={linkUrl}
-                                target={isPhoneColumn && phoneClickBehavior === 'call' ? undefined : "_blank"}
-                                rel={isPhoneColumn && phoneClickBehavior === 'call' ? undefined : "noopener noreferrer"}
+                                target={isLinkColumn ? "_blank" : undefined}
+                                rel={isLinkColumn ? "noopener noreferrer" : undefined}
                                 onClick={async (e) => {
-                                  // For phone and email, prevent default to allow double-click to work
-                                  if (isPhoneColumn || isEmailColumn) {
-                                    e.preventDefault();
-                                  }
-                                  
                                   // If Ctrl/Cmd is pressed, let the row handler handle it (for opening drawer)
                                   if (e.ctrlKey || e.metaKey) {
-                                    if (isPhoneColumn || isEmailColumn) {
-                                      // Already prevented, just return
-                                    } else {
-                                      e.preventDefault();
-                                    }
+                                    e.preventDefault();
                                     return; // Let event bubble to row handler
                                   }
                                   e.stopPropagation();
                                   
-                                  // Use a small delay for phone/email to detect double-click
-                                  if (isPhoneColumn || isEmailColumn) {
-                                    const timeoutKey = `${company.id}-${columnKey}`;
-                                    
-                                    // Clear any existing timeout for this cell
-                                    const existingTimeout = clickTimeoutsRef.current.get(timeoutKey);
-                                    if (existingTimeout) {
-                                      clearTimeout(existingTimeout);
-                                    }
-                                    
-                                    // Copy clipboard column immediately (must happen synchronously in user gesture)
-                                    // For phone column with WhatsApp behavior, copy clipboard column
-                                    if (isPhoneColumn && phoneClickBehavior === 'whatsapp' && clipboardColumn) {
-                                      const clipboardValue = getCellValue(company, clipboardColumn);
-                                      if (clipboardValue && clipboardValue !== '-') {
-                                        try {
-                                          await copyToClipboard(clipboardValue);
-                                          setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
-                                          setToastVisible(true);
-                                        } catch (error) {
-                                          console.error('Failed to copy to clipboard:', error);
-                                          setToastMessage('Failed to copy to clipboard');
-                                          setToastVisible(true);
-                                        }
-                                      }
-                                    }
-                                    
-                                    const clickDelay = setTimeout(() => {
-                                      // Check if timeout was cleared (double-click occurred) or if double-click flag is set
-                                      const timeoutStillExists = clickTimeoutsRef.current.has(timeoutKey);
-                                      const isDoubleClick = doubleClickInProgressRef.current.get(timeoutKey);
-                                      
-                                      // Clean up
-                                      clickTimeoutsRef.current.delete(timeoutKey);
-                                      if (isDoubleClick) {
-                                        doubleClickInProgressRef.current.delete(timeoutKey);
-                                      }
-                                      
-                                      // Don't open link if double-click occurred (timeout was cleared or flag is set)
-                                      if (!timeoutStillExists || isDoubleClick) {
-                                        return;
-                                      }
-                                      
-                                      if (isPhoneColumn && phoneClickBehavior === 'call') {
-                                        window.location.href = linkUrl;
-                                      } else {
-                                        window.open(linkUrl, '_blank', 'noopener,noreferrer');
-                                      }
-                                    }, 300); // 300ms delay to detect double-click
-                                    
-                                    // Store timeout ID in ref for this cell
-                                    clickTimeoutsRef.current.set(timeoutKey, clickDelay);
-                                    return;
-                                  }
-                                  
                                   // For domain/instagram columns, copy clipboard column value if set
-                                  if (!isPhoneColumn && clipboardColumn) {
+                                  if (clipboardColumn) {
                                     const clipboardValue = getCellValue(company, clipboardColumn);
                                     if (clipboardValue && clipboardValue !== '-') {
                                       try {
@@ -2625,29 +2788,10 @@ function CompaniesContent() {
                                     }
                                   }
                                 }}
-                                onDoubleClick={(isPhoneColumn || isEmailColumn) ? (e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  
-                                  // Clear the click timeout if it exists
-                                  const timeoutKey = `${company.id}-${columnKey}`;
-                                  const existingTimeout = clickTimeoutsRef.current.get(timeoutKey);
-                                  
-                                  // Mark that double-click is in progress BEFORE clearing timeout
-                                  // This ensures the flag is set even if timeout callback is already queued
-                                  doubleClickInProgressRef.current.set(timeoutKey, true);
-                                  
-                                  if (existingTimeout) {
-                                    clearTimeout(existingTimeout);
-                                    clickTimeoutsRef.current.delete(timeoutKey);
-                                  }
-                                  
-                                  handleCellDoubleClick(company, columnKey);
-                                } : undefined}
                                 onMouseEnter={handleCellMouseEnter}
                                 onMouseLeave={handleCellMouseLeave}
                                 className={`absolute inset-0 flex items-center w-full h-full px-3 md:px-6 py-4 text-indigo-600 hover:text-indigo-800 hover:underline hover:bg-indigo-50 ${isCellHovered ? "whitespace-normal break-words" : "truncate"}`}
-                                title={(isPhoneColumn || isEmailColumn) ? "Single click to open link, double click to edit" : value}
+                                title={value}
                               >
                                 {value}
                               </a>
@@ -2846,6 +2990,72 @@ function CompaniesContent() {
         confirmText="Delete"
         cancelText="Cancel"
       />
+
+      {/* Delete Note Confirmation Modal (list view) */}
+      {noteToDelete && (() => {
+        const company = companies.find(c => c.id === noteToDelete.companyId);
+        const notes = company?.notes && Array.isArray(company.notes) ? company.notes : [];
+        const note = notes[noteToDelete.noteIndex];
+        return (
+          <>
+            <div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
+              onClick={handleDeleteNoteCancel}
+            />
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+              <div
+                className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Delete Note
+                </h3>
+                <div className="text-sm text-gray-600 mb-6">
+                  <p className="mb-3">Are you sure you want to delete this note? This action cannot be undone.</p>
+                  {note && (
+                    <div className="p-3 bg-gray-50 rounded border border-gray-200">
+                      <p className="text-xs text-gray-500 mb-1">
+                        {note.date ? new Date(note.date).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                        }) : null}
+                      </p>
+                      <p className="text-sm text-gray-900">
+                        {note.message}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeleteNoteCancel();
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeleteNoteConfirm();
+                    }}
+                    className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* Assign Set Modal */}
       {assignSetModalOpen && (
