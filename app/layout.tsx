@@ -5,6 +5,7 @@ import { Analytics } from '@vercel/analytics/next';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { MessageTemplatesProvider } from '@/contexts/MessageTemplatesContext';
 import { CompaniesProvider } from '@/contexts/CompaniesContext';
+import { InvestorsProvider } from '@/contexts/InvestorsContext';
 import { OwnerProvider } from '@/contexts/OwnerContext';
 import { CountryProvider } from '@/contexts/CountryContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
@@ -72,8 +73,10 @@ export default function RootLayout({
               <OwnerProvider>
                 <MessageTemplatesProvider>
                   <CompaniesProvider>
-                    {children}
-                    <Analytics />
+                    <InvestorsProvider>
+                      {children}
+                      <Analytics />
+                    </InvestorsProvider>
                   </CompaniesProvider>
                 </MessageTemplatesProvider>
               </OwnerProvider>

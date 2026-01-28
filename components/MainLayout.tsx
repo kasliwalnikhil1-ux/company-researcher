@@ -8,7 +8,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
@@ -178,6 +178,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           >
             <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Companies</span>}
+          </Link>
+
+          <Link
+            href="/investors"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/investors')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Investors"
+          >
+            <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Investors</span>}
           </Link>
           
           <Link

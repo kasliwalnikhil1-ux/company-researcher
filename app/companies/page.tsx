@@ -641,9 +641,22 @@ function CompaniesContent() {
     if (!user?.id) return;
     const { data: existing } = await supabase
       .from('user_settings')
-      .select('personalization, owners, email_settings, onboarding')
+      .select('personalization, owners, email_settings, onboarding, column_settings')
       .eq('id', user.id)
       .single();
+    let existingColumnSettings: Record<string, unknown> = {};
+    const raw = existing?.column_settings;
+    if (raw != null) {
+      if (typeof raw === 'string') {
+        try {
+          existingColumnSettings = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          /* keep {} */
+        }
+      } else if (typeof raw === 'object' && !Array.isArray(raw)) {
+        existingColumnSettings = raw as Record<string, unknown>;
+      }
+    }
     const payload = {
       id: user.id,
       personalization: existing?.personalization ?? null,
@@ -651,6 +664,7 @@ function CompaniesContent() {
       email_settings: existing?.email_settings ?? null,
       onboarding: existing?.onboarding ?? null,
       column_settings: {
+        ...existingColumnSettings,
         columnOrder,
         visibleColumns: Array.from(visibleColumns),
         clipboardColumn: clipboardColumn ?? null,
