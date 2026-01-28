@@ -18,7 +18,7 @@ import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, ser
 import { useCompanies } from "@/contexts/CompaniesContext";
 import { useOwner } from "@/contexts/OwnerContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { extractUsernameFromUrl } from "../utils/instagramApi";
+import { extractUsernameFromUrl } from "../utils/instagramUrl";
 import { supabase } from "@/utils/supabase/client";
 
 // Interface for qualification data

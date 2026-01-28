@@ -119,13 +119,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             <div className={`flex items-center ${isCollapsed && !isMobile ? '' : 'gap-2'}`}>
               <Image
                 src="/logo.png"
-                alt="CapitalxAI CRM"
+                alt="CapitalxAI"
                 width={32}
                 height={32}
                 className="h-8 w-8 flex-shrink-0 object-contain"
               />
               {(!isCollapsed || isMobile) && (
-                <h1 className="text-xl font-bold text-gray-900">CapitalxAI CRM</h1>
+                <h1 className="text-xl font-bold text-gray-900">CapitalxAI</h1>
               )}
             </div>
             {isMobile && (

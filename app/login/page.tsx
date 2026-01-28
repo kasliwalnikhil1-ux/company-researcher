@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
@@ -130,7 +131,7 @@ export default function Login() {
 
     try {
       await resetPassword(email);
-      setSuccess('Password reset email sent! Please check your inbox.');
+      setSuccess('If an account exists, a reset link has been sent. Please check your inbox.');
       setShowForgotPassword(false);
     } catch (err: any) {
       setError(err.message);
@@ -434,16 +435,21 @@ export default function Login() {
           )}
 
           <p className="mt-6 text-center text-sm text-gray-500">
-            <button
-              type="button"
-              onClick={() => {
-                setIsLogin(!isLogin);
-                setError(null);
-              }}
-              className="font-medium text-brand-default hover:text-brand-dark"
-            >
-              {isLogin ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
-            </button>
+            {isLogin ? (
+              <>
+                Need an account?{' '}
+                <Link href="/signup" className="font-medium text-brand-default hover:text-brand-dark">
+                  Sign up
+                </Link>
+              </>
+            ) : (
+              <>
+                Already have an account?{' '}
+                <Link href="/login" className="font-medium text-brand-default hover:text-brand-dark">
+                  Sign in
+                </Link>
+              </>
+            )}
           </p>
         </div>
       </div>

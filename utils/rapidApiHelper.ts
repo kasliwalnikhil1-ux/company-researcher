@@ -1,15 +1,26 @@
 /**
- * RapidAPI helper with key rotation
+ * RapidAPI helper with key rotation (server-only)
  * Automatically rotates through multiple API keys if one fails
+ * Keys are read from env: RAPIDAPI_KEYS (comma-separated for multiple keys)
  */
 
-const RAPIDAPI_KEYS = [
-  'a19ab35cd6msh38cc3d4aaad7fddp13d081jsna5b4e51e9a2f',
-  '081e6b5b7amsh9a48d0e612ac1ccp1f9c32jsn8a98877df9e2',
-  '5654c1d2f1msh0d280f451bae69cp165facjsn3b5fdcd6b762',
-  'a669dc3de3msh3e331732977f8f9p10a91bjsnfcc1977fa8a4',
-  '8e207135d7mshcd613c4e7c832bdp1723e5jsn175f9d767a9a',
-];
+import 'server-only';
+
+function getRapidApiKeys(): string[] {
+  const raw = process.env.RAPIDAPI_KEYS;
+  if (!raw || typeof raw !== 'string') return [];
+  return raw
+    .split(',')
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0);
+}
+
+// Lazy-initialized so env is read at first use (server-side)
+let _keys: string[] | null = null;
+function keys(): string[] {
+  if (_keys === null) _keys = getRapidApiKeys();
+  return _keys;
+}
 
 // Track current key index for rotation
 let currentKeyIndex = 0;
@@ -18,15 +29,17 @@ let currentKeyIndex = 0;
  * Gets the current RapidAPI key
  */
 export function getCurrentRapidApiKey(): string {
-  return RAPIDAPI_KEYS[currentKeyIndex];
+  const k = keys();
+  return k[currentKeyIndex] ?? '';
 }
 
 /**
  * Rotates to the next RapidAPI key
  */
 export function rotateRapidApiKey(): string {
-  currentKeyIndex = (currentKeyIndex + 1) % RAPIDAPI_KEYS.length;
-  return RAPIDAPI_KEYS[currentKeyIndex];
+  const k = keys();
+  currentKeyIndex = (currentKeyIndex + 1) % Math.max(k.length, 1);
+  return k[currentKeyIndex] ?? '';
 }
 
 /**
@@ -50,8 +63,14 @@ export async function fetchWithRapidApi(
   retryCount: number = 0
 ): Promise<Response> {
   const { rapidApiHost, ...fetchOptions } = options;
-  const maxRetries = RAPIDAPI_KEYS.length - 1;
-  
+  const rapidApiKeys = keys();
+  if (rapidApiKeys.length === 0) {
+    throw new Error(
+      'RAPIDAPI_KEYS is not set. Add comma-separated RapidAPI key(s) to your .env.local (e.g. RAPIDAPI_KEYS=key1,key2).'
+    );
+  }
+  const maxRetries = rapidApiKeys.length - 1;
+
   const currentKey = getCurrentRapidApiKey();
   const headers = {
     'x-rapidapi-host': rapidApiHost,

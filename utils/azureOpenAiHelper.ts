@@ -1,41 +1,30 @@
 /**
- * Azure OpenAI & Google Gemini API Helper Module
- * 
+ * Azure OpenAI & Google Gemini API Helper Module (server-only)
+ *
  * This module provides centralized configuration and helper functions for Azure OpenAI and Google Gemini API calls.
- * It helps avoid code redundancy across multiple scripts.
- * 
- * Uses API key authentication for simplicity.
- * 
+ * Uses API key authentication. Keys must be set via environment variables (no hardcoded fallbacks).
+ *
  * Usage:
- *   // Default: Azure OpenAI (backward compatible)
  *   const response = await callAzureOpenAI(payload);
- * 
- *   // Using Gemini
  *   const response = await callAzureOpenAI(payload, { provider: "gemini" });
- * 
- *   // Higher-level functions also support provider parameter
  *   const result = await getCompletion(messages, { provider: "gemini" });
  *   const result = await getJsonCompletion(messages, { provider: "gemini" });
  */
 
+import 'server-only';
 import OpenAI from 'openai';
 
-// Azure OpenAI Configuration
+// Azure OpenAI Configuration (endpoint/deployment from env or defaults; API key from env only)
 const AZURE_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT || process.env.ENDPOINT_URL || "https://resourceplan.services.ai.azure.com/";
 const DEPLOYMENT_NAME = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || process.env.DEPLOYMENT_NAME || "DeepSeek-V3-0324";
 const DEPLOYMENT_NAME_MINI = process.env.AZURE_OPENAI_DEPLOYMENT_NAME_MINI || process.env.DEPLOYMENT_NAME_MINI || "DeepSeek-V3-0324";
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-05-01-preview";
-const API_KEY = process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_API_KEY || "1969325e9204490993b18e526d80029d";
+const API_KEY = process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_API_KEY || "";
 
-// Gemini Configuration
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyASYsNjapz5DySPIAfw1zgUgc4Z8nuVf-s";
+// Gemini Configuration (key from env only)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL_ID = process.env.GEMINI_MODEL_ID || "gemini-2.5-flash";
 const GEMINI_BASE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}";
-
-// Default User ID for logging
-const DEFAULT_USER_ID = "6c67e9c1-00ef-479d-868b-10b71f94f1f7";
-
-// Note: API keys are now hardcoded as fallbacks, so no warning needed
 
 // Initialize Azure OpenAI client with API key authentication
 // Note: We'll create the client on-demand to support different deployments

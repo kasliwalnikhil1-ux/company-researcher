@@ -1,11 +1,15 @@
 /**
- * Instagram API helper functions
+ * Instagram API helper functions (server-only)
  * Fetches Instagram profile data using RapidAPI
  * Qualifies Instagram profiles using Azure OpenAI
  */
 
+import 'server-only';
 import { fetchWithRapidApi } from './rapidApiHelper';
 import { getJsonCompletion, Message } from './azureOpenAiHelper';
+import { extractUsernameFromUrl } from './instagramUrl';
+
+export { extractUsernameFromUrl };
 
 const RAPIDAPI_HOST = 'instagram120.p.rapidapi.com';
 const PROFILE_API_URL = 'https://instagram120.p.rapidapi.com/api/instagram/profile';
@@ -31,47 +35,6 @@ export interface InstagramProfileResponse {
     profile_pic_url_wrapped?: string;
     profile_pic_url_hd_wrapped?: string;
   };
-}
-
-/**
- * Extracts username from Instagram URL
- * Supports formats:
- * - https://www.instagram.com/username/
- * - https://instagram.com/username/
- * - instagram.com/username/
- * - /username/
- * - username
- */
-export function extractUsernameFromUrl(urlOrUsername: string): string | null {
-  if (!urlOrUsername || typeof urlOrUsername !== 'string') {
-    return null;
-  }
-
-  const trimmed = urlOrUsername.trim();
-  
-  // If it's already a username (no slashes, no protocol, no @), return as-is
-  if (!trimmed.includes('/') && !trimmed.includes('http') && !trimmed.includes('@')) {
-    return trimmed.replace('@', '');
-  }
-
-  // Try to extract from URL patterns
-  const patterns = [
-    /instagram\.com\/([^\/\?]+)/,
-    /\/([^\/\?]+)/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = trimmed.match(pattern);
-    if (match && match[1]) {
-      const username = match[1].replace('@', '');
-      // Filter out common non-username paths
-      if (username && !['p', 'reel', 'tv', 'stories'].includes(username.toLowerCase())) {
-        return username;
-      }
-    }
-  }
-
-  return null;
 }
 
 /**
