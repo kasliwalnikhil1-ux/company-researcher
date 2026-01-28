@@ -180,7 +180,7 @@ export default function Login() {
             inside out.
           </h1>
           <p className="text-white/80 text-sm leading-relaxed">
-            Get detailed insights and know everything about any prospect—instantly.
+            Get detailed insights and know everything about your target accounts—instantly.
           </p>
         </div>
         <div className="relative text-sm text-white/60">
