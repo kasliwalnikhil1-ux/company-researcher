@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
-import { Building2, Lock } from 'lucide-react';
+import { Lock } from 'lucide-react';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
@@ -148,7 +149,7 @@ export default function ResetPassword() {
         </div>
         <div className="relative">
           <div className="flex items-center gap-2">
-            <Building2 className="w-8 h-8" strokeWidth={1.5} />
+            <Image src="/logo.png" alt="CapitalxAI CRM" width={32} height={32} className="h-8 w-auto" />
             <span className="text-xl font-semibold tracking-tight">CapitalxAI CRM</span>
           </div>
         </div>
@@ -170,7 +171,7 @@ export default function ResetPassword() {
         <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <Building2 className="w-7 h-7 text-brand-default" strokeWidth={1.5} />
+            <Image src="/logo.png" alt="CapitalxAI CRM" width={28} height={28} className="h-7 w-auto" />
             <span className="text-lg font-semibold text-gray-900 tracking-tight">CapitalxAI CRM</span>
           </div>
 

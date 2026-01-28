@@ -6,6 +6,7 @@ import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
@@ -114,10 +115,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         )}
 
         <div className={`p-6 border-b border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
-          <div className="flex items-center justify-between">
-            <h1 className={`text-xl font-bold text-gray-900 transition-opacity duration-300 ${isCollapsed && !isMobile ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
-              CapitalxAI CRM
-            </h1>
+          <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : 'justify-between'}`}>
+            <div className={`flex items-center ${isCollapsed && !isMobile ? '' : 'gap-2'}`}>
+              <Image
+                src="/logo.png"
+                alt="CapitalxAI CRM"
+                width={32}
+                height={32}
+                className="h-8 w-8 flex-shrink-0 object-contain"
+              />
+              {(!isCollapsed || isMobile) && (
+                <h1 className="text-xl font-bold text-gray-900">CapitalxAI CRM</h1>
+              )}
+            </div>
             {isMobile && (
               <button
                 onClick={() => setIsMobileMenuOpen(false)}

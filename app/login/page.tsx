@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { Building2 } from 'lucide-react';
 
 const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
 const CHAR_SPEED_MS = 45;
@@ -159,7 +159,7 @@ export default function Login() {
         </div>
         <div className="relative">
           <div className="flex items-center gap-2">
-            <Building2 className="w-8 h-8" strokeWidth={1.5} />
+            <Image src="/logo.png" alt="CapitalxAI CRM" width={32} height={32} className="h-8 w-auto" />
             <span className="text-xl font-semibold tracking-tight">CapitalxAI CRM</span>
           </div>
         </div>
@@ -193,7 +193,7 @@ export default function Login() {
         <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <Building2 className="w-7 h-7 text-brand-default" strokeWidth={1.5} />
+            <Image src="/logo.png" alt="CapitalxAI CRM" width={28} height={28} className="h-7 w-auto" />
             <span className="text-lg font-semibold text-gray-900 tracking-tight">CapitalxAI CRM</span>
           </div>
 

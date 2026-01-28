@@ -33,17 +33,25 @@ export const metadata: Metadata = {
   metadataBase: new URL(appUrl),
   title: "CapitalxAI CRM",
   description: "Instantly get detailed research insights and know everything about any company inside out.",
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
   openGraph: {
     url: appUrl,
     title: 'CapitalxAI CRM',
     description: 'Instantly get detailed research insights and know everything about any company inside out.',
-    images: ['/opengraph-image.jpg'],
+    images: ['/Open%20Graph%20CapitalxAI.png'],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'CapitalxAI CRM',
     description: 'Instantly get detailed research insights and know everything about any company inside out.',
-    images: ['/opengraph-image.jpg'],
+    images: ['/Twitter%20Banner%20CapitalxAI.png'],
   },
 };
 

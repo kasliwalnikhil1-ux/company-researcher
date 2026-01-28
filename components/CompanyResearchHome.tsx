@@ -5,6 +5,7 @@ import { useState, FormEvent, useCallback, useMemo, useRef, useEffect } from "re
 import QualificationDisplay from './qualification/QualificationDisplay';
 import InstagramProfileDisplay from './qualification/InstagramProfileDisplay';
 import Image from "next/image";
+import Link from "next/link";
 import { fetchCompanyMap, fetchInstagramProfile, sendSlackNotification } from "../lib/api";
 import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
@@ -2729,13 +2730,16 @@ export default function CompanyResearcher() {
     <div className="w-full max-w-5xl p-6 z-10 mb-20 mt-6">
       <div className="flex items-center justify-between mb-4 pb-5 opacity-0 animate-fade-up [animation-delay:200ms]">
         <div className="flex items-center gap-4">
-          <Image 
-            src="/logo.png" 
-            alt="Logo" 
-            width={60} 
-            height={60} 
-            className="object-contain"
-          />
+          <Link href="/" className="flex-shrink-0" aria-label="CapitalxAI CRM home">
+            <Image 
+              src="/logo.png?v=2" 
+              alt="CapitalxAI CRM" 
+              width={60} 
+              height={60} 
+              className="object-contain"
+              unoptimized
+            />
+          </Link>
           <h1 className="md:text-6xl text-4xl font-medium">
             <span className="text-brand-default"> Company </span>
             Researcher
