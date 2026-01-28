@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useOnboarding, OnboardingData } from '@/contexts/OnboardingContext';
 import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import Toast from '@/components/ui/Toast';
-import { Building2, Save, Check } from 'lucide-react';
+import { Building2, Save, X, ChevronDown } from 'lucide-react';
 
 // Same constants as OnboardingFlow
 const COUNTRIES = [
@@ -60,6 +60,29 @@ const SECTORS = [
   'Robotics', 'Biotech', 'Pharma', 'Telecom', 'Hardware', 'Other'
 ];
 
+const B2B_COMPANY_SIZES = ['1–10', '11–50', '51–200', '201–500', '501–1000', '1000+'];
+const B2B_USP_OPTIONS = ['Faster to deploy', 'Lower cost', 'Better UX', 'More accurate results', 'Better support', 'Easier integration', 'Industry-specific', 'Scalable', 'Secure'];
+const B2B_CTA_OPTIONS = [
+  { value: 'book_demo' as const, label: 'Book a demo' },
+  { value: 'request_quote' as const, label: 'Request a quote' },
+  { value: 'free_trial' as const, label: 'Start free trial' },
+  { value: 'waitlist' as const, label: 'Join waitlist' },
+  { value: 'contact_sales' as const, label: 'Contact sales' },
+];
+const B2B_BUYER_ROLES: { value: string; label: string }[] = [
+  { value: 'owner', label: 'Owner' },
+  { value: 'founder', label: 'Founder' },
+  { value: 'c_suite', label: 'C-Suite' },
+  { value: 'partner', label: 'Partner' },
+  { value: 'vp', label: 'VP' },
+  { value: 'head', label: 'Head' },
+  { value: 'director', label: 'Director' },
+  { value: 'manager', label: 'Manager' },
+  { value: 'senior', label: 'Senior' },
+  { value: 'entry', label: 'Entry' },
+  { value: 'intern', label: 'Intern' },
+];
+
 export default function CompanyProfilePage() {
   return (
     <ProtectedRoute>
@@ -81,12 +104,30 @@ function CompanyProfileContent() {
   const [showToast, setShowToast] = useState(false);
   const [sectorSearch, setSectorSearch] = useState('');
   const [countrySearch, setCountrySearch] = useState('');
+  const [countryOpen, setCountryOpen] = useState(false);
+  const countryDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!countryOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (countryDropdownRef.current && !countryDropdownRef.current.contains(e.target as Node)) {
+        setCountryOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [countryOpen]);
 
   useEffect(() => {
     if (onboarding) {
       setFormData(onboarding);
     }
   }, [onboarding]);
+
+  const hasChanges = useMemo(() => {
+    if (!onboarding) return false;
+    return JSON.stringify(formData) !== JSON.stringify(onboarding);
+  }, [formData, onboarding]);
 
   const handleSave = async () => {
     if (!user?.id) {
@@ -137,6 +178,8 @@ function CompanyProfileContent() {
     c.toLowerCase().includes(countrySearch.toLowerCase())
   );
 
+  const flowType = onboarding.flowType ?? onboarding.step0?.primaryUse;
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-8">
@@ -145,11 +188,476 @@ function CompanyProfileContent() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Company Profile</h1>
-          <p className="text-sm text-gray-500">View and edit your company information</p>
+          <p className="text-sm text-gray-500">
+            {flowType === 'b2b' ? 'View and edit your B2B outreach profile' : 'View and edit your company information'}
+          </p>
         </div>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6 space-y-8">
+        {flowType === 'b2b' ? (
+          <>
+            {/* B2B: Founder Identity */}
+            {formData.step1 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Identity</h2>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
+                    <input
+                      type="text"
+                      value={formData.step1.firstName || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        step1: {
+                          firstName: e.target.value,
+                          lastName: formData.step1?.lastName ?? '',
+                          gender: formData.step1?.gender
+                        }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
+                    <input
+                      type="text"
+                      value={formData.step1.lastName || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        step1: {
+                          firstName: formData.step1?.firstName ?? '',
+                          lastName: e.target.value,
+                          gender: formData.step1?.gender
+                        }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Gender</label>
+                  <select
+                    value={formData.step1.gender || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      step1: {
+                        firstName: formData.step1?.firstName ?? '',
+                        lastName: formData.step1?.lastName ?? '',
+                        gender: e.target.value
+                      }
+                    })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Select gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="non-binary">Non-binary</option>
+                    <option value="prefer-not-to-say">Prefer not to say</option>
+                  </select>
+                </div>
+              </section>
+            )}
+
+            {/* B2B: Founder Details (Your role + Bio) */}
+            {(formData.step2 || formData.b2bStep3) && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Details</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Your role</label>
+                    <input
+                      type="text"
+                      value={formData.b2bStep3?.yourRole || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep3: {
+                          companyName: formData.b2bStep3?.companyName ?? '',
+                          websiteUrl: formData.b2bStep3?.websiteUrl ?? '',
+                          companySize: formData.b2bStep3?.companySize ?? '',
+                          yourRole: e.target.value
+                        }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. CEO, Founder"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
+                    <textarea
+                      value={formData.step2?.bio || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        step2: {
+                          title: formData.step2?.title ?? '',
+                          bio: e.target.value
+                        }
+                      })}
+                      rows={4}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="Tell us about yourself"
+                    />
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* B2B: Company Overview */}
+            {formData.b2bStep3 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Overview</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Company name</label>
+                    <input
+                      type="text"
+                      value={formData.b2bStep3.companyName || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep3: {
+                          ...formData.b2bStep3!,
+                          companyName: e.target.value
+                        }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Website URL (optional)</label>
+                    <input
+                      type="url"
+                      value={formData.b2bStep3.websiteUrl || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep3: {
+                          ...formData.b2bStep3!,
+                          websiteUrl: e.target.value
+                        }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="https://capitalxai.com"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Company size</label>
+                    <select
+                      value={formData.b2bStep3.companySize || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep3: {
+                          ...formData.b2bStep3!,
+                          companySize: e.target.value
+                        }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="">Select size</option>
+                      {B2B_COMPANY_SIZES.map((size) => (
+                        <option key={size} value={size}>{size} employees</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* B2B: What You Sell */}
+            {formData.b2bStep4 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">What You Sell</h2>
+                <textarea
+                  value={formData.b2bStep4.productOrService || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    b2bStep4: { productOrService: e.target.value }
+                  })}
+                  rows={5}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Describe your product or service..."
+                />
+              </section>
+            )}
+
+            {/* B2B: Core Features */}
+            {formData.b2bStep5 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Key Features (up to 5)</h2>
+                <div className="space-y-3">
+                  {(formData.b2bStep5.coreFeatures || []).map((value, index) => (
+                    <div key={index} className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        value={value}
+                        onChange={(e) => {
+                          const next = [...(formData.b2bStep5?.coreFeatures || [])];
+                          next[index] = e.target.value;
+                          setFormData({ ...formData, b2bStep5: { coreFeatures: next } });
+                        }}
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        placeholder={`Feature ${index + 1}`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = (formData.b2bStep5?.coreFeatures || []).filter((_, i) => i !== index);
+                          setFormData({ ...formData, b2bStep5: { coreFeatures: next.length ? next : [''] } });
+                        }}
+                        className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                        aria-label="Remove"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                  {(formData.b2bStep5.coreFeatures?.length ?? 0) < 5 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = [...(formData.b2bStep5?.coreFeatures || []), ''];
+                        setFormData({ ...formData, b2bStep5: { coreFeatures: next } });
+                      }}
+                      className="w-full py-2.5 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-indigo-400 text-sm font-medium"
+                    >
+                      + Add feature
+                    </button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* B2B: Unique Selling Points */}
+            {formData.b2bStep6 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Why You&apos;re Different</h2>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {B2B_USP_OPTIONS.map((opt) => {
+                    const selected = (formData.b2bStep6?.uniqueSellingPoints || []).includes(opt);
+                    return (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => {
+                          const current = formData.b2bStep6?.uniqueSellingPoints || [];
+                          const next = selected ? current.filter((s) => s !== opt) : [...current, opt];
+                          setFormData({ ...formData, b2bStep6: { uniqueSellingPoints: next } });
+                        }}
+                        className={`px-4 py-2 rounded-lg border-2 text-sm font-medium ${
+                          selected ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                {(formData.b2bStep6.uniqueSellingPoints || []).length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {formData.b2bStep6.uniqueSellingPoints.map((s) => (
+                      <span key={s} className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm">{s}</span>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* B2B: Target Customer / ICP */}
+            {formData.b2bStep7 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Target Customer</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Industry</label>
+                    <input
+                      type="text"
+                      value={formData.b2bStep7.industry || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep7: { ...formData.b2bStep7!, industry: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. B2B SaaS, Fintech"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Company size</label>
+                    <select
+                      value={formData.b2bStep7.companySize || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep7: { ...formData.b2bStep7!, companySize: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="">Select size</option>
+                      {B2B_COMPANY_SIZES.map((size) => (
+                        <option key={size} value={size}>{size} employees</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Geography</label>
+                    <input
+                      type="text"
+                      value={formData.b2bStep7.geography || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep7: { ...formData.b2bStep7!, geography: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. North America, EMEA"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Buyer role (select one or more)</label>
+                    <div className="flex flex-wrap gap-2">
+                      {B2B_BUYER_ROLES.map((opt) => {
+                        const selected = (formData.b2bStep7?.buyerRole || []).includes(opt.value);
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              const current = formData.b2bStep7?.buyerRole ?? [];
+                              const next = selected ? current.filter((r) => r !== opt.value) : [...current, opt.value];
+                              setFormData({ ...formData, b2bStep7: { ...formData.b2bStep7!, buyerRole: next } });
+                            }}
+                            className={`px-4 py-2 rounded-lg border-2 text-sm font-medium ${
+                              selected ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 hover:border-gray-300'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* B2B: Pain Points */}
+            {formData.b2bStep8 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Problems You Solve</h2>
+                <textarea
+                  value={formData.b2bStep8.painPoints || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    b2bStep8: { painPoints: e.target.value }
+                  })}
+                  rows={5}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="What problems does your product solve?"
+                />
+              </section>
+            )}
+
+            {/* B2B: Buying Triggers */}
+            {formData.b2bStep9 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">When Do Customers Usually Buy</h2>
+                <textarea
+                  value={formData.b2bStep9.buyingTriggers || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    b2bStep9: { buyingTriggers: e.target.value }
+                  })}
+                  rows={4}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. Hiring a sales team, Tool replacement"
+                />
+              </section>
+            )}
+
+            {/* B2B: Sales Model */}
+            {formData.b2bStep10 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Sales Model</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Pricing range</label>
+                    <input
+                      type="text"
+                      value={formData.b2bStep10.pricingRange || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep10: { ...formData.b2bStep10!, pricingRange: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. $99–499/mo"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Contract type</label>
+                    <input
+                      type="text"
+                      value={formData.b2bStep10.contractType || ''}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        b2bStep10: { ...formData.b2bStep10!, contractType: e.target.value }
+                      })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      placeholder="e.g. Monthly, Annual"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sales motion</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {[
+                        { value: 'self_serve' as const, label: 'Self-serve' },
+                        { value: 'sales_assisted' as const, label: 'Sales-assisted' },
+                        { value: 'enterprise' as const, label: 'Enterprise' },
+                      ].map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setFormData({
+                            ...formData,
+                            b2bStep10: { ...formData.b2bStep10!, salesMotion: opt.value }
+                          })}
+                          className={`px-4 py-2 rounded-lg border-2 text-sm font-medium ${
+                            formData.b2bStep10?.salesMotion === opt.value
+                              ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                              : 'border-gray-200 hover:border-gray-300'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {/* B2B: CTA */}
+            {formData.b2bStep11 && (
+              <section>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Primary Call to Action</h2>
+                <div className="flex flex-wrap gap-2">
+                  {B2B_CTA_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setFormData({
+                        ...formData,
+                        b2bStep11: { cta: opt.value }
+                      })}
+                      className={`px-4 py-2 rounded-lg border-2 text-sm font-medium ${
+                        formData.b2bStep11?.cta === opt.value
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
+        ) : (
+          <>
         {/* Step 1: Founder Identity */}
         {formData.step1 && (
           <section>
@@ -302,22 +810,37 @@ function CompanyProfileContent() {
           </section>
         )}
 
-        {/* Step 5: Company Website */}
+        {/* Step 5: Company name & Website */}
         {formData.step5 && (
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Website</h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Website</label>
-              <input
-                type="url"
-                value={formData.step5.website || ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  step5: { website: e.target.value }
-                })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="https://example.com"
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Company name</label>
+                <input
+                  type="text"
+                  value={formData.step5.companyName || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step5: { ...formData.step5, companyName: e.target.value, website: formData.step5?.website ?? '' }
+                  })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Your company name"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Website</label>
+                <input
+                  type="url"
+                  value={formData.step5.website || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step5: { ...formData.step5, companyName: formData.step5?.companyName ?? '', website: e.target.value }
+                  })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="https://capitalxai.com"
+                />
+              </div>
             </div>
           </section>
         )}
@@ -406,31 +929,55 @@ function CompanyProfileContent() {
         {formData.step8 && (
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Company HQ</h2>
-            <div>
+            <div ref={countryDropdownRef} className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-2">Country</label>
-              <input
-                type="text"
-                value={countrySearch}
-                onChange={(e) => setCountrySearch(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
-                placeholder="Search countries..."
-              />
-              <select
-                value={formData.step8.hqCountry || ''}
-                onChange={(e) => {
-                  setFormData({
-                    ...formData,
-                    step8: { hqCountry: e.target.value }
-                  });
-                  setCountrySearch('');
-                }}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              <button
+                type="button"
+                onClick={() => setCountryOpen((o) => !o)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-left flex items-center justify-between bg-white"
               >
-                <option value="">Select country</option>
-                {filteredCountries.map((country) => (
-                  <option key={country} value={country}>{country}</option>
-                ))}
-              </select>
+                <span className={formData.step8.hqCountry ? 'text-gray-900' : 'text-gray-500'}>
+                  {formData.step8.hqCountry || 'Search countries...'}
+                </span>
+                <ChevronDown className={`w-5 h-5 text-gray-400 shrink-0 transition-transform ${countryOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {countryOpen && (
+                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-gray-100 bg-gray-50/50 sticky top-0">
+                    <input
+                      type="text"
+                      value={countrySearch}
+                      onChange={(e) => setCountrySearch(e.target.value)}
+                      placeholder="Search countries..."
+                      className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      autoFocus
+                    />
+                  </div>
+                  <div className="max-h-60 overflow-y-auto py-1">
+                    {filteredCountries.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-gray-500">No countries match</div>
+                    ) : (
+                      filteredCountries.map((country) => (
+                        <button
+                          key={country}
+                          type="button"
+                          onClick={() => {
+                            setFormData({
+                              ...formData,
+                              step8: { hqCountry: country }
+                            });
+                            setCountrySearch('');
+                            setCountryOpen(false);
+                          }}
+                          className={`w-full px-4 py-2.5 text-left text-sm hover:bg-indigo-50 transition-colors ${formData.step8?.hqCountry === country ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-900'}`}
+                        >
+                          {country}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}
@@ -708,12 +1255,14 @@ function CompanyProfileContent() {
             </div>
           </section>
         )}
+          </>
+        )}
 
         {/* Save Button */}
         <div className="pt-6 border-t border-gray-200">
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !hasChanges}
             className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {saving ? (

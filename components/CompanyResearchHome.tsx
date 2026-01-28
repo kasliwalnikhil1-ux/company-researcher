@@ -441,7 +441,7 @@ export default function CompanyResearcher() {
       if (!domainName) {
         setErrorsByCompany(prev => ({
           ...prev,
-          [company]: { form: `Invalid company URL: ${company}. Please use format 'example.com'` }
+          [company]: { form: `Invalid company URL: ${company}. Please use format 'capitalxai.com'` }
         }));
         return;
       }
@@ -2935,7 +2935,7 @@ export default function CompanyResearcher() {
             }}
             placeholder={researchMode === 'instagram' 
               ? "Enter Instagram URLs (e.g., instagram.com/username, instagram.com/another_username)"
-              : "Enter company URLs (e.g., example.com, another-company.com)"}
+              : "Enter company URLs (e.g., capitalxai.com, another-company.com)"}
             rows={4}
             className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-brand-default resize-none opacity-0 animate-fade-up [animation-delay:600ms]"
           />

@@ -103,12 +103,12 @@ export function extractPhoneNumber(text: string): string {
 /**
  * Extracts domain from various input formats
  * Supports:
- * - Full URLs: https://example.com, https://www.example.com/path
+ * - Full URLs: https://capitalxai.com, https://www.capitalxai.com/path
  * - URLs with protocol: http://example.io
- * - Plain domains: example.com, example.io
+ * - Plain domains: capitalxai.com, example.io
  * 
  * @param input - Domain URL or plain domain
- * @returns The domain (e.g., example.com, example.io) without protocol, www, or paths
+ * @returns The domain (e.g., capitalxai.com, example.io) without protocol, www, or paths
  */
 export function extractDomain(input: string): string {
   if (!input || typeof input !== 'string') return '';

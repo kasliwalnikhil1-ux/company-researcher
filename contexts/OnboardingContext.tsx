@@ -26,6 +26,7 @@ export interface OnboardingData {
     capitalRaised: 'none' | 'less_than_100k' | '100k_500k' | '500k_2m' | '2m_10m' | 'more_than_10m';
   };
   step5?: {
+    companyName?: string;
     website: string;
   };
   step6?: {
@@ -55,6 +56,42 @@ export interface OnboardingData {
   };
   step12?: {
     investorType: 'lead' | 'follow_on' | 'both';
+  };
+  // B2B Outreach flow steps (step1, step2 shared with fundraising; b2bStep3+ specific)
+  b2bStep3?: {
+    companyName: string;
+    websiteUrl: string;
+    companySize: string;
+    yourRole: string;
+  };
+  b2bStep4?: {
+    productOrService: string;
+  };
+  b2bStep5?: {
+    coreFeatures: string[];
+  };
+  b2bStep6?: {
+    uniqueSellingPoints: string[];
+  };
+  b2bStep7?: {
+    industry: string;
+    companySize: string;
+    geography: string;
+    buyerRole: string[];
+  };
+  b2bStep8?: {
+    painPoints: string;
+  };
+  b2bStep9?: {
+    buyingTriggers: string;
+  };
+  b2bStep10?: {
+    pricingRange: string;
+    contractType: string;
+    salesMotion: 'self_serve' | 'sales_assisted' | 'enterprise';
+  };
+  b2bStep11?: {
+    cta: 'book_demo' | 'request_quote' | 'free_trial' | 'waitlist' | 'contact_sales';
   };
   completed?: boolean;
   completedAt?: string;

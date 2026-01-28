@@ -324,23 +324,15 @@ export default function Login() {
                   />
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-1 relative">
                   <div className="flex items-center justify-between">
                     <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                       Password
                     </label>
                     {isLogin && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowForgotPassword(true);
-                          setError(null);
-                          setSuccess(null);
-                        }}
-                        className="text-sm font-medium text-brand-default hover:text-brand-dark"
-                      >
+                      <span className="text-sm font-medium text-brand-default invisible" aria-hidden="true">
                         Forgot password?
-                      </button>
+                      </span>
                     )}
                   </div>
                   <input
@@ -354,6 +346,19 @@ export default function Login() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                   />
+                  {isLogin && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForgotPassword(true);
+                        setError(null);
+                        setSuccess(null);
+                      }}
+                      className="absolute top-0 right-0 text-sm font-medium text-brand-default hover:text-brand-dark"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
                 </div>
 
                 <button
