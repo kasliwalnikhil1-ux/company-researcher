@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { Check } from 'lucide-react';
 
 const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
 const CHAR_SPEED_MS = 45;
@@ -200,9 +201,30 @@ export default function Login() {
           <h2 className="text-2xl font-medium text-gray-900 mb-1">
             {isLogin ? 'Sign in to your account' : 'Create an account'}
           </h2>
-          <p className="text-gray-500 text-sm mb-8">
+          <p className={`text-gray-500 text-sm ${isLogin ? 'mb-8' : 'mb-2'}`}>
             {isLogin ? 'Enter your credentials to continue.' : 'Start researching companies with confidence.'}
           </p>
+          {!isLogin && (
+            <>
+              <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-fainter px-4 py-2 text-sm font-semibold text-brand-default mb-3">
+                Sign up and get 20 free credits
+              </p>
+              <ul className="flex flex-wrap gap-x-6 gap-y-1 mb-8 text-sm text-gray-600">
+                <li className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-darkgreen-light text-accent-darkgreen-dark">
+                    <Check className="h-3 w-3" strokeWidth={2.5} />
+                  </span>
+                  No credit card required
+                </li>
+                <li className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-darkgreen-light text-accent-darkgreen-dark">
+                    <Check className="h-3 w-3" strokeWidth={2.5} />
+                  </span>
+                  Instant access
+                </li>
+              </ul>
+            </>
+          )}
 
           {showForgotPassword ? (
             <form className="space-y-5" onSubmit={handleForgotPassword}>
