@@ -21,6 +21,9 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export const SIGNUP_USER_EXISTS_MESSAGE =
+  'An account with this email already exists. Please sign in instead.';
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -85,7 +88,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Supabase returns success (no error) for existing emails to prevent enumeration,
     // but identities is empty when the user already exists.
     if (data.user && (!data.user.identities || data.user.identities.length === 0)) {
-      throw new Error('An account with this email already exists. Please sign in instead.');
+      throw new Error(SIGNUP_USER_EXISTS_MESSAGE);
     }
   };
 

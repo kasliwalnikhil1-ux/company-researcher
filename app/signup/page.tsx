@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, SIGNUP_USER_EXISTS_MESSAGE } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
 
 const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
@@ -190,7 +190,19 @@ export default function Signup() {
                 className="rounded-lg px-4 py-3 text-sm bg-accent-maroon-light text-accent-maroon-dark border border-accent-maroon-dark/20"
                 role="alert"
               >
-                {error}
+                {error === SIGNUP_USER_EXISTS_MESSAGE ? (
+                  <>
+                    An account with this email already exists.{' '}
+                    <Link
+                      href="/login"
+                      className="underline font-medium text-brand-default hover:text-brand-dark"
+                    >
+                      Please sign in instead.
+                    </Link>
+                  </>
+                ) : (
+                  error
+                )}
               </div>
             )}
             {success && (
