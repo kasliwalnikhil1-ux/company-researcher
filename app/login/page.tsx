@@ -1,9 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { Building2 } from 'lucide-react';
+
+const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
+const CHAR_SPEED_MS = 45;
+const INITIAL_DELAY_MS = 220;
+const END_PAUSE_MS = 800;
+const CURSOR_BLINK_MS = 500;
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -13,9 +19,76 @@ export default function Login() {
   const [isLogin, setIsLogin] = useState(true);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Typewriter state
+  const [wordIndex, setWordIndex] = useState(0);
+  const [displayedLength, setDisplayedLength] = useState(0);
+  const [phase, setPhase] = useState<'initial' | 'typing' | 'pause' | 'deleting'>('initial');
+  const [cursorVisible, setCursorVisible] = useState(true);
+  const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const cursorRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const { signIn, signUp, resetPassword, signInWithGoogle } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Cursor blink
+  useEffect(() => {
+    cursorRef.current = setInterval(() => {
+      setCursorVisible((v) => !v);
+    }, CURSOR_BLINK_MS);
+    return () => {
+      if (cursorRef.current) clearInterval(cursorRef.current);
+    };
+  }, []);
+
+  // Typewriter loop
+  useEffect(() => {
+    const word = TYPEWRITER_WORDS[wordIndex];
+
+    if (phase === 'initial') {
+      const t = setTimeout(() => setPhase('typing'), INITIAL_DELAY_MS);
+      return () => clearTimeout(t);
+    }
+
+    if (phase === 'pause') {
+      const t = setTimeout(() => {
+        setPhase('deleting');
+        setCursorVisible(true);
+      }, END_PAUSE_MS);
+      return () => clearTimeout(t);
+    }
+
+    if (phase === 'typing') {
+      if (displayedLength >= word.length) {
+        setPhase('pause');
+        setCursorVisible(false);
+        return;
+      }
+      typewriterRef.current = setInterval(() => {
+        setDisplayedLength((n) => Math.min(n + 1, word.length));
+      }, CHAR_SPEED_MS);
+      return () => {
+        if (typewriterRef.current) clearInterval(typewriterRef.current);
+      };
+    }
+
+    if (phase === 'deleting') {
+      if (displayedLength <= 0) {
+        setWordIndex((i) => (i + 1) % TYPEWRITER_WORDS.length);
+        setPhase('typing');
+        return;
+      }
+      typewriterRef.current = setInterval(() => {
+        setDisplayedLength((n) => Math.max(n - 1, 0));
+      }, CHAR_SPEED_MS);
+      return () => {
+        if (typewriterRef.current) clearInterval(typewriterRef.current);
+      };
+    }
+
+    return () => {};
+  }, [phase, wordIndex, displayedLength]);
 
   useEffect(() => {
     const errorParam = searchParams.get('error');
@@ -92,7 +165,19 @@ export default function Login() {
         </div>
         <div className="relative space-y-4 max-w-sm">
           <h1 className="text-3xl font-medium leading-tight">
-            Research any company inside out.
+            Research any{' '}
+            <span className="inline-block">
+              <span>{TYPEWRITER_WORDS[wordIndex].slice(0, displayedLength)}</span>
+              {phase !== 'pause' && (
+                <span
+                  className="inline-block w-0.5 h-[1em] align-baseline bg-white ml-0.5"
+                  style={{ opacity: cursorVisible ? 1 : 0 }}
+                  aria-hidden
+                />
+              )}
+            </span>
+            <br />
+            inside out.
           </h1>
           <p className="text-white/80 text-sm leading-relaxed">
             Get detailed insights and know everything about any prospect—instantly.
@@ -292,6 +377,37 @@ export default function Login() {
                 </svg>
                 {isLogin ? 'Sign in with Google' : 'Sign up with Google'}
               </button>
+
+              <p className="mt-4 text-center text-xs text-gray-500">
+                By clicking "{isLogin ? 'Sign in' : 'Sign up'}" or "{isLogin ? 'Sign in with Google' : 'Sign up with Google'}", you agree to our{' '}
+                <a
+                  href="https://capitalxai.com/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-default hover:text-brand-dark underline"
+                >
+                  Terms
+                </a>
+                ,{' '}
+                <a
+                  href="https://capitalxai.com/content-safety"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-default hover:text-brand-dark underline"
+                >
+                  Content Safety
+                </a>
+                , and{' '}
+                <a
+                  href="https://capitalxai.com/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-default hover:text-brand-dark underline"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </p>
             </>
           )}
 
