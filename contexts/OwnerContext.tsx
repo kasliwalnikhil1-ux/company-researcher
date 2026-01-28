@@ -1,92 +1,120 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/utils/supabase/client';
 
-// Single source of truth - define owners and their colors here only
-const OWNER_CONFIG = [
-  {
-    name: 'Deepak' as const,
-    colors: {
-      bg: 'bg-blue-50',
-      text: 'text-blue-700',
-      border: 'border-blue-200',
-      hex: '#2563eb', // blue-600
-    },
-  },
-  {
-    name: 'Naman' as const,
-    colors: {
-      bg: 'bg-purple-50',
-      text: 'text-purple-700',
-      border: 'border-purple-200',
-      hex: '#9333ea', // purple-600
-    },
-  },
-  {
-    name: 'Ram' as const,
-    colors: {
-      bg: 'bg-green-50',
-      text: 'text-green-700',
-      border: 'border-green-200',
-      hex: '#16a34a', // green-600
-    },
-  },
-  {
-    name: 'Harshit' as const,
-    colors: {
-      bg: 'bg-orange-50',
-      text: 'text-orange-700',
-      border: 'border-orange-200',
-      hex: '#ea580c', // orange-600
-    },
-  },
-] as const;
+export interface OwnerColors {
+  bg: string;
+  text: string;
+  border: string;
+  hex: string;
+}
 
-// Extract owners array from config
-const OWNERS = OWNER_CONFIG.map(config => config.name) as readonly string[];
+export interface OwnerConfigItem {
+  name: string;
+  colors: OwnerColors;
+}
 
-// Derive type from the config
-export type Owner = typeof OWNER_CONFIG[number]['name'];
-
-// Export the owners array
-export const AVAILABLE_OWNERS: Owner[] = OWNER_CONFIG.map(config => config.name);
+export type Owner = string;
 
 const OWNER_STORAGE_KEY = 'selected-owner';
 
-// Build color mapping from config - ensures single source of truth
-export const OWNER_COLORS: Record<Owner, { 
-  bg: string; 
-  text: string; 
-  border: string; 
-  hex: string; 
-}> = OWNER_CONFIG.reduce((acc, config) => {
-  acc[config.name] = config.colors;
-  return acc;
-}, {} as Record<Owner, { bg: string; text: string; border: string; hex: string }>);
+const DEFAULT_COLOR_PRESETS: OwnerColors[] = [
+  { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', hex: '#2563eb' },
+  { bg: 'bg-purple-50', text: 'text-purple-700', border: 'border-purple-200', hex: '#9333ea' },
+  { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', hex: '#16a34a' },
+  { bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', hex: '#ea580c' },
+  { bg: 'bg-pink-50', text: 'text-pink-700', border: 'border-pink-200', hex: '#db2777' },
+  { bg: 'bg-cyan-50', text: 'text-cyan-700', border: 'border-cyan-200', hex: '#0891b2' },
+];
+
+export const OWNER_PRESET_LABELS = ['Blue', 'Purple', 'Green', 'Orange', 'Pink', 'Cyan'] as const;
 
 type OwnerContextType = {
   selectedOwner: Owner;
   setSelectedOwner: (owner: Owner) => void;
   availableOwners: Owner[];
+  ownerColors: Record<string, OwnerColors>;
+  ownerConfig: OwnerConfigItem[];
+  isLoading: boolean;
+  refetchOwners: () => Promise<void>;
 };
 
 const OwnerContext = createContext<OwnerContextType | undefined>(undefined);
 
 export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
-  // Use first available owner as default instead of hardcoding
-  const [selectedOwner, setSelectedOwnerState] = useState<Owner>(AVAILABLE_OWNERS[0]);
+  const { user } = useAuth();
+  const [ownerConfig, setOwnerConfig] = useState<OwnerConfigItem[]>([]);
+  const [selectedOwner, setSelectedOwnerState] = useState<Owner>('');
+  const [isLoading, setIsLoading] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(OWNER_STORAGE_KEY);
-      if (stored && AVAILABLE_OWNERS.includes(stored as Owner)) {
-        setSelectedOwnerState(stored as Owner);
-      }
-      setIsHydrated(true);
+  const availableOwners = ownerConfig.map((c) => c.name);
+  const ownerColors: Record<string, OwnerColors> = ownerConfig.reduce(
+    (acc, c) => {
+      acc[c.name] = c.colors;
+      return acc;
+    },
+    {} as Record<string, OwnerColors>
+  );
+
+  const fetchOwners = useCallback(async () => {
+    if (!user?.id) {
+      setOwnerConfig([]);
+      setIsLoading(false);
+      return;
     }
-  }, []);
+    try {
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('owners')
+        .eq('id', user.id)
+        .single();
+
+      if (error && error.code !== 'PGRST116') {
+        console.error('Error fetching owners:', error);
+        setOwnerConfig([]);
+        return;
+      }
+
+      let config: OwnerConfigItem[] = [];
+      if (data?.owners) {
+        const raw = typeof data.owners === 'string' ? JSON.parse(data.owners) : data.owners;
+        if (Array.isArray(raw) && raw.length > 0) {
+          config = raw.filter(
+            (x: unknown): x is OwnerConfigItem =>
+              typeof x === 'object' &&
+              x !== null &&
+              typeof (x as OwnerConfigItem).name === 'string' &&
+              typeof (x as OwnerConfigItem).colors === 'object'
+          );
+        }
+      }
+      setOwnerConfig(config);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    fetchOwners();
+  }, [fetchOwners]);
+
+  // Hydration: load selectedOwner from localStorage and validate against availableOwners
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = localStorage.getItem(OWNER_STORAGE_KEY);
+    if (availableOwners.length === 0) {
+      setSelectedOwnerState('');
+    } else if (stored && availableOwners.includes(stored)) {
+      setSelectedOwnerState(stored);
+    } else {
+      setSelectedOwnerState(availableOwners[0]);
+    }
+    setIsHydrated(true);
+  }, [availableOwners.join(',')]);
 
   const setSelectedOwner = (owner: Owner) => {
     setSelectedOwnerState(owner);
@@ -95,10 +123,14 @@ export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const value = {
+  const value: OwnerContextType = {
     selectedOwner,
     setSelectedOwner,
-    availableOwners: AVAILABLE_OWNERS,
+    availableOwners,
+    ownerColors,
+    ownerConfig,
+    isLoading,
+    refetchOwners: fetchOwners,
   };
 
   return (
@@ -115,3 +147,6 @@ export const useOwner = () => {
   }
   return context;
 };
+
+// Default color presets for Account page when adding new owners
+export const OWNER_COLOR_PRESETS = DEFAULT_COLOR_PRESETS;

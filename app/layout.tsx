@@ -7,6 +7,7 @@ import { MessageTemplatesProvider } from '@/contexts/MessageTemplatesContext';
 import { CompaniesProvider } from '@/contexts/CompaniesContext';
 import { OwnerProvider } from '@/contexts/OwnerContext';
 import { CountryProvider } from '@/contexts/CountryContext';
+import { OnboardingProvider } from '@/contexts/OnboardingContext';
 
 // Load the ABCDiatype font (Regular and Bold only)
 const abcdDiatype = localFont({
@@ -26,19 +27,23 @@ const reckless = localFont({
   variable: "--font-reckless",
 });
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.capitalxai.com';
+
 export const metadata: Metadata = {
-  title: "Kaptured.AI CRM",
+  metadataBase: new URL(appUrl),
+  title: "CapitalxAI CRM",
   description: "Instantly get detailed research insights and know everything about any company inside out.",
   openGraph: {
-    title: 'Kaptured.AI CRM',
+    url: appUrl,
+    title: 'CapitalxAI CRM',
     description: 'Instantly get detailed research insights and know everything about any company inside out.',
-    images: ['https://companyresearcher.exa.ai/opengraph-image.jpg'],
+    images: ['/opengraph-image.jpg'],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Kaptured.AI CRM',
+    title: 'CapitalxAI CRM',
     description: 'Instantly get detailed research insights and know everything about any company inside out.',
-    images: ['https://companyresearcher.exa.ai/opengraph-image.jpg'],
+    images: ['/opengraph-image.jpg'],
   },
 };
 
@@ -54,16 +59,18 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
-          <CountryProvider>
-            <OwnerProvider>
-              <MessageTemplatesProvider>
-                <CompaniesProvider>
-                  {children}
-                  <Analytics />
-                </CompaniesProvider>
-              </MessageTemplatesProvider>
-            </OwnerProvider>
-          </CountryProvider>
+          <OnboardingProvider>
+            <CountryProvider>
+              <OwnerProvider>
+                <MessageTemplatesProvider>
+                  <CompaniesProvider>
+                    {children}
+                    <Analytics />
+                  </CompaniesProvider>
+                </MessageTemplatesProvider>
+              </OwnerProvider>
+            </CountryProvider>
+          </OnboardingProvider>
         </AuthProvider>
       </body>
     </html>

@@ -333,12 +333,23 @@ Return the assessment in the exact JSON schema format.`;
         },
       };
 
+      // Fetch existing user_settings to preserve other columns
+      const { data: existing } = await supabase
+        .from('user_settings')
+        .select('owners, email_settings, onboarding, column_settings')
+        .eq('id', user.id)
+        .single();
+
       // Upsert user settings
       const { error } = await supabase
         .from('user_settings')
         .upsert({
           id: user.id,
           personalization: personalizationData,
+          owners: existing?.owners ?? null,
+          email_settings: existing?.email_settings ?? null,
+          onboarding: existing?.onboarding ?? null,
+          column_settings: existing?.column_settings ?? null,
         }, {
           onConflict: 'id'
         });

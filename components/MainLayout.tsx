@@ -1,29 +1,30 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { useOwner, OWNER_COLORS, Owner } from '@/contexts/OwnerContext';
+import { useOwner } from '@/contexts/OwnerContext';
 import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
+import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, Shield, Lock, LogOut } from 'lucide-react';
-import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle } from 'lucide-react';
+import OnboardingFlow from './OnboardingFlow';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
-  const { user, signOut, signOutAll, changePassword } = useAuth();
-  const { selectedOwner, setSelectedOwner, availableOwners } = useOwner();
+  const { user, signOut } = useAuth();
+  const { selectedOwner, setSelectedOwner, availableOwners, ownerColors } = useOwner();
+  const defaultOwnerStyles = { bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200' };
+  const ownerStyle = ownerColors[selectedOwner] ?? defaultOwnerStyles;
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
+  const { onboarding, loading: onboardingLoading } = useOnboarding();
   const router = useRouter();
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false);
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
+
+  // Show onboarding flow if onboarding is not completed (null or incomplete)
+  const showOnboarding = !onboardingLoading && !onboarding?.completed;
 
   // Detect mobile screen size
   useEffect(() => {
@@ -53,54 +54,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const handleSignOutAll = async () => {
-    setShowLogoutAllConfirm(true);
-  };
-
-  const confirmSignOutAll = async () => {
-    try {
-      await signOutAll();
-      router.push('/login');
-    } catch (error) {
-      console.error('Error signing out from all devices:', error);
-      alert('Failed to sign out from all devices. Please try again.');
-      setShowLogoutAllConfirm(false);
-    }
-  };
-
-  const handleChangePassword = async () => {
-    setPasswordError('');
-    
-    if (!newPassword || !confirmPassword) {
-      setPasswordError('Please fill in all fields');
-      return;
-    }
-
-    if (newPassword.length < 6) {
-      setPasswordError('Password must be at least 6 characters long');
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError('Passwords do not match');
-      return;
-    }
-
-    setIsChangingPassword(true);
-    try {
-      await changePassword(newPassword);
-      setShowChangePasswordDialog(false);
-      setNewPassword('');
-      setConfirmPassword('');
-      alert('Password changed successfully!');
-    } catch (error) {
-      console.error('Error changing password:', error);
-      setPasswordError(error instanceof Error ? error.message : 'Failed to change password. Please try again.');
-    } finally {
-      setIsChangingPassword(false);
-    }
-  };
-
   const isActive = (path: string) => {
     return pathname === path;
   };
@@ -109,20 +62,21 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     setIsCollapsed(!isCollapsed);
   };
 
+  // Show onboarding flow if needed
+  if (showOnboarding) {
+    return <OnboardingFlow />;
+  }
+
   return (
     <div className="min-h-screen flex">
       {/* Mobile Menu Button */}
-      {isMobile && (
+      {isMobile && !isMobileMenuOpen && (
         <button
           onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
           className="fixed top-4 left-4 z-50 bg-white border border-gray-200 rounded-lg p-2 shadow-md hover:shadow-lg transition-shadow md:hidden"
           aria-label="Toggle menu"
         >
-          {isMobileMenuOpen ? (
-            <X className="w-5 h-5 text-gray-600" />
-          ) : (
-            <Menu className="w-5 h-5 text-gray-600" />
-          )}
+          <Menu className="w-5 h-5 text-gray-600" />
         </button>
       )}
 
@@ -137,12 +91,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {/* Sidebar */}
       <aside className={`
         ${isMobile 
-          ? `fixed top-0 left-0 h-screen z-40 transform transition-transform duration-300 ${
+          ? `fixed top-0 left-0 w-64 h-screen z-40 transform transition-transform duration-300 ${
               isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
             }`
-          : `${isCollapsed ? 'w-16' : 'w-64'} fixed top-0 left-0`
+          : `fixed top-0 left-0 h-screen transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
         }
-        w-64 h-screen bg-white border-r border-gray-200 flex flex-col
+        bg-white border-r border-gray-200 flex flex-col
       `}>
         {/* Toggle Button - Desktop only */}
         {!isMobile && (
@@ -162,7 +116,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         <div className={`p-6 border-b border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
           <div className="flex items-center justify-between">
             <h1 className={`text-xl font-bold text-gray-900 transition-opacity duration-300 ${isCollapsed && !isMobile ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'}`}>
-              Kaptured.AI CRM
+              CapitalxAI CRM
             </h1>
             {isMobile && (
               <button
@@ -176,7 +130,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </div>
         </div>
         
-        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+        <nav className={`flex-1 py-6 space-y-2 overflow-y-auto ${isCollapsed && !isMobile ? 'px-2' : 'px-4'}`}>
           <Link
             href="/"
             className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
@@ -186,7 +140,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Research"
           >
-            <Search className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <Search className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Research</span>}
           </Link>
           
@@ -199,7 +153,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Templates"
           >
-            <FileText className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Templates</span>}
           </Link>
           
@@ -212,7 +166,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Companies"
           >
-            <Building2 className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Companies</span>}
           </Link>
           
@@ -225,7 +179,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Analytics"
           >
-            <BarChart3 className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Analytics</span>}
           </Link>
           
@@ -238,7 +192,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Extract Domains"
           >
-            <Globe className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
           </Link>
           
@@ -251,7 +205,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Enrich CSV"
           >
-            <Sparkles className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <Sparkles className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Enrich</span>}
           </Link>
           
@@ -264,32 +218,59 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             }`}
             title="Personalization"
           >
-            <FileText className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Personalization</span>}
           </Link>
 
-          {/* Security Section */}
-          <div className={`pt-4 mt-4 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
-            <div className={`px-4 mb-2 ${isCollapsed && !isMobile ? 'hidden' : ''}`}>
-              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Security</h2>
-            </div>
-            <button
-              onClick={handleSignOutAll}
-              className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors text-orange-700 hover:bg-orange-50`}
-              title="Logout All Devices"
-            >
-              <LogOut className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Logout All</span>}
-            </button>
-            <button
-              onClick={() => setShowChangePasswordDialog(true)}
-              className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors text-blue-700 hover:bg-blue-50`}
-              title="Change Password"
-            >
-              <Lock className={`w-5 h-5 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Change Password</span>}
-            </button>
-          </div>
+          <Link
+            href="/company-profile"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/company-profile')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Company Profile"
+          >
+            <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Company Profile</span>}
+          </Link>
+
+          <Link
+            href="/usage"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/usage')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Usage"
+          >
+            <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Usage</span>}
+          </Link>
+
+          <Link
+            href="/account"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/account')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Account & Security"
+          >
+            <UserCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Account</span>}
+          </Link>
+
+          <a
+            href="https://calendly.com/aarushi-kaptured/15min"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
+            title="Need Help - Book a 15 min call"
+          >
+            <HelpCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Need Help</span>}
+          </a>
         </nav>
 
         {/* User info and logout at bottom */}
@@ -301,17 +282,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 <p className="text-xs text-gray-500 mb-2">Owner</p>
                 <select
                   value={selectedOwner}
-                  onChange={(e) => {
-                    const newOwner = e.target.value as Owner;
-                    setSelectedOwner(newOwner);
-                  }}
-                  className={`w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors ${OWNER_COLORS[selectedOwner].bg} ${OWNER_COLORS[selectedOwner].text} ${OWNER_COLORS[selectedOwner].border} hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-offset-1 ${OWNER_COLORS[selectedOwner].border.replace('border-', 'focus:ring-')}`}
+                  onChange={(e) => setSelectedOwner(e.target.value)}
+                  className={`w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors ${ownerStyle.bg} ${ownerStyle.text} ${ownerStyle.border} hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-offset-1 ${ownerStyle.border.replace('border-', 'focus:ring-')}`}
                 >
-                  {availableOwners.map((owner) => (
-                    <option key={owner} value={owner} className="bg-white text-gray-900">
-                      {owner}
-                    </option>
-                  ))}
+                  {availableOwners.length === 0 ? (
+                    <option value="">— Add owners in Account —</option>
+                  ) : (
+                    availableOwners.map((owner) => (
+                      <option key={owner} value={owner} className="bg-white text-gray-900">
+                        {owner}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -364,101 +346,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       `}>
         {children}
       </main>
-
-      {/* Logout All Confirmation Modal */}
-      <DeleteConfirmationModal
-        isOpen={showLogoutAllConfirm}
-        title="Logout All Devices"
-        message="Are you sure you want to log out from all devices? This will end all active sessions."
-        onConfirm={confirmSignOutAll}
-        onCancel={() => setShowLogoutAllConfirm(false)}
-        confirmText="Logout All"
-        cancelText="Cancel"
-      />
-
-      {/* Change Password Dialog */}
-      {showChangePasswordDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-blue-600" />
-                Change Password
-              </h2>
-              <button
-                onClick={() => {
-                  setShowChangePasswordDialog(false);
-                  setNewPassword('');
-                  setConfirmPassword('');
-                  setPasswordError('');
-                }}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-                aria-label="Close dialog"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                  New Password
-                </label>
-                <input
-                  id="newPassword"
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter new password"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                  Confirm Password
-                </label>
-                <input
-                  id="confirmPassword"
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Confirm new password"
-                />
-              </div>
-
-              {passwordError && (
-                <div className="text-sm text-red-600 bg-red-50 p-2 rounded-lg">
-                  {passwordError}
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={handleChangePassword}
-                  disabled={isChangingPassword}
-                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isChangingPassword ? 'Changing...' : 'Change Password'}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowChangePasswordDialog(false);
-                    setNewPassword('');
-                    setConfirmPassword('');
-                    setPasswordError('');
-                  }}
-                  disabled={isChangingPassword}
-                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

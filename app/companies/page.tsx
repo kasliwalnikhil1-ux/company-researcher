@@ -3,14 +3,19 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCompanies, Company } from '@/contexts/CompaniesContext';
+import { supabase } from '@/utils/supabase/client';
+import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import Toast from '@/components/ui/Toast';
 import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
 import WhatsAppTemplateModal from '@/components/ui/WhatsAppTemplateModal';
+import ManageColumnsDrawer from '@/components/ui/ManageColumnsDrawer';
+import CompanyFormModal from '@/components/ui/CompanyFormModal';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
-import { Building2, Edit2, Trash2, Plus, X, Filter, GripVertical, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
+import { Building2, Edit2, Trash2, Plus, X, Filter, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
 import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
 import {
   DndContext,
@@ -36,6 +41,15 @@ const CLIPBOARD_COLUMN_KEY = 'companies-clipboard-column';
 const SUBJECT_COLUMN_KEY = 'companies-subject-column';
 const COMPACT_COLUMN_KEY = 'companies-compact-column';
 const PHONE_CLICK_BEHAVIOR_KEY = 'companies-phone-click-behavior';
+
+export interface ColumnSettings {
+  columnOrder?: string[];
+  visibleColumns?: string[];
+  clipboardColumn?: string | null;
+  subjectColumn?: string | null;
+  compactColumn?: string | null;
+  phoneClickBehavior?: 'whatsapp' | 'call';
+}
 
 // Helper function to extract domain from URL
 const extractDomainFromUrl = (url: string): string => {
@@ -79,59 +93,6 @@ const cleanSearchQuery = (query: string): string => {
   return trimmed;
 };
 
-// Sortable Column Item Component
-interface SortableColumnItemProps {
-  column: string;
-  columnLabel: string;
-  isVisible: boolean;
-  onToggle: () => void;
-}
-
-function SortableColumnItem({ column, columnLabel, isVisible, onToggle }: SortableColumnItemProps) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: column });
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
-    opacity: isDragging ? 0.5 : 1,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      className="flex items-center justify-between p-2 hover:bg-gray-50 rounded"
-    >
-      <div className="flex items-center gap-2 flex-1">
-        <button
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing touch-none"
-          aria-label="Drag to reorder"
-        >
-          <GripVertical className="w-4 h-4 text-gray-400" />
-        </button>
-        <label className="flex items-center cursor-pointer flex-1">
-          <input
-            type="checkbox"
-            checked={isVisible}
-            onChange={onToggle}
-            className="mr-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            onClick={(e) => e.stopPropagation()}
-          />
-          <span className="text-sm text-gray-700">{columnLabel}</span>
-        </label>
-      </div>
-    </div>
-  );
-}
 
 interface SummaryData {
   sales_action?: string;
@@ -158,6 +119,7 @@ export default function CompaniesPage() {
 }
 
 function CompaniesContent() {
+  const { user } = useAuth();
   const {
     companies,
     loading,
@@ -193,6 +155,44 @@ function CompaniesContent() {
     initializeCompanies
   } = useCompanies();
 
+  // Email settings and column_settings from user_settings (for compose links and Manage Columns)
+  const [emailSettings, setEmailSettings] = useState<EmailSettings | null>(null);
+  const [columnSettingsFromApi, setColumnSettingsFromApi] = useState<ColumnSettings | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('user_settings')
+        .select('email_settings, column_settings')
+        .eq('id', user.id)
+        .single();
+      if (cancelled) return;
+      const es = data?.email_settings;
+      if (es && typeof es === 'object') {
+        const parsed = typeof es === 'string' ? JSON.parse(es) : es;
+        if (parsed && (parsed.provider === 'gmail' || parsed.provider === 'outlook')) {
+          setEmailSettings({
+            provider: parsed.provider,
+            signature: typeof parsed.signature === 'string' ? parsed.signature : '',
+          });
+        } else {
+          setEmailSettings(null);
+        }
+      } else {
+        setEmailSettings(null);
+      }
+      const cs = data?.column_settings;
+      if (cs && typeof cs === 'object') {
+        const parsed = typeof cs === 'string' ? JSON.parse(cs) : cs;
+        if (parsed && (Array.isArray(parsed.columnOrder) || Array.isArray(parsed.visibleColumns))) {
+          setColumnSettingsFromApi(parsed as ColumnSettings);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
   // Initialize companies on mount (only on Companies page)
   useEffect(() => {
     initializeCompanies();
@@ -214,28 +214,14 @@ function CompaniesContent() {
     return new Date(year, month - 1, day, 0, 0, 0, 0);
   };
   const { templates } = useMessageTemplates();
-  const [isCreating, setIsCreating] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [companyFormModalOpen, setCompanyFormModalOpen] = useState(false);
+  const [companyFormMode, setCompanyFormMode] = useState<'create' | 'edit'>('create');
+  const [companyToEdit, setCompanyToEdit] = useState<Company | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [companyToDelete, setCompanyToDelete] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [companyToView, setCompanyToView] = useState<Company | null>(null);
   const [pendingPageDirection, setPendingPageDirection] = useState<'next' | 'prev' | null>(null);
-  const [formData, setFormData] = useState<{
-    domain: string;
-    instagram: string;
-    phone: string;
-    email: string;
-    summary: string;
-    set_name: string;
-  }>({
-    domain: '',
-    instagram: '',
-    phone: '',
-    email: '',
-    summary: '',
-    set_name: '',
-  });
   
   // Sync companyToView with updated companies array when drawer is open
   useEffect(() => {
@@ -616,8 +602,67 @@ function CompaniesContent() {
     }
     // If clipboard column is cleared, keep the order as is (no need to move anything)
   }, [clipboardColumn]);
-  
-  
+
+  // Apply column_settings from API (merge with current base + template columns, then clear so we only apply once)
+  useEffect(() => {
+    if (!columnSettingsFromApi) return;
+    const saved = columnSettingsFromApi;
+    const currentTemplateColumns = getTemplateColumnKeys();
+
+    if (Array.isArray(saved.columnOrder) && saved.columnOrder.length > 0) {
+      const savedClipboard = saved.clipboardColumn ?? null;
+      const savedBase = saved.columnOrder.filter((col: string) => !col.startsWith('template_') && col !== savedClipboard);
+      const missingBase = baseColumnOrder.filter(col => !savedBase.includes(col));
+      const mergedBase = [...savedBase, ...missingBase];
+      const merged = [...mergedBase, ...currentTemplateColumns.filter(tc => saved.columnOrder!.includes(tc)), ...currentTemplateColumns.filter(tc => !saved.columnOrder!.includes(tc))];
+      let order = merged;
+      if (savedClipboard && order.includes(savedClipboard)) {
+        order = [savedClipboard, ...order.filter(col => col !== savedClipboard)];
+      }
+      setColumnOrder(order);
+    }
+
+    if (Array.isArray(saved.visibleColumns) && saved.visibleColumns.length > 0) {
+      const visibleSet = new Set<string>(saved.visibleColumns);
+      baseColumnOrder.forEach(col => { if (!visibleSet.has(col)) visibleSet.add(col); });
+      currentTemplateColumns.forEach(col => { if (!visibleSet.has(col)) visibleSet.add(col); });
+      setVisibleColumns(visibleSet);
+    }
+
+    if (saved.clipboardColumn !== undefined) setClipboardColumn(saved.clipboardColumn ?? null);
+    if (saved.subjectColumn !== undefined) setSubjectColumn(saved.subjectColumn ?? null);
+    if (saved.compactColumn !== undefined) setCompactColumn(saved.compactColumn ?? null);
+    if (saved.phoneClickBehavior === 'whatsapp' || saved.phoneClickBehavior === 'call') setPhoneClickBehavior(saved.phoneClickBehavior);
+
+    setColumnSettingsFromApi(null);
+  }, [columnSettingsFromApi, getTemplateColumnKeys]);
+
+  const persistColumnSettings = useCallback(async () => {
+    if (!user?.id) return;
+    const { data: existing } = await supabase
+      .from('user_settings')
+      .select('personalization, owners, email_settings, onboarding')
+      .eq('id', user.id)
+      .single();
+    const payload = {
+      id: user.id,
+      personalization: existing?.personalization ?? null,
+      owners: existing?.owners ?? null,
+      email_settings: existing?.email_settings ?? null,
+      onboarding: existing?.onboarding ?? null,
+      column_settings: {
+        columnOrder,
+        visibleColumns: Array.from(visibleColumns),
+        clipboardColumn: clipboardColumn ?? null,
+        subjectColumn: subjectColumn ?? null,
+        compactColumn: compactColumn ?? null,
+        phoneClickBehavior,
+      },
+    };
+    const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
+    if (error) throw error;
+  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, subjectColumn, compactColumn, phoneClickBehavior]);
+
   // Generate column labels including template-based labels
   const columnLabels = useMemo<Record<string, string>>(() => {
     const baseLabels: Record<string, string> = {
@@ -647,26 +692,6 @@ function CompaniesContent() {
     return baseLabels;
   }, [templates]);
   
-  // Drag and drop sensors
-  const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
-
-  // Handle drag end
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-
-    if (over && active.id !== over.id) {
-      setColumnOrder((items) => {
-        const oldIndex = items.indexOf(active.id as string);
-        const newIndex = items.indexOf(over.id as string);
-        return arrayMove(items, oldIndex, newIndex);
-      });
-    }
-  }, []);
   
   // Extract summary data from company summary JSON
   const getSummaryData = useCallback((company: Company): SummaryData => {
@@ -1053,22 +1078,24 @@ function CompaniesContent() {
     };
   }, []);
 
-  const handleCreate = async () => {
-    try {
-      if (!formData.domain.trim()) {
-        alert('Please enter a domain.');
-        return;
+  const handleCompanyFormSave = async (formData: {
+    domain: string;
+    instagram: string;
+    phone: string;
+    email: string;
+    summary: string;
+    set_name: string;
+  }) => {
+    let summaryValue = null;
+    if (formData.summary.trim()) {
+      try {
+        summaryValue = JSON.parse(formData.summary.trim());
+      } catch {
+        summaryValue = { text: formData.summary.trim() };
       }
+    }
 
-      let summaryValue = null;
-      if (formData.summary.trim()) {
-        try {
-          summaryValue = JSON.parse(formData.summary.trim());
-        } catch {
-          summaryValue = { text: formData.summary.trim() };
-        }
-      }
-
+    if (companyFormMode === 'create') {
       await createCompany({
         domain: formData.domain.trim(),
         instagram: formData.instagram.trim(),
@@ -1078,31 +1105,8 @@ function CompaniesContent() {
         set_name: formData.set_name.trim() || null,
         owner: null,
       });
-      
-      setIsCreating(false);
-      setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
-    } catch (error: any) {
-      alert(`Error creating company: ${error.message}`);
-    }
-  };
-
-  const handleUpdate = async (id: string) => {
-    try {
-      if (!formData.domain.trim()) {
-        alert('Please enter a domain.');
-        return;
-      }
-
-      let summaryValue = null;
-      if (formData.summary.trim()) {
-        try {
-          summaryValue = JSON.parse(formData.summary.trim());
-        } catch {
-          summaryValue = { text: formData.summary.trim() };
-        }
-      }
-
-      await updateCompany(id, {
+    } else if (companyFormMode === 'edit' && companyToEdit) {
+      await updateCompany(companyToEdit.id, {
         domain: formData.domain.trim(),
         instagram: formData.instagram.trim(),
         phone: extractPhoneNumber(formData.phone),
@@ -1110,11 +1114,6 @@ function CompaniesContent() {
         summary: summaryValue,
         set_name: formData.set_name.trim() || null,
       });
-      
-      setEditingId(null);
-      setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
-    } catch (error: any) {
-      alert(`Error updating company: ${error.message}`);
     }
   };
 
@@ -1414,21 +1413,15 @@ function CompaniesContent() {
   };
 
   const startEditing = (company: Company) => {
-    setEditingId(company.id);
-    setFormData({
-      domain: company.domain || '',
-      instagram: company.instagram || '',
-      phone: company.phone || '',
-      email: company.email || '',
-      summary: company.summary ? JSON.stringify(company.summary, null, 2) : '',
-      set_name: company.set_name || '',
-    });
+    setCompanyToEdit(company);
+    setCompanyFormMode('edit');
+    setCompanyFormModalOpen(true);
   };
 
-  const cancelEdit = () => {
-    setEditingId(null);
-    setIsCreating(false);
-    setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
+  const handleAddCompany = () => {
+    setCompanyToEdit(null);
+    setCompanyFormMode('create');
+    setCompanyFormModalOpen(true);
   };
 
 
@@ -1513,35 +1506,37 @@ function CompaniesContent() {
     setSelectedCompanyForWhatsApp(null);
   }, [selectedCompanyForWhatsApp, getCellValue]);
   
-  // Helper function to handle email click
+  // Helper function to handle email click (uses user email_settings for provider + signature)
+  // Always includes subject and body when configured, with signature in body
   const handleEmailClick = useCallback((company: Company, emailOverride?: string) => {
     const emailToUse = emailOverride || company.email;
     if (!emailToUse || emailToUse === '-') return;
     
     const email = emailToUse.trim();
-    let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
+    let subject: string | undefined;
+    let body: string | undefined;
     
-    // Add subject column value as email subject if available
+    // Always try to get subject if column is configured
     if (subjectColumn) {
       const subjectValue = getCellValue(company, subjectColumn);
       if (subjectValue && subjectValue !== '-') {
-        const encodedSubject = encodeURIComponent(subjectValue);
-        gmailUrl += `&su=${encodedSubject}`;
+        subject = subjectValue;
       }
     }
     
-    // Add clipboard column value as email body if available
+    // Always try to get body with signature if clipboard column is configured
     if (clipboardColumn) {
       const clipboardValue = getCellValue(company, clipboardColumn);
       if (clipboardValue && clipboardValue !== '-') {
-        const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
-        const encodedBody = encodeURIComponent(emailBody);
-        gmailUrl += `&body=${encodedBody}`;
+        // Build body with greeting, clipboard content, and signature
+        body = buildEmailBody(clipboardValue, 'Hi, \n\n', emailSettings);
       }
     }
     
-    window.open(gmailUrl, '_blank');
-  }, [subjectColumn, clipboardColumn, getCellValue]);
+    // Build compose URL with subject and body (signature included in body if body exists)
+    const url = buildEmailComposeUrl(email, { subject, body, emailSettings });
+    window.open(url, '_blank');
+  }, [subjectColumn, clipboardColumn, getCellValue, emailSettings]);
 
   // Copy clipboard column on domain/Instagram link click (same logic as table cells)
   const handleDomainInstagramLinkClick = useCallback(async (company: Company) => {
@@ -1689,151 +1684,48 @@ function CompaniesContent() {
                 <span className="hidden sm:inline">Manage Columns</span>
                 <span className="sm:hidden">Columns</span>
               </button>
-              {!isCreating && (
-                <button
-                  onClick={() => {
-                    setIsCreating(true);
-                    setFormData({ domain: '', instagram: '', phone: '', email: '', summary: '', set_name: '' });
-                  }}
-                  className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-                >
-                  <Plus className="w-4 h-4 sm:mr-2" />
-                  <span className="hidden sm:inline">Add Company</span>
-                  <span className="sm:hidden">Add</span>
-                </button>
-              )}
+              <button
+                onClick={handleAddCompany}
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+              >
+                <Plus className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Add Company</span>
+                <span className="sm:hidden">Add</span>
+              </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Column Management Dropdown */}
-      {columnFilterOpen && (
-        <div className="mb-4 bg-white border border-gray-200 rounded-lg p-3 md:p-4 shadow-sm max-h-[70vh] overflow-y-auto">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-900">Manage Columns</h3>
-            <button
-              onClick={() => setColumnFilterOpen(false)}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          
-          {/* Clipboard Column Selection */}
-          <div className="mb-4 pb-4 border-b border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Clipboard Column (copied when opening Domain/Instagram links)
-            </label>
-            <select
-              value={clipboardColumn || ''}
-              onChange={(e) => setClipboardColumn(e.target.value || null)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              <option value="">None</option>
-              {columnOrder.map((column) => (
-                <option key={column} value={column}>
-                  {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </option>
-              ))}
-            </select>
-            {clipboardColumn && (
-              <p className="mt-1 text-xs text-gray-500">
-                Selected: {columnLabels[clipboardColumn] || clipboardColumn.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-              </p>
-            )}
-          </div>
-          
-          {/* Subject Column Selection */}
-          <div className="mb-4 pb-4 border-b border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Subject Column (used as email subject when opening email links)
-            </label>
-            <select
-              value={subjectColumn || ''}
-              onChange={(e) => setSubjectColumn(e.target.value || null)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              <option value="">None</option>
-              {columnOrder.map((column) => (
-                <option key={column} value={column}>
-                  {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </option>
-              ))}
-            </select>
-            {subjectColumn && (
-              <p className="mt-1 text-xs text-gray-500">
-                Selected: {columnLabels[subjectColumn] || subjectColumn.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-              </p>
-            )}
-          </div>
-          
-          {/* Compact Column Selection */}
-          <div className="mb-4 pb-4 border-b border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Compact Column
-            </label>
-            <select
-              value={compactColumn || ''}
-              onChange={(e) => setCompactColumn(e.target.value || null)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              <option value="">None</option>
-              {columnOrder.map((column) => (
-                <option key={column} value={column}>
-                  {columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </option>
-              ))}
-            </select>
-            {compactColumn && (
-              <p className="mt-1 text-xs text-gray-500">
-                Selected: {columnLabels[compactColumn] || compactColumn.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-              </p>
-            )}
-          </div>
-          
-          {/* Phone Click Behavior Selection */}
-          <div className="mb-4 pb-4 border-b border-gray-200">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Phone Click Behavior
-            </label>
-            <select
-              value={phoneClickBehavior}
-              onChange={(e) => setPhoneClickBehavior(e.target.value as 'whatsapp' | 'call')}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              <option value="whatsapp">WhatsApp (opens WhatsApp and copies Clipboard Column)</option>
-              <option value="call">Call (uses tel: link)</option>
-            </select>
-            <p className="mt-1 text-xs text-gray-500">
-              Selected: {phoneClickBehavior === 'whatsapp' ? 'WhatsApp' : 'Call'}
-            </p>
-          </div>
-          
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={columnOrder}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="space-y-2">
-                {columnOrder.map((column) => (
-                  <SortableColumnItem
-                    key={column}
-                    column={column}
-                    columnLabel={columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                    isVisible={visibleColumns.has(column)}
-                    onToggle={() => toggleColumn(column)}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-        </div>
-      )}
+      {/* Column Management Drawer */}
+      <ManageColumnsDrawer
+        isOpen={columnFilterOpen}
+        onClose={() => setColumnFilterOpen(false)}
+        columnOrder={columnOrder}
+        visibleColumns={visibleColumns}
+        columnLabels={columnLabels}
+        clipboardColumn={clipboardColumn}
+        subjectColumn={subjectColumn}
+        compactColumn={compactColumn}
+        phoneClickBehavior={phoneClickBehavior}
+        onColumnOrderChange={setColumnOrder}
+        onToggleColumn={toggleColumn}
+        onClipboardColumnChange={setClipboardColumn}
+        onSubjectColumnChange={setSubjectColumn}
+        onCompactColumnChange={setCompactColumn}
+        onPhoneClickBehaviorChange={setPhoneClickBehavior}
+        onSave={async () => {
+          try {
+            await persistColumnSettings();
+            setToastMessage('Column settings saved.');
+            setToastVisible(true);
+            setColumnFilterOpen(false);
+          } catch (e) {
+            setToastMessage(e instanceof Error ? e.message : 'Failed to save column settings.');
+            setToastVisible(true);
+          }
+        }}
+      />
 
       {/* Search and Filter & Sort Button (Mobile) */}
       <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
@@ -2003,117 +1895,18 @@ function CompaniesContent() {
         </div>
       </div>
 
-      {/* Create/Edit Form */}
-      {(isCreating || editingId) && (
-        <div className="mb-6 md:mb-8 bg-white border border-gray-200 rounded-lg p-4 md:p-6 shadow-sm">
-          <h2 className="text-lg md:text-xl font-semibold text-gray-900 mb-4">
-            {isCreating ? 'Add New Company' : 'Edit Company'}
-          </h2>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Domain <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.domain}
-                onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="example.com"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Instagram
-              </label>
-              <input
-                type="text"
-                value={formData.instagram}
-                onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="@company"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Phone
-              </label>
-              <input
-                type="text"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="+1234567890"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email
-              </label>
-              <input
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="contact@example.com"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Set Name
-              </label>
-              <select
-                value={formData.set_name}
-                onChange={(e) => setFormData({ ...formData, set_name: e.target.value })}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="">No Set (null/empty)</option>
-                {availableSetNames.map((setName) => (
-                  <option key={setName} value={setName}>
-                    {setName}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Summary (JSON)
-              </label>
-              <textarea
-                value={formData.summary}
-                onChange={(e) => setFormData({ ...formData, summary: e.target.value })}
-                rows={6}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
-                placeholder='{"key": "value"}'
-              />
-              <p className="mt-1 text-xs text-gray-500">
-                Enter JSON data for the summary field, or plain text (will be converted to JSON)
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => isCreating ? handleCreate() : editingId && handleUpdate(editingId)}
-                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
-              >
-                {isCreating ? 'Create' : 'Update'}
-              </button>
-              <button
-                onClick={cancelEdit}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Company Form Modal */}
+      <CompanyFormModal
+        isOpen={companyFormModalOpen}
+        onClose={() => {
+          setCompanyFormModalOpen(false);
+          setCompanyToEdit(null);
+        }}
+        onSave={handleCompanyFormSave}
+        company={companyToEdit}
+        availableSetNames={availableSetNames}
+        mode={companyFormMode}
+      />
 
       {/* Companies Table or Cards */}
       {companies.length === 0 ? (
@@ -2520,28 +2313,20 @@ function CompaniesContent() {
                             linkUrl = whatsappUrl;
                           }
                         } else if (isEmailColumn && company.email && company.email !== '-') {
-                          // For email column, we'll handle multiple emails in the rendering section
-                          // Generate Gmail compose URL with email pre-filled (for single email or first email)
                           const email = company.email.trim().split(',')[0].trim();
-                          let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`;
-                          // Add subject column value as email subject if available
+                          let subject: string | undefined;
+                          let body: string | undefined;
                           if (subjectColumn) {
                             const subjectValue = getCellValue(company, subjectColumn);
-                            if (subjectValue && subjectValue !== '-') {
-                              const encodedSubject = encodeURIComponent(subjectValue);
-                              gmailUrl += `&su=${encodedSubject}`;
-                            }
+                            if (subjectValue && subjectValue !== '-') subject = subjectValue;
                           }
-                          // Add clipboard column value as email body if available
                           if (clipboardColumn) {
                             const clipboardValue = getCellValue(company, clipboardColumn);
                             if (clipboardValue && clipboardValue !== '-') {
-                              const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
-                              const encodedBody = encodeURIComponent(emailBody);
-                              gmailUrl += `&body=${encodedBody}`;
+                              body = buildEmailBody(clipboardValue, 'Hi, \n\n', emailSettings);
                             }
                           }
-                          linkUrl = gmailUrl;
+                          linkUrl = buildEmailComposeUrl(email, { subject, body, emailSettings });
                         }
                         
                         // Get classification color classes
@@ -2600,7 +2385,7 @@ function CompaniesContent() {
                               e.stopPropagation();
                               handleCellDoubleClick(company, columnKey);
                             } : undefined}
-                            title={!isEditing ? (isNotesColumn ? "Click to open notes management" : isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Single click to open WhatsApp and copy clipboard column, double click to edit" : isPhoneColumn ? "Single click to call, double click to edit" : isEmailColumn ? "Single click to open Gmail with pre-filled email and body, double click to edit" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
+                            title={!isEditing ? (isNotesColumn ? "Click to open notes management" : isTemplateColumn ? "Click to copy message" : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? (isPhoneColumn && phoneClickBehavior === 'whatsapp' ? "Single click to open WhatsApp and copy clipboard column, double click to edit" : isPhoneColumn ? "Single click to call, double click to edit" : isEmailColumn ? "Single click to open email (Gmail/Outlook) with pre-filled body, double click to edit" : "Click to open link and copy clipboard column") : "Single click to copy, double click to edit") : undefined}
                           >
                             {isEditing ? (
                               <div className="flex items-center gap-2">
@@ -2718,24 +2503,30 @@ function CompaniesContent() {
                                       </div>
                                     );
                                   } else {
-                                    // Email column
+                                    // Email column (uses user email_settings for provider + signature)
                                     const trimmedEmail = trimmedItem;
-                                    let emailLinkUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(trimmedEmail)}`;
+                                    let subject: string | undefined;
+                                    let body: string | undefined;
+                                    
+                                    // Always try to get subject if column is configured
                                     if (subjectColumn) {
                                       const subjectValue = getCellValue(company, subjectColumn);
                                       if (subjectValue && subjectValue !== '-') {
-                                        const encodedSubject = encodeURIComponent(subjectValue);
-                                        emailLinkUrl += `&su=${encodedSubject}`;
+                                        subject = subjectValue;
                                       }
                                     }
+                                    
+                                    // Always try to get body with signature if clipboard column is configured
                                     if (clipboardColumn) {
                                       const clipboardValue = getCellValue(company, clipboardColumn);
                                       if (clipboardValue && clipboardValue !== '-') {
-                                        const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
-                                        const encodedBody = encodeURIComponent(emailBody);
-                                        emailLinkUrl += `&body=${encodedBody}`;
+                                        // Build body with greeting, clipboard content, and signature
+                                        body = buildEmailBody(clipboardValue, 'Hi, \n\n', emailSettings);
                                       }
                                     }
+                                    
+                                    // Build compose URL with subject and body (signature included in body if body exists)
+                                    const emailLinkUrl = buildEmailComposeUrl(trimmedEmail, { subject, body, emailSettings });
                                     
                                     return (
                                       <div key={index} className="flex items-center gap-2">
@@ -2750,7 +2541,7 @@ function CompaniesContent() {
                                             handleCellDoubleClick(company, columnKey);
                                           }}
                                           className="text-xs md:text-sm text-indigo-600 hover:text-indigo-800 hover:underline flex-1 text-left truncate"
-                                          title="Click to open Gmail"
+                                          title={subject || body ? "Click to open email with subject and body" : "Click to open email"}
                                         >
                                           {trimmedEmail}
                                         </button>
@@ -3125,6 +2916,7 @@ function CompaniesContent() {
           // When page changes, select the appropriate company of the new page
           // The companies will update after the page loads, and useEffect will handle selection
         }}
+        emailSettings={emailSettings}
       />
     </div>
   );

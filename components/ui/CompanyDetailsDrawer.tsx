@@ -4,6 +4,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight, Plus, Edit2 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
+import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from "@/lib/emailCompose";
 import { supabase } from "@/utils/supabase/client";
 
 interface CompanyDetailsDrawerProps {
@@ -20,6 +21,7 @@ interface CompanyDetailsDrawerProps {
   currentPage?: number;
   totalPages?: number;
   onPageChange?: (page: number) => void;
+  emailSettings?: EmailSettings | null;
 }
 
 const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
@@ -36,6 +38,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   currentPage = 1,
   totalPages = 1,
   onPageChange,
+  emailSettings = null,
 }) => {
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{
@@ -798,79 +801,43 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       }
     };
 
-    // Generate Gmail compose URL with pre-filled fields (exactly like companies page)
-    const getGmailUrl = (email: string): string => {
+    // Generate compose URL (Gmail or Outlook) with pre-filled fields, using user email_settings
+    const getComposeUrl = (email: string): string => {
       if (!company) {
         return `mailto:${email}`;
       }
-      
-      // Trim email exactly like companies page
       const trimmedEmail = email.trim();
-      // Use exact same URL format as companies page
-      let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(trimmedEmail)}`;
-      
-      // Get subject and clipboard columns from localStorage (same keys as companies page)
-      const subjectColumn = typeof window !== 'undefined' 
-        ? localStorage.getItem('companies-subject-column') 
+      const subjectColumn = typeof window !== 'undefined'
+        ? localStorage.getItem('companies-subject-column')
         : null;
-      const clipboardColumn = typeof window !== 'undefined' 
-        ? localStorage.getItem('companies-clipboard-column') 
+      const clipboardColumn = typeof window !== 'undefined'
+        ? localStorage.getItem('companies-clipboard-column')
         : null;
-
-      // Add subject column value as email subject if available (exactly like companies page)
+      let subject: string | undefined;
+      let body: string | undefined;
       if (subjectColumn) {
         try {
           const subjectValue = getCellValue(company, subjectColumn);
-          console.log('Subject column:', subjectColumn, 'Subject value:', subjectValue, 'Length:', subjectValue?.length);
-          // Match companies page exactly: only check for truthy and not '-'
-          if (subjectValue && subjectValue !== '-') {
-            const encodedSubject = encodeURIComponent(subjectValue);
-            gmailUrl += `&su=${encodedSubject}`;
-          } else {
-            console.log('Subject value skipped - empty or "-"');
-          }
-        } catch (error) {
-          console.error('Error getting subject value:', error);
-        }
-      } else {
-        console.log('No subject column configured');
+          if (subjectValue && subjectValue !== '-') subject = subjectValue;
+        } catch (_) {}
       }
-
-      // Add clipboard column value as email body if available (exactly like companies page)
       if (clipboardColumn) {
         try {
           const clipboardValue = getCellValue(company, clipboardColumn);
-          console.log('Clipboard column:', clipboardColumn, 'Clipboard value:', clipboardValue, 'Length:', clipboardValue?.length);
-          // Match companies page exactly: only check for truthy and not '-'
           if (clipboardValue && clipboardValue !== '-') {
-            // Extract first name from contact
             let firstName = '';
             if (contact.first_name) {
               firstName = contact.first_name;
             } else if (contact.full_name) {
-              // Extract first name from full name (first word)
               const nameParts = contact.full_name.trim().split(/\s+/);
               firstName = nameParts[0] || '';
             }
-            
-            // Use personalized greeting with first name if available
             const greeting = firstName ? `Hi ${firstName},` : 'Hi,';
-            const emailBody = `${greeting} \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
-            const encodedBody = encodeURIComponent(emailBody);
-            gmailUrl += `&body=${encodedBody}`;
-          } else {
-            console.log('Clipboard value skipped - empty or "-"');
+            body = buildEmailBody(clipboardValue, greeting, emailSettings);
           }
-        } catch (error) {
-          console.error('Error getting clipboard value:', error);
-        }
-      } else {
-        console.log('No clipboard column configured');
+        } catch (_) {}
       }
-
-      console.log('Final Gmail URL:', gmailUrl);
-
-      return gmailUrl;
+      return buildEmailComposeUrl(trimmedEmail, { subject, body, emailSettings });
     };
 
     return (
@@ -934,11 +901,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 <div className="flex items-center gap-2 text-sm">
                   <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <a
-                    href={getGmailUrl(contact.email)}
+                    href={getComposeUrl(contact.email)}
                     onClick={(e) => {
                       e.preventDefault();
-                      const gmailUrl = getGmailUrl(contact.email);
-                      window.open(gmailUrl, '_blank', 'noopener,noreferrer');
+                      window.open(getComposeUrl(contact.email), '_blank', 'noopener,noreferrer');
                     }}
                     className="text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
                   >
@@ -1274,55 +1240,39 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         {(company.email || "-").split(',').map((emailAddr, index) => {
                           const trimmedEmail = emailAddr.trim();
                           if (!trimmedEmail || trimmedEmail === '-') return null;
-                          
-                          // Generate Gmail compose URL with pre-filled fields
-                          let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(trimmedEmail)}`;
-                          
-                          // Add subject column value as email subject if available
-                          const subjectColumn = typeof window !== 'undefined' 
-                            ? localStorage.getItem('companies-subject-column') 
+                          const subjectColumn = typeof window !== 'undefined'
+                            ? localStorage.getItem('companies-subject-column')
                             : null;
+                          const clipboardColumn = typeof window !== 'undefined'
+                            ? localStorage.getItem('companies-clipboard-column')
+                            : null;
+                          let subject: string | undefined;
+                          let body: string | undefined;
                           if (subjectColumn) {
                             try {
-                              const subjectValue = getCellValue(company, subjectColumn);
-                              if (subjectValue && subjectValue !== '-') {
-                                const encodedSubject = encodeURIComponent(subjectValue);
-                                gmailUrl += `&su=${encodedSubject}`;
-                              }
-                            } catch (error) {
-                              console.error('Error getting subject value:', error);
-                            }
+                              const v = getCellValue(company, subjectColumn);
+                              if (v && v !== '-') subject = v;
+                            } catch (_) {}
                           }
-                          
-                          // Add clipboard column value as email body if available
-                          const clipboardColumn = typeof window !== 'undefined' 
-                            ? localStorage.getItem('companies-clipboard-column') 
-                            : null;
                           if (clipboardColumn) {
                             try {
-                              const clipboardValue = getCellValue(company, clipboardColumn);
-                              if (clipboardValue && clipboardValue !== '-') {
-                                const emailBody = `Hi, \n\n${clipboardValue}\n\nAarushi Jain\nCEO, Kaptured AI`;
-                                const encodedBody = encodeURIComponent(emailBody);
-                                gmailUrl += `&body=${encodedBody}`;
-                              }
-                            } catch (error) {
-                              console.error('Error getting clipboard value:', error);
-                            }
+                              const v = getCellValue(company, clipboardColumn);
+                              if (v && v !== '-') body = buildEmailBody(v, 'Hi, \n\n', emailSettings);
+                            } catch (_) {}
                           }
-                          
+                          const composeUrl = buildEmailComposeUrl(trimmedEmail, { subject, body, emailSettings });
                           return (
                             <div key={index} className="flex items-center gap-2">
                               <a
-                                href={gmailUrl}
+                                href={composeUrl}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  window.open(gmailUrl, '_blank', 'noopener,noreferrer');
+                                  window.open(composeUrl, '_blank', 'noopener,noreferrer');
                                 }}
                                 className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline flex-1"
-                                title="Click to open Gmail"
+                                title="Click to open email"
                               >
                                 {trimmedEmail}
                               </a>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useCompanies, CompanyCountByOwner } from '@/contexts/CompaniesContext';
-import { OWNER_COLORS } from '@/contexts/OwnerContext';
+import { useOwner } from '@/contexts/OwnerContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
@@ -11,6 +11,7 @@ type AnalyticsPeriod = 'today' | 'yesterday' | 'week' | 'month';
 
 export default function AnalyticsPage() {
   const { getCompanyCountsByOwner } = useCompanies();
+  const { ownerColors } = useOwner();
   const [period, setPeriod] = useState<AnalyticsPeriod>('today');
   const [data, setData] = useState<CompanyCountByOwner[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,10 +37,7 @@ export default function AnalyticsPage() {
   }, [period, getCompanyCountsByOwner]);
 
   // Map owner colors for the chart
-  const getBarColor = (owner: string) => {
-    const ownerKey = owner as keyof typeof OWNER_COLORS;
-    return OWNER_COLORS[ownerKey]?.hex || '#64748b';
-  };
+  const getBarColor = (owner: string) => ownerColors[owner]?.hex || '#64748b';
 
   // Format period label
   const getPeriodLabel = (p: AnalyticsPeriod) => {

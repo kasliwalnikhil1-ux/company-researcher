@@ -1,0 +1,742 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useOnboarding, OnboardingData } from '@/contexts/OnboardingContext';
+import { useAuth } from '@/contexts/AuthContext';
+import ProtectedRoute from '@/components/ProtectedRoute';
+import MainLayout from '@/components/MainLayout';
+import Toast from '@/components/ui/Toast';
+import { Building2, Save, Check } from 'lucide-react';
+
+// Same constants as OnboardingFlow
+const COUNTRIES = [
+  'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France', 'India',
+  'Japan', 'China', 'Brazil', 'Mexico', 'Spain', 'Italy', 'Netherlands', 'Sweden',
+  'Switzerland', 'Singapore', 'South Korea', 'Israel', 'United Arab Emirates', 'Saudi Arabia',
+  'South Africa', 'Argentina', 'Chile', 'Colombia', 'Poland', 'Portugal', 'Belgium',
+  'Austria', 'Norway', 'Denmark', 'Finland', 'Ireland', 'New Zealand', 'Taiwan',
+  'Hong Kong', 'Thailand', 'Malaysia', 'Indonesia', 'Philippines', 'Vietnam',
+  'Turkey', 'Egypt', 'Nigeria', 'Kenya', 'Ghana', 'Morocco', 'Tunisia', 'Algeria',
+  'Czech Republic', 'Hungary', 'Romania', 'Greece', 'Croatia', 'Bulgaria', 'Slovakia',
+  'Slovenia', 'Estonia', 'Latvia', 'Lithuania', 'Luxembourg', 'Iceland', 'Malta',
+  'Cyprus', 'Monaco', 'Liechtenstein', 'Andorra', 'San Marino', 'Vatican City',
+  'Russia', 'Ukraine', 'Belarus', 'Kazakhstan', 'Uzbekistan', 'Azerbaijan', 'Georgia',
+  'Armenia', 'Moldova', 'Serbia', 'Montenegro', 'Bosnia and Herzegovina', 'Macedonia',
+  'Albania', 'Kosovo', 'Iraq', 'Iran', 'Jordan', 'Lebanon', 'Syria', 'Yemen',
+  'Oman', 'Kuwait', 'Qatar', 'Bahrain', 'Afghanistan', 'Pakistan', 'Bangladesh',
+  'Sri Lanka', 'Nepal', 'Bhutan', 'Myanmar', 'Cambodia', 'Laos', 'Mongolia',
+  'North Korea', 'Brunei', 'East Timor', 'Papua New Guinea', 'Fiji', 'Samoa',
+  'Tonga', 'Vanuatu', 'Solomon Islands', 'Palau', 'Micronesia', 'Marshall Islands',
+  'Nauru', 'Kiribati', 'Tuvalu', 'Maldives', 'Seychelles', 'Mauritius', 'Madagascar',
+  'Mozambique', 'Tanzania', 'Uganda', 'Ethiopia', 'Sudan', 'Angola', 'Zambia',
+  'Zimbabwe', 'Botswana', 'Namibia', 'Lesotho', 'Swaziland', 'Malawi', 'Rwanda',
+  'Burundi', 'Djibouti', 'Eritrea', 'Somalia', 'Libya', 'Mauritania', 'Mali',
+  'Burkina Faso', 'Niger', 'Chad', 'Central African Republic', 'Cameroon', 'Gabon',
+  'Equatorial Guinea', 'Republic of the Congo', 'Democratic Republic of the Congo',
+  'Guinea', 'Guinea-Bissau', 'Sierra Leone', 'Liberia', 'Ivory Coast', 'Togo',
+  'Benin', 'Senegal', 'Gambia', 'Cape Verde', 'São Tomé and Príncipe', 'Comoros',
+  'Ecuador', 'Peru', 'Bolivia', 'Paraguay', 'Uruguay', 'Venezuela', 'Guyana',
+  'Suriname', 'French Guiana', 'Panama', 'Costa Rica', 'Nicaragua', 'Honduras',
+  'El Salvador', 'Guatemala', 'Belize', 'Jamaica', 'Haiti', 'Dominican Republic',
+  'Cuba', 'Trinidad and Tobago', 'Barbados', 'Bahamas', 'Dominica', 'Saint Lucia',
+  'Saint Vincent and the Grenadines', 'Grenada', 'Antigua and Barbuda',
+  'Saint Kitts and Nevis', 'Cayman Islands', 'Bermuda', 'Aruba', 'Curaçao',
+  'Greenland', 'Faroe Islands', 'Svalbard', 'Falkland Islands', 'French Polynesia',
+  'New Caledonia', 'Guam', 'Northern Mariana Islands', 'American Samoa', 'Puerto Rico',
+  'U.S. Virgin Islands', 'British Virgin Islands', 'Anguilla', 'Montserrat',
+  'Turks and Caicos Islands', 'Gibraltar', 'Jersey', 'Guernsey', 'Isle of Man',
+  'Åland Islands', 'Sint Maarten', 'Bonaire', 'Saba', 'Sint Eustatius',
+].sort();
+
+const FUNDRAISING_STAGES = [
+  'Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D', 'Series E+', 'Bridge', 'Convertible Note'
+];
+
+const SECTORS = [
+  'B2B', 'B2C', 'Marketplace', 'SaaS', 'Fintech', 'Healthtech', 'Edtech', 'E-commerce',
+  'AI/ML', 'Blockchain/Crypto', 'Gaming', 'Media/Entertainment', 'Real Estate', 'Transportation',
+  'Food & Beverage', 'Fashion', 'Travel', 'Energy', 'Manufacturing', 'Agriculture',
+  'Construction', 'Legal', 'HR/Recruiting', 'Marketing/Advertising', 'Security', 'IoT',
+  'Robotics', 'Biotech', 'Pharma', 'Telecom', 'Hardware', 'Other'
+];
+
+export default function CompanyProfilePage() {
+  return (
+    <ProtectedRoute>
+      <MainLayout>
+        <div className="flex-1 overflow-auto">
+          <CompanyProfileContent />
+        </div>
+      </MainLayout>
+    </ProtectedRoute>
+  );
+}
+
+function CompanyProfileContent() {
+  const { user } = useAuth();
+  const { onboarding, updateOnboarding, loading } = useOnboarding();
+  const [formData, setFormData] = useState<Partial<OnboardingData>>({});
+  const [saving, setSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [showToast, setShowToast] = useState(false);
+  const [sectorSearch, setSectorSearch] = useState('');
+  const [countrySearch, setCountrySearch] = useState('');
+
+  useEffect(() => {
+    if (onboarding) {
+      setFormData(onboarding);
+    }
+  }, [onboarding]);
+
+  const handleSave = async () => {
+    if (!user?.id) {
+      setToastMessage('You must be logged in to save your profile.');
+      setShowToast(true);
+      return;
+    }
+
+    try {
+      setSaving(true);
+      await updateOnboarding(formData);
+      setToastMessage('Company profile updated successfully!');
+      setShowToast(true);
+    } catch (error) {
+      console.error('Error saving company profile:', error);
+      setToastMessage('Failed to save company profile. Please try again.');
+      setShowToast(true);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500" />
+      </div>
+    );
+  }
+
+  if (!onboarding || !onboarding.completed) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto">
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
+          <p className="text-yellow-800">
+            Please complete the onboarding flow first to view and edit your company profile.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const filteredSectors = SECTORS.filter(s => 
+    s.toLowerCase().includes(sectorSearch.toLowerCase())
+  );
+
+  const filteredCountries = COUNTRIES.filter(c => 
+    c.toLowerCase().includes(countrySearch.toLowerCase())
+  );
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="flex items-center gap-3 mb-8">
+        <div className="p-2 bg-indigo-100 rounded-lg">
+          <Building2 className="w-6 h-6 text-indigo-600" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Company Profile</h1>
+          <p className="text-sm text-gray-500">View and edit your company information</p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6 space-y-8">
+        {/* Step 1: Founder Identity */}
+        {formData.step1 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Identity</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
+                <input
+                  type="text"
+                  value={formData.step1.firstName || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step1: {
+                    firstName: e.target.value,
+                    lastName: formData.step1?.lastName ?? '',
+                    gender: formData.step1?.gender
+                  }
+                })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
+                <input
+                  type="text"
+                  value={formData.step1.lastName || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step1: {
+                    firstName: formData.step1?.firstName ?? '',
+                    lastName: e.target.value,
+                    gender: formData.step1?.gender
+                  }
+                })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Gender</label>
+              <select
+                value={formData.step1.gender || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step1: {
+                    firstName: formData.step1?.firstName ?? '',
+                    lastName: formData.step1?.lastName ?? '',
+                    gender: e.target.value
+                  }
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select gender</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="non-binary">Non-binary</option>
+                <option value="prefer-not-to-say">Prefer not to say</option>
+              </select>
+            </div>
+          </section>
+        )}
+
+        {/* Step 2: Founder Background */}
+        {formData.step2 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Background</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                <input
+                  type="text"
+                  value={formData.step2.title || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step2: {
+                      title: e.target.value,
+                      bio: formData.step2?.bio ?? ''
+                    }
+                  })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. CEO, Founder"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
+                <textarea
+                  value={formData.step2.bio || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step2: {
+                      title: formData.step2?.title ?? '',
+                      bio: e.target.value
+                    }
+                  })}
+                  rows={4}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Tell us about yourself"
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Step 3: Fundraising Experience */}
+        {formData.step3 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Fundraising Experience</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Prior experience raising venture rounds</label>
+              <select
+                value={formData.step3.experience || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step3: { experience: e.target.value as any }
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select experience</option>
+                <option value="getting_started">Getting Started — First time raising venture capital</option>
+                <option value="seasoned">Seasoned — Raised 1–2 venture rounds</option>
+                <option value="expert">Expert — Raised 3+ venture rounds</option>
+              </select>
+            </div>
+          </section>
+        )}
+
+        {/* Step 4: Capital Raised */}
+        {formData.step4 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Capital Raised to Date</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Total capital raised</label>
+              <select
+                value={formData.step4.capitalRaised || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step4: { capitalRaised: e.target.value as any }
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select amount</option>
+                <option value="none">No amount raised</option>
+                <option value="less_than_100k">Less than $100K</option>
+                <option value="100k_500k">$100K–$500K</option>
+                <option value="500k_2m">$500K–$2M</option>
+                <option value="2m_10m">$2M–$10M</option>
+                <option value="more_than_10m">More than $10M</option>
+              </select>
+            </div>
+          </section>
+        )}
+
+        {/* Step 5: Company Website */}
+        {formData.step5 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Website</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Website</label>
+              <input
+                type="url"
+                value={formData.step5.website || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step5: { website: e.target.value }
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="https://example.com"
+              />
+            </div>
+          </section>
+        )}
+
+        {/* Step 6: Company Sector */}
+        {formData.step6 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Sector</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Sector (Multi-select)</label>
+              <input
+                type="text"
+                value={sectorSearch}
+                onChange={(e) => setSectorSearch(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
+                placeholder="Search sectors..."
+              />
+              <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto p-2">
+                {filteredSectors.map((sector) => {
+                  const isSelected = formData.step6?.sector?.includes(sector);
+                  return (
+                    <label
+                      key={sector}
+                      className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          const current = formData.step6?.sector || [];
+                          const updated = e.target.checked
+                            ? [...current, sector]
+                            : current.filter(s => s !== sector);
+                          setFormData({
+                            ...formData,
+                            step6: { sector: updated }
+                          });
+                        }}
+                        className="mr-3"
+                      />
+                      <span>{sector}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {formData.step6?.sector && formData.step6.sector.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {formData.step6.sector.map((sector) => (
+                    <span
+                      key={sector}
+                      className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
+                    >
+                      {sector}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Step 7: Fundraising Stage */}
+        {formData.step7 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming Fundraising Stage</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Round stage</label>
+              <select
+                value={formData.step7.stage || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step7: { stage: e.target.value }
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select stage</option>
+                {FUNDRAISING_STAGES.map((stage) => (
+                  <option key={stage} value={stage}>{stage}</option>
+                ))}
+              </select>
+            </div>
+          </section>
+        )}
+
+        {/* Step 8: Company HQ */}
+        {formData.step8 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Company HQ</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Country</label>
+              <input
+                type="text"
+                value={countrySearch}
+                onChange={(e) => setCountrySearch(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
+                placeholder="Search countries..."
+              />
+              <select
+                value={formData.step8.hqCountry || ''}
+                onChange={(e) => {
+                  setFormData({
+                    ...formData,
+                    step8: { hqCountry: e.target.value }
+                  });
+                  setCountrySearch('');
+                }}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Select country</option>
+                {filteredCountries.map((country) => (
+                  <option key={country} value={country}>{country}</option>
+                ))}
+              </select>
+            </div>
+          </section>
+        )}
+
+        {/* Step 9: Product Description */}
+        {formData.step9 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Product / Service Description</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">What product or service does your company offer?</label>
+              <textarea
+                value={formData.step9.productDescription || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step9: { productDescription: e.target.value }
+                })}
+                rows={6}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="Describe your product or service..."
+              />
+            </div>
+          </section>
+        )}
+
+        {/* Step 10: Customer Description & Revenue */}
+        {formData.step10 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Customer Description & Revenue</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Who are your customers?</label>
+                <textarea
+                  value={formData.step10.customerDescription || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step10: {
+                      customerDescription: e.target.value,
+                      revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                      arr: formData.step10?.arr
+                    }
+                  })}
+                  rows={4}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Describe your target customers..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Is your company currently generating revenue?</label>
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => setFormData({
+                      ...formData,
+                      step10: {
+                        customerDescription: formData.step10?.customerDescription ?? '',
+                        revenueStatus: 'yes',
+                        arr: formData.step10?.arr
+                      }
+                    })}
+                    className={`flex-1 px-6 py-3 border-2 rounded-lg font-medium transition-all ${
+                      formData.step10?.revenueStatus === 'yes'
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Yes
+                  </button>
+                  <button
+                    onClick={() => setFormData({
+                      ...formData,
+                      step10: {
+                        customerDescription: formData.step10?.customerDescription ?? '',
+                        revenueStatus: 'no',
+                        arr: []
+                      }
+                    })}
+                    className={`flex-1 px-6 py-3 border-2 rounded-lg font-medium transition-all ${
+                      formData.step10?.revenueStatus === 'no'
+                        ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                        : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    No
+                  </button>
+                </div>
+              </div>
+              {formData.step10?.revenueStatus === 'yes' && (
+                <div className="mt-4">
+                  <h3 className="text-md font-medium text-gray-900 mb-3">Annual Recurring Revenue (ARR)</h3>
+                  {(formData.step10.arr || []).map((entry, index) => (
+                    <div key={index} className="flex gap-3 items-end mb-3">
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1">Month</label>
+                        <select
+                          value={entry.month}
+                          onChange={(e) => {
+                            const updated = [...(formData.step10?.arr || [])];
+                            updated[index] = { ...updated[index], month: e.target.value };
+                            setFormData({
+                              ...formData,
+                              step10: {
+                                customerDescription: formData.step10?.customerDescription ?? '',
+                                revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                                arr: updated
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        >
+                          <option value="">Select month</option>
+                          {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1">Year</label>
+                        <input
+                          type="number"
+                          value={entry.year}
+                          onChange={(e) => {
+                            const updated = [...(formData.step10?.arr || [])];
+                            updated[index] = { ...updated[index], year: e.target.value };
+                            setFormData({
+                              ...formData,
+                              step10: {
+                                customerDescription: formData.step10?.customerDescription ?? '',
+                                revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                                arr: updated
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                          placeholder="2024"
+                          min="2000"
+                          max="2100"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs text-gray-500 mb-1">ARR ($)</label>
+                        <input
+                          type="text"
+                          value={entry.amount}
+                          onChange={(e) => {
+                            const updated = [...(formData.step10?.arr || [])];
+                            updated[index] = { ...updated[index], amount: e.target.value };
+                            setFormData({
+                              ...formData,
+                              step10: {
+                                customerDescription: formData.step10?.customerDescription ?? '',
+                                revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                                arr: updated
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                          placeholder="100000"
+                        />
+                      </div>
+                      <button
+                        onClick={() => {
+                          const updated = (formData.step10?.arr || []).filter((_, i) => i !== index);
+                          setFormData({
+                            ...formData,
+                            step10: {
+                              customerDescription: formData.step10?.customerDescription ?? '',
+                              revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                              arr: updated
+                            }
+                          });
+                        }}
+                        className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => {
+                      const updated = [...(formData.step10?.arr || []), { month: '', year: '', amount: '' }];
+                      setFormData({
+                        ...formData,
+                        step10: {
+                          customerDescription: formData.step10?.customerDescription ?? '',
+                          revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                          arr: updated
+                        }
+                      });
+                    }}
+                    className="px-4 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                  >
+                    + Add Month
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* Step 11: Fundraising Timeline & Target Round Size */}
+        {formData.step11 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Fundraising Timeline & Target Round Size</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">When are you planning to raise your next round?</label>
+                <select
+                  value={formData.step11.timeline || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step11: {
+                    timeline: e.target.value as 'near_term' | 'mid_term' | 'later',
+                    targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k'
+                  }
+                  })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Select timeline</option>
+                  <option value="near_term">Near-term (1–3 months)</option>
+                  <option value="mid_term">Mid-term (3–6 months)</option>
+                  <option value="later">Later (6+ months)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What round size are you looking for?</label>
+                <select
+                  value={formData.step11.targetRoundSize || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step11: {
+                    timeline: formData.step11?.timeline ?? 'later',
+                    targetRoundSize: e.target.value as 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m'
+                  }
+                  })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">Select round size</option>
+                  <option value="less_than_500k">Less than $500K</option>
+                  <option value="500k_2m">$500K–$2M</option>
+                  <option value="2m_10m">$2M–$10M</option>
+                  <option value="more_than_10m">More than $10M</option>
+                </select>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Step 12: Investor Type Preference */}
+        {formData.step12 && (
+          <section>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Investor Type Preference</h2>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Are you looking for a lead investor or follow-on investors?</label>
+              <div className="space-y-2">
+                {[
+                  { value: 'lead', label: 'Lead investors' },
+                  { value: 'follow_on', label: 'Follow-on investors' },
+                  { value: 'both', label: 'Both' },
+                ].map((option) => (
+                  <label key={option.value} className="flex items-center">
+                    <input
+                      type="radio"
+                      name="investorType"
+                      value={option.value}
+                      checked={formData.step12?.investorType === option.value}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        step12: { investorType: e.target.value as any }
+                      })}
+                      className="mr-2"
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Save Button */}
+        <div className="pt-6 border-t border-gray-200">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                Save Changes
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <Toast
+        message={toastMessage}
+        isVisible={showToast}
+        onClose={() => setShowToast(false)}
+        duration={4000}
+      />
+    </div>
+  );
+}

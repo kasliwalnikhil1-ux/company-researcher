@@ -14,6 +14,9 @@ type AuthContextType = {
   signOut: () => Promise<void>;
   signOutAll: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -98,6 +101,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (error) throw error;
   };
 
+  const getBaseUrl = () => {
+    if (typeof window === 'undefined') return 'https://app.capitalxai.com';
+    return (process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '');
+  };
+
+  const resetPassword = async (email: string) => {
+    const redirectTo = `${getBaseUrl()}/reset-password`;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+    if (error) throw error;
+  };
+
+  const signInWithGoogle = async () => {
+    const redirectTo = `${getBaseUrl()}/auth/callback`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+      },
+    });
+    if (error) throw error;
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) throw error;
+  };
+
   const value = {
     user,
     session,
@@ -107,6 +141,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signOut,
     signOutAll,
     changePassword,
+    resetPassword,
+    signInWithGoogle,
+    updatePassword,
   };
 
   return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;
