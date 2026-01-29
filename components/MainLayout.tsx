@@ -155,19 +155,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </Link>
           
           <Link
-            href="/templates"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/templates')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Templates"
-          >
-            <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Templates</span>}
-          </Link>
-          
-          <Link
             href="/companies"
             className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/companies')
@@ -233,6 +220,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </Link>
           
           <Link
+            href="/templates"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/templates')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Templates"
+          >
+            <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Templates</span>}
+          </Link>
+          
+          <Link
             href="/personalization"
             className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/personalization')
@@ -259,19 +259,6 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </Link>
 
           <Link
-            href="/usage"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/usage')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Usage"
-          >
-            <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Usage</span>}
-          </Link>
-
-          <Link
             href="/account"
             className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/account')
@@ -284,8 +271,21 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             {(!isCollapsed || isMobile) && <span>Account</span>}
           </Link>
 
+          <Link
+            href="/usage"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/usage')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Usage"
+          >
+            <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Usage</span>}
+          </Link>
+
           <a
-            href="https://calendly.com/aarushi-kaptured/15min"
+            href="https://calendly.com/founders-capitalxai/20min"
             target="_blank"
             rel="noopener noreferrer"
             className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}

@@ -35,7 +35,7 @@ const DEFAULT_BILLING_CYCLE = 'quarterly';
 const DEFAULT_STATUS = 'active';
 const DEFAULT_CREDITS = 0;
 
-const ADD_CREDITS_URL = 'https://calendly.com/aarushi-kaptured/15min';
+const ADD_CREDITS_URL = 'https://calendly.com/founders-capitalxai/20min';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';

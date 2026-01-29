@@ -112,7 +112,7 @@ export default function Login() {
       } else {
         await signUp(email, password);
         setIsLogin(true);
-        setSuccess('Please check your email for the confirmation link.');
+        setSuccess('Please check your email for the confirmation link. If it doesn\'t appear within a few minutes, check your spam folder.');
         setEmail('');
         setPassword('');
       }
@@ -131,7 +131,7 @@ export default function Login() {
 
     try {
       await resetPassword(email);
-      setSuccess('If an account exists, a reset link has been sent. Please check your inbox.');
+      setSuccess('If an account exists, a reset link has been sent. Please check your inbox. If it doesn\'t appear within a few minutes, check your spam folder.');
       setShowForgotPassword(false);
     } catch (err: any) {
       setError(err.message);
@@ -247,6 +247,7 @@ export default function Login() {
                     role="alert"
                   >
                     {success}
+                    <p className="mt-2 text-accent-darkgreen-dark/90">If it doesn&apos;t appear within a few minutes, check your spam folder.</p>
                   </div>
                 )}
                 <div className="space-y-1">

@@ -95,7 +95,7 @@ export default function Signup() {
 
     try {
       await signUp(email, password);
-      setSuccess('Please check your email for the confirmation link.');
+      setSuccess('Please check your email for the confirmation link. If it doesn\'t appear within a few minutes, check your spam folder.');
       setEmail('');
       setPassword('');
     } catch (err: unknown) {
@@ -211,6 +211,7 @@ export default function Signup() {
                 role="alert"
               >
                 {success}
+                <p className="mt-2 text-accent-darkgreen-dark/90">If it doesn&apos;t appear within a few minutes, check your spam folder.</p>
               </div>
             )}
 

@@ -370,21 +370,6 @@ Return the assessment in the exact JSON schema format.`;
     }
   };
 
-  const handleReset = () => {
-    if (confirm('Are you sure you want to reset to default values? This will overwrite your current settings.')) {
-      setFormData({
-        direct: {
-          query: defaultDirectQuery,
-          schema: defaultDirectSchema,
-        },
-        instagram: {
-          systemPrompt: defaultInstagramSystemPrompt,
-          userMessage: defaultInstagramUserMessage,
-        },
-      });
-    }
-  };
-
   if (loading) {
     return (
       <div className="p-8 flex items-center justify-center">
@@ -398,12 +383,6 @@ Return the assessment in the exact JSON schema format.`;
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Personalization</h1>
         <div className="flex gap-2">
-          <button
-            onClick={handleReset}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-          >
-            Reset to Defaults
-          </button>
           <button
             onClick={handleSave}
             disabled={saving || (activeTab === 'direct' && schemaError !== null)}
