@@ -10,6 +10,7 @@ import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
+import { BookDemoButton } from './BookDemoButton';
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
@@ -369,6 +370,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       `}>
         {children}
       </main>
+
+      <BookDemoButton />
     </div>
   );
 }
