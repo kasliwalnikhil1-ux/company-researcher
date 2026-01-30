@@ -15,7 +15,7 @@ export interface CsvProgressState {
   currentDomainIndex: number;
   // Additional metadata for reconstruction
   selectedColumns?: { domain: string | null; instagram: string | null };
-  researchMode?: 'domain' | 'instagram';
+  researchMode?: 'domain' | 'instagram' | 'investor';
 }
 
 const PROGRESS_STORAGE_KEY = 'csv-processing-progress';

@@ -1,92 +1,258 @@
 'use client';
 
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
-import { useAuth } from '@/contexts/AuthContext';
-import { useInvestors, Investor } from '@/contexts/InvestorsContext';
-import { supabase } from '@/utils/supabase/client';
 import Toast from '@/components/ui/Toast';
 import InvestorDetailsDrawer from '@/components/ui/InvestorDetailsDrawer';
-import ManageInvestorColumnsDrawer from '@/components/ui/ManageInvestorColumnsDrawer';
-import { copyToClipboard } from '@/lib/utils';
-import { Handshake, Filter, ChevronLeft, ChevronRight, ChevronDown, Eye, Table, List, X } from 'lucide-react';
+import ReportMissingInvestorsModal from '@/components/ui/ReportMissingInvestorsModal';
+import InsufficientCreditsModal from '@/components/ui/InsufficientCreditsModal';
+import {
+  useInvestorSearch,
+  fetchInvestorById,
+  type InvestorSearchFilters,
+  type InvestorSearchResult,
+  type InvestorTypeFilter,
+} from '@/hooks/useInvestorSearch';
+import {
+  Handshake,
+  Filter,
+  ChevronDown,
+  Eye,
+  X,
+  Search,
+  Check,
+  Sparkles,
+  Loader2,
+  Globe,
+  CheckCircle2,
+  ArrowRight,
+} from 'lucide-react';
+import { formatHqLocationShort } from '@/lib/isoCodes';
+import { Skeleton } from '@/components/ui/skeleton';
+import { CALENDLY_URL } from '@/components/BookDemoButton';
+import { fetchInvestorAnalyze } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useOwner } from '@/contexts/OwnerContext';
+import { supabase } from '@/utils/supabase/client';
 
-const COLUMN_ORDER_KEY = 'investors-column-order';
-const COLUMN_VISIBILITY_KEY = 'investors-column-visibility';
-const VIEW_MODE_KEY = 'investors-view-mode';
+// Filter options - must match search_investors RPC
+const INVESTOR_TYPE_OPTIONS = [
+  'VC',
+  'Angel',
+  'PE',
+  'Corporate Venture',
+  'Family Office',
+  'Accelerator',
+  'Fund of Funds',
+  'Other',
+];
 
-// Common filter options (can be replaced with API later)
 const STAGE_OPTIONS = [
-  'Pre-seed',
-  'Seed',
-  'Series A',
-  'Series B',
-  'Series C',
-  'Growth',
-  'Late Stage',
+  'pre-seed',
+  'seed',
+  'post-seed',
+  'series-a',
+  'series-b',
+  'series-c',
+  'growth',
+  'late-stage',
+  'pre-ipo',
+  'public-equity',
+  'angel',
 ];
 
 const INDUSTRY_OPTIONS = [
-  'SaaS',
-  'Fintech',
-  'Healthcare',
-  'AI/ML',
-  'Consumer',
-  'Enterprise',
-  'Climate',
-  'EdTech',
-  'Marketplace',
-  'Other',
+  'artificial-intelligence',
+  'machine-learning',
+  'healthtech',
+  'biotech',
+  'digital-health',
+  'mental-health',
+  'wellness',
+  'longevity',
+  'fitness',
+  'consumer-health',
+  'medtech',
+  'pharma',
+  'genomics',
+  'bioinformatics',
+  'neuroscience',
+  'consumer-tech',
+  'enterprise-software',
+  'saas',
+  'vertical-saas',
+  'developer-tools',
+  'productivity',
+  'collaboration',
+  'fintech',
+  'payments',
+  'lending',
+  'credit',
+  'insurtech',
+  'regtech',
+  'wealthtech',
+  'climate-tech',
+  'energy',
+  'clean-energy',
+  'carbon-removal',
+  'sustainability',
+  'web3',
+  'blockchain',
+  'crypto',
+  'defi',
+  'nft',
+  'social-platforms',
+  'marketplaces',
+  'creator-economy',
+  'edtech',
+  'hr-tech',
+  'future-of-work',
+  'mobility',
+  'transportation',
+  'autonomous-vehicles',
+  'robotics',
+  'hardware',
+  'deep-tech',
+  'semiconductors',
+  'data-infrastructure',
+  'cloud-infrastructure',
+  'devops',
+  'cybersecurity',
+  'security',
+  'privacy',
+  'identity',
+  'digital-identity',
+  'consumer-internet',
+  'ecommerce',
+  'retail-tech',
+  'proptech',
+  'real-estate',
+  'construction-tech',
+  'smart-cities',
+  'supply-chain',
+  'logistics',
+  'manufacturing',
+  'industrial-tech',
+  'agtech',
+  'foodtech',
+  'gaming',
+  'esports',
+  'media',
+  'entertainment',
+  'music-tech',
+  'sports-tech',
+  'travel-tech',
+  'hospitality',
+  'martech',
+  'adtech',
+  'legal-tech',
+  'govtech',
+  'defense-tech',
+  'space-tech',
+  'aerospace',
+  'iot',
+  'edge-computing',
+  'network-effects',
 ];
 
-const COUNTRY_OPTIONS = [
-  'United States',
-  'United Kingdom',
-  'Germany',
-  'France',
-  'India',
-  'Canada',
-  'Singapore',
-  'Other',
+// ISO 3166-2: country codes (alpha-2) and common subdivisions
+const GEOGRAPHY_OPTIONS = [
+  'US',
+  'GB',
+  'DE',
+  'FR',
+  'IN',
+  'CA',
+  'SG',
+  'AU',
+  'NL',
+  'IL',
+  'CH',
+  'SE',
+  'ES',
+  'IT',
+  'JP',
+  'CN',
+  'KR',
+  'BR',
+  'MX',
+  'ZA',
+  'EU',
+  'LATAM',
+  'APAC',
+  'EMEA',
 ];
 
-const DEFAULT_COLUMN_ORDER = [
-  'name',
-  'role',
-  'hq_country',
-  'hq_state',
-  'investor_type',
-  'fund_size_usd',
-  'check_size_min_usd',
-  'check_size_max_usd',
-  'investment_stages',
-  'investment_industries',
-  'investment_geographies',
-  'investment_thesis',
+const ROLE_OPTIONS = [
+  'CEO / Founder',
+  'Partner',
+  'Managing Partner',
+  'General Partner',
+  'Principal',
+  'Venture Partner',
+  'Operating Partner',
+  'Independent Investor / Angel',
+  'Associate',
+  'Research Analyst',
+  'Scout',
 ];
 
-const COLUMN_LABELS: Record<string, string> = {
-  name: 'Name',
-  role: 'Role',
-  hq_state: 'HQ State',
-  hq_country: 'HQ Country',
-  investor_type: 'Investor Type',
-  fund_size_usd: 'Fund Size',
-  check_size_min_usd: 'Check Min',
-  check_size_max_usd: 'Check Max',
-  investment_stages: 'Stages',
-  investment_industries: 'Industries',
-  investment_geographies: 'Geographies',
-  investment_thesis: 'Thesis',
+// Reviewed tab only: pipeline stage options
+const REVIEWED_STAGE_OPTIONS = [
+  'Identified',
+  'Seeking Intro',
+  'Call Scheduled',
+  'Due Diligence',
+  'Verbal Agreement',
+  'Closed/Signed',
+  'Closed/Lost',
+  'Disappeared',
+];
+
+// Investor fit: Strong Fit -> true, Weak Fit -> false, Unclear Fit -> null
+const INVESTOR_FIT_OPTIONS: { value: boolean | null; label: string }[] = [
+  { value: true, label: '😊 Strong Fit' },
+  { value: false, label: '😕 Weak Fit' },
+  { value: null, label: '😐 Unclear Fit' },
+];
+
+const DEFAULT_FILTERS: InvestorSearchFilters = {
+  type: 'firm',
+  mode: 'global',
+  name: '',
+  active: null,
+  role: null,
+  hq_state: null,
+  hq_country: null,
+  investor_type: [],
+  fund_size_min: null,
+  fund_size_max: null,
+  check_size_min: null,
+  check_size_max: null,
+  investment_stages: [],
+  investment_industries: [],
+  investment_geographies: [],
+  leads_round: null,
+  reviewed_stage: [],
+  set: [],
+  owner: [],
+  investor_fit: [],
 };
 
-const formatCurrency = (value: number | null | undefined): string => {
-  if (value == null || value === 0) return '-';
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-  return `$${value}`;
-};
+const formatKebabLabel = (value: string): string =>
+  value
+    .split(/[-_]/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+
+function parseNumericInput(value: string): number | null {
+  const cleaned = value.replace(/[^0-9.]/g, '');
+  if (!cleaned) return null;
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? null : num;
+}
 
 export default function InvestorsPage() {
   return (
@@ -102,103 +268,167 @@ export default function InvestorsPage() {
 
 function InvestorsContent() {
   const { user } = useAuth();
-  const {
-    investors,
-    loading,
-    searchLoading,
-    searchQuery,
-    setSearchQuery,
-    stageFilter,
-    setStageFilter,
-    industryFilter,
-    setIndustryFilter,
-    countryFilter,
-    setCountryFilter,
-    currentPage,
-    setCurrentPage,
-    totalCount,
-    totalPages,
-    pageSize,
-    initializeInvestors,
-  } = useInvestors();
-
-  useEffect(() => {
-    initializeInvestors();
-  }, [initializeInvestors]);
-
-  // Load column_settings from user_settings (same as companies)
-  const [columnSettingsFromApi, setColumnSettingsFromApi] = useState<{
-    investorsColumnOrder?: string[];
-    investorsVisibleColumns?: string[];
-  } | null>(null);
-  useEffect(() => {
-    if (!user?.id) return;
-    let cancelled = false;
-    (async () => {
-      const { data } = await supabase
-        .from('user_settings')
-        .select('column_settings')
-        .eq('id', user.id)
-        .single();
-      if (cancelled) return;
-      const cs = data?.column_settings;
-      if (cs && typeof cs === 'object') {
-        const parsed = typeof cs === 'string' ? JSON.parse(cs) : cs;
-        if (Array.isArray(parsed.investorsColumnOrder) || Array.isArray(parsed.investorsVisibleColumns)) {
-          setColumnSettingsFromApi({
-            investorsColumnOrder: parsed.investorsColumnOrder,
-            investorsVisibleColumns: parsed.investorsVisibleColumns,
-          });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [user?.id]);
-
+  const { availableOwners, isFreePlan } = useOwner();
+  const [investorSets, setInvestorSets] = useState<string[]>([]);
+  const [filters, setFilters] = useState<InvestorSearchFilters>(DEFAULT_FILTERS);
+  const [localSearchInput, setLocalSearchInput] = useState('');
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [investorToView, setInvestorToView] = useState<Investor | null>(null);
-  const [pendingPageDirection, setPendingPageDirection] = useState<'next' | 'prev' | null>(null);
+  const [investorToView, setInvestorToView] = useState<InvestorSearchResult | null>(null);
   const [toastMessage, setToastMessage] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
-  const [localSearchInput, setLocalSearchInput] = useState(searchQuery);
-  const [columnFilterOpen, setColumnFilterOpen] = useState(false);
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const [stageDropdownOpen, setStageDropdownOpen] = useState(false);
-  const [industryDropdownOpen, setIndustryDropdownOpen] = useState(false);
-
+  const [reportMissingModalOpen, setReportMissingModalOpen] = useState(false);
+  const [insufficientCreditsModalOpen, setInsufficientCreditsModalOpen] = useState(false);
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [showCelebration, setShowCelebration] = useState(false);
+  /** Pending analyze results for immediate card update before refresh completes */
+  const [pendingAnalyzeResults, setPendingAnalyzeResults] = useState<
+    Record<string, { investor_fit: boolean | null; reason: string | null }>
+  >({});
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
+  const pageSize = isFreePlan ? 5 : 20;
+  const { data, loading, error, hasMore, page, setPage, loadMore, refresh } =
+    useInvestorSearch({ filters, pageSize });
+
+  // Fetch investor sets (used in drawer pipeline and reviewed filters)
   useEffect(() => {
-    if (investorToView && drawerOpen) {
-      const updated = investors.find((i) => i.id === investorToView.id);
-      if (updated) setInvestorToView(updated);
-      else if (investors.length > 0) {
-        if (pendingPageDirection === 'next') setInvestorToView(investors[0]);
-        else if (pendingPageDirection === 'prev') setInvestorToView(investors[investors.length - 1]);
-        else setInvestorToView(investors[0]);
-        setPendingPageDirection(null);
+    let mounted = true;
+    (async () => {
+      const { data: sets, error } = await supabase.rpc('get_investor_sets');
+      if (mounted && !error && Array.isArray(sets)) {
+        setInvestorSets(sets.filter((s): s is string => typeof s === 'string'));
+      }
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Sync drawer investor with refreshed data (e.g. after analyze) so personalization fields appear
+  useEffect(() => {
+    if (investorToView && data.length > 0) {
+      const refreshed = data.find((i) => i.id === investorToView.id);
+      if (refreshed && refreshed !== investorToView) {
+        setInvestorToView(refreshed);
       }
     }
-  }, [investors, drawerOpen, pendingPageDirection]);
+  }, [data, investorToView]);
 
+  const updateInvestor = useCallback(
+    async (
+      investorId: string,
+      updates: {
+        notes?: Array<{ message: string; date: string }> | null;
+        owner?: string | null;
+        set_name?: string | null;
+        stage?: string | null;
+        ai_metadata?: Record<string, unknown> | null;
+      }
+    ) => {
+      if (!user?.id) throw new Error('User must be logged in');
+      const payload: Record<string, unknown> = {};
+      if ('notes' in updates) payload.notes = updates.notes ?? null;
+      if ('owner' in updates) payload.owner = updates.owner ?? null;
+      if ('set_name' in updates) payload.set_name = updates.set_name ?? null;
+      if ('stage' in updates) payload.stage = updates.stage ?? null;
+      if ('ai_metadata' in updates) payload.ai_metadata = updates.ai_metadata ?? null;
+      if (Object.keys(payload).length === 0) return;
+
+      const { error } = await supabase
+        .from('investor_personalization')
+        .update(payload)
+        .eq('investor_id', investorId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error('Error updating investor personalization:', error);
+        throw new Error(error.message || 'Failed to update investor');
+      }
+
+      setInvestorToView((prev) =>
+        prev?.id === investorId ? { ...prev, ...payload } : prev
+      );
+      refresh();
+    },
+    [user?.id, refresh]
+  );
+
+  const handleAnalyze = useCallback(
+    async (investorId: string, investorName?: string) => {
+      setAnalyzingId(investorId);
+      const result = await fetchInvestorAnalyze(investorId);
+      setAnalyzingId(null);
+      if (result?.error) {
+        if (result.errorCode === 'INSUFFICIENT_CREDITS') {
+          setInsufficientCreditsModalOpen(true);
+        } else {
+          setToastMessage(result.error);
+          setToastVisible(true);
+        }
+      } else {
+        const name = investorName?.trim() || 'Investor';
+        const investorFit = result?.investor_fit ?? null;
+        const reason = result?.reason ?? null;
+
+        // Update card immediately with investor_fit and reason
+        setPendingAnalyzeResults((prev) => ({
+          ...prev,
+          [investorId]: { investor_fit: investorFit, reason },
+        }));
+
+        if (investorFit === true) {
+          setShowCelebration(true);
+          setToastMessage(`${name} is a strong fit for your company`);
+          setTimeout(() => setShowCelebration(false), 3500);
+        } else {
+          setToastMessage('Investor analyzed successfully.');
+        }
+        setToastVisible(true);
+        refresh();
+
+        // If good fit or null, fetch full investor and auto-open drawer
+        if (investorFit === true || investorFit === null) {
+          const fullInvestor = await fetchInvestorById(investorId, {
+            type: filters.type,
+            mode: filters.mode,
+          });
+          if (fullInvestor) {
+            setInvestorToView({
+              ...fullInvestor,
+              has_personalization: true,
+              ai_metadata: {
+                ...fullInvestor.ai_metadata,
+                investor_fit: investorFit,
+                reason,
+              },
+            });
+            setDrawerOpen(true);
+          }
+        }
+
+        // Clear pending result after a short delay (refresh will have updated data)
+        setTimeout(() => {
+          setPendingAnalyzeResults((prev) => {
+            const next = { ...prev };
+            delete next[investorId];
+            return next;
+          });
+        }, 2000);
+      }
+    },
+    [refresh, filters.type, filters.mode]
+  );
+
+  // Debounced search
   useEffect(() => {
-    setLocalSearchInput(searchQuery);
-  }, [searchQuery]);
-
-  const debouncedSearch = useCallback((query: string) => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    if (query.length === 0) {
-      setSearchQuery('');
-      return;
-    }
-    searchTimeoutRef.current = setTimeout(() => setSearchQuery(query.trim()), 400);
-  }, [setSearchQuery]);
-
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const q = e.target.value;
-    setLocalSearchInput(q);
-    debouncedSearch(q);
-  };
+    searchTimeoutRef.current = setTimeout(() => {
+      setFilters((prev) => ({ ...prev, name: localSearchInput.trim() }));
+    }, 400);
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [localSearchInput]);
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -206,7 +436,7 @@ function InvestorsContent() {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = null;
       }
-      setSearchQuery(localSearchInput.trim());
+      setFilters((prev) => ({ ...prev, name: localSearchInput.trim() }));
     }
   };
 
@@ -216,208 +446,80 @@ function InvestorsContent() {
       searchTimeoutRef.current = null;
     }
     setLocalSearchInput('');
-    setSearchQuery('');
+    setFilters((prev) => ({ ...prev, name: '' }));
   };
 
-  useEffect(() => {
-    return () => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    };
+  const updateFilter = useCallback(<K extends keyof InvestorSearchFilters>(
+    key: K,
+    value: InvestorSearchFilters[K]
+  ) => {
+    setFilters((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return [...DEFAULT_COLUMN_ORDER];
-    const saved = localStorage.getItem(COLUMN_ORDER_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as string[];
-        return parsed.length ? parsed : [...DEFAULT_COLUMN_ORDER];
-      } catch {
-        return [...DEFAULT_COLUMN_ORDER];
-      }
-    }
-    return [...DEFAULT_COLUMN_ORDER];
-  });
-
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set(DEFAULT_COLUMN_ORDER);
-    const saved = localStorage.getItem(COLUMN_VISIBILITY_KEY);
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as string[];
-        return new Set(parsed.length ? parsed : DEFAULT_COLUMN_ORDER);
-      } catch {
-        return new Set(DEFAULT_COLUMN_ORDER);
-      }
-    }
-    return new Set(DEFAULT_COLUMN_ORDER);
-  });
-
-  // Apply column_settings from API (investors keys) once loaded
-  useEffect(() => {
-    if (!columnSettingsFromApi) return;
-    const saved = columnSettingsFromApi;
-    if (Array.isArray(saved.investorsColumnOrder) && saved.investorsColumnOrder.length > 0) {
-      const merged = [...saved.investorsColumnOrder];
-      DEFAULT_COLUMN_ORDER.forEach((col) => {
-        if (!merged.includes(col)) merged.push(col);
-      });
-      setColumnOrder(merged);
-    }
-    if (Array.isArray(saved.investorsVisibleColumns) && saved.investorsVisibleColumns.length > 0) {
-      const visibleSet = new Set(saved.investorsVisibleColumns);
-      DEFAULT_COLUMN_ORDER.forEach((col) => visibleSet.add(col));
-      setVisibleColumns(visibleSet);
-    }
-    setColumnSettingsFromApi(null);
-  }, [columnSettingsFromApi]);
-
-  const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {
-    if (typeof window === 'undefined') return 'table';
-    const saved = localStorage.getItem(VIEW_MODE_KEY);
-    return saved === 'list' ? 'list' : 'table';
-  });
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') localStorage.setItem(COLUMN_ORDER_KEY, JSON.stringify(columnOrder));
-  }, [columnOrder]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') localStorage.setItem(COLUMN_VISIBILITY_KEY, JSON.stringify(Array.from(visibleColumns)));
-  }, [visibleColumns]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') localStorage.setItem(VIEW_MODE_KEY, viewMode);
-  }, [viewMode]);
-
-  const orderedVisibleColumns = useMemo(
-    () => columnOrder.filter((col) => visibleColumns.has(col)),
-    [columnOrder, visibleColumns]
-  );
-
-  const getCellValue = useCallback((investor: Investor, columnKey: string): string => {
-    switch (columnKey) {
-      case 'name':
-        return investor.name || '-';
-      case 'role':
-        return investor.role || '-';
-      case 'hq_state':
-        return investor.hq_state || '-';
-      case 'hq_country':
-        return investor.hq_country || '-';
-      case 'investor_type':
-        return Array.isArray(investor.investor_type) ? investor.investor_type.join(', ') : '-';
-      case 'fund_size_usd':
-        return formatCurrency(investor.fund_size_usd);
-      case 'check_size_min_usd':
-        return formatCurrency(investor.check_size_min_usd);
-      case 'check_size_max_usd':
-        return formatCurrency(investor.check_size_max_usd);
-      case 'investment_stages':
-        return Array.isArray(investor.investment_stages) ? investor.investment_stages.join(', ') : '-';
-      case 'investment_industries':
-        return Array.isArray(investor.investment_industries) ? investor.investment_industries.join(', ') : '-';
-      case 'investment_geographies':
-        return Array.isArray(investor.investment_geographies) ? investor.investment_geographies.join(', ') : '-';
-      case 'investment_thesis':
-        return investor.investment_thesis || '-';
-      default:
-        return '-';
-    }
-  }, []);
-
-  const handleCellClick = useCallback(
-    async (investor: Investor, columnKey: string) => {
-      const value = getCellValue(investor, columnKey);
-      if (value && value !== '-') {
-        try {
-          await copyToClipboard(value);
-          setToastMessage(`${COLUMN_LABELS[columnKey]} copied to clipboard`);
-          setToastVisible(true);
-        } catch {
-          setToastMessage('Failed to copy to clipboard');
-          setToastVisible(true);
-        }
-      }
-    },
-    [getCellValue]
-  );
-
-  const toggleColumn = (column: string) => {
-    setVisibleColumns((prev) => {
-      const next = new Set(prev);
-      if (next.has(column)) next.delete(column);
-      else next.add(column);
-      return next;
+  const toggleArrayFilter = useCallback((
+    key: 'investor_type' | 'investment_stages' | 'investment_industries' | 'investment_geographies' | 'reviewed_stage' | 'set' | 'owner',
+    item: string
+  ) => {
+    setFilters((prev) => {
+      const arr = prev[key];
+      const next = arr.includes(item) ? arr.filter((x) => x !== item) : [...arr, item];
+      return { ...prev, [key]: next };
     });
-  };
+  }, []);
 
-  const persistColumnSettings = useCallback(async () => {
-    if (!user?.id) return;
-    const { data: existing } = await supabase
-      .from('user_settings')
-      .select('personalization, owners, email_settings, onboarding, column_settings')
-      .eq('id', user.id)
-      .single();
-    let existingColumnSettings: Record<string, unknown> = {};
-    const raw = existing?.column_settings;
-    if (raw != null) {
-      if (typeof raw === 'string') {
-        try {
-          existingColumnSettings = JSON.parse(raw) as Record<string, unknown>;
-        } catch {
-          /* keep {} */
-        }
-      } else if (typeof raw === 'object' && !Array.isArray(raw)) {
-        existingColumnSettings = raw as Record<string, unknown>;
+  const toggleInvestorFitFilter = useCallback((value: boolean | null) => {
+    setFilters((prev) => {
+      const arr = prev.investor_fit;
+      const has = arr.some((v) => v === value);
+      const next = has ? arr.filter((v) => v !== value) : [...arr, value];
+      return { ...prev, investor_fit: next };
+    });
+  }, []);
+
+  const buildReportContent = () => {
+    const parts: string[] = [];
+    if (filters.name) parts.push(`Search: ${filters.name}`);
+    if (filters.investment_stages.length) parts.push(`Stage: ${filters.investment_stages.join(', ')}`);
+    if (filters.investment_industries.length) parts.push(`Industry: ${filters.investment_industries.join(', ')}`);
+    if (filters.investment_geographies.length) parts.push(`Geography: ${filters.investment_geographies.join(', ')}`);
+    if (filters.hq_country) parts.push(`Country: ${filters.hq_country}`);
+    if (filters.mode === 'reviewed') {
+      if (filters.reviewed_stage.length) parts.push(`Pipeline Stage: ${filters.reviewed_stage.join(', ')}`);
+      if (filters.set.length) parts.push(`Sets: ${filters.set.join(', ')}`);
+      if (filters.owner.length) parts.push(`Owners: ${filters.owner.join(', ')}`);
+      if (filters.investor_fit.length) {
+        const labels = filters.investor_fit.map((v) =>
+          v === true ? 'Strong Fit' : v === false ? 'Weak Fit' : 'Unclear Fit'
+        );
+        parts.push(`Investor Fit: ${labels.join(', ')}`);
       }
     }
-    const payload = {
-      id: user.id,
-      personalization: existing?.personalization ?? null,
-      owners: existing?.owners ?? null,
-      email_settings: existing?.email_settings ?? null,
-      onboarding: existing?.onboarding ?? null,
-      column_settings: {
-        ...existingColumnSettings,
-        investorsColumnOrder: columnOrder,
-        investorsVisibleColumns: Array.from(visibleColumns),
+    return parts.length ? parts.join('\n') : 'No search terms or filters applied';
+  };
+
+  // Infinite scroll observer
+  useEffect(() => {
+    if (!hasMore || loading) return;
+    const el = loadMoreRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMore();
       },
-    };
-    const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
-    if (error) throw error;
-  }, [user?.id, columnOrder, visibleColumns]);
+      { rootMargin: '100px', threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasMore, loading, loadMore]);
 
-  const handlePageChange = useCallback(
-    (page: number) => {
-      const direction = page > currentPage ? 'next' : 'prev';
-      setPendingPageDirection(direction);
-      setCurrentPage(page);
+  const handleDrawerPageChange = useCallback(
+    (newPage: number) => {
+      if (newPage > page && hasMore && !loading) {
+        loadMore();
+      }
     },
-    [currentPage, setCurrentPage]
+    [page, hasMore, loading, loadMore]
   );
-
-  const toggleStage = (stage: string) => {
-    setStageFilter(
-      stageFilter.includes(stage) ? stageFilter.filter((s) => s !== stage) : [...stageFilter, stage]
-    );
-  };
-
-  const toggleIndustry = (industry: string) => {
-    setIndustryFilter(
-      industryFilter.includes(industry)
-        ? industryFilter.filter((i) => i !== industry)
-        : [...industryFilter, industry]
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="p-8 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500" />
-      </div>
-    );
-  }
 
   return (
     <div className="p-4 md:p-8 max-w-full mx-auto">
@@ -426,372 +528,338 @@ function InvestorsContent() {
           <Handshake className="w-6 h-6 md:w-8 md:h-8" />
           Investors
         </h1>
-        <div className="flex flex-wrap items-center gap-2 md:gap-3">
-          <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
-            <button
-              onClick={() => setViewMode('table')}
-              className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center ${
-                viewMode === 'table' ? 'text-white bg-indigo-600 hover:bg-indigo-700' : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Table View"
-            >
-              <Table className="w-4 h-4" />
-            </button>
-            <div className="h-6 w-px bg-gray-300" />
-            <button
-              onClick={() => setViewMode('list')}
-              className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center ${
-                viewMode === 'list' ? 'text-white bg-indigo-600 hover:bg-indigo-700' : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="List View"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
+        {/* All / Reviewed toggle */}
+        <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white self-start">
           <button
-            onClick={() => setColumnFilterOpen(!columnFilterOpen)}
-            className="inline-flex items-center px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+            onClick={() => updateFilter('mode', 'global')}
+            className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center gap-1.5 text-sm font-medium ${
+              filters.mode === 'global'
+                ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="All investors"
           >
-            <Filter className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Manage Columns</span>
-            <span className="sm:hidden">Columns</span>
+            <Globe className="w-4 h-4" />
+            All
+          </button>
+          <div className="h-6 w-px bg-gray-300" />
+          <button
+            onClick={() => updateFilter('mode', 'reviewed')}
+            className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center gap-1.5 text-sm font-medium ${
+              filters.mode === 'reviewed'
+                ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Reviewed investors only"
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            Reviewed
           </button>
         </div>
       </div>
 
-      <ManageInvestorColumnsDrawer
-        isOpen={columnFilterOpen}
-        onClose={() => setColumnFilterOpen(false)}
-        columnOrder={columnOrder}
-        visibleColumns={visibleColumns}
-        columnLabels={COLUMN_LABELS}
-        onColumnOrderChange={setColumnOrder}
-        onToggleColumn={toggleColumn}
-        onSave={async () => {
-          try {
-            await persistColumnSettings();
-            setToastMessage('Column settings saved.');
-            setToastVisible(true);
-            setColumnFilterOpen(false);
-          } catch (e) {
-            setToastMessage(e instanceof Error ? e.message : 'Failed to save column settings.');
-            setToastVisible(true);
-          }
-        }}
-      />
-
-      <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-        <div className="relative flex-1 max-w-full sm:max-w-md">
-          <input
-            type="text"
-            placeholder="Search investors..."
-            value={localSearchInput}
-            onChange={handleSearchChange}
-            onKeyDown={handleSearchKeyDown}
-            className="block w-full px-4 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-          />
-          {localSearchInput && (
-            <button
-              onClick={handleClearSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
-              aria-label="Clear search"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-        <button
-          onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
-          className="sm:hidden flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-        >
-          <Filter className="w-4 h-4" />
-          <span>Filters</span>
-          <ChevronDown className={`w-4 h-4 transition-transform ${mobileFiltersOpen ? 'rotate-180' : ''}`} />
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div
-        className={`mb-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4 ${
-          mobileFiltersOpen ? 'sm:flex' : 'hidden sm:flex'
-        }`}
-      >
-        <div className="relative">
-          <button
-            onClick={() => {
-              setStageDropdownOpen(!stageDropdownOpen);
-              setIndustryDropdownOpen(false);
-            }}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-          >
-            Stage {stageFilter.length ? `(${stageFilter.length})` : ''}
-            <ChevronDown className="w-4 h-4" />
-          </button>
-          {stageDropdownOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setStageDropdownOpen(false)} />
-              <div className="absolute left-0 top-full mt-1 z-20 w-48 py-2 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                {STAGE_OPTIONS.map((s) => (
-                  <label
-                    key={s}
-                    className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={stageFilter.includes(s)}
-                      onChange={() => toggleStage(s)}
-                      className="mr-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-sm text-gray-700">{s}</span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <div className="relative">
-          <button
-            onClick={() => {
-              setIndustryDropdownOpen(!industryDropdownOpen);
-              setStageDropdownOpen(false);
-            }}
-            className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-          >
-            Industry {industryFilter.length ? `(${industryFilter.length})` : ''}
-            <ChevronDown className="w-4 h-4" />
-          </button>
-          {industryDropdownOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setIndustryDropdownOpen(false)} />
-              <div className="absolute left-0 top-full mt-1 z-20 w-48 py-2 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
-                {INDUSTRY_OPTIONS.map((i) => (
-                  <label
-                    key={i}
-                    className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={industryFilter.includes(i)}
-                      onChange={() => toggleIndustry(i)}
-                      className="mr-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span className="text-sm text-gray-700">{i}</span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-        <select
-          value={countryFilter || 'all'}
-          onChange={(e) => setCountryFilter(e.target.value === 'all' ? null : e.target.value)}
-          className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-        >
-          <option value="all">All Countries</option>
-          {COUNTRY_OPTIONS.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {investors.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-8 md:p-12 text-center">
-          <Handshake className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-sm md:text-base text-gray-500 mb-4">
-            {searchQuery || stageFilter.length || industryFilter.length || countryFilter
-              ? 'No investors found matching your filters.'
-              : 'No investors found.'}
-          </p>
-        </div>
-      ) : viewMode === 'list' ? (
-        <div className="space-y-4">
-          {investors.map((investor) => (
-            <div
-              key={investor.id}
-              className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:bg-gray-50 transition-colors"
-              onClick={() => {
-                setInvestorToView(investor);
-                setDrawerOpen(true);
-              }}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 className="font-semibold text-gray-900">{investor.name}</h3>
-                  {investor.role && (
-                    <p className="text-sm text-gray-600 mt-0.5">{investor.role}</p>
-                  )}
-                  {(investor.hq_state || investor.hq_country) && (
-                    <p className="text-sm text-gray-500 mt-1">
-                      {[investor.hq_state, investor.hq_country].filter(Boolean).join(', ')}
-                    </p>
-                  )}
-                </div>
+      {/* Search form */}
+      <div className="mb-6 space-y-4">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-1 gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search by name, domain, or LinkedIn..."
+                value={localSearchInput}
+                onChange={(e) => setLocalSearchInput(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+              />
+              {localSearchInput && (
                 <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setInvestorToView(investor);
-                    setDrawerOpen(true);
-                  }}
-                  className="p-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100"
-                  title="View Details"
+                  onClick={handleClearSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600"
+                  aria-label="Clear search"
                 >
-                  <Eye className="w-4 h-4" />
+                  <X className="w-4 h-4" />
                 </button>
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {Array.isArray(investor.investment_stages) &&
-                  investor.investment_stages.slice(0, 3).map((s) => (
-                    <span
-                      key={s}
-                      className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
-                    >
-                      {s}
-                    </span>
-                  ))}
-                {formatCurrency(investor.fund_size_usd) !== '-' && (
-                  <span className="text-xs text-gray-500">{formatCurrency(investor.fund_size_usd)}</span>
-                )}
-              </div>
+              )}
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm relative">
-          {searchLoading && (
-            <div className="absolute inset-0 bg-white/75 flex items-center justify-center z-10">
-              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" />
-            </div>
-          )}
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  {orderedVisibleColumns.map((col) => (
-                    <th
-                      key={col}
-                      className="px-3 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                    >
-                      {COLUMN_LABELS[col] || col}
-                    </th>
-                  ))}
-                  <th className="px-3 md:px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {investors.map((investor) => (
-                  <tr
-                    key={investor.id}
-                    className="hover:bg-gray-50 cursor-pointer"
-                    onClick={(e) => {
-                      if (e.ctrlKey || e.metaKey) {
-                        setInvestorToView(investor);
-                        setDrawerOpen(true);
-                      }
-                    }}
-                  >
-                    {orderedVisibleColumns.map((col) => (
-                      <td
-                        key={col}
-                        className="px-3 md:px-6 py-4 text-sm text-gray-900 max-w-xs truncate"
-                        title={getCellValue(investor, col)}
-                        onClick={(e) => {
-                          if (!(e.ctrlKey || e.metaKey)) {
-                            e.stopPropagation();
-                            handleCellClick(investor, col);
-                          }
-                        }}
-                      >
-                        {getCellValue(investor, col)}
-                      </td>
-                    ))}
-                    <td className="px-3 md:px-6 py-4 whitespace-nowrap text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setInvestorToView(investor);
-                          setDrawerOpen(true);
-                        }}
-                        className="inline-flex items-center px-2 md:px-3 py-1.5 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                        title="View Details"
-                      >
-                        <Eye className="w-3 h-3 md:w-4 md:h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <select
+              value={filters.type}
+              onChange={(e) => {
+                const newType = e.target.value as InvestorTypeFilter;
+                setFilters((prev) => ({
+                  ...prev,
+                  type: newType,
+                  role: newType === 'firm' ? null : prev.role,
+                }));
+              }}
+              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
+            >
+              <option value="firm">Firm</option>
+              <option value="person">Person</option>
+            </select>
           </div>
+          <button
+            onClick={() => setFiltersExpanded(!filtersExpanded)}
+            className={`inline-flex items-center gap-2 px-4 py-2 border rounded-md text-sm font-medium ${
+              filtersExpanded
+                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+            }`}
+          >
+            <Filter className="w-4 h-4" />
+            Filters
+            <ChevronDown className={`w-4 h-4 transition-transform ${filtersExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {/* Expanded filters */}
+        {filtersExpanded && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <MultiSelectFilter
+                label="Investor type"
+                options={INVESTOR_TYPE_OPTIONS}
+                selected={filters.investor_type}
+                onToggle={(item) => toggleArrayFilter('investor_type', item)}
+              />
+              <MultiSelectFilter
+                label="Stages"
+                options={STAGE_OPTIONS}
+                selected={filters.investment_stages}
+                onToggle={(item) => toggleArrayFilter('investment_stages', item)}
+                formatLabel={formatKebabLabel}
+              />
+              <MultiSelectFilter
+                label="Industries"
+                options={INDUSTRY_OPTIONS}
+                selected={filters.investment_industries}
+                onToggle={(item) => toggleArrayFilter('investment_industries', item)}
+                formatLabel={formatKebabLabel}
+              />
+              <MultiSelectFilter
+                label="Geographies"
+                options={GEOGRAPHY_OPTIONS}
+                selected={filters.investment_geographies}
+                onToggle={(item) => toggleArrayFilter('investment_geographies', item)}
+              />
+              {filters.type === 'person' && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
+                  <select
+                    value={filters.role ?? ''}
+                    onChange={(e) => updateFilter('role', e.target.value || null)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="">All roles</option>
+                    {ROLE_OPTIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <NumericRangeInput
+                label="Fund size (USD) min"
+                value={filters.fund_size_min}
+                onChange={(v) => updateFilter('fund_size_min', v)}
+                placeholder="e.g. 1000000"
+              />
+              <NumericRangeInput
+                label="Fund size (USD) max"
+                value={filters.fund_size_max}
+                onChange={(v) => updateFilter('fund_size_max', v)}
+                placeholder="e.g. 100000000"
+              />
+              <NumericRangeInput
+                label="Check size (USD) min"
+                value={filters.check_size_min}
+                onChange={(v) => updateFilter('check_size_min', v)}
+                placeholder="e.g. 100000"
+              />
+              <NumericRangeInput
+                label="Check size (USD) max"
+                value={filters.check_size_max}
+                onChange={(v) => updateFilter('check_size_max', v)}
+                placeholder="e.g. 5000000"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">HQ Country</label>
+                <input
+                  type="text"
+                  placeholder="e.g. US, India, United States"
+                  value={filters.hq_country ?? ''}
+                  onChange={(e) => updateFilter('hq_country', e.target.value.trim() || null)}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">HQ State / Region</label>
+                <input
+                  type="text"
+                  placeholder="e.g. US-CA, Tamil Nadu, California"
+                  value={filters.hq_state ?? ''}
+                  onChange={(e) => updateFilter('hq_state', e.target.value.trim() || null)}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-4 items-center">
+              <ToggleFilter
+                label="Active"
+                value={filters.active}
+                onChange={(v) => updateFilter('active', v)}
+              />
+              <ToggleFilter
+                label="Leads round"
+                value={filters.leads_round}
+                onChange={(v) => updateFilter('leads_round', v)}
+              />
+            </div>
+            {/* Reviewed tab only: Stage, Sets, Owners, Investor Fit */}
+            {filters.mode === 'reviewed' && (
+              <div className="pt-4 border-t border-gray-200">
+                <p className="text-xs font-medium text-gray-500 mb-3">Pipeline Filters</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <MultiSelectFilter
+                    label="Stage"
+                    options={REVIEWED_STAGE_OPTIONS}
+                    selected={filters.reviewed_stage}
+                    onToggle={(item) => toggleArrayFilter('reviewed_stage', item)}
+                  />
+                  <InvestorFitFilter
+                    options={INVESTOR_FIT_OPTIONS}
+                    selected={filters.investor_fit}
+                    onToggle={toggleInvestorFitFilter}
+                  />
+                  <MultiSelectFilter
+                    label="Sets"
+                    options={investorSets}
+                    selected={filters.set}
+                    onToggle={(item) => toggleArrayFilter('set', item)}
+                  />
+                  <MultiSelectFilter
+                    label="Owners"
+                    options={availableOwners}
+                    selected={filters.owner}
+                    onToggle={(item) => toggleArrayFilter('owner', item)}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Error state */}
+      {error && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {error.message}
         </div>
       )}
 
-      {totalPages > 1 && (
-        <div className="bg-white border border-gray-200 rounded-lg shadow-sm mt-4">
-          <div className="px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-            <div className="flex-1 flex justify-between sm:hidden">
-              <button
-                onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                disabled={currentPage === 1}
-                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                disabled={currentPage === totalPages}
-                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Next
-              </button>
-            </div>
-            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-              <p className="text-sm text-gray-700">
-                Showing{' '}
-                <span className="font-medium">{(currentPage - 1) * pageSize + 1}</span> to{' '}
-                <span className="font-medium">{Math.min(currentPage * pageSize, totalCount)}</span> of{' '}
-                <span className="font-medium">{totalCount}</span> results
-              </p>
-              <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
-                <button
-                  onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-                  disabled={currentPage === 1}
-                  className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let pageNum: number;
-                  if (totalPages <= 5) pageNum = i + 1;
-                  else if (currentPage <= 3) pageNum = i + 1;
-                  else if (currentPage >= totalPages - 2) pageNum = totalPages - 4 + i;
-                  else pageNum = currentPage - 2 + i;
-                  return (
-                    <button
-                      key={pageNum}
-                      onClick={() => setCurrentPage(pageNum)}
-                      className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
-                        currentPage === pageNum
-                          ? 'z-10 bg-indigo-50 border-indigo-500 text-indigo-600'
-                          : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
-                      }`}
+      {/* Loading state */}
+      {loading && data.length === 0 ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500" />
+        </div>
+      ) : data.length === 0 ? (
+        <div className="bg-white border border-gray-200 rounded-lg p-8 md:p-12 text-center">
+          <Handshake className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
+          <p className="text-sm md:text-base text-gray-500 mb-4">
+            {filters.name || filters.investment_stages.length || filters.investment_industries.length ||
+             filters.investment_geographies.length || filters.investor_type.length ||
+             filters.reviewed_stage.length || filters.set.length || filters.owner.length || filters.investor_fit.length
+              ? 'No investors found matching your filters.'
+              : 'No investors found. Try adjusting your search or filters.'}
+          </p>
+          <p className="text-sm text-gray-600 mb-3">Spot a missing investor? Tell us and we&apos;ll add them for free.</p>
+          <button
+            onClick={() => setReportMissingModalOpen(true)}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700"
+          >
+            Report Missing Investors
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="relative">
+            {loading && data.length > 0 && (
+              <div className="absolute inset-0 bg-white/60 flex items-center justify-center z-10 rounded-lg">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" />
+              </div>
+            )}
+            <div className="space-y-3">
+              {data.map((investor) => (
+                <InvestorResultCard
+                  key={investor.id}
+                  investor={investor}
+                  pendingAnalyze={pendingAnalyzeResults[investor.id]}
+                  onView={() => {
+                    setInvestorToView(investor);
+                    setDrawerOpen(true);
+                  }}
+                onAnalyze={() => handleAnalyze(investor.id, investor.name)}
+                isAnalyzing={analyzingId === investor.id}
+                />
+              ))}
+              {/* Free plan: skeletons + Upgrade button below the 5 results */}
+              {isFreePlan && data.length > 0 && (
+                <div className="relative pt-2">
+                  <div className="space-y-3">
+                    {[1, 2, 3].map((i) => (
+                      <InvestorCardSkeleton key={i} />
+                    ))}
+                  </div>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg">
+                    <p className="text-sm text-gray-600 text-center">
+                    Upgrade your plan to connect with the right investors and complete your raise.
+                    </p>
+                    <a
+                      href={CALENDLY_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
                     >
-                      {pageNum}
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-                  disabled={currentPage === totalPages}
-                  className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-              </nav>
+                      Upgrade Plan
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
+          </div>
+
+          {/* Infinite scroll sentinel - hide for free plan (no load more) */}
+          {!isFreePlan && hasMore && <div ref={loadMoreRef} className="h-4" />}
+
+          {/* Pagination fallback - show load more button on mobile (hide for free plan) */}
+          {!isFreePlan && hasMore && (
+            <div className="mt-4 flex justify-center sm:hidden">
+              <button
+                onClick={() => loadMore()}
+                disabled={loading}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Load more'}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {showCelebration && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none">
+          <div className="w-64 h-64 md:w-80 md:h-80">
+            <DotLottieReact
+              src="/celebrations.lottie"
+              loop={false}
+              autoplay={true}
+              className="w-full h-full"
+            />
           </div>
         </div>
       )}
@@ -805,12 +873,361 @@ function InvestorsContent() {
           setDrawerOpen(false);
           setInvestorToView(null);
         }}
-        investors={investors}
-        currentPage={currentPage}
-        totalPages={totalPages}
-        onPageChange={handlePageChange}
-        onInvestorChange={(inv) => setInvestorToView(inv)}
+        investors={data}
+        currentPage={1}
+        totalPages={isFreePlan ? 1 : hasMore ? 2 : 1}
+        onPageChange={handleDrawerPageChange}
+        onInvestorChange={(inv) => setInvestorToView(inv as InvestorSearchResult)}
+        onAnalyze={(id) => handleAnalyze(id, investorToView?.name)}
+        isAnalyzing={investorToView ? analyzingId === investorToView.id : false}
+        updateInvestor={updateInvestor}
+        stageOptions={REVIEWED_STAGE_OPTIONS}
+        setOptions={investorSets}
+        ownerOptions={availableOwners}
       />
+
+      <ReportMissingInvestorsModal
+        isOpen={reportMissingModalOpen}
+        onClose={() => setReportMissingModalOpen(false)}
+        initialContent={buildReportContent()}
+        onSuccess={() => {
+          setToastMessage("Report submitted successfully. We'll add these investors for you.");
+          setToastVisible(true);
+        }}
+      />
+
+      <InsufficientCreditsModal
+        isOpen={insufficientCreditsModalOpen}
+        onClose={() => setInsufficientCreditsModalOpen(false)}
+      />
+    </div>
+  );
+}
+
+function InvestorFitFilter({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: { value: boolean | null; label: string }[];
+  selected: (boolean | null)[];
+  onToggle: (value: boolean | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const isSelected = (v: boolean | null) => selected.some((s) => s === v);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+      >
+        <span>
+          Investor Fit {selected.length ? `(${selected.length})` : ''}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full mt-1 z-20 w-full min-w-[200px] bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden">
+            <div className="max-h-52 overflow-y-auto py-1">
+              {options.map((opt) => (
+                <label
+                  key={String(opt.value)}
+                  className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSelected(opt.value)}
+                    onChange={() => onToggle(opt.value)}
+                    className="mr-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="text-sm text-gray-700">{opt.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onToggle,
+  formatLabel = (v: string) => v,
+}: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onToggle: (item: string) => void;
+  formatLabel?: (value: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const searchLower = search.trim().toLowerCase();
+  const filteredOptions = searchLower
+    ? options.filter(
+        (opt) =>
+          opt.toLowerCase().includes(searchLower) ||
+          formatLabel(opt).toLowerCase().includes(searchLower)
+      )
+    : options;
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => {
+          setOpen(!open);
+          if (open) setSearch('');
+        }}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+      >
+        <span>
+          {label} {selected.length ? `(${selected.length})` : ''}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSearch(''); }} />
+          <div className="absolute left-0 top-full mt-1 z-20 w-full min-w-[200px] bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden">
+            <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+              <input
+                type="text"
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="block w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            <div className="max-h-52 overflow-y-auto py-1">
+              {filteredOptions.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-gray-500">No matches</p>
+              ) : (
+                filteredOptions.map((opt) => (
+                  <label
+                    key={opt}
+                    className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(opt)}
+                      onChange={() => onToggle(opt)}
+                      className="mr-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700">{formatLabel(opt)}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function NumericRangeInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: number | null;
+  onChange: (v: number | null) => void;
+  placeholder?: string;
+}) {
+  const [inputValue, setInputValue] = useState(value?.toString() ?? '');
+  useEffect(() => {
+    setInputValue(value?.toString() ?? '');
+  }, [value]);
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <input
+        type="text"
+        inputMode="numeric"
+        placeholder={placeholder}
+        value={inputValue}
+        onChange={(e) => {
+          setInputValue(e.target.value);
+          onChange(parseNumericInput(e.target.value));
+        }}
+        className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+      />
+    </div>
+  );
+}
+
+function ToggleFilter({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: boolean | null;
+  onChange: (v: boolean | null) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-sm font-medium text-gray-700">{label}</span>
+      <select
+        value={value === null ? 'all' : value ? 'yes' : 'no'}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange(v === 'all' ? null : v === 'yes');
+        }}
+        className="px-2 py-1 border border-gray-300 rounded text-sm"
+      >
+        <option value="all">All</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+    </div>
+  );
+}
+
+function InvestorCardSkeleton() {
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm opacity-60">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Skeleton className="h-8 w-8 rounded-md" />
+          <Skeleton className="h-8 w-8 rounded-md" />
+        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2">
+        <Skeleton className="h-5 w-16 rounded" />
+        <Skeleton className="h-5 w-20 rounded" />
+        <Skeleton className="h-5 w-14 rounded" />
+      </div>
+    </div>
+  );
+}
+
+function InvestorResultCard({
+  investor,
+  pendingAnalyze,
+  onView,
+  onAnalyze,
+  isAnalyzing,
+}: {
+  investor: InvestorSearchResult;
+  pendingAnalyze?: { investor_fit: boolean | null; reason: string | null };
+  onView: () => void;
+  onAnalyze?: (investorId: string) => void;
+  isAnalyzing?: boolean;
+}) {
+  const location = formatHqLocationShort(investor.hq_state, investor.hq_country);
+  const thesis = investor.investment_thesis?.trim();
+
+  // Merge ai_metadata with pending analyze result for immediate display
+  const aiMeta = investor.ai_metadata ?? {};
+  const investorFit =
+    pendingAnalyze?.investor_fit !== undefined
+      ? pendingAnalyze.investor_fit
+      : (aiMeta.investor_fit as boolean | null | undefined);
+  const reason =
+    pendingAnalyze?.reason ?? (typeof aiMeta.reason === 'string' ? aiMeta.reason : null);
+  const hasFitInfo =
+    typeof investorFit === 'boolean' || investorFit === null;
+  const hasReason = typeof reason === 'string' && reason.trim().length > 0;
+
+  return (
+    <div
+      className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:bg-gray-50 hover:border-gray-300 transition-colors"
+      onClick={onView}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-gray-900">{investor.name}</h3>
+          {investor.role && <p className="text-sm text-gray-600 mt-0.5">{investor.role}</p>}
+          {thesis && <p className="text-sm text-gray-600 mt-1 line-clamp-3 leading-relaxed">{thesis}</p>}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {investor.has_personalization && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+              <Check className="w-3 h-3" />
+              Reviewed
+            </span>
+          )}
+          {!investor.has_personalization && onAnalyze && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAnalyze(investor.id);
+              }}
+              disabled={isAnalyzing}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 flex-shrink-0"
+              title="Analyze with AI"
+            >
+              {isAnalyzing ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="w-3.5 h-3.5" />
+              )}
+              Analyze with AI
+            </button>
+          )}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onView();
+            }}
+            className="p-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100 flex-shrink-0"
+            title="View Details"
+          >
+            <Eye className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* investor_fit and reason - compact display like InvestorDetailsDrawer */}
+      {(hasFitInfo || hasReason) && (
+        <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
+          {hasFitInfo && (
+            <div className="flex items-center gap-2">
+              <span className="text-base" role="img" aria-label="fit">
+                {investorFit === true ? '😊' : investorFit === false ? '😕' : '😐'}
+              </span>
+              <span className="text-xs font-medium text-gray-700">
+                {investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : 'Unclear Fit'}
+              </span>
+            </div>
+          )}
+          {hasReason && (
+            <div className="p-2 rounded-md bg-indigo-50 border border-indigo-100">
+              <p className="text-xs text-gray-800 line-clamp-2 leading-relaxed">{reason.trim()}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2 items-center">
+        {location && <span className="text-sm text-gray-500">{location}</span>}
+        {Array.isArray(investor.investment_stages) &&
+          investor.investment_stages.slice(0, 3).map((s) => (
+            <span
+              key={s}
+              className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
+            >
+              {formatKebabLabel(s)}
+            </span>
+          ))}
+      </div>
     </div>
   );
 }

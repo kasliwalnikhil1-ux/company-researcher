@@ -148,6 +148,109 @@ export function extractDomain(input: string): string {
   }
 }
 
+/** Human-readable labels for onboarding coded values */
+const CAPITAL_RAISED_LABELS: Record<string, string> = {
+  none: 'No amount raised',
+  less_than_100k: 'Less than $100K',
+  '100k_500k': '$100K–$500K',
+  '500k_2m': '$500K–$2M',
+  '2m_10m': '$2M–$10M',
+  more_than_10m: 'More than $10M',
+};
+
+const TARGET_ROUND_LABELS: Record<string, string> = {
+  less_than_500k: 'Less than $500K',
+  '500k_2m': '$500K–$2M',
+  '2m_10m': '$2M–$10M',
+  more_than_10m: 'More than $10M',
+};
+
+export interface OnboardingDataForSummary {
+  step2?: { bio?: string; title?: string };
+  step4?: { capitalRaised?: string };
+  step5?: { companyName?: string; website?: string };
+  step6?: { sector?: string[] };
+  step7?: { stage?: string };
+  step8?: { hqCountry?: string };
+  step9?: { productDescription?: string };
+  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string };
+  step11?: { targetRoundSize?: string };
+}
+
+/**
+ * Formats onboarding data into a beautiful company pitch summary.
+ * Use for investor outreach, AI prompts, or display.
+ */
+export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | null | undefined): string {
+  if (!data) return '';
+
+  const parts: string[] = [];
+
+  // Product description (step9)
+  const productDesc = data.step9?.productDescription?.trim();
+  if (productDesc) {
+    parts.push(productDesc);
+  }
+
+  // Stage & target round (step7, step11)
+  const stage = data.step7?.stage?.trim();
+  const targetRound = data.step11?.targetRoundSize;
+  const targetRoundLabel = targetRound ? TARGET_ROUND_LABELS[targetRound] ?? targetRound : null;
+  if (stage || targetRoundLabel) {
+    const raiseLine = [
+      'They are raising',
+      stage ? `at ${stage} stage` : null,
+      targetRoundLabel ? `with a target round size of ${targetRoundLabel}` : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    if (raiseLine.trim()) parts.push(raiseLine + '.');
+  }
+
+  // Revenue status (step10)
+  const revenueStatus = data.step10?.revenueStatus;
+  const arr = data.step10?.arr;
+  if (revenueStatus === 'yes') {
+    parts.push('Current Revenue: Yes.');
+    if (Array.isArray(arr) && arr.length > 0) {
+      const arrLines = arr
+        .filter((e) => e && (e.amount || e.month || e.year))
+        .map((e) => `${e.month || ''} ${e.year || ''}: ${e.amount || '—'}`.trim())
+        .filter(Boolean);
+      if (arrLines.length > 0) {
+        parts.push(`ARR: ${arrLines.join('; ')}`);
+      }
+    }
+  } else {
+    parts.push('Current Revenue: No revenue yet.');
+  }
+
+  // HQ (step8)
+  const hq = data.step8?.hqCountry?.trim();
+  if (hq) {
+    parts.push(`Company has HQ in ${hq}.`);
+  }
+
+  // Capital raised (step4)
+  const capitalRaised = data.step4?.capitalRaised;
+  if (capitalRaised) {
+    const label = CAPITAL_RAISED_LABELS[capitalRaised] ?? capitalRaised;
+    parts.push(`They have raised ${label}.`);
+  }
+
+  // Founders (step2)
+  const bio = data.step2?.bio?.trim();
+  if (bio) {
+    parts.push(`Founders: ${bio}`);
+  }
+
+  const summary = parts.filter(Boolean).join(' ');
+  // Debug: log formatted summary and raw data
+  console.log('[formatOnboardingCompanySummary] Formatted output:\n', summary);
+  console.log('[formatOnboardingCompanySummary] Raw data:', JSON.stringify(data, null, 2));
+  return summary;
+}
+
 /**
  * Copies text to clipboard with fallback support
  * Uses the modern Clipboard API if available, otherwise falls back to the legacy method

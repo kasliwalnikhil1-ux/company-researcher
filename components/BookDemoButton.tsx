@@ -1,42 +1,16 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { supabase } from '@/utils/supabase/client';
+import { useOwner } from '@/contexts/OwnerContext';
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
 
-const CALENDLY_URL = 'https://calendly.com/founders-capitalxai/20min';
+export const CALENDLY_URL = 'https://calendly.com/founders-capitalxai/20min';
 
 export function BookDemoButton() {
   const { user } = useAuth();
-  const [plan, setPlan] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { isFreePlan, isLoading } = useOwner();
 
-  useEffect(() => {
-    if (!user?.id) {
-      setLoading(false);
-      return;
-    }
-    const fetchPlan = async () => {
-      try {
-        const { data } = await supabase
-          .from('user_settings')
-          .select('plan')
-          .eq('id', user.id)
-          .single();
-        setPlan(data?.plan ?? 'free');
-      } catch {
-        setPlan('free');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchPlan();
-  }, [user?.id]);
-
-  const isFreePlan = plan === 'free';
-
-  if (loading || !isFreePlan || !user) {
+  if (isLoading || !isFreePlan || !user) {
     return null;
   }
 

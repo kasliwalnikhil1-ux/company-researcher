@@ -6,7 +6,7 @@ import QualificationDisplay from './qualification/QualificationDisplay';
 import InstagramProfileDisplay from './qualification/InstagramProfileDisplay';
 import Image from "next/image";
 import Link from "next/link";
-import { fetchCompanyMap, fetchInstagramProfile, sendSlackNotification } from "../lib/api";
+import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, cleanInvestorInput, sendSlackNotification } from "../lib/api";
 import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
 import ConfirmationModal from './ui/ConfirmationModal';
@@ -47,7 +47,12 @@ const extractDomain = (url: string): string | null => {
 
 // Clean URL to base domain with protocol (remove paths, query params, etc.)
 // For Instagram mode, preserves the full URL including username path
-const cleanUrl = (url: string, mode: 'domain' | 'instagram' = 'domain'): string | null => {
+// For investor mode, uses cleanInvestorInput (domain or LinkedIn)
+const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' = 'domain'): string | null => {
+  if (mode === 'investor') {
+    const { cleaned } = cleanInvestorInput(url);
+    return cleaned || null;
+  }
   if (!url) return null;
   try {
     // Remove any whitespace
@@ -108,8 +113,8 @@ export default function CompanyResearcher() {
     instagram?: { systemPrompt?: string; userMessage?: string };
   } | null>(null);
   
-  // Research mode: 'domain' or 'instagram'
-  const [researchMode, setResearchMode] = useState<'domain' | 'instagram'>('domain');
+  // Research mode: 'domain', 'instagram', or 'investor'
+  const [researchMode, setResearchMode] = useState<'domain' | 'instagram' | 'investor'>('domain');
 
   // Set name for batch processing
   const [setName, setSetName] = useState('');
@@ -133,6 +138,14 @@ export default function CompanyResearcher() {
         confidence_score?: number; // Optional
         product_types: string[] | null;
         sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
+      } | null;
+      investorResearchData: {
+        cleaned: string;
+        skipped?: boolean;
+        reason?: string;
+        summary?: { entity_type?: string; is_investor?: boolean; investor_types?: string[]; clean_name?: string };
+        links?: string[];
+        updated?: boolean;
       } | null;
     }
   }>({});
@@ -207,12 +220,13 @@ export default function CompanyResearcher() {
     return resultsByCompany[company] || {
       qualificationData: null,
       instagramProfileData: null,
-      instagramQualificationData: null
+      instagramQualificationData: null,
+      investorResearchData: null,
     };
   }, [resultsByCompany]); 
 
   // Get data for active company
-  const { qualificationData, instagramProfileData, instagramQualificationData } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
+  const { qualificationData, instagramProfileData, instagramQualificationData, investorResearchData } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
 
   // Prepare companies data for CSV export
   const companiesForExport = useMemo(() => {
@@ -259,20 +273,21 @@ export default function CompanyResearcher() {
 
   // Function to filter out invalid domains from input
   const filterInvalidDomains = useCallback((input: string): { filteredInput: string; removedDomains: string[] } => {
+    // Investor mode accepts domain or LinkedIn - no filtering
+    if (researchMode === 'investor') {
+      return { filteredInput: input, removedDomains: [] };
+    }
     const lines = input.split(/[,\n]/).map(line => line.trim()).filter(line => line.length > 0);
     const validLines: string[] = [];
     const removedDomains: string[] = [];
 
     lines.forEach(line => {
-      // Extract domain from URL
       const cleanedUrl = cleanUrl(line, researchMode);
       const domain = cleanedUrl ? extractDomain(cleanedUrl) : null;
 
       if (domain && INVALID_DOMAINS.some(invalidDomain => domain.toLowerCase().includes(invalidDomain.toLowerCase()))) {
-        // This is an invalid domain, add to removed list
         removedDomains.push(line);
       } else {
-        // This is valid, keep it
         validLines.push(line);
       }
     });
@@ -283,17 +298,31 @@ export default function CompanyResearcher() {
 
   // Parse company input into array of company names 
   const parseCompanyInput = useCallback((input: string): string[] => {
-    return input
-      .split(/[,\n]/) // Split by comma or newline
+    const lines = input
+      .split(/[,\n]/)
       .map(company => company.trim())
-      .filter(company => company.length > 0) // Remove empty entries
+      .filter(company => company.length > 0);
+
+    if (researchMode === 'investor') {
+      const result = lines
+        .map(line => {
+          const { cleaned } = cleanInvestorInput(line);
+          return cleaned || line;
+        })
+        .filter((company, index, self) =>
+          index === self.findIndex(c => c.toLowerCase() === company.toLowerCase())
+        );
+      console.log('[CompanyResearchHome] parseCompanyInput (investor):', { lines, result });
+      return result;
+    }
+
+    return lines
       .map(company => {
-        // Clean URL to base domain (or preserve full URL for Instagram mode)
         const cleaned = cleanUrl(company, researchMode);
-        return cleaned || company; // Fallback to original if cleaning fails
+        return cleaned || company;
       })
-      .filter((company, index, self) => 
-        index === self.findIndex(c => c.toLowerCase() === company.toLowerCase()) // Deduplicate case-insensitive
+      .filter((company, index, self) =>
+        index === self.findIndex(c => c.toLowerCase() === company.toLowerCase())
       );
   }, [researchMode]);
 
@@ -315,7 +344,8 @@ export default function CompanyResearcher() {
         [company]: {
           qualificationData: null,
           instagramProfileData: null,
-          instagramQualificationData: null
+          instagramQualificationData: null,
+          investorResearchData: null,
         }
       }));
       
@@ -435,6 +465,61 @@ export default function CompanyResearcher() {
           (slackError) => console.error('Failed to send Slack notification:', slackError)
         );
       }
+    } else if (researchMode === 'investor') {
+      // Investor research mode: domain or LinkedIn URL
+      console.log('[CompanyResearchHome] researchCompany (investor) starting:', company);
+      const { cleaned } = cleanInvestorInput(company);
+      if (!cleaned) {
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { form: `Invalid input: ${company}. Please provide a domain (e.g. boldcap.com) or LinkedIn URL.` }
+        }));
+        return;
+      }
+
+      setResultsByCompany(prev => ({
+        ...prev,
+        [company]: {
+          ...prev[company],
+          qualificationData: null,
+          instagramProfileData: null,
+          instagramQualificationData: null,
+          investorResearchData: { cleaned }
+        }
+      }));
+      setErrorsByCompany(prev => ({ ...prev, [company]: {} }));
+
+      try {
+        const data = await fetchInvestorResearch(cleaned, undefined);
+        console.log('[CompanyResearchHome] researchCompany (investor) API result:', { company: cleaned, data: data ? { ...data, links: data?.links?.length } : null });
+        if (data?.error) {
+          setErrorsByCompany(prev => ({
+            ...prev,
+            [company]: { investorResearch: data.error + (data.details ? `: ${data.details}` : '') }
+          }));
+          return;
+        }
+        setResultsByCompany(prev => ({
+          ...prev,
+          [company]: {
+            ...prev[company],
+            investorResearchData: {
+              cleaned: data?.cleaned || cleaned,
+              skipped: data?.skipped,
+              reason: data?.reason,
+              summary: data?.summary,
+              links: data?.links,
+              updated: data?.updated,
+            }
+          }
+        }));
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { investorResearch: msg }
+        }));
+      }
     } else {
       // Domain research mode (existing logic)
       const domainName = extractDomain(company);
@@ -452,7 +537,8 @@ export default function CompanyResearcher() {
         [company]: {
           qualificationData: null,
           instagramProfileData: null,
-          instagramQualificationData: null
+          instagramQualificationData: null,
+          investorResearchData: null,
         }
       }));
       
@@ -665,7 +751,7 @@ export default function CompanyResearcher() {
     useDualColumns: boolean,
     selectedColumns: { domain: string | null; instagram: string | null },
     selectedUrlColumn: string | null,
-    researchMode: 'domain' | 'instagram'
+    researchMode: 'domain' | 'instagram' | 'investor'
   ) => {
     const isInstagramUrl = (url: string): boolean => {
       if (!url || typeof url !== 'string') return false;
@@ -706,6 +792,14 @@ export default function CompanyResearcher() {
             instagramUrl = url;
             isProcessed = qualificationDataMap.has(url) || errorMap.has(url) || 
                          !!(row['Research Status'] && row['Research Status'].trim() !== '');
+          }
+        } else if (researchMode === 'investor') {
+          if (url && (url.includes('.') || url.toLowerCase().includes('linkedin'))) {
+            const { cleaned } = cleanInvestorInput(url);
+            if (cleaned) {
+              isProcessed = qualificationDataMap.has(cleaned) || errorMap.has(cleaned) ||
+                           !!(row['Research Status'] && row['Research Status'].trim() !== '');
+            }
           }
         } else {
           if (url) {
@@ -858,6 +952,29 @@ export default function CompanyResearcher() {
                 updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
               }
             }
+          } else if (researchMode === 'investor') {
+            if (url && (url.includes('.') || url.toLowerCase().includes('linkedin'))) {
+              const { cleaned } = cleanInvestorInput(url);
+              const investorData = cleaned ? qualificationDataMap.get(cleaned) : null;
+              const investorError = cleaned ? errorMap.get(cleaned) : null;
+              if (investorData && !investorData.error) {
+                updatedRow['Research Status'] = investorData.skipped ? 'skipped (exists)' : 'completed';
+                updatedRow['Cleaned URL'] = investorData.cleaned || cleaned;
+                if (investorData.summary) {
+                  updatedRow['Entity Type'] = investorData.summary.entity_type || '';
+                  updatedRow['Is Investor'] = investorData.summary.is_investor ? 'Yes' : 'No';
+                  updatedRow['Clean Name'] = investorData.summary.clean_name || '';
+                  updatedRow['Investor Types'] = investorData.summary.investor_types?.join(', ') || '';
+                }
+                if (investorData.links?.length) {
+                  updatedRow['Links'] = investorData.links.join('; ');
+                }
+              } else if (investorError) {
+                updatedRow['Research Status'] = investorError;
+              } else {
+                updatedRow['Research Status'] = 'Failed to fetch investor data';
+              }
+            }
           } else {
             const cleanedUrl = cleanUrl(url, researchMode);
             const domainNameValue = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
@@ -958,7 +1075,7 @@ export default function CompanyResearcher() {
     const CONCURRENCY_LIMIT = 10;
 
     // Helper function to save progress after each row is processed
-    const saveProgressAfterRow = (mode: 'domain' | 'instagram', identifier: string) => {
+    const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor', identifier: string) => {
       const processedCount = processedDomainIndices.length;
       if (shouldAutoSave(lastSavedAt, processedCount)) {
         // Merge data into rows for saving
@@ -1084,6 +1201,36 @@ export default function CompanyResearcher() {
           } else {
             // Single column mode
             const url = (selectedUrlColumn ? row[selectedUrlColumn]?.trim() : '') || '';
+            
+            if (mode === 'investor') {
+              if (!url || (!url.includes('.') && !url.toLowerCase().includes('linkedin'))) {
+                if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+                  updatedRow['Research Status'] = 'skipped (no valid domain or LinkedIn URL)';
+                }
+                return updatedRow;
+              }
+              const { cleaned } = cleanInvestorInput(url);
+              const investorData = cleaned ? qualificationDataMap.get(cleaned) : null;
+              const investorError = cleaned ? errorMap.get(cleaned) : null;
+              if (investorData && !investorData.error) {
+                updatedRow['Research Status'] = investorData.skipped ? 'skipped (exists)' : 'completed';
+                updatedRow['Cleaned URL'] = investorData.cleaned || cleaned;
+                if (investorData.summary) {
+                  updatedRow['Entity Type'] = investorData.summary.entity_type || '';
+                  updatedRow['Is Investor'] = investorData.summary.is_investor ? 'Yes' : 'No';
+                  updatedRow['Clean Name'] = investorData.summary.clean_name || '';
+                  updatedRow['Investor Types'] = investorData.summary.investor_types?.join(', ') || '';
+                }
+                if (investorData.links?.length) {
+                  updatedRow['Links'] = investorData.links.join('; ');
+                }
+              } else if (investorError) {
+                updatedRow['Research Status'] = investorError;
+              } else {
+                updatedRow['Research Status'] = 'Failed to fetch investor data';
+              }
+              return updatedRow;
+            }
             
             if (mode === 'instagram') {
               if (!url || !isInstagramUrl(url)) {
@@ -1484,12 +1631,17 @@ export default function CompanyResearcher() {
           }
         }
       });
-    } else {
-      csvData.rows.forEach(row => {
+        } else {
+          csvData.rows.forEach(row => {
         const url = row[selectedUrlColumn!]?.trim() || '';
         if (researchMode === 'instagram') {
           if (url && isInstagramUrl(url)) {
             allValidUrls.push(url);
+          }
+        } else if (researchMode === 'investor') {
+          if (url && (url.includes('.') || url.toLowerCase().includes('linkedin'))) {
+            const { cleaned } = cleanInvestorInput(url);
+            if (cleaned) allValidUrls.push(cleaned);
           }
         } else {
           if (url && url.includes('.')) {
@@ -1537,6 +1689,13 @@ export default function CompanyResearcher() {
           if (!url || !isInstagramUrl(url)) {
             return false;
           }
+        } else if (researchMode === 'investor') {
+          // Investor mode: include domain or LinkedIn URLs
+          if (!url || (!url.includes('.') && !url.toLowerCase().includes('linkedin'))) {
+            return false;
+          }
+          const { cleaned } = cleanInvestorInput(url);
+          if (!cleaned) return false;
         } else {
           // Domain mode: existing logic
           const classification = row['Classification']?.trim() || '';
@@ -1899,6 +2058,66 @@ export default function CompanyResearcher() {
           researchMode
         );
         
+        setIsProcessingCsv(false);
+        setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+        setShowConfirmationModal(true);
+        return;
+      }
+    } else if (researchMode === 'investor') {
+      // Investor mode: single column with domain or LinkedIn URLs
+      console.log('[CompanyResearchHome] processCsvRows investor mode:', { rowsToProcess: rowsToProcess.length, selectedUrlColumn });
+      if (!savedProgress) {
+        const uniqueCleaned = new Set<string>();
+        rowsToProcess.forEach(row => {
+          const url = row[selectedUrlColumn!]?.trim() || '';
+          if (url) {
+            const { cleaned } = cleanInvestorInput(url);
+            if (cleaned) uniqueCleaned.add(cleaned);
+          }
+        });
+        uniqueDomainsArray = Array.from(uniqueCleaned);
+        console.log('[CompanyResearchHome] processCsvRows investor unique URLs:', uniqueDomainsArray);
+      }
+
+      const investorUrlsToProcess = uniqueDomainsArray.slice(startFromIndex);
+      console.log('[CompanyResearchHome] processCsvRows investor batch:', { startFromIndex, toProcess: investorUrlsToProcess.length, total: uniqueDomainsArray.length });
+      await processInBatches(
+        investorUrlsToProcess,
+        async (cleanedUrl, batchIndex) => {
+          const actualIndex = startFromIndex + batchIndex;
+          try {
+            const data = await fetchInvestorResearch(cleanedUrl, undefined);
+            if (data?.error) {
+              errorMap.set(cleanedUrl, data.error + (data.details ? `: ${data.details}` : ''));
+            } else {
+              qualificationDataMap.set(cleanedUrl, data);
+            }
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            errorMap.set(cleanedUrl, msg);
+          }
+          processedDomainIndices.push(actualIndex);
+          saveProgressAfterRow('investor', cleanedUrl);
+          return cleanedUrl;
+        },
+        CONCURRENCY_LIMIT,
+        (processed, total) => {
+          setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+        }
+      );
+
+      if (shouldStopProcessingRef.current) {
+        const currentCsvData = csvDataRef.current || csvData;
+        generateProcessedAndPendingCsvs(
+          currentCsvData.rows,
+          currentCsvData.headers,
+          qualificationDataMap,
+          errorMap,
+          false,
+          { domain: null, instagram: null },
+          selectedUrlColumn || null,
+          researchMode
+        );
         setIsProcessingCsv(false);
         setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
         setShowConfirmationModal(true);
@@ -2366,7 +2585,8 @@ export default function CompanyResearcher() {
           newResults[displayUrl] = {
             qualificationData: domainQualificationData || null,
             instagramProfileData: profileDataWithoutQualification || null,
-            instagramQualificationData: instagramQualificationData || null
+            instagramQualificationData: instagramQualificationData || null,
+            investorResearchData: null,
           };
         }
       } else {
@@ -2384,7 +2604,26 @@ export default function CompanyResearcher() {
               newResults[url] = {
                 qualificationData: null,
                 instagramProfileData: profileDataWithoutQualification,
-                instagramQualificationData: instagramQualificationData
+                instagramQualificationData: instagramQualificationData,
+                investorResearchData: null,
+              };
+            }
+          } else if (researchMode === 'investor') {
+            const { cleaned } = cleanInvestorInput(url);
+            const investorData = cleaned ? qualificationDataMap.get(cleaned) : null;
+            if (investorData && !investorData.error) {
+              newResults[cleaned] = {
+                qualificationData: null,
+                instagramProfileData: null,
+                instagramQualificationData: null,
+                investorResearchData: {
+                  cleaned: investorData.cleaned || cleaned,
+                  skipped: investorData.skipped,
+                  reason: investorData.reason,
+                  summary: investorData.summary,
+                  links: investorData.links,
+                  updated: investorData.updated,
+                },
               };
             }
           } else {
@@ -2397,7 +2636,8 @@ export default function CompanyResearcher() {
               newResults[displayUrl] = {
                 qualificationData: qualificationData,
                 instagramProfileData: null,
-                instagramQualificationData: null
+                instagramQualificationData: null,
+                investorResearchData: null,
               };
             }
           }
@@ -2690,11 +2930,12 @@ export default function CompanyResearcher() {
     e.preventDefault();
 
     const companies = parseCompanyInput(rawCompanyInput);
+    console.log('[CompanyResearchHome] handleResearch:', { researchMode, rawCompanyInput: rawCompanyInput?.slice(0, 100), companies });
     
     if (companies.length === 0) {
       setErrorsByCompany(prev => ({
         ...prev,
-        _form: { form: 'Please enter at least one company URL' }
+        _form: { form: researchMode === 'investor' ? 'Please enter at least one domain or LinkedIn URL' : 'Please enter at least one company URL' }
       }));
       return;
     }
@@ -2711,7 +2952,8 @@ export default function CompanyResearcher() {
           newState[company] = {
             qualificationData: null,
             instagramProfileData: null,
-            instagramQualificationData: null
+            instagramQualificationData: null,
+            investorResearchData: null,
           };
         }
       });
@@ -2724,7 +2966,7 @@ export default function CompanyResearcher() {
     await Promise.all(companies.map(company => researchCompany(company)));
     
     setIsSearching(false);
-  }, [rawCompanyInput, researchCompany]);
+  }, [rawCompanyInput, researchCompany, researchMode]);
 
   return (
     <div className="w-full max-w-5xl p-6 z-10 mb-20 mt-6">
@@ -2784,29 +3026,46 @@ export default function CompanyResearcher() {
           >
             Instagram Research
           </button>
+          <button
+            onClick={() => {
+              setResearchMode('investor');
+              handleClearAll();
+            }}
+            className={`px-6 py-3 rounded-sm font-medium transition-colors ${
+              researchMode === 'investor'
+                ? 'bg-brand-default text-white ring-2 ring-brand-default'
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            Investor Research
+          </button>
         </div>
       </div>
 
-      {/* Set Name Input */}
-      <div className="mb-6 opacity-0 animate-fade-up [animation-delay:400ms]">
-        <label htmlFor="set-name" className="block text-sm font-medium text-gray-700 mb-2">
-          Set Name (Optional)
-        </label>
-        <input
-          id="set-name"
-          type="text"
-          value={setName}
-          onChange={(e) => setSetName(e.target.value)}
-          placeholder="Enter a name for this batch of companies (optional)"
-          className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
-        />
-        <p className="text-xs text-gray-500 mt-1">
-          All processed companies will be tagged with this set name for easy identification and grouping.
-        </p>
-      </div>
+      {/* Set Name Input - not shown in investor mode */}
+      {researchMode !== 'investor' && (
+        <div className="mb-6 opacity-0 animate-fade-up [animation-delay:400ms]">
+          <label htmlFor="set-name" className="block text-sm font-medium text-gray-700 mb-2">
+            Set Name (Optional)
+          </label>
+          <input
+            id="set-name"
+            type="text"
+            value={setName}
+            onChange={(e) => setSetName(e.target.value)}
+            placeholder="Enter a name for this batch of companies (optional)"
+            className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            All processed companies will be tagged with this set name for easy identification and grouping.
+          </p>
+        </div>
+      )}
 
       <p className="text-black mb-12 opacity-0 animate-fade-up [animation-delay:400ms]">
-        {researchMode === 'instagram'
+        {researchMode === 'investor'
+          ? 'Enter domains (e.g. boldcap.com) or LinkedIn URLs (comma or newline separated) for investor research, or upload a CSV file.'
+          : researchMode === 'instagram'
           ? 'Enter Instagram URLs (comma or newline separated) for profile research, or upload a CSV file with Instagram columns.'
           : 'Enter company URLs (comma or newline separated) for qualification assessment, or upload a CSV file.'}
       </p>
@@ -2818,7 +3077,9 @@ export default function CompanyResearcher() {
             <div>
               <h3 className="text-lg font-semibold mb-1">Import from CSV</h3>
               <p className="text-sm text-gray-600">
-                {researchMode === 'instagram'
+                {researchMode === 'investor'
+                  ? 'Upload a CSV file to process multiple investors. Select the column containing domains or LinkedIn URLs.'
+                  : researchMode === 'instagram'
                   ? 'Upload a CSV file to process multiple Instagram profiles. Select the column containing Instagram URLs.'
                   : 'Upload a CSV file to process multiple companies. Select the column containing website URLs.'}
               </p>
@@ -2922,18 +3183,20 @@ export default function CompanyResearcher() {
                 setShowToast(true);
               }
 
-              // Check if filtered input contains Instagram URL and switch mode accordingly
-              if (containsInstagramUrl(filteredInput)) {
-                // Switch to Instagram mode if Instagram URL is detected
-                if (researchMode !== 'instagram') {
-                  setResearchMode('instagram');
+              // Check if filtered input contains Instagram URL and switch mode accordingly (skip for investor mode)
+              if (researchMode !== 'investor') {
+                if (containsInstagramUrl(filteredInput)) {
+                  if (researchMode !== 'instagram') {
+                    setResearchMode('instagram');
+                  }
+                } else if (filteredInput.trim().length > 0 && researchMode === 'instagram') {
+                  setResearchMode('domain');
                 }
-              } else if (filteredInput.trim().length > 0 && researchMode === 'instagram') {
-                // Switch back to Domain mode if no Instagram URL and there's content
-                setResearchMode('domain');
               }
             }}
-            placeholder={researchMode === 'instagram' 
+            placeholder={researchMode === 'investor'
+              ? "Enter domains or LinkedIn URLs (e.g., boldcap.com, linkedin.com/company/boldcap)"
+              : researchMode === 'instagram' 
               ? "Enter Instagram URLs (e.g., instagram.com/username, instagram.com/another_username)"
               : "Enter company URLs (e.g., capitalxai.com, another-company.com)"}
             rows={4}
@@ -2947,8 +3210,8 @@ export default function CompanyResearcher() {
             disabled={isSearching}
           >
             {isSearching 
-              ? (researchMode === 'instagram' ? 'Researching Instagram...' : 'Analyzing...') 
-              : (researchMode === 'instagram' ? 'Research Instagram Profiles' : 'Analyze Companies')}
+              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : 'Analyzing...') 
+              : (researchMode === 'investor' ? 'Research Investor' : researchMode === 'instagram' ? 'Research Instagram Profiles' : 'Analyze Companies')}
           </button>
         </form>
       )}
@@ -2957,7 +3220,7 @@ export default function CompanyResearcher() {
       {isSearching && (
         <div className="mb-6 p-3 bg-blue-50 text-blue-700 rounded-sm flex items-center gap-2">
           <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
-          <span>{researchMode === 'instagram' ? 'Researching Instagram profiles...' : 'Analyzing company qualification...'}</span>
+          <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : 'Analyzing company qualification...'}</span>
         </div>
       )}
       
@@ -3001,16 +3264,97 @@ export default function CompanyResearcher() {
       
       <div className="space-y-12">
         {/* Qualification/Profile Section */}
-        {(isSearching || qualificationData || instagramProfileData) && (
+        {(isSearching || qualificationData || instagramProfileData || investorResearchData) && (
           <div className="space-y-8">
             <div className="flex items-center">
               <h2 className="text-3xl font-medium">
-                {researchMode === 'instagram' ? 'Instagram Profile' : 'Qualification Assessment'}
+                {researchMode === 'investor' ? 'Investor Research' : researchMode === 'instagram' ? 'Instagram Profile' : 'Qualification Assessment'}
               </h2>
             </div>
 
             <div className="opacity-0 animate-fade-up [animation-delay:300ms]">
-              {researchMode === 'instagram' ? (
+              {researchMode === 'investor' ? (
+                // Investor Research Display
+                isSearching && (!investorResearchData || (!investorResearchData.summary && !investorResearchData.skipped)) ? (
+                  <div className="animate-pulse">
+                    <div className="h-[300px] bg-gray-100 rounded-lg flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-gray-500 mb-2">Researching investor...</div>
+                        <div className="flex justify-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : investorResearchData ? (
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+                    <div className="text-sm text-gray-600">
+                      <span className="font-medium">Cleaned URL:</span> {investorResearchData.cleaned}
+                    </div>
+                    {investorResearchData.skipped ? (
+                      <div className="p-4 bg-amber-50 border border-amber-200 rounded-sm text-amber-800">
+                        Skipped (already exists in investors table)
+                        {investorResearchData.reason && (
+                          <span className="ml-2 text-amber-700">({investorResearchData.reason})</span>
+                        )}
+                      </div>
+                    ) : investorResearchData.summary ? (
+                      <>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <span className="text-sm font-medium text-gray-500">Entity Type</span>
+                            <p className="text-base">{investorResearchData.summary.entity_type || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium text-gray-500">Is Investor</span>
+                            <p className="text-base">{investorResearchData.summary.is_investor ? 'Yes' : 'No (Not an Investor)'}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium text-gray-500">Clean Name</span>
+                            <p className="text-base">{investorResearchData.summary.clean_name || '-'}</p>
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium text-gray-500">Investor Types</span>
+                            <p className="text-base">
+                              {investorResearchData.summary.investor_types?.length
+                                ? investorResearchData.summary.investor_types.join(', ')
+                                : '-'}
+                            </p>
+                          </div>
+                        </div>
+                        {investorResearchData.links && investorResearchData.links.length > 0 && (
+                          <div>
+                            <span className="text-sm font-medium text-gray-500 block mb-2">Links</span>
+                            <ul className="list-disc list-inside space-y-1 text-sm">
+                              {investorResearchData.links.map((link, i) => (
+                                <li key={i} className="break-all">{link}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {investorResearchData.updated && (
+                          <p className="text-sm text-green-600">Updated existing investor in database.</p>
+                        )}
+                      </>
+                    ) : (
+                      <p className="text-gray-500">No summary data available.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-[300px] bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
+                    <div className="text-center p-6">
+                      <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <h3 className="mt-2 text-sm font-medium text-gray-900">No investor data available</h3>
+                      <p className="mt-1 text-sm text-gray-500">We couldn&apos;t fetch investor research for this URL.</p>
+                      {errorsByCompany[activeCompany || '']?.investorResearch && (
+                        <p className="mt-2 text-sm text-red-600">{errorsByCompany[activeCompany || ''].investorResearch}</p>
+                      )}
+                    </div>
+                  </div>
+                )
+              ) : researchMode === 'instagram' ? (
                 // Instagram Profile Display
                 isSearching && instagramProfileData === null ? (
                   <div className="animate-pulse">
@@ -3095,7 +3439,7 @@ export default function CompanyResearcher() {
         selectedColumn={selectedUrlColumn}
         selectedColumns={selectedColumns}
         mode={researchMode}
-        allowBoth={true}
+        allowBoth={researchMode !== 'investor'}
         onSelectColumn={(column) => {
           setSelectedUrlColumn(column);
         }}

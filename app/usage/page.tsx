@@ -64,13 +64,6 @@ function formatDateTime(iso: string): string {
   }
 }
 
-function formatActionLabel(action: string): string {
-  return action
-    .split('_')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-}
-
 const USAGE_LOG_PAGE_SIZE = 25;
 
 function UsageDetailsButton() {
@@ -246,7 +239,7 @@ function UsageDetailsPanel({
                   key={row.action}
                   className="flex items-center justify-between px-4 py-3 bg-white hover:bg-gray-50 transition-colors"
                 >
-                  <span className="text-sm font-medium text-gray-900">{formatActionLabel(row.action)}</span>
+                  <span className="text-sm font-medium text-gray-900">{row.action}</span>
                   <span className="text-sm text-gray-600 tabular-nums">{row.total_credits} credits</span>
                 </li>
               ))}
@@ -280,7 +273,7 @@ function UsageDetailsPanel({
                   ) : (
                     usageLog.map((entry) => (
                       <tr key={entry.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{formatActionLabel(entry.action)}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900">{entry.action}</td>
                         <td className="px-4 py-3 text-gray-600 tabular-nums">{entry.credits_used}</td>
                         <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">
                           {entry.investor_name ?? '—'}

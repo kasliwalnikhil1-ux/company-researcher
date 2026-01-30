@@ -16,8 +16,8 @@ import OpenAI from 'openai';
 
 // Azure OpenAI Configuration (endpoint/deployment from env or defaults; API key from env only)
 const AZURE_ENDPOINT = process.env.AZURE_OPENAI_ENDPOINT || process.env.ENDPOINT_URL || "https://resourceplan.services.ai.azure.com/";
-const DEPLOYMENT_NAME = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || process.env.DEPLOYMENT_NAME || "DeepSeek-V3-0324";
-const DEPLOYMENT_NAME_MINI = process.env.AZURE_OPENAI_DEPLOYMENT_NAME_MINI || process.env.DEPLOYMENT_NAME_MINI || "DeepSeek-V3-0324";
+const DEPLOYMENT_NAME = process.env.AZURE_OPENAI_DEPLOYMENT_NAME || process.env.DEPLOYMENT_NAME || "gpt-4o";
+const DEPLOYMENT_NAME_MINI = process.env.AZURE_OPENAI_DEPLOYMENT_NAME_MINI || process.env.DEPLOYMENT_NAME_MINI || "gpt-4o-mini";
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-05-01-preview";
 const API_KEY = process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_API_KEY || "";
 
@@ -312,7 +312,7 @@ export async function callAzureOpenAI(
 
     // Convert to dictionary format matching old API response structure
     const responseContent = completion.choices[0].message.content || "";
-    console.log(`🔍 Raw response from DeepSeek: ${responseContent}`);
+    console.log(`🔍 Raw response from Azure OpenAI: ${responseContent}`);
 
     // Clean JSON from markdown code blocks if present
     const cleanedContent = cleanJsonResponse(responseContent);
@@ -409,7 +409,7 @@ export async function getCompletion(
     provider = "azure",
   } = options;
 
-  const providerName = provider.toLowerCase() === "gemini" ? "Gemini" : "DeepSeek";
+  const providerName = provider.toLowerCase() === "gemini" ? "Gemini" : "Azure OpenAI";
   console.log(
     `🚀 Making request to ${providerName} with ${messages.length} messages, format: ${response_format}`
   );

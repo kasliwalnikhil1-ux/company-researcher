@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useOnboarding, OnboardingData } from '@/contexts/OnboardingContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { formatOnboardingCompanySummary } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import Toast from '@/components/ui/Toast';
@@ -105,7 +106,14 @@ function CompanyProfileContent() {
   const [sectorSearch, setSectorSearch] = useState('');
   const [countrySearch, setCountrySearch] = useState('');
   const [countryOpen, setCountryOpen] = useState(false);
+  const [isLocalhost, setIsLocalhost] = useState(false);
   const countryDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setIsLocalhost(window.location.hostname === 'localhost');
+    }
+  }, []);
 
   useEffect(() => {
     if (!countryOpen) return;
@@ -193,6 +201,15 @@ function CompanyProfileContent() {
           </p>
         </div>
       </div>
+
+      {isLocalhost && onboarding && (
+        <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+          <h3 className="text-sm font-semibold text-amber-800 mb-2">Company Context (localhost only)</h3>
+          <pre className="text-xs text-amber-900 whitespace-pre-wrap font-mono overflow-x-auto max-h-48 overflow-y-auto">
+            {formatOnboardingCompanySummary(onboarding) || '(empty)'}
+          </pre>
+        </div>
+      )}
 
       <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6 space-y-8">
         {flowType === 'b2b' ? (

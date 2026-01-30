@@ -16,7 +16,7 @@ interface ColumnSelectorDialogProps {
   onSelectColumns?: (columns: { domain: string | null; instagram: string | null }) => void;
   onConfirm: () => void;
   onClose: () => void;
-  mode?: 'domain' | 'instagram';
+  mode?: 'domain' | 'instagram' | 'investor';
   allowBoth?: boolean;
 }
 
@@ -116,11 +116,14 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
         if (isInstagramUrl(value)) {
           validUrls.push(value);
         }
+      } else if (mode === 'investor') {
+        // In investor mode, accept domain or LinkedIn URLs
+        if (value.includes('.') && (value.toLowerCase().includes('linkedin.com') || !isExcludedDomain(value))) {
+          validUrls.push(value);
+        }
       } else {
         // In domain mode, exclude social media domains
-        // Check if it looks like a URL (contains a dot)
         if (value.includes('.')) {
-          // Check if it's NOT an excluded domain
           if (!isExcludedDomain(value)) {
             validUrls.push(value);
           }
@@ -170,7 +173,7 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
 
   // Separate columns into domain and Instagram columns
   const domainColumns = useMemo(() => {
-    if (!allowBoth) return [];
+    if (!allowBoth && mode !== 'investor') return [];
     return columns.filter(column => {
       // Check all rows (not just first 5) to be more thorough
       const rowsToCheck = rows.slice(0, Math.min(10, rows.length));
@@ -182,20 +185,22 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
         
         // Check if it's a URL (contains a dot)
         if (value.includes('.')) {
-          // If it's not an Instagram URL, it's a domain URL
-          if (!isInstagramUrl(value)) {
-            // Also check it's not an excluded domain
-            if (!isExcludedDomain(value)) {
+          // Investor mode: accept domain or LinkedIn
+          if (mode === 'investor') {
+            if (value.toLowerCase().includes('linkedin.com') || !isExcludedDomain(value)) {
               hasNonInstagramUrl = true;
               break;
             }
+          } else if (!isInstagramUrl(value) && !isExcludedDomain(value)) {
+            hasNonInstagramUrl = true;
+            break;
           }
         }
       }
       
       return hasNonInstagramUrl;
     });
-  }, [columns, rows, allowBoth]);
+  }, [columns, rows, allowBoth, mode]);
 
   const instagramColumns = useMemo(() => {
     if (!allowBoth) return [];
@@ -242,13 +247,15 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-semibold mb-4">
-          {allowBoth ? 'Select Columns' : (mode === 'instagram' ? 'Select Instagram Column' : 'Select URL Column')}
+          {allowBoth ? 'Select Columns' : (mode === 'instagram' ? 'Select Instagram Column' : mode === 'investor' ? 'Select Domain or LinkedIn Column' : 'Select URL Column')}
         </h2>
         <p className="text-gray-600 mb-4">
           {allowBoth
             ? 'Select the domain column and/or Instagram column. You can select both to combine data from both columns.'
             : (mode === 'instagram' 
               ? 'Please select the column that contains Instagram URLs. Only columns with Instagram URLs (instagram.com) are shown.'
+              : mode === 'investor'
+              ? 'Please select the column that contains domains (e.g. boldcap.com) or LinkedIn URLs (e.g. linkedin.com/company/boldcap).'
               : 'Please select the column that contains company website URLs. Columns with no URLs or social media links (LinkedIn, Twitter, Facebook, etc.) are excluded.')}
         </p>
         

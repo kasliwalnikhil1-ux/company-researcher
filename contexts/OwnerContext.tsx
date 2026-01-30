@@ -37,6 +37,8 @@ type OwnerContextType = {
   availableOwners: Owner[];
   ownerColors: Record<string, OwnerColors>;
   ownerConfig: OwnerConfigItem[];
+  plan: string | null;
+  isFreePlan: boolean;
   isLoading: boolean;
   refetchOwners: () => Promise<void>;
 };
@@ -46,6 +48,7 @@ const OwnerContext = createContext<OwnerContextType | undefined>(undefined);
 export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
   const { user } = useAuth();
   const [ownerConfig, setOwnerConfig] = useState<OwnerConfigItem[]>([]);
+  const [plan, setPlan] = useState<string | null>(null);
   const [selectedOwner, setSelectedOwnerState] = useState<Owner>('');
   const [isLoading, setIsLoading] = useState(true);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -62,6 +65,7 @@ export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
   const fetchOwners = useCallback(async () => {
     if (!user?.id) {
       setOwnerConfig([]);
+      setPlan(null);
       setIsLoading(false);
       return;
     }
@@ -69,15 +73,18 @@ export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
       setIsLoading(true);
       const { data, error } = await supabase
         .from('user_settings')
-        .select('owners')
+        .select('owners, plan')
         .eq('id', user.id)
         .single();
 
       if (error && error.code !== 'PGRST116') {
         console.error('Error fetching owners:', error);
         setOwnerConfig([]);
+        setPlan('free');
         return;
       }
+
+      setPlan(data?.plan ?? 'free');
 
       let config: OwnerConfigItem[] = [];
       if (data?.owners) {
@@ -129,6 +136,8 @@ export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
     availableOwners,
     ownerColors,
     ownerConfig,
+    plan,
+    isFreePlan: plan === 'free',
     isLoading,
     refetchOwners: fetchOwners,
   };

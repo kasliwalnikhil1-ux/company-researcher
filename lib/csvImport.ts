@@ -153,7 +153,13 @@ export const ensureColumnsExist = (headers: string[]): string[] => {
     'Confidence Score',
     'Product Types',
     'Sales Action',
-    'Research Status'
+    'Research Status',
+    'Cleaned URL',
+    'Entity Type',
+    'Is Investor',
+    'Clean Name',
+    'Investor Types',
+    'Links',
   ];
   
   const newHeaders = [...headers];

@@ -182,7 +182,7 @@ export default function Login() {
             inside out.
           </h1>
           <p className="text-white/80 text-sm leading-relaxed">
-            Get detailed insights and know everything about your target accounts—instantly.
+            Access all investors, expand your reach, and accelerate your fundraising.
           </p>
         </div>
         <div className="relative text-sm text-white/60">
@@ -208,7 +208,7 @@ export default function Login() {
           {!isLogin && (
             <>
               <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-fainter px-4 py-2 text-sm font-semibold text-brand-default mb-3">
-                Sign up and get 20 free credits
+                Sign up and get 5 free credits
               </p>
               <ul className="flex flex-wrap gap-x-6 gap-y-1 mb-8 text-sm text-gray-600">
                 <li className="flex items-center gap-2">
