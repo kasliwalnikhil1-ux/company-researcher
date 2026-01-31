@@ -1,10 +1,13 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { X, ChevronLeft, ChevronRight, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown } from 'lucide-react';
 import { fetchInvestorDeepResearch } from '@/lib/api';
-import { formatHqLocation } from '@/lib/isoCodes';
+import { formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
+import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT } from '@/hooks/useInvestorSearch';
+import { Skeleton } from '@/components/ui/skeleton';
+import { CALENDLY_URL } from '@/components/BookDemoButton';
 import { copyToClipboard } from '@/lib/utils';
 
 const getDomainFromUrl = (urlStr: string): string | null => {
@@ -83,6 +86,11 @@ export interface InvestorDetails {
   phone?: string | null;
   /** Array of "[text](url)" formatted links */
   links?: string[] | null;
+  /** For type='person': firm this person is associated with */
+  associated_firm_id?: string | null;
+  associated_firm_name?: string | null;
+  /** For type='firm': number of people linked to the firm */
+  associated_people_count?: number | null;
 }
 
 interface InvestorDetailsDrawerProps {
@@ -94,6 +102,14 @@ interface InvestorDetailsDrawerProps {
   totalPages: number;
   onPageChange: (page: number) => void;
   onInvestorChange?: (investor: InvestorDetails) => void;
+  /** When provided, clicking associated firm name opens that firm in the drawer */
+  onOpenInvestorById?: (id: string) => Promise<void>;
+  /** When viewing a firm opened from a person, show "Back to person" instead of prev/next */
+  backToInvestor?: InvestorDetails | null;
+  /** When viewing a person opened from firm's Contacts tab, show "Back to firm" instead of prev/next */
+  backToFirm?: InvestorDetails | null;
+  /** Called when opening a contact from the Contacts tab - parent should set backToFirm and investor */
+  onOpenContactFromFirm?: (contact: InvestorDetails, firm: InvestorDetails) => void;
   onAnalyze?: (investorId: string) => void;
   isAnalyzing?: boolean;
   updateInvestor?: (
@@ -103,6 +119,10 @@ interface InvestorDetailsDrawerProps {
   stageOptions?: string[];
   setOptions?: string[];
   ownerOptions?: string[];
+  /** Mode for fetching contacts at firm (global | reviewed) */
+  filtersMode?: 'global' | 'reviewed';
+  /** When true, limit contacts to CONTACTS_FREE_LIMIT and show skeletons for more */
+  isFreePlan?: boolean;
 }
 
 const formatCurrency = (value: number | null | undefined): string => {
@@ -128,6 +148,191 @@ const parseCommaList = (text: string | null | undefined): string[] => {
   if (!text || typeof text !== 'string') return [];
   return text.split(',').map((s) => s.trim()).filter(Boolean);
 };
+
+function ContactsMultiSelect({
+  label,
+  options,
+  selected,
+  onToggle,
+  formatLabel = (v: string) => v,
+}: {
+  label: string;
+  options: string[];
+  selected: string[];
+  onToggle: (v: string) => void;
+  formatLabel?: (v: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const searchLower = search.trim().toLowerCase();
+  const filteredOptions = searchLower
+    ? options.filter(
+        (opt) =>
+          opt.toLowerCase().includes(searchLower) ||
+          formatLabel(opt).toLowerCase().includes(searchLower)
+      )
+    : options;
+
+  if (options.length === 0) return null;
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(!open);
+          if (open) setSearch('');
+        }}
+        className="flex items-center gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+      >
+        <span>
+          {label} {selected.length ? `(${selected.length})` : ''}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSearch(''); }} />
+          <div className="absolute left-0 top-full mt-1 z-20 w-full min-w-[180px] max-w-[220px] bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden">
+            <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
+              <input
+                type="text"
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="block w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+              />
+            </div>
+            <div className="max-h-40 overflow-y-auto py-1">
+              {filteredOptions.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-gray-500">No matches</p>
+              ) : (
+                filteredOptions.map((opt) => (
+                  <label
+                    key={opt}
+                    className="flex items-center px-3 py-1.5 hover:bg-gray-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(opt)}
+                      onChange={() => onToggle(opt)}
+                      className="mr-2 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-gray-700">{formatLabel(opt)}</span>
+                  </label>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ContactCardSkeleton() {
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm opacity-60">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-5 w-3/4" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <Skeleton className="h-8 w-8 rounded-md" />
+        </div>
+      </div>
+      <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2">
+        <Skeleton className="h-5 w-16 rounded" />
+        <Skeleton className="h-5 w-20 rounded" />
+        <Skeleton className="h-5 w-14 rounded" />
+      </div>
+    </div>
+  );
+}
+
+function ContactCard({
+  contact,
+  onView,
+}: {
+  contact: InvestorDetails;
+  onView: () => void;
+}) {
+  const location = formatHqLocationShort(contact.hq_state, contact.hq_country);
+  const thesis = contact.investment_thesis?.trim();
+  const aiMeta = contact.ai_metadata ?? {};
+  const investorFit = aiMeta.investor_fit as boolean | null | undefined;
+  const reason = typeof aiMeta.reason === 'string' ? aiMeta.reason : null;
+  const hasFitInfo = typeof investorFit === 'boolean' || investorFit === null;
+  const hasReason = typeof reason === 'string' && reason.trim().length > 0;
+
+  return (
+    <div
+      className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:bg-gray-50 hover:border-gray-300 transition-colors"
+      onClick={onView}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold text-gray-900">{contact.name}</h3>
+          {contact.role && <p className="text-sm text-gray-600 mt-0.5">{contact.role}</p>}
+          {thesis && <p className="text-sm text-gray-600 mt-1 line-clamp-3 leading-relaxed">{thesis}</p>}
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onView();
+          }}
+          className="p-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100 flex-shrink-0"
+          title="View Details"
+        >
+          <Eye className="w-4 h-4" />
+        </button>
+      </div>
+
+      {(hasFitInfo || hasReason) && (
+        <div className="mt-3 pt-3 border-t border-gray-100 space-y-1.5">
+          {hasFitInfo && (
+            <div className="flex items-center gap-2">
+              <span className="text-base" role="img" aria-label="fit">
+                {investorFit === true ? '😊' : investorFit === false ? '😕' : '😐'}
+              </span>
+              <span className="text-xs font-medium text-gray-700">
+                {investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : 'Unclear Fit'}
+              </span>
+            </div>
+          )}
+          {hasReason && (
+            <div className="p-2 rounded-md bg-indigo-50 border border-indigo-100">
+              <p className="text-xs text-gray-800 line-clamp-2 leading-relaxed">{reason!.trim()}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2 items-center">
+        {contact.has_personalization && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+            <Check className="w-3 h-3" />
+            Reviewed
+          </span>
+        )}
+        {location && <span className="text-sm text-gray-500">{location}</span>}
+        {Array.isArray(contact.investment_stages) &&
+          contact.investment_stages.slice(0, 3).map((s) => (
+            <span
+              key={s}
+              className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800"
+            >
+              {formatKebabLabel(s)}
+            </span>
+          ))}
+      </div>
+    </div>
+  );
+}
 
 function DetailRow({
   label,
@@ -187,15 +392,21 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   totalPages,
   onPageChange,
   onInvestorChange,
+  onOpenInvestorById,
+  backToInvestor,
+  backToFirm,
+  onOpenContactFromFirm,
   onAnalyze,
   isAnalyzing,
   updateInvestor,
   stageOptions = [],
   setOptions = [],
   ownerOptions = [],
+  filtersMode = 'global',
+  isFreePlan = false,
 }) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'profile' | 'pipeline' | 'deep-research'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'pipeline' | 'deep-research' | 'contacts'>('profile');
   const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
@@ -206,17 +417,37 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [deepResearchContent, setDeepResearchContent] = useState<string | null>(null);
   const [deepResearchLoading, setDeepResearchLoading] = useState(false);
   const [deepResearchError, setDeepResearchError] = useState<string | null>(null);
+  const [contactsData, setContactsData] = useState<InvestorDetails[]>([]);
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | null>(null);
+  const [contactsNameSearch, setContactsNameSearch] = useState('');
+  const [contactsRoleFilter, setContactsRoleFilter] = useState<string[]>([]);
+  const [contactsStageFilter, setContactsStageFilter] = useState<string[]>([]);
+  const [contactsIndustryFilter, setContactsIndustryFilter] = useState<string[]>([]);
   const [editingAiMetadata, setEditingAiMetadata] = useState(false);
+  const [aiMetadataTwitterLine, setAiMetadataTwitterLine] = useState('');
   const [aiMetadataLine1, setAiMetadataLine1] = useState('');
   const [aiMetadataLine2, setAiMetadataLine2] = useState('');
   const [aiMetadataMutualInterestsText, setAiMetadataMutualInterestsText] = useState('');
   const [aiMetadataSaving, setAiMetadataSaving] = useState(false);
+  const returningToFirmRef = useRef(false);
 
   // Reset tab when investor changes
   useEffect(() => {
-    setActiveTab('profile');
+    if (returningToFirmRef.current && investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0) {
+      setActiveTab('contacts');
+      returningToFirmRef.current = false;
+    } else {
+      setActiveTab('profile');
+    }
     setDeepResearchContent(null);
     setDeepResearchError(null);
+    setContactsData([]);
+    setContactsError(null);
+    setContactsNameSearch('');
+    setContactsRoleFilter([]);
+    setContactsStageFilter([]);
+    setContactsIndustryFilter([]);
   }, [investor?.id]);
 
   // Load notes from investor when investor changes
@@ -236,6 +467,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   useEffect(() => {
     const meta = investor?.ai_metadata;
     if (meta && typeof meta === 'object') {
+      setAiMetadataTwitterLine(typeof meta.twitter_line === 'string' ? meta.twitter_line : '');
       setAiMetadataLine1(typeof meta.line1 === 'string' ? meta.line1 : '');
       setAiMetadataLine2(typeof meta.line2 === 'string' ? meta.line2 : '');
       const interests = Array.isArray(meta.mutual_interests)
@@ -243,6 +475,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
         : [];
       setAiMetadataMutualInterestsText(interests.join('\n'));
     } else {
+      setAiMetadataTwitterLine('');
       setAiMetadataLine1('');
       setAiMetadataLine2('');
       setAiMetadataMutualInterestsText('');
@@ -251,6 +484,38 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   }, [investor?.id, investor?.ai_metadata]);
 
   const DEEP_RESEARCH_STORAGE_KEY = (id: string) => `investor-deep-research-${id}`;
+  const contactsLimit = isFreePlan ? CONTACTS_FREE_LIMIT : 100;
+  const CONTACTS_STORAGE_KEY = (id: string) => `investor-contacts-${id}-${contactsLimit}`;
+
+  const loadContacts = useCallback(async (firmId: string) => {
+    if (typeof window === 'undefined') return;
+    const cached = localStorage.getItem(CONTACTS_STORAGE_KEY(firmId));
+    if (cached !== null) {
+      try {
+        const parsed = JSON.parse(cached) as InvestorDetails[];
+        setContactsData(Array.isArray(parsed) ? parsed : []);
+        return;
+      } catch {
+        // Invalid cache, fetch fresh
+      }
+    }
+    setContactsLoading(true);
+    setContactsError(null);
+    try {
+      const list = await fetchPeopleAtFirm(firmId, filtersMode, contactsLimit);
+      setContactsData(list);
+      try {
+        localStorage.setItem(CONTACTS_STORAGE_KEY(firmId), JSON.stringify(list));
+      } catch {
+        // Ignore quota errors
+      }
+    } catch (err) {
+      setContactsError(err instanceof Error ? err.message : 'Failed to load contacts');
+      setContactsData([]);
+    } finally {
+      setContactsLoading(false);
+    }
+  }, [filtersMode, contactsLimit]);
 
   const loadDeepResearch = useCallback(async (investorId: string) => {
     if (typeof window === 'undefined') return;
@@ -280,6 +545,12 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       loadDeepResearch(investor.id);
     }
   }, [investor?.id, activeTab, loadDeepResearch]);
+
+  useEffect(() => {
+    if (investor?.type === 'firm' && investor.id && activeTab === 'contacts') {
+      loadContacts(investor.id);
+    }
+  }, [investor?.id, investor?.type, activeTab, loadContacts]);
 
   const handleAddNote = useCallback(() => {
     setIsAddingNote(true);
@@ -379,6 +650,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       .filter(Boolean);
     const updatedAiMetadata: Record<string, unknown> = {
       ...meta,
+      twitter_line: aiMetadataTwitterLine.trim() || null,
       line1: aiMetadataLine1.trim() || null,
       line2: aiMetadataLine2.trim() || null,
       mutual_interests: mutualInterests,
@@ -398,10 +670,11 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     } finally {
       setAiMetadataSaving(false);
     }
-  }, [investor, aiMetadataLine1, aiMetadataLine2, aiMetadataMutualInterestsText, updateInvestor, onInvestorChange]);
+  }, [investor, aiMetadataTwitterLine, aiMetadataLine1, aiMetadataLine2, aiMetadataMutualInterestsText, updateInvestor, onInvestorChange]);
 
   const handleCancelEditAiMetadata = useCallback(() => {
     const meta = investor?.ai_metadata && typeof investor.ai_metadata === 'object' ? investor.ai_metadata : {};
+    setAiMetadataTwitterLine(typeof meta.twitter_line === 'string' ? meta.twitter_line : '');
     setAiMetadataLine1(typeof meta.line1 === 'string' ? meta.line1 : '');
     setAiMetadataLine2(typeof meta.line2 === 'string' ? meta.line2 : '');
     const interests = Array.isArray(meta.mutual_interests)
@@ -477,22 +750,47 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 flex-shrink-0">
           <div className="flex items-center gap-2">
-            <button
-              onClick={handlePrev}
-              disabled={!hasPrev}
-              className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Previous investor"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <button
-              onClick={handleNext}
-              disabled={!hasNext}
-              className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Next investor"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
+            {investor?.type === 'firm' && backToInvestor && onInvestorChange ? (
+              <button
+                onClick={() => onInvestorChange(backToInvestor)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                aria-label="Back to person"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="text-sm font-medium">Back to person</span>
+              </button>
+            ) : investor?.type === 'person' && backToFirm && onInvestorChange ? (
+              <button
+                onClick={() => {
+                  returningToFirmRef.current = true;
+                  onInvestorChange(backToFirm);
+                }}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                aria-label="Back to firm"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="text-sm font-medium">Back to firm</span>
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={handlePrev}
+                  disabled={!hasPrev}
+                  className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Previous investor"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <button
+                  onClick={handleNext}
+                  disabled={!hasNext}
+                  className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Next investor"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -503,8 +801,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
           </button>
         </div>
 
-        {/* Tabs - only when has_personalization */}
-        {investor?.has_personalization && (
+        {/* Tabs - when has_personalization or (firm with contacts) */}
+        {(investor?.has_personalization || (investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0)) && (
           <div className="flex gap-1 px-4 pt-2 border-b border-gray-200 flex-shrink-0">
             <button
               onClick={() => setActiveTab('profile')}
@@ -516,26 +814,42 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
             >
               Investor Profile
             </button>
-            <button
-              onClick={() => setActiveTab('pipeline')}
-              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === 'pipeline'
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Pipeline
-            </button>
-            <button
-              onClick={() => setActiveTab('deep-research')}
-              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === 'deep-research'
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Deep Research
-            </button>
+            {investor?.has_personalization && (
+              <>
+                <button
+                  onClick={() => setActiveTab('pipeline')}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === 'pipeline'
+                      ? 'border-indigo-600 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Pipeline
+                </button>
+                <button
+                  onClick={() => setActiveTab('deep-research')}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === 'deep-research'
+                      ? 'border-indigo-600 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Deep Research
+                </button>
+              </>
+            )}
+            {investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0 && (
+              <button
+                onClick={() => setActiveTab('contacts')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === 'contacts'
+                    ? 'border-indigo-600 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Contacts
+              </button>
+            )}
           </div>
         )}
 
@@ -543,6 +857,135 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
         <div className="flex-1 overflow-y-auto p-6">
           {!investor ? (
             <p className="text-gray-500 text-sm">Select an investor to view details.</p>
+          ) : investor.type === 'firm' && activeTab === 'contacts' ? (
+            /* Contacts tab content */
+            (() => {
+              const nameSearchLower = contactsNameSearch.trim().toLowerCase();
+              const roles = [...new Set(contactsData.map((c) => c.role?.trim()).filter(Boolean))] as string[];
+              const stages = [...new Set(contactsData.flatMap((c) => c.investment_stages ?? []).filter(Boolean))].sort();
+              const industries = [...new Set(contactsData.flatMap((c) => c.investment_industries ?? []).filter(Boolean))].sort();
+              const filteredContacts = contactsData.filter((c) => {
+                if (nameSearchLower && !c.name?.toLowerCase().includes(nameSearchLower)) return false;
+                if (contactsRoleFilter.length > 0 && !contactsRoleFilter.includes(c.role?.trim() ?? '')) return false;
+                if (contactsStageFilter.length > 0) {
+                  const contactStages = c.investment_stages ?? [];
+                  if (!contactsStageFilter.some((s) => contactStages.includes(s))) return false;
+                }
+                if (contactsIndustryFilter.length > 0) {
+                  const contactIndustries = c.investment_industries ?? [];
+                  if (!contactsIndustryFilter.some((i) => contactIndustries.includes(i))) return false;
+                }
+                return true;
+              });
+              return (
+                <div className="space-y-4">
+                  {contactsLoading ? (
+                    <div className="flex justify-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                    </div>
+                  ) : contactsError ? (
+                    <p className="text-red-600 text-sm">{contactsError}</p>
+                  ) : contactsData.length > 0 ? (
+                    <>
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="Search by name..."
+                            value={contactsNameSearch}
+                            onChange={(e) => setContactsNameSearch(e.target.value)}
+                            className="block w-full pl-9 pr-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <ContactsMultiSelect
+                            label="Role"
+                            options={roles}
+                            selected={contactsRoleFilter}
+                            onToggle={(v) =>
+                              setContactsRoleFilter((prev) =>
+                                prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]
+                              )
+                            }
+                          />
+                          <ContactsMultiSelect
+                            label="Stages"
+                            options={stages}
+                            selected={contactsStageFilter}
+                            onToggle={(v) =>
+                              setContactsStageFilter((prev) =>
+                                prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]
+                              )
+                            }
+                            formatLabel={formatKebabLabel}
+                          />
+                          <ContactsMultiSelect
+                            label="Industries"
+                            options={industries}
+                            selected={contactsIndustryFilter}
+                            onToggle={(v) =>
+                              setContactsIndustryFilter((prev) =>
+                                prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]
+                              )
+                            }
+                            formatLabel={formatKebabLabel}
+                          />
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          {filteredContacts.length} of {contactsData.length} contacts
+                        </p>
+                      </div>
+                      <div className="space-y-3 relative">
+                        {filteredContacts.length > 0 ? (
+                          <>
+                            {filteredContacts.map((contact) => (
+                              <ContactCard
+                                key={contact.id}
+                                contact={contact}
+                                onView={() => {
+                                  if (onOpenContactFromFirm && investor) {
+                                    onOpenContactFromFirm(contact, investor);
+                                  } else {
+                                    onInvestorChange?.(contact);
+                                  }
+                                }}
+                              />
+                            ))}
+                            {isFreePlan && (investor?.associated_people_count ?? 0) > contactsData.length && (
+                              <div className="relative pt-2">
+                                <div className="space-y-3">
+                                  {[1, 2, 3].map((i) => (
+                                    <ContactCardSkeleton key={i} />
+                                  ))}
+                                </div>
+                                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg">
+                                  <p className="text-sm text-gray-600 text-center">
+                                    Upgrade your plan to connect with the right investors and complete your raise.
+                                  </p>
+                                  <a
+                                    href={CALENDLY_URL}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
+                                  >
+                                    Upgrade Plan
+                                  </a>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-gray-500 text-sm">No contacts match your filters.</p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-gray-500 text-sm">No contacts found for this firm.</p>
+                  )}
+                </div>
+              );
+            })()
           ) : investor.has_personalization && activeTab === 'pipeline' ? (
             /* Pipeline tab content */
             <div className="space-y-6">
@@ -974,6 +1417,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     {/* Personalization - line1 & line2 - editable (show when has content, or when editing, or when updateInvestor to allow adding) */}
                     {(typeof investor.ai_metadata.line1 === 'string' && investor.ai_metadata.line1.trim()) ||
                     (typeof investor.ai_metadata.line2 === 'string' && investor.ai_metadata.line2.trim()) ||
+                    (typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim()) ||
                     (Array.isArray(investor.ai_metadata.mutual_interests) && investor.ai_metadata.mutual_interests.length > 0) ||
                     editingAiMetadata ||
                     (updateInvestor && investor.has_personalization) ? (
@@ -1014,6 +1458,16 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         {editingAiMetadata ? (
                           <div className="space-y-3 border border-indigo-200 rounded-lg p-4 bg-indigo-50/30">
                             <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Twitter Line</label>
+                              <textarea
+                                value={aiMetadataTwitterLine}
+                                onChange={(e) => setAiMetadataTwitterLine(e.target.value)}
+                                rows={2}
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                placeholder="I just read your tweet about..."
+                              />
+                            </div>
+                            <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">Line 1</label>
                               <textarea
                                 value={aiMetadataLine1}
@@ -1046,6 +1500,19 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           </div>
                         ) : (
                           <>
+                            {typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim() && (
+                              <div className="flex items-start gap-2">
+                                <p className="text-sm text-gray-700 flex-1">{investor.ai_metadata.twitter_line}</p>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyField(investor.ai_metadata!.twitter_line as string, 'twitter_line')}
+                                  className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 flex-shrink-0"
+                                  title="Copy"
+                                >
+                                  {copiedField === 'twitter_line' ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            )}
                             {typeof investor.ai_metadata.line1 === 'string' && investor.ai_metadata.line1.trim() && (
                               <div className="flex items-start gap-2">
                                 <p className="text-sm text-gray-700 flex-1">{investor.ai_metadata.line1}</p>
@@ -1094,14 +1561,63 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 </>
               )}
 
-              {/* hq_state & hq_country - show both with readable names */}
-              {(investor.hq_state || investor.hq_country) && (
-                <DetailRow
-                  label="HQ Location"
-                  icon={<MapPin className="w-4 h-4 text-gray-400" />}
-                  value={formatHqLocation(investor.hq_state, investor.hq_country)}
-                />
-              )}
+              {/* Associated Firm (persons) / Associated People (firms) + HQ Location - same row */}
+              {(investor.type === 'person' && (investor.associated_firm_id || investor.associated_firm_name)) ||
+              (investor.type === 'firm' && investor.associated_people_count != null) ||
+              investor.hq_state ||
+              investor.hq_country ? (
+                <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
+                  {investor.type === 'person' && (investor.associated_firm_id || investor.associated_firm_name) && (
+                    <DetailRow
+                      label="Associated Firm"
+                      icon={<Briefcase className="w-4 h-4 text-gray-400" />}
+                      value={
+                        investor.associated_firm_id && onOpenInvestorById ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenInvestorById(investor.associated_firm_id!)}
+                            className="font-semibold text-indigo-600 hover:text-indigo-800 hover:underline text-left"
+                          >
+                            {investor.associated_firm_name || investor.associated_firm_id}
+                          </button>
+                        ) : (
+                          <span className="font-semibold text-gray-900">
+                            {investor.associated_firm_name || investor.associated_firm_id || '-'}
+                          </span>
+                        )
+                      }
+                    />
+                  )}
+                  {investor.type === 'firm' && investor.associated_people_count != null && (
+                    <DetailRow
+                      label="Associated People"
+                      icon={<Users className="w-4 h-4 text-gray-400" />}
+                      value={
+                        investor.associated_people_count === 0 ? (
+                          'No contacts available'
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('contacts')}
+                            className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline text-left"
+                          >
+                            {investor.associated_people_count === 1
+                              ? '1 contact available'
+                              : `${investor.associated_people_count} contacts available`}
+                          </button>
+                        )
+                      }
+                    />
+                  )}
+                  {(investor.hq_state || investor.hq_country) && (
+                    <DetailRow
+                      label="HQ Location"
+                      icon={<MapPin className="w-4 h-4 text-gray-400" />}
+                      value={formatHqLocation(investor.hq_state, investor.hq_country)}
+                    />
+                  )}
+                </div>
+              ) : null}
 
               {/* investor_type */}
               <DetailSection

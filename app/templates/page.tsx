@@ -1,11 +1,16 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
-import { useMessageTemplates, MessageTemplate } from '@/contexts/MessageTemplatesContext';
+import { useMessageTemplates, MessageTemplate, TemplateChannel, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
+import { useOnboarding } from '@/contexts/OnboardingContext';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
+import { fetchGenerateMessages } from '@/lib/api';
+
+const B2B_CHANNELS: TemplateChannel[] = ['direct', 'instagram'];
+const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 
 export default function TemplatesPage() {
   return (
@@ -21,12 +26,52 @@ export default function TemplatesPage() {
 
 function TemplatesContent() {
   const { templates, loading, createTemplate, updateTemplate, deleteTemplate } = useMessageTemplates();
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram'>('direct');
+  const { onboarding } = useOnboarding();
+  const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising';
+  const channelOptions = primaryUse === 'b2b' ? B2B_CHANNELS : FUNDRAISING_CHANNELS;
+  const [activeTab, setActiveTab] = useState<TemplateChannel>(channelOptions[0]);
+
+  // Sync activeTab when channelOptions change (e.g. onboarding loads or primaryUse changes)
+  useEffect(() => {
+    if (!channelOptions.includes(activeTab)) {
+      setActiveTab(channelOptions[0]);
+    }
+  }, [channelOptions, activeTab]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerateMessages = async () => {
+    setGenerating(true);
+    try {
+      const result = await fetchGenerateMessages(onboarding ?? undefined);
+      if (result?.error) {
+        alert(result.error);
+        return;
+      }
+      if (!result?.subjectline || !result?.email1 || !result?.email2) {
+        alert('Could not generate messages. Please try again.');
+        return;
+      }
+      await createTemplate({ title: 'Subject', channel: 'email', template: result.subjectline });
+      await createTemplate({ title: 'Sequence 1', channel: 'email', template: result.email1 });
+      await createTemplate({ title: 'Sequence 2', channel: 'email', template: result.email2 });
+      if (channelOptions.includes('email')) {
+        setActiveTab('email');
+      } else {
+        setActiveTab(channelOptions[0]);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate messages';
+      alert(msg);
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const handleCreateClick = () => {
     setIsCreating(true);
@@ -46,11 +91,11 @@ function TemplatesContent() {
     setEditingTemplate(null);
   };
 
-  const handleCreate = async (data: { title: string; channel: 'direct' | 'instagram'; template: string }) => {
+  const handleCreate = async (data: { title: string; channel: TemplateChannel; template: string }) => {
     await createTemplate(data);
   };
 
-  const handleUpdate = async (id: string, data: { title: string; channel: 'direct' | 'instagram'; template: string }) => {
+  const handleUpdate = async (id: string, data: { title: string; channel: TemplateChannel; template: string }) => {
     await updateTemplate(id, data);
   };
 
@@ -136,26 +181,19 @@ function TemplatesContent() {
       {/* Tabs */}
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
-          <button
-            onClick={() => setActiveTab('direct')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'direct'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Direct
-          </button>
-          <button
-            onClick={() => setActiveTab('instagram')}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'instagram'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Instagram
-          </button>
+          {channelOptions.map((ch) => (
+            <button
+              key={ch}
+              onClick={() => setActiveTab(ch)}
+              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+                activeTab === ch
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              {CHANNEL_LABELS[ch]}
+            </button>
+          ))}
         </nav>
       </div>
 
@@ -165,6 +203,23 @@ function TemplatesContent() {
           <p className="text-gray-500 mb-4">
             No {activeTab} templates found. Create your first template to get started.
           </p>
+          <button
+            onClick={handleGenerateMessages}
+            disabled={generating}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {generating ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Generating...
+              </>
+            ) : (
+              'Generate Messages with AI'
+            )}
+          </button>
         </div>
       ) : (
         <div className="space-y-4">
@@ -177,10 +232,10 @@ function TemplatesContent() {
                 <div>
                   <div className="flex items-center gap-3">
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {template.title || `${template.channel === 'direct' ? 'Direct' : 'Instagram'} Template`}
+                      {template.title || `${CHANNEL_LABELS[template.channel]} Template`}
                     </h3>
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                      {template.channel === 'direct' ? 'Direct' : 'Instagram'}
+                      {CHANNEL_LABELS[template.channel]}
                     </span>
                   </div>
                 </div>
@@ -220,6 +275,8 @@ function TemplatesContent() {
         isCreating={isCreating}
         editingTemplate={editingTemplate}
         defaultChannel={activeTab}
+        channelOptions={channelOptions}
+        primaryUse={primaryUse}
         onClose={handleModalClose}
         onCreate={handleCreate}
         onUpdate={handleUpdate}

@@ -7,10 +7,16 @@ import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
+
+// User IDs allowed to access /research when primaryUse is "fundraising"
+const RESEARCH_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
@@ -24,6 +30,30 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+
+  const primaryUse = useMemo(
+    () => onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising',
+    [onboarding]
+  );
+
+  const routeAccess = useMemo(() => {
+    const isFundraising = primaryUse === 'fundraising';
+    const isB2B = primaryUse === 'b2b';
+    const canAccessResearch = isFundraising
+      ? RESEARCH_ALLOWED_USER_IDS.has(user?.id ?? '')
+      : true;
+    return {
+      showResearch: isFundraising ? canAccessResearch : true,
+      showCompanies: isB2B,
+      showInvestors: isFundraising,
+      showEnrich: isB2B,
+      canAccessResearch,
+      canAccessCompanies: isB2B,
+      canAccessInvestors: isFundraising,
+      canAccessEnrich: isB2B,
+      defaultRoute: isFundraising && !canAccessResearch ? '/investors' : '/',
+    };
+  }, [primaryUse, user?.id]);
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
   const showOnboarding = !onboardingLoading && !onboarding?.completed;
@@ -46,6 +76,36 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     setIsMobileMenuOpen(false);
   }, [pathname]);
+
+  // When Country Code is shown (b2b) and Auto is selected, default to India
+  useEffect(() => {
+    if (primaryUse !== 'fundraising' && selectedCountry === 'Auto') {
+      setSelectedCountry('India');
+    }
+  }, [primaryUse, selectedCountry, setSelectedCountry]);
+
+  // Route guard: redirect users from inaccessible routes based on primaryUse
+  useEffect(() => {
+    if (onboardingLoading || !onboarding?.completed) return;
+    if (pathname === '/login' || pathname === '/signup' || pathname === '/auth/callback' || pathname.startsWith('/reset-password')) return;
+
+    if (pathname === '/' && !routeAccess.canAccessResearch) {
+      router.replace('/investors');
+      return;
+    }
+    if (pathname === '/companies' && !routeAccess.canAccessCompanies) {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
+    if (pathname === '/investors' && !routeAccess.canAccessInvestors) {
+      router.replace('/');
+      return;
+    }
+    if (pathname === '/enrich' && !routeAccess.canAccessEnrich) {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
+  }, [pathname, onboardingLoading, onboarding?.completed, routeAccess, router]);
 
   const handleSignOut = async () => {
     try {
@@ -142,83 +202,65 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         </div>
         
         <nav className={`flex-1 py-6 space-y-2 overflow-y-auto ${isCollapsed && !isMobile ? 'px-2' : 'px-4'}`}>
-          <Link
-            href="/"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Research"
-          >
-            <Search className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Research</span>}
-          </Link>
-          
-          <Link
-            href="/companies"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/companies')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Companies"
-          >
-            <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Companies</span>}
-          </Link>
+          {routeAccess.showResearch && (
+            <Link
+              href="/"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Research"
+            >
+              <Search className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Research</span>}
+            </Link>
+          )}
 
-          <Link
-            href="/investors"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/investors')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Investors"
-          >
-            <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Investors</span>}
-          </Link>
+          {routeAccess.showCompanies && (
+            <Link
+              href="/companies"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/companies')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Companies"
+            >
+              <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Companies</span>}
+            </Link>
+          )}
+
+          {routeAccess.showInvestors && (
+            <Link
+              href="/investors"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/investors')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Investors"
+            >
+              <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Investors</span>}
+            </Link>
+          )}
           
-          <Link
-            href="/analytics"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/analytics')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Analytics"
-          >
-            <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Analytics</span>}
-          </Link>
-          
-          <Link
-            href="/domains-extractor"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/domains-extractor')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Extract Domains"
-          >
-            <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
-          </Link>
-          
-          <Link
-            href="/enrich"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/enrich')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Enrich CSV"
-          >
-            <Sparkles className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Enrich</span>}
-          </Link>
+          {routeAccess.showEnrich && (
+            <Link
+              href="/enrich"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/enrich')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Enrich CSV"
+            >
+              <Sparkles className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Enrich</span>}
+            </Link>
+          )}
           
           <Link
             href="/templates"
@@ -230,7 +272,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             title="Templates"
           >
             <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Templates</span>}
+            {(!isCollapsed || isMobile) && <span>Message Templates</span>}
           </Link>
           
           <Link
@@ -273,6 +315,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </Link>
 
           <Link
+            href="/analytics"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/analytics')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Analytics"
+          >
+            <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Analytics</span>}
+          </Link>
+
+          <Link
             href="/usage"
             className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/usage')
@@ -283,6 +338,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           >
             <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
             {(!isCollapsed || isMobile) && <span>Usage</span>}
+          </Link>
+
+          <Link
+            href="/domains-extractor"
+            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/domains-extractor')
+                ? 'bg-indigo-50 text-indigo-700'
+                : 'text-gray-700 hover:bg-gray-50'
+            }`}
+            title="Extract Domains"
+          >
+            <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+            {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
           </Link>
 
           <a
@@ -321,23 +389,25 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 </select>
               </div>
 
-              {/* Country Dropdown */}
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Country Code</p>
-                <select
-                  value={selectedCountry}
-                  onChange={(e) => {
-                    setSelectedCountry(e.target.value as Country);
-                  }}
-                  className="w-full px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                >
-                  {availableCountries.map((country) => (
-                    <option key={country} value={country} className="bg-white text-gray-900">
-                      {COUNTRY_DATA[country].flag} {country} {country === 'Auto' ? '(Auto-detect)' : `(${COUNTRY_DATA[country].code})`}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Country Dropdown - hidden for fundraising, and Auto option excluded */}
+              {primaryUse !== 'fundraising' && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">Country Code</p>
+                  <select
+                    value={selectedCountry === 'Auto' ? 'India' : selectedCountry}
+                    onChange={(e) => {
+                      setSelectedCountry(e.target.value as Country);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  >
+                    {availableCountries.filter((c) => c !== 'Auto').map((country) => (
+                      <option key={country} value={country} className="bg-white text-gray-900">
+                        {COUNTRY_DATA[country].flag} {country} ({COUNTRY_DATA[country].code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               
               {/* User Email */}
               {user && (

@@ -1,6 +1,7 @@
 // API client for fetching company qualification data
 
 import { supabase } from '@/utils/supabase/client';
+import type { OnboardingDataForSummary } from '@/lib/utils';
 
 export const fetchCompanyMap = async (
   domain: string, 
@@ -246,7 +247,11 @@ export const fetchInvestorDeepResearch = async (investorId: string): Promise<{
 };
 
 // Fetch investor AI analysis (analyze fit, store ai_metadata, mark as reviewed)
-export const fetchInvestorAnalyze = async (investorId: string): Promise<{
+// Pass onboarding so the API can use the real company name instead of "the company"
+export const fetchInvestorAnalyze = async (
+  investorId: string,
+  onboarding?: OnboardingDataForSummary | null
+): Promise<{
   success?: boolean;
   investor_fit?: boolean | null;
   reason?: string | null;
@@ -274,7 +279,7 @@ export const fetchInvestorAnalyze = async (investorId: string): Promise<{
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ investorId }),
+      body: JSON.stringify({ investorId, onboarding: onboarding ?? undefined }),
     });
     const data = await res.json();
     if (!res.ok) {
@@ -293,6 +298,106 @@ export const fetchInvestorAnalyze = async (investorId: string): Promise<{
       errorCode: 'UNKNOWN',
       details: msg,
     };
+  }
+};
+
+// Generate AI investor outreach emails from company context
+export const fetchGenerateMessages = async (
+  onboarding?: OnboardingDataForSummary | null
+): Promise<{
+  success?: boolean;
+  subjectline?: string;
+  email1?: string;
+  email2?: string;
+  error?: string;
+} | null> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    if (!token) {
+      return { error: 'You need to be signed in to perform this action.' };
+    }
+
+    const res = await fetch('/api/generate-messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ onboarding: onboarding ?? undefined }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return {
+        error: data.error || 'Something went wrong while generating messages. Please try again.',
+      };
+    }
+    return data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Generate messages error:', err);
+    return {
+      error: 'Something went wrong while generating messages. Please try again.',
+    };
+  }
+};
+
+// Investor analytics response from get_investor_analytics RPC
+export interface InvestorAnalytics {
+  funnel?: {
+    total: number;
+    identified: number;
+    contacted: number;
+    interested: number;
+    passed: number;
+    funded: number;
+    unreviewed: number;
+  };
+  fit?: {
+    fit_true: number;
+    fit_false: number;
+    fit_unknown: number;
+  };
+  activity?: {
+    added_last_7d: number;
+    added_last_30d: number;
+  };
+  geography?: Array<{ hq_country: string; count: number }>;
+  stages?: Array<{ stage: string; count: number }>;
+  industries?: Array<{ industry: string; count: number }>;
+}
+
+// Fetch investor analytics for fundraising dashboard
+export const fetchInvestorAnalytics = async (): Promise<InvestorAnalytics | null> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    if (!token) {
+      return null;
+    }
+
+    const res = await fetch('/api/investor-analytics', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      console.error('Investor analytics API error:', data);
+      return null;
+    }
+
+    return data as InvestorAnalytics;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Investor analytics fetch error:', err);
+    return null;
   }
 };
 

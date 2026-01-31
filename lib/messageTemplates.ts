@@ -274,3 +274,75 @@ export const generateMessageTemplates = (
     return [message1, message2, message3, message4];
   }
 };
+
+/** Investor ai_metadata fields for message template substitution */
+export interface InvestorAiMetadata {
+  line1?: string | null;
+  line2?: string | null;
+  reason?: string | null;
+  investor_fit?: boolean | null;
+  twitter_line?: string | null;
+}
+
+/** Investor data for message template substitution */
+export interface InvestorTemplateData {
+  name?: string | null;
+  investment_thesis?: string | null;
+  ai_metadata?: InvestorAiMetadata | null;
+}
+
+/**
+ * Generate message templates for investors using ai_metadata (line1, line2, reason, investor_fit)
+ * and substituteVariables with investor-specific placeholders.
+ * @param investorData - Investor name, thesis, ai_metadata
+ * @param dbTemplates - Array of template strings from database
+ * @param holidays - Optional array of holiday dates in YYYY-MM-DD format
+ * @returns Array of message template strings
+ */
+export const generateInvestorMessageTemplates = (
+  investorData: InvestorTemplateData | null | undefined,
+  dbTemplates?: string[],
+  holidays: string[] = []
+): string[] => {
+  if (!dbTemplates || dbTemplates.length === 0) return [];
+
+  const aiMeta = investorData?.ai_metadata ?? {};
+  const line1 = typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '';
+  const line2 = typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '';
+  const reason = typeof aiMeta.reason === 'string' ? aiMeta.reason : '';
+  const twitterLine = typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : '';
+  const investorFit = aiMeta.investor_fit;
+  const fitLabel =
+    investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : investorFit === null ? 'Unclear Fit' : '';
+  const name = investorData?.name?.trim() ?? '';
+  const investmentThesis = investorData?.investment_thesis?.trim() ?? '';
+  const cleanedName = name ? name.split(/\s+/)[0] || name : '';
+
+  const followUpDate = getFollowUpDate(new Date(), holidays);
+
+  const variables: Record<string, string> = {
+    line1,
+    line2,
+    reason,
+    twitter_line: twitterLine,
+    twitterLine,
+    investor_fit: fitLabel,
+    investorFit: fitLabel,
+    name,
+    cleaned_name: cleanedName,
+    cleanedName,
+    investment_thesis: investmentThesis,
+    investmentThesis: investmentThesis,
+    followUpFullDate: followUpDate.fullDate,
+    followUpWeekdayDate: followUpDate.weekdayDate,
+    followUpShortDay: followUpDate.shortDay,
+    followUpRelativeDay: followUpDate.relativeDay,
+    followUpRelativeShortDay: followUpDate.relativeShortDay,
+    followUpDateOnly: followUpDate.dateOnly,
+  };
+
+  return dbTemplates
+    .map((t) => t?.trim())
+    .filter((t) => t && t.length > 0)
+    .map((t) => substituteVariables(t!, variables));
+};

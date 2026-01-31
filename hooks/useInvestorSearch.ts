@@ -67,6 +67,11 @@ export interface InvestorSearchResult {
   email?: string | null;
   phone?: string | null;
   links?: string[] | null;
+  /** For type='person': firm this person is associated with */
+  associated_firm_id?: string | null;
+  associated_firm_name?: string | null;
+  /** For type='firm': number of people linked to the firm */
+  associated_people_count?: number | null;
 }
 
 export interface UseInvestorSearchOptions {
@@ -284,4 +289,39 @@ export async function fetchInvestorById(
   const { data, error } = await supabase.rpc('search_investors', rpcParams);
   if (error || !Array.isArray(data) || data.length === 0) return null;
   return data[0] as InvestorSearchResult;
+}
+
+/** Fetch investors for CSV export - always uses p_mode: "reviewed", p_limit: 100000 */
+export async function fetchInvestorsForExport(
+  filters: InvestorSearchFilters
+): Promise<InvestorSearchResult[]> {
+  const params = buildRpcParams(
+    { ...filters, mode: 'reviewed' },
+    0,
+    100000
+  );
+  const { data, error } = await supabase.rpc('search_investors', params);
+  if (error || !Array.isArray(data)) return [];
+  return data as InvestorSearchResult[];
+}
+
+/** Limit for contacts at firm when on free plan */
+export const CONTACTS_FREE_LIMIT = 5;
+
+/** Fetch people at a firm using search_investors RPC (p_investor_id = firm id, p_type = person) */
+export async function fetchPeopleAtFirm(
+  firmId: string,
+  mode: InvestorModeFilter,
+  limit: number
+): Promise<InvestorSearchResult[]> {
+  const rpcParams: Record<string, unknown> = {
+    p_type: 'person',
+    p_mode: mode,
+    p_investor_id: firmId,
+    p_limit: limit,
+    p_offset: 0,
+  };
+  const { data, error } = await supabase.rpc('search_investors', rpcParams);
+  if (error || !Array.isArray(data)) return [];
+  return data as InvestorSearchResult[];
 }

@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 import { formatOnboardingCompanySummary, type OnboardingDataForSummary } from '@/lib/utils';
+import { fetchTwitterTimeline, type TwitterTweet } from '@/utils/twitterApi';
 
 const SYSTEM_MESSAGE = `You are an investment analysis assistant. Your role is to evaluate <<COMPANY_NAME>>> using only the provided company information and determine whether it is a good fit for investment based on investor criteria.
 
@@ -31,7 +32,7 @@ Investor Profile:
 Return the result strictly in the following JSON format:
 {
   "investor_fit": true | false | null,
-  "reason": "Clear explanation of why this company fits or does not fit the investor",
+  "reason": "Precise, short, clear explanation of why this company fits or does not fit the investor",
   "personalized_outreach_lines": [
     "I saw ...[additional <12 words]..., which is why I'm reaching out to you about <<<COMPANY_NAME>>>.", // Line 1
     "I believe ...[additional <12 words]... could greatly benefit us at <<<COMPANY_NAME>>>." // Line 2
@@ -40,6 +41,77 @@ Return the result strictly in the following JSON format:
 }
 
 Follow exactly the above sentence structures for personalized_outreach_lines, and be precise.`;
+
+const TWITTER_ICEBREAKER_PROMPT = (name: string, first_name: string, allValidTweets: string, dateString: string) =>
+  `PROMPT START
+${name} posted these on Twitter:${allValidTweets}
+
+Write a one-line friendly icebreaker after just reading any one of ${first_name}'s tweets. Don't use hashtags. Keep it less than 120 characters. You don't know ${first_name} or ${first_name}'s skills personally. Do not ask question. Today is ${dateString}. No questions. Don't use  / (slash), Em Dashes (—), En Dashes (–) , and Hyphens (-)"
+
+Reply as a JSON with key:
+{ 
+  "twitter_line": "I just read your tweet..."
+}
+
+Examples of a few other icebreakers:
+I just read your tweet about WindBorne Systems' climate technology. Congratulations to you and the team!
+
+I just read your tweet on stepping into our purpose and sharing our unique stories with the world!
+PROMPT END`;
+
+const MIN_TWEET_TEXT_LENGTH = 30;
+const NEGATIVE_WORDS = /\b(hiring|buy now|limited time|act now|sale now|discount|shop now|apply now|join our team)\b/i;
+
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function parseTweetDate(createdAt: string): Date | null {
+  try {
+    const d = new Date(createdAt);
+    return isNaN(d.getTime()) ? null : d;
+  } catch {
+    return null;
+  }
+}
+
+function isTweetWithinOneWeek(tweet: TwitterTweet): boolean {
+  const d = parseTweetDate(tweet.created_at);
+  if (!d) return false;
+  return Date.now() - d.getTime() < ONE_WEEK_MS;
+}
+
+function hasEnoughText(text: string): boolean {
+  const t = (text || '').trim();
+  return t.length >= MIN_TWEET_TEXT_LENGTH;
+}
+
+function containsNegativeWords(text: string): boolean {
+  return NEGATIVE_WORDS.test(text || '');
+}
+
+function filterValidTweets(
+  pinned: TwitterTweet | null | undefined,
+  timeline: TwitterTweet[] | null | undefined
+): TwitterTweet[] {
+  const valid: TwitterTweet[] = [];
+
+  if (pinned && typeof pinned.text === 'string') {
+    const t = pinned.text.trim();
+    if (hasEnoughText(t) && !containsNegativeWords(t)) {
+      valid.push(pinned);
+    }
+  }
+
+  const timelineList = Array.isArray(timeline) ? timeline : [];
+  for (const tweet of timelineList) {
+    if (!tweet || typeof tweet.text !== 'string') continue;
+    if (!isTweetWithinOneWeek(tweet)) continue;
+    const t = tweet.text.trim();
+    if (!hasEnoughText(t) || containsNegativeWords(t)) continue;
+    valid.push(tweet);
+  }
+
+  return valid;
+}
 
 function getSupabaseServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -113,20 +185,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'investorId is required' }, { status: 400 });
     }
 
-    const companyName = onboarding?.step5?.companyName?.trim() || 'the company';
+    const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse;
+    const companyName =
+      primaryUse === 'b2b'
+        ? onboarding?.b2bStep3?.companyName?.trim() || 'the company'
+        : onboarding?.step5?.companyName?.trim() || 'the company';
     const companyContext = onboarding
       ? formatOnboardingCompanySummary(onboarding)
       : `Kaptured AI is an AI-powered platform that generates professional product photos and videos for brands (especially fashion & jewelry) from minimal input, scaling creative content production with AI. It combines computer vision and generative models to automate visual content at scale.`;
+
+    console.log('[investor-analyze] Input:', { investorId, companyName, companyContextLength: companyContext?.length });
 
     const supabase = getSupabaseServiceClient();
     if (!supabase) {
       return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
     }
 
-    // Fetch investor's deep_research
+    // Fetch investor's deep_research, twitter_url, name
     const { data: investor, error: fetchError } = await supabase
       .from('investors')
-      .select('id, deep_research')
+      .select('id, deep_research, twitter_url, name')
       .eq('id', investorId)
       .single();
 
@@ -151,6 +229,15 @@ export async function POST(req: NextRequest) {
       .replace('<<<DEEP_RESEARCH>>>', deepResearch.trim());
 
     const systemContent = SYSTEM_MESSAGE.replace(/<<COMPANY_NAME>>>/g, companyName);
+    const userHasPlaceholder = userMessage.includes('<<<COMPANY_NAME>>>');
+    const systemHasPlaceholder = systemContent.includes('<<COMPANY_NAME>>>');
+    if (userHasPlaceholder || systemHasPlaceholder) {
+      console.warn('[investor-analyze] Placeholder NOT replaced:', { userHasPlaceholder, systemHasPlaceholder });
+    }
+    console.log('[investor-analyze] Prompts:', {
+      companyName,
+      userMessageSnippet: userMessage.slice(0, 500) + '...',
+    });
     const extracted = await getJsonCompletion(
       [
         { role: 'system', content: systemContent },
@@ -158,6 +245,14 @@ export async function POST(req: NextRequest) {
       ],
       { max_tokens: 1500 }
     );
+
+    console.log('[investor-analyze] AI response:', {
+      investor_fit: extracted?.investor_fit,
+      personalized_outreach_lines: extracted?.personalized_outreach_lines,
+      linesContainPlaceholder: (extracted?.personalized_outreach_lines ?? []).some(
+        (l: string) => typeof l === 'string' && (l.includes('<<<COMPANY_NAME>>>') || l.includes('<<COMPANY_NAME>>>'))
+      ),
+    });
 
     if (extracted?.error) {
       const errMsg = typeof extracted.error === 'string' ? extracted.error : 'AI analysis failed';
@@ -179,12 +274,53 @@ export async function POST(req: NextRequest) {
       ? extracted.mutual_interests.filter(Boolean)
       : [];
 
+    let twitterLine: string | null = null;
+    const twitterUrl = investor.twitter_url?.trim();
+    const investorName = investor.name?.trim() ?? '';
+    const firstName = investorName ? investorName.split(/\s+/)[0] || investorName : '';
+
+    if (twitterUrl) {
+      try {
+        const timelineData = await fetchTwitterTimeline(twitterUrl);
+        const validTweets = filterValidTweets(timelineData.pinned, timelineData.timeline);
+        if (validTweets.length > 0) {
+          const allValidTweets = validTweets
+            .map((t) => `\n- "${(t.text || '').trim()}"`)
+            .join('');
+          const dateString = new Date().toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+          });
+          const twitterPrompt = TWITTER_ICEBREAKER_PROMPT(
+            investorName || 'They',
+            firstName || 'them',
+            allValidTweets,
+            dateString
+          );
+          const twitterExtracted = await getJsonCompletion(
+            [{ role: 'user', content: twitterPrompt }],
+            { max_tokens: 200 }
+          );
+          if (twitterExtracted?.twitter_line && typeof twitterExtracted.twitter_line === 'string') {
+            const raw = twitterExtracted.twitter_line.trim();
+            twitterLine = raw.length > 120 ? raw.slice(0, 120) : raw;
+          }
+        }
+      } catch (twitterErr) {
+        console.warn('[investor-analyze] Twitter icebreaker failed:', twitterErr);
+      }
+    }
+
+    const twitterLineValue = twitterLine ?? undefined;
     const newAiMetadata = {
       investor_fit: extracted?.investor_fit ?? null,
       reason: typeof extracted?.reason === 'string' ? extracted.reason : null,
       line1,
       line2,
       mutual_interests: mutualInterests,
+      ...(twitterLineValue ? { twitter_line: twitterLineValue } : {}),
     };
 
     const { error: rpcError } = await supabase.rpc('upsert_investor_ai_metadata', {
@@ -211,6 +347,7 @@ export async function POST(req: NextRequest) {
       line1: newAiMetadata.line1,
       line2: newAiMetadata.line2,
       mutual_interests: newAiMetadata.mutual_interests,
+      ...(newAiMetadata.twitter_line && { twitter_line: newAiMetadata.twitter_line }),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

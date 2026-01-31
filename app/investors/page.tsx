@@ -1,16 +1,18 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import Toast from '@/components/ui/Toast';
 import InvestorDetailsDrawer from '@/components/ui/InvestorDetailsDrawer';
+import ManageInvestorColumnsDrawer from '@/components/ui/ManageInvestorColumnsDrawer';
 import ReportMissingInvestorsModal from '@/components/ui/ReportMissingInvestorsModal';
 import InsufficientCreditsModal from '@/components/ui/InsufficientCreditsModal';
 import {
   useInvestorSearch,
   fetchInvestorById,
+  fetchInvestorsForExport,
   type InvestorSearchFilters,
   type InvestorSearchResult,
   type InvestorTypeFilter,
@@ -28,6 +30,9 @@ import {
   Globe,
   CheckCircle2,
   ArrowRight,
+  Table,
+  List,
+  Download,
 } from 'lucide-react';
 import { formatHqLocationShort } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -35,7 +40,13 @@ import { CALENDLY_URL } from '@/components/BookDemoButton';
 import { fetchInvestorAnalyze } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner } from '@/contexts/OwnerContext';
+import { useOnboarding } from '@/contexts/OnboardingContext';
+import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
+import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
+import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
+import { copyToClipboard, extractPhoneNumber } from '@/lib/utils';
+import { downloadCsv } from '@/lib/csvExport';
 
 // Filter options - must match search_investors RPC
 const INVESTOR_TYPE_OPTIONS = [
@@ -218,6 +229,40 @@ const INVESTOR_FIT_OPTIONS: { value: boolean | null; label: string }[] = [
   { value: null, label: '😐 Unclear Fit' },
 ];
 
+const INVESTORS_COLUMN_ORDER_KEY = 'investors-column-order';
+const INVESTORS_COLUMN_VISIBILITY_KEY = 'investors-column-visibility';
+const INVESTORS_CLIPBOARD_COLUMN_KEY = 'investors-clipboard-column';
+const INVESTORS_SUBJECT_COLUMN_KEY = 'investors-subject-column';
+const INVESTORS_COMPACT_COLUMN_KEY = 'investors-compact-column';
+const INVESTORS_PHONE_CLICK_BEHAVIOR_KEY = 'investors-phone-click-behavior';
+
+const INVESTOR_BASE_COLUMNS = [
+  'name',
+  'role',
+  'investor_type',
+  'investment_stages',
+  'investment_industries',
+  'investment_geographies',
+  'hq_location',
+  'investment_thesis',
+  'fund_size_usd',
+  'check_size_min_usd',
+  'check_size_max_usd',
+  'domain',
+  'linkedin_url',
+  'email',
+  'phone',
+  'set_name',
+  'stage',
+  'owner',
+  'investor_fit',
+  'twitter_line',
+  'line1',
+  'line2',
+  'reason',
+  'notes',
+];
+
 const DEFAULT_FILTERS: InvestorSearchFilters = {
   type: 'firm',
   mode: 'global',
@@ -269,24 +314,123 @@ export default function InvestorsPage() {
 function InvestorsContent() {
   const { user } = useAuth();
   const { availableOwners, isFreePlan } = useOwner();
+  const { onboarding } = useOnboarding();
+  const { templates } = useMessageTemplates();
   const [investorSets, setInvestorSets] = useState<string[]>([]);
+  const [emailSettings, setEmailSettings] = useState<EmailSettings | null>(null);
+  const [columnSettingsFromApi, setColumnSettingsFromApi] = useState<{
+    columnOrder?: string[];
+    visibleColumns?: string[];
+    clipboardColumn?: string | null;
+    subjectColumn?: string | null;
+    compactColumn?: string | null;
+    phoneClickBehavior?: 'whatsapp' | 'call';
+  } | null>(null);
   const [filters, setFilters] = useState<InvestorSearchFilters>(DEFAULT_FILTERS);
   const [localSearchInput, setLocalSearchInput] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [investorToView, setInvestorToView] = useState<InvestorSearchResult | null>(null);
+  /** When viewing a firm opened from a person, the person we came from (for "Back to person") */
+  const [backToInvestor, setBackToInvestor] = useState<InvestorSearchResult | null>(null);
+  /** When viewing a person opened from firm's Contacts tab, the firm we came from (for "Back to firm") */
+  const [backToFirm, setBackToFirm] = useState<InvestorSearchResult | null>(null);
   const [toastMessage, setToastMessage] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
   const [reportMissingModalOpen, setReportMissingModalOpen] = useState(false);
   const [insufficientCreditsModalOpen, setInsufficientCreditsModalOpen] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [showCelebration, setShowCelebration] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   /** Pending analyze results for immediate card update before refresh completes */
   const [pendingAnalyzeResults, setPendingAnalyzeResults] = useState<
     Record<string, { investor_fit: boolean | null; reason: string | null }>
   >({});
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  // View mode state (table or list)
+  const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('investors-view-mode');
+      return (saved === 'list' || saved === 'table') ? saved : 'list';
+    }
+    return 'list';
+  });
+  const [columnFilterOpen, setColumnFilterOpen] = useState(false);
+
+  const getTemplateColumnKeys = useCallback(() => {
+    return templates.map((t) => `template_${t.id}`);
+  }, [templates]);
+
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => {
+    const initialDefault = [...INVESTOR_BASE_COLUMNS, ...templates.map((t) => `template_${t.id}`)];
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(INVESTORS_COLUMN_ORDER_KEY);
+      const savedClipboard = localStorage.getItem(INVESTORS_CLIPBOARD_COLUMN_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as string[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const savedBase = parsed.filter((c) => !c.startsWith('template_') && c !== savedClipboard);
+            const missing = INVESTOR_BASE_COLUMNS.filter((c) => !savedBase.includes(c));
+            const currentTemplates = templates.map((t) => `template_${t.id}`);
+            let order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => parsed.includes(tc)), ...currentTemplates.filter((tc) => !parsed.includes(tc))];
+            if (savedClipboard && order.includes(savedClipboard)) {
+              order = [savedClipboard, ...order.filter((c) => c !== savedClipboard)];
+            }
+            return order;
+          }
+        } catch {
+          // fall through
+        }
+      }
+    }
+    return initialDefault;
+  });
+  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
+    const initialDefault = new Set([...INVESTOR_BASE_COLUMNS, ...templates.map((t) => `template_${t.id}`)]);
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(INVESTORS_COLUMN_VISIBILITY_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as string[];
+          const set = new Set(parsed.length ? parsed : INVESTOR_BASE_COLUMNS);
+          INVESTOR_BASE_COLUMNS.forEach((c) => set.add(c));
+          templates.forEach((t) => set.add(`template_${t.id}`));
+          return set;
+        } catch {
+          return initialDefault;
+        }
+      }
+    }
+    return initialDefault;
+  });
+  const [clipboardColumn, setClipboardColumn] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(INVESTORS_CLIPBOARD_COLUMN_KEY) || null;
+    }
+    return null;
+  });
+  const [subjectColumn, setSubjectColumn] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(INVESTORS_SUBJECT_COLUMN_KEY) || null;
+    }
+    return null;
+  });
+  const [compactColumn, setCompactColumn] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(INVESTORS_COMPACT_COLUMN_KEY) || null;
+    }
+    return null;
+  });
+  const [phoneClickBehavior, setPhoneClickBehavior] = useState<'whatsapp' | 'call'>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(INVESTORS_PHONE_CLICK_BEHAVIOR_KEY);
+      return saved === 'call' || saved === 'whatsapp' ? saved : 'whatsapp';
+    }
+    return 'whatsapp';
+  });
 
   const pageSize = isFreePlan ? 5 : 20;
   const { data, loading, error, hasMore, page, setPage, loadMore, refresh } =
@@ -303,6 +447,184 @@ function InvestorsContent() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  // Fetch email_settings and column_settings.investors from user_settings
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('user_settings')
+        .select('email_settings, column_settings')
+        .eq('id', user.id)
+        .single();
+      if (cancelled) return;
+      const es = data?.email_settings;
+      if (es && typeof es === 'object') {
+        const parsed = typeof es === 'string' ? JSON.parse(es) : es;
+        if (parsed && (parsed.provider === 'gmail' || parsed.provider === 'outlook')) {
+          setEmailSettings({
+            provider: parsed.provider,
+            signature: typeof parsed.signature === 'string' ? parsed.signature : '',
+          });
+        } else {
+          setEmailSettings(null);
+        }
+      } else {
+        setEmailSettings(null);
+      }
+      const cs = data?.column_settings;
+      if (cs && typeof cs === 'object') {
+        const parsed = typeof cs === 'string' ? JSON.parse(cs) : cs;
+        const investors = parsed?.investors;
+        if (investors && typeof investors === 'object' && (Array.isArray(investors.columnOrder) || Array.isArray(investors.visibleColumns))) {
+          setColumnSettingsFromApi(investors);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // Apply column_settings.investors from API when loaded (once)
+  useEffect(() => {
+    if (!columnSettingsFromApi) return;
+    const cs = columnSettingsFromApi;
+    if (Array.isArray(cs.columnOrder) && cs.columnOrder.length > 0) {
+      const savedBase = cs.columnOrder.filter((c) => !c.startsWith('template_') && c !== cs.clipboardColumn);
+      const missing = INVESTOR_BASE_COLUMNS.filter((c) => !savedBase.includes(c));
+      const currentTemplates = getTemplateColumnKeys();
+      let order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => cs.columnOrder!.includes(tc)), ...currentTemplates.filter((tc) => !cs.columnOrder!.includes(tc))];
+      if (cs.clipboardColumn && order.includes(cs.clipboardColumn)) {
+        order = [cs.clipboardColumn, ...order.filter((c) => c !== cs.clipboardColumn)];
+      }
+      setColumnOrder(order);
+    }
+    if (Array.isArray(cs.visibleColumns) && cs.visibleColumns.length > 0) {
+      const next = new Set(cs.visibleColumns);
+      INVESTOR_BASE_COLUMNS.forEach((c) => next.add(c));
+      getTemplateColumnKeys().forEach((c) => next.add(c));
+      setVisibleColumns(next);
+    }
+    if (cs.clipboardColumn != null) setClipboardColumn(cs.clipboardColumn);
+    if (cs.subjectColumn != null) setSubjectColumn(cs.subjectColumn);
+    if (cs.compactColumn != null) setCompactColumn(cs.compactColumn);
+    if (cs.phoneClickBehavior) setPhoneClickBehavior(cs.phoneClickBehavior);
+    setColumnSettingsFromApi(null);
+  }, [columnSettingsFromApi, getTemplateColumnKeys]);
+
+  // Sync column order when templates change
+  useEffect(() => {
+    const currentTemplates = getTemplateColumnKeys();
+    setColumnOrder((prev) => {
+      const base = prev.filter((c) => !c.startsWith('template_') && c !== clipboardColumn);
+      const existingTemplates = prev.filter((c) => c.startsWith('template_'));
+      const newTemplates = currentTemplates.filter((tc) => !existingTemplates.includes(tc));
+      let order = [...base, ...existingTemplates.filter((tc) => currentTemplates.includes(tc)), ...newTemplates];
+      if (clipboardColumn && order.includes(clipboardColumn)) {
+        order = [clipboardColumn, ...order.filter((c) => c !== clipboardColumn)];
+      }
+      return order;
+    });
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      currentTemplates.forEach((c) => next.add(c));
+      prev.forEach((c) => {
+        if (c.startsWith('template_') && !currentTemplates.includes(c)) next.delete(c);
+      });
+      return next;
+    });
+  }, [getTemplateColumnKeys, clipboardColumn]);
+
+  // Save view mode to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('investors-view-mode', viewMode);
+    }
+  }, [viewMode]);
+
+  // Save column order and visibility to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(INVESTORS_COLUMN_ORDER_KEY, JSON.stringify(columnOrder));
+    }
+  }, [columnOrder]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(INVESTORS_COLUMN_VISIBILITY_KEY, JSON.stringify(Array.from(visibleColumns)));
+    }
+  }, [visibleColumns]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (clipboardColumn) localStorage.setItem(INVESTORS_CLIPBOARD_COLUMN_KEY, clipboardColumn);
+      else localStorage.removeItem(INVESTORS_CLIPBOARD_COLUMN_KEY);
+    }
+  }, [clipboardColumn]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (subjectColumn) localStorage.setItem(INVESTORS_SUBJECT_COLUMN_KEY, subjectColumn);
+      else localStorage.removeItem(INVESTORS_SUBJECT_COLUMN_KEY);
+    }
+  }, [subjectColumn]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      if (compactColumn) localStorage.setItem(INVESTORS_COMPACT_COLUMN_KEY, compactColumn);
+      else localStorage.removeItem(INVESTORS_COMPACT_COLUMN_KEY);
+    }
+  }, [compactColumn]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(INVESTORS_PHONE_CLICK_BEHAVIOR_KEY, phoneClickBehavior);
+    }
+  }, [phoneClickBehavior]);
+
+  // Reorder columns to put clipboard column first when it changes
+  useEffect(() => {
+    if (clipboardColumn) {
+      setColumnOrder((prev) => {
+        if (prev.includes(clipboardColumn) && prev[0] !== clipboardColumn) {
+          return [clipboardColumn, ...prev.filter((c) => c !== clipboardColumn)];
+        }
+        if (!prev.includes(clipboardColumn)) {
+          return [clipboardColumn, ...prev];
+        }
+        return prev;
+      });
+    }
+  }, [clipboardColumn]);
+
+  const persistInvestorColumnSettings = useCallback(async () => {
+    if (!user?.id) return;
+    const { data: existing } = await supabase
+      .from('user_settings')
+      .select('personalization, owners, email_settings, onboarding, column_settings')
+      .eq('id', user.id)
+      .single();
+    let existingColumnSettings: Record<string, unknown> = {};
+    const raw = existing?.column_settings;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      existingColumnSettings = raw as Record<string, unknown>;
+    }
+    const payload = {
+      id: user.id,
+      personalization: existing?.personalization ?? null,
+      owners: existing?.owners ?? null,
+      email_settings: existing?.email_settings ?? null,
+      onboarding: existing?.onboarding ?? null,
+      column_settings: {
+        ...existingColumnSettings,
+        investors: {
+          columnOrder,
+          visibleColumns: Array.from(visibleColumns),
+          clipboardColumn: clipboardColumn ?? null,
+          subjectColumn: subjectColumn ?? null,
+          compactColumn: compactColumn ?? null,
+          phoneClickBehavior,
+        },
+      },
+    };
+    const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
+    if (error) throw error;
+  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, subjectColumn, compactColumn, phoneClickBehavior]);
 
   // Sync drawer investor with refreshed data (e.g. after analyze) so personalization fields appear
   useEffect(() => {
@@ -356,7 +678,7 @@ function InvestorsContent() {
   const handleAnalyze = useCallback(
     async (investorId: string, investorName?: string) => {
       setAnalyzingId(investorId);
-      const result = await fetchInvestorAnalyze(investorId);
+      const result = await fetchInvestorAnalyze(investorId, onboarding ?? undefined);
       setAnalyzingId(null);
       if (result?.error) {
         if (result.errorCode === 'INSUFFICIENT_CREDITS') {
@@ -416,7 +738,7 @@ function InvestorsContent() {
         }, 2000);
       }
     },
-    [refresh, filters.type, filters.mode]
+    [refresh, filters.type, filters.mode, onboarding]
   );
 
   // Debounced search
@@ -476,6 +798,279 @@ function InvestorsContent() {
     });
   }, []);
 
+  const columnLabels = useMemo<Record<string, string>>(() => {
+    const base: Record<string, string> = {
+      name: 'Name',
+      role: 'Role',
+      investor_type: 'Investor Type',
+      investment_stages: 'Stages',
+      investment_industries: 'Industries',
+      investment_geographies: 'Geographies',
+      hq_location: 'HQ Location',
+      investment_thesis: 'Thesis',
+      fund_size_usd: 'Fund Size',
+      check_size_min_usd: 'Check Min',
+      check_size_max_usd: 'Check Max',
+      domain: 'Domain',
+      linkedin_url: 'LinkedIn',
+      email: 'Email',
+      phone: 'Phone',
+      set_name: 'Set',
+      stage: 'Stage',
+      owner: 'Owner',
+      investor_fit: 'Fit',
+      twitter_line: 'Twitter Line',
+      line1: 'Line 1',
+      line2: 'Line 2',
+      reason: 'Reason',
+      notes: 'Notes',
+    };
+    templates.forEach((t) => {
+      const channelLabel = t.channel === 'direct' ? 'Direct Message' : t.channel === 'instagram' ? 'Instagram Message' : t.channel === 'email' ? 'Email' : t.channel === 'linkedin' ? 'LinkedIn' : t.channel;
+      base[`template_${t.id}`] = `${t.title} - ${channelLabel}`;
+    });
+    return base;
+  }, [templates]);
+
+  const toggleColumn = useCallback((column: string) => {
+    setVisibleColumns((prev) => {
+      const next = new Set(prev);
+      if (next.has(column)) next.delete(column);
+      else next.add(column);
+      return next;
+    });
+  }, []);
+
+  const orderedVisibleColumns = useMemo(
+    () => columnOrder.filter((col) => visibleColumns.has(col)),
+    [columnOrder, visibleColumns]
+  );
+
+  const getMessageForInvestorTemplate = useCallback(
+    (investor: InvestorSearchResult, templateId: string, pendingAnalyze?: { investor_fit: boolean | null; reason: string | null }): string => {
+      const template = templates.find((t) => t.id === templateId);
+      if (!template) return '';
+      const aiMeta = investor.ai_metadata ?? {};
+      const reasonVal = pendingAnalyze?.reason ?? aiMeta.reason;
+      const investorData = {
+        name: investor.name,
+        investment_thesis: investor.investment_thesis,
+        ai_metadata: {
+          twitter_line: typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : null,
+          line1: typeof aiMeta.line1 === 'string' ? aiMeta.line1 : null,
+          line2: typeof aiMeta.line2 === 'string' ? aiMeta.line2 : null,
+          reason: typeof reasonVal === 'string' ? (reasonVal as string) : null,
+          investor_fit: pendingAnalyze?.investor_fit !== undefined ? pendingAnalyze.investor_fit : (typeof aiMeta.investor_fit === 'boolean' || aiMeta.investor_fit === null ? aiMeta.investor_fit : undefined),
+        },
+      };
+      const messages = generateInvestorMessageTemplates(investorData, [template.template]);
+      return messages.length > 0 ? messages[0] : '';
+    },
+    [templates]
+  );
+
+  const getInvestorCellValue = useCallback(
+    (investor: InvestorSearchResult, columnKey: string, pendingAnalyze?: { investor_fit: boolean | null; reason: string | null }): string => {
+      const loc = formatHqLocationShort(investor.hq_state, investor.hq_country);
+      const aiMeta = investor.ai_metadata ?? {};
+      const investorFit =
+        pendingAnalyze?.investor_fit !== undefined
+          ? pendingAnalyze.investor_fit
+          : (aiMeta.investor_fit as boolean | null | undefined);
+      const fitLabel =
+        investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : investorFit === null ? 'Unclear Fit' : '';
+
+      switch (columnKey) {
+        case 'name':
+          return investor.name ?? '-';
+        case 'role':
+          return investor.role ?? '-';
+        case 'investor_type':
+          return Array.isArray(investor.investor_type) ? investor.investor_type.join(', ') : '-';
+        case 'investment_stages':
+          return Array.isArray(investor.investment_stages)
+            ? investor.investment_stages.map(formatKebabLabel).join(', ')
+            : '-';
+        case 'investment_industries':
+          return Array.isArray(investor.investment_industries)
+            ? investor.investment_industries.map(formatKebabLabel).join(', ')
+            : '-';
+        case 'investment_geographies':
+          return Array.isArray(investor.investment_geographies) ? investor.investment_geographies.join(', ') : '-';
+        case 'hq_location':
+          return loc || '-';
+        case 'investment_thesis':
+          return investor.investment_thesis?.trim() ?? '-';
+        case 'fund_size_usd':
+          return investor.fund_size_usd != null ? String(investor.fund_size_usd) : '-';
+        case 'check_size_min_usd':
+          return investor.check_size_min_usd != null ? String(investor.check_size_min_usd) : '-';
+        case 'check_size_max_usd':
+          return investor.check_size_max_usd != null ? String(investor.check_size_max_usd) : '-';
+        case 'domain':
+          return investor.domain?.trim() ?? '-';
+        case 'linkedin_url':
+          return investor.linkedin_url?.trim() ?? '-';
+        case 'email':
+          return investor.email?.trim() ?? '-';
+        case 'phone':
+          return investor.phone?.trim() ?? '-';
+        case 'set_name':
+          return investor.set_name ?? '-';
+        case 'stage':
+          return investor.stage ?? '-';
+        case 'owner':
+          return investor.owner ?? '-';
+        case 'investor_fit':
+          return fitLabel || '-';
+        case 'twitter_line':
+          return (typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : '') || '-';
+        case 'line1':
+          return (typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '') || '-';
+        case 'line2':
+          return (typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '') || '-';
+        case 'reason': {
+          const r = pendingAnalyze?.reason ?? aiMeta.reason;
+          return typeof r === 'string' ? r : '-';
+        }
+        case 'notes':
+          return Array.isArray(investor.notes) && investor.notes.length > 0
+            ? investor.notes.map((n) => n.message).join('; ')
+            : '-';
+        default:
+          if (columnKey.startsWith('template_')) {
+            const templateId = columnKey.replace('template_', '');
+            return getMessageForInvestorTemplate(investor, templateId, pendingAnalyze);
+          }
+          return '-';
+      }
+    },
+    [getMessageForInvestorTemplate]
+  );
+
+  const handleExportCsv = useCallback(async () => {
+    const csvEscape = (value: unknown): string => {
+      if (value == null) return '';
+      const str = String(value);
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+    if (filters.mode !== 'reviewed') return;
+    setExportLoading(true);
+    try {
+      const investors = await fetchInvestorsForExport(filters);
+      const isPerson = filters.type === 'person';
+
+      const headers: string[] = [
+        'Name',
+        ...(isPerson ? ['First Name', 'Role', 'Associated Firm Name'] : []),
+        'Owner',
+        'Stage',
+        'Set',
+        'LinkedIn URL',
+        'Twitter URL',
+        'Email 1',
+        'Email 2',
+        'Phone 1',
+        'Phone 2',
+        'Investor Fit',
+        'Reason',
+        'Twitter Line',
+        'Line 1',
+        'Line 2',
+        'Mutual Interests',
+        'Notes',
+      ];
+
+      const rows = investors.map((inv) => {
+        const aiMeta = inv.ai_metadata ?? {};
+        const investorFit = aiMeta.investor_fit;
+        const fitLabel =
+          investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : investorFit === null ? 'Unclear Fit' : '';
+        const firstName = inv.name?.trim() ? inv.name.trim().split(/\s+/)[0] || inv.name : '';
+        const emails = (inv.email ?? '')
+          .split(',')
+          .map((e) => e.trim())
+          .filter(Boolean)
+          .slice(0, 2);
+        const phones = (inv.phone ?? '')
+          .split(',')
+          .map((p) => p.trim())
+          .filter(Boolean)
+          .slice(0, 2);
+        const mutualInterests = Array.isArray(aiMeta.mutual_interests)
+          ? (aiMeta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string').join(', ')
+          : '';
+        const notesStr = Array.isArray(inv.notes) && inv.notes.length > 0
+          ? inv.notes.map((n) => (n?.message ?? '').trim()).filter(Boolean).join('; ')
+          : '';
+
+        const row: string[] = [
+          inv.name ?? '',
+          ...(isPerson ? [firstName, inv.role ?? '', inv.associated_firm_name ?? ''] : []),
+          inv.owner ?? '',
+          inv.stage ?? '',
+          inv.set_name ?? '',
+          inv.linkedin_url ?? '',
+          inv.twitter_url ?? '',
+          emails[0] ?? '',
+          emails[1] ?? '',
+          phones[0] ?? '',
+          phones[1] ?? '',
+          fitLabel,
+          typeof aiMeta.reason === 'string' ? aiMeta.reason : '',
+          typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : '',
+          typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '',
+          typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '',
+          mutualInterests,
+          notesStr,
+        ];
+        return row.map(csvEscape).join(',');
+      });
+
+      const csvString = [headers.map(csvEscape).join(','), ...rows].join('\n');
+      downloadCsv(csvString, `investors-export-${new Date().toISOString().split('T')[0]}.csv`);
+      setToastMessage(`Exported ${investors.length} investors to CSV`);
+      setToastVisible(true);
+    } catch (e) {
+      console.error('Export failed', e);
+      setToastMessage(e instanceof Error ? e.message : 'Failed to export CSV');
+      setToastVisible(true);
+    } finally {
+      setExportLoading(false);
+    }
+  }, [filters]);
+
+  const handleInvestorCellClick = useCallback(
+    async (investor: InvestorSearchResult, columnKey: string) => {
+      if (columnKey === 'domain' || columnKey === 'linkedin_url') {
+        if (clipboardColumn) {
+          const val = getInvestorCellValue(investor, clipboardColumn, pendingAnalyzeResults[investor.id]);
+          if (val && val !== '-') {
+            try {
+              await copyToClipboard(val);
+              setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+              setToastVisible(true);
+            } catch (e) {
+              console.error('Failed to copy', e);
+            }
+          }
+        }
+      } else if (columnKey.startsWith('template_')) {
+        const val = getInvestorCellValue(investor, columnKey, pendingAnalyzeResults[investor.id]);
+        if (val && val !== '-') {
+          try {
+            await copyToClipboard(val);
+            setToastMessage('Message copied to clipboard');
+            setToastVisible(true);
+          } catch (e) {
+            console.error('Failed to copy', e);
+          }
+        }
+      }
+    },
+    [clipboardColumn, getInvestorCellValue, columnLabels]
+  );
+
   const buildReportContent = () => {
     const parts: string[] = [];
     if (filters.name) parts.push(`Search: ${filters.name}`);
@@ -528,35 +1123,100 @@ function InvestorsContent() {
           <Handshake className="w-6 h-6 md:w-8 md:h-8" />
           Investors
         </h1>
-        {/* All / Reviewed toggle */}
-        <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white self-start">
+        <div className="flex flex-wrap items-center gap-2 self-start">
+          {/* View Toggle: List/Table (List first, default) */}
+          <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center ${
+                viewMode === 'list'
+                  ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="List View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <div className="h-6 w-px bg-gray-300" />
+            <button
+              onClick={() => setViewMode('table')}
+              className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center ${
+                viewMode === 'table'
+                  ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Table View"
+            >
+              <Table className="w-4 h-4" />
+            </button>
+          </div>
           <button
-            onClick={() => updateFilter('mode', 'global')}
-            className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center gap-1.5 text-sm font-medium ${
-              filters.mode === 'global'
-                ? 'text-white bg-indigo-600 hover:bg-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="All investors"
+            onClick={() => setColumnFilterOpen(!columnFilterOpen)}
+            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
           >
-            <Globe className="w-4 h-4" />
-            All
+            <Filter className="w-4 h-4" />
+            Manage Columns
           </button>
-          <div className="h-6 w-px bg-gray-300" />
-          <button
-            onClick={() => updateFilter('mode', 'reviewed')}
-            className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center gap-1.5 text-sm font-medium ${
-              filters.mode === 'reviewed'
-                ? 'text-white bg-indigo-600 hover:bg-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Reviewed investors only"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            Reviewed
-          </button>
+          {/* All / Reviewed toggle */}
+          <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
+            <button
+              onClick={() => updateFilter('mode', 'global')}
+              className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center gap-1.5 text-sm font-medium ${
+                filters.mode === 'global'
+                  ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="All investors"
+            >
+              <Globe className="w-4 h-4" />
+              All
+            </button>
+            <div className="h-6 w-px bg-gray-300" />
+            <button
+              onClick={() => updateFilter('mode', 'reviewed')}
+              className={`px-3 md:px-4 py-2 transition-colors flex items-center justify-center gap-1.5 text-sm font-medium ${
+                filters.mode === 'reviewed'
+                  ? 'text-white bg-indigo-600 hover:bg-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Reviewed investors only"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              Reviewed
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Manage Columns Drawer */}
+      <ManageInvestorColumnsDrawer
+        isOpen={columnFilterOpen}
+        onClose={() => setColumnFilterOpen(false)}
+        columnOrder={columnOrder}
+        visibleColumns={visibleColumns}
+        columnLabels={columnLabels}
+        clipboardColumn={clipboardColumn}
+        subjectColumn={subjectColumn}
+        compactColumn={compactColumn}
+        phoneClickBehavior={phoneClickBehavior}
+        onColumnOrderChange={setColumnOrder}
+        onToggleColumn={toggleColumn}
+        onClipboardColumnChange={setClipboardColumn}
+        onSubjectColumnChange={setSubjectColumn}
+        onCompactColumnChange={setCompactColumn}
+        onPhoneClickBehaviorChange={setPhoneClickBehavior}
+        onSave={async () => {
+          try {
+            await persistInvestorColumnSettings();
+            setToastMessage('Column settings saved.');
+            setToastVisible(true);
+            setColumnFilterOpen(false);
+          } catch (e) {
+            setToastMessage(e instanceof Error ? e.message : 'Failed to save column settings.');
+            setToastVisible(true);
+          }
+        }}
+      />
 
       {/* Search form */}
       <div className="mb-6 space-y-4">
@@ -723,7 +1383,21 @@ function InvestorsContent() {
             {/* Reviewed tab only: Stage, Sets, Owners, Investor Fit */}
             {filters.mode === 'reviewed' && (
               <div className="pt-4 border-t border-gray-200">
-                <p className="text-xs font-medium text-gray-500 mb-3">Pipeline Filters</p>
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                  <p className="text-xs font-medium text-gray-500">Pipeline</p>
+                  <button
+                    onClick={handleExportCsv}
+                    disabled={exportLoading || data.length === 0}
+                    className="inline-flex items-center gap-2 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {exportLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Download className="w-4 h-4" />
+                    )}
+                    Export CSV
+                  </button>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   <MultiSelectFilter
                     label="Stage"
@@ -785,6 +1459,191 @@ function InvestorsContent() {
             Report Missing Investors
           </button>
         </div>
+      ) : viewMode === 'table' ? (
+        <>
+          <div className="relative">
+            {loading && data.length > 0 && (
+              <div className="absolute inset-0 bg-white/60 flex items-center justify-center z-10 rounded-lg">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" />
+              </div>
+            )}
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+              <div className="overflow-x-auto max-h-[calc(100vh-300px)]">
+                <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
+                  <colgroup>
+                    {orderedVisibleColumns.map((col: string) => {
+                      const isTemplate = col.startsWith('template_');
+                      const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'reason' || isTemplate;
+                      return <col key={col} style={{ width: isWide ? '280px' : '160px', minWidth: isTemplate ? '200px' : '120px' }} />;
+                    })}
+                    <col style={{ width: '120px' }} />
+                  </colgroup>
+                  <thead className="bg-gray-50 sticky top-0 z-10">
+                    <tr>
+                      {orderedVisibleColumns.map((column: string) => (
+                        <th
+                          key={column}
+                          className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                        >
+                          {columnLabels[column] ?? column.replace(/_/g, ' ')}
+                        </th>
+                      ))}
+                      <th className="px-3 md:px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {data.map((investor) => (
+                      <tr
+                        key={investor.id}
+                        className="hover:bg-gray-50 cursor-pointer"
+                        onClick={(e) => {
+                          if (e.ctrlKey || e.metaKey) {
+                            setInvestorToView(investor);
+                            setDrawerOpen(true);
+                          }
+                        }}
+                      >
+                        {orderedVisibleColumns.map((columnKey: string) => {
+                          const value = getInvestorCellValue(
+                            investor,
+                            columnKey,
+                            pendingAnalyzeResults[investor.id]
+                          );
+                          const isTemplateColumn = columnKey.startsWith('template_');
+                          const isDomainColumn = columnKey === 'domain';
+                          const isLinkedInColumn = columnKey === 'linkedin_url';
+                          const isEmailColumn = columnKey === 'email';
+                          const isPhoneColumn = columnKey === 'phone';
+
+                          let href: string | null = null;
+                          if (isDomainColumn && investor.domain?.trim()) {
+                            const d = investor.domain!.trim();
+                            href = d.startsWith('http') ? d : `https://${d}`;
+                          } else if (isLinkedInColumn && investor.linkedin_url?.trim()) {
+                            href = investor.linkedin_url!.trim();
+                          } else if (isEmailColumn && investor.email?.trim()) {
+                            const email = investor.email!.trim().split(',')[0].trim();
+                            let subject: string | undefined;
+                            let body: string | undefined;
+                            if (subjectColumn) {
+                              const subVal = getInvestorCellValue(investor, subjectColumn, pendingAnalyzeResults[investor.id]);
+                              if (subVal && subVal !== '-') subject = subVal;
+                            }
+                            if (clipboardColumn) {
+                              const clipVal = getInvestorCellValue(investor, clipboardColumn, pendingAnalyzeResults[investor.id]);
+                              if (clipVal && clipVal !== '-') {
+                                body = buildEmailBody(clipVal, 'Hi,\n\n', emailSettings);
+                              }
+                            }
+                            href = buildEmailComposeUrl(email, { subject, body, emailSettings });
+                          } else if (isPhoneColumn && investor.phone?.trim()) {
+                            const phone = extractPhoneNumber(investor.phone!.trim().split(',')[0].trim());
+                            if (phone) {
+                              if (phoneClickBehavior === 'call') {
+                                href = `tel:${phone}`;
+                              } else {
+                                let whatsappUrl = `https://wa.me/${phone}`;
+                                if (clipboardColumn) {
+                                  const clipVal = getInvestorCellValue(investor, clipboardColumn, pendingAnalyzeResults[investor.id]);
+                                  if (clipVal && clipVal !== '-') {
+                                    whatsappUrl += `?text=${encodeURIComponent(clipVal)}`;
+                                  }
+                                }
+                                href = whatsappUrl;
+                              }
+                            }
+                          }
+
+                          const handleLinkClick = async (e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            if ((isDomainColumn || isLinkedInColumn) && clipboardColumn) {
+                              await handleInvestorCellClick(investor, columnKey);
+                            }
+                          };
+
+                          const handleTemplateClick = (e: React.MouseEvent) => {
+                            e.stopPropagation();
+                            handleInvestorCellClick(investor, columnKey);
+                          };
+
+                          return (
+                            <td
+                              key={columnKey}
+                              className={`px-3 md:px-4 py-3 text-sm text-gray-700 truncate max-w-[200px] ${
+                                (href || isTemplateColumn) && value !== '-' ? 'cursor-pointer hover:bg-blue-50' : ''
+                              }`}
+                              title={value}
+                              onClick={isTemplateColumn && value !== '-' ? handleTemplateClick : undefined}
+                            >
+                              {href ? (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={handleLinkClick}
+                                  className="text-indigo-600 hover:underline truncate block"
+                                >
+                                  {value === '-' ? '' : value}
+                                </a>
+                              ) : (
+                                <span className="truncate block">{value}</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td
+                          className="px-3 md:px-4 py-3 text-right"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            {!investor.has_personalization && (
+                              <button
+                                onClick={() => handleAnalyze(investor.id, investor.name)}
+                                disabled={analyzingId === investor.id}
+                                className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                                title={`Analyze ${investor.name || 'investor'} with AI`}
+                              >
+                                {analyzingId === investor.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Sparkles className="w-4 h-4" />
+                                )}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                setInvestorToView(investor);
+                                setDrawerOpen(true);
+                              }}
+                              className="p-1.5 rounded text-gray-600 hover:bg-gray-100"
+                              title={`View ${investor.name || 'investor'} details`}
+                            >
+                              <Eye className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          {!isFreePlan && hasMore && <div ref={loadMoreRef} className="h-4" />}
+          {!isFreePlan && hasMore && (
+            <div className="mt-4 flex justify-center sm:hidden">
+              <button
+                onClick={() => loadMore()}
+                disabled={loading}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+              >
+                {loading ? 'Loading...' : 'Load more'}
+              </button>
+            </div>
+          )}
+        </>
       ) : (
         <>
           <div className="relative">
@@ -872,18 +1731,41 @@ function InvestorsContent() {
         onClose={() => {
           setDrawerOpen(false);
           setInvestorToView(null);
+          setBackToInvestor(null);
+          setBackToFirm(null);
         }}
         investors={data}
         currentPage={1}
         totalPages={isFreePlan ? 1 : hasMore ? 2 : 1}
         onPageChange={handleDrawerPageChange}
-        onInvestorChange={(inv) => setInvestorToView(inv as InvestorSearchResult)}
+        onInvestorChange={(inv) => {
+          setInvestorToView(inv as InvestorSearchResult);
+          if (backToInvestor && inv?.id === backToInvestor.id) setBackToInvestor(null);
+          if (backToFirm && inv?.id === backToFirm.id) setBackToFirm(null);
+        }}
+        onOpenContactFromFirm={(contact, firm) => {
+          setBackToFirm(firm as InvestorSearchResult);
+          setInvestorToView(contact as InvestorSearchResult);
+        }}
+        onOpenInvestorById={async (id) => {
+          const firm = await fetchInvestorById(id, { type: 'firm', mode: filters.mode });
+          if (firm && investorToView?.type === 'person') {
+            setBackToInvestor(investorToView);
+            setInvestorToView(firm);
+          } else if (firm) {
+            setInvestorToView(firm);
+          }
+        }}
+        backToInvestor={backToInvestor}
+        backToFirm={backToFirm}
         onAnalyze={(id) => handleAnalyze(id, investorToView?.name)}
         isAnalyzing={investorToView ? analyzingId === investorToView.id : false}
         updateInvestor={updateInvestor}
         stageOptions={REVIEWED_STAGE_OPTIONS}
         setOptions={investorSets}
         ownerOptions={availableOwners}
+        filtersMode={filters.mode}
+        isFreePlan={isFreePlan}
       />
 
       <ReportMissingInvestorsModal
@@ -1172,7 +2054,7 @@ function InvestorResultCard({
               }}
               disabled={isAnalyzing}
               className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 flex-shrink-0"
-              title="Analyze with AI"
+              title={`Analyze ${investor.name || 'investor'} with AI`}
             >
               {isAnalyzing ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -1188,7 +2070,7 @@ function InvestorResultCard({
               onView();
             }}
             className="p-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-100 flex-shrink-0"
-            title="View Details"
+            title={`View ${investor.name || 'investor'} details`}
           >
             <Eye className="w-4 h-4" />
           </button>

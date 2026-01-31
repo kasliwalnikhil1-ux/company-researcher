@@ -165,7 +165,18 @@ const TARGET_ROUND_LABELS: Record<string, string> = {
   more_than_10m: 'More than $10M',
 };
 
+/** Human-readable labels for B2B CTA values */
+const B2B_CTA_LABELS: Record<string, string> = {
+  book_demo: 'book a demo',
+  request_quote: 'request a quote',
+  free_trial: 'free trial',
+  waitlist: 'join the waitlist',
+  contact_sales: 'contact sales',
+};
+
 export interface OnboardingDataForSummary {
+  step0?: { primaryUse?: 'fundraising' | 'b2b' };
+  flowType?: 'fundraising' | 'b2b';
   step2?: { bio?: string; title?: string };
   step4?: { capitalRaised?: string };
   step5?: { companyName?: string; website?: string };
@@ -175,15 +186,61 @@ export interface OnboardingDataForSummary {
   step9?: { productDescription?: string };
   step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string };
   step11?: { targetRoundSize?: string };
+  b2bStep3?: { companyName?: string; websiteUrl?: string; companySize?: string; yourRole?: string };
+  b2bStep4?: { productOrService?: string };
+  b2bStep5?: { coreFeatures?: string[] };
+  b2bStep8?: { painPoints?: string };
+  b2bStep9?: { buyingTriggers?: string };
+  b2bStep11?: { cta?: string };
 }
 
 /**
  * Formats onboarding data into a beautiful company pitch summary.
  * Use for investor outreach, AI prompts, or display.
+ * Format depends on primaryUse: "fundraising" (default) or "b2b".
  */
 export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | null | undefined): string {
   if (!data) return '';
 
+  const primaryUse = data.flowType ?? data.step0?.primaryUse;
+
+  // B2B flow: use b2bStep* fields
+  if (primaryUse === 'b2b') {
+    const parts: string[] = [];
+    const companyName = data.b2bStep3?.companyName?.trim();
+    if (companyName) parts.push(`${companyName}.`);
+
+    const productOrService = data.b2bStep4?.productOrService?.trim();
+    if (productOrService) parts.push(productOrService);
+
+    const coreFeatures = data.b2bStep5?.coreFeatures;
+    if (Array.isArray(coreFeatures) && coreFeatures.length > 0) {
+      const featuresStr = coreFeatures.filter(Boolean).join(', ');
+      if (featuresStr) parts.push(`Features: ${featuresStr}.`);
+    }
+
+    const painPoints = data.b2bStep8?.painPoints?.trim();
+    if (painPoints) parts.push(painPoints);
+
+    const buyingTriggers = data.b2bStep9?.buyingTriggers?.trim();
+    if (buyingTriggers) parts.push(buyingTriggers);
+
+    const cta = data.b2bStep11?.cta;
+    if (cta) {
+      const ctaLabel = B2B_CTA_LABELS[cta] ?? cta.replace(/_/g, ' ');
+      parts.push(`Aim to ${ctaLabel}.`);
+    }
+
+    const bio = data.step2?.bio?.trim();
+    if (bio) parts.push(`Founders: ${bio}`);
+
+    const summary = parts.filter(Boolean).join(' ');
+    console.log('[formatOnboardingCompanySummary] Formatted output (b2b):\n', summary);
+    console.log('[formatOnboardingCompanySummary] Raw data:', JSON.stringify(data, null, 2));
+    return summary;
+  }
+
+  // Fundraising flow (existing logic)
   const parts: string[] = [];
 
   // Product description (step9)

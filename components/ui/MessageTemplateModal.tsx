@@ -1,16 +1,51 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { MessageTemplate } from '@/contexts/MessageTemplatesContext';
+import React, { useState, useEffect, useRef } from 'react';
+import { MessageTemplate, TemplateChannel, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
+
+// Chips by primaryUse
+const FUNDRAISING_CHIPS: { variable: string; sampleLabel: string }[] = [
+  { variable: '${twitter_line}', sampleLabel: 'I just read your tweet about...' },
+  { variable: '${line1}', sampleLabel: 'I saw ..., which is why I\'m reaching out to your company.' },
+  { variable: '${line2}', sampleLabel: 'I believe ... could greatly benefit us at my company.' },
+  { variable: '${cleaned_name}', sampleLabel: 'Accel or John' },
+  { variable: '${followUpFullDate}', sampleLabel: 'Tuesday, Jan 15' },
+  { variable: '${followUpWeekdayDate}', sampleLabel: 'Tuesday Jan 15' },
+  { variable: '${followUpShortDay}', sampleLabel: 'Tue' },
+  { variable: '${followUpRelativeDay}', sampleLabel: 'this Tuesday' },
+  { variable: '${followUpRelativeShortDay}', sampleLabel: 'this Tue' },
+  { variable: '${followUpDateOnly}', sampleLabel: 'Jan 15' },
+];
+
+const B2B_CHIPS: { variable: string; sampleLabel: string }[] = [
+  { variable: '${PRODUCT1}', sampleLabel: 'jewelry' },
+  { variable: '${PRODUCT2}', sampleLabel: 'accessories' },
+  { variable: '${salesOpenerSentence}', sampleLabel: 'Loved your latest collection.' },
+  { variable: '${product_types}', sampleLabel: 'jewelry and accessories' },
+  { variable: '${company_industry}', sampleLabel: 'fashion' },
+  { variable: '${profile_industry}', sampleLabel: 'fashion' },
+  { variable: '${followUpFullDate}', sampleLabel: 'Tuesday, Jan 15' },
+  { variable: '${followUpWeekdayDate}', sampleLabel: 'Tuesday Jan 15' },
+  { variable: '${followUpShortDay}', sampleLabel: 'Tue' },
+  { variable: '${followUpRelativeDay}', sampleLabel: 'this Tuesday' },
+  { variable: '${followUpRelativeShortDay}', sampleLabel: 'this Tue' },
+  { variable: '${followUpDateOnly}', sampleLabel: 'Jan 15' },
+];
+
+function getVariableChips(primaryUse: 'fundraising' | 'b2b') {
+  return primaryUse === 'b2b' ? B2B_CHIPS : FUNDRAISING_CHIPS;
+}
 
 interface MessageTemplateModalProps {
   isOpen: boolean;
   isCreating: boolean;
   editingTemplate: MessageTemplate | null;
-  defaultChannel: 'direct' | 'instagram';
+  defaultChannel: TemplateChannel;
+  channelOptions: TemplateChannel[];
+  primaryUse?: 'fundraising' | 'b2b';
   onClose: () => void;
-  onCreate: (data: { title: string; channel: 'direct' | 'instagram'; template: string }) => Promise<void>;
-  onUpdate: (id: string, data: { title: string; channel: 'direct' | 'instagram'; template: string }) => Promise<void>;
+  onCreate: (data: { title: string; channel: TemplateChannel; template: string }) => Promise<void>;
+  onUpdate: (id: string, data: { title: string; channel: TemplateChannel; template: string }) => Promise<void>;
 }
 
 const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
@@ -18,13 +53,15 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
   isCreating,
   editingTemplate,
   defaultChannel,
+  channelOptions,
+  primaryUse = 'fundraising',
   onClose,
   onCreate,
   onUpdate,
 }) => {
   const [formData, setFormData] = useState<{
     title: string;
-    channel: 'direct' | 'instagram';
+    channel: TemplateChannel;
     template: string;
   }>({
     title: '',
@@ -32,25 +69,50 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     template: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleChipClick = (variable: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const current = formData.template;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const newValue = before + variable + after;
+
+    setFormData({ ...formData, template: newValue });
+
+    // Restore cursor position after React commits the update; keep focus on textarea
+    const newCursorPos = start + variable.length;
+    setTimeout(() => {
+      textarea.setSelectionRange(newCursorPos, newCursorPos);
+      textarea.focus();
+    }, 0);
+  };
 
   // Initialize form data when modal opens or editing template changes
   useEffect(() => {
     if (isOpen) {
       if (editingTemplate) {
+        const channel = channelOptions.includes(editingTemplate.channel)
+          ? editingTemplate.channel
+          : channelOptions[0];
         setFormData({
           title: (editingTemplate.title || '').trim(),
-          channel: editingTemplate.channel,
+          channel,
           template: (editingTemplate.template || '').trim(),
         });
       } else {
         setFormData({
           title: '',
-          channel: defaultChannel,
+          channel: channelOptions.includes(defaultChannel) ? defaultChannel : channelOptions[0],
           template: '',
         });
       }
     }
-  }, [isOpen, editingTemplate, defaultChannel]);
+  }, [isOpen, editingTemplate, defaultChannel, channelOptions]);
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) {
@@ -126,6 +188,24 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
+              Channel
+            </label>
+            <select
+              value={formData.channel}
+              onChange={(e) => setFormData({ ...formData, channel: e.target.value as TemplateChannel })}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              disabled={isSubmitting}
+            >
+              {channelOptions.map((ch) => (
+                <option key={ch} value={ch}>
+                  {CHANNEL_LABELS[ch]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               Title
             </label>
             <input
@@ -133,31 +213,28 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
               className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="e.g., Instagram Outreach Messages"
+              placeholder="e.g., Sequence 1"
               disabled={isSubmitting}
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Channel
-            </label>
-            <select
-              value={formData.channel}
-              onChange={(e) => setFormData({ ...formData, channel: e.target.value as 'direct' | 'instagram' })}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              disabled={isSubmitting}
-            >
-              <option value="direct">Direct</option>
-              <option value="instagram">Instagram</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Template
+            <label className="flex items-center justify-between gap-2 text-sm font-medium text-gray-700 mb-2">
+              <span>Template</span>
+              <span className="text-gray-400 font-normal text-xs shrink-0">
+                {formData.template.trim()
+                  ? (() => {
+                      const text = formData.template.trim();
+                      const words = text.split(/\s+/).filter(Boolean).length;
+                      const chars = text.length;
+                      const sec = Math.ceil(words / 2.5);
+                      return `${words} word${words !== 1 ? 's' : ''} · ${chars} char${chars !== 1 ? 's' : ''} · ~${sec < 60 ? `${sec}s` : `${Math.ceil(sec / 60)}m`} reading time`;
+                    })()
+                  : '—'}
+              </span>
             </label>
             <textarea
+              ref={textareaRef}
               value={formData.template}
               onChange={(e) => setFormData({ ...formData, template: e.target.value })}
               rows={12}
@@ -165,14 +242,26 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
               placeholder={`Just visited your page - \${salesOpenerSentence} We can create KILLER product photos/videos for your \${PRODUCT1} products using AI, and have worked with top brands like Polki Stories, Onya, and Armuse. Worth a chat?`}
               disabled={isSubmitting}
             />
-            <p className="mt-1 text-xs text-gray-500">
-              Enter your template message. Use $&#123;variable&#125; syntax for variables like $&#123;PRODUCT1&#125;, $&#123;salesOpenerSentence&#125;, $&#123;product_types&#125;, $&#123;followUpFullDate&#125;, etc.
-            </p>
-            <p className="mt-1 text-xs text-gray-400">
-              Available date placeholders: $&#123;followUpFullDate&#125; (e.g., "Tuesday, Jan 15"), $&#123;followUpWeekdayDate&#125; (e.g., "Tuesday Jan 15"), $&#123;followUpShortDay&#125; (e.g., "Tue"), $&#123;followUpRelativeDay&#125; (e.g., "this Tuesday"), $&#123;followUpRelativeShortDay&#125; (e.g., "this Tue"), $&#123;followUpDateOnly&#125; (e.g., "Jan 15")
-            </p>
-            <p className="mt-1 text-xs text-gray-400">
-              Note: Follow-up dates automatically skip weekends and holidays for business-appropriate scheduling.
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {getVariableChips(primaryUse).map(({ variable, sampleLabel }) => (
+                <button
+                  key={variable}
+                  type="button"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleChipClick(variable);
+                  }}
+                  disabled={isSubmitting}
+                  className="inline-flex flex-col items-start px-2.5 py-1.5 rounded-md text-left bg-gray-50 text-gray-700 hover:bg-indigo-50 hover:text-indigo-800 border border-gray-200 hover:border-indigo-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={`Insert ${variable}\nSample Value: ${sampleLabel}`}
+                >
+                  <span className="font-mono text-xs text-gray-600">{variable}</span>
+                  <span className="text-[11px] text-gray-400 mt-0.5 max-w-[100px] truncate">{sampleLabel}</span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-xs text-gray-400">
+              Follow-up dates skip weekends and holidays.
             </p>
           </div>
 

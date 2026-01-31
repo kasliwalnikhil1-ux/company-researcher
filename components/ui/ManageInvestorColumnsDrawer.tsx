@@ -79,8 +79,16 @@ interface ManageInvestorColumnsDrawerProps {
   columnOrder: string[];
   visibleColumns: Set<string>;
   columnLabels: Record<string, string>;
+  clipboardColumn: string | null;
+  subjectColumn: string | null;
+  compactColumn: string | null;
+  phoneClickBehavior: 'whatsapp' | 'call';
   onColumnOrderChange: (newOrder: string[]) => void;
   onToggleColumn: (column: string) => void;
+  onClipboardColumnChange: (column: string | null) => void;
+  onSubjectColumnChange: (column: string | null) => void;
+  onCompactColumnChange: (column: string | null) => void;
+  onPhoneClickBehaviorChange: (behavior: 'whatsapp' | 'call') => void;
   onSave?: () => Promise<void>;
 }
 
@@ -90,10 +98,19 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
   columnOrder,
   visibleColumns,
   columnLabels,
+  clipboardColumn,
+  subjectColumn,
+  compactColumn,
+  phoneClickBehavior,
   onColumnOrderChange,
   onToggleColumn,
+  onClipboardColumnChange,
+  onSubjectColumnChange,
+  onCompactColumnChange,
+  onPhoneClickBehaviorChange,
   onSave,
 }) => {
+  const [activeTab, setActiveTab] = useState<'settings' | 'columns'>('settings');
   const [saving, setSaving] = useState(false);
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -142,35 +159,163 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
               <X className="w-5 h-5" />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-6">
-            <label className="block text-sm font-medium text-gray-700 mb-3">
-              Column Visibility & Order
-            </label>
-            <p className="text-xs text-gray-500 mb-4">
-              Drag to reorder, check/uncheck to show/hide columns
-            </p>
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
+
+          {/* Tabs */}
+          <div className="flex border-b border-gray-200">
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'settings'
+                  ? 'text-indigo-600 border-b-2 border-indigo-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
             >
-              <SortableContext
-                items={columnOrder}
-                strategy={verticalListSortingStrategy}
-              >
-                <div className="space-y-2">
-                  {columnOrder.map((column) => (
-                    <SortableColumnItem
-                      key={column}
-                      column={column}
-                      columnLabel={formatColumnLabel(column)}
-                      isVisible={visibleColumns.has(column)}
-                      onToggle={() => onToggleColumn(column)}
-                    />
-                  ))}
+              Settings
+            </button>
+            <button
+              onClick={() => setActiveTab('columns')}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === 'columns'
+                  ? 'text-indigo-600 border-b-2 border-indigo-600'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Column Visibility & Order
+            </button>
+          </div>
+
+          {/* Content */}
+          <div className="flex-1 overflow-y-auto p-6">
+            {activeTab === 'settings' ? (
+              <div className="space-y-6">
+                {/* Clipboard Column Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Clipboard Column
+                  </label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Copied when opening Domain/LinkedIn/Email links
+                  </p>
+                  <select
+                    value={clipboardColumn || ''}
+                    onChange={(e) => onClipboardColumnChange(e.target.value || null)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="">None</option>
+                    {columnOrder.map((column) => (
+                      <option key={column} value={column}>
+                        {formatColumnLabel(column)}
+                      </option>
+                    ))}
+                  </select>
+                  {clipboardColumn && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Selected: {formatColumnLabel(clipboardColumn)}
+                    </p>
+                  )}
                 </div>
-              </SortableContext>
-            </DndContext>
+
+                {/* Subject Column Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Subject Column
+                  </label>
+                  <p className="text-xs text-gray-500 mb-3">
+                    Used as email subject when opening email links
+                  </p>
+                  <select
+                    value={subjectColumn || ''}
+                    onChange={(e) => onSubjectColumnChange(e.target.value || null)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="">None</option>
+                    {columnOrder.map((column) => (
+                      <option key={column} value={column}>
+                        {formatColumnLabel(column)}
+                      </option>
+                    ))}
+                  </select>
+                  {subjectColumn && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Selected: {formatColumnLabel(subjectColumn)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Compact Column Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Compact Column
+                  </label>
+                  <select
+                    value={compactColumn || ''}
+                    onChange={(e) => onCompactColumnChange(e.target.value || null)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="">None</option>
+                    {columnOrder.map((column) => (
+                      <option key={column} value={column}>
+                        {formatColumnLabel(column)}
+                      </option>
+                    ))}
+                  </select>
+                  {compactColumn && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Selected: {formatColumnLabel(compactColumn)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Phone Click Behavior Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Phone Click Behavior
+                  </label>
+                  <select
+                    value={phoneClickBehavior}
+                    onChange={(e) => onPhoneClickBehaviorChange(e.target.value as 'whatsapp' | 'call')}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="whatsapp">WhatsApp (opens WhatsApp and copies Clipboard Column)</option>
+                    <option value="call">Call (uses tel: link)</option>
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500">
+                    Selected: {phoneClickBehavior === 'whatsapp' ? 'WhatsApp' : 'Call'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Column Visibility & Order
+                </label>
+                <p className="text-xs text-gray-500 mb-4">
+                  Drag to reorder, check/uncheck to show/hide columns
+                </p>
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext
+                    items={columnOrder}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-2">
+                      {columnOrder.map((column) => (
+                        <SortableColumnItem
+                          key={column}
+                          column={column}
+                          columnLabel={formatColumnLabel(column)}
+                          isVisible={visibleColumns.has(column)}
+                          onToggle={() => onToggleColumn(column)}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              </div>
+            )}
           </div>
           <div className="p-6 border-t border-gray-200 flex gap-3">
             {onSave && (

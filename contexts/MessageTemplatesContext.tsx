@@ -4,13 +4,22 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
 
+export type TemplateChannel = 'direct' | 'instagram' | 'email' | 'linkedin';
+
 export interface MessageTemplate {
   id: string;
   user_id: string;
   title: string;
   template: string; // Single template string with ${variable} syntax
-  channel: 'direct' | 'instagram';
+  channel: TemplateChannel;
 }
+
+export const CHANNEL_LABELS: Record<TemplateChannel, string> = {
+  direct: 'Direct',
+  instagram: 'Instagram',
+  email: 'Email',
+  linkedin: 'LinkedIn',
+};
 
 interface MessageTemplatesContextType {
   templates: MessageTemplate[];
