@@ -18,6 +18,12 @@ const RESEARCH_ALLOWED_USER_IDS = new Set([
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
 ]);
 
+// User IDs allowed to access /personalization
+const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
+
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const { selectedOwner, setSelectedOwner, availableOwners, ownerColors } = useOwner();
@@ -42,15 +48,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     const canAccessResearch = isFundraising
       ? RESEARCH_ALLOWED_USER_IDS.has(user?.id ?? '')
       : true;
+    const canAccessPersonalization = PERSONALIZATION_ALLOWED_USER_IDS.has(user?.id ?? '');
     return {
       showResearch: isFundraising ? canAccessResearch : true,
       showCompanies: isB2B,
       showInvestors: isFundraising,
       showEnrich: isB2B,
+      showPersonalization: canAccessPersonalization,
       canAccessResearch,
       canAccessCompanies: isB2B,
       canAccessInvestors: isFundraising,
       canAccessEnrich: isB2B,
+      canAccessPersonalization,
       defaultRoute: isFundraising && !canAccessResearch ? '/investors' : '/',
     };
   }, [primaryUse, user?.id]);
@@ -102,6 +111,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       return;
     }
     if (pathname === '/enrich' && !routeAccess.canAccessEnrich) {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
+    if (pathname === '/personalization' && !routeAccess.canAccessPersonalization) {
       router.replace(routeAccess.defaultRoute);
       return;
     }
@@ -275,18 +288,20 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             {(!isCollapsed || isMobile) && <span>Message Templates</span>}
           </Link>
           
-          <Link
-            href="/personalization"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/personalization')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Personalization"
-          >
-            <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Personalization</span>}
-          </Link>
+          {routeAccess.showPersonalization && (
+            <Link
+              href="/personalization"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/personalization')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Personalization"
+            >
+              <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Personalization</span>}
+            </Link>
+          )}
 
           <Link
             href="/company-profile"

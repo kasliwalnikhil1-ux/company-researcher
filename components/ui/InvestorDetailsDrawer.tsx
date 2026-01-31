@@ -299,13 +299,33 @@ function ContactCard({
               <span className="text-base" role="img" aria-label="fit">
                 {investorFit === true ? '😊' : investorFit === false ? '😕' : '😐'}
               </span>
-              <span className="text-xs font-medium text-gray-700">
+              <span
+                className={`text-xs font-medium ${
+                  investorFit === true
+                    ? 'text-emerald-700'
+                    : investorFit === false
+                      ? 'text-red-700'
+                      : investorFit === null
+                        ? 'text-amber-700'
+                        : 'text-gray-700'
+                }`}
+              >
                 {investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : 'Unclear Fit'}
               </span>
             </div>
           )}
           {hasReason && (
-            <div className="p-2 rounded-md bg-indigo-50 border border-indigo-100">
+            <div
+              className={`p-2 rounded-md border ${
+                investorFit === true
+                  ? 'bg-emerald-50 border-emerald-100'
+                  : investorFit === false
+                    ? 'bg-red-50 border-red-100'
+                    : investorFit === null
+                      ? 'bg-amber-50 border-amber-100'
+                      : 'bg-gray-50 border-gray-100'
+              }`}
+            >
               <p className="text-xs text-gray-800 line-clamp-2 leading-relaxed">{reason!.trim()}</p>
             </div>
           )}
@@ -314,7 +334,17 @@ function ContactCard({
 
       <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-2 items-center">
         {contact.has_personalization && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+              investorFit === true
+                ? 'bg-emerald-100 text-emerald-800'
+                : investorFit === false
+                  ? 'bg-red-100 text-red-800'
+                  : investorFit === null
+                    ? 'bg-amber-100 text-amber-800'
+                    : 'bg-gray-100 text-gray-800'
+            }`}
+          >
             <Check className="w-3 h-3" />
             Reviewed
           </span>
@@ -1361,7 +1391,17 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     <span>{investor.leads_round === true ? 'Yes' : investor.leads_round === false ? 'No' : '-'}</span>
                   </span>
                   {investor.has_personalization && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                        investor.ai_metadata?.investor_fit === true
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : investor.ai_metadata?.investor_fit === false
+                            ? 'bg-red-100 text-red-800'
+                            : investor.ai_metadata?.investor_fit === null
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-gray-100 text-gray-800'
+                      }`}
+                    >
                       <CheckCircle className="w-3 h-3" />
                       Reviewed
                     </span>
@@ -1371,7 +1411,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   <button
                     onClick={() => onAnalyze(investor.id)}
                     disabled={isAnalyzing}
-                    className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50"
+                    className="mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 shadow-sm"
                   >
                     {isAnalyzing ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -1401,7 +1441,15 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         <span className="text-lg" role="img" aria-label="fit">
                           {investor.ai_metadata.investor_fit === true ? '😊' : investor.ai_metadata.investor_fit === false ? '😕' : '😐'}
                         </span>
-                        <span className="text-sm font-medium text-gray-900">
+                        <span
+                          className={`text-sm font-medium ${
+                            investor.ai_metadata?.investor_fit === true
+                              ? 'text-emerald-700'
+                              : investor.ai_metadata?.investor_fit === false
+                                ? 'text-red-700'
+                                : 'text-amber-700'
+                          }`}
+                        >
                           {investor.ai_metadata.investor_fit === true ? 'Strong Fit' : investor.ai_metadata.investor_fit === false ? 'Weak Fit' : 'Unclear Fit'}
                         </span>
                       </div>
@@ -1409,7 +1457,17 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
 
                     {/* reason */}
                     {typeof investor.ai_metadata.reason === 'string' && investor.ai_metadata.reason.trim() && (
-                      <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-100">
+                      <div
+                        className={`p-3 rounded-lg border ${
+                          investor.ai_metadata?.investor_fit === true
+                            ? 'bg-emerald-50 border-emerald-100'
+                            : investor.ai_metadata?.investor_fit === false
+                              ? 'bg-red-50 border-red-100'
+                              : investor.ai_metadata?.investor_fit === null
+                                ? 'bg-amber-50 border-amber-100'
+                                : 'bg-gray-50 border-gray-100'
+                        }`}
+                      >
                         <p className="text-sm text-gray-800 whitespace-pre-wrap">{investor.ai_metadata.reason}</p>
                       </div>
                     )}

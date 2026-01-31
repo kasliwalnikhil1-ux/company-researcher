@@ -80,14 +80,14 @@ interface ManageInvestorColumnsDrawerProps {
   visibleColumns: Set<string>;
   columnLabels: Record<string, string>;
   clipboardColumn: string | null;
+  clipboardLinkedInColumn: string | null;
   subjectColumn: string | null;
-  compactColumn: string | null;
   phoneClickBehavior: 'whatsapp' | 'call';
   onColumnOrderChange: (newOrder: string[]) => void;
   onToggleColumn: (column: string) => void;
   onClipboardColumnChange: (column: string | null) => void;
+  onClipboardLinkedInColumnChange: (column: string | null) => void;
   onSubjectColumnChange: (column: string | null) => void;
-  onCompactColumnChange: (column: string | null) => void;
   onPhoneClickBehaviorChange: (behavior: 'whatsapp' | 'call') => void;
   onSave?: () => Promise<void>;
 }
@@ -99,14 +99,14 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
   visibleColumns,
   columnLabels,
   clipboardColumn,
+  clipboardLinkedInColumn,
   subjectColumn,
-  compactColumn,
   phoneClickBehavior,
   onColumnOrderChange,
   onToggleColumn,
   onClipboardColumnChange,
+  onClipboardLinkedInColumnChange,
   onSubjectColumnChange,
-  onCompactColumnChange,
   onPhoneClickBehaviorChange,
   onSave,
 }) => {
@@ -130,7 +130,17 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
   };
 
   const formatColumnLabel = (column: string): string => {
-    return columnLabels[column] || column.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+    if (columnLabels[column]) return columnLabels[column];
+    // Never expose template IDs to users; use friendly fallback for template_* columns
+    if (column.startsWith('template_')) return 'Template (unavailable)';
+    return column.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
+
+  // Include orphan columns (e.g. clipboardColumn) so the select displays the correct value
+  const getSelectOptions = (baseColumns: string[], orphan: string | null): string[] => {
+    const set = new Set(baseColumns);
+    if (orphan && !set.has(orphan)) set.add(orphan);
+    return [...set];
   };
 
   if (!isOpen) return null;
@@ -188,31 +198,48 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === 'settings' ? (
               <div className="space-y-6">
-                {/* Clipboard Column Selection */}
+                {/* LinkedIn Column Selection */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Clipboard Column
+                    LinkedIn Column
                   </label>
-                  <p className="text-xs text-gray-500 mb-3">
-                    Copied when opening Domain/LinkedIn/Email links
+                  <select
+                    value={clipboardLinkedInColumn || ''}
+                    onChange={(e) => onClipboardLinkedInColumnChange(e.target.value || null)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="">None</option>
+                    {getSelectOptions(columnOrder, clipboardLinkedInColumn).map((column) => (
+                      <option key={column} value={column}>
+                        {formatColumnLabel(column)}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-2 text-xs text-gray-500">
+                    When you tap a LinkedIn link, this column&apos;s value is automatically copied to your clipboard.
                   </p>
+                </div>
+
+                {/* Email Column Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Email Column
+                  </label>
                   <select
                     value={clipboardColumn || ''}
                     onChange={(e) => onClipboardColumnChange(e.target.value || null)}
                     className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                   >
                     <option value="">None</option>
-                    {columnOrder.map((column) => (
+                    {getSelectOptions(columnOrder, clipboardColumn).map((column) => (
                       <option key={column} value={column}>
                         {formatColumnLabel(column)}
                       </option>
                     ))}
                   </select>
-                  {clipboardColumn && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Selected: {formatColumnLabel(clipboardColumn)}
-                    </p>
-                  )}
+                  <p className="mt-2 text-xs text-gray-500">
+                    When you tap a Domain or Email link, this column&apos;s value is automatically copied to your clipboard. Also used for email body and WhatsApp pre-fill.
+                  </p>
                 </div>
 
                 {/* Subject Column Selection */}
@@ -220,50 +247,21 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Subject Column
                   </label>
-                  <p className="text-xs text-gray-500 mb-3">
-                    Used as email subject when opening email links
-                  </p>
                   <select
                     value={subjectColumn || ''}
                     onChange={(e) => onSubjectColumnChange(e.target.value || null)}
                     className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                   >
                     <option value="">None</option>
-                    {columnOrder.map((column) => (
+                    {getSelectOptions(columnOrder, subjectColumn).map((column) => (
                       <option key={column} value={column}>
                         {formatColumnLabel(column)}
                       </option>
                     ))}
                   </select>
-                  {subjectColumn && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Selected: {formatColumnLabel(subjectColumn)}
-                    </p>
-                  )}
-                </div>
-
-                {/* Compact Column Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Compact Column
-                  </label>
-                  <select
-                    value={compactColumn || ''}
-                    onChange={(e) => onCompactColumnChange(e.target.value || null)}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  >
-                    <option value="">None</option>
-                    {columnOrder.map((column) => (
-                      <option key={column} value={column}>
-                        {formatColumnLabel(column)}
-                      </option>
-                    ))}
-                  </select>
-                  {compactColumn && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Selected: {formatColumnLabel(compactColumn)}
-                    </p>
-                  )}
+                  <p className="mt-2 text-xs text-gray-500">
+                    When you open an email link, this column&apos;s value is used as the subject line.
+                  </p>
                 </div>
 
                 {/* Phone Click Behavior Selection */}
@@ -280,7 +278,9 @@ const ManageInvestorColumnsDrawer: React.FC<ManageInvestorColumnsDrawerProps> = 
                     <option value="call">Call (uses tel: link)</option>
                   </select>
                   <p className="mt-2 text-xs text-gray-500">
-                    Selected: {phoneClickBehavior === 'whatsapp' ? 'WhatsApp' : 'Call'}
+                    {phoneClickBehavior === 'whatsapp'
+                      ? 'Tapping a phone number opens WhatsApp and copies your Email Column so you can paste it.'
+                      : 'Tapping a phone number starts a call.'}
                   </p>
                 </div>
               </div>

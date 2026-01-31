@@ -48,16 +48,16 @@ import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
 import { copyToClipboard, extractPhoneNumber } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csvExport';
 
-// Filter options - must match search_investors RPC
+// Filter options - must match what's stored in backend (investor-research API)
 const INVESTOR_TYPE_OPTIONS = [
-  'VC',
-  'Angel',
-  'PE',
-  'Corporate Venture',
+  'Venture Capital',
+  'Angel Investor',
   'Family Office',
-  'Accelerator',
-  'Fund of Funds',
-  'Other',
+  'Private Equity',
+  'Hedge Fund',
+  'Corporate Venture',
+  'Accelerator / Incubator',
+  'Investment Holding Company',
 ];
 
 const STAGE_OPTIONS = [
@@ -232,8 +232,8 @@ const INVESTOR_FIT_OPTIONS: { value: boolean | null; label: string }[] = [
 const INVESTORS_COLUMN_ORDER_KEY = 'investors-column-order';
 const INVESTORS_COLUMN_VISIBILITY_KEY = 'investors-column-visibility';
 const INVESTORS_CLIPBOARD_COLUMN_KEY = 'investors-clipboard-column';
+const INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY = 'investors-clipboard-linkedin-column';
 const INVESTORS_SUBJECT_COLUMN_KEY = 'investors-subject-column';
-const INVESTORS_COMPACT_COLUMN_KEY = 'investors-compact-column';
 const INVESTORS_PHONE_CLICK_BEHAVIOR_KEY = 'investors-phone-click-behavior';
 
 const INVESTOR_BASE_COLUMNS = [
@@ -322,8 +322,8 @@ function InvestorsContent() {
     columnOrder?: string[];
     visibleColumns?: string[];
     clipboardColumn?: string | null;
+    clipboardLinkedInColumn?: string | null;
     subjectColumn?: string | null;
-    compactColumn?: string | null;
     phoneClickBehavior?: 'whatsapp' | 'call';
   } | null>(null);
   const [filters, setFilters] = useState<InvestorSearchFilters>(DEFAULT_FILTERS);
@@ -412,15 +412,15 @@ function InvestorsContent() {
     }
     return null;
   });
-  const [subjectColumn, setSubjectColumn] = useState<string | null>(() => {
+  const [clipboardLinkedInColumn, setClipboardLinkedInColumn] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(INVESTORS_SUBJECT_COLUMN_KEY) || null;
+      return localStorage.getItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY) || null;
     }
     return null;
   });
-  const [compactColumn, setCompactColumn] = useState<string | null>(() => {
+  const [subjectColumn, setSubjectColumn] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(INVESTORS_COMPACT_COLUMN_KEY) || null;
+      return localStorage.getItem(INVESTORS_SUBJECT_COLUMN_KEY) || null;
     }
     return null;
   });
@@ -490,7 +490,9 @@ function InvestorsContent() {
     if (!columnSettingsFromApi) return;
     const cs = columnSettingsFromApi;
     if (Array.isArray(cs.columnOrder) && cs.columnOrder.length > 0) {
-      const savedBase = cs.columnOrder.filter((c) => !c.startsWith('template_') && c !== cs.clipboardColumn);
+      const savedBase = cs.columnOrder.filter(
+        (c) => !c.startsWith('template_') && c !== cs.clipboardColumn && c !== cs.clipboardLinkedInColumn
+      );
       const missing = INVESTOR_BASE_COLUMNS.filter((c) => !savedBase.includes(c));
       const currentTemplates = getTemplateColumnKeys();
       let order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => cs.columnOrder!.includes(tc)), ...currentTemplates.filter((tc) => !cs.columnOrder!.includes(tc))];
@@ -506,8 +508,8 @@ function InvestorsContent() {
       setVisibleColumns(next);
     }
     if (cs.clipboardColumn != null) setClipboardColumn(cs.clipboardColumn);
+    if (cs.clipboardLinkedInColumn != null) setClipboardLinkedInColumn(cs.clipboardLinkedInColumn);
     if (cs.subjectColumn != null) setSubjectColumn(cs.subjectColumn);
-    if (cs.compactColumn != null) setCompactColumn(cs.compactColumn);
     if (cs.phoneClickBehavior) setPhoneClickBehavior(cs.phoneClickBehavior);
     setColumnSettingsFromApi(null);
   }, [columnSettingsFromApi, getTemplateColumnKeys]);
@@ -516,7 +518,9 @@ function InvestorsContent() {
   useEffect(() => {
     const currentTemplates = getTemplateColumnKeys();
     setColumnOrder((prev) => {
-      const base = prev.filter((c) => !c.startsWith('template_') && c !== clipboardColumn);
+      const base = prev.filter(
+        (c) => !c.startsWith('template_') && c !== clipboardColumn && c !== clipboardLinkedInColumn
+      );
       const existingTemplates = prev.filter((c) => c.startsWith('template_'));
       const newTemplates = currentTemplates.filter((tc) => !existingTemplates.includes(tc));
       let order = [...base, ...existingTemplates.filter((tc) => currentTemplates.includes(tc)), ...newTemplates];
@@ -533,7 +537,23 @@ function InvestorsContent() {
       });
       return next;
     });
-  }, [getTemplateColumnKeys, clipboardColumn]);
+  }, [getTemplateColumnKeys, clipboardColumn, clipboardLinkedInColumn]);
+
+  // Auto-assign Clipboard Column ← Sequence 1 (email1), Subject Column ← Subject (subjectline)
+  useEffect(() => {
+    const subjectTemplate = templates.find((t) => t.channel === 'email' && t.title === 'Subject');
+    const sequence1Template = templates.find((t) => t.channel === 'email' && t.title === 'Sequence 1');
+    setSubjectColumn((prev) => {
+      if (prev) return prev;
+      if (subjectTemplate) return `template_${subjectTemplate.id}`;
+      return prev;
+    });
+    setClipboardColumn((prev) => {
+      if (prev) return prev;
+      if (sequence1Template) return `template_${sequence1Template.id}`;
+      return prev;
+    });
+  }, [templates]);
 
   // Save view mode to localStorage
   useEffect(() => {
@@ -561,16 +581,16 @@ function InvestorsContent() {
   }, [clipboardColumn]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      if (clipboardLinkedInColumn) localStorage.setItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY, clipboardLinkedInColumn);
+      else localStorage.removeItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY);
+    }
+  }, [clipboardLinkedInColumn]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
       if (subjectColumn) localStorage.setItem(INVESTORS_SUBJECT_COLUMN_KEY, subjectColumn);
       else localStorage.removeItem(INVESTORS_SUBJECT_COLUMN_KEY);
     }
   }, [subjectColumn]);
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      if (compactColumn) localStorage.setItem(INVESTORS_COMPACT_COLUMN_KEY, compactColumn);
-      else localStorage.removeItem(INVESTORS_COMPACT_COLUMN_KEY);
-    }
-  }, [compactColumn]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(INVESTORS_PHONE_CLICK_BEHAVIOR_KEY, phoneClickBehavior);
@@ -610,21 +630,21 @@ function InvestorsContent() {
       owners: existing?.owners ?? null,
       email_settings: existing?.email_settings ?? null,
       onboarding: existing?.onboarding ?? null,
-      column_settings: {
+        column_settings: {
         ...existingColumnSettings,
         investors: {
           columnOrder,
           visibleColumns: Array.from(visibleColumns),
           clipboardColumn: clipboardColumn ?? null,
+          clipboardLinkedInColumn: clipboardLinkedInColumn ?? null,
           subjectColumn: subjectColumn ?? null,
-          compactColumn: compactColumn ?? null,
           phoneClickBehavior,
         },
       },
     };
     const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
-  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, subjectColumn, compactColumn, phoneClickBehavior]);
+  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, clipboardLinkedInColumn, subjectColumn, phoneClickBehavior]);
 
   // Sync drawer investor with refreshed data (e.g. after analyze) so personalization fields appear
   useEffect(() => {
@@ -1042,13 +1062,26 @@ function InvestorsContent() {
 
   const handleInvestorCellClick = useCallback(
     async (investor: InvestorSearchResult, columnKey: string) => {
-      if (columnKey === 'domain' || columnKey === 'linkedin_url') {
+      if (columnKey === 'domain' || columnKey === 'email') {
         if (clipboardColumn) {
           const val = getInvestorCellValue(investor, clipboardColumn, pendingAnalyzeResults[investor.id]);
           if (val && val !== '-') {
             try {
               await copyToClipboard(val);
               setToastMessage(`${columnLabels[clipboardColumn]} copied to clipboard`);
+              setToastVisible(true);
+            } catch (e) {
+              console.error('Failed to copy', e);
+            }
+          }
+        }
+      } else if (columnKey === 'linkedin_url') {
+        if (clipboardLinkedInColumn) {
+          const val = getInvestorCellValue(investor, clipboardLinkedInColumn, pendingAnalyzeResults[investor.id]);
+          if (val && val !== '-') {
+            try {
+              await copyToClipboard(val);
+              setToastMessage(`${columnLabels[clipboardLinkedInColumn]} copied to clipboard`);
               setToastVisible(true);
             } catch (e) {
               console.error('Failed to copy', e);
@@ -1068,7 +1101,7 @@ function InvestorsContent() {
         }
       }
     },
-    [clipboardColumn, getInvestorCellValue, columnLabels]
+    [clipboardColumn, clipboardLinkedInColumn, getInvestorCellValue, columnLabels]
   );
 
   const buildReportContent = () => {
@@ -1196,14 +1229,14 @@ function InvestorsContent() {
         visibleColumns={visibleColumns}
         columnLabels={columnLabels}
         clipboardColumn={clipboardColumn}
+        clipboardLinkedInColumn={clipboardLinkedInColumn}
         subjectColumn={subjectColumn}
-        compactColumn={compactColumn}
         phoneClickBehavior={phoneClickBehavior}
         onColumnOrderChange={setColumnOrder}
         onToggleColumn={toggleColumn}
         onClipboardColumnChange={setClipboardColumn}
+        onClipboardLinkedInColumnChange={setClipboardLinkedInColumn}
         onSubjectColumnChange={setSubjectColumn}
-        onCompactColumnChange={setCompactColumn}
         onPhoneClickBehaviorChange={setPhoneClickBehavior}
         onSave={async () => {
           try {
@@ -1476,7 +1509,7 @@ function InvestorsContent() {
                       const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'reason' || isTemplate;
                       return <col key={col} style={{ width: isWide ? '280px' : '160px', minWidth: isTemplate ? '200px' : '120px' }} />;
                     })}
-                    <col style={{ width: '120px' }} />
+                    <col style={{ width: '160px' }} />
                   </colgroup>
                   <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
@@ -1494,10 +1527,22 @@ function InvestorsContent() {
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {data.map((investor) => (
+                    {data.map((investor) => {
+                      const aiMeta = investor.ai_metadata ?? {};
+                      const investorFit =
+                        pendingAnalyzeResults[investor.id]?.investor_fit !== undefined
+                          ? pendingAnalyzeResults[investor.id].investor_fit
+                          : (aiMeta.investor_fit as boolean | null | undefined);
+                      const getRowBgColor = () => {
+                        if (investorFit === true) return 'bg-green-200 hover:bg-green-300';
+                        if (investorFit === false) return 'bg-red-200 hover:bg-red-300';
+                        if (investorFit === null) return 'bg-amber-100 hover:bg-amber-200';
+                        return 'hover:bg-gray-50';
+                      };
+                      return (
                       <tr
                         key={investor.id}
-                        className="hover:bg-gray-50 cursor-pointer"
+                        className={`cursor-pointer ${getRowBgColor()}`}
                         onClick={(e) => {
                           if (e.ctrlKey || e.metaKey) {
                             setInvestorToView(investor);
@@ -1512,6 +1557,7 @@ function InvestorsContent() {
                             pendingAnalyzeResults[investor.id]
                           );
                           const isTemplateColumn = columnKey.startsWith('template_');
+                          const isInvestorFitColumn = columnKey === 'investor_fit';
                           const isDomainColumn = columnKey === 'domain';
                           const isLinkedInColumn = columnKey === 'linkedin_url';
                           const isEmailColumn = columnKey === 'email';
@@ -1558,7 +1604,9 @@ function InvestorsContent() {
 
                           const handleLinkClick = async (e: React.MouseEvent) => {
                             e.stopPropagation();
-                            if ((isDomainColumn || isLinkedInColumn) && clipboardColumn) {
+                            const shouldCopyEmailOrDomain = (isDomainColumn || isEmailColumn) && clipboardColumn;
+                            const shouldCopyLinkedIn = isLinkedInColumn && clipboardLinkedInColumn;
+                            if (shouldCopyEmailOrDomain || shouldCopyLinkedIn) {
                               await handleInvestorCellClick(investor, columnKey);
                             }
                           };
@@ -1588,7 +1636,21 @@ function InvestorsContent() {
                                   {value === '-' ? '' : value}
                                 </a>
                               ) : (
-                                <span className="truncate block">{value}</span>
+                                <span
+                                  className={
+                                    isInvestorFitColumn && value !== '-'
+                                      ? `truncate block font-medium ${
+                                          investorFit === true
+                                            ? 'text-emerald-700'
+                                            : investorFit === false
+                                              ? 'text-red-700'
+                                              : 'text-amber-700'
+                                        }`
+                                      : 'truncate block'
+                                  }
+                                >
+                                  {value}
+                                </span>
                               )}
                             </td>
                           );
@@ -1598,18 +1660,34 @@ function InvestorsContent() {
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-end gap-1">
-                            {!investor.has_personalization && (
+                            {investor.has_personalization ? (
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                                  investorFit === true
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : investorFit === false
+                                      ? 'bg-red-100 text-red-800'
+                                      : investorFit === null
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                }`}
+                              >
+                                <Check className="w-3 h-3" />
+                                Reviewed
+                              </span>
+                            ) : (
                               <button
                                 onClick={() => handleAnalyze(investor.id, investor.name)}
                                 disabled={analyzingId === investor.id}
-                                className="p-1.5 rounded text-indigo-600 hover:bg-indigo-50 disabled:opacity-50"
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50"
                                 title={`Analyze ${investor.name || 'investor'} with AI`}
                               >
                                 {analyzingId === investor.id ? (
-                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                 ) : (
-                                  <Sparkles className="w-4 h-4" />
+                                  <Sparkles className="w-3.5 h-3.5" />
                                 )}
+                                Analyze with AI
                               </button>
                             )}
                             <button
@@ -1625,7 +1703,8 @@ function InvestorsContent() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -2041,7 +2120,17 @@ function InvestorResultCard({
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {investor.has_personalization && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800">
+            <span
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                investorFit === true
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : investorFit === false
+                    ? 'bg-red-100 text-red-800'
+                    : investorFit === null
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-gray-100 text-gray-800'
+              }`}
+            >
               <Check className="w-3 h-3" />
               Reviewed
             </span>
@@ -2053,7 +2142,7 @@ function InvestorResultCard({
                 onAnalyze(investor.id);
               }}
               disabled={isAnalyzing}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 flex-shrink-0"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 flex-shrink-0 shadow-sm"
               title={`Analyze ${investor.name || 'investor'} with AI`}
             >
               {isAnalyzing ? (
@@ -2085,13 +2174,33 @@ function InvestorResultCard({
               <span className="text-base" role="img" aria-label="fit">
                 {investorFit === true ? '😊' : investorFit === false ? '😕' : '😐'}
               </span>
-              <span className="text-xs font-medium text-gray-700">
+              <span
+                className={`text-xs font-medium ${
+                  investorFit === true
+                    ? 'text-emerald-700'
+                    : investorFit === false
+                      ? 'text-red-700'
+                      : investorFit === null
+                        ? 'text-amber-700'
+                        : 'text-gray-700'
+                }`}
+              >
                 {investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : 'Unclear Fit'}
               </span>
             </div>
           )}
           {hasReason && (
-            <div className="p-2 rounded-md bg-indigo-50 border border-indigo-100">
+            <div
+              className={`p-2 rounded-md border ${
+                investorFit === true
+                  ? 'bg-emerald-50 border-emerald-100'
+                  : investorFit === false
+                    ? 'bg-red-50 border-red-100'
+                    : investorFit === null
+                      ? 'bg-amber-50 border-amber-100'
+                      : 'bg-gray-50 border-gray-100'
+              }`}
+            >
               <p className="text-xs text-gray-800 line-clamp-2 leading-relaxed">{reason.trim()}</p>
             </div>
           )}

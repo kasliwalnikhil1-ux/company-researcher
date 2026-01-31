@@ -82,13 +82,11 @@ interface ManageColumnsDrawerProps {
   columnLabels: Record<string, string>;
   clipboardColumn: string | null;
   subjectColumn: string | null;
-  compactColumn: string | null;
   phoneClickBehavior: 'whatsapp' | 'call';
   onColumnOrderChange: (newOrder: string[]) => void;
   onToggleColumn: (column: string) => void;
   onClipboardColumnChange: (column: string | null) => void;
   onSubjectColumnChange: (column: string | null) => void;
-  onCompactColumnChange: (column: string | null) => void;
   onPhoneClickBehaviorChange: (behavior: 'whatsapp' | 'call') => void;
   onSave?: () => Promise<void>;
 }
@@ -101,13 +99,11 @@ const ManageColumnsDrawer: React.FC<ManageColumnsDrawerProps> = ({
   columnLabels,
   clipboardColumn,
   subjectColumn,
-  compactColumn,
   phoneClickBehavior,
   onColumnOrderChange,
   onToggleColumn,
   onClipboardColumnChange,
   onSubjectColumnChange,
-  onCompactColumnChange,
   onPhoneClickBehaviorChange,
   onSave,
 }) => {
@@ -247,30 +243,6 @@ const ManageColumnsDrawer: React.FC<ManageColumnsDrawerProps> = ({
                   {subjectColumn && (
                     <p className="mt-2 text-xs text-gray-500">
                       Selected: {formatColumnLabel(subjectColumn)}
-                    </p>
-                  )}
-                </div>
-
-                {/* Compact Column Selection */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Compact Column
-                  </label>
-                  <select
-                    value={compactColumn || ''}
-                    onChange={(e) => onCompactColumnChange(e.target.value || null)}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  >
-                    <option value="">None</option>
-                    {columnOrder.map((column) => (
-                      <option key={column} value={column}>
-                        {formatColumnLabel(column)}
-                      </option>
-                    ))}
-                  </select>
-                  {compactColumn && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Selected: {formatColumnLabel(compactColumn)}
                     </p>
                   )}
                 </div>

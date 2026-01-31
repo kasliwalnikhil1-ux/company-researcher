@@ -39,7 +39,6 @@ const COLUMN_ORDER_KEY = 'companies-column-order';
 const COLUMN_VISIBILITY_KEY = 'companies-column-visibility';
 const CLIPBOARD_COLUMN_KEY = 'companies-clipboard-column';
 const SUBJECT_COLUMN_KEY = 'companies-subject-column';
-const COMPACT_COLUMN_KEY = 'companies-compact-column';
 const PHONE_CLICK_BEHAVIOR_KEY = 'companies-phone-click-behavior';
 
 export interface ColumnSettings {
@@ -47,7 +46,6 @@ export interface ColumnSettings {
   visibleColumns?: string[];
   clipboardColumn?: string | null;
   subjectColumn?: string | null;
-  compactColumn?: string | null;
   phoneClickBehavior?: 'whatsapp' | 'call';
 }
 
@@ -472,15 +470,6 @@ function CompaniesContent() {
     return null;
   });
   
-  // Compact column state
-  const [compactColumn, setCompactColumn] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(COMPACT_COLUMN_KEY);
-      return saved || null;
-    }
-    return null;
-  });
-  
   // Phone click behavior state (default: 'whatsapp')
   const [phoneClickBehavior, setPhoneClickBehavior] = useState<'whatsapp' | 'call'>(() => {
     if (typeof window !== 'undefined') {
@@ -543,34 +532,6 @@ function CompaniesContent() {
     }
   }, [subjectColumn]);
   
-  // Save compact column selection to localStorage (persists forever)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      if (compactColumn) {
-        localStorage.setItem(COMPACT_COLUMN_KEY, compactColumn);
-      } else {
-        localStorage.removeItem(COMPACT_COLUMN_KEY);
-      }
-    }
-  }, [compactColumn]);
-  
-  // Set default compact column to "Call Message - Direct Message" if present and not already set
-  useEffect(() => {
-    if (!compactColumn && templates.length > 0 && columnOrder.length > 0) {
-      // Find template with title "Call Message" and channel "direct"
-      const callMessageDirectTemplate = templates.find(
-        t => t.title === 'Call Message' && t.channel === 'direct'
-      );
-      if (callMessageDirectTemplate) {
-        const columnKey = `template_${callMessageDirectTemplate.id}`;
-        // Check if this column exists in columnOrder
-        if (columnOrder.includes(columnKey)) {
-          setCompactColumn(columnKey);
-        }
-      }
-    }
-  }, [templates, columnOrder, compactColumn]);
-  
   // Save phone click behavior to localStorage
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -631,7 +592,6 @@ function CompaniesContent() {
 
     if (saved.clipboardColumn !== undefined) setClipboardColumn(saved.clipboardColumn ?? null);
     if (saved.subjectColumn !== undefined) setSubjectColumn(saved.subjectColumn ?? null);
-    if (saved.compactColumn !== undefined) setCompactColumn(saved.compactColumn ?? null);
     if (saved.phoneClickBehavior === 'whatsapp' || saved.phoneClickBehavior === 'call') setPhoneClickBehavior(saved.phoneClickBehavior);
 
     setColumnSettingsFromApi(null);
@@ -669,13 +629,12 @@ function CompaniesContent() {
         visibleColumns: Array.from(visibleColumns),
         clipboardColumn: clipboardColumn ?? null,
         subjectColumn: subjectColumn ?? null,
-        compactColumn: compactColumn ?? null,
         phoneClickBehavior,
       },
     };
     const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
-  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, subjectColumn, compactColumn, phoneClickBehavior]);
+  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, subjectColumn, phoneClickBehavior]);
 
   // Generate column labels including template-based labels
   const columnLabels = useMemo<Record<string, string>>(() => {
@@ -1720,13 +1679,11 @@ function CompaniesContent() {
         columnLabels={columnLabels}
         clipboardColumn={clipboardColumn}
         subjectColumn={subjectColumn}
-        compactColumn={compactColumn}
         phoneClickBehavior={phoneClickBehavior}
         onColumnOrderChange={setColumnOrder}
         onToggleColumn={toggleColumn}
         onClipboardColumnChange={setClipboardColumn}
         onSubjectColumnChange={setSubjectColumn}
-        onCompactColumnChange={setCompactColumn}
         onPhoneClickBehaviorChange={setPhoneClickBehavior}
         onSave={async () => {
           try {
@@ -1938,7 +1895,6 @@ function CompaniesContent() {
             const instagram = company.instagram && company.instagram !== '-' ? company.instagram.trim().replace(/^@/, '') : null;
             const phone = company.phone && company.phone !== '-' ? company.phone.trim() : null;
             const email = company.email && company.email !== '-' ? company.email.trim() : null;
-            const compactValue = compactColumn ? getCellValue(company, compactColumn) : null;
             const notes = company.notes && Array.isArray(company.notes) ? company.notes : [];
             const isEditingThisNote = editingNoteState?.companyId === company.id;
             const editingNoteIndex = isEditingThisNote ? editingNoteState!.noteIndex : null;
@@ -2037,13 +1993,6 @@ function CompaniesContent() {
                         </div>
                       );
                     })}
-                  </div>
-                )}
-                
-                {/* Compact Column */}
-                {compactColumn && compactValue && compactValue !== '-' && (
-                  <div className="mb-3 p-2 bg-gray-50 rounded border border-gray-200">
-                    <div className="text-sm text-gray-900 whitespace-pre-wrap">{compactValue}</div>
                   </div>
                 )}
                 

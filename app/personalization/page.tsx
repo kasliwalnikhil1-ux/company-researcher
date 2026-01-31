@@ -4,15 +4,32 @@ import { useState, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 import Toast from '@/components/ui/Toast';
 
+const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
+
 export default function PersonalizationPage() {
+  const { user } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (user && !PERSONALIZATION_ALLOWED_USER_IDS.has(user.id)) {
+      router.replace('/');
+    }
+  }, [user, router]);
+
+  const canAccess = user && PERSONALIZATION_ALLOWED_USER_IDS.has(user.id);
+
   return (
     <ProtectedRoute>
       <MainLayout>
         <div className="flex-1 overflow-auto">
-          <PersonalizationContent />
+          {canAccess && <PersonalizationContent />}
         </div>
       </MainLayout>
     </ProtectedRoute>

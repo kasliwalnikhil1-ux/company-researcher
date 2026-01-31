@@ -34,13 +34,13 @@ Return the result strictly in the following JSON format:
   "investor_fit": true | false | null,
   "reason": "Precise, short, clear explanation of why this company fits or does not fit the investor",
   "personalized_outreach_lines": [
-    "I saw ...[additional <12 words]..., which is why I'm reaching out to you about <<<COMPANY_NAME>>>.", // Line 1
-    "I believe ...[additional <12 words]... could greatly benefit us at <<<COMPANY_NAME>>>." // Line 2
+    "I saw you...[additional <12 words]..., which is why I'm reaching out to you about <<<COMPANY_NAME>>>.", // Line 1
+    "I believe you...[additional <12 words]... could greatly benefit us at <<<COMPANY_NAME>>>." // Line 2
   ],
   "mutual_interests": ["upto 2, optional, precise and accurate, non-generic items such as common place or work, industry, college, etc."]
 }
 
-Follow exactly the above sentence structures for personalized_outreach_lines, and be precise.`;
+Follow exactly the above sentence structures for personalized_outreach_lines. These are emails openers leading with why them. Be specific and precise.`;
 
 const TWITTER_ICEBREAKER_PROMPT = (name: string, first_name: string, allValidTweets: string, dateString: string) =>
   `PROMPT START

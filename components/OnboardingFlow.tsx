@@ -431,14 +431,15 @@ export default function OnboardingFlow() {
               <div className="text-sm text-gray-600 mt-1">Investor discovery, outreach, and deal management</div>
             </button>
             <button
+              disabled
               onClick={() => setFormData({
                 ...formData,
                 step0: { primaryUse: 'b2b' }
               })}
-              className={`w-full p-6 text-left border-2 rounded-lg transition-all ${
+              className={`w-full p-6 text-left border-2 rounded-lg transition-all opacity-60 cursor-not-allowed ${
                 formData.step0?.primaryUse === 'b2b'
                   ? 'border-indigo-500 bg-indigo-50'
-                  : 'border-gray-200 hover:border-gray-300'
+                  : 'border-gray-200'
               }`}
             >
               <div className="font-semibold text-gray-900">B2B Outreach</div>
