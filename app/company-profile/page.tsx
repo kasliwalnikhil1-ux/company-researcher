@@ -49,17 +49,31 @@ const COUNTRIES = [
   'Åland Islands', 'Sint Maarten', 'Bonaire', 'Saba', 'Sint Eustatius',
 ].sort();
 
+// Aligned with investor-research route (investment_stages)
 const FUNDRAISING_STAGES = [
-  'Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D', 'Series E+', 'Bridge', 'Convertible Note'
+  'pre-seed', 'seed', 'post-seed', 'series-a', 'series-b', 'series-c',
+  'growth', 'late-stage', 'pre-ipo', 'public-equity', 'angel',
 ];
 
+// Aligned with investor-research route (investment_industries)
 const SECTORS = [
-  'B2B', 'B2C', 'Marketplace', 'SaaS', 'Fintech', 'Healthtech', 'Edtech', 'E-commerce',
-  'AI/ML', 'Blockchain/Crypto', 'Gaming', 'Media/Entertainment', 'Real Estate', 'Transportation',
-  'Food & Beverage', 'Fashion', 'Travel', 'Energy', 'Manufacturing', 'Agriculture',
-  'Construction', 'Legal', 'HR/Recruiting', 'Marketing/Advertising', 'Security', 'IoT',
-  'Robotics', 'Biotech', 'Pharma', 'Telecom', 'Hardware', 'Other'
+  'artificial-intelligence', 'machine-learning', 'healthtech', 'biotech', 'digital-health', 'mental-health',
+  'wellness', 'longevity', 'fitness', 'consumer-health', 'medtech', 'pharma', 'genomics', 'bioinformatics',
+  'neuroscience', 'consumer-tech', 'enterprise-software', 'saas', 'vertical-saas', 'developer-tools',
+  'productivity', 'collaboration', 'fintech', 'payments', 'lending', 'credit', 'insurtech', 'regtech',
+  'wealthtech', 'climate-tech', 'energy', 'clean-energy', 'carbon-removal', 'sustainability', 'web3',
+  'blockchain', 'crypto', 'defi', 'nft', 'social-platforms', 'marketplaces', 'creator-economy', 'edtech',
+  'hr-tech', 'future-of-work', 'mobility', 'transportation', 'autonomous-vehicles', 'robotics', 'hardware',
+  'deep-tech', 'semiconductors', 'data-infrastructure', 'cloud-infrastructure', 'devops', 'cybersecurity',
+  'security', 'privacy', 'identity', 'digital-identity', 'consumer-internet', 'ecommerce', 'retail-tech',
+  'proptech', 'real-estate', 'construction-tech', 'smart-cities', 'supply-chain', 'logistics',
+  'manufacturing', 'industrial-tech', 'agtech', 'foodtech', 'gaming', 'esports', 'media', 'entertainment',
+  'music-tech', 'sports-tech', 'travel-tech', 'hospitality', 'martech', 'adtech', 'legal-tech', 'govtech',
+  'defense-tech', 'space-tech', 'aerospace', 'iot', 'edge-computing', 'network-effects',
 ];
+
+const formatKebabLabel = (value: string): string =>
+  value.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 
 const B2B_COMPANY_SIZES = ['1–10', '11–50', '51–200', '201–500', '501–1000', '1000+'];
 const B2B_USP_OPTIONS = ['Faster to deploy', 'Lower cost', 'Better UX', 'More accurate results', 'Better support', 'Easier integration', 'Industry-specific', 'Scalable', 'Secure'];
@@ -171,8 +185,9 @@ function CompanyProfileContent() {
     );
   }
 
-  const filteredSectors = SECTORS.filter(s => 
-    s.toLowerCase().includes(sectorSearch.toLowerCase())
+  const sectorSearchLower = sectorSearch.toLowerCase();
+  const filteredSectors = SECTORS.filter(s =>
+    s.toLowerCase().includes(sectorSearchLower) || formatKebabLabel(s).toLowerCase().includes(sectorSearchLower)
   );
 
   const filteredCountries = COUNTRIES.filter(c => 
@@ -213,7 +228,7 @@ function CompanyProfileContent() {
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Identity</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">First Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">First Name <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.step1.firstName || ''}
@@ -229,7 +244,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Last Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Last Name <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.step1.lastName || ''}
@@ -275,7 +290,7 @@ function CompanyProfileContent() {
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Details</h2>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Your role</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Your role <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.b2bStep3?.yourRole || ''}
@@ -293,7 +308,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Bio <span className="text-red-500">*</span></label>
                     <textarea
                       value={formData.step2?.bio || ''}
                       onChange={(e) => setFormData({
@@ -318,7 +333,7 @@ function CompanyProfileContent() {
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Overview</h2>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Company name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Company name <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.b2bStep3.companyName || ''}
@@ -349,7 +364,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Company size</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Company size <span className="text-red-500">*</span></label>
                     <select
                       value={formData.b2bStep3.companySize || ''}
                       onChange={(e) => setFormData({
@@ -374,7 +389,7 @@ function CompanyProfileContent() {
             {/* B2B: What You Sell */}
             {formData.b2bStep4 && (
               <section>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">What You Sell</h2>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">What You Sell <span className="text-red-500">*</span></h2>
                 <textarea
                   value={formData.b2bStep4.productOrService || ''}
                   onChange={(e) => setFormData({
@@ -476,7 +491,7 @@ function CompanyProfileContent() {
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Target Customer</h2>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Industry</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Industry <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.b2bStep7.industry || ''}
@@ -489,7 +504,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Company size</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Company size <span className="text-red-500">*</span></label>
                     <select
                       value={formData.b2bStep7.companySize || ''}
                       onChange={(e) => setFormData({
@@ -505,7 +520,7 @@ function CompanyProfileContent() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Geography</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Geography <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.b2bStep7.geography || ''}
@@ -518,7 +533,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Buyer role (select one or more)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Buyer role (select one or more) <span className="text-red-500">*</span></label>
                     <div className="flex flex-wrap gap-2">
                       {B2B_BUYER_ROLES.map((opt) => {
                         const selected = (formData.b2bStep7?.buyerRole || []).includes(opt.value);
@@ -548,7 +563,7 @@ function CompanyProfileContent() {
             {/* B2B: Pain Points */}
             {formData.b2bStep8 && (
               <section>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Problems You Solve</h2>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Problems You Solve <span className="text-red-500">*</span></h2>
                 <textarea
                   value={formData.b2bStep8.painPoints || ''}
                   onChange={(e) => setFormData({
@@ -585,7 +600,7 @@ function CompanyProfileContent() {
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Sales Model</h2>
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Pricing range</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Pricing range <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.b2bStep10.pricingRange || ''}
@@ -598,7 +613,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Contract type</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Contract type <span className="text-red-500">*</span></label>
                     <input
                       type="text"
                       value={formData.b2bStep10.contractType || ''}
@@ -611,7 +626,7 @@ function CompanyProfileContent() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Sales motion</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sales motion <span className="text-red-500">*</span></label>
                     <div className="flex gap-2 flex-wrap">
                       {[
                         { value: 'self_serve' as const, label: 'Self-serve' },
@@ -643,7 +658,7 @@ function CompanyProfileContent() {
             {/* B2B: CTA */}
             {formData.b2bStep11 && (
               <section>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Primary Call to Action</h2>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Primary Call to Action <span className="text-red-500">*</span></h2>
                 <div className="flex flex-wrap gap-2">
                   {B2B_CTA_OPTIONS.map((opt) => (
                     <button
@@ -736,7 +751,7 @@ function CompanyProfileContent() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Background</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Title <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   value={formData.step2.title || ''}
@@ -776,7 +791,7 @@ function CompanyProfileContent() {
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Fundraising Experience</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Prior experience raising venture rounds</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Prior experience raising venture rounds <span className="text-red-500">*</span></label>
               <select
                 value={formData.step3.experience || ''}
                 onChange={(e) => setFormData({
@@ -799,7 +814,7 @@ function CompanyProfileContent() {
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Capital Raised to Date</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Total capital raised</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Total capital raised <span className="text-red-500">*</span></label>
               <select
                 value={formData.step4.capitalRaised || ''}
                 onChange={(e) => setFormData({
@@ -826,7 +841,7 @@ function CompanyProfileContent() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Website</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Company name</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Company name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   value={formData.step5.companyName || ''}
@@ -860,7 +875,7 @@ function CompanyProfileContent() {
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Sector</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Sector (Multi-select)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Sector (Multi-select) <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={sectorSearch}
@@ -891,7 +906,7 @@ function CompanyProfileContent() {
                         }}
                         className="mr-3"
                       />
-                      <span>{sector}</span>
+                      <span>{formatKebabLabel(sector)}</span>
                     </label>
                   );
                 })}
@@ -903,7 +918,7 @@ function CompanyProfileContent() {
                       key={sector}
                       className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
                     >
-                      {sector}
+                      {formatKebabLabel(sector)}
                     </span>
                   ))}
                 </div>
@@ -928,7 +943,7 @@ function CompanyProfileContent() {
               >
                 <option value="">Select stage</option>
                 {FUNDRAISING_STAGES.map((stage) => (
-                  <option key={stage} value={stage}>{stage}</option>
+                  <option key={stage} value={stage}>{formatKebabLabel(stage)}</option>
                 ))}
               </select>
             </div>
@@ -940,7 +955,7 @@ function CompanyProfileContent() {
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Company HQ</h2>
             <div ref={countryDropdownRef} className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Country</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Country <span className="text-red-500">*</span></label>
               <button
                 type="button"
                 onClick={() => setCountryOpen((o) => !o)}
@@ -997,7 +1012,7 @@ function CompanyProfileContent() {
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Product / Service Description</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">What product or service does your company offer?</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">What product or service does your company offer? <span className="text-red-500">*</span></label>
               <textarea
                 value={formData.step9.productDescription || ''}
                 onChange={(e) => setFormData({
@@ -1018,13 +1033,14 @@ function CompanyProfileContent() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Customer Description & Revenue</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Who are your customers?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Who are your customers? <span className="text-red-500">*</span></label>
                 <textarea
                   value={formData.step10.customerDescription || ''}
                   onChange={(e) => setFormData({
                     ...formData,
                     step10: {
                       customerDescription: e.target.value,
+                      businessModel: formData.step10?.businessModel ?? [],
                       revenueStatus: formData.step10?.revenueStatus ?? 'no',
                       arr: formData.step10?.arr
                     }
@@ -1035,13 +1051,46 @@ function CompanyProfileContent() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Is your company currently generating revenue?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></label>
+                <div className="flex flex-wrap gap-2">
+                  {['B2B', 'B2C', 'Marketplace'].map((option) => {
+                    const isSelected = (formData.step10?.businessModel ?? []).includes(option);
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => {
+                          const current = formData.step10?.businessModel ?? [];
+                          const updated = isSelected ? current.filter((o) => o !== option) : [...current, option];
+                          setFormData({
+                            ...formData,
+                            step10: {
+                              customerDescription: formData.step10?.customerDescription ?? '',
+                              businessModel: updated,
+                              revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                              arr: formData.step10?.arr
+                            }
+                          });
+                        }}
+                        className={`px-4 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                          isSelected ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Is your company currently generating revenue? <span className="text-red-500">*</span></label>
                 <div className="flex gap-4">
                   <button
                     onClick={() => setFormData({
                       ...formData,
                       step10: {
                         customerDescription: formData.step10?.customerDescription ?? '',
+                        businessModel: formData.step10?.businessModel ?? [],
                         revenueStatus: 'yes',
                         arr: formData.step10?.arr
                       }
@@ -1059,6 +1108,7 @@ function CompanyProfileContent() {
                       ...formData,
                       step10: {
                         customerDescription: formData.step10?.customerDescription ?? '',
+                        businessModel: formData.step10?.businessModel ?? [],
                         revenueStatus: 'no',
                         arr: []
                       }
@@ -1089,6 +1139,7 @@ function CompanyProfileContent() {
                               ...formData,
                               step10: {
                                 customerDescription: formData.step10?.customerDescription ?? '',
+                                businessModel: formData.step10?.businessModel ?? [],
                                 revenueStatus: formData.step10?.revenueStatus ?? 'no',
                                 arr: updated
                               }
@@ -1114,6 +1165,7 @@ function CompanyProfileContent() {
                               ...formData,
                               step10: {
                                 customerDescription: formData.step10?.customerDescription ?? '',
+                                businessModel: formData.step10?.businessModel ?? [],
                                 revenueStatus: formData.step10?.revenueStatus ?? 'no',
                                 arr: updated
                               }
@@ -1137,6 +1189,7 @@ function CompanyProfileContent() {
                               ...formData,
                               step10: {
                                 customerDescription: formData.step10?.customerDescription ?? '',
+                                businessModel: formData.step10?.businessModel ?? [],
                                 revenueStatus: formData.step10?.revenueStatus ?? 'no',
                                 arr: updated
                               }
@@ -1153,6 +1206,7 @@ function CompanyProfileContent() {
                             ...formData,
                             step10: {
                               customerDescription: formData.step10?.customerDescription ?? '',
+                              businessModel: formData.step10?.businessModel ?? [],
                               revenueStatus: formData.step10?.revenueStatus ?? 'no',
                               arr: updated
                             }
@@ -1171,6 +1225,7 @@ function CompanyProfileContent() {
                         ...formData,
                         step10: {
                           customerDescription: formData.step10?.customerDescription ?? '',
+                          businessModel: formData.step10?.businessModel ?? [],
                           revenueStatus: formData.step10?.revenueStatus ?? 'no',
                           arr: updated
                         }
@@ -1186,21 +1241,54 @@ function CompanyProfileContent() {
           </section>
         )}
 
-        {/* Step 11: Fundraising Timeline & Target Round Size */}
+        {/* Step 11: Who to raise from, Timeline & Target Round Size */}
         {formData.step11 && (
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Fundraising Timeline & Target Round Size</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">When are you planning to raise your next round?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Who are you looking to raise from? <span className="text-red-500">*</span></label>
+                <div className="border border-gray-300 rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
+                  {['Venture Capital', 'Angel Investor', 'Family Office', 'Private Equity', 'Hedge Fund', 'Corporate Venture', 'Accelerator / Incubator', 'Investment Holding Company'].map((type) => {
+                    const isSelected = (formData.step11?.lookingToRaiseFrom ?? []).includes(type);
+                    return (
+                      <label key={type} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            const current = formData.step11?.lookingToRaiseFrom ?? [];
+                            const updated = e.target.checked ? [...current, type] : current.filter((t) => t !== type);
+                            setFormData({
+                              ...formData,
+                              step11: {
+                                ...formData.step11,
+                                lookingToRaiseFrom: updated,
+                                timeline: formData.step11?.timeline ?? 'later',
+                                targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k',
+                              }
+                            });
+                          }}
+                          className="mr-3"
+                        />
+                        <span>{type}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">When are you planning to raise your next round? <span className="text-red-500">*</span></label>
                 <select
                   value={formData.step11.timeline || ''}
                   onChange={(e) => setFormData({
                     ...formData,
                     step11: {
-                    timeline: e.target.value as 'near_term' | 'mid_term' | 'later',
-                    targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k'
-                  }
+                      ...formData.step11,
+                      lookingToRaiseFrom: formData.step11?.lookingToRaiseFrom ?? [],
+                      timeline: e.target.value as 'near_term' | 'mid_term' | 'later',
+                      targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k'
+                    }
                   })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
@@ -1211,15 +1299,17 @@ function CompanyProfileContent() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">What round size are you looking for?</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What round size are you looking for? <span className="text-red-500">*</span></label>
                 <select
                   value={formData.step11.targetRoundSize || ''}
                   onChange={(e) => setFormData({
                     ...formData,
                     step11: {
-                    timeline: formData.step11?.timeline ?? 'later',
-                    targetRoundSize: e.target.value as 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m'
-                  }
+                      ...formData.step11,
+                      lookingToRaiseFrom: formData.step11?.lookingToRaiseFrom ?? [],
+                      timeline: formData.step11?.timeline ?? 'later',
+                      targetRoundSize: e.target.value as 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m'
+                    }
                   })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
@@ -1239,7 +1329,7 @@ function CompanyProfileContent() {
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Investor Type Preference</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Are you looking for a lead investor or follow-on investors?</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Are you looking for a lead investor or follow-on investors? <span className="text-red-500">*</span></label>
               <div className="space-y-2">
                 {[
                   { value: 'lead', label: 'Lead investors' },

@@ -11,8 +11,8 @@ const sampleOnboarding = {
   step3: { experience: 'getting_started' as const },
   step4: { capitalRaised: '2m_10m' as const },
   step5: { website: 'http://kaptured.ai', companyName: 'Kaptured AI' },
-  step6: { sector: ['B2B', 'Fashion', 'AI/ML'] },
-  step7: { stage: 'Pre-Seed' },
+  step6: { sector: ['saas', 'retail-tech', 'artificial-intelligence'] },
+  step7: { stage: 'pre-seed' },
   step8: { hqCountry: 'Bahamas' },
   step9: {
     productDescription:
@@ -24,7 +24,7 @@ const sampleOnboarding = {
     customerDescription:
       'The customers of Kaptured.AI include brands and businesses in the fashion and e-commerce sectors looking to enhance their visual marketing through high-quality AI-generated content.',
   },
-  step11: { timeline: 'near_term' as const, targetRoundSize: 'less_than_500k' as const },
+  step11: { lookingToRaiseFrom: ['Venture Capital', 'Angel Investor'], timeline: 'near_term' as const, targetRoundSize: 'less_than_500k' as const },
   step12: { investorType: 'both' as const },
   flowType: 'fundraising' as const,
   completed: true,

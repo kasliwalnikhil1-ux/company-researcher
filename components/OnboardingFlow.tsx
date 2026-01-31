@@ -46,17 +46,31 @@ const COUNTRIES = [
   'Åland Islands', 'Sint Maarten', 'Bonaire', 'Saba', 'Sint Eustatius',
 ].sort();
 
+// Aligned with investor-research route (investment_stages)
 const FUNDRAISING_STAGES = [
-  'Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C', 'Series D', 'Series E+', 'Bridge', 'Convertible Note'
+  'pre-seed', 'seed', 'post-seed', 'series-a', 'series-b', 'series-c',
+  'growth', 'late-stage', 'pre-ipo', 'public-equity', 'angel',
 ];
 
+// Aligned with investor-research route (investment_industries)
 const SECTORS = [
-  'B2B', 'B2C', 'Marketplace', 'SaaS', 'Fintech', 'Healthtech', 'Edtech', 'E-commerce',
-  'AI/ML', 'Blockchain/Crypto', 'Gaming', 'Media/Entertainment', 'Real Estate', 'Transportation',
-  'Food & Beverage', 'Fashion', 'Travel', 'Energy', 'Manufacturing', 'Agriculture',
-  'Construction', 'Legal', 'HR/Recruiting', 'Marketing/Advertising', 'Security', 'IoT',
-  'Robotics', 'Biotech', 'Pharma', 'Telecom', 'Hardware', 'Other'
+  'artificial-intelligence', 'machine-learning', 'healthtech', 'biotech', 'digital-health', 'mental-health',
+  'wellness', 'longevity', 'fitness', 'consumer-health', 'medtech', 'pharma', 'genomics', 'bioinformatics',
+  'neuroscience', 'consumer-tech', 'enterprise-software', 'saas', 'vertical-saas', 'developer-tools',
+  'productivity', 'collaboration', 'fintech', 'payments', 'lending', 'credit', 'insurtech', 'regtech',
+  'wealthtech', 'climate-tech', 'energy', 'clean-energy', 'carbon-removal', 'sustainability', 'web3',
+  'blockchain', 'crypto', 'defi', 'nft', 'social-platforms', 'marketplaces', 'creator-economy', 'edtech',
+  'hr-tech', 'future-of-work', 'mobility', 'transportation', 'autonomous-vehicles', 'robotics', 'hardware',
+  'deep-tech', 'semiconductors', 'data-infrastructure', 'cloud-infrastructure', 'devops', 'cybersecurity',
+  'security', 'privacy', 'identity', 'digital-identity', 'consumer-internet', 'ecommerce', 'retail-tech',
+  'proptech', 'real-estate', 'construction-tech', 'smart-cities', 'supply-chain', 'logistics',
+  'manufacturing', 'industrial-tech', 'agtech', 'foodtech', 'gaming', 'esports', 'media', 'entertainment',
+  'music-tech', 'sports-tech', 'travel-tech', 'hospitality', 'martech', 'adtech', 'legal-tech', 'govtech',
+  'defense-tech', 'space-tech', 'aerospace', 'iot', 'edge-computing', 'network-effects',
 ];
+
+const formatKebabLabel = (value: string): string =>
+  value.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 
 const B2B_COMPANY_SIZES = ['1–10', '11–50', '51–200', '201–500', '501–1000', '1000+'];
 const B2B_USP_OPTIONS = ['Faster to deploy', 'Lower cost', 'Better UX', 'More accurate results', 'Better support', 'Easier integration', 'Industry-specific', 'Scalable', 'Secure'];
@@ -135,8 +149,8 @@ export default function OnboardingFlow() {
           else setCurrentStep(0);
         } else {
           if (onboarding.step12) setCurrentStep(13);
-          else if (onboarding.step11) setCurrentStep(12);
-          else if (onboarding.step10) setCurrentStep(11);
+          else if (onboarding.step11 && (onboarding.step11.lookingToRaiseFrom?.length ?? 0) > 0) setCurrentStep(12);
+          else if (onboarding.step10 && (onboarding.step10.businessModel?.length ?? 0) > 0) setCurrentStep(11);
           else if (onboarding.step9) setCurrentStep(10);
           else if (onboarding.step8) setCurrentStep(9);
           else if (onboarding.step7) setCurrentStep(8);
@@ -403,8 +417,8 @@ export default function OnboardingFlow() {
     if (currentStep === 7) return !!formData.step7?.stage;
     if (currentStep === 8) return !!formData.step8?.hqCountry;
     if (currentStep === 9) return !!formData.step9?.productDescription;
-    if (currentStep === 10) return !!(formData.step10?.customerDescription && formData.step10?.revenueStatus);
-    if (currentStep === 11) return !!(formData.step11?.timeline && formData.step11?.targetRoundSize);
+    if (currentStep === 10) return !!(formData.step10?.customerDescription && (formData.step10?.businessModel?.length ?? 0) > 0 && formData.step10?.revenueStatus);
+    if (currentStep === 11) return !!(formData.step11?.lookingToRaiseFrom?.length && formData.step11?.timeline && formData.step11?.targetRoundSize);
     if (currentStep === 12) return !!formData.step12?.investorType;
     return false;
   };
@@ -414,7 +428,7 @@ export default function OnboardingFlow() {
     if (currentStep === 0) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">How will you primarily use the platform?</h2>
+          <h2 className="text-2xl font-bold text-gray-900">How will you primarily use the platform? <span className="text-red-500">*</span></h2>
           <div className="space-y-4">
             <button
               onClick={() => setFormData({
@@ -456,7 +470,7 @@ export default function OnboardingFlow() {
       if (currentStep === 1) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">What&apos;s your name?</h2>
+            <h2 className="text-2xl font-bold text-gray-900">What&apos;s your name? <span className="text-red-500">*</span></h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -579,7 +593,7 @@ export default function OnboardingFlow() {
       if (currentStep === 3) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Company Overview</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Company Overview <span className="text-red-500">*</span></h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -677,7 +691,7 @@ export default function OnboardingFlow() {
       if (currentStep === 4) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">What You Sell</h2>
+            <h2 className="text-2xl font-bold text-gray-900">What You Sell <span className="text-red-500">*</span></h2>
             <p className="text-gray-600">What product or service does your company offer?</p>
             <div>
               <textarea
@@ -853,7 +867,7 @@ export default function OnboardingFlow() {
 
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Target Customer</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Target Customer <span className="text-red-500">*</span></h2>
             <p className="text-sm text-gray-500">
               Example: &quot;B2B SaaS companies with 20–200 employees, targeting founders or sales leaders&quot;
             </p>
@@ -965,7 +979,7 @@ export default function OnboardingFlow() {
       if (currentStep === 8) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Problems You Solve</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Problems You Solve <span className="text-red-500">*</span></h2>
             <p className="text-gray-600">What problems does your product solve?</p>
             <div>
               <textarea
@@ -1013,7 +1027,7 @@ export default function OnboardingFlow() {
       if (currentStep === 10) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Sales Model</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Sales Model <span className="text-red-500">*</span></h2>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1094,7 +1108,7 @@ export default function OnboardingFlow() {
       if (currentStep === 11) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">What Do You Want Prospects To Do?</h2>
+            <h2 className="text-2xl font-bold text-gray-900">What Do You Want Prospects To Do? <span className="text-red-500">*</span></h2>
             <p className="text-gray-600">Choose your primary call to action</p>
             <div className="space-y-3">
               {B2B_CTA_OPTIONS.map((opt) => (
@@ -1160,7 +1174,7 @@ export default function OnboardingFlow() {
     if (currentStep === 1) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">What's your name?</h2>
+          <h2 className="text-2xl font-bold text-gray-900">What's your name? <span className="text-red-500">*</span></h2>
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -1233,7 +1247,7 @@ export default function OnboardingFlow() {
           <h2 className="text-2xl font-bold text-gray-900">Founder Details</h2>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Title</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Title <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={formData.step2?.title || ''}
@@ -1249,7 +1263,7 @@ export default function OnboardingFlow() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Bio <span className="text-red-500">*</span></label>
               <textarea
                 value={formData.step2?.bio || ''}
                 onChange={(e) => setFormData({
@@ -1261,8 +1275,11 @@ export default function OnboardingFlow() {
                 })}
                 rows={5}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Tell us about yourself"
+                placeholder="Ex-YC, Harvard alumni, former Google engineers, female founders"
               />
+              <p className="text-sm text-gray-500 mt-2">
+                Used for: Investor matching, email content, and founder introductions
+              </p>
             </div>
           </div>
         </div>
@@ -1273,7 +1290,7 @@ export default function OnboardingFlow() {
     if (currentStep === 3) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Which best describes your prior experience raising venture rounds?</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Which best describes your prior experience raising venture rounds? <span className="text-red-500">*</span></h2>
           <div className="space-y-4">
             {[
               { value: 'getting_started', label: 'Getting Started', desc: 'First time raising venture capital' },
@@ -1305,7 +1322,7 @@ export default function OnboardingFlow() {
     if (currentStep === 4) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">What is your total capital raised to date?</h2>
+          <h2 className="text-2xl font-bold text-gray-900">What is your total capital raised to date? <span className="text-red-500">*</span></h2>
           <select
             value={formData.step4?.capitalRaised || ''}
             onChange={(e) => setFormData({
@@ -1330,7 +1347,7 @@ export default function OnboardingFlow() {
     if (currentStep === 5) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Company's Website</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Company's Website <span className="text-red-500">*</span></h2>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Company name <span className="text-red-500">*</span></label>
             <input
@@ -1386,13 +1403,14 @@ export default function OnboardingFlow() {
 
     // Step 6: Company Sector
     if (currentStep === 6) {
-      const filteredSectors = SECTORS.filter(s => 
-        s.toLowerCase().includes(sectorSearch.toLowerCase())
+      const search = sectorSearch.toLowerCase();
+      const filteredSectors = SECTORS.filter(s =>
+        s.toLowerCase().includes(search) || formatKebabLabel(s).toLowerCase().includes(search)
       );
 
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Select your company's sector</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Select your company's sector <span className="text-red-500">*</span></h2>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Sector <span className="text-red-500">*</span> (Multi-select)
@@ -1427,7 +1445,7 @@ export default function OnboardingFlow() {
                       }}
                       className="mr-3"
                     />
-                    <span>{sector}</span>
+                    <span>{formatKebabLabel(sector)}</span>
                   </label>
                 );
               })}
@@ -1439,7 +1457,7 @@ export default function OnboardingFlow() {
                     key={sector}
                     className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm flex items-center gap-2"
                   >
-                    {sector}
+                    {formatKebabLabel(sector)}
                     <button
                       onClick={() => {
                         const updated = formData.step6?.sector?.filter(s => s !== sector) || [];
@@ -1465,7 +1483,7 @@ export default function OnboardingFlow() {
     if (currentStep === 7) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Upcoming round stage</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Upcoming round stage <span className="text-red-500">*</span></h2>
           <select
             value={formData.step7?.stage || ''}
             onChange={(e) => setFormData({
@@ -1476,7 +1494,7 @@ export default function OnboardingFlow() {
           >
             <option value="">Select stage</option>
             {FUNDRAISING_STAGES.map((stage) => (
-              <option key={stage} value={stage}>{stage}</option>
+              <option key={stage} value={stage}>{formatKebabLabel(stage)}</option>
             ))}
           </select>
         </div>
@@ -1491,7 +1509,7 @@ export default function OnboardingFlow() {
 
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Select company's HQ country</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Select company's HQ country <span className="text-red-500">*</span></h2>
           <div ref={countryDropdownRef} className="relative">
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Country <span className="text-red-500">*</span>
@@ -1544,6 +1562,9 @@ export default function OnboardingFlow() {
               </div>
             )}
           </div>
+          <p className="text-sm text-gray-500 mt-2">
+            Used for: Helps identify investors who invest in companies based on where you are
+          </p>
         </div>
       );
     }
@@ -1552,7 +1573,7 @@ export default function OnboardingFlow() {
     if (currentStep === 9) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">What product or service does your company offer?</h2>
+          <h2 className="text-2xl font-bold text-gray-900">What product or service does your company offer? <span className="text-red-500">*</span></h2>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Description <span className="text-red-500">*</span>
@@ -1584,6 +1605,7 @@ export default function OnboardingFlow() {
           ...formData,
           step10: {
             customerDescription: formData.step10?.customerDescription ?? '',
+            businessModel: formData.step10?.businessModel ?? [],
             revenueStatus: formData.step10?.revenueStatus ?? 'no',
             arr: updated
           }
@@ -1597,6 +1619,7 @@ export default function OnboardingFlow() {
           ...formData,
           step10: {
             customerDescription: formData.step10?.customerDescription ?? '',
+            businessModel: formData.step10?.businessModel ?? [],
             revenueStatus: formData.step10?.revenueStatus ?? 'no',
             arr: updated
           }
@@ -1611,22 +1634,27 @@ export default function OnboardingFlow() {
           ...formData,
           step10: {
             customerDescription: formData.step10?.customerDescription ?? '',
+            businessModel: formData.step10?.businessModel ?? [],
             revenueStatus: formData.step10?.revenueStatus ?? 'no',
             arr: updated
           }
         });
       };
 
+      const BUSINESS_MODEL_OPTIONS = ['B2B', 'B2C', 'Marketplace'];
+      const businessModelSelected = formData.step10?.businessModel || [];
+
       return (
         <div className="space-y-6">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Who are your customers?</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Who are your customers? <span className="text-red-500">*</span></h2>
             <textarea
               value={formData.step10?.customerDescription || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 step10: {
                   customerDescription: e.target.value,
+                  businessModel: formData.step10?.businessModel ?? [],
                   revenueStatus: formData.step10?.revenueStatus ?? 'no',
                   arr: formData.step10?.arr
                 }
@@ -1637,13 +1665,47 @@ export default function OnboardingFlow() {
             />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">Is your company currently generating revenue?</h2>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></label>
+            <div className="flex flex-wrap gap-2">
+              {BUSINESS_MODEL_OPTIONS.map((option) => {
+                const isSelected = businessModelSelected.includes(option);
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => {
+                      const updated = isSelected
+                        ? businessModelSelected.filter((o) => o !== option)
+                        : [...businessModelSelected, option];
+                      setFormData({
+                        ...formData,
+                        step10: {
+                          customerDescription: formData.step10?.customerDescription ?? '',
+                          businessModel: updated,
+                          revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                          arr: formData.step10?.arr
+                        }
+                      });
+                    }}
+                    className={`px-4 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                      isSelected ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Is your company currently generating revenue? <span className="text-red-500">*</span></h2>
             <div className="flex gap-4">
               <button
                 onClick={() => setFormData({
                   ...formData,
                   step10: {
                     customerDescription: formData.step10?.customerDescription ?? '',
+                    businessModel: formData.step10?.businessModel ?? [],
                     revenueStatus: 'yes',
                     arr: formData.step10?.arr
                   }
@@ -1664,6 +1726,7 @@ export default function OnboardingFlow() {
                     ...formData,
                     step10: {
                       customerDescription: formData.step10?.customerDescription ?? '',
+                      businessModel: formData.step10?.businessModel ?? [],
                       revenueStatus: 'no',
                       arr: cleared
                     }
@@ -1743,6 +1806,7 @@ export default function OnboardingFlow() {
                     ...formData,
                     step10: {
                       customerDescription: formData.step10?.customerDescription ?? '',
+                      businessModel: formData.step10?.businessModel ?? [],
                       revenueStatus: formData.step10?.revenueStatus ?? 'no',
                       arr: cleared
                     }
@@ -1758,17 +1822,65 @@ export default function OnboardingFlow() {
       );
     }
 
-    // Step 11: Fundraising Timeline & Target Round Size
+    // Step 11: Who to raise from, Timeline & Target Round Size
     if (currentStep === 11) {
+      const INVESTOR_TYPES = [
+        'Venture Capital',
+        'Angel Investor',
+        'Family Office',
+        'Private Equity',
+        'Hedge Fund',
+        'Corporate Venture',
+        'Accelerator / Incubator',
+        'Investment Holding Company',
+      ];
+      const current = formData.step11?.lookingToRaiseFrom || [];
       return (
         <div className="space-y-6">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">When are you planning to raise your next round?</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">Who are you looking to raise from? <span className="text-red-500">*</span></h2>
+            <div className="border border-gray-300 rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
+              {INVESTOR_TYPES.map((type) => {
+                const isSelected = current.includes(type);
+                return (
+                  <label
+                    key={type}
+                    className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        const updated = e.target.checked
+                          ? [...current, type]
+                          : current.filter((t) => t !== type);
+                        setFormData({
+                          ...formData,
+                          step11: {
+                            ...formData.step11,
+                            lookingToRaiseFrom: updated,
+                            timeline: formData.step11?.timeline ?? 'later',
+                            targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k',
+                          }
+                        });
+                      }}
+                      className="mr-3"
+                    />
+                    <span>{type}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">When are you planning to raise your next round? <span className="text-red-500">*</span></h2>
             <select
               value={formData.step11?.timeline || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 step11: {
+                  ...formData.step11,
+                  lookingToRaiseFrom: formData.step11?.lookingToRaiseFrom ?? [],
                   timeline: e.target.value as 'near_term' | 'mid_term' | 'later',
                   targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k'
                 }
@@ -1782,12 +1894,14 @@ export default function OnboardingFlow() {
             </select>
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-4">What round size are you looking for?</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-4">What round size are you looking for? <span className="text-red-500">*</span></h2>
             <select
               value={formData.step11?.targetRoundSize || ''}
               onChange={(e) => setFormData({
                 ...formData,
                 step11: {
+                  ...formData.step11,
+                  lookingToRaiseFrom: formData.step11?.lookingToRaiseFrom ?? [],
                   timeline: formData.step11?.timeline ?? 'later',
                   targetRoundSize: e.target.value as 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m'
                 }
@@ -1809,7 +1923,7 @@ export default function OnboardingFlow() {
     if (currentStep === 12) {
       return (
         <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Are you looking for a lead investor or follow-on investors?</h2>
+          <h2 className="text-2xl font-bold text-gray-900">Are you looking for a lead investor or follow-on investors? <span className="text-red-500">*</span></h2>
           <div className="space-y-4">
             {[
               { value: 'lead', label: 'Lead investors' },

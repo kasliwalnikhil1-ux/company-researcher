@@ -184,8 +184,8 @@ export interface OnboardingDataForSummary {
   step7?: { stage?: string };
   step8?: { hqCountry?: string };
   step9?: { productDescription?: string };
-  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string };
-  step11?: { targetRoundSize?: string };
+  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[] };
+  step11?: { targetRoundSize?: string; lookingToRaiseFrom?: string[] };
   b2bStep3?: { companyName?: string; websiteUrl?: string; companySize?: string; yourRole?: string };
   b2bStep4?: { productOrService?: string };
   b2bStep5?: { coreFeatures?: string[] };
@@ -249,6 +249,12 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
     parts.push(productDesc);
   }
 
+  // Looking to raise from (step11)
+  const lookingToRaiseFrom = data.step11?.lookingToRaiseFrom;
+  if (Array.isArray(lookingToRaiseFrom) && lookingToRaiseFrom.length > 0) {
+    parts.push(`Looking to raise from: ${lookingToRaiseFrom.join(', ')}.`);
+  }
+
   // Stage & target round (step7, step11)
   const stage = data.step7?.stage?.trim();
   const targetRound = data.step11?.targetRoundSize;
@@ -262,6 +268,12 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
       .filter(Boolean)
       .join(' ');
     if (raiseLine.trim()) parts.push(raiseLine + '.');
+  }
+
+  // Business model (step10)
+  const businessModel = data.step10?.businessModel;
+  if (Array.isArray(businessModel) && businessModel.length > 0) {
+    parts.push(`Business model: ${businessModel.join(', ')}.`);
   }
 
   // Revenue status (step10)
