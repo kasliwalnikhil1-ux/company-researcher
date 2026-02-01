@@ -24,7 +24,9 @@ const PLANS = [
     includes: [
       '1 user',
       '5 credits',
-      'Full access to all features',
+      'Launch your fundraising campaign fast, the way experts do',
+      'Full control & precision, without expensive fundraising consultants',
+      'Evaluate the ROI of the platform',
       'Risk-free trial'
     ],
     bestFor: 'Trying the complete platform before upgrading',
@@ -42,7 +44,7 @@ const PLANS = [
       '1 user',
       '500 credits',
       'Unlimited search & filters',
-      'Investor, company & people discovery',
+      'Investor, company & people discovery with vast coverage',
       'Identify investors and people most likely to fund your company',
       'Verified investor contact details',
       'Basic AI-assisted investor messaging',
