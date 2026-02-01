@@ -5,7 +5,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
-import { CreditCard, Coins, ExternalLink, BarChart3, List, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { CreditCard, Coins, BarChart3, List, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { usePricingModal } from '@/contexts/PricingModalContext';
 
 type UsageSettings = {
   plan: string | null;
@@ -35,7 +36,6 @@ const DEFAULT_BILLING_CYCLE = 'quarterly';
 const DEFAULT_STATUS = 'active';
 const DEFAULT_CREDITS = 0;
 
-const ADD_CREDITS_URL = 'https://calendly.com/founders-capitalxai/20min';
 
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
@@ -327,6 +327,7 @@ export default function UsagePage() {
 
 function UsageContent() {
   const { user } = useAuth();
+  const { openPricingModal } = usePricingModal();
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<UsageSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -427,15 +428,13 @@ function UsageContent() {
               <span className="text-sm text-gray-500">credits remaining</span>
             </div>
             <div className="mt-6 flex flex-wrap items-center gap-4">
-              <a
-                href={ADD_CREDITS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+              <button
+                type="button"
+                onClick={() => openPricingModal()}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-brand-default hover:bg-brand-dark rounded-lg transition-colors"
               >
                 Add more credits
-                <ExternalLink className="w-4 h-4" />
-              </a>
+              </button>
               <UsageDetailsButton />
             </div>
           </section>

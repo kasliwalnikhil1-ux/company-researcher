@@ -67,6 +67,8 @@ export interface InvestorSearchResult {
   email?: string | null;
   phone?: string | null;
   links?: string[] | null;
+  /** Latest news: { answer, citations, date } - only when has_personalization */
+  investor_news?: { answer: string; citations: string[]; date: string } | null;
   /** For type='person': firm this person is associated with */
   associated_firm_id?: string | null;
   associated_firm_name?: string | null;
@@ -90,7 +92,7 @@ export interface UseInvestorSearchReturn {
   refresh: () => Promise<void>;
 }
 
-const PAGE_SIZE_DEFAULT = 20;
+const PAGE_SIZE_DEFAULT = 10;
 
 function buildRpcParams(
   filters: InvestorSearchFilters,

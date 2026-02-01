@@ -2,13 +2,20 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown } from 'lucide-react';
-import { fetchInvestorDeepResearch } from '@/lib/api';
+import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper } from 'lucide-react';
+import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, type InvestorNews } from '@/lib/api';
 import { formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT } from '@/hooks/useInvestorSearch';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CALENDLY_URL } from '@/components/BookDemoButton';
-import { copyToClipboard } from '@/lib/utils';
+import { usePricingModal } from '@/contexts/PricingModalContext';
+import { copyToClipboard, extractPhoneNumber } from '@/lib/utils';
+import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
+import { supabase } from '@/utils/supabase/client';
+
+const INVESTOR_DRAWER_MESSAGES_SEARCH_KEY = 'investor-drawer-messages-search';
+const INVESTOR_DRAWER_MESSAGES_CHANNEL_KEY = 'investor-drawer-messages-channel';
+
+const MESSAGE_CHANNEL_OPTIONS_BASE = ['Email', 'LinkedIn', 'Direct Message', 'Instagram Message'];
 
 const getDomainFromUrl = (urlStr: string): string | null => {
   try {
@@ -17,6 +24,28 @@ const getDomainFromUrl = (urlStr: string): string | null => {
   } catch {
     return null;
   }
+};
+
+function normalizeDomain(domain: string): string {
+  return domain
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0];
+}
+
+type WarmIntroFounder = {
+  city?: string;
+  name: string;
+  state?: string;
+  country?: string;
+  linkedin?: string;
+  photo_url?: string;
+};
+
+type WarmIntroByDomain = {
+  domain: string;
+  founders: WarmIntroFounder[];
 };
 
 function CompanyLogo({ name, url }: { name: string; url?: string }) {
@@ -86,6 +115,8 @@ export interface InvestorDetails {
   phone?: string | null;
   /** Array of "[text](url)" formatted links */
   links?: string[] | null;
+  /** Latest news: { answer, citations, date } - only when has_personalization */
+  investor_news?: InvestorNews | null;
   /** For type='person': firm this person is associated with */
   associated_firm_id?: string | null;
   associated_firm_name?: string | null;
@@ -123,6 +154,15 @@ interface InvestorDetailsDrawerProps {
   filtersMode?: 'global' | 'reviewed';
   /** When true, limit contacts to CONTACTS_FREE_LIMIT and show skeletons for more */
   isFreePlan?: boolean;
+  /** Column settings for contact-detail click behavior (matches investors table) */
+  clipboardColumn?: string | null;
+  clipboardLinkedInColumn?: string | null;
+  subjectColumn?: string | null;
+  phoneClickBehavior?: 'whatsapp' | 'call';
+  emailSettings?: EmailSettings | null;
+  getInvestorCellValue?: (investor: InvestorDetails, columnKey: string) => string;
+  columnLabels?: Record<string, string>;
+  onCopyToClipboard?: (message: string) => void;
 }
 
 const formatCurrency = (value: number | null | undefined): string => {
@@ -434,9 +474,18 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   ownerOptions = [],
   filtersMode = 'global',
   isFreePlan = false,
+  clipboardColumn = null,
+  clipboardLinkedInColumn = null,
+  subjectColumn = null,
+  phoneClickBehavior = 'whatsapp',
+  emailSettings = null,
+  getInvestorCellValue,
+  columnLabels = {},
+  onCopyToClipboard,
 }) => {
+  const { openPricingModal } = usePricingModal();
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'profile' | 'pipeline' | 'deep-research' | 'contacts'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'pipeline' | 'deep-research' | 'latest-news' | 'contacts'>('profile');
   const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [editingNoteIndex, setEditingNoteIndex] = useState<number | null>(null);
@@ -460,7 +509,39 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [aiMetadataLine2, setAiMetadataLine2] = useState('');
   const [aiMetadataMutualInterestsText, setAiMetadataMutualInterestsText] = useState('');
   const [aiMetadataSaving, setAiMetadataSaving] = useState(false);
+  const [investorNews, setInvestorNews] = useState<InvestorNews | null>(null);
+  const [investorNewsLoading, setInvestorNewsLoading] = useState(false);
+  const [investorNewsError, setInvestorNewsError] = useState<string | null>(null);
+  const [investorNewsFetchCooldown, setInvestorNewsFetchCooldown] = useState(false);
+  const [warmIntrosByDomains, setWarmIntrosByDomains] = useState<WarmIntroByDomain[] | null>(null);
+  const [warmIntrosLoading, setWarmIntrosLoading] = useState(false);
   const returningToFirmRef = useRef(false);
+
+  const [messagesSearch, setMessagesSearch] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(INVESTOR_DRAWER_MESSAGES_SEARCH_KEY) ?? '';
+    }
+    return '';
+  });
+  const [messagesChannelFilter, setMessagesChannelFilter] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(INVESTOR_DRAWER_MESSAGES_CHANNEL_KEY);
+      return saved && (saved === 'All' || MESSAGE_CHANNEL_OPTIONS_BASE.includes(saved)) ? saved : 'All';
+    }
+    return 'All';
+  });
+
+  // Persist messages search and channel filter to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(INVESTOR_DRAWER_MESSAGES_SEARCH_KEY, messagesSearch);
+    }
+  }, [messagesSearch]);
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(INVESTOR_DRAWER_MESSAGES_CHANNEL_KEY, messagesChannelFilter);
+    }
+  }, [messagesChannelFilter]);
 
   // Reset tab when investor changes
   useEffect(() => {
@@ -472,6 +553,10 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     }
     setDeepResearchContent(null);
     setDeepResearchError(null);
+    setInvestorNews(null);
+    setInvestorNewsError(null);
+    setInvestorNewsFetchCooldown(false);
+    setWarmIntrosByDomains(null);
     setContactsData([]);
     setContactsError(null);
     setContactsNameSearch('');
@@ -514,6 +599,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   }, [investor?.id, investor?.ai_metadata]);
 
   const DEEP_RESEARCH_STORAGE_KEY = (id: string) => `investor-deep-research-${id}`;
+  const INVESTOR_NEWS_STORAGE_KEY = (id: string) => `investor-news-${id}`;
   const contactsLimit = isFreePlan ? CONTACTS_FREE_LIMIT : 100;
   const CONTACTS_STORAGE_KEY = (id: string) => `investor-contacts-${id}-${contactsLimit}`;
 
@@ -581,6 +667,154 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       loadContacts(investor.id);
     }
   }, [investor?.id, investor?.type, activeTab, loadContacts]);
+
+  const loadInvestorNews = useCallback(async (investorId: string) => {
+    if (typeof window === 'undefined') return;
+    const cached = localStorage.getItem(INVESTOR_NEWS_STORAGE_KEY(investorId));
+    if (cached !== null) {
+      try {
+        const parsed = JSON.parse(cached) as InvestorNews;
+        console.log('[InvestorDetailsDrawer] loadInvestorNews from localStorage:', {
+          answerLength: parsed?.answer?.length,
+          citationsCount: parsed?.citations?.length,
+          hasDate: !!parsed?.date,
+        });
+        if (parsed?.answer != null || (Array.isArray(parsed?.citations) && parsed.citations.length > 0)) {
+          setInvestorNews(parsed);
+          return;
+        }
+      } catch {
+        // Invalid cache
+      }
+    }
+    if (investor?.investor_news && investor.id === investorId) {
+      console.log('[InvestorDetailsDrawer] loadInvestorNews from investor:', {
+        answerLength: investor.investor_news?.answer?.length,
+        citationsCount: investor.investor_news?.citations?.length,
+      });
+      setInvestorNews(investor.investor_news);
+      return;
+    }
+    setInvestorNewsLoading(true);
+    setInvestorNewsError(null);
+    const result = await fetchInvestorNewsCurrent(investorId);
+    setInvestorNewsLoading(false);
+    if (result?.investor_news) {
+      console.log('[InvestorDetailsDrawer] loadInvestorNews from API:', {
+        answerLength: result.investor_news?.answer?.length,
+        citationsCount: result.investor_news?.citations?.length,
+      });
+      setInvestorNews(result.investor_news);
+    } else if (result?.error) {
+      setInvestorNewsError(result.error);
+    } else {
+      setInvestorNews(null);
+    }
+  }, [investor?.id, investor?.investor_news]);
+
+  useEffect(() => {
+    if (investor && activeTab === 'latest-news') {
+      loadInvestorNews(investor.id);
+    }
+  }, [investor?.id, activeTab, loadInvestorNews]);
+
+  const loadWarmIntros = useCallback(async (domains: string[]) => {
+    if (domains.length === 0) {
+      setWarmIntrosByDomains(null);
+      return;
+    }
+    const sortedDomains = [...new Set(domains)].sort();
+    const cacheKey = `warm-intros-${sortedDomains.join(',')}`;
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached !== null) {
+        try {
+          const parsed = JSON.parse(cached) as WarmIntroByDomain[];
+          const hasFounders = parsed.some((d) => Array.isArray(d.founders) && d.founders.length > 0);
+          if (hasFounders) {
+            setWarmIntrosByDomains(parsed);
+            return;
+          }
+        } catch {
+          // Invalid cache
+        }
+      }
+    }
+    setWarmIntrosLoading(true);
+    const { data, error } = await supabase.rpc('get_warm_intros_by_domains', {
+      domains: sortedDomains,
+    });
+    setWarmIntrosLoading(false);
+    if (error) {
+      setWarmIntrosByDomains(null);
+      return;
+    }
+    const results = (data ?? []) as WarmIntroByDomain[];
+    const hasFounders = results.some((d) => Array.isArray(d.founders) && d.founders.length > 0);
+    if (hasFounders) {
+      setWarmIntrosByDomains(results);
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(results));
+      } catch {
+        // Ignore quota errors
+      }
+    } else {
+      setWarmIntrosByDomains(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!investor) return;
+    const items = Array.isArray(investor.notable_investments)
+      ? investor.notable_investments
+      : typeof investor.notable_investments === 'string'
+        ? [investor.notable_investments]
+        : [];
+    const domains: string[] = [];
+    for (const item of items) {
+      const parsed = parseNotableInvestment(item);
+      if (parsed?.url) {
+        const domain = normalizeDomain(parsed.url);
+        if (domain) domains.push(domain);
+      }
+    }
+    loadWarmIntros(domains);
+  }, [investor?.id, investor?.notable_investments, loadWarmIntros]);
+
+  const handleFetchInvestorNews = useCallback(async () => {
+    if (!investor || investorNewsFetchCooldown) return;
+    setInvestorNewsLoading(true);
+    setInvestorNewsError(null);
+    const result = await fetchInvestorNews({
+      investorId: investor.id,
+      name: investor.name,
+      domain: investor.domain,
+      type: investor.type === 'firm' || investor.type === 'person' ? investor.type : undefined,
+      investor_type: investor.investor_type ?? undefined,
+      associated_firm_name: investor.associated_firm_name ?? undefined,
+    });
+    setInvestorNewsLoading(false);
+    if (result?.investor_news) {
+      console.log('[InvestorDetailsDrawer] fetchInvestorNews result:', {
+        answerLength: result.investor_news.answer?.length,
+        citationsCount: result.investor_news.citations?.length,
+        date: result.investor_news.date,
+      });
+      setInvestorNews(result.investor_news);
+      try {
+        localStorage.setItem(INVESTOR_NEWS_STORAGE_KEY(investor.id), JSON.stringify(result.investor_news));
+      } catch {
+        // Ignore quota errors
+      }
+      if (onInvestorChange) {
+        onInvestorChange({ ...investor, investor_news: result.investor_news });
+      }
+      setInvestorNewsFetchCooldown(true);
+      setTimeout(() => setInvestorNewsFetchCooldown(false), 10000);
+    } else if (result?.error) {
+      setInvestorNewsError(result.error);
+    }
+  }, [investor, investorNewsFetchCooldown, onInvestorChange]);
 
   const handleAddNote = useCallback(() => {
     setIsAddingNote(true);
@@ -845,28 +1079,16 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               Investor Profile
             </button>
             {investor?.has_personalization && (
-              <>
-                <button
-                  onClick={() => setActiveTab('pipeline')}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeTab === 'pipeline'
-                      ? 'border-indigo-600 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  Pipeline
-                </button>
-                <button
-                  onClick={() => setActiveTab('deep-research')}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeTab === 'deep-research'
-                      ? 'border-indigo-600 text-indigo-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  Deep Research
-                </button>
-              </>
+              <button
+                onClick={() => setActiveTab('pipeline')}
+                className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === 'pipeline'
+                    ? 'border-indigo-600 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Pipeline
+              </button>
             )}
             {investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0 && (
               <button
@@ -879,6 +1101,30 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               >
                 Contacts
               </button>
+            )}
+            {investor?.has_personalization && (
+              <>
+                <button
+                  onClick={() => setActiveTab('deep-research')}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === 'deep-research'
+                      ? 'border-indigo-600 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Deep Research
+                </button>
+                <button
+                  onClick={() => setActiveTab('latest-news')}
+                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    activeTab === 'latest-news'
+                      ? 'border-indigo-600 text-indigo-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Latest News
+                </button>
+              </>
             )}
           </div>
         )}
@@ -993,14 +1239,13 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                   <p className="text-sm text-gray-600 text-center">
                                     Upgrade your plan to connect with the right investors and complete your raise.
                                   </p>
-                                  <a
-                                    href={CALENDLY_URL}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
+                                  <button
+                                    type="button"
+                                    onClick={() => openPricingModal()}
                                     className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
                                   >
                                     Upgrade Plan
-                                  </a>
+                                  </button>
                                 </div>
                               </div>
                             )}
@@ -1104,6 +1349,19 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                             className="p-2 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                             title={investor.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '')}
                             aria-label="Visit website"
+                            onClick={async () => {
+                              if (clipboardColumn && getInvestorCellValue) {
+                                const val = getInvestorCellValue(investor, clipboardColumn);
+                                if (val && val !== '-') {
+                                  try {
+                                    await copyToClipboard(val);
+                                    onCopyToClipboard?.(`${columnLabels[clipboardColumn] ?? clipboardColumn} copied to clipboard`);
+                                  } catch {
+                                    // ignore
+                                  }
+                                }
+                              }
+                            }}
                           >
                             <Globe className="w-5 h-5" />
                           </a>
@@ -1116,6 +1374,19 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                             className="p-2 rounded-lg text-gray-500 hover:text-[#0A66C2] hover:bg-[#0A66C2]/10 transition-colors"
                             title="LinkedIn"
                             aria-label="Open LinkedIn"
+                            onClick={async () => {
+                              if (clipboardLinkedInColumn && getInvestorCellValue) {
+                                const val = getInvestorCellValue(investor, clipboardLinkedInColumn);
+                                if (val && val !== '-') {
+                                  try {
+                                    await copyToClipboard(val);
+                                    onCopyToClipboard?.(`${columnLabels[clipboardLinkedInColumn] ?? clipboardLinkedInColumn} copied to clipboard`);
+                                  } catch {
+                                    // ignore
+                                  }
+                                }
+                              }
+                            }}
                           >
                             <Linkedin className="w-5 h-5" />
                           </a>
@@ -1139,15 +1410,32 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           <div className="flex items-center gap-2">
                             <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
                             <div className="flex flex-wrap gap-x-3 gap-y-0">
-                              {emails.map((e, idx) => (
-                                <a
-                                  key={idx}
-                                  href={`mailto:${e}`}
-                                  className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
-                                >
-                                  {e}
-                                </a>
-                              ))}
+                              {emails.map((e, idx) => {
+                                let subject: string | undefined;
+                                let body: string | undefined;
+                                if (subjectColumn && getInvestorCellValue) {
+                                  const subVal = getInvestorCellValue(investor, subjectColumn);
+                                  if (subVal && subVal !== '-') subject = subVal;
+                                }
+                                if (clipboardColumn && getInvestorCellValue) {
+                                  const clipVal = getInvestorCellValue(investor, clipboardColumn);
+                                  if (clipVal && clipVal !== '-') {
+                                    body = buildEmailBody(clipVal, 'Hi,\n\n', emailSettings);
+                                  }
+                                }
+                                const href = buildEmailComposeUrl(e, { subject, body, emailSettings });
+                                return (
+                                  <a
+                                    key={idx}
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
+                                  >
+                                    {e}
+                                  </a>
+                                );
+                              })}
                             </div>
                           </div>
                         ) : null;
@@ -1158,15 +1446,37 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           <div className="flex items-center gap-2">
                             <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
                             <div className="flex flex-wrap gap-x-3 gap-y-0">
-                              {phones.map((p, idx) => (
-                                <a
-                                  key={idx}
-                                  href={`tel:${p.replace(/\s/g, '')}`}
-                                  className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
-                                >
-                                  {p}
-                                </a>
-                              ))}
+                              {phones.map((p, idx) => {
+                                const phone = extractPhoneNumber(p);
+                                let href: string;
+                                if (phone) {
+                                  if (phoneClickBehavior === 'call') {
+                                    href = `tel:${phone}`;
+                                  } else {
+                                    let whatsappUrl = `https://wa.me/${phone}`;
+                                    if (clipboardColumn && getInvestorCellValue) {
+                                      const clipVal = getInvestorCellValue(investor, clipboardColumn);
+                                      if (clipVal && clipVal !== '-') {
+                                        whatsappUrl += `?text=${encodeURIComponent(clipVal)}`;
+                                      }
+                                    }
+                                    href = whatsappUrl;
+                                  }
+                                } else {
+                                  href = `tel:${p.replace(/\s/g, '')}`;
+                                }
+                                return (
+                                  <a
+                                    key={idx}
+                                    href={href}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
+                                  >
+                                    {p}
+                                  </a>
+                                );
+                              })}
                             </div>
                           </div>
                         ) : null;
@@ -1174,6 +1484,91 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     </div>
                     </div>
                   )}
+
+                  {/* Messages - filled templates with copy button for each */}
+                  {getInvestorCellValue &&
+                    (() => {
+                      const templateKeys = Object.keys(columnLabels).filter((k) => k.startsWith('template_'));
+                      const filledMessages = templateKeys
+                        .map((k) => ({ key: k, message: getInvestorCellValue(investor, k), label: columnLabels[k] ?? k.replace('template_', '') }))
+                        .filter(({ message }) => message && message !== '-');
+                      const channelsWithMessages = [...new Set(
+                        filledMessages
+                          .map(({ label }) => {
+                            const m = label.match(/ - (.+)$/);
+                            return m ? m[1] : null;
+                          })
+                          .filter((ch): ch is string => ch != null)
+                      )].sort((a, b) => MESSAGE_CHANNEL_OPTIONS_BASE.indexOf(a) - MESSAGE_CHANNEL_OPTIONS_BASE.indexOf(b));
+                      const messageChannelOptions = ['All', ...channelsWithMessages];
+                      const effectiveChannelFilter = messageChannelOptions.includes(messagesChannelFilter) ? messagesChannelFilter : 'All';
+                      const searchLower = messagesSearch.trim().toLowerCase();
+                      const channelFilter = effectiveChannelFilter === 'All' ? null : effectiveChannelFilter;
+                      const filteredMessages = filledMessages.filter(({ label }) => {
+                        if (searchLower && !label.toLowerCase().includes(searchLower)) return false;
+                        if (channelFilter && !label.endsWith(` - ${channelFilter}`)) return false;
+                        return true;
+                      });
+                      return filledMessages.length > 0 ? (
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider shrink-0">Messages</h3>
+                            <div className="ml-auto flex items-center gap-2 min-w-0">
+                              <div className="relative w-[140px] min-w-[120px]">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Search title..."
+                                  value={messagesSearch}
+                                  onChange={(e) => setMessagesSearch(e.target.value)}
+                                  className="block w-full pl-7 pr-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                />
+                              </div>
+                              <select
+                                value={effectiveChannelFilter}
+                                onChange={(e) => setMessagesChannelFilter(e.target.value)}
+                                className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 min-w-0 max-w-[140px]"
+                              >
+                                {messageChannelOptions.map((ch) => (
+                                  <option key={ch} value={ch}>
+                                    {ch}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            {filteredMessages.length === 0 ? (
+                              <p className="text-sm text-gray-500 py-2">No messages match your search or filter.</p>
+                            ) : (
+                            filteredMessages.map(({ key: columnKey, message, label }) => (
+                                <div
+                                  key={columnKey}
+                                  className="flex gap-2 p-3 rounded-lg border border-gray-200 bg-gray-50/50"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-gray-500 mb-1">{label}</p>
+                                    <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
+                                      {message}
+                                    </p>
+                                  </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyField(message, `message_${columnKey}`)}
+                                  className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 flex-shrink-0"
+                                  title="Copy"
+                                  aria-label={`Copy ${label}`}
+                                >
+                                  {copiedField === `message_${columnKey}` ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            ))
+                            )}
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
+
                   {investor.has_personalization && updateInvestor && (
                     <div>
                       <div className="flex items-center justify-between mb-4">
@@ -1361,6 +1756,92 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               ) : (
                 <p className="text-gray-500 text-sm">No deep research data available for this investor.</p>
               )}
+            </div>
+          ) : investor.has_personalization && activeTab === 'latest-news' ? (
+            /* Latest News tab content */
+            <div className="space-y-4">
+              {investorNewsLoading && !investorNews ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                </div>
+              ) : investorNewsError ? (
+                <p className="text-red-600 text-sm">{investorNewsError}</p>
+              ) : investorNews ? (
+                <div className="space-y-4">
+                  {investorNews.answer && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                        <Newspaper className="w-3.5 h-3.5 text-gray-400" />
+                        Summary
+                      </h3>
+                      <div className="prose prose-sm max-w-none prose-p:text-gray-700 prose-p:leading-relaxed prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
+                        <ReactMarkdown>{investorNews.answer}</ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
+                  {Array.isArray(investorNews.citations) && investorNews.citations.length > 0 && (
+                    <DetailSection
+                      label="Sources"
+                      icon={<Link2 className="w-3.5 h-3.5 text-gray-400" />}
+                      value={
+                        <ul className="list-disc list-inside space-y-2">
+                          {investorNews.citations.map((item, idx) => {
+                            const parsed = parseNotableInvestment(item);
+                            return (
+                              <li key={idx}>
+                                {parsed ? (
+                                  <a
+                                    href={parsed.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
+                                  >
+                                    {parsed.name}
+                                  </a>
+                                ) : (
+                                  <span className="text-sm text-gray-700">{item}</span>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      }
+                    />
+                  )}
+                  {investorNews.date && (
+                    <p className="text-xs text-gray-500">
+                      {investorNews.answer || (Array.isArray(investorNews.citations) && investorNews.citations.length > 0)
+                        ? `Last fetched: ${new Date(investorNews.date).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}`
+                        : 'Last fetch returned no results. Try fetching again.'}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+              <div className="flex flex-col gap-2 pt-2">
+                {!investorNews && !investorNewsLoading && !investorNewsError && (
+                  <p className="text-sm text-gray-500">No news fetched yet. Click to fetch latest.</p>
+                )}
+                <button
+                  onClick={handleFetchInvestorNews}
+                  disabled={investorNewsLoading || investorNewsFetchCooldown}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-fit"
+                >
+                  {investorNewsLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Newspaper className="w-4 h-4" />
+                  )}
+                  {investorNewsLoading
+                    ? 'Fetching...'
+                    : `Fetch Latest News on ${investor?.name || 'this investor'}`}
+                </button>
+              </div>
             </div>
           ) : (
             /* Investor Profile tab (default) - current content without Pipeline fields */
@@ -1826,6 +2307,63 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   />
                 );
               })()}
+
+              {/* Warm intros by domain - compact display */}
+              {warmIntrosLoading ? (
+                <div className="flex items-center gap-2 py-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />
+                  <span className="text-xs text-gray-500">Loading warm intros…</span>
+                </div>
+              ) : warmIntrosByDomains && warmIntrosByDomains.some((d) => Array.isArray(d.founders) && d.founders.length > 0) ? (
+                <DetailSection
+                  label="Founder–Investor Intro Paths"
+                  icon={<Users className="w-3.5 h-3.5 text-gray-400" />}
+                  value={
+                    <div className="space-y-3">
+                      {warmIntrosByDomains
+                        .filter((d) => Array.isArray(d.founders) && d.founders.length > 0)
+                        .map(({ domain, founders }) => (
+                          <div key={domain} className="flex flex-wrap items-center gap-2">
+                            <CompanyLogo name={domain} url={`https://${domain}`} />
+                            <span className="text-xs font-medium text-gray-500 shrink-0">{domain}</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {founders.map((f, i) => {
+                                const loc = [f.city, f.state, f.country].filter(Boolean).join(', ');
+                                return (
+                                  <a
+                                    key={i}
+                                    href={f.linkedin}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-start gap-1.5 px-2 py-1.5 rounded bg-gray-50 hover:bg-gray-100 text-xs text-gray-700"
+                                  >
+                                    {f.photo_url ? (
+                                      <img
+                                        src={f.photo_url}
+                                        alt=""
+                                        className="w-6 h-6 rounded-full object-cover shrink-0"
+                                      />
+                                    ) : (
+                                      <span className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-medium text-gray-500 shrink-0">
+                                        {f.name.charAt(0)}
+                                      </span>
+                                    )}
+                                    <div className="min-w-0">
+                                      <span className="block font-medium truncate max-w-[100px]">{f.name}</span>
+                                      {loc && (
+                                        <span className="block text-[10px] text-gray-500 truncate max-w-[100px]">{loc}</span>
+                                      )}
+                                    </div>
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  }
+                />
+              ) : null}
 
               {/* Pipeline fields moved to Pipeline tab when has_personalization */}
             </div>

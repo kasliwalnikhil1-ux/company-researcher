@@ -5,6 +5,28 @@ import { Session, User } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 
+function isInvalidRefreshTokenError(error: unknown): boolean {
+  if (error && typeof error === 'object' && 'message' in error) {
+    const msg = String((error as { message?: string }).message).toLowerCase();
+    return msg.includes('refresh token') && (msg.includes('not found') || msg.includes('invalid'));
+  }
+  return false;
+}
+
+function clearInvalidAuthStorage(): void {
+  try {
+    if (typeof window === 'undefined') return;
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key?.startsWith('sb-')) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((k) => window.localStorage.removeItem(k));
+  } catch {
+    // ignore
+  }
+}
+
 type AuthContextType = {
   user: User | null;
   session: Session | null;
@@ -32,13 +54,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     const getSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
+        setSession(session);
+        setUser(session?.user ?? null);
+      } catch (error) {
+        if (isInvalidRefreshTokenError(error)) {
+          clearInvalidAuthStorage();
+          setSession(null);
+          setUser(null);
+        } else {
+          setSession(null);
+          setUser(null);
+        }
+      } finally {
+        setLoading(false);
+      }
     };
 
     getSession();
@@ -46,23 +80,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      // Keep session updated for token refresh, etc.
-      setSession((prev) => {
-        const prevToken = prev?.access_token ?? null;
-        const nextToken = newSession?.access_token ?? null;
-        if (prevToken === nextToken) return prev;
-        return newSession;
-      });
+      try {
+        // Keep session updated for token refresh, etc.
+        setSession((prev) => {
+          const prevToken = prev?.access_token ?? null;
+          const nextToken = newSession?.access_token ?? null;
+          if (prevToken === nextToken) return prev;
+          return newSession;
+        });
 
-      // Only update user state if the user identity changes
-      setUser((prevUser) => {
-        const prevId = prevUser?.id ?? null;
-        const nextId = newSession?.user?.id ?? null;
-        if (prevId === nextId) return prevUser;
-        return newSession?.user ?? null;
-      });
-
-      setLoading(false);
+        // Only update user state if the user identity changes
+        setUser((prevUser) => {
+          const prevId = prevUser?.id ?? null;
+          const nextId = newSession?.user?.id ?? null;
+          if (prevId === nextId) return prevUser;
+          return newSession?.user ?? null;
+        });
+      } catch (error) {
+        if (isInvalidRefreshTokenError(error)) {
+          clearInvalidAuthStorage();
+          setSession(null);
+          setUser(null);
+        }
+      } finally {
+        setLoading(false);
+      }
     });
 
     return () => {

@@ -8,6 +8,7 @@ import { CompaniesProvider } from '@/contexts/CompaniesContext';
 import { OwnerProvider } from '@/contexts/OwnerContext';
 import { CountryProvider } from '@/contexts/CountryContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
+import { PricingModalProvider } from '@/contexts/PricingModalContext';
 
 // Load the ABCDiatype font (Regular and Bold only)
 const abcdDiatype = localFont({
@@ -72,8 +73,10 @@ export default function RootLayout({
               <OwnerProvider>
                 <MessageTemplatesProvider>
                   <CompaniesProvider>
-                    {children}
-                    <Analytics />
+                    <PricingModalProvider>
+                      {children}
+                      <Analytics />
+                    </PricingModalProvider>
                   </CompaniesProvider>
                 </MessageTemplatesProvider>
               </OwnerProvider>

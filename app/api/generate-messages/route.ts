@@ -52,7 +52,7 @@ No features or roadmap.
 Can we connect for a quick call on \${followUpRelativeDay}?
 
 Cheers,
-..founder..name and designation
+<<<FOUNDER_SIGNATURE>>>
 
 
 Email 2
@@ -64,7 +64,7 @@ Hey \${cleaned_name}, \${line2}
 What are your thoughts?
 
 best,
-..founder..name and designation
+<<<FOUNDER_SIGNATURE>>>
 END PROMPT`;
 
 function getSupabaseAuthClient(accessToken: string) {
@@ -110,7 +110,27 @@ export async function POST(req: NextRequest) {
       ? formatOnboardingCompanySummary(onboarding)
       : 'No company context provided. Please complete onboarding or provide company details.';
 
-    const userMessage = USER_MESSAGE_TEMPLATE.replace('<<<COMPANY_CONTEXT>>>', companyContext);
+    const step1 = onboarding?.step1;
+    const step5 = onboarding?.step5;
+    const b2bStep3 = onboarding?.b2bStep3;
+
+    const founderParts = [
+      step1?.firstName?.trim(),
+      step1?.lastName?.trim(),
+    ].filter(Boolean);
+    const founderName = founderParts.join(' ');
+    const title = step1?.title?.trim() ?? b2bStep3?.yourRole?.trim();
+    const companyName = step5?.companyName?.trim() ?? b2bStep3?.companyName?.trim();
+
+    const line2Parts = [title, companyName].filter(Boolean);
+    const line2 = line2Parts.join(', ');
+    const founderSignature = founderName
+      ? line2 ? `${founderName}\n${line2}` : founderName
+      : line2 || 'Founder';
+
+    const userMessage = USER_MESSAGE_TEMPLATE
+      .replace('<<<COMPANY_CONTEXT>>>', companyContext)
+      .replace(/<<<FOUNDER_SIGNATURE>>>/g, founderSignature);
 
     const extracted = await getJsonCompletion(
       [

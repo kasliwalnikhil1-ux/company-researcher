@@ -208,6 +208,91 @@ export type InvestorAnalyzeErrorCode =
   | 'PERMISSION_DENIED'
   | 'UNKNOWN';
 
+/** investor_news structure: { answer: string, citations: string[], date: string } */
+export interface InvestorNews {
+  answer: string;
+  citations: string[];
+  date: string;
+}
+
+// Fetch current investor_news from DB (no Exa fetch)
+export const fetchInvestorNewsCurrent = async (investorId: string): Promise<{
+  investor_news: InvestorNews | null;
+  error?: string;
+} | null> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    if (!token) {
+      return { investor_news: null, error: 'You need to be signed in.' };
+    }
+
+    const res = await fetch(`/api/investor-news?investorId=${encodeURIComponent(investorId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { investor_news: null, error: data.error || 'Failed to load news' };
+    }
+    return { investor_news: data.investor_news ?? null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Investor news fetch error:', msg);
+    return { investor_news: null, error: 'Failed to load' };
+  }
+};
+
+/** Context passed from drawer - investor data already loaded */
+export interface InvestorNewsContext {
+  investorId: string;
+  name?: string | null;
+  domain?: string | null;
+  type?: 'firm' | 'person' | null;
+  investor_type?: string[] | null;
+  associated_firm_name?: string | null;
+}
+
+// Fetch latest news from Exa and update DB
+export const fetchInvestorNews = async (context: InvestorNewsContext): Promise<{
+  investor_news: InvestorNews | null;
+  error?: string;
+} | null> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
+    if (!token) {
+      return { investor_news: null, error: 'You need to be signed in.' };
+    }
+
+    const res = await fetch('/api/investor-news', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        investorId: context.investorId,
+        name: context.name ?? undefined,
+        domain: context.domain ?? undefined,
+        type: context.type ?? undefined,
+        investor_type: context.investor_type ?? undefined,
+        associated_firm_name: context.associated_firm_name ?? undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      return { investor_news: null, error: data.error || 'Failed to fetch news' };
+    }
+    return { investor_news: data.investor_news ?? null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('Investor news fetch error:', msg);
+    return { investor_news: null, error: 'Failed to fetch' };
+  }
+};
+
 // Fetch investor deep_research for display
 export const fetchInvestorDeepResearch = async (investorId: string): Promise<{
   deep_research: string | null;

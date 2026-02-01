@@ -1,8 +1,7 @@
 'use client';
 
 import React from 'react';
-
-const CALENDLY_URL = 'https://calendly.com/founders-capitalxai/20min';
+import { usePricingModal } from '@/contexts/PricingModalContext';
 
 interface InsufficientCreditsModalProps {
   isOpen: boolean;
@@ -10,11 +9,13 @@ interface InsufficientCreditsModalProps {
 }
 
 const InsufficientCreditsModal: React.FC<InsufficientCreditsModalProps> = ({ isOpen, onClose }) => {
+  const { openPricingModal } = usePricingModal();
+
   if (!isOpen) return null;
 
   const handleBuyCredits = () => {
-    window.open(CALENDLY_URL, '_blank');
     onClose();
+    openPricingModal();
   };
 
   return (

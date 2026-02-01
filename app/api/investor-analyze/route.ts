@@ -34,8 +34,8 @@ Return the result strictly in the following JSON format:
   "investor_fit": true | false | null,
   "reason": "Precise, short, clear explanation of why this company fits or does not fit the investor",
   "personalized_outreach_lines": [
-    "I saw you...[additional <12 words]..., which is why I'm reaching out to you about <<<COMPANY_NAME>>>.", // Line 1
-    "I believe you...[additional <12 words]... could greatly benefit us at <<<COMPANY_NAME>>>." // Line 2
+    "I saw you...[additional <12 words, how the company aligns with their interests]..., which is why I'm reaching out to you about <<<COMPANY_NAME>>>.", // Line 1
+    "I believe [additional <12 words, how investor can help]... could greatly benefit us at <<<COMPANY_NAME>>>." // Line 2
   ],
   "mutual_interests": ["upto 2, optional, precise and accurate, non-generic items such as common place or work, industry, college, etc."]
 }

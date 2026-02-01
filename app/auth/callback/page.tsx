@@ -28,10 +28,15 @@ export default function AuthCallback() {
         }
       } else {
         // No code parameter, check if already authenticated
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          router.push('/');
-        } else {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            router.push('/');
+          } else {
+            router.push('/login');
+          }
+        } catch {
+          // Invalid/expired refresh token - treat as unauthenticated
           router.push('/login');
         }
       }

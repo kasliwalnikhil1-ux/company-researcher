@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 
 const FASHION_DEEP_SEARCH_URL = 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
+const FOUNDER_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/founder-search';
 
 const STEP2_INPUT_TEMPLATE = `Act as a research analyst.
 
@@ -94,6 +95,25 @@ function getSupabaseClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   if (!url || !key) return null;
   return createClient(url, key);
+}
+
+// Extract URLs from notable_investments in format [name](url)
+function extractDomainsFromNotableInvestments(notableInvestments: string[] | null): string[] {
+  if (!Array.isArray(notableInvestments) || notableInvestments.length === 0) return [];
+  const re = /\[([^\]]*)\]\(([^)]*)\)/g;
+  const urls = new Set<string>();
+  for (const s of notableInvestments) {
+    if (typeof s !== 'string') continue;
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(s)) !== null) {
+      const url = (m[2] || '').trim();
+      if (!url) continue;
+      const normalized = url.startsWith('http') ? url : `https://${url}`;
+      urls.add(normalized);
+    }
+  }
+  return [...urls];
 }
 
 // Clean domain or LinkedIn URL for display and API use
@@ -511,6 +531,17 @@ export async function POST(req: NextRequest) {
     }
 
     console.log('[investor-research] Step 3 complete, updated investor:', rowId);
+
+    // Fire-and-forget founder-search for all notable investment domains
+    const notableInvestments = Array.isArray(extracted?.notable_investments) ? extracted.notable_investments : null;
+    const domains = extractDomainsFromNotableInvestments(notableInvestments);
+    if (domains.length > 0) {
+      fetch(FOUNDER_SEARCH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domains }),
+      }).catch((e) => console.error('[investor-research] founder-search fire-and-forget error:', e));
+    }
 
     return NextResponse.json({
       cleaned,

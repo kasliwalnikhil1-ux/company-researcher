@@ -14,9 +14,10 @@ export interface OnboardingData {
     firstName: string;
     lastName: string;
     gender?: string;
+    title?: string; // Role (e.g. CEO, Founder) - collected in step 1
   };
   step2?: {
-    title: string;
+    title?: string; // Kept for backwards compat; primary source is step1.title
     bio: string;
   };
   step3?: {
@@ -33,7 +34,7 @@ export interface OnboardingData {
     sector: string[];
   };
   step7?: {
-    stage: string;
+    stage: string | string[]; // Multi-select: string[] for multiple stages
   };
   step8?: {
     hqCountry: string;

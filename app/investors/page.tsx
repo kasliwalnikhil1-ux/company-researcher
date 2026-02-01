@@ -34,9 +34,9 @@ import {
   List,
   Download,
 } from 'lucide-react';
-import { formatHqLocationShort } from '@/lib/isoCodes';
+import { formatHqLocationShort, getCountryName } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CALENDLY_URL } from '@/components/BookDemoButton';
+import { usePricingModal } from '@/contexts/PricingModalContext';
 import { fetchInvestorAnalyze } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner } from '@/contexts/OwnerContext';
@@ -61,6 +61,7 @@ const INVESTOR_TYPE_OPTIONS = [
 ];
 
 const STAGE_OPTIONS = [
+  'angel',
   'pre-seed',
   'seed',
   'post-seed',
@@ -71,7 +72,6 @@ const STAGE_OPTIONS = [
   'late-stage',
   'pre-ipo',
   'public-equity',
-  'angel',
 ];
 
 const INDUSTRY_OPTIONS = [
@@ -196,6 +196,20 @@ const GEOGRAPHY_OPTIONS = [
   'EMEA',
 ];
 
+/** Region codes that are not ISO country codes - map to display names */
+const GEOGRAPHY_REGION_LABELS: Record<string, string> = {
+  EU: 'European Union',
+  LATAM: 'Latin America',
+  APAC: 'Asia-Pacific',
+  EMEA: 'Europe, Middle East & Africa',
+};
+
+function formatGeographyLabel(code: string): string {
+  const regionLabel = GEOGRAPHY_REGION_LABELS[code];
+  if (regionLabel) return regionLabel;
+  return getCountryName(code) || code;
+}
+
 const ROLE_OPTIONS = [
   'CEO / Founder',
   'Partner',
@@ -235,6 +249,62 @@ const INVESTORS_CLIPBOARD_COLUMN_KEY = 'investors-clipboard-column';
 const INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY = 'investors-clipboard-linkedin-column';
 const INVESTORS_SUBJECT_COLUMN_KEY = 'investors-subject-column';
 const INVESTORS_PHONE_CLICK_BEHAVIOR_KEY = 'investors-phone-click-behavior';
+const INVESTORS_FILTERS_KEY = 'investors-filters';
+
+/** Stored filter format (onboarding-like structure) for localStorage */
+interface StoredInvestorFilters {
+  step0?: { primaryUse: string };
+  step6?: { sector: string[] };
+  step7?: { stage: string[] };
+  step8?: { hqCountry: string };
+  step10?: Record<string, unknown>;
+  step11?: { lookingToRaiseFrom: string[] };
+  step12?: { investorType: string };
+}
+
+function storedToFilters(stored: StoredInvestorFilters | null): Partial<InvestorSearchFilters> {
+  if (!stored) return {};
+  const partial: Partial<InvestorSearchFilters> = {};
+  if (stored.step6?.sector?.length) partial.investment_industries = [...stored.step6.sector];
+  if (stored.step7?.stage?.length) {
+    const stage = stored.step7.stage;
+    partial.investment_stages = Array.isArray(stage) ? [...stage] : [stage];
+  }
+  if (stored.step8?.hqCountry?.trim()) partial.investment_geographies = [stored.step8.hqCountry.trim()];
+  if (stored.step11?.lookingToRaiseFrom?.length) partial.investor_type = [...stored.step11.lookingToRaiseFrom];
+  if (stored.step12?.investorType) {
+    const t = stored.step12.investorType;
+    partial.type = t === 'follow_on' ? 'person' : 'firm';
+  }
+  return partial;
+}
+
+function onboardingToStored(onboarding: { step0?: { primaryUse?: string }; step6?: { sector?: string[] }; step7?: { stage?: string | string[] }; step8?: { hqCountry?: string }; step10?: Record<string, unknown>; step11?: { lookingToRaiseFrom?: string[] }; step12?: { investorType?: string } } | null): StoredInvestorFilters | null {
+  if (!onboarding) return null;
+  const stored: StoredInvestorFilters = {};
+  if (onboarding.step0?.primaryUse) stored.step0 = { primaryUse: onboarding.step0.primaryUse };
+  if (onboarding.step6?.sector?.length) stored.step6 = { sector: [...onboarding.step6.sector] };
+  if (onboarding.step7?.stage) {
+    const s = onboarding.step7.stage;
+    stored.step7 = { stage: Array.isArray(s) ? [...s] : [s] };
+  }
+  if (onboarding.step8?.hqCountry?.trim()) stored.step8 = { hqCountry: onboarding.step8.hqCountry.trim() };
+  if (onboarding.step10 && Object.keys(onboarding.step10).length > 0) stored.step10 = { ...onboarding.step10 };
+  if (onboarding.step11?.lookingToRaiseFrom?.length) stored.step11 = { lookingToRaiseFrom: [...onboarding.step11.lookingToRaiseFrom] };
+  if (onboarding.step12?.investorType) stored.step12 = { investorType: onboarding.step12.investorType };
+  return Object.keys(stored).length ? stored : null;
+}
+
+function filtersToStored(filters: InvestorSearchFilters): StoredInvestorFilters {
+  const stored: StoredInvestorFilters = { step0: { primaryUse: 'fundraising' } };
+  if (filters.investment_industries?.length) stored.step6 = { sector: [...filters.investment_industries] };
+  if (filters.investment_stages?.length) stored.step7 = { stage: [...filters.investment_stages] };
+  if (filters.investment_geographies?.length) stored.step8 = { hqCountry: filters.investment_geographies[0].trim() };
+  stored.step10 = {};
+  if (filters.investor_type?.length) stored.step11 = { lookingToRaiseFrom: [...filters.investor_type] };
+  stored.step12 = { investorType: filters.type === 'person' ? 'follow_on' : 'both' };
+  return stored;
+}
 
 const INVESTOR_BASE_COLUMNS = [
   'name',
@@ -314,6 +384,7 @@ export default function InvestorsPage() {
 function InvestorsContent() {
   const { user } = useAuth();
   const { availableOwners, isFreePlan } = useOwner();
+  const { openPricingModal } = usePricingModal();
   const { onboarding } = useOnboarding();
   const { templates } = useMessageTemplates();
   const [investorSets, setInvestorSets] = useState<string[]>([]);
@@ -327,6 +398,9 @@ function InvestorsContent() {
     phoneClickBehavior?: 'whatsapp' | 'call';
   } | null>(null);
   const [filters, setFilters] = useState<InvestorSearchFilters>(DEFAULT_FILTERS);
+  const hasAppliedOnboardingFallback = useRef(false);
+  const clearedFiltersRef = useRef(false);
+  const skipNextPersistRef = useRef(true);
   const [localSearchInput, setLocalSearchInput] = useState('');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -760,6 +834,67 @@ function InvestorsContent() {
     },
     [refresh, filters.type, filters.mode, onboarding]
   );
+
+  // Initial load: read from localStorage (client-only, runs once on mount)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = localStorage.getItem(INVESTORS_FILTERS_KEY);
+    if (raw && raw !== 'null') {
+      try {
+        const stored = JSON.parse(raw) as StoredInvestorFilters | null;
+        if (stored) {
+          const partial = storedToFilters(stored);
+          setFilters((prev) => ({ ...prev, ...partial }));
+          hasAppliedOnboardingFallback.current = true; // prevent onboarding from overwriting
+        }
+      } catch {
+        // fall through to onboarding fallback
+      }
+    }
+  }, []);
+
+  // Apply onboarding as fallback when localStorage has null or key is absent
+  useEffect(() => {
+    if (hasAppliedOnboardingFallback.current) return;
+    if (typeof window === 'undefined') return;
+    const raw = localStorage.getItem(INVESTORS_FILTERS_KEY);
+    if (raw && raw !== 'null') return;
+    if (!onboarding) return;
+    const stored = onboardingToStored(onboarding);
+    if (stored) {
+      const partial = storedToFilters(stored);
+      setFilters((prev) => ({ ...prev, ...partial }));
+    }
+    hasAppliedOnboardingFallback.current = true;
+  }, [onboarding]);
+
+  // Persist filters to localStorage when user changes them (excluding debounced name)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (skipNextPersistRef.current) {
+      skipNextPersistRef.current = false;
+      return;
+    }
+    if (clearedFiltersRef.current) {
+      clearedFiltersRef.current = false;
+      return;
+    }
+    const stored = filtersToStored(filters);
+    localStorage.setItem(INVESTORS_FILTERS_KEY, JSON.stringify(stored));
+  }, [
+    filters.type,
+    filters.investment_industries,
+    filters.investment_stages,
+    filters.investment_geographies,
+    filters.investor_type,
+  ]);
+
+  const handleClearFilters = useCallback(() => {
+    clearedFiltersRef.current = true;
+    localStorage.setItem(INVESTORS_FILTERS_KEY, 'null');
+    setLocalSearchInput('');
+    setFilters(DEFAULT_FILTERS);
+  }, []);
 
   // Debounced search
   useEffect(() => {
@@ -1334,6 +1469,7 @@ function InvestorsContent() {
                 options={GEOGRAPHY_OPTIONS}
                 selected={filters.investment_geographies}
                 onToggle={(item) => toggleArrayFilter('investment_geographies', item)}
+                formatLabel={formatGeographyLabel}
               />
               {filters.type === 'person' && (
                 <div>
@@ -1401,17 +1537,47 @@ function InvestorsContent() {
                 />
               </div>
             </div>
-            <div className="flex flex-wrap gap-4 items-center">
-              <ToggleFilter
-                label="Active"
-                value={filters.active}
-                onChange={(v) => updateFilter('active', v)}
-              />
-              <ToggleFilter
-                label="Leads round"
-                value={filters.leads_round}
-                onChange={(v) => updateFilter('leads_round', v)}
-              />
+            <div className="flex flex-wrap gap-4 items-center justify-between">
+              <div className="flex flex-wrap gap-4 items-center">
+                <ToggleFilter
+                  label="Active"
+                  value={filters.active}
+                  onChange={(v) => updateFilter('active', v)}
+                />
+                <ToggleFilter
+                  label="Leads round"
+                  value={filters.leads_round}
+                  onChange={(v) => updateFilter('leads_round', v)}
+                />
+              </div>
+              <button
+                onClick={handleClearFilters}
+                disabled={
+                  !filters.investment_industries?.length &&
+                  !filters.investment_stages?.length &&
+                  !filters.investment_geographies?.length &&
+                  !filters.investor_type?.length &&
+                  filters.type === 'firm' &&
+                  filters.active === null &&
+                  filters.leads_round === null &&
+                  !filters.role &&
+                  !filters.hq_country &&
+                  !filters.hq_state &&
+                  filters.fund_size_min === null &&
+                  filters.fund_size_max === null &&
+                  filters.check_size_min === null &&
+                  filters.check_size_max === null &&
+                  !filters.reviewed_stage?.length &&
+                  !filters.set?.length &&
+                  !filters.owner?.length &&
+                  !filters.investor_fit?.length &&
+                  !localSearchInput.trim()
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                <X className="w-4 h-4" />
+                Clear Filters
+              </button>
             </div>
             {/* Reviewed tab only: Stage, Sets, Owners, Investor Fit */}
             {filters.mode === 'reviewed' && (
@@ -1757,14 +1923,13 @@ function InvestorsContent() {
                     <p className="text-sm text-gray-600 text-center">
                     Upgrade your plan to connect with the right investors and complete your raise.
                     </p>
-                    <a
-                      href={CALENDLY_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => openPricingModal()}
                       className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
                     >
                       Upgrade Plan
-                    </a>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1845,6 +2010,17 @@ function InvestorsContent() {
         ownerOptions={availableOwners}
         filtersMode={filters.mode}
         isFreePlan={isFreePlan}
+        clipboardColumn={clipboardColumn}
+        clipboardLinkedInColumn={clipboardLinkedInColumn}
+        subjectColumn={subjectColumn}
+        phoneClickBehavior={phoneClickBehavior}
+        emailSettings={emailSettings}
+        getInvestorCellValue={(inv, col) => getInvestorCellValue(inv as InvestorSearchResult, col, pendingAnalyzeResults[inv.id])}
+        columnLabels={columnLabels}
+        onCopyToClipboard={(msg) => {
+          setToastMessage(msg);
+          setToastVisible(true);
+        }}
       />
 
       <ReportMissingInvestorsModal

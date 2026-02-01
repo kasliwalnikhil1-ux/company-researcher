@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useOnboarding, OnboardingData } from '@/contexts/OnboardingContext';
 import { useRouter } from 'next/navigation';
 import { Check, ArrowLeft, ArrowRight, X, ChevronDown } from 'lucide-react';
+import { SectorSelector, SECTORS } from '@/components/ui/SectorSelector';
 import { Sparkles } from '@/components/ui/Sparkles';
 
 // Comprehensive country list
@@ -48,25 +49,8 @@ const COUNTRIES = [
 
 // Aligned with investor-research route (investment_stages)
 const FUNDRAISING_STAGES = [
-  'pre-seed', 'seed', 'post-seed', 'series-a', 'series-b', 'series-c',
-  'growth', 'late-stage', 'pre-ipo', 'public-equity', 'angel',
-];
-
-// Aligned with investor-research route (investment_industries)
-const SECTORS = [
-  'artificial-intelligence', 'machine-learning', 'healthtech', 'biotech', 'digital-health', 'mental-health',
-  'wellness', 'longevity', 'fitness', 'consumer-health', 'medtech', 'pharma', 'genomics', 'bioinformatics',
-  'neuroscience', 'consumer-tech', 'enterprise-software', 'saas', 'vertical-saas', 'developer-tools',
-  'productivity', 'collaboration', 'fintech', 'payments', 'lending', 'credit', 'insurtech', 'regtech',
-  'wealthtech', 'climate-tech', 'energy', 'clean-energy', 'carbon-removal', 'sustainability', 'web3',
-  'blockchain', 'crypto', 'defi', 'nft', 'social-platforms', 'marketplaces', 'creator-economy', 'edtech',
-  'hr-tech', 'future-of-work', 'mobility', 'transportation', 'autonomous-vehicles', 'robotics', 'hardware',
-  'deep-tech', 'semiconductors', 'data-infrastructure', 'cloud-infrastructure', 'devops', 'cybersecurity',
-  'security', 'privacy', 'identity', 'digital-identity', 'consumer-internet', 'ecommerce', 'retail-tech',
-  'proptech', 'real-estate', 'construction-tech', 'smart-cities', 'supply-chain', 'logistics',
-  'manufacturing', 'industrial-tech', 'agtech', 'foodtech', 'gaming', 'esports', 'media', 'entertainment',
-  'music-tech', 'sports-tech', 'travel-tech', 'hospitality', 'martech', 'adtech', 'legal-tech', 'govtech',
-  'defense-tech', 'space-tech', 'aerospace', 'iot', 'edge-computing', 'network-effects',
+  'angel', 'pre-seed', 'seed', 'post-seed', 'series-a', 'series-b', 'series-c',
+  'growth', 'late-stage', 'pre-ipo', 'public-equity',
 ];
 
 const formatKebabLabel = (value: string): string =>
@@ -102,7 +86,6 @@ export default function OnboardingFlow() {
   const [currentStep, setCurrentStep] = useState(0);
   const [formData, setFormData] = useState<Partial<OnboardingData>>({});
   const [arrEntries, setArrEntries] = useState<Array<{ month: string; year: string; amount: string }>>([]);
-  const [sectorSearch, setSectorSearch] = useState('');
   const [countrySearch, setCountrySearch] = useState('');
   const [countryOpen, setCountryOpen] = useState(false);
   const countryDropdownRef = useRef<HTMLDivElement>(null);
@@ -184,9 +167,6 @@ export default function OnboardingFlow() {
 
   // Clear search fields when changing steps
   useEffect(() => {
-    if (currentStep !== 6) {
-      setSectorSearch('');
-    }
     if (currentStep !== 8) {
       setCountrySearch('');
     }
@@ -335,8 +315,18 @@ export default function OnboardingFlow() {
         updates.flowType = formData.step0?.primaryUse;
       } else if (currentStep === 1) updates.step1 = formData.step1;
       else if (currentStep === 2) {
-        updates.step2 = formData.step2;
-        updates.b2bStep3 = formData.b2bStep3; // persist yourRole (collected on this step)
+        updates.step2 = {
+          title: formData.step1?.title ?? formData.step2?.title ?? '',
+          bio: formData.step2?.bio ?? ''
+        };
+        // Sync yourRole from step1.title for b2bStep3 (used in step 3)
+        updates.b2bStep3 = {
+          ...formData.b2bStep3,
+          companyName: formData.b2bStep3?.companyName ?? '',
+          websiteUrl: formData.b2bStep3?.websiteUrl ?? '',
+          companySize: formData.b2bStep3?.companySize ?? '',
+          yourRole: formData.step1?.title ?? formData.b2bStep3?.yourRole ?? ''
+        };
       } else if (currentStep === 3) updates.b2bStep3 = formData.b2bStep3;
       else if (currentStep === 4) updates.b2bStep4 = formData.b2bStep4;
       else if (currentStep === 5) updates.b2bStep5 = formData.b2bStep5;
@@ -351,8 +341,12 @@ export default function OnboardingFlow() {
         updates.step0 = formData.step0;
         updates.flowType = formData.step0?.primaryUse;
       } else if (currentStep === 1) updates.step1 = formData.step1;
-      else if (currentStep === 2) updates.step2 = formData.step2;
-      else if (currentStep === 3) updates.step3 = formData.step3;
+      else if (currentStep === 2) {
+        updates.step2 = {
+          title: formData.step1?.title ?? formData.step2?.title ?? '',
+          bio: formData.step2?.bio ?? ''
+        };
+      } else if (currentStep === 3) updates.step3 = formData.step3;
       else if (currentStep === 4) updates.step4 = formData.step4;
       else if (currentStep === 5) updates.step5 = formData.step5;
       else if (currentStep === 6) updates.step6 = formData.step6;
@@ -383,8 +377,8 @@ export default function OnboardingFlow() {
   const canProceed = () => {
     if (currentStep === 0) return !!formData.step0?.primaryUse;
     if (isB2B) {
-      if (currentStep === 1) return !!(formData.step1?.firstName && formData.step1?.lastName);
-      if (currentStep === 2) return !!formData.step2?.bio?.trim() && !!formData.b2bStep3?.yourRole?.trim();
+      if (currentStep === 1) return !!(formData.step1?.firstName && formData.step1?.lastName && formData.step1?.title?.trim());
+      if (currentStep === 2) return !!formData.step2?.bio?.trim();
       if (currentStep === 3) {
         const step3 = formData.b2bStep3;
         const hasRequired = !!(step3?.companyName?.trim() && step3?.companySize && step3?.yourRole?.trim());
@@ -403,8 +397,8 @@ export default function OnboardingFlow() {
       if (currentStep === 12) return true;
       return false;
     }
-    if (currentStep === 1) return !!(formData.step1?.firstName && formData.step1?.lastName);
-    if (currentStep === 2) return !!(formData.step2?.title && formData.step2?.bio);
+    if (currentStep === 1) return !!(formData.step1?.firstName && formData.step1?.lastName && formData.step1?.title?.trim());
+    if (currentStep === 2) return !!formData.step2?.bio?.trim();
     if (currentStep === 3) return !!formData.step3?.experience;
     if (currentStep === 4) return !!formData.step4?.capitalRaised;
     if (currentStep === 5) {
@@ -414,7 +408,10 @@ export default function OnboardingFlow() {
       return nameOk && urlValid;
     }
     if (currentStep === 6) return !!(formData.step6?.sector && formData.step6.sector.length > 0);
-    if (currentStep === 7) return !!formData.step7?.stage;
+    if (currentStep === 7) {
+      const stage = formData.step7?.stage;
+      return Array.isArray(stage) ? stage.length > 0 : !!stage?.trim();
+    }
     if (currentStep === 8) return !!formData.step8?.hqCountry;
     if (currentStep === 9) return !!formData.step9?.productDescription;
     if (currentStep === 10) return !!(formData.step10?.customerDescription && (formData.step10?.businessModel?.length ?? 0) > 0 && formData.step10?.revenueStatus);
@@ -466,7 +463,7 @@ export default function OnboardingFlow() {
 
     // ——— B2B Outreach flow ———
     if (formData.step0?.primaryUse === 'b2b') {
-      // B2B Step 1: Founder Identity
+      // B2B Step 1: Founder Identity (same structure as fundraising: title, gender, lastName, firstName)
       if (currentStep === 1) {
         return (
           <div className="space-y-6">
@@ -484,7 +481,8 @@ export default function OnboardingFlow() {
                     step1: {
                       firstName: e.target.value,
                       lastName: formData.step1?.lastName ?? '',
-                      gender: formData.step1?.gender
+                      gender: formData.step1?.gender,
+                      title: formData.step1?.title
                     }
                   })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -503,7 +501,8 @@ export default function OnboardingFlow() {
                     step1: {
                       firstName: formData.step1?.firstName ?? '',
                       lastName: e.target.value,
-                      gender: formData.step1?.gender
+                      gender: formData.step1?.gender,
+                      title: formData.step1?.title
                     }
                   })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -519,7 +518,8 @@ export default function OnboardingFlow() {
                     step1: {
                       firstName: formData.step1?.firstName ?? '',
                       lastName: formData.step1?.lastName ?? '',
-                      gender: e.target.value
+                      gender: e.target.value,
+                      title: formData.step1?.title
                     }
                   })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -531,38 +531,38 @@ export default function OnboardingFlow() {
                   <option value="prefer-not-to-say">Prefer not to say</option>
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Role <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.step1?.title || formData.step2?.title || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step1: {
+                      firstName: formData.step1?.firstName ?? '',
+                      lastName: formData.step1?.lastName ?? '',
+                      gender: formData.step1?.gender ?? '',
+                      title: e.target.value
+                    }
+                  })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="e.g. CEO, Founder"
+                />
+              </div>
             </div>
           </div>
         );
       }
 
-      // B2B Step 2: Founder Background
+      // B2B Step 2: Founder Background (same structure as fundraising: bio + title from step1)
       if (currentStep === 2) {
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-bold text-gray-900">Founder Details</h2>
+            <h2 className="text-2xl font-bold text-gray-900">Founding Team Overview</h2>
             <p className="text-gray-600">Tell us about yourself</p>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Your role <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.b2bStep3?.yourRole || ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    b2bStep3: {
-                      companyName: formData.b2bStep3?.companyName ?? '',
-                      websiteUrl: formData.b2bStep3?.websiteUrl ?? '',
-                      companySize: formData.b2bStep3?.companySize ?? '',
-                      yourRole: e.target.value
-                    }
-                  })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. CEO, Founder, Sales Lead"
-                />
-              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Bio <span className="text-red-500">*</span>
@@ -572,7 +572,7 @@ export default function OnboardingFlow() {
                   onChange={(e) => setFormData({
                     ...formData,
                     step2: {
-                      title: formData.step2?.title ?? '',
+                      title: formData.step1?.title ?? formData.step2?.title ?? '',
                       bio: e.target.value
                     }
                   })}
@@ -1188,7 +1188,8 @@ export default function OnboardingFlow() {
                   step1: {
                     firstName: e.target.value,
                     lastName: formData.step1?.lastName ?? '',
-                    gender: formData.step1?.gender
+                    gender: formData.step1?.gender,
+                    title: formData.step1?.title
                   }
                 })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1207,7 +1208,8 @@ export default function OnboardingFlow() {
                   step1: {
                     firstName: formData.step1?.firstName ?? '',
                     lastName: e.target.value,
-                    gender: formData.step1?.gender
+                    gender: formData.step1?.gender,
+                    title: formData.step1?.title
                   }
                 })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1223,7 +1225,8 @@ export default function OnboardingFlow() {
                   step1: {
                     firstName: formData.step1?.firstName ?? '',
                     lastName: formData.step1?.lastName ?? '',
-                    gender: e.target.value
+                    gender: e.target.value,
+                    title: formData.step1?.title
                   }
                 })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1235,33 +1238,37 @@ export default function OnboardingFlow() {
                 <option value="prefer-not-to-say">Prefer not to say</option>
               </select>
             </div>
-          </div>
-        </div>
-      );
-    }
-
-    // Step 2: Founder Background
-    if (currentStep === 2) {
-      return (
-        <div className="space-y-6">
-          <h2 className="text-2xl font-bold text-gray-900">Founder Details</h2>
-          <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Title <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Role <span className="text-red-500">*</span>
+              </label>
               <input
                 type="text"
-                value={formData.step2?.title || ''}
+                value={formData.step1?.title || formData.step2?.title || ''}
                 onChange={(e) => setFormData({
                   ...formData,
-                  step2: {
-                    title: e.target.value,
-                    bio: formData.step2?.bio ?? ''
+                  step1: {
+                    firstName: formData.step1?.firstName ?? '',
+                    lastName: formData.step1?.lastName ?? '',
+                    gender: formData.step1?.gender ?? '',
+                    title: e.target.value
                   }
                 })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 placeholder="e.g. CEO, Founder"
               />
             </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Step 2: Founder Background (role/title moved to step 1)
+    if (currentStep === 2) {
+      return (
+        <div className="space-y-6">
+          <h2 className="text-2xl font-bold text-gray-900">Founding Team Overview</h2>
+          <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Bio <span className="text-red-500">*</span></label>
               <textarea
@@ -1269,7 +1276,7 @@ export default function OnboardingFlow() {
                 onChange={(e) => setFormData({
                   ...formData,
                   step2: {
-                    title: formData.step2?.title ?? '',
+                    title: formData.step1?.title ?? formData.step2?.title ?? '',
                     bio: e.target.value
                   }
                 })}
@@ -1403,100 +1410,82 @@ export default function OnboardingFlow() {
 
     // Step 6: Company Sector
     if (currentStep === 6) {
-      const search = sectorSearch.toLowerCase();
-      const filteredSectors = SECTORS.filter(s =>
-        s.toLowerCase().includes(search) || formatKebabLabel(s).toLowerCase().includes(search)
-      );
-
       return (
         <div className="space-y-6">
           <h2 className="text-2xl font-bold text-gray-900">Select your company's sector <span className="text-red-500">*</span></h2>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Sector <span className="text-red-500">*</span> (Multi-select)
-            </label>
-            <input
-              type="text"
-              value={sectorSearch}
-              onChange={(e) => setSectorSearch(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
-              placeholder="Search sectors..."
-            />
-            <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto p-2">
-              {filteredSectors.map((sector) => {
-                const isSelected = formData.step6?.sector?.includes(sector);
-                return (
-                  <label
-                    key={sector}
-                    className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={(e) => {
-                        const current = formData.step6?.sector || [];
-                        const updated = e.target.checked
-                          ? [...current, sector]
-                          : current.filter(s => s !== sector);
-                        setFormData({
-                          ...formData,
-                          step6: { sector: updated }
-                        });
-                      }}
-                      className="mr-3"
-                    />
-                    <span>{formatKebabLabel(sector)}</span>
-                  </label>
-                );
-              })}
-            </div>
-            {formData.step6?.sector && formData.step6.sector.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {formData.step6.sector.map((sector) => (
-                  <span
-                    key={sector}
-                    className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm flex items-center gap-2"
-                  >
-                    {formatKebabLabel(sector)}
-                    <button
-                      onClick={() => {
-                        const updated = formData.step6?.sector?.filter(s => s !== sector) || [];
-                        setFormData({
-                          ...formData,
-                          step6: { sector: updated }
-                        });
-                      }}
-                      className="hover:text-indigo-900"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+          <SectorSelector
+            value={formData.step6?.sector || []}
+            onChange={(sectors) => setFormData({ ...formData, step6: { sector: sectors } })}
+            label="Sector"
+            required
+          />
         </div>
       );
     }
 
-    // Step 7: Upcoming Fundraising Stage
+    // Step 7: Upcoming Fundraising Stage (multi-select)
     if (currentStep === 7) {
+      const rawStage = formData.step7?.stage;
+      const stages: string[] = Array.isArray(rawStage)
+        ? rawStage
+        : typeof rawStage === 'string' && rawStage.trim()
+          ? [rawStage.trim()]
+          : [];
+
       return (
         <div className="space-y-6">
           <h2 className="text-2xl font-bold text-gray-900">Upcoming round stage <span className="text-red-500">*</span></h2>
-          <select
-            value={formData.step7?.stage || ''}
-            onChange={(e) => setFormData({
-              ...formData,
-              step7: { stage: e.target.value }
+          <p className="text-sm text-gray-500">Select all stages that apply (multi-select)</p>
+          <div className="flex flex-wrap gap-2">
+            {FUNDRAISING_STAGES.map((stage) => {
+              const isSelected = stages.includes(stage);
+              return (
+                <button
+                  key={stage}
+                  type="button"
+                  onClick={() => {
+                    const updated = isSelected
+                      ? stages.filter((s) => s !== stage)
+                      : [...stages, stage];
+                    setFormData({
+                      ...formData,
+                      step7: { stage: updated }
+                    });
+                  }}
+                  className={`px-4 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                    isSelected ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  {formatKebabLabel(stage)}
+                </button>
+              );
             })}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg"
-          >
-            <option value="">Select stage</option>
-            {FUNDRAISING_STAGES.map((stage) => (
-              <option key={stage} value={stage}>{formatKebabLabel(stage)}</option>
-            ))}
-          </select>
+          </div>
+          {stages.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              {stages.map((s) => (
+                <span
+                  key={s}
+                  className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm flex items-center gap-2"
+                >
+                  {formatKebabLabel(s)}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = stages.filter((x) => x !== s);
+                      setFormData({
+                        ...formData,
+                        step7: { stage: updated }
+                      });
+                    }}
+                    className="hover:text-indigo-900"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
@@ -1659,13 +1648,13 @@ export default function OnboardingFlow() {
                   arr: formData.step10?.arr
                 }
               })}
-              rows={4}
+              rows={2}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="Describe your target customers..."
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></label>
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></h2>
             <div className="flex flex-wrap gap-2">
               {BUSINESS_MODEL_OPTIONS.map((option) => {
                 const isSelected = businessModelSelected.includes(option);
@@ -1741,6 +1730,9 @@ export default function OnboardingFlow() {
                 No
               </button>
             </div>
+            <p className="text-sm text-gray-500 mt-2">
+              Used for: Investors who invest in companies at your revenue stage and business model
+            </p>
           </div>
           {formData.step10?.revenueStatus === 'yes' && (
             <div className="space-y-4">

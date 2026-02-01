@@ -177,11 +177,12 @@ const B2B_CTA_LABELS: Record<string, string> = {
 export interface OnboardingDataForSummary {
   step0?: { primaryUse?: 'fundraising' | 'b2b' };
   flowType?: 'fundraising' | 'b2b';
+  step1?: { title?: string; lastName?: string; firstName?: string };
   step2?: { bio?: string; title?: string };
   step4?: { capitalRaised?: string };
   step5?: { companyName?: string; website?: string };
   step6?: { sector?: string[] };
-  step7?: { stage?: string };
+  step7?: { stage?: string | string[] };
   step8?: { hqCountry?: string };
   step9?: { productDescription?: string };
   step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[] };
@@ -256,13 +257,16 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
   }
 
   // Stage & target round (step7, step11)
-  const stage = data.step7?.stage?.trim();
+  const rawStage = data.step7?.stage;
+  const stageStr = Array.isArray(rawStage)
+    ? rawStage.filter(Boolean).join(', ')
+    : typeof rawStage === 'string' ? rawStage.trim() : '';
   const targetRound = data.step11?.targetRoundSize;
   const targetRoundLabel = targetRound ? TARGET_ROUND_LABELS[targetRound] ?? targetRound : null;
-  if (stage || targetRoundLabel) {
+  if (stageStr || targetRoundLabel) {
     const raiseLine = [
       'They are raising',
-      stage ? `at ${stage} stage` : null,
+      stageStr ? `at ${stageStr} stage` : null,
       targetRoundLabel ? `with a target round size of ${targetRoundLabel}` : null,
     ]
       .filter(Boolean)

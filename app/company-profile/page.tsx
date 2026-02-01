@@ -7,6 +7,7 @@ import { formatOnboardingCompanySummary } from '@/lib/utils';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import Toast from '@/components/ui/Toast';
+import { SectorSelector } from '@/components/ui/SectorSelector';
 import { Building2, Save, X, ChevronDown } from 'lucide-react';
 
 // Same constants as OnboardingFlow
@@ -51,25 +52,8 @@ const COUNTRIES = [
 
 // Aligned with investor-research route (investment_stages)
 const FUNDRAISING_STAGES = [
-  'pre-seed', 'seed', 'post-seed', 'series-a', 'series-b', 'series-c',
-  'growth', 'late-stage', 'pre-ipo', 'public-equity', 'angel',
-];
-
-// Aligned with investor-research route (investment_industries)
-const SECTORS = [
-  'artificial-intelligence', 'machine-learning', 'healthtech', 'biotech', 'digital-health', 'mental-health',
-  'wellness', 'longevity', 'fitness', 'consumer-health', 'medtech', 'pharma', 'genomics', 'bioinformatics',
-  'neuroscience', 'consumer-tech', 'enterprise-software', 'saas', 'vertical-saas', 'developer-tools',
-  'productivity', 'collaboration', 'fintech', 'payments', 'lending', 'credit', 'insurtech', 'regtech',
-  'wealthtech', 'climate-tech', 'energy', 'clean-energy', 'carbon-removal', 'sustainability', 'web3',
-  'blockchain', 'crypto', 'defi', 'nft', 'social-platforms', 'marketplaces', 'creator-economy', 'edtech',
-  'hr-tech', 'future-of-work', 'mobility', 'transportation', 'autonomous-vehicles', 'robotics', 'hardware',
-  'deep-tech', 'semiconductors', 'data-infrastructure', 'cloud-infrastructure', 'devops', 'cybersecurity',
-  'security', 'privacy', 'identity', 'digital-identity', 'consumer-internet', 'ecommerce', 'retail-tech',
-  'proptech', 'real-estate', 'construction-tech', 'smart-cities', 'supply-chain', 'logistics',
-  'manufacturing', 'industrial-tech', 'agtech', 'foodtech', 'gaming', 'esports', 'media', 'entertainment',
-  'music-tech', 'sports-tech', 'travel-tech', 'hospitality', 'martech', 'adtech', 'legal-tech', 'govtech',
-  'defense-tech', 'space-tech', 'aerospace', 'iot', 'edge-computing', 'network-effects',
+  'angel', 'pre-seed', 'seed', 'post-seed', 'series-a', 'series-b', 'series-c',
+  'growth', 'late-stage', 'pre-ipo', 'public-equity',
 ];
 
 const formatKebabLabel = (value: string): string =>
@@ -117,10 +101,17 @@ function CompanyProfileContent() {
   const [saving, setSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
-  const [sectorSearch, setSectorSearch] = useState('');
   const [countrySearch, setCountrySearch] = useState('');
   const [countryOpen, setCountryOpen] = useState(false);
+  const [isLocalhost, setIsLocalhost] = useState(false);
   const countryDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsLocalhost(
+      typeof window !== 'undefined' &&
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    );
+  }, []);
 
   useEffect(() => {
     if (!countryOpen) return;
@@ -185,11 +176,6 @@ function CompanyProfileContent() {
     );
   }
 
-  const sectorSearchLower = sectorSearch.toLowerCase();
-  const filteredSectors = SECTORS.filter(s =>
-    s.toLowerCase().includes(sectorSearchLower) || formatKebabLabel(s).toLowerCase().includes(sectorSearchLower)
-  );
-
   const filteredCountries = COUNTRIES.filter(c => 
     c.toLowerCase().includes(countrySearch.toLowerCase())
   );
@@ -210,7 +196,7 @@ function CompanyProfileContent() {
         </div>
       </div>
 
-      {onboarding && (
+      {isLocalhost && onboarding && (
         <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
           <h3 className="text-sm font-semibold text-amber-800 mb-2">Company Context</h3>
           <pre className="text-xs text-amber-900 whitespace-pre-wrap font-mono overflow-x-auto max-h-48 overflow-y-auto">
@@ -222,7 +208,7 @@ function CompanyProfileContent() {
       <div className="bg-white border border-gray-200 rounded-lg shadow-sm p-6 space-y-8">
         {flowType === 'b2b' ? (
           <>
-            {/* B2B: Founder Identity */}
+            {/* B2B: Founder Identity (same structure as fundraising: title, gender, lastName, firstName) */}
             {formData.step1 && (
               <section>
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Identity</h2>
@@ -237,7 +223,8 @@ function CompanyProfileContent() {
                         step1: {
                           firstName: e.target.value,
                           lastName: formData.step1?.lastName ?? '',
-                          gender: formData.step1?.gender
+                          gender: formData.step1?.gender,
+                          title: formData.step1?.title
                         }
                       })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -253,7 +240,8 @@ function CompanyProfileContent() {
                         step1: {
                           firstName: formData.step1?.firstName ?? '',
                           lastName: e.target.value,
-                          gender: formData.step1?.gender
+                          gender: formData.step1?.gender,
+                          title: formData.step1?.title
                         }
                       })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -269,7 +257,8 @@ function CompanyProfileContent() {
                       step1: {
                         firstName: formData.step1?.firstName ?? '',
                         lastName: formData.step1?.lastName ?? '',
-                        gender: e.target.value
+                        gender: e.target.value,
+                        title: formData.step1?.title
                       }
                     })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -281,32 +270,35 @@ function CompanyProfileContent() {
                     <option value="prefer-not-to-say">Prefer not to say</option>
                   </select>
                 </div>
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Role <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={formData.step1.title || formData.step2?.title || formData.b2bStep3?.yourRole || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      step1: {
+                        firstName: formData.step1?.firstName ?? '',
+                        lastName: formData.step1?.lastName ?? '',
+                        gender: formData.step1?.gender ?? '',
+                        title: e.target.value
+                      },
+                      ...(formData.b2bStep3 && {
+                        b2bStep3: { ...formData.b2bStep3, yourRole: e.target.value }
+                      })
+                    })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="e.g. CEO, Founder"
+                  />
+                </div>
               </section>
             )}
 
-            {/* B2B: Founder Details (Your role + Bio) */}
-            {(formData.step2 || formData.b2bStep3) && (
+            {/* B2B: Founding Team Overview (bio + title from step1, same as fundraising) */}
+            {formData.step2 && (
               <section>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Details</h2>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Founding Team Overview</h2>
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Your role <span className="text-red-500">*</span></label>
-                    <input
-                      type="text"
-                      value={formData.b2bStep3?.yourRole || ''}
-                      onChange={(e) => setFormData({
-                        ...formData,
-                        b2bStep3: {
-                          companyName: formData.b2bStep3?.companyName ?? '',
-                          websiteUrl: formData.b2bStep3?.websiteUrl ?? '',
-                          companySize: formData.b2bStep3?.companySize ?? '',
-                          yourRole: e.target.value
-                        }
-                      })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                      placeholder="e.g. CEO, Founder"
-                    />
-                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Bio <span className="text-red-500">*</span></label>
                     <textarea
@@ -314,7 +306,7 @@ function CompanyProfileContent() {
                       onChange={(e) => setFormData({
                         ...formData,
                         step2: {
-                          title: formData.step2?.title ?? '',
+                          title: formData.step1?.title ?? formData.step2?.title ?? '',
                           bio: e.target.value
                         }
                       })}
@@ -693,14 +685,15 @@ function CompanyProfileContent() {
                 <input
                   type="text"
                   value={formData.step1.firstName || ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  step1: {
-                    firstName: e.target.value,
-                    lastName: formData.step1?.lastName ?? '',
-                    gender: formData.step1?.gender
-                  }
-                })}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step1: {
+                      firstName: e.target.value,
+                      lastName: formData.step1?.lastName ?? '',
+                      gender: formData.step1?.gender,
+                      title: formData.step1?.title
+                    }
+                  })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -709,14 +702,15 @@ function CompanyProfileContent() {
                 <input
                   type="text"
                   value={formData.step1.lastName || ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  step1: {
-                    firstName: formData.step1?.firstName ?? '',
-                    lastName: e.target.value,
-                    gender: formData.step1?.gender
-                  }
-                })}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step1: {
+                      firstName: formData.step1?.firstName ?? '',
+                      lastName: e.target.value,
+                      gender: formData.step1?.gender,
+                      title: formData.step1?.title
+                    }
+                  })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -730,7 +724,8 @@ function CompanyProfileContent() {
                   step1: {
                     firstName: formData.step1?.firstName ?? '',
                     lastName: formData.step1?.lastName ?? '',
-                    gender: e.target.value
+                    gender: e.target.value,
+                    title: formData.step1?.title
                   }
                 })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -742,30 +737,32 @@ function CompanyProfileContent() {
                 <option value="prefer-not-to-say">Prefer not to say</option>
               </select>
             </div>
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Role <span className="text-red-500">*</span></label>
+              <input
+                type="text"
+                value={formData.step1?.title || formData.step2?.title || ''}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  step1: {
+                    firstName: formData.step1?.firstName ?? '',
+                    lastName: formData.step1?.lastName ?? '',
+                    gender: formData.step1?.gender ?? '',
+                    title: e.target.value
+                  }
+                })}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                placeholder="e.g. CEO, Founder"
+              />
+            </div>
           </section>
         )}
 
-        {/* Step 2: Founder Background */}
+        {/* Step 2: Founding Team Overview (Role moved to step 1) */}
         {formData.step2 && (
           <section>
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Founder Background</h2>
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Founding Team Overview</h2>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Title <span className="text-red-500">*</span></label>
-                <input
-                  type="text"
-                  value={formData.step2.title || ''}
-                  onChange={(e) => setFormData({
-                    ...formData,
-                    step2: {
-                      title: e.target.value,
-                      bio: formData.step2?.bio ?? ''
-                    }
-                  })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  placeholder="e.g. CEO, Founder"
-                />
-              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Bio</label>
                 <textarea
@@ -773,7 +770,7 @@ function CompanyProfileContent() {
                   onChange={(e) => setFormData({
                     ...formData,
                     step2: {
-                      title: formData.step2?.title ?? '',
+                      title: formData.step1?.title ?? formData.step2?.title ?? '',
                       bio: e.target.value
                     }
                   })}
@@ -874,78 +871,83 @@ function CompanyProfileContent() {
         {formData.step6 && (
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Company Sector</h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Sector (Multi-select) <span className="text-red-500">*</span></label>
-              <input
-                type="text"
-                value={sectorSearch}
-                onChange={(e) => setSectorSearch(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-3"
-                placeholder="Search sectors..."
-              />
-              <div className="border border-gray-300 rounded-lg max-h-60 overflow-y-auto p-2">
-                {filteredSectors.map((sector) => {
-                  const isSelected = formData.step6?.sector?.includes(sector);
-                  return (
-                    <label
-                      key={sector}
-                      className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={(e) => {
-                          const current = formData.step6?.sector || [];
-                          const updated = e.target.checked
-                            ? [...current, sector]
-                            : current.filter(s => s !== sector);
-                          setFormData({
-                            ...formData,
-                            step6: { sector: updated }
-                          });
-                        }}
-                        className="mr-3"
-                      />
-                      <span>{formatKebabLabel(sector)}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              {formData.step6?.sector && formData.step6.sector.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {formData.step6.sector.map((sector) => (
-                    <span
-                      key={sector}
-                      className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm"
-                    >
-                      {formatKebabLabel(sector)}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
+            <SectorSelector
+              value={formData.step6?.sector || []}
+              onChange={(sectors) => setFormData({ ...formData, step6: { sector: sectors } })}
+              label="Sector"
+              required
+            />
           </section>
         )}
 
-        {/* Step 7: Fundraising Stage */}
+        {/* Step 7: Fundraising Stage (multi-select) */}
         {formData.step7 && (
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming Fundraising Stage</h2>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Round stage</label>
-              <select
-                value={formData.step7.stage || ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  step7: { stage: e.target.value }
-                })}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="">Select stage</option>
-                {FUNDRAISING_STAGES.map((stage) => (
-                  <option key={stage} value={stage}>{formatKebabLabel(stage)}</option>
-                ))}
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Round stage (select all that apply)</label>
+              {(() => {
+                const rawStage = formData.step7?.stage;
+                const stages: string[] = Array.isArray(rawStage)
+                  ? rawStage
+                  : typeof rawStage === 'string' && rawStage.trim()
+                    ? [rawStage.trim()]
+                    : [];
+                return (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      {FUNDRAISING_STAGES.map((stage) => {
+                        const isSelected = stages.includes(stage);
+                        return (
+                          <button
+                            key={stage}
+                            type="button"
+                            onClick={() => {
+                              const updated = isSelected
+                                ? stages.filter((s) => s !== stage)
+                                : [...stages, stage];
+                              setFormData({
+                                ...formData,
+                                step7: { stage: updated }
+                              });
+                            }}
+                            className={`px-4 py-2 rounded-lg border-2 text-sm font-medium transition-all ${
+                              isSelected ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-700 hover:border-gray-300'
+                            }`}
+                          >
+                            {formatKebabLabel(stage)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {stages.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {stages.map((s) => (
+                          <span
+                            key={s}
+                            className="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm flex items-center gap-2"
+                          >
+                            {formatKebabLabel(s)}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = stages.filter((x) => x !== s);
+                                setFormData({
+                                  ...formData,
+                                  step7: { stage: updated }
+                                });
+                              }}
+                              className="hover:text-indigo-900"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </section>
         )}
@@ -1033,7 +1035,7 @@ function CompanyProfileContent() {
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Customer Description & Revenue</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Who are your customers? <span className="text-red-500">*</span></label>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Who are your customers? <span className="text-red-500">*</span></h2>
                 <textarea
                   value={formData.step10.customerDescription || ''}
                   onChange={(e) => setFormData({
@@ -1051,7 +1053,7 @@ function CompanyProfileContent() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></label>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></h2>
                 <div className="flex flex-wrap gap-2">
                   {['B2B', 'B2C', 'Marketplace'].map((option) => {
                     const isSelected = (formData.step10?.businessModel ?? []).includes(option);
