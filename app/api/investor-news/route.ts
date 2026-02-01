@@ -158,11 +158,11 @@ export async function POST(req: NextRequest) {
     let query: string;
     if (type === 'person') {
       const parts = [nameStr, associatedFirmName, investorTypes].filter(Boolean);
-      query = `Latest news, videos, articles, and updates about ${parts.join(' ')}. Be comprehensive and accurate.`.trim();
+      query = `Latest news, videos, articles, and updates on ${parts.join(' ')}. Be comprehensive and accurate.`.trim();
     } else {
       const domainStr = domain ? String(domain) : '';
       const parts = [nameStr, domainStr, investorTypes].filter(Boolean);
-      query = `Latest news, videos, articles, and updates about ${parts.join(' ')}. Be comprehensive and accurate.`.trim();
+      query = `Latest news, videos, articles, and updates on ${parts.join(' ')}. Be comprehensive and accurate.`.trim();
     }
 
     const exaKey = EXA_API_KEYS[Math.floor(Math.random() * EXA_API_KEYS.length)];
@@ -174,7 +174,14 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model: 'exa',
-        messages: [{ role: 'user', content: query }],
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are an investment intelligence engine operating inside a professional investor platform.\n\nThe user already knows the firm is a venture capital fund.\nDO NOT:\n- explain what the firm is\n- summarize its mission\n- describe its investment thesis\n- restate public boilerplate\n\nONLY return:\n- concrete recent events (last 6–12 months)\n- investments, exits, or capital activity\n- partner or leadership actions\n- media appearances, interviews, or quotes\n- fund launches, closes, or strategy shifts\n\nIf no meaningful updates exist:\n- explicitly say "No material public updates found"\n- explain what sources were checked\n- do NOT fabricate or infer activity\n\nOutput must be factual, time-bound, and specific.',
+          },
+          { role: 'user', content: query },
+        ],
       }),
     });
 

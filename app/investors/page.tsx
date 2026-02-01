@@ -34,7 +34,7 @@ import {
   List,
   Download,
 } from 'lucide-react';
-import { formatHqLocationShort, getCountryName } from '@/lib/isoCodes';
+import { formatHqLocationShort, getCountryName, resolveCountryInput } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
 import { fetchInvestorAnalyze } from '@/lib/api';
@@ -270,11 +270,15 @@ function storedToFilters(stored: StoredInvestorFilters | null): Partial<Investor
     const stage = stored.step7.stage;
     partial.investment_stages = Array.isArray(stage) ? [...stage] : [stage];
   }
-  if (stored.step8?.hqCountry?.trim()) partial.investment_geographies = [stored.step8.hqCountry.trim()];
+  if (stored.step8?.hqCountry?.trim()) {
+    const resolved = resolveCountryInput(stored.step8.hqCountry.trim());
+    if (resolved) partial.investment_geographies = [resolved];
+  }
   if (stored.step11?.lookingToRaiseFrom?.length) partial.investor_type = [...stored.step11.lookingToRaiseFrom];
   if (stored.step12?.investorType) {
     const t = stored.step12.investorType;
     partial.type = t === 'follow_on' ? 'person' : 'firm';
+    partial.leads_round = t === 'lead' ? true : t === 'follow_on' ? false : null;
   }
   return partial;
 }
@@ -299,10 +303,15 @@ function filtersToStored(filters: InvestorSearchFilters): StoredInvestorFilters 
   const stored: StoredInvestorFilters = { step0: { primaryUse: 'fundraising' } };
   if (filters.investment_industries?.length) stored.step6 = { sector: [...filters.investment_industries] };
   if (filters.investment_stages?.length) stored.step7 = { stage: [...filters.investment_stages] };
-  if (filters.investment_geographies?.length) stored.step8 = { hqCountry: filters.investment_geographies[0].trim() };
+  if (filters.investment_geographies?.length) {
+    const geo = filters.investment_geographies[0].trim();
+    stored.step8 = { hqCountry: getCountryName(geo) || geo };
+  }
   stored.step10 = {};
   if (filters.investor_type?.length) stored.step11 = { lookingToRaiseFrom: [...filters.investor_type] };
-  stored.step12 = { investorType: filters.type === 'person' ? 'follow_on' : 'both' };
+  const investorType =
+    filters.leads_round === true ? 'lead' : filters.leads_round === false ? 'follow_on' : 'both';
+  stored.step12 = { investorType };
   return stored;
 }
 
@@ -887,6 +896,7 @@ function InvestorsContent() {
     filters.investment_stages,
     filters.investment_geographies,
     filters.investor_type,
+    filters.leads_round,
   ]);
 
   const handleClearFilters = useCallback(() => {

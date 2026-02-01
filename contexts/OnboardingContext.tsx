@@ -54,8 +54,8 @@ export interface OnboardingData {
   };
   step11?: {
     lookingToRaiseFrom?: string[];
-    timeline: 'near_term' | 'mid_term' | 'later';
-    targetRoundSize: 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m';
+    timeline?: 'near_term' | 'mid_term' | 'later';
+    targetRoundSize?: 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m';
   };
   step12?: {
     investorType: 'lead' | 'follow_on' | 'both';

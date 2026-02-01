@@ -56,8 +56,10 @@ const PLANS = [
     id: 'pro',
     name: 'Pro',
     price: '$700',
+    originalPrice: '$1000',
     credits: '500 Credits',
     validity: 'Valid for 6 months',
+    discountNote: 'Your investment bankers at a fraction of the cost',
     description: 'Advanced intelligence, deep research, and network access.',
     includes: [
       'Everything in Basic',
@@ -123,10 +125,16 @@ const PricingModal: React.FC<PricingModalProps> = ({ isOpen, onClose }) => {
               )}
               <div className="mb-4">
                 <h3 className="text-lg font-semibold text-gray-900">{plan.name}</h3>
-                <div className="mt-2 flex items-baseline gap-1">
+                <div className="mt-2 flex items-baseline gap-2 flex-wrap">
+                  {'originalPrice' in plan && plan.originalPrice && (
+                    <span className="text-lg font-medium text-brand-default line-through">{plan.originalPrice}</span>
+                  )}
                   <span className="text-2xl font-bold text-gray-900">{plan.price}</span>
                   <span className="text-sm text-gray-500">· {plan.credits}</span>
                 </div>
+                {'discountNote' in plan && plan.discountNote && (
+                  <p className="mt-1 text-xs text-brand-default font-medium">{plan.discountNote}</p>
+                )}
                 <p className="mt-1 text-xs text-gray-500">{plan.validity}</p>
                 <p className="mt-2 text-sm text-gray-600">{plan.description}</p>
               </div>

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useOnboarding, OnboardingData } from '@/contexts/OnboardingContext';
 import { useRouter } from 'next/navigation';
 import { Check, ArrowLeft, ArrowRight, X, ChevronDown } from 'lucide-react';
+import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { SectorSelector, SECTORS } from '@/components/ui/SectorSelector';
 import { Sparkles } from '@/components/ui/Sparkles';
 
@@ -441,21 +442,28 @@ export default function OnboardingFlow() {
               <div className="font-semibold text-gray-900">Fundraising</div>
               <div className="text-sm text-gray-600 mt-1">Investor discovery, outreach, and deal management</div>
             </button>
-            <button
-              disabled
-              onClick={() => setFormData({
-                ...formData,
-                step0: { primaryUse: 'b2b' }
-              })}
-              className={`w-full p-6 text-left border-2 rounded-lg transition-all opacity-60 cursor-not-allowed ${
-                formData.step0?.primaryUse === 'b2b'
-                  ? 'border-indigo-500 bg-indigo-50'
-                  : 'border-gray-200'
-              }`}
+            <div
+              className={`w-full p-6 text-left border-2 rounded-lg transition-all opacity-60 cursor-not-allowed border-gray-200`}
             >
-              <div className="font-semibold text-gray-900">B2B Outreach</div>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-gray-900">B2B Outreach</span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                  Coming Soon
+                </span>
+              </div>
               <div className="text-sm text-gray-600 mt-1">Lead generation, prospecting, and sales outreach</div>
-            </button>
+              <div className="text-sm text-indigo-600 mt-2">
+              Meet the world's most intelligent sales platform.{' '}
+                <a
+                  href="https://calendly.com/founders-capitalxai/20min"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-medium underline hover:text-indigo-700 cursor-pointer"
+                >
+                  Request early access
+                </a>
+              </div>
+            </div>
           </div>
         </div>
       );
@@ -1851,8 +1859,8 @@ export default function OnboardingFlow() {
                           step11: {
                             ...formData.step11,
                             lookingToRaiseFrom: updated,
-                            timeline: formData.step11?.timeline ?? 'later',
-                            targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k',
+                            timeline: formData.step11?.timeline,
+                            targetRoundSize: formData.step11?.targetRoundSize,
                           }
                         });
                       }}
@@ -1874,7 +1882,7 @@ export default function OnboardingFlow() {
                   ...formData.step11,
                   lookingToRaiseFrom: formData.step11?.lookingToRaiseFrom ?? [],
                   timeline: e.target.value as 'near_term' | 'mid_term' | 'later',
-                  targetRoundSize: formData.step11?.targetRoundSize ?? 'less_than_500k'
+                  targetRoundSize: formData.step11?.targetRoundSize
                 }
               })}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg"
@@ -1894,7 +1902,7 @@ export default function OnboardingFlow() {
                 step11: {
                   ...formData.step11,
                   lookingToRaiseFrom: formData.step11?.lookingToRaiseFrom ?? [],
-                  timeline: formData.step11?.timeline ?? 'later',
+                  timeline: formData.step11?.timeline,
                   targetRoundSize: e.target.value as 'less_than_500k' | '500k_2m' | '2m_10m' | 'more_than_10m'
                 }
               })}
@@ -1946,6 +1954,16 @@ export default function OnboardingFlow() {
     if (currentStep === 13) {
       return (
         <div className="space-y-6 text-center">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none">
+            <div className="w-64 h-64 md:w-80 md:h-80">
+              <DotLottieReact
+                src="/launch_step.lottie"
+                loop={false}
+                autoplay={true}
+                className="w-full h-full"
+              />
+            </div>
+          </div>
           <div className="flex justify-center">
             <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
               <Check className="w-8 h-8 text-green-600" />
