@@ -16,16 +16,17 @@ const STEP2_INPUT_TEMPLATE = `Act as a research analyst.
 Create a full investor profile for {clean_name} ({investor_type}) including:
 Background and career/professional/business history
 Contact details, including verified emails, LinkedIn url, twitter url 
+Best way to approach or pitch them or link to apply online/form/connect/submission page if available
 Current fund or firm and role and hq state, hq country
 Investment stage and check size min and max, fund size, and lead investor or follow-on investor
 Industry and technology focus
 Geographic preference and investment geographies
-Notable investments and exits in format [name](url)
+Notable investments, portfolio companies and exits in format [name](url)
+Co-Investors (individuals or firms) in format [name](url) where url is domain for firm and LinkedIn URL for individual
 Recent deals or activity
 Public quotes, essays, or interviews that reveal investment philosophy
 What this investor looks for in founders
 Red flags or common reasons they pass
-Best way to approach or pitch them
 Recent exclusive articles, podcasts, videos with links
 
 Use structured sections and keep the analysis concise but thorough.
@@ -54,6 +55,7 @@ function buildStep3Schema(isPerson: boolean): string {
     '  "linkedin_url": "",\n' +
     '  "twitter_url": "",\n' +
     '  "emails": [],\n' +
+    '  "apply_url": "",\n' +
     roleField +
     '  "hq_state": "",\n' +
     '  "hq_country": "",\n' +
@@ -67,6 +69,7 @@ function buildStep3Schema(isPerson: boolean): string {
     '  "investment_geographies": [],\n' +
     '  "investment_thesis": "",\n' +
     '  "notable_investments": []\n' +
+    '  "coinvestors": []\n' +
     '}\n\n' +
     roleHint +
     'hq_state, hq_country: as per ISO 3166-2 standard\n' +
@@ -74,7 +77,7 @@ function buildStep3Schema(isPerson: boolean): string {
     'investment_industries: pick from "artificial-intelligence","machine-learning","healthtech","biotech","digital-health","mental-health","wellness","longevity","fitness","consumer-health","medtech","pharma","genomics","bioinformatics","neuroscience","consumer-tech","enterprise-software","saas","vertical-saas","developer-tools","productivity","collaboration","fintech","payments","lending","credit","insurtech","regtech","wealthtech","climate-tech","energy","clean-energy","carbon-removal","sustainability","web3","blockchain","crypto","defi","nft","social-platforms","marketplaces","creator-economy","edtech","hr-tech","future-of-work","mobility","transportation","autonomous-vehicles","robotics","hardware","deep-tech","semiconductors","data-infrastructure","cloud-infrastructure","devops","cybersecurity","security","privacy","identity","digital-identity","consumer-internet","ecommerce","retail-tech","proptech","real-estate","construction-tech","smart-cities","supply-chain","logistics","manufacturing","industrial-tech","agtech","foodtech","gaming","esports","media","entertainment","music-tech","sports-tech","travel-tech","hospitality","martech","adtech","legal-tech","govtech","defense-tech","space-tech","aerospace","iot","edge-computing","network-effects"\n' +
     'investment_geographies: as per ISO 3166-2 standard\n' +
     'investment_thesis: Precise criteria to qualify, starts with Invests in....\n' +
-    'notable_investments: list of strings in format [name](url)'
+    'notable_investments and coinvestors: list of strings in format [name](url)'
   );
 }
 
@@ -507,6 +510,8 @@ export async function POST(req: NextRequest) {
       linkedin_url: extracted?.linkedin_url ?? null,
       twitter_url: extracted?.twitter_url ?? null,
       active: extracted?.active ?? null,
+      apply_url: extracted?.apply_url ?? null,
+      coinvestors: Array.isArray(extracted?.coinvestors) ? extracted.coinvestors : null,
       email: emailStr ?? null,
       ...(entityType === 'Person' && { role: extracted?.role ?? null }),
       hq_state: extracted?.hq_state ?? null,

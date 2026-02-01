@@ -52,6 +52,8 @@ export interface InvestorSearchResult {
   investment_geographies: string[] | null;
   investment_thesis: string | null;
   notable_investments: string[] | null;
+  /** Co-investors in same format as notable_investments: [name](url) */
+  coinvestors?: string[] | null;
   leads_round: boolean | null;
   has_personalization: boolean;
   /** Only populated when has_personalization === true; otherwise null */
@@ -64,6 +66,8 @@ export interface InvestorSearchResult {
   domain?: string | null;
   linkedin_url?: string | null;
   twitter_url?: string | null;
+  /** Apply URL - only when has_personalization */
+  apply_url?: string | null;
   email?: string | null;
   phone?: string | null;
   links?: string[] | null;

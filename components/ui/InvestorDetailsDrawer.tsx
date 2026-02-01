@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, type InvestorNews } from '@/lib/api';
 import { formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT } from '@/hooks/useInvestorSearch';
@@ -97,6 +97,8 @@ export interface InvestorDetails {
   investment_geographies?: string[] | null;
   investment_thesis?: string | null;
   notable_investments?: string[] | string | null;
+  /** Co-investors in same format as notable_investments: [name](url) */
+  coinvestors?: string[] | null;
   leads_round?: boolean | null;
   has_personalization?: boolean;
   /** Personalization fields - only present when has_personalization === true */
@@ -109,6 +111,8 @@ export interface InvestorDetails {
   domain?: string | null;
   linkedin_url?: string | null;
   twitter_url?: string | null;
+  /** Apply URL - only when has_personalization */
+  apply_url?: string | null;
   /** Comma-separated list of emails */
   email?: string | null;
   /** Comma-separated list of phone numbers */
@@ -178,7 +182,7 @@ const formatKebabLabel = (value: string): string =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(' ');
 
-const parseNotableInvestment = (s: string): { name: string; url: string } | null => {
+const parseNotableInvestment: (s: string) => { name: string; url: string } | null = (s) => {
   const match = s.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
   return match ? { name: match[1], url: match[2] } : null;
 };
@@ -781,8 +785,12 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     loadWarmIntros(domains);
   }, [investor?.id, investor?.notable_investments, loadWarmIntros]);
 
+  const newsFetchedWithin7Days =
+    investorNews?.date &&
+    Date.now() - new Date(investorNews.date).getTime() < 7 * 24 * 60 * 60 * 1000;
+
   const handleFetchInvestorNews = useCallback(async () => {
-    if (!investor || investorNewsFetchCooldown) return;
+    if (!investor || investorNewsFetchCooldown || newsFetchedWithin7Days) return;
     setInvestorNewsLoading(true);
     setInvestorNewsError(null);
     const result = await fetchInvestorNews({
@@ -814,7 +822,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     } else if (result?.error) {
       setInvestorNewsError(result.error);
     }
-  }, [investor, investorNewsFetchCooldown, onInvestorChange]);
+  }, [investor, investorNewsFetchCooldown, newsFetchedWithin7Days, onInvestorChange]);
 
   const handleAddNote = useCallback(() => {
     setIsAddingNote(true);
@@ -1340,6 +1348,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 {(investor.domain?.trim() ||
                     investor.linkedin_url?.trim() ||
                     investor.twitter_url?.trim() ||
+                    investor.apply_url?.trim() ||
                     parseCommaList(investor.email).length > 0 ||
                     parseCommaList(investor.phone).length > 0) && (
                     <div>
@@ -1410,6 +1419,18 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                             aria-label="Open Twitter"
                           >
                             <Twitter className="w-5 h-5" />
+                          </a>
+                        )}
+                        {investor.apply_url?.trim() && (
+                          <a
+                            href={investor.apply_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title="Apply"
+                            aria-label="Open Apply URL"
+                          >
+                            <ExternalLink className="w-5 h-5" />
                           </a>
                         )}
                       </div>
@@ -1838,7 +1859,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 )}
                 <button
                   onClick={handleFetchInvestorNews}
-                  disabled={investorNewsLoading || investorNewsFetchCooldown}
+                  disabled={investorNewsLoading || investorNewsFetchCooldown || !!newsFetchedWithin7Days}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-fit"
                 >
                   {investorNewsLoading ? (
@@ -1848,7 +1869,9 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   )}
                   {investorNewsLoading
                     ? 'Fetching...'
-                    : `Fetch Latest News on ${investor?.name || 'this investor'}`}
+                    : newsFetchedWithin7Days
+                      ? 'News fetched recently (try again in 7 days)'
+                      : `Fetch Latest News on ${investor?.name || 'this investor'}`}
                 </button>
               </div>
             </div>
@@ -2283,6 +2306,47 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   <DetailSection
                     label="Notable investments"
                     icon={<ExternalLink className="w-3.5 h-3.5 text-gray-400" />}
+                    value={
+                      items.length > 0 ? (
+                        <ul className="space-y-2">
+                          {items.map((item, idx) => {
+                            const parsed = parseNotableInvestment(item);
+                            const displayName = parsed ? parsed.name : item;
+                            const displayUrl = parsed ? parsed.url : undefined;
+                            return (
+                              <li key={idx} className="flex items-center gap-3">
+                                <CompanyLogo name={displayName} url={displayUrl} />
+                                {parsed ? (
+                                  <a
+                                    href={parsed.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
+                                  >
+                                    {parsed.name}
+                                  </a>
+                                ) : (
+                                  <span className="text-sm text-gray-700">{item}</span>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : (
+                        '-'
+                      )
+                    }
+                  />
+                );
+              })()}
+
+              {/* coinvestors */}
+              {(() => {
+                const items = Array.isArray(investor.coinvestors) ? investor.coinvestors : [];
+                return (
+                  <DetailSection
+                    label="Featured Co-investors"
+                    icon={<Handshake className="w-3.5 h-3.5 text-gray-400" />}
                     value={
                       items.length > 0 ? (
                         <ul className="space-y-2">
