@@ -393,7 +393,7 @@ export default function InvestorsPage() {
 function InvestorsContent() {
   const { user } = useAuth();
   const { availableOwners, isFreePlan } = useOwner();
-  const { openPricingModal } = usePricingModal();
+  const { openPricingModal, openROIModal } = usePricingModal();
   const { onboarding } = useOnboarding();
   const { templates } = useMessageTemplates();
   const [investorSets, setInvestorSets] = useState<string[]>([]);
@@ -1933,13 +1933,22 @@ function InvestorsContent() {
                     <p className="text-sm text-gray-600 text-center">
                     Upgrade your plan to connect with the right investors and complete your raise.
                     </p>
-                    <button
-                      type="button"
-                      onClick={() => openPricingModal()}
-                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
-                    >
-                      Upgrade Plan
-                    </button>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openPricingModal()}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
+                      >
+                        Upgrade Plan
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openROIModal()}
+                        className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 border-2 border-gray-300 hover:border-brand-subtle transition-colors"
+                      >
+                        Why it&apos;s worth it
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
