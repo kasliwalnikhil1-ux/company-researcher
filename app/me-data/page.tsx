@@ -5,6 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
+import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { Database, Plus, Loader2, Trash2 } from 'lucide-react';
 
 const ME_DATA_TYPES = [
@@ -63,6 +64,7 @@ function MeDataContent() {
   const [insertDataRaw, setInsertDataRaw] = useState('');
   const [insertError, setInsertError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [rowToDelete, setRowToDelete] = useState<string | null>(null);
 
   const fetchRows = useCallback(async () => {
     if (!user?.id) {
@@ -127,12 +129,15 @@ function MeDataContent() {
       const { error: deleteErr } = await supabase.from('me_data').delete().eq('id', id);
       if (deleteErr) throw deleteErr;
       await fetchRows();
+      setRowToDelete(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete');
     } finally {
       setDeletingId(null);
     }
   };
+
+  const rowToDeleteType = rows.find((r) => r.id === rowToDelete)?.type ?? 'this entry';
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -247,7 +252,7 @@ function MeDataContent() {
                       <td className="px-4 py-3">
                         <button
                           type="button"
-                          onClick={() => handleDelete(row.id)}
+                          onClick={() => setRowToDelete(row.id)}
                           disabled={deletingId === row.id}
                           className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
                           title="Delete"
@@ -267,6 +272,14 @@ function MeDataContent() {
           </div>
         )}
       </section>
+
+      <DeleteConfirmationModal
+        isOpen={rowToDelete !== null}
+        title="Delete entry"
+        message={`Are you sure you want to delete this ${rowToDeleteType} entry? This cannot be undone.`}
+        onConfirm={() => rowToDelete && handleDelete(rowToDelete)}
+        onCancel={() => setRowToDelete(null)}
+      />
     </div>
   );
 }
