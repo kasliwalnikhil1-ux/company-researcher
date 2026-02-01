@@ -5,7 +5,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
-import { Database, Plus, Loader2 } from 'lucide-react';
+import { Database, Plus, Loader2, Trash2 } from 'lucide-react';
 
 const ME_DATA_TYPES = [
   'Neutral',
@@ -62,6 +62,7 @@ function MeDataContent() {
   const [insertType, setInsertType] = useState<MeDataType>('Neutral');
   const [insertDataRaw, setInsertDataRaw] = useState('');
   const [insertError, setInsertError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchRows = useCallback(async () => {
     if (!user?.id) {
@@ -117,6 +118,19 @@ function MeDataContent() {
       setInsertError(e instanceof Error ? e.message : 'Failed to insert');
     } finally {
       setInserting(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id);
+    try {
+      const { error: deleteErr } = await supabase.from('me_data').delete().eq('id', id);
+      if (deleteErr) throw deleteErr;
+      await fetchRows();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -208,12 +222,13 @@ function MeDataContent() {
                 <tr className="bg-gray-50 border-b border-gray-200">
                   <th className="text-left px-4 py-3 font-medium text-gray-700">Type</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-700">Created</th>
+                  <th className="w-12 px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={2} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
                       No entries yet. Add one above.
                     </td>
                   </tr>
@@ -228,6 +243,21 @@ function MeDataContent() {
                       </td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         {formatDateTime(row.created_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(row.id)}
+                          disabled={deletingId === row.id}
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                          title="Delete"
+                        >
+                          {deletingId === row.id ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="w-4 h-4" />
+                          )}
+                        </button>
                       </td>
                     </tr>
                   ))
