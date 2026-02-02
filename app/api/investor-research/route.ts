@@ -17,7 +17,7 @@ Create a full investor profile for {clean_name} ({investor_type}) including:
 Background and career/professional/business history{person_background_detail}
 Contact details, including verified emails, LinkedIn url, twitter url 
 Best way to approach or pitch them or link to apply online/form/connect/submission page if available
-Current fund or firm and role and hq state, hq country
+Current fund or firm (including [name](url) for firm name and domain) and role and hq state, hq country
 Investment stage and check size min and max, fund size, and lead investor or follow-on investor
 Industry and technology focus
 Geographic preference and investment geographies
@@ -47,11 +47,12 @@ Output valid JSON only`;
 
 function buildStep3Schema(isPerson: boolean): string {
   const personFields = isPerson
-    ? '  "role": "",\n  "work_experience_orgs": [],\n  "education_orgs": [],\n'
-    : '';
+    ? '  "role": "",\n  "current_firm": "",\n  "work_experience_orgs": [],\n  "education_orgs": [],\n'
+    : '  "current_firm": "",\n';
   const roleHint = isPerson
     ? 'role: pick from "CEO / Founder","Partner","Managing Partner","General Partner","Principal","Venture Partner","Operating Partner","Independent Investor / Angel","Associate","Research Analyst","Scout"\n'
     : '';
+  const currentFirmHint = 'current_firm: str, firm name and domain in format [name](url), e.g. [Accel](accel.com)\n';
   const personHints = isPerson
     ? 'work_experience_orgs, education_orgs: list of strings in format [name](url) like coinvestors\n'
     : '';
@@ -77,6 +78,7 @@ function buildStep3Schema(isPerson: boolean): string {
     '  "coinvestors": []\n' +
     '}\n\n' +
     roleHint +
+    currentFirmHint +
     'hq_state, hq_country: as per ISO 3166-2 standard\n' +
     'investment_stages: pick from "pre-seed","seed","post-seed","series-a","series-b","series-c","growth","late-stage","pre-ipo","public-equity","angel"\n' +
     'investment_industries: pick from "artificial-intelligence","machine-learning","healthtech","biotech","digital-health","mental-health","wellness","longevity","fitness","consumer-health","medtech","pharma","genomics","bioinformatics","neuroscience","consumer-tech","enterprise-software","saas","vertical-saas","developer-tools","productivity","collaboration","fintech","payments","lending","credit","insurtech","regtech","wealthtech","climate-tech","energy","clean-energy","carbon-removal","sustainability","web3","blockchain","crypto","defi","nft","social-platforms","marketplaces","creator-economy","edtech","hr-tech","future-of-work","mobility","transportation","autonomous-vehicles","robotics","hardware","deep-tech","semiconductors","data-infrastructure","cloud-infrastructure","devops","cybersecurity","security","privacy","identity","digital-identity","consumer-internet","ecommerce","retail-tech","proptech","real-estate","construction-tech","smart-cities","supply-chain","logistics","manufacturing","industrial-tech","agtech","foodtech","gaming","esports","media","entertainment","music-tech","sports-tech","travel-tech","hospitality","martech","adtech","legal-tech","govtech","defense-tech","space-tech","aerospace","iot","edge-computing","network-effects"\n' +
@@ -104,6 +106,16 @@ function getSupabaseClient() {
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   if (!url || !key) return null;
   return createClient(url, key);
+}
+
+// Parse [name](url) format into { name, url }
+function parseNameUrlFormat(s: string | null | undefined): { name: string; url: string } | null {
+  if (!s || typeof s !== 'string') return null;
+  const m = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(s.trim());
+  if (!m) return null;
+  const name = (m[1] || '').trim();
+  const url = (m[2] || '').trim();
+  return name || url ? { name, url } : null;
 }
 
 // Extract URLs from notable_investments in format [name](url)
@@ -514,6 +526,16 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    // Extract current_firm [name](url) as JSON and console.log (do not update investor table)
+    const currentFirmRaw = extracted?.current_firm;
+    const currentFirmParsed = parseNameUrlFormat(
+      typeof currentFirmRaw === 'string' ? currentFirmRaw : null
+    );
+    const currentFirmJson = currentFirmParsed
+      ? JSON.stringify(currentFirmParsed)
+      : JSON.stringify({ name: null, url: null });
+    console.log('[investor-research] current_firm extracted:', currentFirmJson);
 
     // Build update row from extracted JSON (role only when Person)
     const emailStr = Array.isArray(extracted?.emails) ? extracted.emails.filter(Boolean).join(', ') : null;
