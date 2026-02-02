@@ -54,6 +54,10 @@ export interface InvestorSearchResult {
   notable_investments: string[] | null;
   /** Co-investors in same format as notable_investments: [name](url) */
   coinvestors?: string[] | null;
+  /** For type='person': work experience orgs in format [name](url) */
+  work_experience_orgs?: string[] | null;
+  /** For type='person': education orgs in format [name](url) */
+  education_orgs?: string[] | null;
   leads_round: boolean | null;
   has_personalization: boolean;
   /** Only populated when has_personalization === true; otherwise null */

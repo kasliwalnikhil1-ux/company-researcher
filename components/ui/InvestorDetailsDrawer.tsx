@@ -128,6 +128,10 @@ export interface InvestorDetails {
   associated_firm_name?: string | null;
   /** For type='firm': number of people linked to the firm */
   associated_people_count?: number | null;
+  /** For type='person': work experience orgs in format [name](url) */
+  work_experience_orgs?: string[] | null;
+  /** For type='person': education orgs in format [name](url) */
+  education_orgs?: string[] | null;
 }
 
 interface InvestorDetailsDrawerProps {
@@ -175,8 +179,14 @@ interface InvestorDetailsDrawerProps {
 
 const formatCurrency = (value: number | null | undefined): string => {
   if (value == null || value === 0) return '-';
-  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  if (value >= 1_000_000) {
+    const s = (value / 1_000_000).toFixed(1).replace(/\.0$/, '');
+    return `$${s}M`;
+  }
+  if (value >= 1_000) {
+    const s = (value / 1_000).toFixed(1).replace(/\.0$/, '');
+    return `$${s}K`;
+  }
   return `$${value}`;
 };
 
@@ -2073,6 +2083,64 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 />
               )}
 
+              {/* Associated Firm (persons) / Associated People (firms) + HQ Location - above AI metadata */}
+              {(investor.type === 'person' && (investor.associated_firm_id || investor.associated_firm_name)) ||
+              (investor.type === 'firm' && investor.associated_people_count != null) ||
+              investor.hq_state ||
+              investor.hq_country ? (
+                <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
+                  {investor.type === 'person' && (investor.associated_firm_id || investor.associated_firm_name) && (
+                    <DetailRow
+                      label="Associated Firm"
+                      icon={<Briefcase className="w-4 h-4 text-gray-400" />}
+                      value={
+                        investor.associated_firm_id && onOpenInvestorById ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenInvestorById(investor.associated_firm_id!)}
+                            className="font-semibold text-indigo-600 hover:text-indigo-800 hover:underline text-left"
+                          >
+                            {investor.associated_firm_name || investor.associated_firm_id}
+                          </button>
+                        ) : (
+                          <span className="font-semibold text-gray-900">
+                            {investor.associated_firm_name || investor.associated_firm_id || '-'}
+                          </span>
+                        )
+                      }
+                    />
+                  )}
+                  {investor.type === 'firm' && investor.associated_people_count != null && (
+                    <DetailRow
+                      label="Associated People"
+                      icon={<Users className="w-4 h-4 text-gray-400" />}
+                      value={
+                        investor.associated_people_count === 0 ? (
+                          'No contacts available'
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('contacts')}
+                            className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline text-left"
+                          >
+                            {investor.associated_people_count === 1
+                              ? '1 contact available'
+                              : `${investor.associated_people_count} contacts available`}
+                          </button>
+                        )
+                      }
+                    />
+                  )}
+                  {(investor.hq_state || investor.hq_country) && (
+                    <DetailRow
+                      label="HQ Location"
+                      icon={<MapPin className="w-4 h-4 text-gray-400" />}
+                      value={<span className="font-semibold">{formatHqLocation(investor.hq_state, investor.hq_country)}</span>}
+                    />
+                  )}
+                </div>
+              ) : null}
+
               {investor.ai_metadata && typeof investor.ai_metadata === 'object' && Object.keys(investor.ai_metadata).length > 0 && (
                 <>
                   <hr className="border-gray-200" />
@@ -2279,61 +2347,71 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 </>
               )}
 
-              {/* Associated Firm (persons) / Associated People (firms) + HQ Location - same row */}
-              {(investor.type === 'person' && (investor.associated_firm_id || investor.associated_firm_name)) ||
-              (investor.type === 'firm' && investor.associated_people_count != null) ||
-              investor.hq_state ||
-              investor.hq_country ? (
-                <div className="flex flex-wrap items-start gap-x-6 gap-y-4">
-                  {investor.type === 'person' && (investor.associated_firm_id || investor.associated_firm_name) && (
-                    <DetailRow
-                      label="Associated Firm"
-                      icon={<Briefcase className="w-4 h-4 text-gray-400" />}
-                      value={
-                        investor.associated_firm_id && onOpenInvestorById ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenInvestorById(investor.associated_firm_id!)}
-                            className="font-semibold text-indigo-600 hover:text-indigo-800 hover:underline text-left"
-                          >
-                            {investor.associated_firm_name || investor.associated_firm_id}
-                          </button>
-                        ) : (
-                          <span className="font-semibold text-gray-900">
-                            {investor.associated_firm_name || investor.associated_firm_id || '-'}
-                          </span>
-                        )
-                      }
-                    />
-                  )}
-                  {investor.type === 'firm' && investor.associated_people_count != null && (
-                    <DetailRow
-                      label="Associated People"
-                      icon={<Users className="w-4 h-4 text-gray-400" />}
-                      value={
-                        investor.associated_people_count === 0 ? (
-                          'No contacts available'
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('contacts')}
-                            className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline text-left"
-                          >
-                            {investor.associated_people_count === 1
-                              ? '1 contact available'
-                              : `${investor.associated_people_count} contacts available`}
-                          </button>
-                        )
-                      }
-                    />
-                  )}
-                  {(investor.hq_state || investor.hq_country) && (
-                    <DetailRow
-                      label="HQ Location"
-                      icon={<MapPin className="w-4 h-4 text-gray-400" />}
-                      value={formatHqLocation(investor.hq_state, investor.hq_country)}
-                    />
-                  )}
+              {/* Work Experience + Education (persons only) - 2 cols - above Associated Firm */}
+              {investor.type === 'person' &&
+                ((Array.isArray(investor.work_experience_orgs) && investor.work_experience_orgs.length > 0) ||
+                  (Array.isArray(investor.education_orgs) && investor.education_orgs.length > 0)) ? (
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0">
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Education</h3>
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      {Array.isArray(investor.education_orgs) && investor.education_orgs.length > 0 ? (
+                        investor.education_orgs.map((item, idx) => {
+                          const parsed = parseNotableInvestment(item);
+                          const displayName = parsed ? parsed.name : item;
+                          return (
+                            <li key={idx} className="flex items-center gap-3">
+                              <CompanyLogo name={displayName} url={parsed?.url} />
+                              {parsed ? (
+                                <a
+                                  href={parsed.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                >
+                                  {parsed.name}
+                                </a>
+                              ) : (
+                                <span>{item}</span>
+                              )}
+                            </li>
+                          );
+                        })
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </ul>
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Work Experience</h3>
+                    <ul className="space-y-2 text-sm text-gray-700">
+                      {Array.isArray(investor.work_experience_orgs) && investor.work_experience_orgs.length > 0 ? (
+                        investor.work_experience_orgs.map((item, idx) => {
+                          const parsed = parseNotableInvestment(item);
+                          const displayName = parsed ? parsed.name : item;
+                          return (
+                            <li key={idx} className="flex items-center gap-3">
+                              <CompanyLogo name={displayName} url={parsed?.url} />
+                              {parsed ? (
+                                <a
+                                  href={parsed.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                >
+                                  {parsed.name}
+                                </a>
+                              ) : (
+                                <span>{item}</span>
+                              )}
+                            </li>
+                          );
+                        })
+                      ) : (
+                        <span className="text-gray-400">-</span>
+                      )}
+                    </ul>
+                  </div>
                 </div>
               ) : null}
 

@@ -102,6 +102,12 @@ const SKIP_EXISTING_VALUES =
     ? process.env.SKIP_EXISTING_VALUES === 'true' || process.env.SKIP_EXISTING_VALUES === '1'
     : true;
 
+// pause_contacts: true by default - skip Organization flow (fetch contacts) after Step 3
+const PAUSE_CONTACTS =
+  process.env.PAUSE_CONTACTS !== undefined
+    ? process.env.PAUSE_CONTACTS === 'true' || process.env.PAUSE_CONTACTS === '1'
+    : true;
+
 function getSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -624,7 +630,11 @@ export async function POST(req: NextRequest) {
     let contactsPendingResponse: { firm_id: string; contacts: { input: string; affiliateContactEmail?: string; full_name?: string }[] } | null = null;
 
     // --- Organization flow: get contacts, return for frontend to process ---
-    if (entityType === 'Organization' && domain) {
+    if (PAUSE_CONTACTS) {
+      if (entityType === 'Organization' && domain) {
+        console.log('[investor-research] Organization flow: skipped (PAUSE_CONTACTS=true)');
+      }
+    } else if (entityType === 'Organization' && domain) {
       console.log('[investor-research] Organization flow: fetching contacts for domain:', domain);
       try {
         const investorSearchRes = await fetch(INVESTOR_SEARCH_URL, {

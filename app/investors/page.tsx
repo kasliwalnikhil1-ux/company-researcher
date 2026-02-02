@@ -278,7 +278,7 @@ function storedToFilters(stored: StoredInvestorFilters | null): Partial<Investor
   if (stored.step11?.lookingToRaiseFrom?.length) partial.investor_type = [...stored.step11.lookingToRaiseFrom];
   if (stored.step12?.investorType) {
     const t = stored.step12.investorType;
-    partial.type = t === 'follow_on' ? 'person' : 'firm';
+    // Note: type (Firm/Person) is persisted separately via investors-type; step12 maps to leads_round only
     partial.leads_round = t === 'lead' ? true : t === 'follow_on' ? false : null;
   }
   return partial;
@@ -416,6 +416,8 @@ function InvestorsContent() {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('investors-mode');
       if (saved === 'global' || saved === 'reviewed') base.mode = saved;
+      const savedType = localStorage.getItem('investors-type');
+      if (savedType === 'firm' || savedType === 'person') base.type = savedType;
     }
     return base;
   });
@@ -682,6 +684,13 @@ function InvestorsContent() {
       localStorage.setItem('investors-mode', filters.mode);
     }
   }, [filters.mode]);
+
+  // Save Firm/Person type to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('investors-type', filters.type);
+    }
+  }, [filters.type]);
 
   // Save column order and visibility to localStorage
   useEffect(() => {
