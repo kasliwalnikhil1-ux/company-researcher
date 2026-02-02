@@ -8,7 +8,7 @@ import MainLayout from '@/components/MainLayout';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { Database, Plus, Loader2, Trash2, ChevronLeft, ChevronRight, Play } from 'lucide-react';
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 500;
 
 const ME_DATA_TYPES = [
   'Neutral',
