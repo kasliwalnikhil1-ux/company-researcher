@@ -51,6 +51,7 @@ export interface OnboardingData {
       year: string;
       amount: string;
     }>;
+    currentMilestonesOrTraction?: string;
   };
   step11?: {
     lookingToRaiseFrom?: string[];

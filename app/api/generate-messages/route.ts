@@ -36,6 +36,7 @@ Format it like (some examples for format, not real values):
 Enterprise SaaS – 2x exited founder – US – Pre-Seed
 B2C Delivery – $1M GMV, +30% MoM – Nigeria – Seed
 Crypto / Payment – Lead secured – UK – Series A
+Use milestones/traction from company context when available (e.g. GMV, MoM growth, users, leads).
 
 Email 1
 Hey \${cleaned_name}, {twitter_line}

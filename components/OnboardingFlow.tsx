@@ -7,6 +7,7 @@ import { Check, ArrowLeft, ArrowRight, X, ChevronDown } from 'lucide-react';
 import { DotLottieReact } from '@lottiefiles/dotlottie-react';
 import { SectorSelector, SECTORS } from '@/components/ui/SectorSelector';
 import { Sparkles } from '@/components/ui/Sparkles';
+import { AutoResizeTextarea } from '@/components/ui/AutoResizeTextarea';
 
 // Comprehensive country list
 const COUNTRIES = [
@@ -1604,7 +1605,8 @@ export default function OnboardingFlow() {
             customerDescription: formData.step10?.customerDescription ?? '',
             businessModel: formData.step10?.businessModel ?? [],
             revenueStatus: formData.step10?.revenueStatus ?? 'no',
-            arr: updated
+            arr: updated,
+            currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
           }
         });
       };
@@ -1618,7 +1620,8 @@ export default function OnboardingFlow() {
             customerDescription: formData.step10?.customerDescription ?? '',
             businessModel: formData.step10?.businessModel ?? [],
             revenueStatus: formData.step10?.revenueStatus ?? 'no',
-            arr: updated
+            arr: updated,
+            currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
           }
         });
       };
@@ -1633,19 +1636,20 @@ export default function OnboardingFlow() {
             customerDescription: formData.step10?.customerDescription ?? '',
             businessModel: formData.step10?.businessModel ?? [],
             revenueStatus: formData.step10?.revenueStatus ?? 'no',
-            arr: updated
+            arr: updated,
+            currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
           }
         });
       };
 
-      const BUSINESS_MODEL_OPTIONS = ['B2B', 'B2C', 'Marketplace'];
+      const BUSINESS_MODEL_OPTIONS = ['B2B', 'B2C', 'B2G', 'Marketplace'];
       const businessModelSelected = formData.step10?.businessModel || [];
 
       return (
         <div className="space-y-6">
           <div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Who are your customers? <span className="text-red-500">*</span></h2>
-            <textarea
+            <AutoResizeTextarea
               value={formData.step10?.customerDescription || ''}
               onChange={(e) => setFormData({
                 ...formData,
@@ -1653,16 +1657,17 @@ export default function OnboardingFlow() {
                   customerDescription: e.target.value,
                   businessModel: formData.step10?.businessModel ?? [],
                   revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                  arr: formData.step10?.arr
+                  arr: formData.step10?.arr,
+                  currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                 }
               })}
-              rows={2}
+              minRows={2}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="Describe your target customers..."
             />
           </div>
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></h2>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></label>
             <div className="flex flex-wrap gap-2">
               {BUSINESS_MODEL_OPTIONS.map((option) => {
                 const isSelected = businessModelSelected.includes(option);
@@ -1680,7 +1685,8 @@ export default function OnboardingFlow() {
                           customerDescription: formData.step10?.customerDescription ?? '',
                           businessModel: updated,
                           revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                          arr: formData.step10?.arr
+                          arr: formData.step10?.arr,
+                          currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                         }
                       });
                     }}
@@ -1704,7 +1710,8 @@ export default function OnboardingFlow() {
                     customerDescription: formData.step10?.customerDescription ?? '',
                     businessModel: formData.step10?.businessModel ?? [],
                     revenueStatus: 'yes',
-                    arr: formData.step10?.arr
+                    arr: formData.step10?.arr,
+                    currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                   }
                 })}
                 className={`flex-1 px-6 py-3 border-2 rounded-lg font-medium transition-all ${
@@ -1725,7 +1732,8 @@ export default function OnboardingFlow() {
                       customerDescription: formData.step10?.customerDescription ?? '',
                       businessModel: formData.step10?.businessModel ?? [],
                       revenueStatus: 'no',
-                      arr: cleared
+                      arr: cleared,
+                      currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                     }
                   });
                 }}
@@ -1808,7 +1816,8 @@ export default function OnboardingFlow() {
                       customerDescription: formData.step10?.customerDescription ?? '',
                       businessModel: formData.step10?.businessModel ?? [],
                       revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                      arr: cleared
+                      arr: cleared,
+                      currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                     }
                   });
                 }}
@@ -1818,6 +1827,25 @@ export default function OnboardingFlow() {
               </button>
             </div>
           )}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">Key milestones achieved and early traction (optional)</label>
+            <AutoResizeTextarea
+              value={formData.step10?.currentMilestonesOrTraction || ''}
+              onChange={(e) => setFormData({
+                ...formData,
+                step10: {
+                  customerDescription: formData.step10?.customerDescription ?? '',
+                  businessModel: formData.step10?.businessModel ?? [],
+                  revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                  arr: formData.step10?.arr,
+                  currentMilestonesOrTraction: e.target.value
+                }
+              })}
+              minRows={2}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="e.g. $1M GMV, +30% MoM, Lead secured, 500+ users..."
+            />
+          </div>
         </div>
       );
     }

@@ -115,6 +115,9 @@ export const OwnerProvider = ({ children }: { children: React.ReactNode }) => {
     const stored = localStorage.getItem(OWNER_STORAGE_KEY);
     if (availableOwners.length === 0) {
       setSelectedOwnerState('');
+    } else if (stored === '') {
+      // User explicitly chose "Select" - respect that on load
+      setSelectedOwnerState('');
     } else if (stored && availableOwners.includes(stored)) {
       setSelectedOwnerState(stored);
     } else {

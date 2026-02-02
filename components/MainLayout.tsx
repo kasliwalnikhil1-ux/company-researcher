@@ -1,6 +1,8 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
+import { supabase } from '@/utils/supabase/client';
 import { useOwner } from '@/contexts/OwnerContext';
 import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -8,9 +10,10 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
+import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
 
 // User IDs allowed to access /research when primaryUse is "fundraising"
 const RESEARCH_ALLOWED_USER_IDS = new Set([
@@ -30,18 +33,27 @@ const ME_DATA_ALLOWED_USER_IDS = new Set([
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
 ]);
 
+// User IDs allowed to access Reset Account (same as ME Data)
+const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
+
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const { selectedOwner, setSelectedOwner, availableOwners, ownerColors } = useOwner();
   const defaultOwnerStyles = { bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200' };
   const ownerStyle = ownerColors[selectedOwner] ?? defaultOwnerStyles;
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
-  const { onboarding, loading: onboardingLoading } = useOnboarding();
+  const { onboarding, loading: onboardingLoading, fetchOnboarding } = useOnboarding();
+  const { refreshTemplates } = useMessageTemplates();
   const router = useRouter();
   const pathname = usePathname();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isResetAccountModalOpen, setIsResetAccountModalOpen] = useState(false);
+  const [isResettingAccount, setIsResettingAccount] = useState(false);
 
   const primaryUse = useMemo(
     () => onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising',
@@ -56,6 +68,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       : true;
     const canAccessPersonalization = PERSONALIZATION_ALLOWED_USER_IDS.has(user?.id ?? '');
     const canAccessMeData = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
+    const canAccessResetAccount = isFundraising && RESET_ACCOUNT_ALLOWED_USER_IDS.has(user?.id ?? '');
     return {
       showResearch: isFundraising ? canAccessResearch : true,
       showCompanies: isB2B,
@@ -69,12 +82,15 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       canAccessEnrich: isB2B,
       canAccessPersonalization,
       canAccessMeData,
+      canAccessResetAccount,
       defaultRoute: isFundraising && !canAccessResearch ? '/investors' : '/',
     };
   }, [primaryUse, user?.id]);
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
-  const showOnboarding = !onboardingLoading && !onboarding?.completed;
+  // me-data and me-data-prospects are accessible irrespective of onboarding
+  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects';
+  const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute;
 
   // Detect mobile screen size
   useEffect(() => {
@@ -139,6 +155,33 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.push('/login');
     } catch (error) {
       console.error('Error signing out:', error);
+    }
+  };
+
+  const handleResetAccountConfirm = async () => {
+    if (isResettingAccount) return;
+    try {
+      setIsResettingAccount(true);
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        console.error('No session');
+        return;
+      }
+      const res = await fetch('/api/reset-account', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.details || res.statusText);
+      }
+      setIsResetAccountModalOpen(false);
+      await Promise.all([fetchOnboarding(), refreshTemplates()]);
+    } catch (error) {
+      console.error('Reset account failed:', error);
+      alert(error instanceof Error ? error.message : 'Failed to reset account');
+    } finally {
+      setIsResettingAccount(false);
     }
   };
 
@@ -410,6 +453,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             </>
           )}
 
+          {routeAccess.canAccessResetAccount && (
+            <button
+              type="button"
+              onClick={() => setIsResetAccountModalOpen(true)}
+              className={`flex items-center w-full ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
+              title="Reset Account"
+            >
+              <RotateCcw className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Reset Account</span>}
+            </button>
+          )}
+
           <a
             href="https://calendly.com/founders-capitalxai/20min"
             target="_blank"
@@ -448,6 +503,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                     </>
                   ) : (
                     <>
+                      <option value="">— Select —</option>
                       {availableOwners.map((owner) => (
                         <option key={owner} value={owner} className="bg-white text-gray-900">
                           {owner}
@@ -512,6 +568,16 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       </main>
 
       <BookDemoButton />
+
+      <DeleteConfirmationModal
+        isOpen={isResetAccountModalOpen}
+        title="Reset Account"
+        message="This will clear your onboarding, all investor personalization data, and all message templates. You will need to complete onboarding again. This cannot be undone."
+        onConfirm={handleResetAccountConfirm}
+        onCancel={() => !isResettingAccount && setIsResetAccountModalOpen(false)}
+        confirmText={isResettingAccount ? 'Resetting…' : 'Reset Account'}
+        confirmDisabled={isResettingAccount}
+      />
     </div>
   );
 }

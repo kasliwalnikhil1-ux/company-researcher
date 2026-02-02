@@ -4,7 +4,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, type InvestorNews } from '@/lib/api';
-import { formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
+import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT } from '@/hooks/useInvestorSearch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
@@ -169,6 +169,8 @@ interface InvestorDetailsDrawerProps {
   clipboardLinkedInColumn?: string | null;
   subjectColumn?: string | null;
   phoneClickBehavior?: 'whatsapp' | 'call';
+  /** When true, clipboard content is from an email template - don't add greeting/signature to compose body */
+  isClipboardEmailChannel?: boolean;
   emailSettings?: EmailSettings | null;
   getInvestorCellValue?: (investor: InvestorDetails, columnKey: string) => string;
   columnLabels?: Record<string, string>;
@@ -496,6 +498,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   clipboardLinkedInColumn = null,
   subjectColumn = null,
   phoneClickBehavior = 'whatsapp',
+  isClipboardEmailChannel = false,
   emailSettings = null,
   getInvestorCellValue,
   columnLabels = {},
@@ -1329,46 +1332,24 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
             /* Pipeline tab content */
             <div className="space-y-6">
               <div className="space-y-4">
-                {/* Owner, Set, Stage - always shown, editable */}
+                {/* Stage, Set, Owner - always shown, editable */}
                 {updateInvestor && (
                   <div className="space-y-4">
                     <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Pipeline</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Stage</label>
                         <select
-                          value={investor.owner?.trim() ?? ''}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            if (val === '__add_owners__') {
-                              router.push('/account');
-                              return;
-                            }
-                            handlePipelineFieldChange('owner', val || null);
-                          }}
+                          value={investor.stage?.trim() ?? 'Identified'}
+                          onChange={(e) => handlePipelineFieldChange('stage', e.target.value || null)}
                           disabled={pipelineSaving}
-                          className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 ${
-                            ownerOptions.length === 0
-                              ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
-                              : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
-                          }`}
+                          className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
                         >
-                          {ownerOptions.length === 0 ? (
-                            <>
-                              <option value="">— No owners in Account —</option>
-                              <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
-                            </>
-                          ) : (
-                            <>
-                              <option value="">— Select —</option>
-                              {ownerOptions.map((o: string) => (
-                                <option key={o} value={o}>
-                                  {o}
-                                </option>
-                              ))}
-                              <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
-                            </>
-                          )}
+                          {stageOptions.map((s: string) => (
+                            <option key={s} value={s}>
+                              {s}
+                            </option>
+                          ))}
                         </select>
                       </div>
                       <div>
@@ -1409,18 +1390,40 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Stage</label>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
                         <select
-                          value={investor.stage?.trim() ?? 'Identified'}
-                          onChange={(e) => handlePipelineFieldChange('stage', e.target.value || null)}
+                          value={investor.owner?.trim() ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '__add_owners__') {
+                              router.push('/account');
+                              return;
+                            }
+                            handlePipelineFieldChange('owner', val || null);
+                          }}
                           disabled={pipelineSaving}
-                          className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
+                          className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 ${
+                            ownerOptions.length === 0
+                              ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
+                              : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
+                          }`}
                         >
-                          {stageOptions.map((s: string) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
+                          {ownerOptions.length === 0 ? (
+                            <>
+                              <option value="">— No owners in Account —</option>
+                              <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="">— Select —</option>
+                              {ownerOptions.map((o: string) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                              <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                            </>
+                          )}
                         </select>
                       </div>
                     </div>
@@ -1539,7 +1542,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                 if (clipboardColumn && getInvestorCellValue) {
                                   const clipVal = getInvestorCellValue(investor, clipboardColumn);
                                   if (clipVal && clipVal !== '-') {
-                                    body = buildEmailBody(clipVal, 'Hi,\n\n', emailSettings);
+                                    body = isClipboardEmailChannel ? clipVal : buildEmailBody(clipVal, 'Hi,\n\n', emailSettings);
                                   }
                                 }
                                 const href = buildEmailComposeUrl(e, { subject, body, emailSettings });
@@ -2510,7 +2513,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           key={g}
                           className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-sky-50 text-sky-800"
                         >
-                          {g}
+                          {formatGeographyForDisplay(g)}
                         </span>
                       ))}
                     </div>

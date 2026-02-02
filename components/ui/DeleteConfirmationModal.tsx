@@ -10,6 +10,7 @@ interface DeleteConfirmationModalProps {
   onCancel: () => void;
   confirmText?: string;
   cancelText?: string;
+  confirmDisabled?: boolean;
 }
 
 const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
@@ -20,6 +21,7 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
   onCancel,
   confirmText = 'Delete',
   cancelText = 'Cancel',
+  confirmDisabled = false,
 }) => {
   if (!isOpen) return null;
 
@@ -56,7 +58,8 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
           </button>
           <button
             onClick={onConfirm}
-            className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+            disabled={confirmDisabled}
+            className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {confirmText}
           </button>

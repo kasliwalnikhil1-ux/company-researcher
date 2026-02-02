@@ -34,7 +34,7 @@ import {
   List,
   Download,
 } from 'lucide-react';
-import { formatHqLocationShort, getCountryName, resolveCountryInput } from '@/lib/isoCodes';
+import { formatGeographyForDisplay, formatHqLocationShort, getCountryName, resolveCountryInput } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
 import { fetchInvestorAnalyze } from '@/lib/api';
@@ -46,7 +46,7 @@ import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
-import { copyToClipboard, extractPhoneNumber } from '@/lib/utils';
+import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csvExport';
 
 // Filter options - must match what's stored in backend (investor-research API)
@@ -196,20 +196,6 @@ const GEOGRAPHY_OPTIONS = [
   'APAC',
   'EMEA',
 ];
-
-/** Region codes that are not ISO country codes - map to display names */
-const GEOGRAPHY_REGION_LABELS: Record<string, string> = {
-  EU: 'European Union',
-  LATAM: 'Latin America',
-  APAC: 'Asia-Pacific',
-  EMEA: 'Europe, Middle East & Africa',
-};
-
-function formatGeographyLabel(code: string): string {
-  const regionLabel = GEOGRAPHY_REGION_LABELS[code];
-  if (regionLabel) return regionLabel;
-  return getCountryName(code) || code;
-}
 
 const ROLE_OPTIONS = [
   'CEO / Founder',
@@ -436,7 +422,7 @@ function InvestorsContent() {
   const [toastVisible, setToastVisible] = useState(false);
   const [reportMissingModalOpen, setReportMissingModalOpen] = useState(false);
   const [insufficientCreditsModalOpen, setInsufficientCreditsModalOpen] = useState(false);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [analyzingIds, setAnalyzingIds] = useState<Set<string>>(new Set());
   const [showCelebration, setShowCelebration] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   /** Pending analyze results for immediate card update before refresh completes */
@@ -528,19 +514,25 @@ function InvestorsContent() {
   });
   const [clipboardColumn, setClipboardColumn] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(INVESTORS_CLIPBOARD_COLUMN_KEY) || null;
+      const raw = localStorage.getItem(INVESTORS_CLIPBOARD_COLUMN_KEY) || null;
+      if (raw?.startsWith('template_') || raw?.startsWith('template_label:')) return null;
+      return raw;
     }
     return null;
   });
   const [clipboardLinkedInColumn, setClipboardLinkedInColumn] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY) || null;
+      const raw = localStorage.getItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY) || null;
+      if (raw?.startsWith('template_') || raw?.startsWith('template_label:')) return null;
+      return raw;
     }
     return null;
   });
   const [subjectColumn, setSubjectColumn] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(INVESTORS_SUBJECT_COLUMN_KEY) || null;
+      const raw = localStorage.getItem(INVESTORS_SUBJECT_COLUMN_KEY) || null;
+      if (raw?.startsWith('template_') || raw?.startsWith('template_label:')) return null;
+      return raw;
     }
     return null;
   });
@@ -624,12 +616,35 @@ function InvestorsContent() {
       getTemplateColumnKeys().forEach((c) => next.add(c));
       setVisibleColumns(next);
     }
-    if (cs.clipboardColumn != null) setClipboardColumn(cs.clipboardColumn);
-    if (cs.clipboardLinkedInColumn != null) setClipboardLinkedInColumn(cs.clipboardLinkedInColumn);
-    if (cs.subjectColumn != null) setSubjectColumn(cs.subjectColumn);
+    if (cs.clipboardColumn != null) {
+      const resolved = templates.length > 0 ? storedToColumnKeyForTemplateSelection(cs.clipboardColumn, templates) : cs.clipboardColumn;
+      setClipboardColumn(resolved ?? cs.clipboardColumn);
+    }
+    if (cs.clipboardLinkedInColumn != null) {
+      const resolved = templates.length > 0 ? storedToColumnKeyForTemplateSelection(cs.clipboardLinkedInColumn, templates) : cs.clipboardLinkedInColumn;
+      setClipboardLinkedInColumn(resolved ?? cs.clipboardLinkedInColumn);
+    }
+    if (cs.subjectColumn != null) {
+      const resolved = templates.length > 0 ? storedToColumnKeyForTemplateSelection(cs.subjectColumn, templates) : cs.subjectColumn;
+      setSubjectColumn(resolved ?? cs.subjectColumn);
+    }
     if (cs.phoneClickBehavior) setPhoneClickBehavior(cs.phoneClickBehavior);
     setColumnSettingsFromApi(null);
   }, [columnSettingsFromApi, getTemplateColumnKeys]);
+
+  // Re-resolve LinkedIn/Email/Subject column selections when templates change (e.g. template deleted and recreated with same name)
+  useEffect(() => {
+    if (templates.length === 0) return;
+    const storedClipboard = typeof window !== 'undefined' ? localStorage.getItem(INVESTORS_CLIPBOARD_COLUMN_KEY) : null;
+    const storedLinkedIn = typeof window !== 'undefined' ? localStorage.getItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY) : null;
+    const storedSubject = typeof window !== 'undefined' ? localStorage.getItem(INVESTORS_SUBJECT_COLUMN_KEY) : null;
+    const resolvedClipboard = storedClipboard ? storedToColumnKeyForTemplateSelection(storedClipboard, templates) : null;
+    const resolvedLinkedIn = storedLinkedIn ? storedToColumnKeyForTemplateSelection(storedLinkedIn, templates) : null;
+    const resolvedSubject = storedSubject ? storedToColumnKeyForTemplateSelection(storedSubject, templates) : null;
+    setClipboardColumn((prev) => (storedClipboard ? (resolvedClipboard ?? null) : prev));
+    setClipboardLinkedInColumn((prev) => (storedLinkedIn ? (resolvedLinkedIn ?? null) : prev));
+    setSubjectColumn((prev) => (storedSubject ? (resolvedSubject ?? null) : prev));
+  }, [templates]);
 
   // Sync column order when templates change
   useEffect(() => {
@@ -705,22 +720,25 @@ function InvestorsContent() {
   }, [visibleColumns]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      if (clipboardColumn) localStorage.setItem(INVESTORS_CLIPBOARD_COLUMN_KEY, clipboardColumn);
+      const stored = columnKeyToStoredForTemplateSelection(clipboardColumn ?? '', templates);
+      if (stored) localStorage.setItem(INVESTORS_CLIPBOARD_COLUMN_KEY, stored);
       else localStorage.removeItem(INVESTORS_CLIPBOARD_COLUMN_KEY);
     }
-  }, [clipboardColumn]);
+  }, [clipboardColumn, templates]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      if (clipboardLinkedInColumn) localStorage.setItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY, clipboardLinkedInColumn);
+      const stored = columnKeyToStoredForTemplateSelection(clipboardLinkedInColumn ?? '', templates);
+      if (stored) localStorage.setItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY, stored);
       else localStorage.removeItem(INVESTORS_CLIPBOARD_LINKEDIN_COLUMN_KEY);
     }
-  }, [clipboardLinkedInColumn]);
+  }, [clipboardLinkedInColumn, templates]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      if (subjectColumn) localStorage.setItem(INVESTORS_SUBJECT_COLUMN_KEY, subjectColumn);
+      const stored = columnKeyToStoredForTemplateSelection(subjectColumn ?? '', templates);
+      if (stored) localStorage.setItem(INVESTORS_SUBJECT_COLUMN_KEY, stored);
       else localStorage.removeItem(INVESTORS_SUBJECT_COLUMN_KEY);
     }
-  }, [subjectColumn]);
+  }, [subjectColumn, templates]);
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem(INVESTORS_PHONE_CLICK_BEHAVIOR_KEY, phoneClickBehavior);
@@ -750,16 +768,16 @@ function InvestorsContent() {
         investors: {
           columnOrder,
           visibleColumns: Array.from(visibleColumns),
-          clipboardColumn: clipboardColumn ?? null,
-          clipboardLinkedInColumn: clipboardLinkedInColumn ?? null,
-          subjectColumn: subjectColumn ?? null,
+          clipboardColumn: columnKeyToStoredForTemplateSelection(clipboardColumn ?? '', templates) || null,
+          clipboardLinkedInColumn: columnKeyToStoredForTemplateSelection(clipboardLinkedInColumn ?? '', templates) || null,
+          subjectColumn: columnKeyToStoredForTemplateSelection(subjectColumn ?? '', templates) || null,
           phoneClickBehavior,
         },
       },
     };
     const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
     if (error) throw error;
-  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, clipboardLinkedInColumn, subjectColumn, phoneClickBehavior]);
+  }, [user?.id, columnOrder, visibleColumns, clipboardColumn, clipboardLinkedInColumn, subjectColumn, phoneClickBehavior, templates]);
 
   // Sync drawer investor with refreshed data (e.g. after analyze) so personalization fields appear
   useEffect(() => {
@@ -812,9 +830,13 @@ function InvestorsContent() {
 
   const handleAnalyze = useCallback(
     async (investorId: string, investorName?: string) => {
-      setAnalyzingId(investorId);
+      setAnalyzingIds((prev) => new Set([...prev, investorId]));
       const result = await fetchInvestorAnalyze(investorId, onboarding ?? undefined, plan ?? undefined);
-      setAnalyzingId(null);
+      setAnalyzingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(investorId);
+        return next;
+      });
       if (result?.error) {
         if (result.errorCode === 'INSUFFICIENT_CREDITS') {
           setInsufficientCreditsModalOpen(true);
@@ -1008,7 +1030,7 @@ function InvestorsContent() {
       investor_type: 'Investor Type',
       investment_stages: 'Stages',
       investment_industries: 'Industries',
-      investment_geographies: 'Geographies',
+      investment_geographies: 'Investment Geographies',
       hq_location: 'HQ Location',
       investment_thesis: 'Thesis',
       fund_size_usd: 'Fund Size',
@@ -1046,8 +1068,14 @@ function InvestorsContent() {
   }, []);
 
   const orderedVisibleColumns = useMemo(
-    () => columnOrder.filter((col) => visibleColumns.has(col)),
-    [columnOrder, visibleColumns]
+    () =>
+      columnOrder.filter((col) => {
+        if (!visibleColumns.has(col)) return false;
+        // Hide Role column in Firm mode - Role is only for Person
+        if (col === 'role' && filters.type === 'firm') return false;
+        return true;
+      }),
+    [columnOrder, visibleColumns, filters.type]
   );
 
   const getMessageForInvestorTemplate = useCallback(
@@ -1101,7 +1129,9 @@ function InvestorsContent() {
             ? investor.investment_industries.map(formatKebabLabel).join(', ')
             : '-';
         case 'investment_geographies':
-          return Array.isArray(investor.investment_geographies) ? investor.investment_geographies.join(', ') : '-';
+          return Array.isArray(investor.investment_geographies)
+            ? investor.investment_geographies.map(formatGeographyForDisplay).join(', ')
+            : '-';
         case 'hq_location':
           return loc || '-';
         case 'investment_thesis':
@@ -1430,7 +1460,7 @@ function InvestorsContent() {
     if (filters.name) parts.push(`Search: ${filters.name}`);
     if (filters.investment_stages.length) parts.push(`Stage: ${filters.investment_stages.join(', ')}`);
     if (filters.investment_industries.length) parts.push(`Industry: ${filters.investment_industries.join(', ')}`);
-    if (filters.investment_geographies.length) parts.push(`Geography: ${filters.investment_geographies.join(', ')}`);
+    if (filters.investment_geographies.length) parts.push(`Investment Geography: ${filters.investment_geographies.join(', ')}`);
     if (filters.hq_country) parts.push(`Country: ${filters.hq_country}`);
     if (filters.mode === 'reviewed') {
       if (filters.reviewed_stage.length) parts.push(`Pipeline Stage: ${filters.reviewed_stage.join(', ')}`);
@@ -1647,6 +1677,13 @@ function InvestorsContent() {
             </>
           ) : (
             <>
+          <button
+            onClick={() => setColumnFilterOpen(!columnFilterOpen)}
+            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <Filter className="w-4 h-4" />
+            Manage Columns
+          </button>
           {/* View Toggle: List/Table (List first, default) */}
           <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
             <button
@@ -1673,13 +1710,6 @@ function InvestorsContent() {
               <Table className="w-4 h-4" />
             </button>
           </div>
-          <button
-            onClick={() => setColumnFilterOpen(!columnFilterOpen)}
-            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-          >
-            <Filter className="w-4 h-4" />
-            Manage Columns
-          </button>
           {/* All / Reviewed toggle */}
           <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
             <button
@@ -1767,21 +1797,24 @@ function InvestorsContent() {
                 </button>
               )}
             </div>
-            <select
-              value={filters.type}
-              onChange={(e) => {
-                const newType = e.target.value as InvestorTypeFilter;
-                setFilters((prev) => ({
-                  ...prev,
-                  type: newType,
-                  role: newType === 'firm' ? null : prev.role,
-                }));
-              }}
-              className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px]"
-            >
-              <option value="firm">Firm</option>
-              <option value="person">Person</option>
-            </select>
+            <div className="relative">
+              <select
+                value={filters.type}
+                onChange={(e) => {
+                  const newType = e.target.value as InvestorTypeFilter;
+                  setFilters((prev) => ({
+                    ...prev,
+                    type: newType,
+                    role: newType === 'firm' ? null : prev.role,
+                  }));
+                }}
+                className="pl-3 pr-9 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px] appearance-none"
+              >
+                <option value="firm">Firm</option>
+                <option value="person">Person</option>
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+            </div>
           </div>
           <button
             onClick={() => setFiltersExpanded(!filtersExpanded)}
@@ -1822,11 +1855,11 @@ function InvestorsContent() {
                 formatLabel={formatKebabLabel}
               />
               <MultiSelectFilter
-                label="Geographies"
+                label="Investment Geographies"
                 options={GEOGRAPHY_OPTIONS}
                 selected={filters.investment_geographies}
                 onToggle={(item) => toggleArrayFilter('investment_geographies', item)}
-                formatLabel={formatGeographyLabel}
+                formatLabel={formatGeographyForDisplay}
               />
               {filters.type === 'person' && (
                 <div>
@@ -2148,7 +2181,8 @@ function InvestorsContent() {
                             if (clipboardColumn) {
                               const clipVal = getInvestorCellValue(investor, clipboardColumn, pendingAnalyzeResults[investor.id]);
                               if (clipVal && clipVal !== '-') {
-                                body = buildEmailBody(clipVal, 'Hi,\n\n', emailSettings);
+                                const isClipboardEmailChannel = templates.some((t) => `template_${t.id}` === clipboardColumn && t.channel === 'email');
+                                body = isClipboardEmailChannel ? clipVal : buildEmailBody(clipVal, 'Hi,\n\n', emailSettings);
                               }
                             }
                             href = buildEmailComposeUrl(email, { subject, body, emailSettings });
@@ -2312,11 +2346,11 @@ function InvestorsContent() {
                             ) : (
                               <button
                                 onClick={() => handleAnalyze(investor.id, investor.name)}
-                                disabled={analyzingId === investor.id}
+                                disabled={analyzingIds.has(investor.id)}
                                 className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50"
                                 title={`Analyze ${investor.name || 'investor'} with AI`}
                               >
-                                {analyzingId === investor.id ? (
+                                {analyzingIds.has(investor.id) ? (
                                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                 ) : (
                                   <Sparkles className="w-3.5 h-3.5" />
@@ -2376,7 +2410,7 @@ function InvestorsContent() {
                     setDrawerOpen(true);
                   }}
                 onAnalyze={() => handleAnalyze(investor.id, investor.name)}
-                isAnalyzing={analyzingId === investor.id}
+                isAnalyzing={analyzingIds.has(investor.id)}
                 />
               ))}
               {/* Free plan: skeletons + Upgrade button below the 5 results */}
@@ -2480,7 +2514,7 @@ function InvestorsContent() {
         backToInvestor={backToInvestor}
         backToFirm={backToFirm}
         onAnalyze={(id) => handleAnalyze(id, investorToView?.name)}
-        isAnalyzing={investorToView ? analyzingId === investorToView.id : false}
+        isAnalyzing={investorToView ? analyzingIds.has(investorToView.id) : false}
         updateInvestor={updateInvestor}
         stageOptions={REVIEWED_STAGE_OPTIONS}
         setOptions={investorSets}
@@ -2492,6 +2526,7 @@ function InvestorsContent() {
         subjectColumn={subjectColumn}
         phoneClickBehavior={phoneClickBehavior}
         emailSettings={emailSettings}
+        isClipboardEmailChannel={templates.some((t) => `template_${t.id}` === clipboardColumn && t.channel === 'email')}
         getInvestorCellValue={(inv, col) => getInvestorCellValue(inv as InvestorSearchResult, col, pendingAnalyzeResults[inv.id])}
         columnLabels={columnLabels}
         onCopyToClipboard={(msg) => {
@@ -2521,7 +2556,7 @@ function InvestorsContent() {
                 }`}
                 autoFocus
               >
-                <option value="">Clear set</option>
+                <option value="">— Select —</option>
                 {investorSets.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -2596,7 +2631,7 @@ function InvestorsContent() {
                   </>
                 ) : (
                   <>
-                    <option value="">Clear owner</option>
+                    <option value="">— Select —</option>
                     {availableOwners.map((o) => (
                       <option key={o} value={o}>
                         {o}
@@ -2634,7 +2669,7 @@ function InvestorsContent() {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Stage</h2>
             <p className="text-gray-600 mb-4">
-              Assign a pipeline stage to {selectedInvestorIds.size} selected investor{selectedInvestorIds.size === 1 ? '' : 's'}. Leave empty to clear the stage.
+              Assign a pipeline stage to {selectedInvestorIds.size} selected investor{selectedInvestorIds.size === 1 ? '' : 's'}.
             </p>
             <div className="mb-6">
               <label className="block text-sm font-medium text-gray-700 mb-2">Stage</label>
@@ -2644,7 +2679,7 @@ function InvestorsContent() {
                 className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 autoFocus
               >
-                <option value="">Clear stage</option>
+                <option value="" disabled>Select a stage</option>
                 {REVIEWED_STAGE_OPTIONS.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -2664,7 +2699,8 @@ function InvestorsContent() {
               </button>
               <button
                 onClick={handleBulkAssignStage}
-                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
+                disabled={!assignStage.trim()}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Assign
               </button>
@@ -2747,13 +2783,16 @@ function MultiSelectFilter({
   selected,
   onToggle,
   formatLabel = (v: string) => v,
+  searchPlaceholder,
 }: {
   label: string;
   options: string[];
   selected: string[];
   onToggle: (item: string) => void;
   formatLabel?: (value: string) => string;
+  searchPlaceholder?: string;
 }) {
+  const placeholder = searchPlaceholder ?? `Search ${label.toLowerCase()}...`;
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const searchLower = search.trim().toLowerCase();
@@ -2786,7 +2825,7 @@ function MultiSelectFilter({
             <div className="p-2 border-b border-gray-100 sticky top-0 bg-white">
               <input
                 type="text"
-                placeholder="Search..."
+                placeholder={placeholder}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 onClick={(e) => e.stopPropagation()}
@@ -2865,18 +2904,21 @@ function ToggleFilter({
   return (
     <div className="flex items-center gap-2">
       <span className="text-sm font-medium text-gray-700">{label}</span>
-      <select
-        value={value === null ? 'all' : value ? 'yes' : 'no'}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange(v === 'all' ? null : v === 'yes');
-        }}
-        className="px-2 py-1 border border-gray-300 rounded text-sm"
-      >
-        <option value="all">All</option>
-        <option value="yes">Yes</option>
-        <option value="no">No</option>
-      </select>
+      <div className="relative">
+        <select
+          value={value === null ? 'all' : value ? 'yes' : 'no'}
+          onChange={(e) => {
+            const v = e.target.value;
+            onChange(v === 'all' ? null : v === 'yes');
+          }}
+          className="pl-2 pr-8 py-1 border border-gray-300 rounded text-sm appearance-none min-w-[72px]"
+        >
+          <option value="all">All</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+        <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+      </div>
     </div>
   );
 }

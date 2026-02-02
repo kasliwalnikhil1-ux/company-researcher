@@ -88,6 +88,26 @@ export function formatHqLocationShort(
   return parts.filter(Boolean).join(', ') || '';
 }
 
+/** Region codes that are not ISO country codes - map to display names */
+const GEOGRAPHY_REGION_LABELS: Record<string, string> = {
+  EU: 'European Union',
+  LATAM: 'Latin America',
+  APAC: 'Asia-Pacific',
+  EMEA: 'Europe, Middle East & Africa',
+};
+
+/**
+ * Format a geography code (ISO country, subdivision, or region) for display.
+ */
+export function formatGeographyForDisplay(code: string | null | undefined): string {
+  if (!code?.trim()) return '';
+  const c = code.trim();
+  const regionLabel = GEOGRAPHY_REGION_LABELS[c];
+  if (regionLabel) return regionLabel;
+  if (c.includes('-')) return getSubdivisionName(c) || c;
+  return getCountryName(c) || c;
+}
+
 /**
  * Resolve user input (name or code) to ISO 3166-1 alpha-2 country code for search.
  * Accepts: "India", "United States", "US", "USA", "IN", etc.

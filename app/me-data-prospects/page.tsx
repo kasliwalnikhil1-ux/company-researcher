@@ -140,14 +140,26 @@ function MeDataProspectsContent() {
   const handleDownloadCsv = async () => {
     if (!user?.id) return;
     try {
-      const { data, error: fetchError } = await supabase
-        .from('me_data_prospects')
-        .select('linkedin_url, name, headline, intent, status, convo_date')
-        .eq('user_id', user.id)
-        .order('convo_date', { ascending: false, nullsFirst: false });
+      const BATCH_SIZE = 1000;
+      const allRows: ProspectRow[] = [];
+      let offset = 0;
+      let hasMore = true;
 
-      if (fetchError) throw fetchError;
-      const allRows = (data ?? []) as ProspectRow[];
+      while (hasMore) {
+        const { data, error: fetchError } = await supabase
+          .from('me_data_prospects')
+          .select('linkedin_url, name, headline, intent, status, convo_date')
+          .eq('user_id', user.id)
+          .order('convo_date', { ascending: false, nullsFirst: false })
+          .range(offset, offset + BATCH_SIZE - 1);
+
+        if (fetchError) throw fetchError;
+        const batch = (data ?? []) as ProspectRow[];
+        allRows.push(...batch);
+        hasMore = batch.length === BATCH_SIZE;
+        offset += BATCH_SIZE;
+      }
+
       const csv = prospectsToCsv(allRows, [...visibleColumns]);
       downloadCsv(csv, 'me-data-prospects.csv');
     } catch (e) {

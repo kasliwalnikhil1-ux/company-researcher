@@ -8,6 +8,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import Toast from '@/components/ui/Toast';
 import { SectorSelector } from '@/components/ui/SectorSelector';
+import { AutoResizeTextarea } from '@/components/ui/AutoResizeTextarea';
 import { Building2, Save, X, ChevronDown } from 'lucide-react';
 
 // Same constants as OnboardingFlow
@@ -1036,7 +1037,7 @@ function CompanyProfileContent() {
             <div className="space-y-4">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">Who are your customers? <span className="text-red-500">*</span></h2>
-                <textarea
+                <AutoResizeTextarea
                   value={formData.step10.customerDescription || ''}
                   onChange={(e) => setFormData({
                     ...formData,
@@ -1044,18 +1045,19 @@ function CompanyProfileContent() {
                       customerDescription: e.target.value,
                       businessModel: formData.step10?.businessModel ?? [],
                       revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                      arr: formData.step10?.arr
+                      arr: formData.step10?.arr,
+                      currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                     }
                   })}
-                  rows={4}
+                  minRows={2}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="Describe your target customers..."
                 />
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></h2>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Business model (select all that apply) <span className="text-red-500">*</span></label>
                 <div className="flex flex-wrap gap-2">
-                  {['B2B', 'B2C', 'Marketplace'].map((option) => {
+                  {['B2B', 'B2C', 'B2G', 'Marketplace'].map((option) => {
                     const isSelected = (formData.step10?.businessModel ?? []).includes(option);
                     return (
                       <button
@@ -1070,7 +1072,8 @@ function CompanyProfileContent() {
                               customerDescription: formData.step10?.customerDescription ?? '',
                               businessModel: updated,
                               revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                              arr: formData.step10?.arr
+                              arr: formData.step10?.arr,
+                              currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                             }
                           });
                         }}
@@ -1094,7 +1097,8 @@ function CompanyProfileContent() {
                         customerDescription: formData.step10?.customerDescription ?? '',
                         businessModel: formData.step10?.businessModel ?? [],
                         revenueStatus: 'yes',
-                        arr: formData.step10?.arr
+                        arr: formData.step10?.arr,
+                        currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                       }
                     })}
                     className={`flex-1 px-6 py-3 border-2 rounded-lg font-medium transition-all ${
@@ -1112,7 +1116,8 @@ function CompanyProfileContent() {
                         customerDescription: formData.step10?.customerDescription ?? '',
                         businessModel: formData.step10?.businessModel ?? [],
                         revenueStatus: 'no',
-                        arr: []
+                        arr: [],
+                        currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                       }
                     })}
                     className={`flex-1 px-6 py-3 border-2 rounded-lg font-medium transition-all ${
@@ -1123,6 +1128,25 @@ function CompanyProfileContent() {
                   >
                     No
                   </button>
+                </div>
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Key milestones achieved and early traction (optional)</label>
+                  <AutoResizeTextarea
+                    value={formData.step10?.currentMilestonesOrTraction || ''}
+                    onChange={(e) => setFormData({
+                      ...formData,
+                      step10: {
+                        customerDescription: formData.step10?.customerDescription ?? '',
+                        businessModel: formData.step10?.businessModel ?? [],
+                        revenueStatus: formData.step10?.revenueStatus ?? 'no',
+                        arr: formData.step10?.arr,
+                        currentMilestonesOrTraction: e.target.value
+                      }
+                    })}
+                    minRows={2}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    placeholder="e.g. $1M GMV, +30% MoM, Lead secured, 500+ users..."
+                  />
                 </div>
               </div>
               {formData.step10?.revenueStatus === 'yes' && (
@@ -1143,7 +1167,8 @@ function CompanyProfileContent() {
                                 customerDescription: formData.step10?.customerDescription ?? '',
                                 businessModel: formData.step10?.businessModel ?? [],
                                 revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                                arr: updated
+                                arr: updated,
+                                currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                               }
                             });
                           }}
@@ -1169,7 +1194,8 @@ function CompanyProfileContent() {
                                 customerDescription: formData.step10?.customerDescription ?? '',
                                 businessModel: formData.step10?.businessModel ?? [],
                                 revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                                arr: updated
+                                arr: updated,
+                                currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                               }
                             });
                           }}
@@ -1193,7 +1219,8 @@ function CompanyProfileContent() {
                                 customerDescription: formData.step10?.customerDescription ?? '',
                                 businessModel: formData.step10?.businessModel ?? [],
                                 revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                                arr: updated
+                                arr: updated,
+                                currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                               }
                             });
                           }}
@@ -1210,7 +1237,8 @@ function CompanyProfileContent() {
                               customerDescription: formData.step10?.customerDescription ?? '',
                               businessModel: formData.step10?.businessModel ?? [],
                               revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                              arr: updated
+                              arr: updated,
+                              currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                             }
                           });
                         }}
@@ -1229,7 +1257,8 @@ function CompanyProfileContent() {
                           customerDescription: formData.step10?.customerDescription ?? '',
                           businessModel: formData.step10?.businessModel ?? [],
                           revenueStatus: formData.step10?.revenueStatus ?? 'no',
-                          arr: updated
+                          arr: updated,
+                          currentMilestonesOrTraction: formData.step10?.currentMilestonesOrTraction ?? ''
                         }
                       });
                     }}

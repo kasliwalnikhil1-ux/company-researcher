@@ -100,6 +100,66 @@ export function extractPhoneNumber(text: string): string {
   return cleaned;
 }
 
+/** Template column label format - must match investors page columnLabels */
+const TEMPLATE_CHANNEL_LABELS: Record<string, string> = {
+  direct: 'Direct Message',
+  instagram: 'Instagram Message',
+  email: 'Email',
+  linkedin: 'LinkedIn',
+};
+
+/**
+ * Returns the display label for a template column (e.g. "Subject - Email").
+ * Must match the format used in investors page columnLabels.
+ */
+export function getTemplateColumnLabel(template: { title: string; channel: string }): string {
+  const channelLabel = TEMPLATE_CHANNEL_LABELS[template.channel] ?? template.channel;
+  return `${template.title} - ${channelLabel}`;
+}
+
+const TEMPLATE_LABEL_PREFIX = 'template_label:';
+
+/**
+ * Converts a column key to a stored value for persistence.
+ * For template columns (template_<id>), stores by name (template_label:<title> - <channel>)
+ * so selections survive template delete+recreate with same name.
+ * For non-template columns, returns the key as-is.
+ */
+export function columnKeyToStoredForTemplateSelection(
+  columnKey: string,
+  templates: Array<{ id: string; title: string; channel: string }>
+): string {
+  if (!columnKey?.startsWith('template_')) return columnKey;
+  const templateId = columnKey.replace('template_', '');
+  const template = templates.find((t) => t.id === templateId);
+  if (!template) return columnKey; // orphaned template, keep as-is
+  return `${TEMPLATE_LABEL_PREFIX}${getTemplateColumnLabel(template)}`;
+}
+
+/**
+ * Resolves a stored value back to a column key.
+ * For template_label:<label>, finds the template with matching label and returns template_<id>.
+ * For legacy template_<id>, returns as-is if template exists; otherwise tries to resolve by label (not possible for deleted).
+ * For non-template columns, returns as-is.
+ */
+export function storedToColumnKeyForTemplateSelection(
+  stored: string | null,
+  templates: Array<{ id: string; title: string; channel: string }>
+): string | null {
+  if (!stored) return null;
+  if (stored.startsWith(TEMPLATE_LABEL_PREFIX)) {
+    const label = stored.slice(TEMPLATE_LABEL_PREFIX.length);
+    const template = templates.find((t) => getTemplateColumnLabel(t) === label);
+    return template ? `template_${template.id}` : null;
+  }
+  if (stored.startsWith('template_')) {
+    const templateId = stored.replace('template_', '');
+    const exists = templates.some((t) => t.id === templateId);
+    return exists ? stored : null; // legacy: template deleted, clear selection
+  }
+  return stored;
+}
+
 /**
  * Extracts domain from various input formats
  * Supports:
@@ -185,7 +245,7 @@ export interface OnboardingDataForSummary {
   step7?: { stage?: string | string[] };
   step8?: { hqCountry?: string };
   step9?: { productDescription?: string };
-  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[]; customerDescription?: string };
+  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[]; customerDescription?: string; currentMilestonesOrTraction?: string };
   step11?: { targetRoundSize?: string; lookingToRaiseFrom?: string[] };
   b2bStep3?: { companyName?: string; websiteUrl?: string; companySize?: string; yourRole?: string };
   b2bStep4?: { productOrService?: string };
@@ -302,6 +362,12 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
     }
   } else {
     parts.push('Current Revenue: No revenue yet.');
+  }
+
+  // Current milestones or traction (step10)
+  const currentMilestonesOrTraction = data.step10?.currentMilestonesOrTraction?.trim();
+  if (currentMilestonesOrTraction) {
+    parts.push(`Current milestones / traction: ${currentMilestonesOrTraction}`);
   }
 
   // HQ (step8)

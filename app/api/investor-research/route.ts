@@ -144,6 +144,22 @@ function extractDomainsFromNotableInvestments(notableInvestments: string[] | nul
   return [...urls];
 }
 
+// Normalize URL for comparison (origin + normalized path)
+function normalizeUrlForCompare(url: string | null | undefined): string | null {
+  if (!url || typeof url !== 'string') return null;
+  const s = url.trim();
+  if (!s) return null;
+  try {
+    const full = s.startsWith('http') ? s : `https://${s}`;
+    const u = new URL(full);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = (u.pathname || '/').replace(/\/+$/, '') || '/';
+    return `https://${host}${path}`;
+  } catch {
+    return null;
+  }
+}
+
 // Clean domain or LinkedIn URL for display and API use
 export function cleanInvestorInput(input: string): { cleaned: string; type: 'domain' | 'linkedin'; domain: string | null; linkedinUrl: string | null } {
   if (!input || typeof input !== 'string') {
@@ -592,11 +608,20 @@ export async function POST(req: NextRequest) {
 
     // Build update row from extracted JSON (role only when Person)
     const emailStr = Array.isArray(extracted?.emails) ? extracted.emails.filter(Boolean).join(', ') : null;
+    let applyUrl = extracted?.apply_url ?? null;
+    // If apply_url is same as website (from domain), set to null
+    if (applyUrl && domain) {
+      const websiteNorm = normalizeUrlForCompare(`https://${domain}`);
+      const applyNorm = normalizeUrlForCompare(applyUrl);
+      if (websiteNorm && applyNorm && websiteNorm === applyNorm) {
+        applyUrl = null;
+      }
+    }
     const updateRow: Record<string, unknown> = {
       linkedin_url: extracted?.linkedin_url ?? null,
       twitter_url: extracted?.twitter_url ?? null,
       active: extracted?.active ?? null,
-      apply_url: extracted?.apply_url ?? null,
+      apply_url: applyUrl,
       coinvestors: Array.isArray(extracted?.coinvestors) ? extracted.coinvestors : null,
       email: emailStr ?? null,
       ...(entityType === 'Person' && {

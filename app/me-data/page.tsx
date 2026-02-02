@@ -14,7 +14,7 @@ const ME_DATA_ALLOWED_USER_IDS = new Set([
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
 ]);
 
-const PAGE_SIZE = 500;
+const PAGE_SIZE = 20;
 
 const ME_DATA_TYPES = [
   'Neutral',
@@ -223,18 +223,20 @@ function MeDataContent() {
     });
   };
 
+  const unprocessedRows = rows.filter((r) => !r.processed);
   const toggleAllOnPage = () => {
-    const allSelected = rows.every((r) => selectedIds.has(r.id));
+    const selectableRows = unprocessedRows;
+    const allSelected = selectableRows.length > 0 && selectableRows.every((r) => selectedIds.has(r.id));
     if (allSelected) {
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        rows.forEach((r) => next.delete(r.id));
+        selectableRows.forEach((r) => next.delete(r.id));
         return next;
       });
     } else {
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        rows.forEach((r) => next.add(r.id));
+        selectableRows.forEach((r) => next.add(r.id));
         return next;
       });
     }
@@ -356,7 +358,21 @@ function MeDataContent() {
       {/* List */}
       <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
         <div className="p-6 pb-0 flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold text-gray-900">Entries</h2>
+          <div className="flex items-center gap-4">
+            <h2 className="text-lg font-semibold text-gray-900">Entries</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Filter:</label>
+              <select
+                value={processedFilter}
+                onChange={(e) => setProcessedFilter(e.target.value as 'all' | 'processed' | 'unprocessed')}
+                className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="all">All</option>
+                <option value="processed">Processed</option>
+                <option value="unprocessed">Unprocessed</option>
+              </select>
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             {selectedIds.size > 0 && (
               <button
@@ -378,18 +394,6 @@ function MeDataContent() {
                 )}
               </button>
             )}
-            <div className="flex items-center gap-2">
-              <label className="text-sm font-medium text-gray-700">Show:</label>
-              <select
-                value={processedFilter}
-                onChange={(e) => setProcessedFilter(e.target.value as 'all' | 'processed' | 'unprocessed')}
-                className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="all">All</option>
-                <option value="processed">Processed</option>
-                <option value="unprocessed">Unprocessed</option>
-              </select>
-            </div>
           </div>
         </div>
         {processError && (
@@ -418,11 +422,11 @@ function MeDataContent() {
                   <th className="w-10 px-4 py-3">
                     <input
                       type="checkbox"
-                      checked={rows.length > 0 && rows.every((r) => selectedIds.has(r.id))}
+                      checked={unprocessedRows.length > 0 && unprocessedRows.every((r) => selectedIds.has(r.id))}
                       onChange={toggleAllOnPage}
-                      disabled={bulkProcessing}
+                      disabled={bulkProcessing || unprocessedRows.length === 0}
                       className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                      aria-label="Select all on page"
+                      aria-label="Select all unprocessed on page"
                     />
                   </th>
                   <th className="text-left px-4 py-3 font-medium text-gray-700">Type</th>
@@ -449,9 +453,9 @@ function MeDataContent() {
                           type="checkbox"
                           checked={selectedIds.has(row.id)}
                           onChange={() => toggleRowSelection(row.id)}
-                          disabled={bulkProcessing}
+                          disabled={bulkProcessing || !!row.processed}
                           className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                          aria-label={`Select ${row.type ?? 'entry'}`}
+                          aria-label={row.processed ? 'Already processed' : `Select ${row.type ?? 'entry'}`}
                         />
                       </td>
                       <td className="px-4 py-3 font-medium text-gray-900">

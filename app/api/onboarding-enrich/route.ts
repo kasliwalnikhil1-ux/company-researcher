@@ -52,6 +52,7 @@ async function processUrlWithKeys(
   schema: Record<string, unknown>
 ): Promise<{ results?: Array<{ summary?: string }> }> {
   if (EXA_API_KEYS.length === 0) {
+    console.error('[onboarding-enrich] No Exa API keys configured');
     throw new Error('No Exa API keys configured');
   }
   const shuffledKeys = [...EXA_API_KEYS].sort(() => Math.random() - 0.5);
@@ -60,13 +61,17 @@ async function processUrlWithKeys(
     try {
       return await makeExaCall(url, key, query, schema);
     } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
       if (isCreditError(error)) {
+        console.warn('[onboarding-enrich] Exa credit/quota error, trying next key:', msg);
         lastError = error;
         continue;
       }
+      console.error('[onboarding-enrich] Exa API call failed for url:', url, 'error:', msg);
       throw error;
     }
   }
+  console.error('[onboarding-enrich] All Exa API keys exhausted for url:', url, 'lastError:', lastError instanceof Error ? lastError.message : lastError);
   throw lastError ?? new Error('All API keys exhausted');
 }
 
@@ -177,6 +182,7 @@ export async function POST(req: NextRequest) {
     const { websiteurl, flowType } = body;
 
     if (!websiteurl || typeof websiteurl !== 'string') {
+      console.error('[onboarding-enrich] Bad request: websiteurl missing or invalid', { websiteurl: body?.websiteurl });
       return NextResponse.json(
         { error: 'websiteurl is required' },
         { status: 400 }
@@ -187,9 +193,12 @@ export async function POST(req: NextRequest) {
     const { query, schema } = getQueryAndSchema(flow);
     const normalizedUrl = cleanUrl(websiteurl);
 
+    console.log('[onboarding-enrich] Starting enrich for url:', normalizedUrl, 'flow:', flow);
+
     const result = await processUrlWithKeys(normalizedUrl, query, schema);
 
     if (!result?.results?.length) {
+      console.error('[onboarding-enrich] No results from Exa API for url:', normalizedUrl, 'raw:', JSON.stringify(result));
       return NextResponse.json(
         { error: 'No results returned from Exa API' },
         { status: 500 }
@@ -198,6 +207,7 @@ export async function POST(req: NextRequest) {
 
     const first = result.results[0];
     if (!first?.summary) {
+      console.error('[onboarding-enrich] No summary in Exa response for url:', normalizedUrl, 'first:', JSON.stringify(first));
       return NextResponse.json(
         { error: 'No summary in Exa API response' },
         { status: 500 }
@@ -208,6 +218,8 @@ export async function POST(req: NextRequest) {
     try {
       data = JSON.parse(first.summary);
     } catch (e) {
+      const parseErr = e instanceof Error ? e.message : String(e);
+      console.error('[onboarding-enrich] JSON parse failed for url:', normalizedUrl, 'error:', parseErr, 'raw_summary_length:', first.summary?.length);
       return NextResponse.json(
         { error: 'Failed to parse summary data', raw_summary: first.summary },
         { status: 500 }
@@ -217,7 +229,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error('Onboarding enrich API error:', error);
+    const stack = error instanceof Error ? error.stack : undefined;
+    console.error('[onboarding-enrich] API error:', message, 'stack:', stack);
     return NextResponse.json(
       { error: 'Onboarding enrich failed', details: message },
       { status: 500 }
