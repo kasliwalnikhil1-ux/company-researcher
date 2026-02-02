@@ -6,7 +6,9 @@ import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
-import { Database, Plus, Loader2, Trash2 } from 'lucide-react';
+import { Database, Plus, Loader2, Trash2, ChevronLeft, ChevronRight, Play } from 'lucide-react';
+
+const PAGE_SIZE = 20;
 
 const ME_DATA_TYPES = [
   'Neutral',
@@ -25,6 +27,7 @@ type MeDataRow = {
   id: string;
   user_id: string;
   type: string | null;
+  processed: boolean | null;
   created_at: string;
 };
 
@@ -65,36 +68,64 @@ function MeDataContent() {
   const [insertError, setInsertError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rowToDelete, setRowToDelete] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processError, setProcessError] = useState<string | null>(null);
+  const [processedFilter, setProcessedFilter] = useState<'all' | 'processed' | 'unprocessed'>('all');
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
 
-  const fetchRows = useCallback(async () => {
+  const fetchRows = useCallback(async (overridePage?: number) => {
     if (!user?.id) {
       setLoading(false);
       return;
     }
+    const pageToUse = overridePage ?? page;
     try {
       setLoading(true);
       setError(null);
-      const { data, error: fetchError } = await supabase
+      let query = supabase
         .from('me_data')
-        .select('id, user_id, type, created_at')
+        .select('id, user_id, type, processed, created_at', { count: 'exact' })
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
+
+      if (processedFilter === 'processed') {
+        query = query.eq('processed', true);
+      } else if (processedFilter === 'unprocessed') {
+        query = query.or('processed.is.null,processed.eq.false');
+      }
+
+      const from = (pageToUse - 1) * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, error: fetchError, count } = await query.range(from, to);
 
       if (fetchError) {
         throw fetchError;
       }
-      setRows((data ?? []) as MeDataRow[]);
+      const rowsData = (data ?? []) as MeDataRow[];
+      setRows(rowsData);
+      setTotalCount(count ?? 0);
+      if (rowsData.length === 0 && pageToUse > 1 && (count ?? 0) > 0) {
+        setPage(pageToUse - 1);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load ME Data');
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, processedFilter, page]);
 
   useEffect(() => {
     fetchRows();
   }, [fetchRows]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelectedIds(new Set());
+  }, [processedFilter]);
 
   const handleInsert = async () => {
     if (!user?.id) return;
@@ -115,7 +146,8 @@ function MeDataContent() {
       });
       if (insertErr) throw insertErr;
       setInsertDataRaw('');
-      await fetchRows();
+      setPage(1);
+      await fetchRows(1);
     } catch (e) {
       setInsertError(e instanceof Error ? e.message : 'Failed to insert');
     } finally {
@@ -137,7 +169,105 @@ function MeDataContent() {
     }
   };
 
+  const handleProcess = async (id: string) => {
+    setProcessingId(id);
+    setProcessError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated');
+      }
+      const res = await fetch('/api/me-data-process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ meDataId: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || data.details || 'Failed to process');
+      }
+      await fetchRows();
+    } catch (e) {
+      setProcessError(e instanceof Error ? e.message : 'Failed to process');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const toggleRowSelection = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllOnPage = () => {
+    const allSelected = rows.every((r) => selectedIds.has(r.id));
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        rows.forEach((r) => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        rows.forEach((r) => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const handleBulkProcess = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkProcessing(true);
+    setProcessError(null);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      setProcessingId(id);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.access_token) {
+          throw new Error('Not authenticated');
+        }
+        const res = await fetch('/api/me-data-process', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ meDataId: id }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || data.details || 'Failed to process');
+        }
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        await fetchRows();
+      } catch (e) {
+        setProcessError(e instanceof Error ? e.message : 'Failed to process');
+        break;
+      } finally {
+        setProcessingId(null);
+      }
+    }
+    setBulkProcessing(false);
+  };
+
   const rowToDeleteType = rows.find((r) => r.id === rowToDelete)?.type ?? 'this entry';
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const hasPrev = page > 1;
+  const hasNext = page < totalPages;
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -208,7 +338,50 @@ function MeDataContent() {
 
       {/* List */}
       <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-        <h2 className="text-lg font-semibold text-gray-900 p-6 pb-0">Entries</h2>
+        <div className="p-6 pb-0 flex flex-wrap items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold text-gray-900">Entries</h2>
+          <div className="flex items-center gap-3">
+            {selectedIds.size > 0 && (
+              <button
+                type="button"
+                onClick={handleBulkProcess}
+                disabled={bulkProcessing}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {bulkProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Processing {selectedIds.size}…
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Bulk process ({selectedIds.size})
+                  </>
+                )}
+              </button>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="text-sm font-medium text-gray-700">Show:</label>
+              <select
+                value={processedFilter}
+                onChange={(e) => setProcessedFilter(e.target.value as 'all' | 'processed' | 'unprocessed')}
+                className="px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="all">All</option>
+                <option value="processed">Processed</option>
+                <option value="unprocessed">Unprocessed</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        {processError && (
+          <div className="mx-6 mt-4">
+            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {processError}
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="p-12 flex items-center justify-center gap-2 text-gray-500">
             <Loader2 className="w-5 h-5 animate-spin" />
@@ -225,15 +398,26 @@ function MeDataContent() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="w-10 px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && rows.every((r) => selectedIds.has(r.id))}
+                      onChange={toggleAllOnPage}
+                      disabled={bulkProcessing}
+                      className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label="Select all on page"
+                    />
+                  </th>
                   <th className="text-left px-4 py-3 font-medium text-gray-700">Type</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-700">Processed</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-700">Created</th>
-                  <th className="w-12 px-4 py-3"></th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-700">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
                       No entries yet. Add one above.
                     </td>
                   </tr>
@@ -241,34 +425,101 @@ function MeDataContent() {
                   rows.map((row) => (
                     <tr
                       key={row.id}
-                      className="border-b border-gray-100 last:border-0 hover:bg-gray-50"
+                      className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 ${selectedIds.has(row.id) ? 'bg-indigo-50' : ''}`}
                     >
+                      <td className="w-10 px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(row.id)}
+                          onChange={() => toggleRowSelection(row.id)}
+                          disabled={bulkProcessing}
+                          className="w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          aria-label={`Select ${row.type ?? 'entry'}`}
+                        />
+                      </td>
                       <td className="px-4 py-3 font-medium text-gray-900">
                         {row.type ?? '—'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
+                            row.processed
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-gray-100 text-gray-600'
+                          }`}
+                        >
+                          {row.processed ? 'Processed' : 'Unprocessed'}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         {formatDateTime(row.created_at)}
                       </td>
-                      <td className="px-4 py-3">
-                        <button
-                          type="button"
-                          onClick={() => setRowToDelete(row.id)}
-                          disabled={deletingId === row.id}
-                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                          title="Delete"
-                        >
-                          {deletingId === row.id ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
-                        </button>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleProcess(row.id)}
+                            disabled={processingId === row.id || bulkProcessing}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50"
+                            title="Process data"
+                          >
+                            {processingId === row.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Play className="w-4 h-4" />
+                            )}
+                            Process
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRowToDelete(row.id)}
+                            disabled={deletingId === row.id}
+                            className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
+                            title="Delete"
+                          >
+                            {deletingId === row.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-4 h-4" />
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+        {!loading && !error && totalCount > 0 && (
+          <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-4">
+            <p className="text-sm text-gray-500">
+              Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, totalCount)} of {totalCount}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={!hasPrev}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Previous
+              </button>
+              <span className="text-sm text-gray-600">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={!hasNext}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Next
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
       </section>

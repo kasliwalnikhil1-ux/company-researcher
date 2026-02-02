@@ -1885,7 +1885,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               {plan === 'basic' ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3">
                   <p className="text-sm text-gray-600 text-center">
-                    Investor content & updates is not part of your current plan
+                    Investor content and updates is not part of your current plan
                   </p>
                   <button
                     type="button"

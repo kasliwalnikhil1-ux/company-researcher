@@ -153,7 +153,7 @@ const PLANS: PlanConfig[] = [
         ],
       },
       {
-        title: 'Content & updates',
+        title: 'Content and updates',
         items: [
           'Recent exclusive articles, podcasts, videos with links',
           'Latest investor news, updates, articles & videos',

@@ -14,7 +14,7 @@ const FOUNDER_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v
 const STEP2_INPUT_TEMPLATE = `Act as a research analyst.
 
 Create a full investor profile for {clean_name} ({investor_type}) including:
-Background and career/professional/business history
+Background and career/professional/business history{person_background_detail}
 Contact details, including verified emails, LinkedIn url, twitter url 
 Best way to approach or pitch them or link to apply online/form/connect/submission page if available
 Current fund or firm and role and hq state, hq country
@@ -46,9 +46,14 @@ Use accurate text.
 Output valid JSON only`;
 
 function buildStep3Schema(isPerson: boolean): string {
-  const roleField = isPerson ? '  "role": "",\n' : '';
+  const personFields = isPerson
+    ? '  "role": "",\n  "work_experience_orgs": [],\n  "education_orgs": [],\n'
+    : '';
   const roleHint = isPerson
     ? 'role: pick from "CEO / Founder","Partner","Managing Partner","General Partner","Principal","Venture Partner","Operating Partner","Independent Investor / Angel","Associate","Research Analyst","Scout"\n'
+    : '';
+  const personHints = isPerson
+    ? 'work_experience_orgs, education_orgs: list of strings in format [name](url) like coinvestors\n'
     : '';
   return (
     '{\n' +
@@ -56,7 +61,7 @@ function buildStep3Schema(isPerson: boolean): string {
     '  "twitter_url": "",\n' +
     '  "emails": [],\n' +
     '  "apply_url": "",\n' +
-    roleField +
+    personFields +
     '  "hq_state": "",\n' +
     '  "hq_country": "",\n' +
     '  "leads_round": true,\n' +
@@ -68,7 +73,7 @@ function buildStep3Schema(isPerson: boolean): string {
     '  "investment_industries": [],\n' +
     '  "investment_geographies": [],\n' +
     '  "investment_thesis": "",\n' +
-    '  "notable_investments": []\n' +
+    '  "notable_investments": [],\n' +
     '  "coinvestors": []\n' +
     '}\n\n' +
     roleHint +
@@ -77,7 +82,8 @@ function buildStep3Schema(isPerson: boolean): string {
     'investment_industries: pick from "artificial-intelligence","machine-learning","healthtech","biotech","digital-health","mental-health","wellness","longevity","fitness","consumer-health","medtech","pharma","genomics","bioinformatics","neuroscience","consumer-tech","enterprise-software","saas","vertical-saas","developer-tools","productivity","collaboration","fintech","payments","lending","credit","insurtech","regtech","wealthtech","climate-tech","energy","clean-energy","carbon-removal","sustainability","web3","blockchain","crypto","defi","nft","social-platforms","marketplaces","creator-economy","edtech","hr-tech","future-of-work","mobility","transportation","autonomous-vehicles","robotics","hardware","deep-tech","semiconductors","data-infrastructure","cloud-infrastructure","devops","cybersecurity","security","privacy","identity","digital-identity","consumer-internet","ecommerce","retail-tech","proptech","real-estate","construction-tech","smart-cities","supply-chain","logistics","manufacturing","industrial-tech","agtech","foodtech","gaming","esports","media","entertainment","music-tech","sports-tech","travel-tech","hospitality","martech","adtech","legal-tech","govtech","defense-tech","space-tech","aerospace","iot","edge-computing","network-effects"\n' +
     'investment_geographies: as per ISO 3166-2 standard\n' +
     'investment_thesis: Precise criteria to qualify, starts with Invests in....\n' +
-    'notable_investments and coinvestors: list of strings in format [name](url)'
+    'notable_investments and coinvestors: list of strings in format [name](url)\n' +
+    personHints
   );
 }
 
@@ -435,9 +441,14 @@ export async function POST(req: NextRequest) {
 
     // Step 2: fashion-deep-search
     const investorTypeStr = investorTypes?.join(', ') || '';
+    const personBackgroundDetail =
+      entityType === 'Person'
+        ? ', including companies they worked at and schools/universities they attended in format [name](url)'
+        : '';
     const step2Input = STEP2_INPUT_TEMPLATE
       .replace('{clean_name}', cleanName || '')
-      .replace('{investor_type}', investorTypeStr);
+      .replace('{investor_type}', investorTypeStr)
+      .replace('{person_background_detail}', personBackgroundDetail);
 
     console.log('[investor-research] Step 2: Calling fashion-deep-search for:', cleanName);
 
@@ -513,7 +524,11 @@ export async function POST(req: NextRequest) {
       apply_url: extracted?.apply_url ?? null,
       coinvestors: Array.isArray(extracted?.coinvestors) ? extracted.coinvestors : null,
       email: emailStr ?? null,
-      ...(entityType === 'Person' && { role: extracted?.role ?? null }),
+      ...(entityType === 'Person' && {
+        role: extracted?.role ?? null,
+        work_experience_orgs: Array.isArray(extracted?.work_experience_orgs) ? extracted.work_experience_orgs : null,
+        education_orgs: Array.isArray(extracted?.education_orgs) ? extracted.education_orgs : null,
+      }),
       hq_state: extracted?.hq_state ?? null,
       hq_country: extracted?.hq_country ?? null,
       investor_type: Array.isArray(extracted?.investor_type) ? extracted.investor_type : investorTypes,
