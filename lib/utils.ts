@@ -185,7 +185,7 @@ export interface OnboardingDataForSummary {
   step7?: { stage?: string | string[] };
   step8?: { hqCountry?: string };
   step9?: { productDescription?: string };
-  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[] };
+  step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[]; customerDescription?: string };
   step11?: { targetRoundSize?: string; lookingToRaiseFrom?: string[] };
   b2bStep3?: { companyName?: string; websiteUrl?: string; companySize?: string; yourRole?: string };
   b2bStep4?: { productOrService?: string };
@@ -278,6 +278,12 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
   const businessModel = data.step10?.businessModel;
   if (Array.isArray(businessModel) && businessModel.length > 0) {
     parts.push(`Business model: ${businessModel.join(', ')}.`);
+  }
+
+  // Customer description (step10)
+  const customerDescription = data.step10?.customerDescription?.trim();
+  if (customerDescription) {
+    parts.push(`Customers: ${customerDescription}`);
   }
 
   // Revenue status (step10)

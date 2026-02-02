@@ -4,11 +4,13 @@
  * This module provides centralized configuration and helper functions for Azure OpenAI and Google Gemini API calls.
  * Uses API key authentication. Keys must be set via environment variables (no hardcoded fallbacks).
  *
+ * Default: Gemini first, fallback to Azure on failure (missing key, API error).
+ *
  * Usage:
- *   const response = await callAzureOpenAI(payload);
- *   const response = await callAzureOpenAI(payload, { provider: "gemini" });
- *   const result = await getCompletion(messages, { provider: "gemini" });
- *   const result = await getJsonCompletion(messages, { provider: "gemini" });
+ *   const response = await callAzureOpenAI(payload);  // Gemini default, Azure fallback
+ *   const response = await callAzureOpenAI(payload, { provider: "azure" });  // Azure only
+ *   const result = await getCompletion(messages);  // Gemini default, Azure fallback
+ *   const result = await getJsonCompletion(messages, { provider: "azure" });  // Azure only
  */
 
 import 'server-only';
@@ -23,7 +25,7 @@ const API_KEY = process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_API_KEY ||
 
 // Gemini Configuration (key from env only)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
-const GEMINI_MODEL_ID = process.env.GEMINI_MODEL_ID || "gemini-2.5-flash";
+const GEMINI_MODEL_ID = process.env.GEMINI_MODEL_ID || "gemini-3-flash-preview";
 const GEMINI_BASE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}";
 
 // Initialize Azure OpenAI client with API key authentication
@@ -144,12 +146,15 @@ async function callGeminiApi(
     }
   }
 
-  // Build Gemini request body
+  // Build Gemini request body (non-streaming: generateContent endpoint)
   const body: any = {
     contents: geminiContents,
     generationConfig: {
       temperature: temperature,
       maxOutputTokens: maxTokens,
+      thinkingConfig: {
+        thinkingLevel: "MEDIUM",
+      },
     },
   };
 
@@ -261,22 +266,58 @@ async function callGeminiApi(
 
 /**
  * Make a call to Azure OpenAI API or Gemini API using the SDK.
+ * Default: try Gemini first, fallback to Azure on failure.
  */
 export async function callAzureOpenAI(
   payload: AzureOpenAIPayload,
   options: CallOptions = {}
 ): Promise<AzureOpenAIResponse> {
-  const { provider = "azure" } = options;
+  const { provider = "gemini" } = options;
 
-  // Route to appropriate provider
-  if (provider.toLowerCase() === "gemini") {
-    return await callGeminiApi(payload);
+  // If explicitly Azure, use Azure only
+  if (provider.toLowerCase() === "azure") {
+    if (!API_KEY) {
+      throw new Error("Azure OpenAI API key is not set. Please set AZURE_OPENAI_API_KEY.");
+    }
+    const result = await callAzureOpenAIInternal(payload, options);
+    console.log(`[azureOpenAiHelper] Used: Azure OpenAI (${result.model})`);
+    return result;
   }
 
-  // Default: Azure OpenAI
+  // Default / Gemini: try Gemini first, fallback to Azure
+  try {
+    if (GEMINI_API_KEY) {
+      const result = await callGeminiApi(payload);
+      console.log(`[azureOpenAiHelper] Used: Gemini (${result.model})`);
+      return result;
+    }
+  } catch (geminiError) {
+    const errorStr =
+      geminiError instanceof Error
+        ? `${geminiError.name}: ${geminiError.message}\n${geminiError.stack ?? ""}`
+        : String(geminiError);
+    console.error("[azureOpenAiHelper] Gemini error:", errorStr);
+    console.warn("[azureOpenAiHelper] Gemini failed, falling back to Azure");
+  }
+
+  // Fallback to Azure
   if (!API_KEY) {
-    throw new Error("Azure OpenAI API key is not set. Please set AZURE_OPENAI_API_KEY.");
+    throw new Error(
+      "Neither Gemini nor Azure is configured. Set GEMINI_API_KEY or AZURE_OPENAI_API_KEY."
+    );
   }
+  const result = await callAzureOpenAIInternal(payload, options);
+  console.log(`[azureOpenAiHelper] Used: Azure OpenAI (${result.model}) [fallback]`);
+  return result;
+}
+
+/**
+ * Internal Azure OpenAI call (no fallback logic).
+ */
+async function callAzureOpenAIInternal(
+  payload: AzureOpenAIPayload,
+  options: CallOptions = {}
+): Promise<AzureOpenAIResponse> {
 
   // Extract parameters from payload
   const messages = payload.messages || [];
@@ -406,10 +447,10 @@ export async function getCompletion(
     max_tokens = 4000,
     response_format = "json_object",
     endpoint,
-    provider = "azure",
+    provider = "gemini",
   } = options;
 
-  const providerName = provider.toLowerCase() === "gemini" ? "Gemini" : "Azure OpenAI";
+  const providerName = provider.toLowerCase() === "azure" ? "Azure OpenAI" : "Gemini (fallback: Azure)";
   console.log(
     `🚀 Making request to ${providerName} with ${messages.length} messages, format: ${response_format}`
   );

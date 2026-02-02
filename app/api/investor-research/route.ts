@@ -22,7 +22,7 @@ Investment stage and check size min and max, fund size, and lead investor or fol
 Industry and technology focus
 Geographic preference and investment geographies
 Notable investments, portfolio companies and exits in format [name](url)
-Co-Investors (individuals or firms) in format [name](url) where url is domain for firm and LinkedIn URL for individual
+Co-Investors they back deals with (individuals or firms) in format [name](url) where url is domain for firm and LinkedIn URL for individual
 Recent deals or activity
 Public quotes, essays, or interviews that reveal investment philosophy
 What this investor looks for in founders

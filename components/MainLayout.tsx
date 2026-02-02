@@ -389,17 +389,30 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 <p className="text-xs text-gray-500 mb-2">Owner</p>
                 <select
                   value={selectedOwner}
-                  onChange={(e) => setSelectedOwner(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__add_owners__') {
+                      router.push('/account');
+                      return;
+                    }
+                    setSelectedOwner(val);
+                  }}
                   className={`w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors ${ownerStyle.bg} ${ownerStyle.text} ${ownerStyle.border} hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-offset-1 ${ownerStyle.border.replace('border-', 'focus:ring-')}`}
                 >
                   {availableOwners.length === 0 ? (
-                    <option value="">— Add owners in Account —</option>
+                    <>
+                      <option value="">— No owners in Account —</option>
+                      <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                    </>
                   ) : (
-                    availableOwners.map((owner) => (
-                      <option key={owner} value={owner} className="bg-white text-gray-900">
-                        {owner}
-                      </option>
-                    ))
+                    <>
+                      {availableOwners.map((owner) => (
+                        <option key={owner} value={owner} className="bg-white text-gray-900">
+                          {owner}
+                        </option>
+                      ))}
+                      <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                    </>
                   )}
                 </select>
               </div>

@@ -333,9 +333,11 @@ export const fetchInvestorDeepResearch = async (investorId: string): Promise<{
 
 // Fetch investor AI analysis (analyze fit, store ai_metadata, mark as reviewed)
 // Pass onboarding so the API can use the real company name instead of "the company"
+// Pass plan (free, basic, pro) so the API can skip Twitter personalization for basic
 export const fetchInvestorAnalyze = async (
   investorId: string,
-  onboarding?: OnboardingDataForSummary | null
+  onboarding?: OnboardingDataForSummary | null,
+  plan?: string | null
 ): Promise<{
   success?: boolean;
   investor_fit?: boolean | null;
@@ -364,7 +366,7 @@ export const fetchInvestorAnalyze = async (
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify({ investorId, onboarding: onboarding ?? undefined }),
+      body: JSON.stringify({ investorId, onboarding: onboarding ?? undefined, plan: plan ?? undefined }),
     });
     const data = await res.json();
     if (!res.ok) {

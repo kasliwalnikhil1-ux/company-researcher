@@ -379,7 +379,7 @@ function AccountContent() {
                       type="text"
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
-                      placeholder="e.g. Deepak"
+                      placeholder="e.g. Elon"
                       className="px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
                   </div>

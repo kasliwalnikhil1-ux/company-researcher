@@ -178,7 +178,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { investorId, onboarding } = body as { investorId?: string; onboarding?: OnboardingDataForSummary };
+    const { investorId, onboarding, plan } = body as { investorId?: string; onboarding?: OnboardingDataForSummary; plan?: string };
     investorIdParam = typeof investorId === 'string' ? investorId : undefined;
 
     if (!investorId || typeof investorId !== 'string') {
@@ -279,7 +279,9 @@ export async function POST(req: NextRequest) {
     const investorName = investor.name?.trim() ?? '';
     const firstName = investorName ? investorName.split(/\s+/)[0] || investorName : '';
 
-    if (twitterUrl) {
+    // Skip Twitter personalization for basic plan (Pro only)
+    const skipTwitterPersonalization = plan === 'basic';
+    if (twitterUrl && !skipTwitterPersonalization) {
       try {
         const timelineData = await fetchTwitterTimeline(twitterUrl);
         const validTweets = filterValidTweets(timelineData.pinned, timelineData.timeline);

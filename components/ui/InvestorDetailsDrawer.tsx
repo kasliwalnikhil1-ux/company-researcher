@@ -8,9 +8,11 @@ import { formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT } from '@/hooks/useInvestorSearch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
+import { useOwner } from '@/contexts/OwnerContext';
 import { copyToClipboard, extractPhoneNumber } from '@/lib/utils';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { supabase } from '@/utils/supabase/client';
+import { useRouter } from 'next/navigation';
 
 const INVESTOR_DRAWER_MESSAGES_SEARCH_KEY = 'investor-drawer-messages-search';
 const INVESTOR_DRAWER_MESSAGES_CHANNEL_KEY = 'investor-drawer-messages-channel';
@@ -167,6 +169,8 @@ interface InvestorDetailsDrawerProps {
   getInvestorCellValue?: (investor: InvestorDetails, columnKey: string) => string;
   columnLabels?: Record<string, string>;
   onCopyToClipboard?: (message: string) => void;
+  /** Called after creating a new set and assigning to investor - parent should refetch sets */
+  onSetCreated?: () => void;
 }
 
 const formatCurrency = (value: number | null | undefined): string => {
@@ -486,8 +490,11 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   getInvestorCellValue,
   columnLabels = {},
   onCopyToClipboard,
+  onSetCreated,
 }) => {
   const { openPricingModal, openROIModal } = usePricingModal();
+  const { plan } = useOwner();
+  const router = useRouter();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'profile' | 'pipeline' | 'deep-research' | 'latest-news' | 'contacts'>('profile');
   const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
@@ -497,6 +504,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [noteToDelete, setNoteToDelete] = useState<number | null>(null);
   const [noteToast, setNoteToast] = useState<string | null>(null);
   const [pipelineSaving, setPipelineSaving] = useState(false);
+  const [createSetModalOpen, setCreateSetModalOpen] = useState(false);
+  const [createSetName, setCreateSetName] = useState('');
   const [deepResearchContent, setDeepResearchContent] = useState<string | null>(null);
   const [deepResearchLoading, setDeepResearchLoading] = useState(false);
   const [deepResearchError, setDeepResearchError] = useState<string | null>(null);
@@ -661,10 +670,10 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   }, []);
 
   useEffect(() => {
-    if (investor && activeTab === 'deep-research') {
+    if (investor && activeTab === 'deep-research' && plan !== 'basic') {
       loadDeepResearch(investor.id);
     }
-  }, [investor?.id, activeTab, loadDeepResearch]);
+  }, [investor?.id, activeTab, plan, loadDeepResearch]);
 
   useEffect(() => {
     if (investor?.type === 'firm' && investor.id && activeTab === 'contacts') {
@@ -717,10 +726,10 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   }, [investor?.id, investor?.investor_news]);
 
   useEffect(() => {
-    if (investor && activeTab === 'latest-news') {
+    if (investor && activeTab === 'latest-news' && plan !== 'basic') {
       loadInvestorNews(investor.id);
     }
-  }, [investor?.id, activeTab, loadInvestorNews]);
+  }, [investor?.id, activeTab, plan, loadInvestorNews]);
 
   const loadWarmIntros = useCallback(async (domains: string[]) => {
     if (domains.length === 0) {
@@ -767,8 +776,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     }
   }, []);
 
-  useEffect(() => {
-    if (!investor) return;
+  const notableInvestmentDomains = React.useMemo(() => {
+    if (!investor) return [];
     const items = Array.isArray(investor.notable_investments)
       ? investor.notable_investments
       : typeof investor.notable_investments === 'string'
@@ -782,15 +791,20 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
         if (domain) domains.push(domain);
       }
     }
-    loadWarmIntros(domains);
-  }, [investor?.id, investor?.notable_investments, loadWarmIntros]);
+    return domains;
+  }, [investor?.id, investor?.notable_investments]);
+
+  useEffect(() => {
+    if (!investor || plan === 'basic') return;
+    loadWarmIntros(notableInvestmentDomains);
+  }, [investor?.id, plan, notableInvestmentDomains, loadWarmIntros]);
 
   const newsFetchedWithin7Days =
     investorNews?.date &&
     Date.now() - new Date(investorNews.date).getTime() < 7 * 24 * 60 * 60 * 1000;
 
   const handleFetchInvestorNews = useCallback(async () => {
-    if (!investor || investorNewsFetchCooldown || newsFetchedWithin7Days) return;
+    if (!investor || plan === 'basic' || investorNewsFetchCooldown || newsFetchedWithin7Days) return;
     setInvestorNewsLoading(true);
     setInvestorNewsError(null);
     const result = await fetchInvestorNews({
@@ -822,7 +836,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     } else if (result?.error) {
       setInvestorNewsError(result.error);
     }
-  }, [investor, investorNewsFetchCooldown, newsFetchedWithin7Days, onInvestorChange]);
+  }, [investor, plan, investorNewsFetchCooldown, newsFetchedWithin7Days, onInvestorChange]);
 
   const handleAddNote = useCallback(() => {
     setIsAddingNote(true);
@@ -920,11 +934,34 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean);
+    const newTwitterLine = aiMetadataTwitterLine.trim() || null;
+    const newLine1 = aiMetadataLine1.trim() || null;
+    const newLine2 = aiMetadataLine2.trim() || null;
+
+    const currentTwitterLine = typeof meta.twitter_line === 'string' ? meta.twitter_line.trim() || null : null;
+    const currentLine1 = typeof meta.line1 === 'string' ? meta.line1.trim() || null : null;
+    const currentLine2 = typeof meta.line2 === 'string' ? meta.line2.trim() || null : null;
+    const currentInterests = Array.isArray(meta.mutual_interests)
+      ? (meta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
+      : [];
+
+    const hasChanges =
+      newTwitterLine !== currentTwitterLine ||
+      newLine1 !== currentLine1 ||
+      newLine2 !== currentLine2 ||
+      mutualInterests.length !== currentInterests.length ||
+      mutualInterests.some((s, i) => s !== currentInterests[i]);
+
+    if (!hasChanges) {
+      setEditingAiMetadata(false);
+      return;
+    }
+
     const updatedAiMetadata: Record<string, unknown> = {
       ...meta,
-      twitter_line: aiMetadataTwitterLine.trim() || null,
-      line1: aiMetadataLine1.trim() || null,
-      line2: aiMetadataLine2.trim() || null,
+      twitter_line: newTwitterLine,
+      line1: newLine1,
+      line2: newLine2,
       mutual_interests: mutualInterests,
     };
 
@@ -1288,6 +1325,80 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Pipeline</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
+                        <select
+                          value={investor.owner?.trim() ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '__add_owners__') {
+                              router.push('/account');
+                              return;
+                            }
+                            handlePipelineFieldChange('owner', val || null);
+                          }}
+                          disabled={pipelineSaving}
+                          className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 ${
+                            ownerOptions.length === 0
+                              ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
+                              : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
+                          }`}
+                        >
+                          {ownerOptions.length === 0 ? (
+                            <>
+                              <option value="">— No owners in Account —</option>
+                              <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="">— Select —</option>
+                              {ownerOptions.map((o: string) => (
+                                <option key={o} value={o}>
+                                  {o}
+                                </option>
+                              ))}
+                              <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">Set</label>
+                        <select
+                          value={investor.set_name?.trim() ?? ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '__create_new_set__') {
+                              setCreateSetModalOpen(true);
+                              return;
+                            }
+                            handlePipelineFieldChange('set_name', val || null);
+                          }}
+                          disabled={pipelineSaving}
+                          className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 ${
+                            setOptions.length === 0
+                              ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
+                              : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
+                          }`}
+                        >
+                          {setOptions.length === 0 ? (
+                            <>
+                              <option value="">— No sets —</option>
+                              <option value="__create_new_set__" className="text-brand-default font-medium">Create new set</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="">— Select —</option>
+                              {setOptions.map((s: string) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                              <option value="__create_new_set__" className="text-brand-default font-medium">Create new set</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+                      <div>
                         <label className="block text-xs font-medium text-gray-500 mb-1">Stage</label>
                         <select
                           value={investor.stage?.trim() ?? 'Identified'}
@@ -1296,38 +1407,6 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
                         >
                           {stageOptions.map((s: string) => (
-                            <option key={s} value={s}>
-                              {s}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
-                        <select
-                          value={investor.owner?.trim() ?? ''}
-                          onChange={(e) => handlePipelineFieldChange('owner', e.target.value || null)}
-                          disabled={pipelineSaving}
-                          className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
-                        >
-                          <option value="">— Select —</option>
-                          {ownerOptions.map((o: string) => (
-                            <option key={o} value={o}>
-                              {o}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-500 mb-1">Set</label>
-                        <select
-                          value={investor.set_name?.trim() ?? ''}
-                          onChange={(e) => handlePipelineFieldChange('set_name', e.target.value || null)}
-                          disabled={pipelineSaving}
-                          className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50"
-                        >
-                          <option value="">— Select —</option>
-                          {setOptions.map((s: string) => (
                             <option key={s} value={s}>
                               {s}
                             </option>
@@ -1764,7 +1843,20 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
           ) : investor.has_personalization && activeTab === 'deep-research' ? (
             /* Deep Research tab content */
             <div className="space-y-4">
-              {deepResearchLoading ? (
+              {plan === 'basic' ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <p className="text-sm text-gray-600 text-center">
+                    Investor intelligence is not part of your current plan
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openPricingModal}
+                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    Upgrade to Pro to access Deep Research
+                  </button>
+                </div>
+              ) : deepResearchLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
                 </div>
@@ -1790,7 +1882,20 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
           ) : investor.has_personalization && activeTab === 'latest-news' ? (
             /* Latest News tab content */
             <div className="space-y-4">
-              {investorNewsLoading && !investorNews ? (
+              {plan === 'basic' ? (
+                <div className="flex flex-col items-center justify-center py-12 gap-3">
+                  <p className="text-sm text-gray-600 text-center">
+                    Investor content & updates is not part of your current plan
+                  </p>
+                  <button
+                    type="button"
+                    onClick={openPricingModal}
+                    className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                  >
+                    Upgrade to Pro to access Latest News
+                  </button>
+                </div>
+              ) : investorNewsLoading && !investorNews ? (
                 <div className="flex items-center justify-center py-12">
                   <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
                 </div>
@@ -1853,27 +1958,29 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   )}
                 </div>
               ) : null}
-              <div className="flex flex-col gap-2 pt-2">
-                {!investorNews && !investorNewsLoading && !investorNewsError && (
-                  <p className="text-sm text-gray-500">No news fetched yet. Click to fetch latest.</p>
-                )}
-                <button
-                  onClick={handleFetchInvestorNews}
-                  disabled={investorNewsLoading || investorNewsFetchCooldown || !!newsFetchedWithin7Days}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-fit"
-                >
-                  {investorNewsLoading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Newspaper className="w-4 h-4" />
+              {plan !== 'basic' && (
+                <div className="flex flex-col gap-2 pt-2">
+                  {!investorNews && !investorNewsLoading && !investorNewsError && (
+                    <p className="text-sm text-gray-500">No news fetched yet. Click to fetch latest.</p>
                   )}
-                  {investorNewsLoading
-                    ? 'Fetching...'
-                    : newsFetchedWithin7Days
-                      ? 'News fetched recently (try again in 7 days)'
-                      : `Fetch Latest News on ${investor?.name || 'this investor'}`}
-                </button>
-              </div>
+                  <button
+                    onClick={handleFetchInvestorNews}
+                    disabled={investorNewsLoading || investorNewsFetchCooldown || !!newsFetchedWithin7Days}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-fit"
+                  >
+                    {investorNewsLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Newspaper className="w-4 h-4" />
+                    )}
+                    {investorNewsLoading
+                      ? 'Fetching...'
+                      : newsFetchedWithin7Days
+                        ? 'News fetched recently (try again in 7 days)'
+                        : `Fetch Latest News on ${investor?.name || 'this investor'}`}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             /* Investor Profile tab (default) - current content without Pipeline fields */
@@ -2030,13 +2137,23 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           <div className="space-y-3 border border-indigo-200 rounded-lg p-4 bg-indigo-50/30">
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">Twitter Line</label>
-                              <textarea
-                                value={aiMetadataTwitterLine}
-                                onChange={(e) => setAiMetadataTwitterLine(e.target.value)}
-                                rows={2}
-                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                placeholder="I just read your tweet about..."
-                              />
+                              {plan === 'pro' ? (
+                                <textarea
+                                  value={aiMetadataTwitterLine}
+                                  onChange={(e) => setAiMetadataTwitterLine(e.target.value)}
+                                  rows={2}
+                                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                  placeholder="I just read your tweet about..."
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={openPricingModal}
+                                  className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                                >
+                                  Upgrade to Pro for Twitter personalization
+                                </button>
+                              )}
                             </div>
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">Line 1</label>
@@ -2071,7 +2188,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           </div>
                         ) : (
                           <>
-                            {typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim() && (
+                            {plan === 'pro' && typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim() ? (
                               <div className="flex items-start gap-2">
                                 <p className="text-sm text-gray-700 flex-1">{investor.ai_metadata.twitter_line}</p>
                                 <button
@@ -2083,7 +2200,15 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                   {copiedField === 'twitter_line' ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
                                 </button>
                               </div>
-                            )}
+                            ) : plan !== 'pro' ? (
+                              <button
+                                type="button"
+                                onClick={openPricingModal}
+                                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                              >
+                                Upgrade to Pro for Twitter personalization
+                              </button>
+                            ) : null}
                             {typeof investor.ai_metadata.line1 === 'string' && investor.ai_metadata.line1.trim() && (
                               <div className="flex items-start gap-2">
                                 <p className="text-sm text-gray-700 flex-1">{investor.ai_metadata.line1}</p>
@@ -2382,7 +2507,21 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               })()}
 
               {/* Warm intros by domain - compact display */}
-              {warmIntrosLoading ? (
+              {plan === 'basic' && notableInvestmentDomains.length > 0 ? (
+                <DetailSection
+                  label="Founder–Investor Intro Paths"
+                  icon={<Users className="w-3.5 h-3.5 text-gray-400" />}
+                  value={
+                    <button
+                      type="button"
+                      onClick={openPricingModal}
+                      className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                    >
+                      Upgrade to Pro to View Founder Profiles
+                    </button>
+                  }
+                />
+              ) : warmIntrosLoading ? (
                 <div className="flex items-center gap-2 py-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400" />
                   <span className="text-xs text-gray-500">Loading warm intros…</span>
@@ -2448,6 +2587,59 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       {noteToast && (
         <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded-md shadow-lg z-[80] transition-opacity duration-300">
           {noteToast}
+        </div>
+      )}
+
+      {/* Create Set Modal */}
+      {createSetModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Create New Set</h2>
+            <p className="text-gray-600 mb-4">
+              Define a new set name and assign it to this investor.
+            </p>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Set Name</label>
+              <input
+                type="text"
+                value={createSetName}
+                onChange={(e) => setCreateSetName(e.target.value)}
+                placeholder="Enter set name"
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setCreateSetModalOpen(false);
+                  setCreateSetName('');
+                }}
+                className="px-6 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const name = createSetName.trim();
+                  if (!name) return;
+                  if (!investor || !updateInvestor) return;
+                  try {
+                    await handlePipelineFieldChange('set_name', name);
+                    setCreateSetModalOpen(false);
+                    setCreateSetName('');
+                    onSetCreated?.();
+                  } catch {
+                    // Error handled by handlePipelineFieldChange
+                  }
+                }}
+                disabled={!createSetName.trim()}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-brand-default hover:bg-brand-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-default disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

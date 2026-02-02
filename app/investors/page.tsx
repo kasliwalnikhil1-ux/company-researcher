@@ -40,6 +40,7 @@ import { usePricingModal } from '@/contexts/PricingModalContext';
 import { fetchInvestorAnalyze } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner } from '@/contexts/OwnerContext';
+import { useRouter } from 'next/navigation';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
@@ -338,9 +339,12 @@ const INVESTOR_BASE_COLUMNS = [
   'twitter_line',
   'line1',
   'line2',
+  'mutual_interests',
   'reason',
   'notes',
 ];
+
+const EDITABLE_AI_METADATA_COLUMNS = ['twitter_line', 'line1', 'line2', 'mutual_interests'] as const;
 
 const DEFAULT_FILTERS: InvestorSearchFilters = {
   type: 'firm',
@@ -392,7 +396,8 @@ export default function InvestorsPage() {
 
 function InvestorsContent() {
   const { user } = useAuth();
-  const { availableOwners, isFreePlan } = useOwner();
+  const { availableOwners, isFreePlan, plan } = useOwner();
+  const router = useRouter();
   const { openPricingModal, openROIModal } = usePricingModal();
   const { onboarding } = useOnboarding();
   const { templates } = useMessageTemplates();
@@ -406,7 +411,14 @@ function InvestorsContent() {
     subjectColumn?: string | null;
     phoneClickBehavior?: 'whatsapp' | 'call';
   } | null>(null);
-  const [filters, setFilters] = useState<InvestorSearchFilters>(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<InvestorSearchFilters>(() => {
+    const base = { ...DEFAULT_FILTERS };
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('investors-mode');
+      if (saved === 'global' || saved === 'reviewed') base.mode = saved;
+    }
+    return base;
+  });
   const hasAppliedOnboardingFallback = useRef(false);
   const clearedFiltersRef = useRef(false);
   const skipNextPersistRef = useRef(true);
@@ -432,6 +444,33 @@ function InvestorsContent() {
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
+  // Table drag-to-pan state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStartX, setDragStartX] = useState(0);
+  const [scrollStartX, setScrollStartX] = useState(0);
+  const tableScrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Inline editing state for ai_metadata columns (twitter_line, line1, line2, mutual_interests)
+  const [editingCell, setEditingCell] = useState<{
+    investorId: string;
+    columnKey: 'twitter_line' | 'line1' | 'line2' | 'mutual_interests';
+    value: string;
+  } | null>(null);
+  const editInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+
+  // Row hover state - when a row is hovered, all cells in that row expand
+  const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
+
+  // Multi-select state (reviewed mode + table view only)
+  const [selectedInvestorIds, setSelectedInvestorIds] = useState<Set<string>>(new Set());
+  const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
+  const [assignOwnerModalOpen, setAssignOwnerModalOpen] = useState(false);
+  const [assignStageModalOpen, setAssignStageModalOpen] = useState(false);
+  const [assignSetSelected, setAssignSetSelected] = useState('');
+  const [assignSetNewName, setAssignSetNewName] = useState('');
+  const [assignOwner, setAssignOwner] = useState('');
+  const [assignStage, setAssignStage] = useState('');
+
   // View mode state (table or list)
   const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {
     if (typeof window !== 'undefined') {
@@ -450,18 +489,14 @@ function InvestorsContent() {
     const initialDefault = [...INVESTOR_BASE_COLUMNS, ...templates.map((t) => `template_${t.id}`)];
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(INVESTORS_COLUMN_ORDER_KEY);
-      const savedClipboard = localStorage.getItem(INVESTORS_CLIPBOARD_COLUMN_KEY);
       if (saved) {
         try {
           const parsed = JSON.parse(saved) as string[];
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const savedBase = parsed.filter((c) => !c.startsWith('template_') && c !== savedClipboard);
+            const savedBase = parsed.filter((c) => !c.startsWith('template_'));
             const missing = INVESTOR_BASE_COLUMNS.filter((c) => !savedBase.includes(c));
             const currentTemplates = templates.map((t) => `template_${t.id}`);
-            let order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => parsed.includes(tc)), ...currentTemplates.filter((tc) => !parsed.includes(tc))];
-            if (savedClipboard && order.includes(savedClipboard)) {
-              order = [savedClipboard, ...order.filter((c) => c !== savedClipboard)];
-            }
+            const order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => parsed.includes(tc)), ...currentTemplates.filter((tc) => !parsed.includes(tc))];
             return order;
           }
         } catch {
@@ -520,16 +555,16 @@ function InvestorsContent() {
     useInvestorSearch({ filters, pageSize });
 
   // Fetch investor sets (used in drawer pipeline and reviewed filters)
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data: sets, error } = await supabase.rpc('get_investor_sets');
-      if (mounted && !error && Array.isArray(sets)) {
-        setInvestorSets(sets.filter((s): s is string => typeof s === 'string'));
-      }
-    })();
-    return () => { mounted = false; };
+  const refetchInvestorSets = useCallback(async () => {
+    const { data: sets, error } = await supabase.rpc('get_investor_sets');
+    if (!error && Array.isArray(sets)) {
+      setInvestorSets(sets.filter((s): s is string => typeof s === 'string'));
+    }
   }, []);
+
+  useEffect(() => {
+    refetchInvestorSets();
+  }, [refetchInvestorSets]);
 
   // Fetch email_settings and column_settings.investors from user_settings
   useEffect(() => {
@@ -574,14 +609,11 @@ function InvestorsContent() {
     const cs = columnSettingsFromApi;
     if (Array.isArray(cs.columnOrder) && cs.columnOrder.length > 0) {
       const savedBase = cs.columnOrder.filter(
-        (c) => !c.startsWith('template_') && c !== cs.clipboardColumn && c !== cs.clipboardLinkedInColumn
+        (c) => !c.startsWith('template_')
       );
       const missing = INVESTOR_BASE_COLUMNS.filter((c) => !savedBase.includes(c));
       const currentTemplates = getTemplateColumnKeys();
-      let order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => cs.columnOrder!.includes(tc)), ...currentTemplates.filter((tc) => !cs.columnOrder!.includes(tc))];
-      if (cs.clipboardColumn && order.includes(cs.clipboardColumn)) {
-        order = [cs.clipboardColumn, ...order.filter((c) => c !== cs.clipboardColumn)];
-      }
+      const order = [...savedBase, ...missing, ...currentTemplates.filter((tc) => cs.columnOrder!.includes(tc)), ...currentTemplates.filter((tc) => !cs.columnOrder!.includes(tc))];
       setColumnOrder(order);
     }
     if (Array.isArray(cs.visibleColumns) && cs.visibleColumns.length > 0) {
@@ -601,16 +633,10 @@ function InvestorsContent() {
   useEffect(() => {
     const currentTemplates = getTemplateColumnKeys();
     setColumnOrder((prev) => {
-      const base = prev.filter(
-        (c) => !c.startsWith('template_') && c !== clipboardColumn && c !== clipboardLinkedInColumn
-      );
+      const base = prev.filter((c) => !c.startsWith('template_'));
       const existingTemplates = prev.filter((c) => c.startsWith('template_'));
       const newTemplates = currentTemplates.filter((tc) => !existingTemplates.includes(tc));
-      let order = [...base, ...existingTemplates.filter((tc) => currentTemplates.includes(tc)), ...newTemplates];
-      if (clipboardColumn && order.includes(clipboardColumn)) {
-        order = [clipboardColumn, ...order.filter((c) => c !== clipboardColumn)];
-      }
-      return order;
+      return [...base, ...existingTemplates.filter((tc) => currentTemplates.includes(tc)), ...newTemplates];
     });
     setVisibleColumns((prev) => {
       const next = new Set(prev);
@@ -620,9 +646,9 @@ function InvestorsContent() {
       });
       return next;
     });
-  }, [getTemplateColumnKeys, clipboardColumn, clipboardLinkedInColumn]);
+  }, [getTemplateColumnKeys]);
 
-  // Auto-assign Clipboard Column ← Sequence 1 (email1), Subject Column ← Subject (subjectline)
+  // Auto-assign Clipboard Column ← Sequence 1 (email1), Subject Column ← Subject (subjectline), LinkedIn Column ← Sequence 1
   useEffect(() => {
     const subjectTemplate = templates.find((t) => t.channel === 'email' && t.title === 'Subject');
     const sequence1Template = templates.find((t) => t.channel === 'email' && t.title === 'Sequence 1');
@@ -636,6 +662,11 @@ function InvestorsContent() {
       if (sequence1Template) return `template_${sequence1Template.id}`;
       return prev;
     });
+    setClipboardLinkedInColumn((prev) => {
+      if (prev) return prev;
+      if (sequence1Template) return `template_${sequence1Template.id}`;
+      return prev;
+    });
   }, [templates]);
 
   // Save view mode to localStorage
@@ -644,6 +675,13 @@ function InvestorsContent() {
       localStorage.setItem('investors-view-mode', viewMode);
     }
   }, [viewMode]);
+
+  // Save All/Reviewed mode to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('investors-mode', filters.mode);
+    }
+  }, [filters.mode]);
 
   // Save column order and visibility to localStorage
   useEffect(() => {
@@ -679,21 +717,6 @@ function InvestorsContent() {
       localStorage.setItem(INVESTORS_PHONE_CLICK_BEHAVIOR_KEY, phoneClickBehavior);
     }
   }, [phoneClickBehavior]);
-
-  // Reorder columns to put clipboard column first when it changes
-  useEffect(() => {
-    if (clipboardColumn) {
-      setColumnOrder((prev) => {
-        if (prev.includes(clipboardColumn) && prev[0] !== clipboardColumn) {
-          return [clipboardColumn, ...prev.filter((c) => c !== clipboardColumn)];
-        }
-        if (!prev.includes(clipboardColumn)) {
-          return [clipboardColumn, ...prev];
-        }
-        return prev;
-      });
-    }
-  }, [clipboardColumn]);
 
   const persistInvestorColumnSettings = useCallback(async () => {
     if (!user?.id) return;
@@ -781,7 +804,7 @@ function InvestorsContent() {
   const handleAnalyze = useCallback(
     async (investorId: string, investorName?: string) => {
       setAnalyzingId(investorId);
-      const result = await fetchInvestorAnalyze(investorId, onboarding ?? undefined);
+      const result = await fetchInvestorAnalyze(investorId, onboarding ?? undefined, plan ?? undefined);
       setAnalyzingId(null);
       if (result?.error) {
         if (result.errorCode === 'INSUFFICIENT_CREDITS') {
@@ -841,14 +864,19 @@ function InvestorsContent() {
         }, 2000);
       }
     },
-    [refresh, filters.type, filters.mode, onboarding]
+    [refresh, filters.type, filters.mode, onboarding, plan]
   );
 
   // Initial load: read from localStorage (client-only, runs once on mount)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const raw = localStorage.getItem(INVESTORS_FILTERS_KEY);
-    if (raw && raw !== 'null') {
+    if (raw === 'null') {
+      // User explicitly cleared filters - keep DEFAULT_FILTERS, don't apply onboarding
+      hasAppliedOnboardingFallback.current = true;
+      return;
+    }
+    if (raw) {
       try {
         const stored = JSON.parse(raw) as StoredInvestorFilters | null;
         if (stored) {
@@ -862,12 +890,13 @@ function InvestorsContent() {
     }
   }, []);
 
-  // Apply onboarding as fallback when localStorage has null or key is absent
+  // Apply onboarding as fallback when localStorage key is absent (never set)
   useEffect(() => {
     if (hasAppliedOnboardingFallback.current) return;
     if (typeof window === 'undefined') return;
     const raw = localStorage.getItem(INVESTORS_FILTERS_KEY);
-    if (raw && raw !== 'null') return;
+    if (raw === 'null') return; // User explicitly cleared - don't apply onboarding
+    if (raw) return; // Already have stored filters (handled by first effect)
     if (!onboarding) return;
     const stored = onboardingToStored(onboarding);
     if (stored) {
@@ -987,6 +1016,7 @@ function InvestorsContent() {
       twitter_line: 'Twitter Line',
       line1: 'Line 1',
       line2: 'Line 2',
+      mutual_interests: 'Mutual Interests',
       reason: 'Reason',
       notes: 'Notes',
     };
@@ -1013,6 +1043,7 @@ function InvestorsContent() {
 
   const getMessageForInvestorTemplate = useCallback(
     (investor: InvestorSearchResult, templateId: string, pendingAnalyze?: { investor_fit: boolean | null; reason: string | null }): string => {
+      if (!investor.has_personalization) return '-';
       const template = templates.find((t) => t.id === templateId);
       if (!template) return '';
       const aiMeta = investor.ai_metadata ?? {};
@@ -1094,6 +1125,12 @@ function InvestorsContent() {
           return (typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '') || '-';
         case 'line2':
           return (typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '') || '-';
+        case 'mutual_interests': {
+          const interests = Array.isArray(aiMeta.mutual_interests)
+            ? (aiMeta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
+            : [];
+          return interests.length > 0 ? interests.join('\n') : '-';
+        }
         case 'reason': {
           const r = pendingAnalyze?.reason ?? aiMeta.reason;
           return typeof r === 'string' ? r : '-';
@@ -1251,6 +1288,134 @@ function InvestorsContent() {
     [clipboardColumn, clipboardLinkedInColumn, getInvestorCellValue, columnLabels]
   );
 
+  // Handle row selection (reviewed mode + table view)
+  const handleRowSelect = useCallback((investorId: string, isSelected: boolean) => {
+    setSelectedInvestorIds((prev) => {
+      const next = new Set(prev);
+      if (isSelected) next.add(investorId);
+      else next.delete(investorId);
+      return next;
+    });
+  }, []);
+
+  const handleSelectAll = useCallback(
+    (isSelected: boolean) => {
+      if (isSelected) {
+        const ids = data.filter((i) => i.has_personalization).map((i) => i.id);
+        setSelectedInvestorIds(new Set(ids));
+      } else {
+        setSelectedInvestorIds(new Set());
+      }
+    },
+    [data]
+  );
+
+  // Bulk update investor_personalization for set_name, owner, or stage
+  const bulkUpdateInvestors = useCallback(
+    async (
+      ids: string[],
+      field: 'set_name' | 'owner' | 'stage',
+      value: string | null
+    ) => {
+      if (!user?.id || ids.length === 0) return;
+      const trimmed = value?.trim() || null;
+      const payload: Record<string, string | null> = { [field]: trimmed };
+
+      const { error } = await supabase
+        .from('investor_personalization')
+        .update(payload)
+        .in('investor_id', ids)
+        .eq('user_id', user.id);
+
+      if (error) {
+        console.error(`Error bulk updating ${field}:`, error);
+        throw new Error(error.message || `Failed to bulk update ${field}`);
+      }
+      refresh();
+    },
+    [user?.id, refresh]
+  );
+
+  const handleBulkAssignSet = useCallback(async () => {
+    if (selectedInvestorIds.size === 0) {
+      setToastMessage('Please select at least one investor');
+      setToastVisible(true);
+      return;
+    }
+    const setName =
+      assignSetSelected === '__create_new_set__'
+        ? (assignSetNewName.trim() || null)
+        : (assignSetSelected || null);
+    if (assignSetSelected === '__create_new_set__' && !assignSetNewName.trim()) {
+      setToastMessage('Please enter a set name');
+      setToastVisible(true);
+      return;
+    }
+    try {
+      const count = selectedInvestorIds.size;
+      await bulkUpdateInvestors(Array.from(selectedInvestorIds), 'set_name', setName);
+      setSelectedInvestorIds(new Set());
+      setAssignSetModalOpen(false);
+      setAssignSetSelected('');
+      setAssignSetNewName('');
+      refetchInvestorSets();
+      setToastMessage(`Assigned set "${setName || 'empty'}" to ${count} investor${count === 1 ? '' : 's'}`);
+      setToastVisible(true);
+    } catch (e) {
+      setToastMessage(e instanceof Error ? e.message : 'Failed to assign set');
+      setToastVisible(true);
+    }
+  }, [selectedInvestorIds, assignSetSelected, assignSetNewName, bulkUpdateInvestors, refetchInvestorSets]);
+
+  const handleBulkAssignOwner = useCallback(async () => {
+    if (selectedInvestorIds.size === 0) {
+      setToastMessage('Please select at least one investor');
+      setToastVisible(true);
+      return;
+    }
+    try {
+      const count = selectedInvestorIds.size;
+      const owner = assignOwner.trim() || null;
+      await bulkUpdateInvestors(Array.from(selectedInvestorIds), 'owner', owner);
+      setSelectedInvestorIds(new Set());
+      setAssignOwnerModalOpen(false);
+      setAssignOwner('');
+      setToastMessage(`Assigned owner "${owner || 'empty'}" to ${count} investor${count === 1 ? '' : 's'}`);
+      setToastVisible(true);
+    } catch (e) {
+      setToastMessage(e instanceof Error ? e.message : 'Failed to assign owner');
+      setToastVisible(true);
+    }
+  }, [selectedInvestorIds, assignOwner, bulkUpdateInvestors]);
+
+  const handleBulkAssignStage = useCallback(async () => {
+    if (selectedInvestorIds.size === 0) {
+      setToastMessage('Please select at least one investor');
+      setToastVisible(true);
+      return;
+    }
+    try {
+      const count = selectedInvestorIds.size;
+      const stage = assignStage.trim() || null;
+      await bulkUpdateInvestors(Array.from(selectedInvestorIds), 'stage', stage);
+      setSelectedInvestorIds(new Set());
+      setAssignStageModalOpen(false);
+      setAssignStage('');
+      setToastMessage(`Assigned stage "${stage || 'empty'}" to ${count} investor${count === 1 ? '' : 's'}`);
+      setToastVisible(true);
+    } catch (e) {
+      setToastMessage(e instanceof Error ? e.message : 'Failed to assign stage');
+      setToastVisible(true);
+    }
+  }, [selectedInvestorIds, assignStage, bulkUpdateInvestors]);
+
+  // Clear selection when switching away from reviewed mode or table view
+  useEffect(() => {
+    if (filters.mode !== 'reviewed' || viewMode !== 'table') {
+      setSelectedInvestorIds(new Set());
+    }
+  }, [filters.mode, viewMode]);
+
   const buildReportContent = () => {
     const parts: string[] = [];
     if (filters.name) parts.push(`Search: ${filters.name}`);
@@ -1296,6 +1461,142 @@ function InvestorsContent() {
     [page, hasMore, loading, loadMore]
   );
 
+  const handleCellDoubleClick = useCallback(
+    (investor: InvestorSearchResult, columnKey: string) => {
+      if (!EDITABLE_AI_METADATA_COLUMNS.includes(columnKey as (typeof EDITABLE_AI_METADATA_COLUMNS)[number])) return;
+      const value = getInvestorCellValue(investor, columnKey, pendingAnalyzeResults[investor.id]);
+      setEditingCell({
+        investorId: investor.id,
+        columnKey: columnKey as 'twitter_line' | 'line1' | 'line2' | 'mutual_interests',
+        value: value === '-' ? '' : value,
+      });
+    },
+    [getInvestorCellValue, pendingAnalyzeResults]
+  );
+
+  const handleInlineEditSave = useCallback(async () => {
+    if (!editingCell) return;
+    const { investorId, columnKey, value } = editingCell;
+    const investor = data.find((i) => i.id === investorId);
+    if (!investor) return;
+
+    const aiMeta = investor.ai_metadata ?? {};
+    const trimmed = value.trim();
+
+    let hasChanges = false;
+    if (columnKey === 'mutual_interests') {
+      const newInterests = trimmed
+        ? trimmed
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+      const currentInterests = Array.isArray(aiMeta.mutual_interests)
+        ? (aiMeta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
+        : [];
+      hasChanges =
+        newInterests.length !== currentInterests.length ||
+        newInterests.some((s, i) => s !== currentInterests[i]);
+    } else {
+      const currentVal = typeof aiMeta[columnKey] === 'string' ? (aiMeta[columnKey] as string).trim() || null : null;
+      const newVal = trimmed || null;
+      hasChanges = currentVal !== newVal;
+    }
+
+    if (!hasChanges) {
+      setEditingCell(null);
+      return;
+    }
+
+    const meta = investor.ai_metadata && typeof investor.ai_metadata === 'object' ? { ...investor.ai_metadata } : {};
+    if (columnKey === 'mutual_interests') {
+      const interests = trimmed
+        ? trimmed
+            .split('\n')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+      (meta as Record<string, unknown>).mutual_interests = interests;
+    } else {
+      (meta as Record<string, unknown>)[columnKey] = trimmed || null;
+    }
+
+    try {
+      await updateInvestor(investorId, { ai_metadata: meta });
+      setEditingCell(null);
+      setToastMessage('Personalization saved');
+      setToastVisible(true);
+    } catch (err) {
+      console.error('Error saving ai_metadata:', err);
+      setToastMessage(err instanceof Error ? err.message : 'Failed to save');
+      setToastVisible(true);
+    }
+  }, [editingCell, data, updateInvestor]);
+
+  useEffect(() => {
+    if (editingCell && editInputRef.current) {
+      editInputRef.current.focus();
+      if (editInputRef.current instanceof HTMLInputElement || editInputRef.current instanceof HTMLTextAreaElement) {
+        editInputRef.current.setSelectionRange(editInputRef.current.value.length, editInputRef.current.value.length);
+      }
+    }
+  }, [editingCell]);
+
+  // Table drag-to-pan handlers
+  const handleTableMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (
+      target.tagName === 'BUTTON' ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'A' ||
+      target.tagName === 'SELECT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.closest('button, input, a, select, textarea')
+    ) {
+      return;
+    }
+    setIsDragging(true);
+    setDragStartX(e.clientX);
+    if (tableScrollContainerRef.current) {
+      setScrollStartX(tableScrollContainerRef.current.scrollLeft);
+    }
+    e.preventDefault();
+  }, []);
+
+  const handleTableMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || !tableScrollContainerRef.current) return;
+    const deltaX = e.clientX - dragStartX;
+    tableScrollContainerRef.current.scrollLeft = scrollStartX - deltaX;
+    e.preventDefault();
+  }, [isDragging, dragStartX, scrollStartX]);
+
+  const handleTableMouseUp = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  const handleTableMouseLeave = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!tableScrollContainerRef.current) return;
+      const deltaX = e.clientX - dragStartX;
+      tableScrollContainerRef.current.scrollLeft = scrollStartX - deltaX;
+    };
+    const handleGlobalMouseUp = () => {
+      setIsDragging(false);
+    };
+    document.addEventListener('mousemove', handleGlobalMouseMove);
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', handleGlobalMouseMove);
+      document.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, [isDragging, dragStartX, scrollStartX]);
+
   return (
     <div className="p-4 md:p-8 max-w-full mx-auto">
       <div className="mb-4 md:mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1304,6 +1605,39 @@ function InvestorsContent() {
           Investors
         </h1>
         <div className="flex flex-wrap items-center gap-2 self-start">
+          {filters.mode === 'reviewed' && viewMode === 'table' && selectedInvestorIds.size > 0 ? (
+            <>
+              <button
+                onClick={() => setAssignStageModalOpen(true)}
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700"
+              >
+                <span className="hidden sm:inline">Assign Stage </span>({selectedInvestorIds.size})
+              </button>
+              <button
+                onClick={() => setAssignSetModalOpen(true)}
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+              >
+                <span className="hidden sm:inline">Assign Set </span>({selectedInvestorIds.size})
+              </button>
+              <button
+                onClick={() => setAssignOwnerModalOpen(true)}
+                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700"
+              >
+                <span className="hidden sm:inline">Assign Owner </span>({selectedInvestorIds.size})
+              </button>
+              <button
+                onClick={() => setSelectedInvestorIds(new Set())}
+                className="inline-flex items-center gap-1.5 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                title={selectedInvestorIds.size === 1 ? 'Clear selection' : 'Clear selections'}
+              >
+                <X className="w-4 h-4" />
+                <span className="hidden sm:inline">
+                  Clear {selectedInvestorIds.size === 1 ? 'selection' : 'selections'}
+                </span>
+              </button>
+            </>
+          ) : (
+            <>
           {/* View Toggle: List/Table (List first, default) */}
           <div className="inline-flex items-center border border-gray-300 rounded-md overflow-hidden bg-white">
             <button
@@ -1365,6 +1699,8 @@ function InvestorsContent() {
               Reviewed
             </button>
           </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -1679,27 +2015,50 @@ function InvestorsContent() {
               </div>
             )}
             <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
-              <div className="overflow-x-auto max-h-[calc(100vh-300px)]">
+              <div
+                ref={tableScrollContainerRef}
+                className={`overflow-x-auto overflow-y-auto max-h-[calc(100vh-300px)] ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+                onMouseDown={handleTableMouseDown}
+                onMouseMove={handleTableMouseMove}
+                onMouseUp={handleTableMouseUp}
+                onMouseLeave={handleTableMouseLeave}
+                style={{ userSelect: isDragging ? 'none' : 'auto' }}
+              >
                 <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
                   <colgroup>
+                    {filters.mode === 'reviewed' && <col style={{ width: '40px' }} />}
                     {orderedVisibleColumns.map((col: string) => {
                       const isTemplate = col.startsWith('template_');
-                      const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'reason' || isTemplate;
+                      const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'mutual_interests' || col === 'reason' || isTemplate;
                       return <col key={col} style={{ width: isWide ? '280px' : '160px', minWidth: isTemplate ? '200px' : '120px' }} />;
                     })}
                     <col style={{ width: '160px' }} />
                   </colgroup>
                   <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
+                      {filters.mode === 'reviewed' && (
+                        <th className="px-2 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 align-middle">
+                          <input
+                            type="checkbox"
+                            checked={(() => {
+                              const selectableCount = data.filter((i) => i.has_personalization).length;
+                              return selectableCount > 0 && selectedInvestorIds.size === selectableCount;
+                            })()}
+                            onChange={(e) => handleSelectAll(e.target.checked)}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </th>
+                      )}
                       {orderedVisibleColumns.map((column: string) => (
                         <th
                           key={column}
-                          className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                          className="px-3 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider align-middle"
                         >
                           {columnLabels[column] ?? column.replace(/_/g, ' ')}
                         </th>
                       ))}
-                      <th className="px-3 md:px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      <th className="px-3 md:px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider align-middle">
                         Actions
                       </th>
                     </tr>
@@ -1721,6 +2080,8 @@ function InvestorsContent() {
                       <tr
                         key={investor.id}
                         className={`cursor-pointer ${getRowBgColor()}`}
+                        onMouseEnter={() => setHoveredRowId(investor.id)}
+                        onMouseLeave={() => setHoveredRowId(null)}
                         onClick={(e) => {
                           if (e.ctrlKey || e.metaKey) {
                             setInvestorToView(investor);
@@ -1728,6 +2089,21 @@ function InvestorsContent() {
                           }
                         }}
                       >
+                        {filters.mode === 'reviewed' && (
+                          <td className="px-2 md:px-4 py-4 whitespace-nowrap align-middle" onClick={(e) => e.stopPropagation()}>
+                            {investor.has_personalization ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedInvestorIds.has(investor.id)}
+                                onChange={(e) => handleRowSelect(investor.id, e.target.checked)}
+                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                onClick={(e) => e.stopPropagation()}
+                              />
+                            ) : (
+                              <span className="w-4 inline-block" />
+                            )}
+                          </td>
+                        )}
                         {orderedVisibleColumns.map((columnKey: string) => {
                           const value = getInvestorCellValue(
                             investor,
@@ -1740,6 +2116,11 @@ function InvestorsContent() {
                           const isLinkedInColumn = columnKey === 'linkedin_url';
                           const isEmailColumn = columnKey === 'email';
                           const isPhoneColumn = columnKey === 'phone';
+                          const isEditableAiMetadataColumn = EDITABLE_AI_METADATA_COLUMNS.includes(
+                            columnKey as (typeof EDITABLE_AI_METADATA_COLUMNS)[number]
+                          );
+                          const isEditingThisCell =
+                            editingCell?.investorId === investor.id && editingCell?.columnKey === columnKey;
 
                           let href: string | null = null;
                           if (isDomainColumn && investor.domain?.trim()) {
@@ -1794,47 +2175,113 @@ function InvestorsContent() {
                             handleInvestorCellClick(investor, columnKey);
                           };
 
+                          const isRowHovered = hoveredRowId === investor.id;
+
                           return (
                             <td
                               key={columnKey}
-                              className={`px-3 md:px-4 py-3 text-sm text-gray-700 truncate max-w-[200px] ${
+                              className={`px-3 md:px-4 py-3 text-sm text-gray-700 max-w-[200px] align-middle ${
                                 (href || isTemplateColumn) && value !== '-' ? 'cursor-pointer hover:bg-blue-50' : ''
-                              }`}
-                              title={value}
+                              } ${isEditableAiMetadataColumn ? 'cursor-text hover:bg-indigo-50/50' : ''}`}
+                              title={
+                                isEditableAiMetadataColumn
+                                  ? 'Double-click to edit'
+                                  : value
+                              }
                               onClick={isTemplateColumn && value !== '-' ? handleTemplateClick : undefined}
+                              onDoubleClick={
+                                isEditableAiMetadataColumn
+                                  ? (e) => {
+                                      e.stopPropagation();
+                                      handleCellDoubleClick(investor, columnKey);
+                                    }
+                                  : undefined
+                              }
                             >
-                              {href ? (
+                              {isEditingThisCell ? (
+                                <div className="flex items-start gap-2" onClick={(e) => e.stopPropagation()}>
+                                  <textarea
+                                    ref={editInputRef as React.RefObject<HTMLTextAreaElement>}
+                                    value={editingCell?.value ?? ''}
+                                    onChange={(e) =>
+                                      setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : null))
+                                    }
+                                    onBlur={handleInlineEditSave}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                                        e.preventDefault();
+                                        handleInlineEditSave();
+                                      } else if (e.key === 'Escape') {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    className="flex-1 min-w-0 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    rows={columnKey === 'mutual_interests' ? 4 : 2}
+                                  />
+                                  <div className="flex flex-col gap-0.5 flex-shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={handleInlineEditSave}
+                                      className="p-1 text-green-600 hover:text-green-800"
+                                      title="Save (Ctrl+Enter)"
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        setEditingCell(null);
+                                      }}
+                                      className="p-1 text-red-600 hover:text-red-800"
+                                      title="Cancel (Esc)"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : href ? (
                                 <a
                                   href={href}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={handleLinkClick}
-                                  className="text-indigo-600 hover:underline truncate block"
+                                  className={`text-indigo-600 hover:underline block ${
+                                    isRowHovered ? 'whitespace-normal break-words' : 'truncate'
+                                  }`}
+                                  title={value}
                                 >
                                   {value === '-' ? '' : value}
                                 </a>
                               ) : (
-                                <span
-                                  className={
+                                <div
+                                  className={`${
+                                    isRowHovered
+                                      ? isTemplateColumn
+                                        ? 'whitespace-pre-wrap break-words'
+                                        : 'whitespace-normal break-words'
+                                      : 'truncate'
+                                  } ${
                                     isInvestorFitColumn && value !== '-'
-                                      ? `truncate block font-medium ${
+                                      ? `block font-medium ${
                                           investorFit === true
                                             ? 'text-emerald-700'
                                             : investorFit === false
                                               ? 'text-red-700'
                                               : 'text-amber-700'
                                         }`
-                                      : 'truncate block'
-                                  }
+                                      : 'block'
+                                  }`}
+                                  title={value}
                                 >
                                   {value}
-                                </span>
+                                </div>
                               )}
                             </td>
                           );
                         })}
                         <td
-                          className="px-3 md:px-4 py-3 text-right"
+                          className="px-3 md:px-4 py-3 text-right align-middle"
                           onClick={(e) => e.stopPropagation()}
                         >
                           <div className="flex items-center justify-end gap-1">
@@ -2042,7 +2489,180 @@ function InvestorsContent() {
           setToastMessage(msg);
           setToastVisible(true);
         }}
+        onSetCreated={refetchInvestorSets}
       />
+
+      {/* Assign Set Modal */}
+      {assignSetModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Set</h2>
+            <p className="text-gray-600 mb-4">
+              Assign a set name to {selectedInvestorIds.size} selected investor{selectedInvestorIds.size === 1 ? '' : 's'}. Select from existing sets or create a new one.
+            </p>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Set Name</label>
+              <select
+                value={assignSetSelected}
+                onChange={(e) => setAssignSetSelected(e.target.value)}
+                className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                  investorSets.length === 0
+                    ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
+                    : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
+                }`}
+                autoFocus
+              >
+                <option value="">Clear set</option>
+                {investorSets.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+                <option value="__create_new_set__" className="text-brand-default font-medium">Create new set</option>
+              </select>
+              {assignSetSelected === '__create_new_set__' && (
+                <input
+                  type="text"
+                  value={assignSetNewName}
+                  onChange={(e) => setAssignSetNewName(e.target.value)}
+                  placeholder="Enter new set name"
+                  className="mt-3 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              )}
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setAssignSetModalOpen(false);
+                  setAssignSetSelected('');
+                  setAssignSetNewName('');
+                }}
+                className="px-6 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkAssignSet}
+                disabled={assignSetSelected === '__create_new_set__' && !assignSetNewName.trim()}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-brand-default hover:bg-brand-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-default disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Owner Modal */}
+      {assignOwnerModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Owner</h2>
+            <p className="text-gray-600 mb-4">
+              Assign an owner to {selectedInvestorIds.size} selected investor{selectedInvestorIds.size === 1 ? '' : 's'}. Leave empty to clear the owner.
+            </p>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Owner</label>
+              <select
+                value={assignOwner}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__add_owners__') {
+                    router.push('/account');
+                    return;
+                  }
+                  setAssignOwner(val);
+                }}
+                className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                  availableOwners.length === 0
+                    ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
+                    : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
+                }`}
+                autoFocus
+              >
+                {availableOwners.length === 0 ? (
+                  <>
+                    <option value="">— No owners in Account —</option>
+                    <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="">Clear owner</option>
+                    {availableOwners.map((o) => (
+                      <option key={o} value={o}>
+                        {o}
+                      </option>
+                    ))}
+                    <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
+                  </>
+                )}
+              </select>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setAssignOwnerModalOpen(false);
+                  setAssignOwner('');
+                }}
+                className="px-6 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkAssignOwner}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign Stage Modal */}
+      {assignStageModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Stage</h2>
+            <p className="text-gray-600 mb-4">
+              Assign a pipeline stage to {selectedInvestorIds.size} selected investor{selectedInvestorIds.size === 1 ? '' : 's'}. Leave empty to clear the stage.
+            </p>
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">Stage</label>
+              <select
+                value={assignStage}
+                onChange={(e) => setAssignStage(e.target.value)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                autoFocus
+              >
+                <option value="">Clear stage</option>
+                {REVIEWED_STAGE_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setAssignStageModalOpen(false);
+                  setAssignStage('');
+                }}
+                className="px-6 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkAssignStage}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ReportMissingInvestorsModal
         isOpen={reportMissingModalOpen}

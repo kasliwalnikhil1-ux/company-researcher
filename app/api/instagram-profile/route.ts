@@ -111,11 +111,11 @@ export async function POST(req: NextRequest) {
         try {
           const profileResponse = await fetchInstagramProfile(username);
           
-          // Qualify the Instagram profile using Azure OpenAI with personalized prompts
+          // Qualify the Instagram profile using Gemini (fallback to Azure) with personalized prompts
           let qualificationData = null;
           try {
             console.log(`[Instagram Profile API] Qualifying profile for ${username}`);
-            qualificationData = await qualifyInstagramProfile(profileResponse, 'azure', personalizedPrompts || undefined);
+            qualificationData = await qualifyInstagramProfile(profileResponse, 'gemini', personalizedPrompts || undefined);
             console.log(`[Instagram Profile API] Qualification complete for ${username}:`, qualificationData.classification);
           } catch (qualError) {
             console.error(`[Instagram Profile API] Error qualifying profile for ${username}:`, qualError);
