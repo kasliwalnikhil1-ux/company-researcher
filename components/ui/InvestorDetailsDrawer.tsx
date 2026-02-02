@@ -1431,7 +1431,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     parseCommaList(investor.email).length > 0 ||
                     parseCommaList(investor.phone).length > 0) && (
                     <div>
-                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Contact Details</h3>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Start a Conversation</h3>
                       <div className="flex flex-wrap items-center gap-4">
                       <div className="flex items-center gap-1">
                         {investor.domain?.trim() && (
@@ -1594,90 +1594,6 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     </div>
                   )}
 
-                  {/* Messages - filled templates with copy button for each */}
-                  {getInvestorCellValue &&
-                    (() => {
-                      const templateKeys = Object.keys(columnLabels).filter((k) => k.startsWith('template_'));
-                      const filledMessages = templateKeys
-                        .map((k) => ({ key: k, message: getInvestorCellValue(investor, k), label: columnLabels[k] ?? k.replace('template_', '') }))
-                        .filter(({ message }) => message && message !== '-');
-                      const channelsWithMessages = [...new Set(
-                        filledMessages
-                          .map(({ label }) => {
-                            const m = label.match(/ - (.+)$/);
-                            return m ? m[1] : null;
-                          })
-                          .filter((ch): ch is string => ch != null)
-                      )].sort((a, b) => MESSAGE_CHANNEL_OPTIONS_BASE.indexOf(a) - MESSAGE_CHANNEL_OPTIONS_BASE.indexOf(b));
-                      const messageChannelOptions = ['All', ...channelsWithMessages];
-                      const effectiveChannelFilter = messageChannelOptions.includes(messagesChannelFilter) ? messagesChannelFilter : 'All';
-                      const searchLower = messagesSearch.trim().toLowerCase();
-                      const channelFilter = effectiveChannelFilter === 'All' ? null : effectiveChannelFilter;
-                      const filteredMessages = filledMessages.filter(({ label }) => {
-                        if (searchLower && !label.toLowerCase().includes(searchLower)) return false;
-                        if (channelFilter && !label.endsWith(` - ${channelFilter}`)) return false;
-                        return true;
-                      });
-                      return filledMessages.length > 0 ? (
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2 mb-2">
-                            <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider shrink-0">Messages</h3>
-                            <div className="ml-auto flex items-center gap-2 min-w-0">
-                              <div className="relative w-[140px] min-w-[120px]">
-                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
-                                <input
-                                  type="text"
-                                  placeholder="Search title..."
-                                  value={messagesSearch}
-                                  onChange={(e) => setMessagesSearch(e.target.value)}
-                                  className="block w-full pl-7 pr-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                                />
-                              </div>
-                              <select
-                                value={effectiveChannelFilter}
-                                onChange={(e) => setMessagesChannelFilter(e.target.value)}
-                                className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 min-w-0 max-w-[140px]"
-                              >
-                                {messageChannelOptions.map((ch) => (
-                                  <option key={ch} value={ch}>
-                                    {ch}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                          </div>
-                          <div className="space-y-3">
-                            {filteredMessages.length === 0 ? (
-                              <p className="text-sm text-gray-500 py-2">No messages match your search or filter.</p>
-                            ) : (
-                            filteredMessages.map(({ key: columnKey, message, label }) => (
-                                <div
-                                  key={columnKey}
-                                  className="flex gap-2 p-3 rounded-lg border border-gray-200 bg-gray-50/50"
-                                >
-                                  <div className="flex-1 min-w-0">
-                                    <p className="text-xs font-medium text-gray-500 mb-1">{label}</p>
-                                    <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
-                                      {message}
-                                    </p>
-                                  </div>
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopyField(message, `message_${columnKey}`)}
-                                  className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 flex-shrink-0"
-                                  title="Copy"
-                                  aria-label={`Copy ${label}`}
-                                >
-                                  {copiedField === `message_${columnKey}` ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
-                                </button>
-                              </div>
-                            ))
-                            )}
-                          </div>
-                        </div>
-                      ) : null;
-                    })()}
-
                   {investor.has_personalization && updateInvestor && (
                     <div>
                       <div className="flex items-center justify-between mb-4">
@@ -1802,23 +1718,129 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       ) : (
                         !isAddingNote && (
                           <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
-                            <p className="text-sm text-gray-600">No notes yet. Click &quot;Add Note&quot; to create one.</p>
+                            <p className="text-sm text-gray-600">No notes yet. Click &quot;Add Note&quot; to track conversation details.</p>
                           </div>
                         )
                       )}
                     </div>
                   )}
+
+                  {/* Messages - filled templates with copy button for each */}
+                  {getInvestorCellValue &&
+                    (() => {
+                      const templateKeys = Object.keys(columnLabels).filter((k) => k.startsWith('template_'));
+                      const filledMessages = templateKeys
+                        .map((k) => ({ key: k, message: getInvestorCellValue(investor, k), label: columnLabels[k] ?? k.replace('template_', '') }))
+                        .filter(({ message }) => message && message !== '-')
+                        .sort((a, b) => {
+                          const titleA = a.label || '';
+                          const titleB = b.label || '';
+                          // For Email channel, put Subject first (case insensitive, subject in title, label format: "Subject - Email")
+                          const aIsSubjectEmail = /\bsubject\b/i.test(titleA) && / - email$/i.test(titleA);
+                          const bIsSubjectEmail = /\bsubject\b/i.test(titleB) && / - email$/i.test(titleB);
+                          if (aIsSubjectEmail && !bIsSubjectEmail) return -1;
+                          if (!aIsSubjectEmail && bIsSubjectEmail) return 1;
+                          if (aIsSubjectEmail && bIsSubjectEmail) return 0;
+                          const matchA = titleA.match(/Message\s+(\d+)/i);
+                          const matchB = titleB.match(/Message\s+(\d+)/i);
+                          const numA = matchA ? parseInt(matchA[1], 10) : null;
+                          const numB = matchB ? parseInt(matchB[1], 10) : null;
+                          if (numA !== null && numB !== null) return numA - numB;
+                          if (numA === null && numB !== null) return -1;
+                          if (numA !== null && numB === null) return 1;
+                          return titleA.localeCompare(titleB);
+                        });
+                      const channelsWithMessages = [...new Set(
+                        filledMessages
+                          .map(({ label }) => {
+                            const m = label.match(/ - (.+)$/);
+                            return m ? m[1] : null;
+                          })
+                          .filter((ch): ch is string => ch != null)
+                      )].sort((a, b) => MESSAGE_CHANNEL_OPTIONS_BASE.indexOf(a) - MESSAGE_CHANNEL_OPTIONS_BASE.indexOf(b));
+                      const messageChannelOptions = ['All', ...channelsWithMessages];
+                      const effectiveChannelFilter = messageChannelOptions.includes(messagesChannelFilter) ? messagesChannelFilter : 'All';
+                      const searchLower = messagesSearch.trim().toLowerCase();
+                      const channelFilter = effectiveChannelFilter === 'All' ? null : effectiveChannelFilter;
+                      const filteredMessages = filledMessages.filter(({ label }) => {
+                        if (searchLower && !label.toLowerCase().includes(searchLower)) return false;
+                        if (channelFilter && !label.endsWith(` - ${channelFilter}`)) return false;
+                        return true;
+                      });
+                      return filledMessages.length > 0 ? (
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
+                            <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider shrink-0">Messages</h3>
+                            <div className="ml-auto flex items-center gap-2 min-w-0">
+                              <div className="relative w-[140px] min-w-[120px]">
+                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                <input
+                                  type="text"
+                                  placeholder="Search title..."
+                                  value={messagesSearch}
+                                  onChange={(e) => setMessagesSearch(e.target.value)}
+                                  className="block w-full pl-7 pr-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                                />
+                              </div>
+                              <select
+                                value={effectiveChannelFilter}
+                                onChange={(e) => setMessagesChannelFilter(e.target.value)}
+                                className="px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 min-w-0 max-w-[140px]"
+                              >
+                                {messageChannelOptions.map((ch) => (
+                                  <option key={ch} value={ch}>
+                                    {ch}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div className="space-y-3">
+                            {filteredMessages.length === 0 ? (
+                              <p className="text-sm text-gray-500 py-2">No messages match your search or filter.</p>
+                            ) : (
+                            filteredMessages.map(({ key: columnKey, message, label }) => (
+                                <div
+                                  key={columnKey}
+                                  className="flex gap-2 p-3 rounded-lg border border-gray-200 bg-gray-50/50"
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-xs font-medium text-gray-500 mb-1">{label}</p>
+                                    <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
+                                      {message}
+                                    </p>
+                                  </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyField(message, `message_${columnKey}`)}
+                                  className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 flex-shrink-0"
+                                  title="Copy"
+                                  aria-label={`Copy ${label}`}
+                                >
+                                  {copiedField === `message_${columnKey}` ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            ))
+                            )}
+                          </div>
+                        </div>
+                      ) : null;
+                    })()}
+
                   {investor.has_personalization && updateInvestor && <hr className="border-gray-200" />}
                   {Array.isArray(investor.links) && investor.links.length > 0 && (
                     <DetailSection
                       label="Investor Links"
                       icon={<Link2 className="w-3.5 h-3.5 text-gray-400" />}
                       value={
-                        <ul className="list-disc list-inside space-y-2">
+                        <ul className="space-y-2">
                           {investor.links.map((item, idx) => {
                             const parsed = parseNotableInvestment(item);
+                            const displayName = parsed ? parsed.name : item;
+                            const displayUrl = parsed ? parsed.url : undefined;
                             return (
-                              <li key={idx}>
+                              <li key={idx} className="flex items-center gap-3">
+                                <CompanyLogo name={displayName} url={displayUrl} />
                                 {parsed ? (
                                   <a
                                     href={parsed.url}
@@ -2137,7 +2159,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           <div className="space-y-3 border border-indigo-200 rounded-lg p-4 bg-indigo-50/30">
                             <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">Twitter Line</label>
-                              {plan === 'pro' ? (
+                              {plan !== 'basic' ? (
                                 <textarea
                                   value={aiMetadataTwitterLine}
                                   onChange={(e) => setAiMetadataTwitterLine(e.target.value)}
@@ -2188,7 +2210,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           </div>
                         ) : (
                           <>
-                            {plan === 'pro' && typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim() ? (
+                            {plan !== 'basic' && typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim() ? (
                               <div className="flex items-start gap-2">
                                 <p className="text-sm text-gray-700 flex-1">{investor.ai_metadata.twitter_line}</p>
                                 <button
@@ -2200,7 +2222,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                   {copiedField === 'twitter_line' ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
                                 </button>
                               </div>
-                            ) : plan !== 'pro' ? (
+                            ) : plan === 'basic' ? (
                               <button
                                 type="button"
                                 onClick={openPricingModal}

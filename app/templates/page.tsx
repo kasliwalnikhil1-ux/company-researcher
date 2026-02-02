@@ -133,6 +133,15 @@ function TemplatesContent() {
       const titleA = a.title || '';
       const titleB = b.title || '';
       
+      // For email channel, put Subject first (case insensitive, subject anywhere in title)
+      if (activeTab === 'email') {
+        const aIsSubject = /\bsubject\b/i.test(titleA);
+        const bIsSubject = /\bsubject\b/i.test(titleB);
+        if (aIsSubject && !bIsSubject) return -1;
+        if (!aIsSubject && bIsSubject) return 1;
+        if (aIsSubject && bIsSubject) return 0;
+      }
+      
       // Extract number from titles like "Message 1", "Message 2", etc.
       const matchA = titleA.match(/Message\s+(\d+)/i);
       const matchB = titleB.match(/Message\s+(\d+)/i);

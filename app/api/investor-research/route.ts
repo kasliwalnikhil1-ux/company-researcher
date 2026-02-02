@@ -10,6 +10,7 @@ import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 
 const FASHION_DEEP_SEARCH_URL = 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
 const FOUNDER_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/founder-search';
+const INVESTOR_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/investor-search';
 
 const STEP2_INPUT_TEMPLATE = `Act as a research analyst.
 
@@ -184,9 +185,9 @@ export function cleanInvestorInput(input: string): { cleaned: string; type: 'dom
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { input, skipExisting } = body;
+    const { input, skipExisting, researchContext, affiliateWithFirmId, affiliateContactEmail } = body;
 
-    console.log('[investor-research] POST received:', { input, skipExisting });
+    console.log('[investor-research] POST received:', { input, skipExisting, researchContext, affiliateWithFirmId: !!affiliateWithFirmId });
 
     const skipExistingValues = skipExisting !== undefined ? !!skipExisting : SKIP_EXISTING_VALUES;
     console.log('[investor-research] skipExistingValues:', skipExistingValues, '(env default:', SKIP_EXISTING_VALUES, ')');
@@ -217,9 +218,31 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
         if (byDomain) {
           console.log('[investor-research] Skipped (domain exists):', domain);
+          if (affiliateWithFirmId) {
+            const { data: existingAff } = await supabase
+              .from('investor_affiliations')
+              .select('id')
+              .eq('person_id', byDomain.id)
+              .eq('firm_id', affiliateWithFirmId)
+              .maybeSingle();
+            if (!existingAff) {
+              await supabase.from('investor_affiliations').insert({
+                id: randomUUID(),
+                person_id: byDomain.id,
+                firm_id: affiliateWithFirmId,
+              });
+            }
+            if (affiliateContactEmail) {
+              const { data: inv } = await supabase.from('investors').select('email').eq('id', byDomain.id).single();
+              const currentEmails = inv?.email ? String(inv.email).split(/[,;]\s*/).filter(Boolean) : [];
+              const merged = [...new Set([...currentEmails, affiliateContactEmail].filter(Boolean))];
+              await supabase.from('investors').update({ email: merged.join(', ') }).eq('id', byDomain.id);
+            }
+          }
           return NextResponse.json({
             skipped: true,
             reason: 'domain_exists',
+            investor_id: byDomain.id,
             cleaned,
             domain,
             linkedinUrl: null,
@@ -235,9 +258,31 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
         if (byLinkedIn) {
           console.log('[investor-research] Skipped (linkedin exists):', linkedinUrl);
+          if (affiliateWithFirmId) {
+            const { data: existingAff } = await supabase
+              .from('investor_affiliations')
+              .select('id')
+              .eq('person_id', byLinkedIn.id)
+              .eq('firm_id', affiliateWithFirmId)
+              .maybeSingle();
+            if (!existingAff) {
+              await supabase.from('investor_affiliations').insert({
+                id: randomUUID(),
+                person_id: byLinkedIn.id,
+                firm_id: affiliateWithFirmId,
+              });
+            }
+            if (affiliateContactEmail) {
+              const { data: inv } = await supabase.from('investors').select('email').eq('id', byLinkedIn.id).single();
+              const currentEmails = inv?.email ? String(inv.email).split(/[,;]\s*/).filter(Boolean) : [];
+              const merged = [...new Set([...currentEmails, affiliateContactEmail].filter(Boolean))];
+              await supabase.from('investors').update({ email: merged.join(', ') }).eq('id', byLinkedIn.id);
+            }
+          }
           return NextResponse.json({
             skipped: true,
             reason: 'linkedin_exists',
+            investor_id: byLinkedIn.id,
             cleaned,
             domain: null,
             linkedinUrl,
@@ -356,7 +401,7 @@ export async function POST(req: NextRequest) {
     const cleanName = summary?.clean_name || null;
     const investorTypes = isInvestor && summary?.investor_types ? summary.investor_types : null;
 
-    console.log('[investor-research] Parsed summary:', { summary, isInvestor, entityType, cleanName, investorTypes });
+    console.log('[investor-research] Step 1: entity_type=', entityType, '| is_investor=', isInvestor, '| clean_name=', cleanName);
 
     // Build links from subpages: [title](url)
     const links: string[] = [];
@@ -393,6 +438,7 @@ export async function POST(req: NextRequest) {
 
     // Non-investor: mark as to_do for future processing
     if (!isInvestor) {
+      const nonInvestorId = existingId || randomUUID();
       const row = {
         ...baseRow,
         research_status: 'to_do',
@@ -408,7 +454,7 @@ export async function POST(req: NextRequest) {
       } else {
         const { error: insErr } = await supabase.from('investors').insert({
           ...row,
-          id: randomUUID(),
+          id: nonInvestorId,
         });
         if (insErr) {
           console.error('Investor insert error:', insErr);
@@ -417,6 +463,7 @@ export async function POST(req: NextRequest) {
       }
 
       return NextResponse.json({
+        investor_id: nonInvestorId,
         cleaned,
         domain,
         linkedinUrl,
@@ -505,7 +552,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log('[investor-research] Step 2 complete, deep research length:', deepResearchText.length);
+    console.log('[investor-research] Step 2 complete, deep research length:', deepResearchText.length, 'chars');
 
     // Step 3: Azure structured JSON extraction (role only when Person)
     const step3Schema = buildStep3Schema(entityType === 'Person');
@@ -574,6 +621,127 @@ export async function POST(req: NextRequest) {
 
     console.log('[investor-research] Step 3 complete, updated investor:', rowId);
 
+    let contactsPendingResponse: { firm_id: string; contacts: { input: string; affiliateContactEmail?: string; full_name?: string }[] } | null = null;
+
+    // --- Organization flow: get contacts, return for frontend to process ---
+    if (entityType === 'Organization' && domain) {
+      console.log('[investor-research] Organization flow: fetching contacts for domain:', domain);
+      try {
+        const investorSearchRes = await fetch(INVESTOR_SEARCH_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain }),
+        });
+        if (investorSearchRes.ok) {
+          const investorSearchData = await investorSearchRes.json();
+          const contacts = Array.isArray(investorSearchData?.results) ? investorSearchData.results : [];
+          console.log('[investor-research] Organization flow: got', contacts.length, 'contacts from investor-search');
+          const contactsPending: { input: string; affiliateContactEmail?: string; full_name?: string }[] = [];
+          for (const contact of contacts) {
+            const contactLinkedIn = contact?.linkedin_url;
+            if (!contactLinkedIn || typeof contactLinkedIn !== 'string') {
+              console.log('[investor-research] Organization flow: skipping contact (no linkedin_url):', contact?.full_name || contact?.person_id);
+              continue;
+            }
+            const linkedInInput = contactLinkedIn.startsWith('http') ? contactLinkedIn : `https://www.linkedin.com/${contactLinkedIn.replace(/^\//, '')}`;
+            const affiliateContactEmail = contact?.email && contact?.email_status === 'verified' ? contact.email : undefined;
+            contactsPending.push({
+              input: linkedInInput,
+              affiliateContactEmail,
+              full_name: contact?.full_name,
+            });
+          }
+          if (contactsPending.length > 0) {
+            contactsPendingResponse = { firm_id: rowId, contacts: contactsPending };
+            console.log('[investor-research] Organization flow: returning', contactsPending.length, 'contacts for frontend to process');
+          }
+        } else {
+          console.log('[investor-research] Organization flow: investor-search failed', investorSearchRes.status);
+        }
+      } catch (e) {
+        console.error('[investor-research] investor-search error:', e);
+      }
+    } else if (entityType === 'Organization' && !domain) {
+      console.log('[investor-research] Organization flow: skipped (no domain for org)');
+    }
+
+    // --- Person flow: get firm, lookup or research, create affiliation ---
+    if (entityType === 'Person' && researchContext === 'firm_from_person') {
+      console.log('[investor-research] Person flow: skipped (researchContext=firm_from_person, infinite loop prevention)');
+    }
+    if (entityType === 'Person' && researchContext !== 'firm_from_person' && currentFirmParsed?.url) {
+      const { domain: firmDomain } = cleanInvestorInput(currentFirmParsed.url);
+      const firmDomainForRpc = firmDomain || currentFirmParsed.url;
+      console.log('[investor-research] Person flow: looking up firm for person', cleanName, '| firm domain:', firmDomainForRpc);
+      const { data: firmIdFromRpc } = await supabase.rpc('get_investor_id_by_domain_or_linkedin', {
+        p_domain: firmDomainForRpc,
+      });
+      if (firmIdFromRpc) {
+        console.log('[investor-research] Person flow: firm found in DB:', firmIdFromRpc);
+        const { data: existingAff } = await supabase
+          .from('investor_affiliations')
+          .select('id')
+          .eq('person_id', rowId)
+          .eq('firm_id', firmIdFromRpc)
+          .maybeSingle();
+        if (!existingAff) {
+          const { error: affErr } = await supabase.from('investor_affiliations').insert({
+            id: randomUUID(),
+            person_id: rowId,
+            firm_id: firmIdFromRpc,
+          });
+          if (affErr) console.error('[investor-research] Affiliation insert error:', affErr);
+          else console.log('[investor-research] Person flow: created affiliation person', rowId, '-> firm', firmIdFromRpc);
+        } else {
+          console.log('[investor-research] Person flow: affiliation already exists');
+        }
+      } else {
+        console.log('[investor-research] Person flow: firm not in DB, researching firm:', firmDomainForRpc);
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (req.url ? new URL(req.url).origin : '');
+        if (baseUrl) {
+        try {
+          const firmRes = await fetch(`${baseUrl}/api/investor-research`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              input: firmDomainForRpc,
+              skipExisting: true,
+              researchContext: 'firm_from_person',
+            }),
+          });
+          const firmData = await firmRes.json();
+          const firmInvestorId = firmData?.investor_id;
+          console.log('[investor-research] Person flow: firm research result:', { firmInvestorId, error: firmData?.error, research_status: firmData?.research_status });
+          if (firmInvestorId && !firmData?.error && firmData?.research_status !== 'to_do') {
+            const { data: existingAff } = await supabase
+              .from('investor_affiliations')
+              .select('id')
+              .eq('person_id', rowId)
+              .eq('firm_id', firmInvestorId)
+              .maybeSingle();
+            if (!existingAff) {
+              const { error: affErr } = await supabase.from('investor_affiliations').insert({
+                id: randomUUID(),
+                person_id: rowId,
+                firm_id: firmInvestorId,
+              });
+              if (affErr) console.error('[investor-research] Affiliation insert error:', affErr);
+              else console.log('[investor-research] Person flow: created affiliation person', rowId, '-> firm', firmInvestorId);
+            }
+          } else {
+            console.log('[investor-research] Person flow: firm not added (not investor or error)');
+          }
+        } catch (e) {
+          console.error('[investor-research] Firm research from person error:', e);
+        }
+        } else {
+          console.warn('[investor-research] baseUrl not set, skipping firm research self-call');
+        }
+      }
+    } else if (entityType === 'Person' && researchContext !== 'firm_from_person' && !currentFirmParsed?.url) {
+      console.log('[investor-research] Person flow: skipped (no current_firm in Step 3)');
+    }
+
     // Fire-and-forget founder-search for all notable investment domains
     const notableInvestments = Array.isArray(extracted?.notable_investments) ? extracted.notable_investments : null;
     const domains = extractDomainsFromNotableInvestments(notableInvestments);
@@ -585,7 +753,34 @@ export async function POST(req: NextRequest) {
       }).catch((e) => console.error('[investor-research] founder-search fire-and-forget error:', e));
     }
 
-    return NextResponse.json({
+    // When called with affiliateWithFirmId (e.g. from Organization flow fire-and-forget), create affiliation
+    if (affiliateWithFirmId && isInvestor) {
+      const { data: existingAff } = await supabase
+        .from('investor_affiliations')
+        .select('id')
+        .eq('person_id', rowId)
+        .eq('firm_id', affiliateWithFirmId)
+        .maybeSingle();
+      if (!existingAff) {
+        await supabase.from('investor_affiliations').insert({
+          id: randomUUID(),
+          person_id: rowId,
+          firm_id: affiliateWithFirmId,
+        });
+        console.log('[investor-research] Created affiliation (affiliateWithFirmId): person', rowId, '-> firm', affiliateWithFirmId);
+      }
+      if (affiliateContactEmail) {
+        const { data: inv } = await supabase.from('investors').select('email').eq('id', rowId).single();
+        const currentEmails = inv?.email ? String(inv.email).split(/[,;]\s*/).filter(Boolean) : [];
+        const merged = [...new Set([...currentEmails, affiliateContactEmail].filter(Boolean))];
+        await supabase.from('investors').update({ email: merged.join(', ') }).eq('id', rowId);
+        console.log('[investor-research] Merged affiliateContactEmail for person', rowId);
+      }
+    }
+
+    console.log('[investor-research] Done. investor_id=', rowId, '| entity_type=', entityType);
+    const response: Record<string, unknown> = {
+      investor_id: rowId,
       cleaned,
       domain,
       linkedinUrl,
@@ -598,7 +793,11 @@ export async function POST(req: NextRequest) {
       links,
       updated: true,
       deep_research_complete: true,
-    });
+    };
+    if (contactsPendingResponse) {
+      response.contacts_pending = contactsPendingResponse;
+    }
+    return NextResponse.json(response);
   } catch (err) {
     console.error('Investor research error:', err);
     const msg = err instanceof Error ? err.message : String(err);

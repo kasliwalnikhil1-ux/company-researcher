@@ -167,7 +167,8 @@ export function cleanInvestorInput(input: string): {
 // Fetch investor research (Exa + upsert to investors table)
 export const fetchInvestorResearch = async (
   input: string,
-  skipExisting?: boolean
+  skipExisting?: boolean,
+  options?: { affiliateWithFirmId?: string; affiliateContactEmail?: string }
 ): Promise<{
   cleaned?: string;
   skipped?: boolean;
@@ -175,15 +176,19 @@ export const fetchInvestorResearch = async (
   summary?: { entity_type?: string; is_investor?: boolean; investor_types?: string[]; clean_name?: string };
   links?: string[];
   updated?: boolean;
+  contacts_pending?: { firm_id: string; contacts: { input: string; affiliateContactEmail?: string; full_name?: string }[] };
   error?: string;
   details?: string;
 } | null> => {
   try {
-    console.log('[fetchInvestorResearch] Calling API:', { input, skipExisting });
+    const body: Record<string, unknown> = { input, skipExisting };
+    if (options?.affiliateWithFirmId) body.affiliateWithFirmId = options.affiliateWithFirmId;
+    if (options?.affiliateContactEmail) body.affiliateContactEmail = options.affiliateContactEmail;
+    console.log('[fetchInvestorResearch] Calling API:', { input, skipExisting, affiliateWithFirmId: !!options?.affiliateWithFirmId });
     const res = await fetch('/api/investor-research', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input, skipExisting }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     console.log('[fetchInvestorResearch] API response:', { ok: res.ok, status: res.status, data: { ...data, links: data?.links?.length } });
@@ -197,6 +202,52 @@ export const fetchInvestorResearch = async (
     console.error('Investor research error:', err);
     return { error: 'Network error', details: msg };
   }
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Process contacts_pending with concurrency limit and retries. Returns { processed, failed, errors }. */
+export const processContactsPending = async (
+  firmId: string,
+  contacts: { input: string; affiliateContactEmail?: string; full_name?: string }[],
+  options: {
+    concurrency?: number;
+    maxRetries?: number;
+    onProgress?: (processed: number, total: number, failed: number) => void;
+  } = {}
+): Promise<{ processed: number; failed: number; errors: { name?: string; input: string; error: string }[] }> => {
+  const { concurrency = 5, maxRetries = 3, onProgress } = options;
+  const errors: { name?: string; input: string; error: string }[] = [];
+  let processed = 0;
+  let failed = 0;
+
+  const processOne = async (contact: (typeof contacts)[0], retriesLeft: number): Promise<boolean> => {
+    const result = await fetchInvestorResearch(contact.input, true, {
+      affiliateWithFirmId: firmId,
+      affiliateContactEmail: contact.affiliateContactEmail,
+    });
+    if (result?.error) {
+      if (retriesLeft > 0) {
+        await sleep(1000 * (maxRetries - retriesLeft + 1));
+        return processOne(contact, retriesLeft - 1);
+      }
+      errors.push({ name: contact.full_name, input: contact.input, error: result.error + (result.details ? `: ${result.details}` : '') });
+      return false;
+    }
+    return true;
+  };
+
+  for (let i = 0; i < contacts.length; i += concurrency) {
+    const batch = contacts.slice(i, i + concurrency);
+    const results = await Promise.all(batch.map((c) => processOne(c, maxRetries)));
+    for (let j = 0; j < results.length; j++) {
+      if (results[j]) processed++;
+      else failed++;
+    }
+    onProgress?.(processed + failed, contacts.length, failed);
+  }
+
+  return { processed, failed, errors };
 };
 
 // Error codes from investor-analyze API for user-facing handling

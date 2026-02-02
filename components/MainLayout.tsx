@@ -24,6 +24,12 @@ const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
 ]);
 
+// User IDs allowed to access ME Data and ME Prospects
+const ME_DATA_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
+
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const { selectedOwner, setSelectedOwner, availableOwners, ownerColors } = useOwner();
@@ -49,17 +55,20 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       ? RESEARCH_ALLOWED_USER_IDS.has(user?.id ?? '')
       : true;
     const canAccessPersonalization = PERSONALIZATION_ALLOWED_USER_IDS.has(user?.id ?? '');
+    const canAccessMeData = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
     return {
       showResearch: isFundraising ? canAccessResearch : true,
       showCompanies: isB2B,
       showInvestors: isFundraising,
       showEnrich: isB2B,
       showPersonalization: canAccessPersonalization,
+      showMeData: canAccessMeData,
       canAccessResearch,
       canAccessCompanies: isB2B,
       canAccessInvestors: isFundraising,
       canAccessEnrich: isB2B,
       canAccessPersonalization,
+      canAccessMeData,
       defaultRoute: isFundraising && !canAccessResearch ? '/investors' : '/',
     };
   }, [primaryUse, user?.id]);
@@ -115,6 +124,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       return;
     }
     if (pathname === '/personalization' && !routeAccess.canAccessPersonalization) {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
+    if ((pathname === '/me-data' || pathname === '/me-data-prospects') && !routeAccess.canAccessMeData) {
       router.replace(routeAccess.defaultRoute);
       return;
     }
@@ -368,31 +381,34 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
           </Link>
 
-          <Link
-            href="/me-data"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/me-data')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="ME Data"
-          >
-            <Database className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>ME Data</span>}
-          </Link>
-
-          <Link
-            href="/me-data-prospects"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/me-data-prospects')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="ME Data Prospects"
-          >
-            <Users className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>ME Prospects</span>}
-          </Link>
+          {routeAccess.showMeData && (
+            <>
+              <Link
+                href="/me-data"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/me-data')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="ME Data"
+              >
+                <Database className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>ME Data</span>}
+              </Link>
+              <Link
+                href="/me-data-prospects"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/me-data-prospects')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="ME Data Prospects"
+              >
+                <Users className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>ME Prospects</span>}
+              </Link>
+            </>
+          )}
 
           <a
             href="https://calendly.com/founders-capitalxai/20min"

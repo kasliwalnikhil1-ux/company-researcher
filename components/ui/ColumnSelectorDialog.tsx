@@ -255,7 +255,7 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
             : (mode === 'instagram' 
               ? 'Please select the column that contains Instagram URLs. Only columns with Instagram URLs (instagram.com) are shown.'
               : mode === 'investor'
-              ? 'Please select the column that contains domains (e.g. boldcap.com) or LinkedIn URLs (e.g. linkedin.com/company/boldcap).'
+              ? 'Please select the column that contains domains (e.g. boldcap.com) or LinkedIn URLs (e.g. linkedin.com/in/garrytan).'
               : 'Please select the column that contains company website URLs. Columns with no URLs or social media links (LinkedIn, Twitter, Facebook, etc.) are excluded.')}
         </p>
         

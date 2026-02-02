@@ -119,7 +119,7 @@ async function callGeminiApi(
   // Extract parameters from Azure OpenAI-style payload
   const messages = payload.messages || [];
   const temperature = payload.temperature ?? 0.5;
-  const maxTokens = payload.max_tokens ?? 2000;
+  const maxTokens = payload.max_tokens ?? 65536;
   const responseFormat = payload.response_format;
 
   // Convert messages to Gemini format
@@ -153,8 +153,9 @@ async function callGeminiApi(
       temperature: temperature,
       maxOutputTokens: maxTokens,
       thinkingConfig: {
-        thinkingLevel: "MEDIUM",
+        thinkingLevel: "HIGH",
       },
+      responseMimeType: "application/json",
     },
   };
 
@@ -321,9 +322,9 @@ async function callAzureOpenAIInternal(
 
   // Extract parameters from payload
   const messages = payload.messages || [];
-  const temperature = payload.temperature ?? 0.5;
+  const temperature = payload.temperature ?? 0.3;
   const topP = payload.top_p ?? 0.85;
-  const maxTokens = payload.max_tokens ?? 800;
+  const maxTokens = payload.max_tokens ?? 4096;
   const responseFormat = payload.response_format;
 
   // Determine which deployment to use
@@ -466,33 +467,47 @@ export async function getCompletion(
     payload.response_format = { type: "json_object" };
   }
 
-  try {
-    const responseData = await callAzureOpenAI(payload, { endpoint, provider });
-
-    if (responseData.choices && responseData.choices.length > 0) {
-      const content = responseData.choices[0].message.content;
-
-      // If JSON format was requested, try to parse it
-      if (response_format === "json_object") {
-        try {
-          return extractJsonFromResponse(content);
-        } catch (e) {
-          console.error("JSON parsing error:", e);
-          console.error("Raw response content:", content);
-
-          // Return error object if JSON parsing fails
-          return {
-            error: "Failed to parse JSON response",
-            raw_content: content,
-            json_error: String(e),
-          };
-        }
-      } else {
-        return content;
-      }
-    } else {
-      return { error: "No response from API" };
+  const parseOrError = (content: string): { ok: true; data: any } | { ok: false; error: string; raw_content: string } => {
+    try {
+      return { ok: true, data: extractJsonFromResponse(content) };
+    } catch (e) {
+      return { ok: false, error: String(e), raw_content: content };
     }
+  };
+
+  const callAndParse = async (
+    useProvider: "azure" | "gemini"
+  ): Promise<{ ok: true; data: any } | { ok: false; error: string; raw_content?: string }> => {
+    const responseData = await callAzureOpenAI(payload, { endpoint, provider: useProvider });
+    if (!responseData.choices?.length) return { ok: false, error: "No response from API" };
+    const content = responseData.choices[0].message.content;
+    if (response_format !== "json_object") return { ok: true, data: content };
+    const parsed = parseOrError(content);
+    if (parsed.ok) return parsed;
+    return { ok: false, error: parsed.error, raw_content: parsed.raw_content };
+  };
+
+  try {
+    // First attempt with configured provider (default: gemini)
+    let result = await callAndParse(provider);
+    if (!result.ok && result.raw_content) {
+      console.warn("[azureOpenAiHelper] JSON parse failed, retrying once with same provider");
+      result = await callAndParse(provider);
+    }
+    if (!result.ok && result.raw_content && provider !== "azure") {
+      console.warn("[azureOpenAiHelper] Retry failed, switching to Azure OpenAI");
+      result = await callAndParse("azure");
+    }
+    if (!result.ok && result.raw_content) {
+      console.warn("[azureOpenAiHelper] Azure JSON parse failed, retrying Azure once");
+      result = await callAndParse("azure");
+    }
+    if (result.ok) return result.data;
+    return {
+      error: "Failed to parse JSON response",
+      raw_content: result.raw_content,
+      json_error: result.error,
+    };
   } catch (error) {
     console.error("Error in getCompletion:", error);
     return { error: String(error) };

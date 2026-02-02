@@ -1505,7 +1505,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 ) : (
                   !isAddingNote && (
                     <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
-                      <p className="text-sm text-gray-600">No notes yet. Click "Add Note" to create one.</p>
+                      <p className="text-sm text-gray-600">No notes yet. Click "Add Note" to track conversation details.</p>
                     </div>
                   )
                 )}

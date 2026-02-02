@@ -2,11 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import { Database, Plus, Loader2, Trash2, ChevronLeft, ChevronRight, Play } from 'lucide-react';
+
+const ME_DATA_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
 
 const PAGE_SIZE = 500;
 
@@ -46,11 +52,22 @@ function formatDateTime(iso: string): string {
 }
 
 export default function MeDataPage() {
+  const { user } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (user && !ME_DATA_ALLOWED_USER_IDS.has(user.id)) {
+      router.replace('/');
+    }
+  }, [user, router]);
+
+  const canAccess = user && ME_DATA_ALLOWED_USER_IDS.has(user.id);
+
   return (
     <ProtectedRoute>
       <MainLayout>
         <div className="flex-1 overflow-auto">
-          <MeDataContent />
+          {canAccess && <MeDataContent />}
         </div>
       </MainLayout>
     </ProtectedRoute>

@@ -279,7 +279,7 @@ export async function POST(req: NextRequest) {
     const investorName = investor.name?.trim() ?? '';
     const firstName = investorName ? investorName.split(/\s+/)[0] || investorName : '';
 
-    // Skip Twitter personalization for basic plan (Pro only)
+    // Skip Twitter personalization for basic plan (enabled for free and pro)
     const skipTwitterPersonalization = plan === 'basic';
     if (twitterUrl && !skipTwitterPersonalization) {
       try {

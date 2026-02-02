@@ -6,7 +6,7 @@ import QualificationDisplay from './qualification/QualificationDisplay';
 import InstagramProfileDisplay from './qualification/InstagramProfileDisplay';
 import Image from "next/image";
 import Link from "next/link";
-import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, cleanInvestorInput, sendSlackNotification } from "../lib/api";
+import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
 import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
 import ConfirmationModal from './ui/ConfirmationModal';
@@ -18,6 +18,7 @@ import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, ser
 import { useCompanies } from "@/contexts/CompaniesContext";
 import { useOwner } from "@/contexts/OwnerContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOnboarding } from "@/contexts/OnboardingContext";
 import { extractUsernameFromUrl } from "../utils/instagramUrl";
 import { supabase } from "@/utils/supabase/client";
 
@@ -106,6 +107,14 @@ export default function CompanyResearcher() {
   const { selectedOwner } = useOwner();
   // Auth context for user ID
   const { user } = useAuth();
+  const { onboarding } = useOnboarding();
+  
+  const primaryUse = useMemo(
+    () => onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising',
+    [onboarding]
+  );
+  const isFundraising = primaryUse === 'fundraising';
+  const isB2B = primaryUse === 'b2b';
   
   // Personalization settings (fetched once on page load)
   const [personalizationSettings, setPersonalizationSettings] = useState<{
@@ -115,6 +124,15 @@ export default function CompanyResearcher() {
   
   // Research mode: 'domain', 'instagram', or 'investor'
   const [researchMode, setResearchMode] = useState<'domain' | 'instagram' | 'investor'>('domain');
+
+  // Sync researchMode when primaryUse changes
+  useEffect(() => {
+    if (isFundraising && researchMode !== 'investor') {
+      setResearchMode('investor');
+    } else if ((isB2B || !isFundraising) && researchMode === 'investor') {
+      setResearchMode('domain');
+    }
+  }, [isFundraising, isB2B, researchMode]);
 
   // Set name for batch processing
   const [setName, setSetName] = useState('');
@@ -146,6 +164,7 @@ export default function CompanyResearcher() {
         summary?: { entity_type?: string; is_investor?: boolean; investor_types?: string[]; clean_name?: string };
         links?: string[];
         updated?: boolean;
+        contactsProcessing?: { current: number; total: number; failed: number };
       } | null;
     }
   }>({});
@@ -158,7 +177,7 @@ export default function CompanyResearcher() {
   const [selectedUrlColumn, setSelectedUrlColumn] = useState<string | null>(null);
   const [selectedColumns, setSelectedColumns] = useState<{ domain: string | null; instagram: string | null }>({ domain: null, instagram: null });
   const [isProcessingCsv, setIsProcessingCsv] = useState(false);
-  const [csvProcessingProgress, setCsvProcessingProgress] = useState({ current: 0, total: 0 });
+  const [csvProcessingProgress, setCsvProcessingProgress] = useState<{ current: number; total: number; contactsLabel?: string }>({ current: 0, total: 0 });
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState('');
   const [hasSavedProgress, setHasSavedProgress] = useState(false);
@@ -510,9 +529,42 @@ export default function CompanyResearcher() {
               summary: data?.summary,
               links: data?.links,
               updated: data?.updated,
+              contactsProcessing: data?.contacts_pending ? { current: 0, total: data.contacts_pending.contacts.length, failed: 0 } : undefined,
             }
           }
         }));
+
+        if (data?.contacts_pending?.contacts?.length) {
+          const { firm_id, contacts } = data.contacts_pending;
+          const result = await processContactsPending(firm_id, contacts, {
+            concurrency: 5,
+            maxRetries: 3,
+            onProgress: (current, total, failed) => {
+              setResultsByCompany(prev => {
+                const existing = prev[company]?.investorResearchData;
+                if (!existing) return prev;
+                return {
+                  ...prev,
+                  [company]: {
+                    ...prev[company],
+                    investorResearchData: { ...existing, contactsProcessing: { current, total, failed } },
+                  }
+                };
+              });
+            },
+          });
+          setResultsByCompany(prev => ({
+            ...prev,
+            [company]: {
+              ...prev[company],
+              investorResearchData: prev[company]?.investorResearchData
+                ? { ...prev[company].investorResearchData!, contactsProcessing: undefined }
+                : (prev[company]?.investorResearchData ?? null),
+            }
+          }));
+          setToastMessage(`Contacts: ${result.processed} processed, ${result.failed} failed${result.errors.length ? ` (${result.errors.length} errors)` : ''}`);
+          setShowToast(true);
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setErrorsByCompany(prev => ({
@@ -2091,6 +2143,21 @@ export default function CompanyResearcher() {
               errorMap.set(cleanedUrl, data.error + (data.details ? `: ${data.details}` : ''));
             } else {
               qualificationDataMap.set(cleanedUrl, data);
+              if (data?.contacts_pending?.contacts?.length) {
+                const { firm_id, contacts } = data.contacts_pending;
+                await processContactsPending(firm_id, contacts, {
+                  concurrency: 5,
+                  maxRetries: 3,
+                  onProgress: (current, total, failed) => {
+                    setCsvProcessingProgress({
+                      current: startFromIndex + processedDomainIndices.length,
+                      total: uniqueDomainsArray.length,
+                      contactsLabel: `Contacts: ${current}/${total}${failed ? ` (${failed} failed)` : ''}`,
+                    });
+                  },
+                });
+                setCsvProcessingProgress(prev => ({ ...prev, contactsLabel: undefined }));
+              }
             }
           } catch (error) {
             const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -2983,8 +3050,10 @@ export default function CompanyResearcher() {
             />
           </Link>
           <h1 className="md:text-6xl text-4xl font-medium">
-            <span className="text-brand-default"> Company </span>
-            Researcher
+            <span className="text-brand-default">
+              {isFundraising ? 'Investor' : 'Company'}
+            </span>
+            {' Researcher'}
           </h1>
         </div>
         {(submittedCompanies.length > 0 || rawCompanyInput.trim().length > 0) && (
@@ -3000,45 +3069,43 @@ export default function CompanyResearcher() {
       {/* Mode Selector */}
       <div className="mb-8 opacity-0 animate-fade-up [animation-delay:400ms]">
         <div className="flex gap-4">
-          <button
-            onClick={() => {
-              setResearchMode('domain');
-              handleClearAll();
-            }}
-            className={`px-6 py-3 rounded-sm font-medium transition-colors ${
-              researchMode === 'domain'
-                ? 'bg-brand-default text-white ring-2 ring-brand-default'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            Domain Research
-          </button>
-          <button
-            onClick={() => {
-              setResearchMode('instagram');
-              handleClearAll();
-            }}
-            className={`px-6 py-3 rounded-sm font-medium transition-colors ${
-              researchMode === 'instagram'
-                ? 'bg-brand-default text-white ring-2 ring-brand-default'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            Instagram Research
-          </button>
-          <button
-            onClick={() => {
-              setResearchMode('investor');
-              handleClearAll();
-            }}
-            className={`px-6 py-3 rounded-sm font-medium transition-colors ${
-              researchMode === 'investor'
-                ? 'bg-brand-default text-white ring-2 ring-brand-default'
-                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-            }`}
-          >
-            Investor Research
-          </button>
+          {isFundraising ? (
+            <button
+              className="px-6 py-3 rounded-sm font-medium bg-brand-default text-white ring-2 ring-brand-default"
+              aria-label="Investor Research"
+            >
+              Investor Research
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  setResearchMode('domain');
+                  handleClearAll();
+                }}
+                className={`px-6 py-3 rounded-sm font-medium transition-colors ${
+                  researchMode === 'domain'
+                    ? 'bg-brand-default text-white ring-2 ring-brand-default'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Domain Research
+              </button>
+              <button
+                onClick={() => {
+                  setResearchMode('instagram');
+                  handleClearAll();
+                }}
+                className={`px-6 py-3 rounded-sm font-medium transition-colors ${
+                  researchMode === 'instagram'
+                    ? 'bg-brand-default text-white ring-2 ring-brand-default'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Instagram Research
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -3104,7 +3171,7 @@ export default function CompanyResearcher() {
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
-                  <span>Processing CSV: {csvProcessingProgress.current} / {csvProcessingProgress.total}</span>
+                  <span>Processing CSV: {csvProcessingProgress.current} / {csvProcessingProgress.total}{csvProcessingProgress.contactsLabel ? ` — ${csvProcessingProgress.contactsLabel}` : ''}</span>
                 </div>
                 <button
                   onClick={() => {
@@ -3195,7 +3262,7 @@ export default function CompanyResearcher() {
               }
             }}
             placeholder={researchMode === 'investor'
-              ? "Enter domains or LinkedIn URLs (e.g., boldcap.com, linkedin.com/company/boldcap)"
+              ? "Enter domains or LinkedIn URLs (e.g., boldcap.com, linkedin.com/in/garrytan)"
               : researchMode === 'instagram' 
               ? "Enter Instagram URLs (e.g., instagram.com/username, instagram.com/another_username)"
               : "Enter company URLs (e.g., capitalxai.com, another-company.com)"}
@@ -3334,6 +3401,12 @@ export default function CompanyResearcher() {
                         )}
                         {investorResearchData.updated && (
                           <p className="text-sm text-green-600">Updated existing investor in database.</p>
+                        )}
+                        {investorResearchData.contactsProcessing && (
+                          <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-sm text-blue-800">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                            <span className="text-sm">Processing contacts: {investorResearchData.contactsProcessing.current}/{investorResearchData.contactsProcessing.total}{investorResearchData.contactsProcessing.failed ? ` (${investorResearchData.contactsProcessing.failed} failed)` : ''}</span>
+                          </div>
                         )}
                       </>
                     ) : (
