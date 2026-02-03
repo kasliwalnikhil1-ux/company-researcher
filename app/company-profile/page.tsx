@@ -1014,18 +1014,33 @@ function CompanyProfileContent() {
         {formData.step9 && (
           <section>
             <h2 className="text-lg font-semibold text-gray-900 mb-4">Product / Service Description</h2>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">What product or service does your company offer? <span className="text-red-500">*</span></label>
-              <textarea
-                value={formData.step9.productDescription || ''}
-                onChange={(e) => setFormData({
-                  ...formData,
-                  step9: { productDescription: e.target.value }
-                })}
-                rows={6}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                placeholder="Describe your product or service..."
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What product or service does your company offer? <span className="text-red-500">*</span></label>
+                <textarea
+                  value={formData.step9.productDescription || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step9: { productDescription: e.target.value, whatMakesYouUnique: formData.step9?.whatMakesYouUnique }
+                  })}
+                  rows={6}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Describe your product or service..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">What makes you unique? <span className="text-gray-400">(optional)</span></label>
+                <textarea
+                  value={formData.step9.whatMakesYouUnique || ''}
+                  onChange={(e) => setFormData({
+                    ...formData,
+                    step9: { productDescription: formData.step9?.productDescription ?? '', whatMakesYouUnique: e.target.value }
+                  })}
+                  rows={3}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="What differentiates you from competitors?"
+                />
+              </div>
             </div>
           </section>
         )}
@@ -1363,9 +1378,9 @@ function CompanyProfileContent() {
               <label className="block text-sm font-medium text-gray-700 mb-2">Are you looking for a lead investor or follow-on investors? <span className="text-red-500">*</span></label>
               <div className="space-y-2">
                 {[
+                  { value: 'both', label: 'Both' },
                   { value: 'lead', label: 'Lead investors' },
                   { value: 'follow_on', label: 'Follow-on investors' },
-                  { value: 'both', label: 'Both' },
                 ].map((option) => (
                   <label key={option.value} className="flex items-center">
                     <input

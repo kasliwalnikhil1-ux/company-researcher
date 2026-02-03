@@ -41,6 +41,7 @@ export interface OnboardingData {
   };
   step9?: {
     productDescription: string;
+    whatMakesYouUnique?: string;
   };
   step10?: {
     customerDescription: string;
@@ -97,6 +98,20 @@ export interface OnboardingData {
   b2bStep11?: {
     cta: 'book_demo' | 'request_quote' | 'free_trial' | 'waitlist' | 'contact_sales';
   };
+  /** Twitter personalization: which tweets to use for icebreakers */
+  twitterPersonalization?: {
+    /** Include pinned tweet even if older than maxTweetAgeDays (default true) */
+    allowPinnedTweetsOlderThanMax?: boolean;
+    /** Max age in days for timeline tweets and optionally pinned (default 7) */
+    maxTweetAgeDays?: number;
+  };
+  /** Exclude investors from search: firms by domain, individuals by LinkedIn path */
+  excludeInvestors?: {
+    /** Firm domains to exclude (e.g. a16z.com, sequoiacap.com) */
+    domains?: string[];
+    /** LinkedIn paths to exclude for individuals (e.g. /in/namankas, /in/garytan) */
+    linkedinUrls?: string[];
+  };
   completed?: boolean;
   completedAt?: string;
 }
@@ -106,6 +121,8 @@ interface OnboardingContextType {
   loading: boolean;
   fetchOnboarding: () => Promise<void>;
   updateOnboarding: (data: Partial<OnboardingData>) => Promise<void>;
+  /** Update onboarding in memory only (no API call). Use after saving known keys elsewhere. */
+  mergeOnboardingLocal: (updates: Partial<OnboardingData>) => void;
   completeOnboarding: () => Promise<void>;
 }
 
@@ -193,6 +210,10 @@ export const OnboardingProvider = ({ children }: { children: React.ReactNode }) 
     }
   }, [user?.id, onboarding]);
 
+  const mergeOnboardingLocal = useCallback((updates: Partial<OnboardingData>) => {
+    setOnboarding((prev) => (prev ? { ...prev, ...updates } : { ...updates }));
+  }, []);
+
   const completeOnboarding = useCallback(async () => {
     await updateOnboarding({
       completed: true,
@@ -209,6 +230,7 @@ export const OnboardingProvider = ({ children }: { children: React.ReactNode }) 
     loading,
     fetchOnboarding,
     updateOnboarding,
+    mergeOnboardingLocal,
     completeOnboarding,
   };
 

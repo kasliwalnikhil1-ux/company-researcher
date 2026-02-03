@@ -13,7 +13,8 @@ export interface InvestorSearchFilters {
   mode: InvestorModeFilter;
   name: string;
   active: boolean | null;
-  role: string | null;
+  /** Person only; multiple roles (p_role text[] in search_investors) */
+  role: string[];
   hq_state: string | null;
   hq_country: string | null;
   investor_type: string[];
@@ -33,7 +34,17 @@ export interface InvestorSearchFilters {
   owner: string[];
   /** Reviewed tab only: investor_fit - true=Strong, false=Weak, null=Unclear */
   investor_fit: (boolean | null)[];
+  /** Optional: search by firm domains (e.g. accel.com) - passed as p_domains to search_investors */
+  domains?: string[];
+  /** Optional: search by LinkedIn paths (e.g. /in/namankas) - passed as p_linkedin_urls to search_investors */
+  linkedin_urls?: string[];
 }
+
+/** Exclude lists from onboarding - passed as p_exclude_domains, p_exclude_linkedin_urls to search_investors */
+export type ExcludeInvestorsOption = {
+  domains?: string[];
+  linkedinUrls?: string[];
+};
 
 export interface InvestorSearchResult {
   id: string;
@@ -87,6 +98,8 @@ export interface InvestorSearchResult {
 export interface UseInvestorSearchOptions {
   filters: InvestorSearchFilters;
   pageSize?: number;
+  /** Exclude firms/individuals from onboarding - passed to search_investors on every call */
+  excludeInvestors?: ExcludeInvestorsOption | null;
 }
 
 export interface UseInvestorSearchReturn {
@@ -105,7 +118,8 @@ const PAGE_SIZE_DEFAULT = 10;
 function buildRpcParams(
   filters: InvestorSearchFilters,
   offset: number,
-  limit: number
+  limit: number,
+  excludeInvestors?: ExcludeInvestorsOption | null
 ): Record<string, unknown> {
   const params: Record<string, unknown> = {
     p_type: filters.type,
@@ -120,8 +134,8 @@ function buildRpcParams(
   if (filters.active !== null) {
     params.p_active = filters.active;
   }
-  if (filters.role?.trim()) {
-    params.p_role = filters.role.trim();
+  if (filters.role?.length) {
+    params.p_role = filters.role;
   }
   // Resolve country/state names to ISO codes for search (e.g. "India" → "IN", "Tamil Nadu" → "IN-TN")
   const resolvedCountry = filters.hq_country?.trim()
@@ -171,6 +185,18 @@ function buildRpcParams(
   if (filters.investor_fit.length > 0) {
     params.p_investor_fit = filters.investor_fit;
   }
+  if (filters.domains?.length) {
+    params.p_domains = filters.domains;
+  }
+  if (filters.linkedin_urls?.length) {
+    params.p_linkedin_urls = filters.linkedin_urls;
+  }
+  if (excludeInvestors?.domains?.length) {
+    params.p_exclude_domains = excludeInvestors.domains;
+  }
+  if (excludeInvestors?.linkedinUrls?.length) {
+    params.p_exclude_linkedin_urls = excludeInvestors.linkedinUrls;
+  }
 
   return params;
 }
@@ -178,6 +204,7 @@ function buildRpcParams(
 export function useInvestorSearch({
   filters,
   pageSize = PAGE_SIZE_DEFAULT,
+  excludeInvestors,
 }: UseInvestorSearchOptions): UseInvestorSearchReturn {
   const [data, setData] = useState<InvestorSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
@@ -197,7 +224,7 @@ export function useInvestorSearch({
       setError(null);
 
       const offset = (pageNum - 1) * pageSize;
-      const rpcParams = buildRpcParams(filters, offset, pageSize);
+      const rpcParams = buildRpcParams(filters, offset, pageSize, excludeInvestors);
 
       try {
         const { data: result, error: rpcError } = await supabase.rpc(
@@ -230,7 +257,7 @@ export function useInvestorSearch({
         abortRef.current = null;
       }
     },
-    [filters, pageSize]
+    [filters, pageSize, excludeInvestors]
   );
 
   useEffect(() => {
@@ -240,7 +267,7 @@ export function useInvestorSearch({
     filters.mode,
     filters.name,
     filters.active,
-    filters.role,
+    JSON.stringify(filters.role),
     filters.hq_state,
     filters.hq_country,
     JSON.stringify(filters.investor_type),
@@ -256,6 +283,8 @@ export function useInvestorSearch({
     JSON.stringify(filters.set),
     JSON.stringify(filters.owner),
     JSON.stringify(filters.investor_fit),
+    JSON.stringify(excludeInvestors?.domains),
+    JSON.stringify(excludeInvestors?.linkedinUrls),
   ]);
 
   useEffect(() => {
@@ -287,7 +316,8 @@ export function useInvestorSearch({
 /** Fetch a single investor by ID using search_investors RPC (same format as search results) */
 export async function fetchInvestorById(
   investorId: string,
-  filters: Pick<InvestorSearchFilters, 'type' | 'mode'>
+  filters: Pick<InvestorSearchFilters, 'type' | 'mode'>,
+  excludeInvestors?: ExcludeInvestorsOption | null
 ): Promise<InvestorSearchResult | null> {
   const rpcParams: Record<string, unknown> = {
     p_type: filters.type,
@@ -296,6 +326,12 @@ export async function fetchInvestorById(
     p_limit: 1,
     p_offset: 0,
   };
+  if (excludeInvestors?.domains?.length) {
+    rpcParams.p_exclude_domains = excludeInvestors.domains;
+  }
+  if (excludeInvestors?.linkedinUrls?.length) {
+    rpcParams.p_exclude_linkedin_urls = excludeInvestors.linkedinUrls;
+  }
   const { data, error } = await supabase.rpc('search_investors', rpcParams);
   if (error || !Array.isArray(data) || data.length === 0) return null;
   return data[0] as InvestorSearchResult;
@@ -303,12 +339,14 @@ export async function fetchInvestorById(
 
 /** Fetch investors for CSV export - always uses p_mode: "reviewed", p_limit: 100000 */
 export async function fetchInvestorsForExport(
-  filters: InvestorSearchFilters
+  filters: InvestorSearchFilters,
+  excludeInvestors?: ExcludeInvestorsOption | null
 ): Promise<InvestorSearchResult[]> {
   const params = buildRpcParams(
     { ...filters, mode: 'reviewed' },
     0,
-    100000
+    100000,
+    excludeInvestors
   );
   const { data, error } = await supabase.rpc('search_investors', params);
   if (error || !Array.isArray(data)) return [];
@@ -322,7 +360,8 @@ export const CONTACTS_FREE_LIMIT = 5;
 export async function fetchPeopleAtFirm(
   firmId: string,
   mode: InvestorModeFilter,
-  limit: number
+  limit: number,
+  excludeInvestors?: ExcludeInvestorsOption | null
 ): Promise<InvestorSearchResult[]> {
   const rpcParams: Record<string, unknown> = {
     p_type: 'person',
@@ -331,6 +370,12 @@ export async function fetchPeopleAtFirm(
     p_limit: limit,
     p_offset: 0,
   };
+  if (excludeInvestors?.domains?.length) {
+    rpcParams.p_exclude_domains = excludeInvestors.domains;
+  }
+  if (excludeInvestors?.linkedinUrls?.length) {
+    rpcParams.p_exclude_linkedin_urls = excludeInvestors.linkedinUrls;
+  }
   const { data, error } = await supabase.rpc('search_investors', rpcParams);
   if (error || !Array.isArray(data)) return [];
   return data as InvestorSearchResult[];

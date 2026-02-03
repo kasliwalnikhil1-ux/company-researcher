@@ -3,14 +3,16 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useOwner, OWNER_COLOR_PRESETS, OWNER_PRESET_LABELS, type OwnerConfigItem } from '@/contexts/OwnerContext';
 import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import Toast from '@/components/ui/Toast';
-import { UserCircle, Lock, LogOut, X, Shield, Plus, Pencil, Trash2, Check, Mail } from 'lucide-react';
+import { UserCircle, Lock, LogOut, X, Shield, Plus, Pencil, Trash2, Check, Mail, Twitter, UserX } from 'lucide-react';
 import type { EmailSettings } from '@/lib/emailCompose';
+import { normalizeExcludeDomain, normalizeExcludeLinkedinUrl } from '@/lib/utils';
 
 export default function AccountPage() {
   return (
@@ -26,6 +28,7 @@ export default function AccountPage() {
 
 function AccountContent() {
   const { user, signOutAll, changePassword } = useAuth();
+  const { mergeOnboardingLocal } = useOnboarding();
   const { refetchOwners } = useOwner();
   const router = useRouter();
 
@@ -54,6 +57,23 @@ function AccountContent() {
   const [emailProvider, setEmailProvider] = useState<'gmail' | 'outlook'>('gmail');
   const [emailSignature, setEmailSignature] = useState('');
   const [emailSaving, setEmailSaving] = useState(false);
+
+  // Twitter personalization (stored in onboarding)
+  const [allowPinnedTweetsOlderThanMax, setAllowPinnedTweetsOlderThanMax] = useState(true);
+  const [maxTweetAgeDays, setMaxTweetAgeDays] = useState(7);
+  const [twitterSaving, setTwitterSaving] = useState(false);
+
+  // Exclude investors (stored in onboarding) — arrays for tag UI
+  const [excludeDomains, setExcludeDomains] = useState<string[]>([]);
+  const [excludeLinkedinUrls, setExcludeLinkedinUrls] = useState<string[]>([]);
+  const [excludeDomainInput, setExcludeDomainInput] = useState('');
+  const [excludeLinkedinInput, setExcludeLinkedinInput] = useState('');
+  const [excludeSaving, setExcludeSaving] = useState(false);
+
+  const showExcludeReminderToast = () => {
+    setToastMessage('Click the button Save exclude list to save your changes.');
+    setShowToast(true);
+  };
 
   const handleSignOutAll = () => setShowLogoutAllConfirm(true);
 
@@ -115,7 +135,7 @@ function AccountContent() {
       setOwnersLoading(true);
       const { data, error } = await supabase
         .from('user_settings')
-        .select('owners, email_settings')
+        .select('owners, email_settings, onboarding')
         .eq('id', user.id)
         .single();
 
@@ -146,6 +166,29 @@ function AccountContent() {
         if (parsed && (parsed.provider === 'gmail' || parsed.provider === 'outlook')) {
           setEmailProvider(parsed.provider);
           setEmailSignature(typeof parsed.signature === 'string' ? parsed.signature : '');
+        }
+      }
+
+      const ob = data?.onboarding;
+      if (ob && typeof ob === 'object') {
+        const parsed = typeof ob === 'string' ? JSON.parse(ob) : ob;
+        const tp = parsed?.twitterPersonalization;
+        if (tp && typeof tp === 'object') {
+          if (typeof tp.allowPinnedTweetsOlderThanMax === 'boolean') {
+            setAllowPinnedTweetsOlderThanMax(tp.allowPinnedTweetsOlderThanMax);
+          }
+          if (typeof tp.maxTweetAgeDays === 'number' && tp.maxTweetAgeDays >= 1) {
+            setMaxTweetAgeDays(tp.maxTweetAgeDays);
+          }
+        }
+        const ei = parsed?.excludeInvestors;
+        if (ei && typeof ei === 'object') {
+          if (Array.isArray(ei.domains)) {
+            setExcludeDomains(ei.domains.filter((d: unknown): d is string => typeof d === 'string'));
+          }
+          if (Array.isArray(ei.linkedinUrls)) {
+            setExcludeLinkedinUrls(ei.linkedinUrls.filter((u: unknown): u is string => typeof u === 'string'));
+          }
         }
       }
     } finally {
@@ -294,6 +337,109 @@ function AccountContent() {
     }
   };
 
+  const saveTwitterPersonalization = async () => {
+    if (!user?.id) return;
+    try {
+      setTwitterSaving(true);
+      const { data: existing } = await supabase
+        .from('user_settings')
+        .select('personalization, owners, email_settings, onboarding, column_settings')
+        .eq('id', user.id)
+        .single();
+
+      const existingOnboarding = existing?.onboarding;
+      const ob = existingOnboarding && typeof existingOnboarding === 'object'
+        ? (typeof existingOnboarding === 'string' ? JSON.parse(existingOnboarding) : existingOnboarding)
+        : {};
+      const updatedOnboarding = {
+        ...ob,
+        twitterPersonalization: {
+          allowPinnedTweetsOlderThanMax: allowPinnedTweetsOlderThanMax,
+          maxTweetAgeDays: maxTweetAgeDays,
+        },
+      };
+
+      const payload = {
+        id: user.id,
+        personalization: existing?.personalization ?? null,
+        owners: existing?.owners ?? null,
+        email_settings: existing?.email_settings ?? null,
+        onboarding: updatedOnboarding,
+        column_settings: existing?.column_settings ?? null,
+      };
+
+      const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      mergeOnboardingLocal({
+        twitterPersonalization: {
+          allowPinnedTweetsOlderThanMax,
+          maxTweetAgeDays,
+        },
+      });
+      setToastMessage('Twitter personalization settings saved.');
+      setShowToast(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to save Twitter settings';
+      setToastMessage(`Error: ${msg}`);
+      setShowToast(true);
+    } finally {
+      setTwitterSaving(false);
+    }
+  };
+
+  const saveExcludeInvestors = async () => {
+    if (!user?.id) return;
+    try {
+      setExcludeSaving(true);
+      const { data: existing } = await supabase
+        .from('user_settings')
+        .select('personalization, owners, email_settings, onboarding, column_settings')
+        .eq('id', user.id)
+        .single();
+
+      const domains = excludeDomains.map(normalizeExcludeDomain).filter((d): d is string => d != null);
+      const linkedinUrls = excludeLinkedinUrls.map(normalizeExcludeLinkedinUrl).filter((u): u is string => u != null);
+
+      const existingOnboarding = existing?.onboarding;
+      const ob = existingOnboarding && typeof existingOnboarding === 'object'
+        ? (typeof existingOnboarding === 'string' ? JSON.parse(existingOnboarding) : existingOnboarding)
+        : {};
+      const updatedOnboarding = {
+        ...ob,
+        excludeInvestors: {
+          domains: [...new Set(domains)],
+          linkedinUrls: [...new Set(linkedinUrls)],
+        },
+      };
+
+      const payload = {
+        id: user.id,
+        personalization: existing?.personalization ?? null,
+        owners: existing?.owners ?? null,
+        email_settings: existing?.email_settings ?? null,
+        onboarding: updatedOnboarding,
+        column_settings: existing?.column_settings ?? null,
+      };
+
+      const { error } = await supabase.from('user_settings').upsert(payload, { onConflict: 'id' });
+      if (error) throw error;
+      mergeOnboardingLocal({
+        excludeInvestors: {
+          domains: [...new Set(domains)],
+          linkedinUrls: [...new Set(linkedinUrls)],
+        },
+      });
+      setToastMessage('Exclude investors saved.');
+      setShowToast(true);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Failed to save exclude list';
+      setToastMessage(`Error: ${msg}`);
+      setShowToast(true);
+    } finally {
+      setExcludeSaving(false);
+    }
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center gap-3 mb-8">
@@ -345,6 +491,227 @@ function AccountContent() {
               {emailSaving ? 'Saving...' : 'Save email settings'}
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* Twitter Personalization section */}
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Twitter Personalization</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Control which tweets are used for investor outreach icebreakers. Timeline tweets older than the max age are ignored.
+        </p>
+        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <input
+                id="allowPinnedOlder"
+                type="checkbox"
+                checked={allowPinnedTweetsOlderThanMax}
+                onChange={(e) => setAllowPinnedTweetsOlderThanMax(e.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              />
+              <label htmlFor="allowPinnedOlder" className="text-sm font-medium text-gray-700">
+                Allow pinned tweets older than max age
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 ml-7">
+              When on, the pinned tweet is always included for personalization even if it is older than the max age below.
+            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Max tweet age</label>
+              <select
+                value={maxTweetAgeDays}
+                onChange={(e) => setMaxTweetAgeDays(Number(e.target.value))}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              >
+                <option value={1}>1 day</option>
+                <option value={3}>3 days</option>
+                <option value={7}>1 week</option>
+                <option value={14}>2 weeks</option>
+                <option value={30}>1 month</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Timeline tweets older than this are not used.</p>
+            </div>
+            <button
+              type="button"
+              onClick={saveTwitterPersonalization}
+              disabled={twitterSaving}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 transition-colors"
+            >
+              <Twitter className="w-4 h-4" />
+              {twitterSaving ? 'Saving...' : 'Save Twitter settings'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* Exclude investors section */}
+      <section className="mb-10">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Exclude investors</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          Exclude specific firms (by domain) or individuals (by LinkedIn URL) from investor search. Add entries below; you can paste multiple separated by commas or new lines.
+        </p>
+        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm space-y-6">
+          {/* Firm domains */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Exclude firm domains</label>
+            <p className="text-xs text-gray-500 mb-2">Firms with these domains will not appear in search.</p>
+            {(excludeDomains.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {excludeDomains.map((d) => (
+                <span
+                  key={d}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm bg-gray-100 text-gray-800 border border-gray-200"
+                >
+                  {d}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExcludeDomains((prev) => prev.filter((x) => x !== d));
+                      showExcludeReminderToast();
+                    }}
+                    className="p-0.5 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    aria-label={`Remove ${d}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            )) || null}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={excludeDomainInput}
+                onChange={(e) => setExcludeDomainInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const raw = (e.target as HTMLInputElement).value.trim();
+                    if (!raw) return;
+                    const parts = raw.split(/[\n,\s]+/).map((s) => s.trim()).filter(Boolean);
+                    const normalized = parts.map(normalizeExcludeDomain).filter((d): d is string => d != null);
+                    setExcludeDomains((prev) => [...new Set([...prev, ...normalized])]);
+                    setExcludeDomainInput('');
+                    showExcludeReminderToast();
+                  }
+                }}
+                onPaste={(e) => {
+                  const pasted = e.clipboardData.getData('text').trim();
+                  if (pasted && /[\n,]/.test(pasted)) {
+                    e.preventDefault();
+                    const parts = pasted.split(/[\n,\s]+/).map((s) => s.trim()).filter(Boolean);
+                    const normalized = parts.map(normalizeExcludeDomain).filter((d): d is string => d != null);
+                    setExcludeDomains((prev) => [...new Set([...prev, ...normalized])]);
+                    showExcludeReminderToast();
+                  }
+                }}
+                placeholder="e.g. a16z.com, sequoiacap.com"
+                className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const raw = excludeDomainInput.trim();
+                  if (!raw) return;
+                  const parts = raw.split(/[\n,\s]+/).map((s) => s.trim()).filter(Boolean);
+                  const normalized = parts.map(normalizeExcludeDomain).filter((d): d is string => d != null);
+                  setExcludeDomains((prev) => [...new Set([...prev, ...normalized])]);
+                  setExcludeDomainInput('');
+                  showExcludeReminderToast();
+                }}
+                className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md border border-indigo-200 whitespace-nowrap"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* LinkedIn URLs (individuals) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Exclude LinkedIn (individuals)</label>
+            <p className="text-xs text-gray-500 mb-2">Use path (e.g. /in/username) or full URL. These people will not appear in search.</p>
+            {(excludeLinkedinUrls.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {excludeLinkedinUrls.map((u) => (
+                <span
+                  key={u}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm bg-gray-100 text-gray-800 border border-gray-200 max-w-full truncate"
+                  title={u}
+                >
+                  <span className="truncate">{u}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExcludeLinkedinUrls((prev) => prev.filter((x) => x !== u));
+                      showExcludeReminderToast();
+                    }}
+                    className="p-0.5 rounded hover:bg-gray-200 text-gray-500 hover:text-gray-700 flex-shrink-0 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    aria-label={`Remove ${u}`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            )) || null}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={excludeLinkedinInput}
+                onChange={(e) => setExcludeLinkedinInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const raw = (e.target as HTMLInputElement).value.trim();
+                    if (!raw) return;
+                    const parts = raw.split(/[\n,\s]+/).map((s) => s.trim()).filter(Boolean);
+                    const normalized = parts.map(normalizeExcludeLinkedinUrl).filter((u): u is string => u != null);
+                    setExcludeLinkedinUrls((prev) => [...new Set([...prev, ...normalized])]);
+                    setExcludeLinkedinInput('');
+                    showExcludeReminderToast();
+                  }
+                }}
+                onPaste={(e) => {
+                  const pasted = e.clipboardData.getData('text').trim();
+                  if (pasted && /[\n,]/.test(pasted)) {
+                    e.preventDefault();
+                    const parts = pasted.split(/[\n,\s]+/).map((s) => s.trim()).filter(Boolean);
+                    const normalized = parts.map(normalizeExcludeLinkedinUrl).filter((u): u is string => u != null);
+                    setExcludeLinkedinUrls((prev) => [...new Set([...prev, ...normalized])]);
+                    showExcludeReminderToast();
+                  }
+                }}
+                placeholder="e.g. /in/username or https://linkedin.com/in/username"
+                className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const raw = excludeLinkedinInput.trim();
+                  if (!raw) return;
+                  const parts = raw.split(/[\n,\s]+/).map((s) => s.trim()).filter(Boolean);
+                  const normalized = parts.map(normalizeExcludeLinkedinUrl).filter((u): u is string => u != null);
+                  setExcludeLinkedinUrls((prev) => [...new Set([...prev, ...normalized])]);
+                  setExcludeLinkedinInput('');
+                  showExcludeReminderToast();
+                }}
+                className="px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md border border-indigo-200 whitespace-nowrap"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={saveExcludeInvestors}
+            disabled={excludeSaving}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 transition-colors"
+          >
+            <UserX className="w-4 h-4" />
+            {excludeSaving ? 'Saving...' : 'Save exclude list'}
+          </button>
         </div>
       </section>
 

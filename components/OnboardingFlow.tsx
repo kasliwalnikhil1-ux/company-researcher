@@ -256,11 +256,24 @@ export default function OnboardingFlow() {
         const sectorList = Array.isArray(data.sector) ? data.sector : [];
         const sector = sectorList.filter((s: string) => SECTORS.includes(s));
         const productDescription = typeof data.product_description === 'string' ? data.product_description : '';
+        const whatMakesYouUnique = typeof data.what_makes_you_unique === 'string' ? data.what_makes_you_unique.trim() : '';
         const whoAreYourCustomers = typeof data.who_are_your_customers === 'string' ? data.who_are_your_customers : '';
+        const businessModelAllowed = ['B2B', 'B2C', 'B2G', 'Marketplace'];
+        const businessModel = Array.isArray(data.business_model)
+          ? data.business_model.filter((b: unknown) => typeof b === 'string' && businessModelAllowed.includes(b))
+          : [];
         const prefill: Partial<OnboardingData> = {};
         if (sector.length > 0) prefill.step6 = { sector };
-        if (productDescription) prefill.step9 = { productDescription };
-        if (whoAreYourCustomers) prefill.step10 = { customerDescription: whoAreYourCustomers, revenueStatus: 'no' as const, arr: [] };
+        const step9Prefill: Partial<OnboardingData['step9']> = {};
+        if (productDescription) step9Prefill.productDescription = productDescription;
+        if (whatMakesYouUnique) step9Prefill.whatMakesYouUnique = whatMakesYouUnique;
+        if (Object.keys(step9Prefill).length > 0) prefill.step9 = step9Prefill as OnboardingData['step9'];
+        const keyMilestonesOrTraction = typeof data.key_milestones_or_traction === 'string' ? data.key_milestones_or_traction.trim() : '';
+        const step10Prefill: Partial<OnboardingData['step10']> = {};
+        if (whoAreYourCustomers) step10Prefill.customerDescription = whoAreYourCustomers;
+        if (businessModel.length > 0) step10Prefill.businessModel = businessModel;
+        if (keyMilestonesOrTraction) step10Prefill.currentMilestonesOrTraction = keyMilestonesOrTraction;
+        if (Object.keys(step10Prefill).length > 0) prefill.step10 = step10Prefill as OnboardingData['step10'];
         return prefill;
       }
     } catch (e) {
@@ -1580,7 +1593,7 @@ export default function OnboardingFlow() {
               value={formData.step9?.productDescription || ''}
               onChange={(e) => setFormData({
                 ...formData,
-                step9: { productDescription: e.target.value }
+                step9: { productDescription: e.target.value, whatMakesYouUnique: formData.step9?.whatMakesYouUnique }
               })}
               rows={6}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1589,6 +1602,21 @@ export default function OnboardingFlow() {
             <p className="text-sm text-gray-500 mt-2">
               Used for: Investor matching, Pitch context, Outreach personalization
             </p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              What makes you unique? <span className="text-gray-400">(optional)</span>
+            </label>
+            <textarea
+              value={formData.step9?.whatMakesYouUnique || ''}
+              onChange={(e) => setFormData({
+                ...formData,
+                step9: { productDescription: formData.step9?.productDescription ?? '', whatMakesYouUnique: e.target.value }
+              })}
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="What differentiates you from competitors?"
+            />
           </div>
         </div>
       );
@@ -1954,9 +1982,9 @@ export default function OnboardingFlow() {
           <h2 className="text-2xl font-bold text-gray-900">Are you looking for a lead investor or follow-on investors? <span className="text-red-500">*</span></h2>
           <div className="space-y-4">
             {[
+              { value: 'both', label: 'Both' },
               { value: 'lead', label: 'Lead investors' },
               { value: 'follow_on', label: 'Follow-on investors' },
-              { value: 'both', label: 'Both' },
             ].map((option) => (
               <button
                 key={option.value}

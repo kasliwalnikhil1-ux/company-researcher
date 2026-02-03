@@ -100,6 +100,80 @@ export function extractPhoneNumber(text: string): string {
   return cleaned;
 }
 
+/** Regex for [name](url) format (same as notable_investments / coinvestors) */
+const NAME_URL_MARKDOWN_REGEX = /^\[([^\]]+)\]\(([^)]+)\)$/;
+
+/**
+ * Parses a list of strings in format [name](url) into domains and LinkedIn paths
+ * for use with search_investors (p_domains, p_linkedin_urls).
+ * - URLs whose host contains "linkedin.com" → pathname (e.g. /in/namankas) added to linkedin_urls.
+ * - Other URLs → hostname (www stripped) added to domains if it looks like a valid domain.
+ * Reusable from Featured Co-investors, notable investments, or any [name](url) list.
+ */
+export function parseNameUrlListToSearchParams(items: string[]): {
+  domains: string[];
+  linkedin_urls: string[];
+} {
+  const domainsSet = new Set<string>();
+  const linkedinSet = new Set<string>();
+  for (const item of items) {
+    if (!item || typeof item !== 'string') continue;
+    const match = item.trim().match(NAME_URL_MARKDOWN_REGEX);
+    if (!match) continue;
+    const url = match[2].trim();
+    if (!url) continue;
+    try {
+      const href = url.startsWith('http') ? url : `https://${url}`;
+      const parsed = new URL(href);
+      const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+      if (host.includes('linkedin.com')) {
+        const path = parsed.pathname || '';
+        if (path) linkedinSet.add(path);
+      } else {
+        if (host && /[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(host)) {
+          domainsSet.add(host);
+        }
+      }
+    } catch {
+      // ignore invalid URLs
+    }
+  }
+  return {
+    domains: Array.from(domainsSet),
+    linkedin_urls: Array.from(linkedinSet),
+  };
+}
+
+/** Normalize a domain for exclude list: lowercase, no www (e.g. a16z.com) */
+export function normalizeExcludeDomain(input: string): string | null {
+  const s = (input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0];
+  if (!s || !/[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(s)) return null;
+  return s;
+}
+
+/** Normalize LinkedIn URL to path for exclude list (e.g. /in/namankas) */
+export function normalizeExcludeLinkedinUrl(input: string): string | null {
+  const s = (input || '').trim();
+  if (!s) return null;
+  try {
+    const href = s.startsWith('http') ? s : `https://linkedin.com${s.startsWith('/') ? s : `/${s}`}`;
+    const parsed = new URL(href);
+    if (parsed.hostname.toLowerCase().includes('linkedin.com')) {
+      const path = (parsed.pathname || '').trim();
+      if (path && path.startsWith('/')) return path;
+    }
+  } catch {
+    // ignore
+  }
+  if (s.startsWith('/in/')) return s;
+  return null;
+}
+
 /** Template column label format - must match investors page columnLabels */
 const TEMPLATE_CHANNEL_LABELS: Record<string, string> = {
   direct: 'Direct Message',
@@ -244,7 +318,7 @@ export interface OnboardingDataForSummary {
   step6?: { sector?: string[] };
   step7?: { stage?: string | string[] };
   step8?: { hqCountry?: string };
-  step9?: { productDescription?: string };
+  step9?: { productDescription?: string; whatMakesYouUnique?: string };
   step10?: { arr?: Array<{ month?: string; year?: string; amount?: string }>; revenueStatus?: string; businessModel?: string[]; customerDescription?: string; currentMilestonesOrTraction?: string };
   step11?: { targetRoundSize?: string; lookingToRaiseFrom?: string[] };
   b2bStep3?: { companyName?: string; websiteUrl?: string; companySize?: string; yourRole?: string };
@@ -253,6 +327,16 @@ export interface OnboardingDataForSummary {
   b2bStep8?: { painPoints?: string };
   b2bStep9?: { buyingTriggers?: string };
   b2bStep11?: { cta?: string };
+  /** Twitter personalization for investor-analyze tweet filtering */
+  twitterPersonalization?: {
+    allowPinnedTweetsOlderThanMax?: boolean;
+    maxTweetAgeDays?: number;
+  };
+  /** Exclude investors from search_investors (domains for firms, linkedin paths for individuals) */
+  excludeInvestors?: {
+    domains?: string[];
+    linkedinUrls?: string[];
+  };
 }
 
 /**
@@ -308,6 +392,10 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
   const productDesc = data.step9?.productDescription?.trim();
   if (productDesc) {
     parts.push(productDesc);
+  }
+  const whatMakesYouUnique = data.step9?.whatMakesYouUnique?.trim();
+  if (whatMakesYouUnique) {
+    parts.push(`What makes them unique: ${whatMakesYouUnique}`);
   }
 
   // Looking to raise from (step11)

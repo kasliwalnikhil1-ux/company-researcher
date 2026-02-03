@@ -62,7 +62,7 @@ PROMPT END`;
 const MIN_TWEET_TEXT_LENGTH = 30;
 const NEGATIVE_WORDS = /\b(hiring|buy now|limited time|act now|sale now|discount|shop now|apply now|join our team)\b/i;
 
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const DEFAULT_MAX_TWEET_AGE_DAYS = 7;
 
 function parseTweetDate(createdAt: string): Date | null {
   try {
@@ -73,10 +73,15 @@ function parseTweetDate(createdAt: string): Date | null {
   }
 }
 
-function isTweetWithinOneWeek(tweet: TwitterTweet): boolean {
+function getMaxTweetAgeMs(maxTweetAgeDays: number): number {
+  const days = Math.max(1, Math.min(365, Math.floor(maxTweetAgeDays)));
+  return days * 24 * 60 * 60 * 1000;
+}
+
+function isTweetWithinMaxAge(tweet: TwitterTweet, maxAgeMs: number): boolean {
   const d = parseTweetDate(tweet.created_at);
   if (!d) return false;
-  return Date.now() - d.getTime() < ONE_WEEK_MS;
+  return Date.now() - d.getTime() < maxAgeMs;
 }
 
 function hasEnoughText(text: string): boolean {
@@ -88,23 +93,38 @@ function containsNegativeWords(text: string): boolean {
   return NEGATIVE_WORDS.test(text || '');
 }
 
+export type TwitterPersonalizationOptions = {
+  allowPinnedTweetsOlderThanMax?: boolean;
+  maxTweetAgeDays?: number;
+};
+
 function filterValidTweets(
   pinned: TwitterTweet | null | undefined,
-  timeline: TwitterTweet[] | null | undefined
+  timeline: TwitterTweet[] | null | undefined,
+  options: TwitterPersonalizationOptions = {}
 ): TwitterTweet[] {
+  const allowPinnedOlder = options.allowPinnedTweetsOlderThanMax !== false;
+  const maxTweetAgeDays = typeof options.maxTweetAgeDays === 'number' && options.maxTweetAgeDays >= 1
+    ? options.maxTweetAgeDays
+    : DEFAULT_MAX_TWEET_AGE_DAYS;
+  const maxAgeMs = getMaxTweetAgeMs(maxTweetAgeDays);
+
   const valid: TwitterTweet[] = [];
 
   if (pinned && typeof pinned.text === 'string') {
     const t = pinned.text.trim();
     if (hasEnoughText(t) && !containsNegativeWords(t)) {
-      valid.push(pinned);
+      const pinnedWithinMax = isTweetWithinMaxAge(pinned, maxAgeMs);
+      if (allowPinnedOlder || pinnedWithinMax) {
+        valid.push(pinned);
+      }
     }
   }
 
   const timelineList = Array.isArray(timeline) ? timeline : [];
   for (const tweet of timelineList) {
     if (!tweet || typeof tweet.text !== 'string') continue;
-    if (!isTweetWithinOneWeek(tweet)) continue;
+    if (!isTweetWithinMaxAge(tweet, maxAgeMs)) continue;
     const t = tweet.text.trim();
     if (!hasEnoughText(t) || containsNegativeWords(t)) continue;
     valid.push(tweet);
@@ -281,10 +301,18 @@ export async function POST(req: NextRequest) {
 
     // Skip Twitter personalization for basic plan (enabled for free and pro)
     const skipTwitterPersonalization = plan === 'basic';
+    const twitterOpts = onboarding?.twitterPersonalization;
     if (twitterUrl && !skipTwitterPersonalization) {
       try {
         const timelineData = await fetchTwitterTimeline(twitterUrl);
-        const validTweets = filterValidTweets(timelineData.pinned, timelineData.timeline);
+        const validTweets = filterValidTweets(
+          timelineData.pinned,
+          timelineData.timeline,
+          {
+            allowPinnedTweetsOlderThanMax: twitterOpts?.allowPinnedTweetsOlderThanMax,
+            maxTweetAgeDays: twitterOpts?.maxTweetAgeDays,
+          }
+        );
         if (validTweets.length > 0) {
           const allValidTweets = validTweets
             .map((t) => `\n- "${(t.text || '').trim()}"`)

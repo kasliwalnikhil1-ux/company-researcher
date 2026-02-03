@@ -33,6 +33,7 @@ import {
   Table,
   List,
   Download,
+  Building2,
 } from 'lucide-react';
 import { formatGeographyForDisplay, formatHqLocationShort, getCountryName, resolveCountryInput } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -46,7 +47,7 @@ import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
-import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection } from '@/lib/utils';
+import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csvExport';
 
 // Filter options - must match what's stored in backend (investor-research API)
@@ -337,7 +338,7 @@ const DEFAULT_FILTERS: InvestorSearchFilters = {
   mode: 'global',
   name: '',
   active: null,
-  role: null,
+  role: [],
   hq_state: null,
   hq_country: null,
   investor_type: [],
@@ -353,6 +354,8 @@ const DEFAULT_FILTERS: InvestorSearchFilters = {
   set: [],
   owner: [],
   investor_fit: [],
+  domains: [],
+  linkedin_urls: [],
 };
 
 const formatKebabLabel = (value: string): string =>
@@ -422,7 +425,14 @@ function InvestorsContent() {
   const [toastVisible, setToastVisible] = useState(false);
   const [reportMissingModalOpen, setReportMissingModalOpen] = useState(false);
   const [insufficientCreditsModalOpen, setInsufficientCreditsModalOpen] = useState(false);
+  /** When set, search results are filtered by co-investors (p_domains/p_linkedin_urls); chip shows "Notable co-investors of {name}" */
+  const [coInvestorsChipLabel, setCoInvestorsChipLabel] = useState<string | null>(null);
+  const [findCompanyModalOpen, setFindCompanyModalOpen] = useState(false);
+  const [findCompanyInput, setFindCompanyInput] = useState('');
+  const [findCompanyLoading, setFindCompanyLoading] = useState(false);
+  const [findCompanyError, setFindCompanyError] = useState<string | null>(null);
   const [analyzingIds, setAnalyzingIds] = useState<Set<string>>(new Set());
+  const [analyzingAllCount, setAnalyzingAllCount] = useState(0);
   const [showCelebration, setShowCelebration] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   /** Pending analyze results for immediate card update before refresh completes */
@@ -449,7 +459,7 @@ function InvestorsContent() {
   // Row hover state - when a row is hovered, all cells in that row expand
   const [hoveredRowId, setHoveredRowId] = useState<string | null>(null);
 
-  // Multi-select state (reviewed mode + table view only)
+  // Multi-select state (table view only; global + reviewed)
   const [selectedInvestorIds, setSelectedInvestorIds] = useState<Set<string>>(new Set());
   const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
   const [assignOwnerModalOpen, setAssignOwnerModalOpen] = useState(false);
@@ -545,8 +555,9 @@ function InvestorsContent() {
   });
 
   const pageSize = isFreePlan ? 5 : 20;
+  const excludeInvestors = onboarding?.excludeInvestors ?? undefined;
   const { data, loading, error, hasMore, page, setPage, loadMore, refresh } =
-    useInvestorSearch({ filters, pageSize });
+    useInvestorSearch({ filters, pageSize, excludeInvestors });
 
   // Fetch investor sets (used in drawer pipeline and reviewed filters)
   const refetchInvestorSets = useCallback(async () => {
@@ -870,7 +881,7 @@ function InvestorsContent() {
           const fullInvestor = await fetchInvestorById(investorId, {
             type: filters.type,
             mode: filters.mode,
-          });
+          }, excludeInvestors);
           if (fullInvestor) {
             setInvestorToView({
               ...fullInvestor,
@@ -897,6 +908,61 @@ function InvestorsContent() {
     },
     [refresh, filters.type, filters.mode, onboarding, plan]
   );
+
+  const handleAnalyzeAll = useCallback(async () => {
+    const ids = Array.from(selectedInvestorIds);
+    if (ids.length === 0) return;
+    setAnalyzingAllCount(ids.length);
+    let done = 0;
+    let hadError = false;
+    let insufficientCredits = false;
+    for (const investorId of ids) {
+      setAnalyzingIds((prev) => new Set([...prev, investorId]));
+      const result = await fetchInvestorAnalyze(investorId, onboarding ?? undefined, plan ?? undefined);
+      setAnalyzingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(investorId);
+        return next;
+      });
+      done += 1;
+      setAnalyzingAllCount((prev) => Math.max(0, prev - 1));
+      if (result?.error) {
+        hadError = true;
+        if (result.errorCode === 'INSUFFICIENT_CREDITS') {
+          insufficientCredits = true;
+          setInsufficientCreditsModalOpen(true);
+          break;
+        }
+        setToastMessage(result.error);
+        setToastVisible(true);
+        break;
+      }
+      const investorFit = result?.investor_fit ?? null;
+      const reason = result?.reason ?? null;
+      setPendingAnalyzeResults((prev) => ({
+        ...prev,
+        [investorId]: { investor_fit: investorFit, reason },
+      }));
+    }
+    if (!insufficientCredits) {
+      setToastMessage(hadError ? 'Some analyses failed.' : `Analyzed ${done} investor${done === 1 ? '' : 's'} successfully.`);
+      setToastVisible(true);
+    }
+    setAnalyzingAllCount(0);
+    refresh();
+    setSelectedInvestorIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.delete(id));
+      return next;
+    });
+    setTimeout(() => {
+      setPendingAnalyzeResults((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => delete next[id]);
+        return next;
+      });
+    }, 2000);
+  }, [selectedInvestorIds, data, onboarding, plan, refresh]);
 
   // Initial load: read from localStorage (client-only, runs once on mount)
   useEffect(() => {
@@ -963,6 +1029,7 @@ function InvestorsContent() {
     clearedFiltersRef.current = true;
     localStorage.setItem(INVESTORS_FILTERS_KEY, 'null');
     setLocalSearchInput('');
+    setCoInvestorsChipLabel(null);
     setFilters(DEFAULT_FILTERS);
   }, []);
 
@@ -993,8 +1060,73 @@ function InvestorsContent() {
       searchTimeoutRef.current = null;
     }
     setLocalSearchInput('');
-    setFilters((prev) => ({ ...prev, name: '' }));
+    setCoInvestorsChipLabel(null);
+    setFilters((prev) => ({ ...prev, name: '', domains: [], linkedin_urls: [] }));
   };
+
+  const handleSearchCoinvestors = useCallback((nameUrlList: string[], sourceName: string) => {
+    const { domains, linkedin_urls } = parseNameUrlListToSearchParams(nameUrlList);
+    if (domains.length === 0 && linkedin_urls.length === 0) return;
+    setFilters((prev) => ({
+      ...prev,
+      name: '',
+      domains,
+      linkedin_urls,
+    }));
+    setLocalSearchInput('');
+    setCoInvestorsChipLabel(`Notable co-investors of ${sourceName}`);
+    setDrawerOpen(false);
+    setInvestorToView(null);
+    setBackToInvestor(null);
+    setBackToFirm(null);
+  }, []);
+
+  /** Apply a list of [name](url) investors to search (reusable from find-company or elsewhere). */
+  const applyInvestorsListToSearch = useCallback((investors: string[], chipLabel: string) => {
+    const { domains, linkedin_urls } = parseNameUrlListToSearchParams(investors);
+    if (domains.length === 0 && linkedin_urls.length === 0) return false;
+    setFilters((prev) => ({
+      ...prev,
+      name: '',
+      domains,
+      linkedin_urls,
+    }));
+    setLocalSearchInput('');
+    setCoInvestorsChipLabel(chipLabel);
+    return true;
+  }, []);
+
+  const handleFindCompanyInvestorsSubmit = useCallback(async () => {
+    const company = findCompanyInput.trim();
+    if (!company) return;
+    setFindCompanyError(null);
+    setFindCompanyLoading(true);
+    try {
+      const res = await fetch('/api/find-company-investors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setFindCompanyError(data.error || `Request failed (${res.status})`);
+        return;
+      }
+      const investors = Array.isArray(data.investors) ? data.investors : [];
+      console.log('[Find company investors]', { company, status: res.status, investorsCount: investors.length, investors });
+      const applied = applyInvestorsListToSearch(investors, `Investors of ${company}`);
+      if (applied) {
+        setFindCompanyModalOpen(false);
+        setFindCompanyInput('');
+      } else {
+        setFindCompanyError('No valid investors found. Try a different company or description.');
+      }
+    } catch (e) {
+      setFindCompanyError(e instanceof Error ? e.message : 'Request failed');
+    } finally {
+      setFindCompanyLoading(false);
+    }
+  }, [findCompanyInput, applyInvestorsListToSearch]);
 
   const updateFilter = useCallback(<K extends keyof InvestorSearchFilters>(
     key: K,
@@ -1004,7 +1136,7 @@ function InvestorsContent() {
   }, []);
 
   const toggleArrayFilter = useCallback((
-    key: 'investor_type' | 'investment_stages' | 'investment_industries' | 'investment_geographies' | 'reviewed_stage' | 'set' | 'owner',
+    key: 'investor_type' | 'investment_stages' | 'investment_industries' | 'investment_geographies' | 'reviewed_stage' | 'set' | 'owner' | 'role',
     item: string
   ) => {
     setFilters((prev) => {
@@ -1198,7 +1330,7 @@ function InvestorsContent() {
     if (filters.mode !== 'reviewed') return;
     setExportLoading(true);
     try {
-      const investors = await fetchInvestorsForExport(filters);
+      const investors = await fetchInvestorsForExport(filters, excludeInvestors);
       const isPerson = filters.type === 'person';
 
       const headers: string[] = [
@@ -1340,13 +1472,16 @@ function InvestorsContent() {
   const handleSelectAll = useCallback(
     (isSelected: boolean) => {
       if (isSelected) {
-        const ids = data.filter((i) => i.has_personalization).map((i) => i.id);
+        const ids =
+          filters.mode === 'reviewed'
+            ? data.filter((i) => i.has_personalization).map((i) => i.id)
+            : data.map((i) => i.id);
         setSelectedInvestorIds(new Set(ids));
       } else {
         setSelectedInvestorIds(new Set());
       }
     },
-    [data]
+    [data, filters.mode]
   );
 
   // Bulk update investor_personalization for set_name, owner, or stage
@@ -1457,6 +1592,7 @@ function InvestorsContent() {
 
   const buildReportContent = () => {
     const parts: string[] = [];
+    if (coInvestorsChipLabel) parts.push(coInvestorsChipLabel);
     if (filters.name) parts.push(`Search: ${filters.name}`);
     if (filters.investment_stages.length) parts.push(`Stage: ${filters.investment_stages.join(', ')}`);
     if (filters.investment_industries.length) parts.push(`Industry: ${filters.investment_industries.join(', ')}`);
@@ -1644,26 +1780,43 @@ function InvestorsContent() {
           Investors
         </h1>
         <div className="flex flex-wrap items-center gap-2 self-start">
-          {filters.mode === 'reviewed' && viewMode === 'table' && selectedInvestorIds.size > 0 ? (
+          {selectedInvestorIds.size > 0 ? (
             <>
               <button
-                onClick={() => setAssignStageModalOpen(true)}
-                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700"
+                onClick={() => handleAnalyzeAll()}
+                disabled={analyzingAllCount > 0}
+                className="inline-flex items-center gap-1.5 px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50"
+                title="Analyze selected investors with AI"
               >
-                <span className="hidden sm:inline">Assign Stage </span>({selectedInvestorIds.size})
+                {analyzingAllCount > 0 ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+                <span className="hidden sm:inline">Analyze all with AI </span>({selectedInvestorIds.size})
               </button>
-              <button
-                onClick={() => setAssignSetModalOpen(true)}
-                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-              >
-                <span className="hidden sm:inline">Assign Set </span>({selectedInvestorIds.size})
-              </button>
-              <button
-                onClick={() => setAssignOwnerModalOpen(true)}
-                className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700"
-              >
-                <span className="hidden sm:inline">Assign Owner </span>({selectedInvestorIds.size})
-              </button>
+              {filters.mode === 'reviewed' && (
+                <>
+                  <button
+                    onClick={() => setAssignStageModalOpen(true)}
+                    className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-amber-600 hover:bg-amber-700"
+                  >
+                    <span className="hidden sm:inline">Assign Stage </span>({selectedInvestorIds.size})
+                  </button>
+                  <button
+                    onClick={() => setAssignSetModalOpen(true)}
+                    className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                  >
+                    <span className="hidden sm:inline">Assign Set </span>({selectedInvestorIds.size})
+                  </button>
+                  <button
+                    onClick={() => setAssignOwnerModalOpen(true)}
+                    className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    <span className="hidden sm:inline">Assign Owner </span>({selectedInvestorIds.size})
+                  </button>
+                </>
+              )}
               <button
                 onClick={() => setSelectedInvestorIds(new Set())}
                 className="inline-flex items-center gap-1.5 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
@@ -1797,6 +1950,13 @@ function InvestorsContent() {
                 </button>
               )}
             </div>
+            <button
+              onClick={() => setFindCompanyModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shrink-0"
+            >
+              <Building2 className="w-4 h-4" />
+              Find investors of a company
+            </button>
             <div className="relative">
               <select
                 value={filters.type}
@@ -1805,7 +1965,7 @@ function InvestorsContent() {
                   setFilters((prev) => ({
                     ...prev,
                     type: newType,
-                    role: newType === 'firm' ? null : prev.role,
+                    role: newType === 'firm' ? [] : prev.role,
                   }));
                 }}
                 className="pl-3 pr-9 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px] appearance-none"
@@ -1829,6 +1989,26 @@ function InvestorsContent() {
             <ChevronDown className={`w-4 h-4 transition-transform ${filtersExpanded ? 'rotate-180' : ''}`} />
           </button>
         </div>
+
+        {/* Co-investors search chip */}
+        {coInvestorsChipLabel && (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-indigo-50 text-indigo-800 text-sm font-medium">
+              {coInvestorsChipLabel}
+              <button
+                type="button"
+                onClick={() => {
+                  setCoInvestorsChipLabel(null);
+                  setFilters((prev) => ({ ...prev, domains: [], linkedin_urls: [] }));
+                }}
+                className="p-0.5 rounded hover:bg-indigo-100 text-indigo-600"
+                aria-label="Clear co-investors filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </span>
+          </div>
+        )}
 
         {/* Expanded filters */}
         {filtersExpanded && (
@@ -1862,21 +2042,12 @@ function InvestorsContent() {
                 formatLabel={formatGeographyForDisplay}
               />
               {filters.type === 'person' && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Role</label>
-                  <select
-                    value={filters.role ?? ''}
-                    onChange={(e) => updateFilter('role', e.target.value || null)}
-                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                  >
-                    <option value="">All roles</option>
-                    {ROLE_OPTIONS.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                <MultiSelectFilter
+                  label="Roles"
+                  options={ROLE_OPTIONS}
+                  selected={filters.role}
+                  onToggle={(item) => toggleArrayFilter('role', item)}
+                />
               )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1950,7 +2121,7 @@ function InvestorsContent() {
                   filters.type === 'firm' &&
                   filters.active === null &&
                   filters.leads_round === null &&
-                  !filters.role &&
+                  !filters.role?.length &&
                   !filters.hq_country &&
                   !filters.hq_state &&
                   filters.fund_size_min === null &&
@@ -2034,9 +2205,9 @@ function InvestorsContent() {
         <div className="bg-white border border-gray-200 rounded-lg p-8 md:p-12 text-center">
           <Handshake className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
           <p className="text-sm md:text-base text-gray-500 mb-4">
-            {filters.name || filters.investment_stages.length || filters.investment_industries.length ||
+            {(filters.name || (filters.domains?.length ?? 0) > 0 || (filters.linkedin_urls?.length ?? 0) > 0 || filters.investment_stages.length || filters.investment_industries.length ||
              filters.investment_geographies.length || filters.investor_type.length ||
-             filters.reviewed_stage.length || filters.set.length || filters.owner.length || filters.investor_fit.length
+             filters.reviewed_stage.length || filters.set.length || filters.owner.length || filters.investor_fit.length)
               ? 'No investors found matching your filters.'
               : 'No investors found. Try adjusting your search or filters.'}
           </p>
@@ -2068,7 +2239,7 @@ function InvestorsContent() {
               >
                 <table className="min-w-full divide-y divide-gray-200" style={{ tableLayout: 'fixed', width: '100%' }}>
                   <colgroup>
-                    {filters.mode === 'reviewed' && <col style={{ width: '40px' }} />}
+                    {viewMode === 'table' && <col style={{ width: '40px' }} />}
                     {orderedVisibleColumns.map((col: string) => {
                       const isTemplate = col.startsWith('template_');
                       const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'mutual_interests' || col === 'reason' || isTemplate;
@@ -2078,12 +2249,15 @@ function InvestorsContent() {
                   </colgroup>
                   <thead className="bg-gray-50 sticky top-0 z-10">
                     <tr>
-                      {filters.mode === 'reviewed' && (
+                      {viewMode === 'table' && (
                         <th className="px-2 md:px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 align-middle">
                           <input
                             type="checkbox"
                             checked={(() => {
-                              const selectableCount = data.filter((i) => i.has_personalization).length;
+                              const selectableCount =
+                                filters.mode === 'reviewed'
+                                  ? data.filter((i) => i.has_personalization).length
+                                  : data.length;
                               return selectableCount > 0 && selectedInvestorIds.size === selectableCount;
                             })()}
                             onChange={(e) => handleSelectAll(e.target.checked)}
@@ -2131,9 +2305,21 @@ function InvestorsContent() {
                           }
                         }}
                       >
-                        {filters.mode === 'reviewed' && (
+                        {viewMode === 'table' && (
                           <td className="px-2 md:px-4 py-4 whitespace-nowrap align-middle" onClick={(e) => e.stopPropagation()}>
-                            {investor.has_personalization ? (
+                            {filters.mode === 'reviewed' ? (
+                              investor.has_personalization ? (
+                                <input
+                                  type="checkbox"
+                                  checked={selectedInvestorIds.has(investor.id)}
+                                  onChange={(e) => handleRowSelect(investor.id, e.target.checked)}
+                                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                  onClick={(e) => e.stopPropagation()}
+                                />
+                              ) : (
+                                <span className="w-4 inline-block" />
+                              )
+                            ) : (
                               <input
                                 type="checkbox"
                                 checked={selectedInvestorIds.has(investor.id)}
@@ -2141,8 +2327,6 @@ function InvestorsContent() {
                                 className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                 onClick={(e) => e.stopPropagation()}
                               />
-                            ) : (
-                              <span className="w-4 inline-block" />
                             )}
                           </td>
                         )}
@@ -2399,6 +2583,27 @@ function InvestorsContent() {
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500" />
               </div>
             )}
+            {/* List view: select all bar */}
+            {data.length > 0 && (
+              <div className="flex items-center gap-3 mb-3 py-2 px-1">
+                <label className="inline-flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={(() => {
+                      const selectableCount =
+                        filters.mode === 'reviewed'
+                          ? data.filter((i) => i.has_personalization).length
+                          : data.length;
+                      return selectableCount > 0 && selectedInvestorIds.size === selectableCount;
+                    })()}
+                    onChange={(e) => handleSelectAll(e.target.checked)}
+                    className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  <span>Select all</span>
+                </label>
+              </div>
+            )}
             <div className="space-y-3">
               {data.map((investor) => (
                 <InvestorResultCard
@@ -2409,8 +2614,13 @@ function InvestorsContent() {
                     setInvestorToView(investor);
                     setDrawerOpen(true);
                   }}
-                onAnalyze={() => handleAnalyze(investor.id, investor.name)}
-                isAnalyzing={analyzingIds.has(investor.id)}
+                  onAnalyze={() => handleAnalyze(investor.id, investor.name)}
+                  isAnalyzing={analyzingIds.has(investor.id)}
+                  selected={selectedInvestorIds.has(investor.id)}
+                  onSelectChange={(checked) => handleRowSelect(investor.id, checked)}
+                  showCheckbox={
+                    filters.mode === 'global' ? true : Boolean(investor.has_personalization)
+                  }
                 />
               ))}
               {/* Free plan: skeletons + Upgrade button below the 5 results */}
@@ -2503,7 +2713,7 @@ function InvestorsContent() {
           setInvestorToView(contact as InvestorSearchResult);
         }}
         onOpenInvestorById={async (id) => {
-          const firm = await fetchInvestorById(id, { type: 'firm', mode: filters.mode });
+          const firm = await fetchInvestorById(id, { type: 'firm', mode: filters.mode }, excludeInvestors);
           if (firm && investorToView?.type === 'person') {
             setBackToInvestor(investorToView);
             setInvestorToView(firm);
@@ -2534,7 +2744,95 @@ function InvestorsContent() {
           setToastVisible(true);
         }}
         onSetCreated={refetchInvestorSets}
+        onSearchCoinvestors={handleSearchCoinvestors}
+        excludeInvestors={excludeInvestors}
       />
+
+      {/* Find investors of a company modal (available on Free and Pro; Basic sees Upgrade to Pro) */}
+      {findCompanyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Find investors of a company</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Enter the company name or a short description. We&apos;ll find investors (firms and individuals) and show them in search.
+            </p>
+            <input
+              type="text"
+              placeholder="e.g. Stripe, Harvey AI Law, Notion, Freshworks CRM"
+              value={findCompanyInput}
+              onChange={(e) => {
+                setFindCompanyInput(e.target.value);
+                setFindCompanyError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (plan === 'basic') {
+                    setFindCompanyModalOpen(false);
+                    setFindCompanyInput('');
+                    setFindCompanyError(null);
+                    openPricingModal();
+                  } else {
+                    handleFindCompanyInvestorsSubmit();
+                  }
+                }
+                if (e.key === 'Escape') setFindCompanyModalOpen(false);
+              }}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm mb-4"
+              disabled={findCompanyLoading}
+              autoFocus
+            />
+            {findCompanyError && (
+              <p className="text-sm text-red-600 mb-4">{findCompanyError}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!findCompanyLoading) {
+                    setFindCompanyModalOpen(false);
+                    setFindCompanyInput('');
+                    setFindCompanyError(null);
+                  }
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
+                disabled={findCompanyLoading}
+              >
+                Cancel
+              </button>
+              {plan === 'basic' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFindCompanyModalOpen(false);
+                    setFindCompanyInput('');
+                    setFindCompanyError(null);
+                    openPricingModal();
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700"
+                >
+                  Upgrade to Pro
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleFindCompanyInvestorsSubmit}
+                  disabled={findCompanyLoading || !findCompanyInput.trim()}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-transparent rounded-md text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {findCompanyLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Finding…
+                    </>
+                  ) : (
+                    'Find investors'
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Assign Set Modal */}
       {assignSetModalOpen && (
@@ -2953,12 +3251,18 @@ function InvestorResultCard({
   onView,
   onAnalyze,
   isAnalyzing,
+  selected,
+  onSelectChange,
+  showCheckbox,
 }: {
   investor: InvestorSearchResult;
   pendingAnalyze?: { investor_fit: boolean | null; reason: string | null };
   onView: () => void;
   onAnalyze?: (investorId: string) => void;
   isAnalyzing?: boolean;
+  selected?: boolean;
+  onSelectChange?: (checked: boolean) => void;
+  showCheckbox?: boolean;
 }) {
   const location = formatHqLocationShort(investor.hq_state, investor.hq_country);
   const thesis = investor.investment_thesis?.trim();
@@ -2981,6 +3285,17 @@ function InvestorResultCard({
       onClick={onView}
     >
       <div className="flex items-start justify-between gap-4">
+        {showCheckbox && onSelectChange && (
+          <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={selected ?? false}
+              onChange={(e) => onSelectChange(e.target.checked)}
+              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-gray-900">{investor.name}</h3>
           {investor.role && <p className="text-sm text-gray-600 mt-0.5">{investor.role}</p>}

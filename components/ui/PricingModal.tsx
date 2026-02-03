@@ -146,6 +146,7 @@ const PLANS: PlanConfig[] = [
       {
         title: 'Investor intelligence',
         items: [
+          'Find investors of a company',
           'Recent investor deals and activity',
           'Public quotes, essays, or interviews that reveal investment philosophy',
           'What this investor looks for in founders',

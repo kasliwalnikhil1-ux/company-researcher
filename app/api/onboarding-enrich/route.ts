@@ -133,13 +133,18 @@ Rules:
 - sector: List of relevant sectors (use exact slugs) from: artificial-intelligence, machine-learning, healthtech, biotech, digital-health, mental-health, wellness, longevity, fitness, consumer-health, medtech, pharma, genomics, bioinformatics, neuroscience, consumer-tech, enterprise-software, saas, vertical-saas, developer-tools, productivity, collaboration, fintech, payments, lending, credit, insurtech, regtech, wealthtech, climate-tech, energy, clean-energy, carbon-removal, sustainability, web3, blockchain, crypto, defi, nft, social-platforms, marketplaces, creator-economy, edtech, hr-tech, future-of-work, mobility, transportation, autonomous-vehicles, robotics, hardware, deep-tech, semiconductors, data-infrastructure, cloud-infrastructure, devops, cybersecurity, security, privacy, identity, digital-identity, consumer-internet, ecommerce, retail-tech, proptech, real-estate, construction-tech, smart-cities, supply-chain, logistics, manufacturing, industrial-tech, agtech, foodtech, gaming, esports, media, entertainment, music-tech, sports-tech, travel-tech, hospitality, martech, adtech, legal-tech, govtech, defense-tech, space-tech, aerospace, iot, edge-computing, network-effects. Return 1-3 most relevant; empty array if unclear.
 - product_description: Clear description of the product or service (2-4 sentences). Empty string if not found.
 - who_are_your_customers: Who are this company's customers? Target audience, customer segments, or who they sell to. Short paragraph. Empty string if not found.
+- business_model: Which business model(s) apply? Select all that apply from exactly: B2B, B2C, B2G, Marketplace. Return 1-4 values; empty array if unclear.
+- what_makes_you_unique: What differentiates this company from competitors? Unique value proposition, key differentiators, or why they stand out. Short paragraph. Empty string if not found.
+- key_milestones_or_traction: Key milestones achieved and early traction (e.g. users, revenue, partnerships, launches, growth metrics). Short paragraph. Empty string if not found.
 
 Return only valid JSON matching the schema.`;
+
+const BUSINESS_MODEL_VALUES = ['B2B', 'B2C', 'B2G', 'Marketplace'];
 
 const FUNDRAISING_SCHEMA = {
   description: 'Fundraising onboarding company info from website',
   type: 'object',
-  required: ['company_summary', 'sector', 'product_description', 'who_are_your_customers'],
+  required: ['company_summary', 'sector', 'product_description', 'who_are_your_customers', 'business_model', 'what_makes_you_unique', 'key_milestones_or_traction'],
   additionalProperties: false,
   properties: {
     company_summary: { type: 'string', description: 'Brief description of the company' },
@@ -150,6 +155,13 @@ const FUNDRAISING_SCHEMA = {
     },
     product_description: { type: 'string', description: 'Product or service description' },
     who_are_your_customers: { type: 'string', description: 'Who are your customers?' },
+    business_model: {
+      type: 'array',
+      items: { type: 'string', enum: BUSINESS_MODEL_VALUES },
+      description: 'Business model(s): B2B, B2C, B2G, Marketplace (select all that apply)',
+    },
+    what_makes_you_unique: { type: 'string', description: 'What differentiates the company from competitors' },
+    key_milestones_or_traction: { type: 'string', description: 'Key milestones achieved and early traction' },
   },
 };
 

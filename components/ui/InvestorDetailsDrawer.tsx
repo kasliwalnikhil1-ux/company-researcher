@@ -5,11 +5,11 @@ import ReactMarkdown from 'react-markdown';
 import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, type InvestorNews } from '@/lib/api';
 import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
-import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT } from '@/hooks/useInvestorSearch';
+import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT, type ExcludeInvestorsOption } from '@/hooks/useInvestorSearch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
 import { useOwner } from '@/contexts/OwnerContext';
-import { copyToClipboard, extractPhoneNumber } from '@/lib/utils';
+import { copyToClipboard, extractPhoneNumber, parseNameUrlListToSearchParams } from '@/lib/utils';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { supabase } from '@/utils/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -177,6 +177,10 @@ interface InvestorDetailsDrawerProps {
   onCopyToClipboard?: (message: string) => void;
   /** Called after creating a new set and assigning to investor - parent should refetch sets */
   onSetCreated?: () => void;
+  /** When provided, enables "search these co-investors" in Featured Co-investors. Called with [name](url) list and source investor name; parent should run search and close drawer */
+  onSearchCoinvestors?: (nameUrlList: string[], sourceName: string) => void;
+  /** Exclude lists passed to search_investors when fetching contacts at firm */
+  excludeInvestors?: ExcludeInvestorsOption | null;
 }
 
 const formatCurrency = (value: number | null | undefined): string => {
@@ -493,6 +497,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   setOptions = [],
   ownerOptions = [],
   filtersMode = 'global',
+  excludeInvestors,
   isFreePlan = false,
   clipboardColumn = null,
   clipboardLinkedInColumn = null,
@@ -504,6 +509,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   columnLabels = {},
   onCopyToClipboard,
   onSetCreated,
+  onSearchCoinvestors,
 }) => {
   const { openPricingModal, openROIModal } = usePricingModal();
   const { plan } = useOwner();
@@ -644,7 +650,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     setContactsLoading(true);
     setContactsError(null);
     try {
-      const list = await fetchPeopleAtFirm(firmId, filtersMode, contactsLimit);
+      const list = await fetchPeopleAtFirm(firmId, filtersMode, contactsLimit, excludeInvestors);
       setContactsData(list);
       try {
         localStorage.setItem(CONTACTS_STORAGE_KEY(firmId), JSON.stringify(list));
@@ -657,7 +663,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     } finally {
       setContactsLoading(false);
     }
-  }, [filtersMode, contactsLimit]);
+  }, [filtersMode, contactsLimit, excludeInvestors]);
 
   const loadDeepResearch = useCallback(async (investorId: string) => {
     if (typeof window === 'undefined') return;
@@ -2571,12 +2577,34 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               {/* coinvestors */}
               {(() => {
                 const items = Array.isArray(investor.coinvestors) ? investor.coinvestors : [];
+                const canSearchCoinvestors = items.length > 0 && onSearchCoinvestors;
                 return (
-                  <DetailSection
-                    label="Featured Co-investors"
-                    icon={<Handshake className="w-3.5 h-3.5 text-gray-400" />}
-                    value={
-                      items.length > 0 ? (
+                  <div>
+                    <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2 flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Handshake className="w-3.5 h-3.5 text-gray-400" />
+                        Featured Co-investors
+                      </span>
+                      {canSearchCoinvestors && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const { domains, linkedin_urls } = parseNameUrlListToSearchParams(items);
+                            if (domains.length || linkedin_urls.length) {
+                              onSearchCoinvestors(items, investor.name);
+                            }
+                          }}
+                          className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-gray-600 bg-gray-100 hover:text-indigo-600 hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 transition-colors"
+                          title="Search these co-investors"
+                          aria-label="Search these co-investors"
+                        >
+                          <Search className="w-3.5 h-3.5 shrink-0" />
+                          <span>Search these co-investors</span>
+                        </button>
+                      )}
+                    </h3>
+                    <div className="text-sm text-gray-700">
+                      {items.length > 0 ? (
                         <ul className="space-y-2">
                           {items.map((item, idx) => {
                             const parsed = parseNotableInvestment(item);
@@ -2603,9 +2631,9 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         </ul>
                       ) : (
                         '-'
-                      )
-                    }
-                  />
+                      )}
+                    </div>
+                  </div>
                 );
               })()}
 
