@@ -1295,7 +1295,7 @@ function CompanyProfileContent() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Who are you looking to raise from? <span className="text-red-500">*</span></label>
                 <div className="border border-gray-300 rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
-                  {['Venture Capital', 'Angel Investor', 'Family Office', 'Private Equity', 'Hedge Fund', 'Corporate Venture', 'Accelerator / Incubator', 'Investment Holding Company', 'Sovereign Wealth Fund', 'Institutional Investor', 'Fund of Funds', 'Venture Debt / Credit Investor', 'Crowdfunding / Community Investor', 'Government or Public Investment Fund', 'Other Alternative Investor'].map((type) => {
+                  {['Venture Capital', 'Angel Investor', 'Family Office', 'Private Equity', 'Hedge Fund', 'Corporate Venture Capital', 'Accelerator / Incubator', 'Investment Holding Company', 'Sovereign Wealth Fund', 'Institutional Investor', 'Fund of Funds', 'Venture Debt / Credit Investor', 'Crowdfunding / Community Investor', 'Government or Public Investment Fund', 'Other Alternative Investor'].map((type) => {
                     const isSelected = (formData.step11?.lookingToRaiseFrom ?? []).includes(type);
                     return (
                       <label key={type} className="flex items-center p-2 hover:bg-gray-50 rounded cursor-pointer">

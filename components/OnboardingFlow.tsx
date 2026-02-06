@@ -1907,7 +1907,7 @@ export default function OnboardingFlow() {
         'Family Office',
         'Private Equity',
         'Hedge Fund',
-        'Corporate Venture',
+        'Corporate Venture Capital',
         'Accelerator / Incubator',
         'Investment Holding Company',
         'Sovereign Wealth Fund',
