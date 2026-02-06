@@ -1974,7 +1974,7 @@ function InvestorsContent() {
             <>
           <button
             onClick={() => setColumnFilterOpen(!columnFilterOpen)}
-            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+            className="inline-flex items-center gap-2 px-3 md:px-4 py-2 border border-gray-300 text-xs md:text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 w-full sm:w-auto"
           >
             <Filter className="w-4 h-4" />
             Manage Columns
@@ -2071,7 +2071,8 @@ function InvestorsContent() {
       {/* Search form */}
       <div className="mb-6 space-y-4">
         <div className="flex flex-col sm:flex-row gap-3">
-          <div className="flex flex-1 gap-2">
+          <div className="flex flex-col sm:flex-row flex-1 gap-2">
+            {/* Search input - full width on mobile, flex on desktop */}
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
@@ -2092,42 +2093,48 @@ function InvestorsContent() {
                 </button>
               )}
             </div>
-            <button
-              onClick={() => setFindCompanyModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shrink-0"
-            >
-              <Building2 className="w-4 h-4" />
-              Find investors of a company
-            </button>
-            <div className="relative">
-              <select
-                value={filters.type}
-                onChange={(e) => {
-                  const newType = e.target.value as InvestorTypeFilter;
-                  setFilters((prev) => ({
-                    ...prev,
-                    type: newType,
-                    role: newType === 'firm' ? [] : prev.role,
-                  }));
-                }}
-                className="pl-3 pr-9 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px] appearance-none"
+            {/* Buttons row - wraps on mobile, inline on desktop */}
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setFindCompanyModalOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 shrink-0"
               >
-                <option value="firm">Firm</option>
-                <option value="person">Person</option>
-              </select>
-              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+                <Building2 className="w-4 h-4" />
+                <span className="hidden sm:inline">Find investors of a company</span>
+                <span className="sm:hidden">Find by company</span>
+              </button>
+              <div className="relative">
+                <select
+                  value={filters.type}
+                  onChange={(e) => {
+                    const newType = e.target.value as InvestorTypeFilter;
+                    setFilters((prev) => ({
+                      ...prev,
+                      type: newType,
+                      role: newType === 'firm' ? [] : prev.role,
+                    }));
+                  }}
+                  className="pl-3 pr-9 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[120px] appearance-none"
+                >
+                  <option value="firm">Firm</option>
+                  <option value="person">Person</option>
+                </select>
+                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              </div>
             </div>
           </div>
           <button
             onClick={() => setFiltersExpanded(!filtersExpanded)}
-            className={`inline-flex items-center gap-2 px-4 py-2 border rounded-md text-sm font-medium ${
+            className={`inline-flex items-center justify-between gap-2 px-4 py-2 border rounded-md text-sm font-medium min-w-[120px] ${
               filtersExpanded
                 ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
                 : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
             }`}
           >
-            <Filter className="w-4 h-4" />
-            Filters
+            <span className="inline-flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Filters
+            </span>
             <ChevronDown className={`w-4 h-4 transition-transform ${filtersExpanded ? 'rotate-180' : ''}`} />
           </button>
         </div>
@@ -3467,7 +3474,6 @@ function InvestorResultCard({
         <div className="min-w-0 flex-1">
           <h3 className="font-semibold text-gray-900">{investor.name}</h3>
           {investor.role && <p className="text-sm text-gray-600 mt-0.5">{investor.role}</p>}
-          {thesis && <p className="text-sm text-gray-600 mt-1 line-clamp-3 leading-relaxed">{thesis}</p>}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {investor.has_personalization && (
@@ -3516,6 +3522,11 @@ function InvestorResultCard({
           </button>
         </div>
       </div>
+
+      {/* Investment thesis - full width row */}
+      {thesis && (
+        <p className="text-sm text-gray-600 mt-2 line-clamp-3 leading-relaxed">{thesis}</p>
+      )}
 
       {/* investor_fit and reason - compact display like InvestorDetailsDrawer */}
       {(hasFitInfo || hasReason) && (
