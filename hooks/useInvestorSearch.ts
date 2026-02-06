@@ -18,6 +18,8 @@ export interface InvestorSearchFilters {
   hq_state: string | null;
   hq_country: string | null;
   investor_type: string[];
+  /** Investor tier: A, B, C (or null for unclassified) */
+  tier: string[];
   fund_size_min: number | null;
   fund_size_max: number | null;
   check_size_min: number | null;
@@ -55,6 +57,8 @@ export interface InvestorSearchResult {
   hq_state: string | null;
   hq_country: string | null;
   investor_type: string[] | null;
+  /** Investor tier: A, B, C, or null for unclassified */
+  tier: string | null;
   fund_size_usd: number | null;
   check_size_min_usd: number | null;
   check_size_max_usd: number | null;
@@ -148,6 +152,9 @@ function buildRpcParams(
   if (resolvedCountry) params.p_hq_country = resolvedCountry;
   if (filters.investor_type.length > 0) {
     params.p_investor_type = filters.investor_type;
+  }
+  if (filters.tier.length > 0) {
+    params.p_tier = filters.tier;
   }
   if (filters.fund_size_min != null && filters.fund_size_min > 0) {
     params.p_fund_size_min = filters.fund_size_min;
@@ -271,6 +278,7 @@ export function useInvestorSearch({
     filters.hq_state,
     filters.hq_country,
     JSON.stringify(filters.investor_type),
+    JSON.stringify(filters.tier),
     filters.fund_size_min,
     filters.fund_size_max,
     filters.check_size_min,

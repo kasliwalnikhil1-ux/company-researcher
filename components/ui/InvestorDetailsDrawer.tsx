@@ -91,6 +91,8 @@ export interface InvestorDetails {
   hq_state?: string | null;
   hq_country?: string | null;
   investor_type?: string[] | null;
+  /** Investor tier: A, B, C, or null for unclassified */
+  tier?: string | null;
   fund_size_usd?: number | null;
   check_size_min_usd?: number | null;
   check_size_max_usd?: number | null;
@@ -2123,6 +2125,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     )}
                     <span>{investor.active === true ? 'Yes' : investor.active === false ? 'No' : '-'}</span>
                   </span>
+                  <span className="text-gray-300">•</span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="font-medium text-gray-500">Leads round</span>
                     {investor.leads_round === true ? (
@@ -2133,6 +2136,27 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       <Minus className="w-4 h-4 text-gray-400" />
                     )}
                     <span>{investor.leads_round === true ? 'Yes' : investor.leads_round === false ? 'No' : '-'}</span>
+                  </span>
+                  <span className="text-gray-300">•</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="font-medium text-gray-500">Tier</span>
+                    {investor.tier ? (
+                      <span
+                        className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                          investor.tier === 'A'
+                            ? 'bg-green-100 text-green-800'
+                            : investor.tier === 'B'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : investor.tier === 'C'
+                            ? 'bg-orange-100 text-orange-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {investor.tier}
+                      </span>
+                    ) : (
+                      <span>-</span>
+                    )}
                   </span>
                   {investor.has_personalization && (
                     <span

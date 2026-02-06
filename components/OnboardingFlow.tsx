@@ -1915,8 +1915,7 @@ export default function OnboardingFlow() {
         'Fund of Funds',
         'Venture Debt / Credit Investor',
         'Crowdfunding / Community Investor',
-        'Government or Public Investment Fund',
-        'Other Alternative Investor',
+        'Government or Public Investment Fund'
       ];
       const current = formData.step11?.lookingToRaiseFrom || [];
       return (

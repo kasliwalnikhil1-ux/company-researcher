@@ -421,6 +421,59 @@ export function extractDomain(input: string): string {
   }
 }
 
+/**
+ * Cleans a search input by detecting LinkedIn URLs or domain URLs and extracting the relevant part.
+ * - For LinkedIn URLs: extracts just the path (e.g., "in/username") in lowercase
+ * - For domain URLs: extracts just the domain (e.g., "accel.com") in lowercase
+ * - For other inputs: returns trimmed lowercase input
+ * 
+ * @param input - User search input (could be a LinkedIn URL, domain URL, or plain text)
+ * @returns Cleaned search term in lowercase
+ */
+export function cleanSearchInput(input: string): string {
+  if (!input || typeof input !== 'string') return '';
+  
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  
+  // Check if it's a LinkedIn URL or path
+  const linkedinMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(in|company|school|showcase|groups)\/([^/?#\s]+)/i);
+  if (linkedinMatch) {
+    // Return just the path part (e.g., "in/username") in lowercase
+    const pathType = linkedinMatch[1].toLowerCase();
+    const identifier = linkedinMatch[2].toLowerCase();
+    return `${pathType}/${identifier}`;
+  }
+  
+  // Check if it looks like a LinkedIn path without the full URL (e.g., "in/username" or "/in/username")
+  const linkedinPathMatch = trimmed.match(/^\/?(?:in|company|school|showcase|groups)\/([^/?#\s]+)$/i);
+  if (linkedinPathMatch) {
+    // Clean up and return in lowercase
+    return trimmed.replace(/^\/+/, '').toLowerCase();
+  }
+  
+  // Check if it looks like a URL with protocol (not LinkedIn)
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    // It's a domain URL, extract just the domain
+    return extractDomain(trimmed).toLowerCase();
+  }
+  
+  // Check if it looks like a domain with www. prefix
+  if (trimmed.toLowerCase().startsWith('www.')) {
+    return trimmed.substring(4).split('/')[0].split('?')[0].toLowerCase();
+  }
+  
+  // Check if it looks like a domain (contains a dot and common TLD patterns)
+  const domainPattern = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
+  if (domainPattern.test(trimmed.split('/')[0].split('?')[0])) {
+    // Extract just the domain part
+    return trimmed.split('/')[0].split('?')[0].toLowerCase();
+  }
+  
+  // Return as-is (trimmed and lowercased) for regular text searches
+  return trimmed.toLowerCase();
+}
+
 /** Human-readable labels for onboarding coded values */
 const CAPITAL_RAISED_LABELS: Record<string, string> = {
   none: 'No amount raised',

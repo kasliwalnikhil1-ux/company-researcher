@@ -47,7 +47,7 @@ import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
-import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams, normalizeLinkedInUrl } from '@/lib/utils';
+import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams, normalizeLinkedInUrl, cleanSearchInput } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csvExport';
 
 // Filter options - must match what's stored in backend (investor-research API)
@@ -65,9 +65,10 @@ const INVESTOR_TYPE_OPTIONS = [
   'Fund of Funds',
   'Venture Debt / Credit Investor',
   'Crowdfunding / Community Investor',
-  'Government or Public Investment Fund',
-  'Other Alternative Investor',
+  'Government or Public Investment Fund'
 ];
+
+const TIER_OPTIONS = ['A', 'B', 'C'];
 
 const STAGE_OPTIONS = [
   'angel',
@@ -313,6 +314,7 @@ function filtersToStored(filters: InvestorSearchFilters): StoredInvestorFilters 
 const INVESTOR_BASE_COLUMNS = [
   'name',
   'role',
+  'tier',
   'investor_type',
   'investment_stages',
   'investment_industries',
@@ -350,6 +352,7 @@ const DEFAULT_FILTERS: InvestorSearchFilters = {
   hq_state: null,
   hq_country: null,
   investor_type: [],
+  tier: [],
   fund_size_min: null,
   fund_size_max: null,
   check_size_min: null,
@@ -1143,11 +1146,12 @@ function InvestorsContent() {
     setFilters(DEFAULT_FILTERS);
   }, []);
 
-  // Debounced search
+  // Debounced search - cleans domains and LinkedIn URLs before searching
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
-      setFilters((prev) => ({ ...prev, name: localSearchInput.trim() }));
+      const cleanedInput = cleanSearchInput(localSearchInput);
+      setFilters((prev) => ({ ...prev, name: cleanedInput }));
     }, 400);
     return () => {
       if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -1160,7 +1164,8 @@ function InvestorsContent() {
         clearTimeout(searchTimeoutRef.current);
         searchTimeoutRef.current = null;
       }
-      setFilters((prev) => ({ ...prev, name: localSearchInput.trim() }));
+      const cleanedInput = cleanSearchInput(localSearchInput);
+      setFilters((prev) => ({ ...prev, name: cleanedInput }));
     }
   };
 
@@ -1265,7 +1270,7 @@ function InvestorsContent() {
   }, []);
 
   const toggleArrayFilter = useCallback((
-    key: 'investor_type' | 'investment_stages' | 'investment_industries' | 'investment_geographies' | 'reviewed_stage' | 'set' | 'owner' | 'role',
+    key: 'investor_type' | 'tier' | 'investment_stages' | 'investment_industries' | 'investment_geographies' | 'reviewed_stage' | 'set' | 'owner' | 'role',
     item: string
   ) => {
     setFilters((prev) => {
@@ -1288,6 +1293,7 @@ function InvestorsContent() {
     const base: Record<string, string> = {
       name: 'Name',
       role: 'Role',
+      tier: 'Tier',
       investor_type: 'Investor Type',
       investment_stages: 'Stages',
       investment_industries: 'Industries',
@@ -1380,6 +1386,8 @@ function InvestorsContent() {
           return investor.name ?? '-';
         case 'role':
           return investor.role ?? '-';
+        case 'tier':
+          return investor.tier ?? '-';
         case 'investor_type':
           return Array.isArray(investor.investor_type) ? investor.investor_type.join(', ') : '-';
         case 'investment_stages':
@@ -2244,6 +2252,15 @@ function InvestorsContent() {
                   value={filters.leads_round}
                   onChange={(v) => updateFilter('leads_round', v)}
                 />
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-gray-700">Tier</span>
+                  <MultiSelectFilter
+                    label={filters.tier.length ? '' : 'All'}
+                    options={TIER_OPTIONS}
+                    selected={filters.tier}
+                    onToggle={(item) => toggleArrayFilter('tier', item)}
+                  />
+                </div>
               </div>
               <button
                 onClick={handleClearFilters}
@@ -2252,6 +2269,7 @@ function InvestorsContent() {
                   !filters.investment_stages?.length &&
                   !filters.investment_geographies?.length &&
                   !filters.investor_type?.length &&
+                  !filters.tier?.length &&
                   filters.type === 'firm' &&
                   filters.active === null &&
                   filters.leads_round === null &&
@@ -2340,7 +2358,7 @@ function InvestorsContent() {
           <Handshake className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
           <p className="text-sm md:text-base text-gray-500 mb-4">
             {(filters.name || (filters.domains?.length ?? 0) > 0 || (filters.linkedin_urls?.length ?? 0) > 0 || filters.investment_stages.length || filters.investment_industries.length ||
-             filters.investment_geographies.length || filters.investor_type.length ||
+             filters.investment_geographies.length || filters.investor_type.length || filters.tier.length ||
              filters.reviewed_stage.length || filters.set.length || filters.owner.length || filters.investor_fit.length)
               ? 'No investors found matching your filters.'
               : 'No investors found. Try adjusting your search or filters.'}

@@ -83,6 +83,7 @@ const PLANS: PlanConfig[] = [
           'Investors profile with notable investments',
           'Verified investor contact details',
           'Official apply link or submission page',
+          'Investor grading by reputation, support & founder friendliness',
         ],
       },
       {
