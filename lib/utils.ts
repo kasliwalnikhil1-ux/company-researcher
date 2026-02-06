@@ -630,6 +630,82 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
  * @param text - Text to copy to clipboard
  * @returns Promise that resolves when text is copied, or rejects if copying fails
  */
+/**
+ * Normalizes a LinkedIn URL to ensure it's a complete, valid URL
+ * Supports:
+ * - Full URLs: https://linkedin.com/in/username, https://www.linkedin.com/company/name
+ * - Partial paths: in/username, company/name, /in/username
+ * - Just usernames: username (assumes it's a personal profile)
+ * 
+ * @param input - LinkedIn URL, path, or username
+ * @returns Complete LinkedIn URL (e.g., https://www.linkedin.com/in/username)
+ */
+export function normalizeLinkedInUrl(input: string): string {
+  if (!input || typeof input !== 'string') return '';
+  
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  
+  // If it already starts with http, return as-is (already complete)
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  
+  // Remove leading slashes
+  let path = trimmed.replace(/^\/+/, '');
+  
+  // If it looks like a LinkedIn path (in/..., company/..., school/..., etc.)
+  if (/^(in|company|school|showcase|groups)\//.test(path)) {
+    return `https://www.linkedin.com/${path}`;
+  }
+  
+  // If it's www.linkedin.com/... without protocol
+  if (path.startsWith('www.linkedin.com') || path.startsWith('linkedin.com')) {
+    return `https://${path}`;
+  }
+  
+  // Assume it's a personal profile username
+  return `https://www.linkedin.com/in/${path}`;
+}
+
+/**
+ * Normalizes a Twitter/X URL to ensure it's a complete, valid URL
+ * Supports:
+ * - Full URLs: https://twitter.com/username, https://x.com/username
+ * - @username format: @username
+ * - Plain username: username
+ * - Partial paths: /username
+ * 
+ * @param input - Twitter/X URL or username
+ * @returns Complete Twitter/X URL (e.g., https://x.com/username)
+ */
+export function normalizeTwitterUrl(input: string): string {
+  if (!input || typeof input !== 'string') return '';
+  
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+  
+  // If it already starts with http, return as-is (already complete)
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  
+  // If it's www.twitter.com/... or twitter.com/... or x.com/... without protocol
+  if (trimmed.startsWith('www.twitter.com') || trimmed.startsWith('twitter.com') || 
+      trimmed.startsWith('www.x.com') || trimmed.startsWith('x.com')) {
+    return `https://${trimmed}`;
+  }
+  
+  // Remove @ prefix if present
+  let username = trimmed.startsWith('@') ? trimmed.substring(1) : trimmed;
+  
+  // Remove leading slashes
+  username = username.replace(/^\/+/, '');
+  
+  // Return complete URL using x.com (Twitter's current domain)
+  return `https://x.com/${username}`;
+}
+
 export async function copyToClipboard(text: string): Promise<void> {
   if (!text) {
     throw new Error('No text provided to copy');

@@ -294,39 +294,61 @@ export async function POST(req: NextRequest) {
         }
       }
       if (linkedinUrl) {
+        // Extract the linkedin username (e.g. "anton-generalov" from "in/anton-generalov-a2827281")
+        // LinkedIn URLs can have a numeric suffix that may vary, so we also check by username prefix
+        const linkedinUsername = linkedinUrl.replace(/^in\//, '').replace(/-[a-z0-9]+$/i, '');
+        console.log('[investor-research] Checking for existing linkedin_url:', linkedinUrl, '| username:', linkedinUsername);
+        
+        // First try exact match
         const { data: byLinkedIn } = await supabase
           .from('investors')
-          .select('id')
+          .select('id, linkedin_url')
           .eq('linkedin_url', linkedinUrl)
           .limit(1)
           .maybeSingle();
-        if (byLinkedIn) {
-          console.log('[investor-research] Skipped (linkedin exists):', linkedinUrl);
+        
+        // If no exact match, try matching by username prefix (in/username or in/username-SUFFIX)
+        let matchedInvestor = byLinkedIn;
+        if (!matchedInvestor && linkedinUsername) {
+          const { data: byLinkedInPrefix } = await supabase
+            .from('investors')
+            .select('id, linkedin_url')
+            .like('linkedin_url', `in/${linkedinUsername}%`)
+            .limit(1)
+            .maybeSingle();
+          if (byLinkedInPrefix) {
+            console.log('[investor-research] Found by linkedin prefix match:', byLinkedInPrefix.linkedin_url);
+            matchedInvestor = byLinkedInPrefix;
+          }
+        }
+        
+        if (matchedInvestor) {
+          console.log('[investor-research] Skipped (linkedin exists):', linkedinUrl, '| matched:', matchedInvestor.linkedin_url);
           if (affiliateWithFirmId) {
             const { data: existingAff } = await supabase
               .from('investor_affiliations')
               .select('id')
-              .eq('person_id', byLinkedIn.id)
+              .eq('person_id', matchedInvestor.id)
               .eq('firm_id', affiliateWithFirmId)
               .maybeSingle();
             if (!existingAff) {
               await supabase.from('investor_affiliations').insert({
                 id: randomUUID(),
-                person_id: byLinkedIn.id,
+                person_id: matchedInvestor.id,
                 firm_id: affiliateWithFirmId,
               });
             }
             if (affiliateContactEmail) {
-              const { data: inv } = await supabase.from('investors').select('email').eq('id', byLinkedIn.id).single();
+              const { data: inv } = await supabase.from('investors').select('email').eq('id', matchedInvestor.id).single();
               const currentEmails = inv?.email ? String(inv.email).split(/[,;]\s*/).filter(Boolean) : [];
               const merged = [...new Set([...currentEmails, affiliateContactEmail].filter(Boolean))];
-              await supabase.from('investors').update({ email: merged.join(', ') }).eq('id', byLinkedIn.id);
+              await supabase.from('investors').update({ email: merged.join(', ') }).eq('id', matchedInvestor.id);
             }
           }
           return NextResponse.json({
             skipped: true,
             reason: 'linkedin_exists',
-            investor_id: byLinkedIn.id,
+            investor_id: matchedInvestor.id,
             cleaned,
             domain: null,
             linkedinUrl,
@@ -486,40 +508,12 @@ export async function POST(req: NextRequest) {
       existingId = data?.id || null;
     }
 
-    // Non-investor: mark as to_do for future processing
+    // Non-investor: skip entirely (do not add to database)
     if (!isInvestor) {
-      const nonInvestorId = existingId || randomUUID();
-      const row = {
-        ...baseRow,
-        research_status: 'to_do',
-      };
-      console.log('[investor-research] Non-investor: marking as to_do:', row);
-
-      if (existingId) {
-        const { error: updErr } = await supabase.from('investors').update(row).eq('id', existingId);
-        if (updErr) {
-          console.error('Investor update error:', updErr);
-          sendSlackNotification(`❌ Investor Research - Database Update Error\nInput: ${cleaned}\nError: ${updErr.message}`).catch(
-            (err) => console.error('Failed to send Slack notification:', err)
-          );
-          return NextResponse.json({ error: 'Failed to update investor', details: updErr.message }, { status: 500 });
-        }
-      } else {
-        const { error: insErr } = await supabase.from('investors').insert({
-          ...row,
-          id: nonInvestorId,
-        });
-        if (insErr) {
-          console.error('Investor insert error:', insErr);
-          sendSlackNotification(`❌ Investor Research - Database Insert Error\nInput: ${cleaned}\nError: ${insErr.message}`).catch(
-            (err) => console.error('Failed to send Slack notification:', err)
-          );
-          return NextResponse.json({ error: 'Failed to insert investor', details: insErr.message }, { status: 500 });
-        }
-      }
-
+      console.log('[investor-research] Non-investor: skipping:', { cleaned, entityType, cleanName });
       return NextResponse.json({
-        investor_id: nonInvestorId,
+        skipped: true,
+        reason: 'not_investor',
         cleaned,
         domain,
         linkedinUrl,
@@ -530,8 +524,7 @@ export async function POST(req: NextRequest) {
           clean_name: cleanName,
         },
         links,
-        research_status: 'to_do',
-        message: 'Not an investor. Marked as to_do for future processing.',
+        message: 'Not an investor. Skipped.',
       });
     }
 
@@ -669,8 +662,10 @@ export async function POST(req: NextRequest) {
     const extractedLinkedinUrl = extracted?.linkedin_url
       ? cleanInvestorInput(extracted.linkedin_url).linkedinUrl
       : null;
+    // Prefer the original input linkedinUrl over AI-extracted one for consistency in duplicate detection
+    // The input URL is the source of truth; AI extraction may return a different format (e.g., without numeric suffix)
     const updateRow: Record<string, unknown> = {
-      linkedin_url: extractedLinkedinUrl ?? linkedinUrl ?? null,
+      linkedin_url: linkedinUrl ?? extractedLinkedinUrl ?? null,
       twitter_url: extracted?.twitter_url ?? null,
       active: extracted?.active ?? null,
       apply_url: applyUrl,
@@ -802,7 +797,7 @@ export async function POST(req: NextRequest) {
           const firmData = await firmRes.json();
           const firmInvestorId = firmData?.investor_id;
           console.log('[investor-research] Person flow: firm research result:', { firmInvestorId, error: firmData?.error, research_status: firmData?.research_status });
-          if (firmInvestorId && !firmData?.error && firmData?.research_status !== 'to_do') {
+          if (firmInvestorId && !firmData?.error && !firmData?.skipped) {
             const { data: existingAff } = await supabase
               .from('investor_affiliations')
               .select('id')

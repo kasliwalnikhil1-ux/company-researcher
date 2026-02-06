@@ -47,7 +47,7 @@ import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
-import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams } from '@/lib/utils';
+import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams, normalizeLinkedInUrl } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csvExport';
 
 // Filter options - must match what's stored in backend (investor-research API)
@@ -2359,7 +2359,7 @@ function InvestorsContent() {
                             const d = investor.domain!.trim();
                             href = d.startsWith('http') ? d : `https://${d}`;
                           } else if (isLinkedInColumn && investor.linkedin_url?.trim()) {
-                            href = investor.linkedin_url!.trim();
+                            href = normalizeLinkedInUrl(investor.linkedin_url!.trim());
                           } else if (isEmailColumn && investor.email?.trim()) {
                             const email = investor.email!.trim().split(',')[0].trim();
                             let subject: string | undefined;

@@ -9,7 +9,7 @@ import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT, type ExcludeInvestorsOption } f
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
 import { useOwner } from '@/contexts/OwnerContext';
-import { copyToClipboard, extractPhoneNumber, parseNameUrlListToSearchParams } from '@/lib/utils';
+import { copyToClipboard, extractPhoneNumber, parseNameUrlListToSearchParams, normalizeLinkedInUrl, normalizeTwitterUrl } from '@/lib/utils';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { supabase } from '@/utils/supabase/client';
 import { useRouter } from 'next/navigation';
@@ -1504,7 +1504,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         )}
                         {investor.linkedin_url?.trim() && (
                           <a
-                            href={investor.linkedin_url}
+                            href={normalizeLinkedInUrl(investor.linkedin_url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-2 rounded-lg text-gray-500 hover:text-[#0A66C2] hover:bg-[#0A66C2]/10 transition-colors"
@@ -1529,7 +1529,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         )}
                         {investor.twitter_url?.trim() && (
                           <a
-                            href={investor.twitter_url}
+                            href={normalizeTwitterUrl(investor.twitter_url)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="p-2 rounded-lg text-gray-500 hover:text-[#1DA1F2] hover:bg-[#1DA1F2]/10 transition-colors"
