@@ -2259,6 +2259,7 @@ function InvestorsContent() {
                     options={TIER_OPTIONS}
                     selected={filters.tier}
                     onToggle={(item) => toggleArrayFilter('tier', item)}
+                    searchPlaceholder="Search investor tiers..."
                   />
                 </div>
               </div>
