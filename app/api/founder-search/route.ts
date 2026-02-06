@@ -22,28 +22,40 @@ function getSupabaseAuthClient(accessToken: string) {
   });
 }
 
-function normalizeDomain(domain: string): string {
-  return domain
-    .toLowerCase()
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .split('/')[0];
+function normalizeDomain(url: string): string {
+  // Add protocol if missing for URL parsing
+  const full = url.startsWith('http') ? url : `https://${url}`;
+  try {
+    const u = new URL(full);
+    return u.hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    // Fallback: strip protocol and www, take first path segment
+    return url
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .split('/')[0];
+  }
 }
 
 function extractDomainsFromNotableInvestments(investments: string[] | null): string[] {
   if (!investments || !Array.isArray(investments)) return [];
-  const domains: string[] = [];
+  const re = /\[([^\]]*)\]\(([^)]*)\)/g;
+  const domains = new Set<string>();
   for (const item of investments) {
-    // Format: [name](url)
-    const match = item.match(/\]\((https?:\/\/[^)]+)\)/);
-    if (match && match[1]) {
-      const domain = normalizeDomain(match[1]);
-      if (domain && !domains.includes(domain)) {
-        domains.push(domain);
+    if (typeof item !== 'string') continue;
+    let m: RegExpExecArray | null;
+    re.lastIndex = 0;
+    while ((m = re.exec(item)) !== null) {
+      const url = (m[2] || '').trim();
+      if (!url) continue;
+      const domain = normalizeDomain(url);
+      if (domain) {
+        domains.add(domain);
       }
     }
   }
-  return domains;
+  return [...domains];
 }
 
 export const maxDuration = 60;
@@ -96,9 +108,13 @@ export async function POST(req: NextRequest) {
     const notableInvestments = Array.isArray(investor.notable_investments)
       ? investor.notable_investments
       : null;
+    
+    console.log('[founder-search] Notable investments:', notableInvestments?.length ?? 0, 'items');
+    
     const domains = extractDomainsFromNotableInvestments(notableInvestments);
 
     if (domains.length === 0) {
+      console.log('[founder-search] No domains extracted. Raw notable_investments:', JSON.stringify(notableInvestments));
       return NextResponse.json({
         success: false,
         message: 'No domains found in notable investments',

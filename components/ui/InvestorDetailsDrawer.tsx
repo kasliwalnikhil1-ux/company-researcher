@@ -207,9 +207,14 @@ const parseNotableInvestment: (s: string) => { name: string; url: string } | nul
   const match = s.match(/^\[([^\]]+)\]\(([^)]*)\)$/);
   if (match) {
     const name = match[1];
-    const url = match[2];
+    let url = match[2].trim();
     // Only return as a link if URL is non-empty
-    return url ? { name, url } : null;
+    if (!url) return null;
+    // Ensure URL has a protocol for proper link navigation and favicon lookup
+    if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
+      url = `https://${url}`;
+    }
+    return { name, url };
   }
   return null;
 };
