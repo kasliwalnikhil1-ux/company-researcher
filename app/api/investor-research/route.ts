@@ -96,7 +96,8 @@ function buildStep3Schema(isPerson: boolean): string {
     '  "investment_geographies": [],\n' +
     '  "investment_thesis": "",\n' +
     '  "notable_investments": [],\n' +
-    '  "coinvestors": []\n' +
+    '  "coinvestors": [],\n' +
+    '  "tier": ""\n' +
     '}\n\n' +
     roleHint +
     currentFirmHint +
@@ -106,6 +107,7 @@ function buildStep3Schema(isPerson: boolean): string {
     'investment_geographies: as per ISO 3166-2 standard\n' +
     'investment_thesis: Precise criteria to qualify, starts with Invests in....\n' +
     'notable_investments and coinvestors: list of strings in format [name](url)\n' +
+    'tier: A|B|C - Grade this investor A, B, or C based on how popular, reputable, helpful, strong network, and founder-friendly they are\n' +
     personHints
   );
 }
@@ -375,7 +377,7 @@ export async function POST(req: NextRequest) {
       subpageTarget: ['about', 'portfolio', 'team', 'contact', 'thesis', 'investments', 'apply link'],
       summary: {
         query:
-          'You are analyzing a website to determine whether it represents an investor.\n\nYour task:\n1. Determine whether the subject is a Person or an Organization.\n2. Determine whether the subject is an investor.\n3. If an investor, assign one or more investor types.\n4. Extract a clean, normalized name.\n\nDefinitions:\n- A Person is an individual acting under their own name.\n- An Organization is a company, fund, firm, or structured entity.\n- An investor may have multiple investor types.\n- If the subject does not clearly invest capital, mark it as Not an Investor.\n\nInvestor types may include:\n- Venture Capital\n- Angel Investor\n- Family Office\n- Private Equity\n- Hedge Fund\n- Corporate Venture\n- Accelerator / Incubator\n- Investment Holding Company\n\nRules:\n- Base decisions only on visible website content.\n- Do not infer or assume.\n- A person can be an investor.\n- An organization can have multiple investor types.\n- If no investment activity is clearly stated, classify as Not an Investor.\n- The clean_name should remove legal suffixes, fund numbers, and marketing terms.\n\nReturn the result strictly in the JSON format below.',
+          'You are analyzing a website to determine whether it represents an investor.\n\nYour task:\n1. Determine whether the subject is a Person or an Organization.\n2. Determine whether the subject is an investor.\n3. If an investor, assign one or more investor types.\n4. Extract a clean, normalized name.\n\nDefinitions:\n- A Person is an individual acting under their own name.\n- An Organization is a company, fund, firm, or structured entity.\n- An investor may have multiple investor types.\n- If the subject does not clearly invest capital, mark it as Not an Investor.\n\nInvestor types may include:\n- Venture Capital\n- Angel Investor\n- Family Office\n- Private Equity\n- Hedge Fund\n- Corporate Venture\n- Accelerator / Incubator\n- Investment Holding Company\n- Sovereign Wealth Fund\n- Institutional Investor\n- Fund of Funds\n- Venture Debt / Credit Investor\n- Crowdfunding / Community Investor\n- Government or Public Investment Fund\n- Other Alternative Investor\n\nRules:\n- Base decisions only on visible website content.\n- Do not infer or assume.\n- A person can be an investor.\n- An organization can have multiple investor types.\n- If no investment activity is clearly stated, classify as Not an Investor.\n- The clean_name should remove legal suffixes, fund numbers, and marketing terms.\n\nReturn the result strictly in the JSON format below.',
         schema: {
           description:
             'Schema for entities that can be either people or organizations, with investor classification and normalized naming',
@@ -390,7 +392,7 @@ export async function POST(req: NextRequest) {
               type: 'boolean',
               description: 'Whether this entity is an investor',
             },
-            investor_types: {
+              investor_types: {
               type: 'array',
               items: {
                 type: 'string',
@@ -403,6 +405,13 @@ export async function POST(req: NextRequest) {
                   'Corporate Venture',
                   'Accelerator / Incubator',
                   'Investment Holding Company',
+                  'Sovereign Wealth Fund',
+                  'Institutional Investor',
+                  'Fund of Funds',
+                  'Venture Debt / Credit Investor',
+                  'Crowdfunding / Community Investor',
+                  'Government or Public Investment Fund',
+                  'Other Alternative Investor',
                 ],
               },
               description: 'Types of investment activities this entity engages in',
@@ -689,6 +698,7 @@ export async function POST(req: NextRequest) {
       notable_investments: Array.isArray(extracted?.notable_investments) ? extracted.notable_investments : null,
       deep_research: deepResearchText,
       leads_round: typeof extracted?.leads_round === 'boolean' ? extracted.leads_round : null,
+      tier: typeof extracted?.tier === 'string' && ['A', 'B', 'C'].includes(extracted.tier) ? extracted.tier : null,
     };
 
     const { error: finalUpdErr } = await supabase.from('investors').update(updateRow).eq('id', rowId);

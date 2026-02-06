@@ -1910,6 +1910,13 @@ export default function OnboardingFlow() {
         'Corporate Venture',
         'Accelerator / Incubator',
         'Investment Holding Company',
+        'Sovereign Wealth Fund',
+        'Institutional Investor',
+        'Fund of Funds',
+        'Venture Debt / Credit Investor',
+        'Crowdfunding / Community Investor',
+        'Government or Public Investment Fund',
+        'Other Alternative Investor',
       ];
       const current = formData.step11?.lookingToRaiseFrom || [];
       return (

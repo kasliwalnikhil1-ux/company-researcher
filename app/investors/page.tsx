@@ -60,6 +60,13 @@ const INVESTOR_TYPE_OPTIONS = [
   'Corporate Venture',
   'Accelerator / Incubator',
   'Investment Holding Company',
+  'Sovereign Wealth Fund',
+  'Institutional Investor',
+  'Fund of Funds',
+  'Venture Debt / Credit Investor',
+  'Crowdfunding / Community Investor',
+  'Government or Public Investment Fund',
+  'Other Alternative Investor',
 ];
 
 const STAGE_OPTIONS = [
