@@ -33,10 +33,11 @@ const GEMINI_BASE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/m
 
 // Vertex AI Configuration (service account authentication)
 // Set USE_VERTEX=true to enable Vertex AI (skipped by default)
+// Uses global endpoint by default (recommended for better availability)
 const USE_VERTEX = /^(?:true|1|yes)$/i.test(process.env.USE_VERTEX ?? "false");
 const GCP_SERVICE_ACCOUNT_KEY = process.env.GCP_SERVICE_ACCOUNT_KEY || "";
 const GCP_PROJECT_ID = process.env.GCP_PROJECT_ID || "";
-const GCP_LOCATION = process.env.GCP_LOCATION || "us-central1";
+const GCP_LOCATION = process.env.GCP_LOCATION || "global";
 const VERTEX_MODEL_ID = process.env.VERTEX_MODEL_ID || "gemini-3-flash-preview";
 
 // -----------------------------------------------------------
@@ -207,22 +208,136 @@ export interface CallOptions {
   provider?: "azure" | "gemini" | "vertex";
 }
 
-/**
- * Clean JSON response by removing markdown code blocks if present.
- * This handles cases where the API returns JSON wrapped in ```json ... ``` or ``` ... ```
- */
-function cleanJsonResponse(content: string): string {
-  // Check if content is wrapped in markdown code blocks
-  // Pattern matches ```json ... ``` or ``` ... ```
-  const codeBlockPattern = /^```(?:json)?\s*\n(.*?)\n```\s*$/s;
-  const match = content.trim().match(codeBlockPattern);
+// Slack webhook URL for error notifications
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || "";
 
-  if (match) {
-    return match[1].trim();
+/**
+ * Send an error notification to Slack
+ */
+async function sendSlackError(provider: string, error: string, context?: string): Promise<void> {
+  if (!SLACK_WEBHOOK_URL) {
+    console.warn("[azureOpenAiHelper] SLACK_WEBHOOK_URL not configured, skipping Slack notification");
+    return;
   }
 
-  // If no markdown blocks found, return original content
-  return content;
+  try {
+    const message = `🚨 *${provider} API Error*\n\n*Error:* ${error}${context ? `\n\n*Context:* ${context}` : ""}`;
+    
+    await fetch(SLACK_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: message }),
+    });
+  } catch (slackError) {
+    console.error("[azureOpenAiHelper] Failed to send Slack notification:", slackError);
+  }
+}
+
+/**
+ * Clean JSON response by removing markdown code blocks and preamble text if present.
+ * This handles cases where the API returns:
+ * - JSON wrapped in ```json ... ``` or ``` ... ```
+ * - Preamble text like "Here is the JSON:" before the actual JSON
+ * - Trailing text after the JSON
+ */
+function cleanJsonResponse(content: string): string {
+  let cleaned = content.trim();
+  
+  // If empty or too short to be valid JSON, return as-is
+  if (!cleaned || cleaned.length < 2) {
+    return cleaned;
+  }
+  
+  // Check if content is wrapped in markdown code blocks (anywhere in the content)
+  // Pattern matches ```json ... ``` or ``` ... ```
+  const codeBlockPattern = /```(?:json)?\s*\n?([\s\S]*?)\n?```/;
+  const codeBlockMatch = cleaned.match(codeBlockPattern);
+
+  if (codeBlockMatch) {
+    cleaned = codeBlockMatch[1].trim();
+  }
+
+  // Remove common preamble text patterns like "Here is the JSON:", "Here is the JSON requested:", etc.
+  const preamblePatterns = [
+    /^[\s\S]*?here\s+is\s+the\s+json[^{[\n]*[:.]?\s*\n?/i,
+    /^[\s\S]*?json\s+response[^{[\n]*[:.]?\s*\n?/i,
+    /^[\s\S]*?the\s+(?:following|result)[^{[\n]*[:.]?\s*\n?/i,
+    /^[\s\S]*?response[^{[\n]*[:.]?\s*\n?/i,
+  ];
+  
+  for (const pattern of preamblePatterns) {
+    if (pattern.test(cleaned) && (cleaned.includes("{") || cleaned.includes("["))) {
+      cleaned = cleaned.replace(pattern, "").trim();
+      break;
+    }
+  }
+
+  // If the response doesn't start with { or [, try to find the first JSON object or array
+  if (!cleaned.startsWith("{") && !cleaned.startsWith("[")) {
+    // Try to find a JSON object first (more common)
+    const jsonObjectStart = cleaned.indexOf("{");
+    const jsonArrayStart = cleaned.indexOf("[");
+    
+    let startIndex = -1;
+    if (jsonObjectStart !== -1 && jsonArrayStart !== -1) {
+      startIndex = Math.min(jsonObjectStart, jsonArrayStart);
+    } else if (jsonObjectStart !== -1) {
+      startIndex = jsonObjectStart;
+    } else if (jsonArrayStart !== -1) {
+      startIndex = jsonArrayStart;
+    }
+    
+    if (startIndex !== -1) {
+      cleaned = cleaned.substring(startIndex);
+    }
+  }
+
+  // Try to find and extract a balanced JSON object or array
+  if (cleaned.startsWith("{") || cleaned.startsWith("[")) {
+    const openChar = cleaned[0];
+    const closeChar = openChar === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let endIndex = -1;
+    
+    for (let i = 0; i < cleaned.length; i++) {
+      const char = cleaned[i];
+      
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      
+      if (inString) continue;
+      
+      if (char === openChar || (openChar === "{" ? char === "{" : char === "[")) {
+        depth++;
+      } else if (char === closeChar || (openChar === "{" ? char === "}" : char === "]")) {
+        depth--;
+        if (depth === 0) {
+          endIndex = i + 1;
+          break;
+        }
+      }
+    }
+    
+    if (endIndex !== -1 && endIndex <= cleaned.length) {
+      cleaned = cleaned.substring(0, endIndex);
+    }
+  }
+
+  return cleaned;
 }
 
 /**
@@ -274,13 +389,16 @@ async function callGeminiApi(
     parts: [{ text: systemInstruction }],
   } : undefined;
 
+  // Track if JSON format is requested
+  const wantsJson = responseFormat && typeof responseFormat === "object" && responseFormat.type === "json_object";
+
   // If JSON response format is requested, add to prompt
-  if (responseFormat && typeof responseFormat === "object" && responseFormat.type === "json_object") {
+  if (wantsJson) {
     // Prepend JSON instruction to the last user message
     if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === "user") {
       const originalText = geminiContents[geminiContents.length - 1].parts[0].text;
       geminiContents[geminiContents.length - 1].parts[0].text =
-        "Please respond with ONLY valid JSON. Do not include markdown code blocks or explanations.\n\n" +
+        "CRITICAL: Your response MUST be ONLY a valid JSON object. Start directly with { and end with }. NO preamble text like 'Here is the JSON', NO markdown, NO explanations before or after the JSON.\n\n" +
         originalText;
     }
   }
@@ -292,11 +410,22 @@ async function callGeminiApi(
   const buildBody = (includeMaxTokens: boolean) => {
     const generationConfig: any = {
       temperature: temperature,
-      thinkingConfig: {
-        thinkingLevel: "HIGH",
-      },
-      responseMimeType: "application/json",
     };
+    
+    // Only use thinkingConfig for non-JSON responses or with lower thinking level for JSON
+    // Thinking models sometimes ignore responseMimeType, so we reduce thinking for JSON
+    if (wantsJson) {
+      // For JSON responses, use lower thinking level to improve format compliance
+      generationConfig.thinkingConfig = {
+        thinkingLevel: "MEDIUM",
+      };
+      generationConfig.responseMimeType = "application/json";
+    } else {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: "HIGH",
+      };
+    }
+    
     if (includeMaxTokens) {
       generationConfig.maxOutputTokens = maxTokens;
     }
@@ -337,7 +466,22 @@ async function callGeminiApi(
       throw new Error("No content parts in Gemini response");
     }
 
-    const responseContent = contentParts[0].text || "";
+    // When using thinking models, the response may have multiple parts:
+    // - Parts with "thought: true" contain the thinking process
+    // - The last non-thought part contains the actual response
+    // Find the actual response part (not the thinking part)
+    let responseContent = "";
+    for (let i = contentParts.length - 1; i >= 0; i--) {
+      const part = contentParts[i];
+      if (part.text && !part.thought) {
+        responseContent = part.text;
+        break;
+      }
+    }
+    // Fallback to first part if no non-thought part found
+    if (!responseContent && contentParts[0].text) {
+      responseContent = contentParts[0].text;
+    }
     console.log(`🔍 Raw response from Gemini: ${responseContent}`);
 
     // Clean JSON from markdown code blocks if present
@@ -409,6 +553,10 @@ async function callGeminiApi(
     }
   }
 
+  // Send Slack notification for Gemini failure
+  const errorMessage = lastError?.message || `Gemini API call failed after ${retries * 2} attempts`;
+  await sendSlackError("Gemini", errorMessage, `Model: ${model}`);
+  
   throw lastError || new Error(`Gemini API call failed after ${retries * 2} attempts (with and without maxOutputTokens)`);
 }
 
@@ -476,29 +624,46 @@ async function callVertexApi(
     parts: [{ text: systemInstruction }],
   } : undefined;
 
+  // Track if JSON format is requested
+  const wantsJson = responseFormat && typeof responseFormat === "object" && responseFormat.type === "json_object";
+
   // If JSON response format is requested, add to prompt
-  if (responseFormat && typeof responseFormat === "object" && responseFormat.type === "json_object") {
+  if (wantsJson) {
     // Prepend JSON instruction to the last user message
     if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === "user") {
       const originalText = geminiContents[geminiContents.length - 1].parts[0].text;
       geminiContents[geminiContents.length - 1].parts[0].text =
-        "Please respond with ONLY valid JSON. Do not include markdown code blocks or explanations.\n\n" +
+        "CRITICAL: Your response MUST be ONLY a valid JSON object. Start directly with { and end with }. NO preamble text like 'Here is the JSON', NO markdown, NO explanations before or after the JSON.\n\n" +
         originalText;
     }
   }
 
   // Vertex AI endpoint format
-  const endpoint = `https://${GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${GCP_LOCATION}/publishers/google/models/${model}:generateContent`;
+  // Use global endpoint (no location prefix) for "global", otherwise use regional endpoint
+  const endpoint = GCP_LOCATION === "global"
+    ? `https://aiplatform.googleapis.com/v1/projects/${projectId}/locations/global/publishers/google/models/${model}:generateContent`
+    : `https://${GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${GCP_LOCATION}/publishers/google/models/${model}:generateContent`;
 
   // Helper function to build request body
   const buildBody = (includeMaxTokens: boolean) => {
     const generationConfig: any = {
       temperature: temperature,
-      thinkingConfig: {
-        thinkingLevel: "HIGH",
-      },
-      responseMimeType: "application/json",
     };
+    
+    // Only use thinkingConfig for non-JSON responses or with lower thinking level for JSON
+    // Thinking models sometimes ignore responseMimeType, so we reduce thinking for JSON
+    if (wantsJson) {
+      // For JSON responses, use lower thinking level to improve format compliance
+      generationConfig.thinkingConfig = {
+        thinkingLevel: "MEDIUM",
+      };
+      generationConfig.responseMimeType = "application/json";
+    } else {
+      generationConfig.thinkingConfig = {
+        thinkingLevel: "HIGH",
+      };
+    }
+    
     if (includeMaxTokens) {
       generationConfig.maxOutputTokens = maxTokens;
     }
@@ -547,7 +712,22 @@ async function callVertexApi(
       throw new Error("No content parts in Vertex AI response");
     }
 
-    const responseContent = contentParts[0].text || "";
+    // When using thinking models, the response may have multiple parts:
+    // - Parts with "thought: true" contain the thinking process
+    // - The last non-thought part contains the actual response
+    // Find the actual response part (not the thinking part)
+    let responseContent = "";
+    for (let i = contentParts.length - 1; i >= 0; i--) {
+      const part = contentParts[i];
+      if (part.text && !part.thought) {
+        responseContent = part.text;
+        break;
+      }
+    }
+    // Fallback to first part if no non-thought part found
+    if (!responseContent && contentParts[0].text) {
+      responseContent = contentParts[0].text;
+    }
     console.log(`🔍 Raw response from Vertex AI: ${responseContent}`);
 
     // Clean JSON from markdown code blocks if present
@@ -619,6 +799,10 @@ async function callVertexApi(
     }
   }
 
+  // Send Slack notification for Vertex AI failure
+  const errorMessage = lastError?.message || `Vertex AI API call failed after ${retries * 2} attempts`;
+  await sendSlackError("Vertex AI", errorMessage, `Model: ${model}, Location: ${GCP_LOCATION}`);
+  
   throw lastError || new Error(`Vertex AI API call failed after ${retries * 2} attempts (with and without maxOutputTokens)`);
 }
 

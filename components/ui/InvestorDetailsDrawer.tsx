@@ -561,6 +561,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [investorNewsFetchCooldown, setInvestorNewsFetchCooldown] = useState(false);
   const [warmIntrosByDomains, setWarmIntrosByDomains] = useState<WarmIntroByDomain[] | null>(null);
   const [warmIntrosLoading, setWarmIntrosLoading] = useState(false);
+  const [founderSearchLoading, setFounderSearchLoading] = useState(false);
+  const [founderSearchResult, setFounderSearchResult] = useState<{ success: boolean; message: string } | null>(null);
   const returningToFirmRef = useRef(false);
 
   const [messagesSearch, setMessagesSearch] = useState(() => {
@@ -603,6 +605,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     setInvestorNewsError(null);
     setInvestorNewsFetchCooldown(false);
     setWarmIntrosByDomains(null);
+    setFounderSearchResult(null);
     setContactsData([]);
     setContactsError(null);
     setContactsNameSearch('');
@@ -833,6 +836,45 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     if (!investor || plan === 'basic') return;
     loadWarmIntros(notableInvestmentDomains);
   }, [investor?.id, plan, notableInvestmentDomains, loadWarmIntros]);
+
+  const handleFounderSearch = useCallback(async () => {
+    if (!investor || founderSearchLoading) return;
+    setFounderSearchLoading(true);
+    setFounderSearchResult(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        setFounderSearchResult({ success: false, message: 'Not authenticated' });
+        setFounderSearchLoading(false);
+        return;
+      }
+      const response = await fetch('/api/founder-search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ investorId: investor.id }),
+      });
+      const result = await response.json();
+      if (response.ok && result.success) {
+        setFounderSearchResult({ success: true, message: result.message || 'Founder search completed' });
+        // Reload warm intros after founder search
+        if (notableInvestmentDomains.length > 0) {
+          // Clear cache and reload
+          const sortedDomains = [...new Set(notableInvestmentDomains)].sort();
+          const cacheKey = `warm-intros-${sortedDomains.join(',')}`;
+          localStorage.removeItem(cacheKey);
+          loadWarmIntros(notableInvestmentDomains);
+        }
+      } else {
+        setFounderSearchResult({ success: false, message: result.error || result.message || 'Failed to run founder search' });
+      }
+    } catch (err) {
+      setFounderSearchResult({ success: false, message: err instanceof Error ? err.message : 'Failed to run founder search' });
+    }
+    setFounderSearchLoading(false);
+  }, [investor, founderSearchLoading, notableInvestmentDomains, loadWarmIntros]);
 
   const newsFetchedWithin7Days =
     investorNews?.date &&
@@ -2786,6 +2828,35 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   }
                 />
               ) : null}
+
+              {/* Founder Search Button - only when no warm intros found but notable investments have domains */}
+              {plan !== 'basic' && notableInvestmentDomains.length > 0 && !warmIntrosLoading && (!warmIntrosByDomains || !warmIntrosByDomains.some((d) => Array.isArray(d.founders) && d.founders.length > 0)) && (
+                <div className="pt-2 border-t border-gray-100">
+                  <button
+                    type="button"
+                    onClick={handleFounderSearch}
+                    disabled={founderSearchLoading}
+                    className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {founderSearchLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Searching founders...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Search className="w-4 h-4" />
+                        <span>Search Founders at Portfolio Companies</span>
+                      </>
+                    )}
+                  </button>
+                  {founderSearchResult && (
+                    <p className={`mt-1 text-xs ${founderSearchResult.success ? 'text-green-600' : 'text-red-600'}`}>
+                      {founderSearchResult.message}
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Pipeline fields moved to Pipeline tab when has_personalization */}
             </div>

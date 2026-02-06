@@ -838,14 +838,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Fire-and-forget founder-search for all notable investment domains
+    // PAUSE_FOUNDER_SEARCH env var: 'true' or unset = paused (default), 'false' = enabled
+    const pauseFounderSearch = process.env.PAUSE_FOUNDER_SEARCH !== 'false';
     const notableInvestments = Array.isArray(extracted?.notable_investments) ? extracted.notable_investments : null;
     const domains = extractDomainsFromNotableInvestments(notableInvestments);
-    if (domains.length > 0) {
+    if (domains.length > 0 && !pauseFounderSearch) {
       fetch(FOUNDER_SEARCH_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domains }),
       }).catch((e) => console.error('[investor-research] founder-search fire-and-forget error:', e));
+    } else if (domains.length > 0 && pauseFounderSearch) {
+      console.log('[investor-research] founder-search paused (PAUSE_FOUNDER_SEARCH=true), skipped', domains.length, 'domains');
     }
 
     // When called with affiliateWithFirmId (e.g. from Organization flow fire-and-forget), create affiliation
