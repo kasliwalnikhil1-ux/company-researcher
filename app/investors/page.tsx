@@ -439,6 +439,13 @@ function InvestorsContent() {
   const [findCompanyInput, setFindCompanyInput] = useState('');
   const [findCompanyLoading, setFindCompanyLoading] = useState(false);
   const [findCompanyError, setFindCompanyError] = useState<string | null>(null);
+  /** Tracks the original investors from "Find investors of a company" to detect missing ones after search */
+  const [pendingInvestorSearch, setPendingInvestorSearch] = useState<{
+    company: string;
+    originalInvestors: string[];
+    searchedDomains: string[];
+    searchedLinkedinUrls: string[];
+  } | null>(null);
   const [analyzingIds, setAnalyzingIds] = useState<Set<string>>(new Set());
   const [analyzingAllCount, setAnalyzingAllCount] = useState(0);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -578,6 +585,101 @@ function InvestorsContent() {
   useEffect(() => {
     refetchInvestorSets();
   }, [refetchInvestorSets]);
+
+  // Detect and report missing investors after "Find investors of a company" search completes
+  useEffect(() => {
+    // Only run when search completes (loading becomes false) and we have pending search data
+    if (loading || !pendingInvestorSearch) return;
+
+    const { company, originalInvestors, searchedDomains, searchedLinkedinUrls } = pendingInvestorSearch;
+
+    // Extract found domains and linkedin URLs from search results
+    const foundDomains = new Set<string>();
+    const foundLinkedinUrls = new Set<string>();
+    for (const investor of data) {
+      if (investor.domain) {
+        foundDomains.add(investor.domain.toLowerCase());
+      }
+      if (investor.linkedin_url) {
+        // Normalize to match format: in/username
+        const url = investor.linkedin_url.toLowerCase();
+        const match = url.match(/linkedin\.com\/(.+)/);
+        if (match) {
+          foundLinkedinUrls.add(match[1].replace(/^\/+/, '').replace(/\/+$/, ''));
+        } else {
+          foundLinkedinUrls.add(url.replace(/^\/+/, '').replace(/\/+$/, ''));
+        }
+      }
+    }
+
+    // Find missing domains and linkedin URLs
+    const missingDomains = searchedDomains.filter((d) => !foundDomains.has(d.toLowerCase()));
+    const missingLinkedinUrls = searchedLinkedinUrls.filter((url) => {
+      const normalized = url.toLowerCase().replace(/^\/+/, '').replace(/\/+$/, '');
+      return !foundLinkedinUrls.has(normalized);
+    });
+
+    // Map back to original investor entries for cleaner reporting
+    const missingInvestors: string[] = [];
+    for (const inv of originalInvestors) {
+      const match = inv.trim().match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (!match) continue;
+      const urlRaw = match[2].trim();
+      try {
+        const href = urlRaw.startsWith('http') ? urlRaw : `https://${urlRaw}`;
+        const parsed = new URL(href);
+        const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+        if (host.includes('linkedin.com')) {
+          const path = (parsed.pathname || '').toLowerCase().replace(/^\/+/, '').replace(/\/+$/, '');
+          if (missingLinkedinUrls.some((m) => m.toLowerCase() === path)) {
+            missingInvestors.push(inv);
+          }
+        } else {
+          if (missingDomains.some((m) => m.toLowerCase() === host)) {
+            missingInvestors.push(inv);
+          }
+        }
+      } catch {
+        // skip invalid URLs
+      }
+    }
+
+    // Report missing investors if any
+    if (missingInvestors.length > 0) {
+      const content = `Company: ${company}\nFound: ${data.length}/${originalInvestors.length} investors\n\nMissing investors:\n${missingInvestors.join('\n')}`;
+      console.log('[Missing Investors]', { company, found: data.length, total: originalInvestors.length, missing: missingInvestors });
+
+      // Call API to report missing investors (async, fire-and-forget)
+      (async () => {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const accessToken = sessionData?.session?.access_token;
+          if (!accessToken) {
+            console.warn('[Missing Investors] No session, skipping report');
+            return;
+          }
+          const res = await fetch('/api/missing-investors', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ content }),
+          });
+          if (!res.ok) {
+            console.error('[Missing Investors] Failed to report:', await res.text());
+          } else {
+            console.log('[Missing Investors] Reported successfully');
+          }
+        } catch (err) {
+          console.error('[Missing Investors] Error reporting:', err);
+        }
+      })();
+    }
+
+    // Clear pending search data
+    setPendingInvestorSearch(null);
+  }, [loading, data, pendingInvestorSearch]);
 
   // Fetch email_settings and column_settings.investors from user_settings
   useEffect(() => {
@@ -1069,6 +1171,7 @@ function InvestorsContent() {
     }
     setLocalSearchInput('');
     setCoInvestorsChipLabel(null);
+    setPendingInvestorSearch(null);
     setFilters((prev) => ({ ...prev, name: '', domains: [], linkedin_urls: [] }));
   };
 
@@ -1083,6 +1186,13 @@ function InvestorsContent() {
     }));
     setLocalSearchInput('');
     setCoInvestorsChipLabel(`Notable co-investors of ${sourceName}`);
+    // Track original investors for missing detection
+    setPendingInvestorSearch({
+      company: `Co-investors of ${sourceName}`,
+      originalInvestors: nameUrlList,
+      searchedDomains: domains,
+      searchedLinkedinUrls: linkedin_urls,
+    });
     setDrawerOpen(false);
     setInvestorToView(null);
     setBackToInvestor(null);
@@ -1122,8 +1232,19 @@ function InvestorsContent() {
       }
       const investors = Array.isArray(data.investors) ? data.investors : [];
       console.log('[Find company investors]', { company, status: res.status, investorsCount: investors.length, investors });
+      
+      // Parse investors to track what we're searching for
+      const { domains, linkedin_urls } = parseNameUrlListToSearchParams(investors);
+      
       const applied = applyInvestorsListToSearch(investors, `Investors of ${company}`);
       if (applied) {
+        // Store original investors for missing detection after search completes
+        setPendingInvestorSearch({
+          company,
+          originalInvestors: investors,
+          searchedDomains: domains,
+          searchedLinkedinUrls: linkedin_urls,
+        });
         setFindCompanyModalOpen(false);
         setFindCompanyInput('');
       } else {

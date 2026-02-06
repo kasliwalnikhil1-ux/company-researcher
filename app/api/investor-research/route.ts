@@ -137,6 +137,70 @@ function getSupabaseClient() {
   return createClient(url, key);
 }
 
+// Exa API retry configuration
+const EXA_RETRYABLE_STATUS_CODES = [401, 402, 403, 429, 500, 501, 502, 503];
+const EXA_KEY_SWITCH_STATUS_CODES = [401, 402, 403, 429]; // Switch to key index 0 for these
+const EXA_MAX_RETRIES = 3;
+const EXA_INITIAL_BACKOFF_MS = 1000;
+
+// Helper function to call Exa API with retry logic
+async function callExaApiWithRetry(
+  exaUrl: string,
+  payload: object,
+  exaKeys: string[],
+  initialKeyIndex: number
+): Promise<{ response: Response; usedKeyIndex: number }> {
+  let lastError: { status: number; text: string } | null = null;
+  let currentKeyIndex = initialKeyIndex;
+
+  for (let attempt = 0; attempt < EXA_MAX_RETRIES; attempt++) {
+    const exaKey = exaKeys[currentKeyIndex];
+    
+    console.log(`[investor-research] Exa API attempt ${attempt + 1}/${EXA_MAX_RETRIES}, key index: ${currentKeyIndex}`);
+    
+    const response = await fetch(exaUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': exaKey,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      return { response, usedKeyIndex: currentKeyIndex };
+    }
+
+    const status = response.status;
+    const errText = await response.text();
+    lastError = { status, text: errText };
+
+    console.warn(`[investor-research] Exa API error (attempt ${attempt + 1}): status=${status}, error=${errText}`);
+
+    // Check if this is a retryable error
+    if (!EXA_RETRYABLE_STATUS_CODES.includes(status)) {
+      // Non-retryable error, throw immediately
+      throw { status, text: errText, retryable: false };
+    }
+
+    // For auth/payment/rate limit errors (401, 402, 403, 429), switch to key at index 0 if not already using it
+    if (EXA_KEY_SWITCH_STATUS_CODES.includes(status) && currentKeyIndex !== 0 && exaKeys.length > 1) {
+      console.log(`[investor-research] Key issue (${status}), switching to Exa API key at index 0`);
+      currentKeyIndex = 0;
+    }
+
+    // If we have more retries left, apply exponential backoff
+    if (attempt < EXA_MAX_RETRIES - 1) {
+      const backoffMs = EXA_INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+      console.log(`[investor-research] Retrying Exa API in ${backoffMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  // All retries exhausted
+  throw { status: lastError?.status || 500, text: lastError?.text || 'Max retries exceeded', retryable: true };
+}
+
 // Parse [name](url) format into { name, url }
 function parseNameUrlFormat(s: string | null | undefined): { name: string; url: string } | null {
   if (!s || typeof s !== 'string') return null;
@@ -363,7 +427,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No Exa API keys configured' }, { status: 500 });
     }
 
-    const exaKey = EXA_API_KEYS[Math.floor(Math.random() * EXA_API_KEYS.length)];
+    const initialKeyIndex = Math.floor(Math.random() * EXA_API_KEYS.length);
     const exaUrl = 'https://api.exa.ai/contents';
 
     // Exa API needs full URL; for domain use https://domain, for linkedin use full URL
@@ -427,24 +491,21 @@ export async function POST(req: NextRequest) {
       },
     };
 
-    const exaRes = await fetch(exaUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-api-key': exaKey,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!exaRes.ok) {
-      const errText = await exaRes.text();
-      console.error('Exa API error:', exaRes.status, errText);
-      sendSlackNotification(`❌ Investor Research - Exa API Error\nInput: ${cleaned}\nStatus: ${exaRes.status}\nError: ${errText}`).catch(
-        (err) => console.error('Failed to send Slack notification:', err)
+    let exaRes: Response;
+    try {
+      const result = await callExaApiWithRetry(exaUrl, payload, EXA_API_KEYS, initialKeyIndex);
+      exaRes = result.response;
+    } catch (exaError: unknown) {
+      const err = exaError as { status?: number; text?: string; retryable?: boolean };
+      const status = err?.status || 500;
+      const errText = err?.text || 'Unknown Exa API error';
+      console.error('Exa API error after retries:', status, errText);
+      sendSlackNotification(`❌ Investor Research - Exa API Error (after ${EXA_MAX_RETRIES} retries)\nInput: ${cleaned}\nStatus: ${status}\nError: ${errText}`).catch(
+        (slackErr) => console.error('Failed to send Slack notification:', slackErr)
       );
       return NextResponse.json(
         { error: 'Exa API failed', details: errText },
-        { status: exaRes.status >= 500 ? 502 : 400 }
+        { status: status >= 500 ? 502 : 400 }
       );
     }
 
@@ -754,17 +815,27 @@ export async function POST(req: NextRequest) {
           console.log('[investor-research] Organization flow: investor-search failed', investorSearchRes.status);
         }
       } catch (e) {
-        console.error('[investor-research] investor-search error:', e);
+        // Extract cause for fetch errors
+        let errMsg = e instanceof Error ? e.message : String(e);
+        const errCause = e instanceof Error && 'cause' in e ? e.cause : undefined;
+        if (errCause instanceof Error) {
+          errMsg += ` | Cause: ${errCause.message}`;
+        }
+        console.error('[investor-research] investor-search error:', errMsg);
       }
     } else if (entityType === 'Organization' && !domain) {
       console.log('[investor-research] Organization flow: skipped (no domain for org)');
     }
 
     // --- Person flow: get firm, lookup or research, create affiliation ---
+    // Skip if: (1) already researching firm from person (infinite loop prevention), or (2) affiliateWithFirmId is provided (we already know the firm)
     if (entityType === 'Person' && researchContext === 'firm_from_person') {
       console.log('[investor-research] Person flow: skipped (researchContext=firm_from_person, infinite loop prevention)');
     }
-    if (entityType === 'Person' && researchContext !== 'firm_from_person' && currentFirmParsed?.url) {
+    if (entityType === 'Person' && affiliateWithFirmId) {
+      console.log('[investor-research] Person flow: skipped (affiliateWithFirmId provided, firm already known)');
+    }
+    if (entityType === 'Person' && researchContext !== 'firm_from_person' && !affiliateWithFirmId && currentFirmParsed?.url) {
       const { domain: firmDomain } = cleanInvestorInput(currentFirmParsed.url);
       const firmDomainForRpc = firmDomain || currentFirmParsed.url;
       console.log('[investor-research] Person flow: looking up firm for person', cleanName, '| firm domain:', firmDomainForRpc);
@@ -804,6 +875,15 @@ export async function POST(req: NextRequest) {
               researchContext: 'firm_from_person',
             }),
           });
+          
+          // Check if response is OK and has JSON content-type before parsing
+          const contentType = firmRes.headers.get('content-type') || '';
+          if (!firmRes.ok || !contentType.includes('application/json')) {
+            const errText = await firmRes.text();
+            console.error('[investor-research] Person flow: firm research API error:', firmRes.status, errText.substring(0, 200));
+            throw new Error(`Firm research failed: ${firmRes.status} - ${errText.substring(0, 100)}`);
+          }
+          
           const firmData = await firmRes.json();
           const firmInvestorId = firmData?.investor_id;
           console.log('[investor-research] Person flow: firm research result:', { firmInvestorId, error: firmData?.error, research_status: firmData?.research_status });
@@ -827,13 +907,19 @@ export async function POST(req: NextRequest) {
             console.log('[investor-research] Person flow: firm not added (not investor or error)');
           }
         } catch (e) {
-          console.error('[investor-research] Firm research from person error:', e);
+          // Extract cause for fetch errors
+          let errMsg = e instanceof Error ? e.message : String(e);
+          const errCause = e instanceof Error && 'cause' in e ? e.cause : undefined;
+          if (errCause instanceof Error) {
+            errMsg += ` | Cause: ${errCause.message}`;
+          }
+          console.error('[investor-research] Firm research from person error:', errMsg);
         }
         } else {
           console.warn('[investor-research] baseUrl not set, skipping firm research self-call');
         }
       }
-    } else if (entityType === 'Person' && researchContext !== 'firm_from_person' && !currentFirmParsed?.url) {
+    } else if (entityType === 'Person' && researchContext !== 'firm_from_person' && !affiliateWithFirmId && !currentFirmParsed?.url) {
       console.log('[investor-research] Person flow: skipped (no current_firm in Step 3)');
     }
 
@@ -847,7 +933,12 @@ export async function POST(req: NextRequest) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ domains }),
-      }).catch((e) => console.error('[investor-research] founder-search fire-and-forget error:', e));
+      }).catch((e) => {
+        let errMsg = e instanceof Error ? e.message : String(e);
+        const errCause = e instanceof Error && 'cause' in e ? e.cause : undefined;
+        if (errCause instanceof Error) errMsg += ` | Cause: ${errCause.message}`;
+        console.error('[investor-research] founder-search fire-and-forget error:', errMsg);
+      });
     } else if (domains.length > 0 && pauseFounderSearch) {
       console.log('[investor-research] founder-search paused (PAUSE_FOUNDER_SEARCH=true), skipped', domains.length, 'domains');
     }
@@ -899,10 +990,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(response);
   } catch (err) {
     console.error('Investor research error:', err);
-    const msg = err instanceof Error ? err.message : String(err);
-    sendSlackNotification(`❌ Investor Research - Unexpected Error\nError: ${msg}`).catch(
+    // Extract detailed error info including cause (for fetch errors like ECONNREFUSED, ETIMEDOUT, etc.)
+    let msg = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error && 'cause' in err ? err.cause : undefined;
+    let causeMsg = '';
+    if (cause) {
+      if (cause instanceof Error) {
+        causeMsg = cause.message;
+        // Check for nested cause (common with fetch errors)
+        if ('cause' in cause && cause.cause instanceof Error) {
+          causeMsg += ` -> ${cause.cause.message}`;
+        }
+      } else if (typeof cause === 'string') {
+        causeMsg = cause;
+      } else if (typeof cause === 'object') {
+        causeMsg = JSON.stringify(cause);
+      }
+    }
+    const fullMsg = causeMsg ? `${msg} | Cause: ${causeMsg}` : msg;
+    console.error('Investor research error details:', { message: msg, cause: causeMsg, stack: err instanceof Error ? err.stack : undefined });
+    sendSlackNotification(`❌ Investor Research - Unexpected Error\nError: ${fullMsg}`).catch(
       (slackErr) => console.error('Failed to send Slack notification:', slackErr)
     );
-    return NextResponse.json({ error: 'Investor research failed', details: msg }, { status: 500 });
+    return NextResponse.json({ error: 'Investor research failed', details: fullMsg }, { status: 500 });
   }
 }
