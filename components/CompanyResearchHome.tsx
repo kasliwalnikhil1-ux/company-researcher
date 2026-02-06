@@ -3030,7 +3030,28 @@ export default function CompanyResearcher() {
     setErrorsByCompany({});
 
     // Start research for all companies in parallel
-    await Promise.all(companies.map(company => researchCompany(company)));
+    // Use Promise.allSettled to ensure all companies are processed even if some fail
+    const results = await Promise.allSettled(
+      companies.map(async (company) => {
+        try {
+          await researchCompany(company);
+        } catch (error) {
+          // Catch any unexpected errors to prevent stopping other researches
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`[CompanyResearchHome] Unexpected error researching ${company}:`, error);
+          setErrorsByCompany(prev => ({
+            ...prev,
+            [company]: { general: `Unexpected error: ${msg}` }
+          }));
+        }
+      })
+    );
+    
+    // Log any rejected promises for debugging
+    const rejected = results.filter(r => r.status === 'rejected');
+    if (rejected.length > 0) {
+      console.warn(`[CompanyResearchHome] ${rejected.length} research(es) failed:`, rejected);
+    }
     
     setIsSearching(false);
   }, [rawCompanyInput, researchCompany, researchMode]);

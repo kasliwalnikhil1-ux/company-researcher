@@ -32,6 +32,40 @@ async function sendSlackNotification(message: string): Promise<void> {
   }
 }
 
+// Helper function to add failed investor to missing_investors table
+async function addToMissingInvestors(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  input: string,
+  cleaned: string,
+  type: 'domain' | 'linkedin',
+  errorStep: string,
+  errorMessage: string
+): Promise<void> {
+  try {
+    // Store all details as JSON in the content field
+    const content = JSON.stringify({
+      input,
+      cleaned,
+      type,
+      error_step: errorStep,
+      error_message: errorMessage.substring(0, 1000), // Limit error message length
+    });
+    
+    const { error } = await supabase.from('missing_investors').insert({
+      id: randomUUID(),
+      content,
+    });
+    if (error) {
+      console.error('[investor-research] Failed to add to missing_investors:', error.message);
+    } else {
+      console.log('[investor-research] Added to missing_investors:', cleaned, '| step:', errorStep);
+    }
+  } catch (e) {
+    console.error('[investor-research] Error adding to missing_investors:', e);
+  }
+}
+
 const STEP2_INPUT_TEMPLATE = `Act as a research analyst.
 
 Create a full investor profile for {clean_name} ({investor_type}) including:
@@ -143,6 +177,11 @@ const EXA_KEY_SWITCH_STATUS_CODES = [401, 402, 403, 429]; // Switch to key index
 const EXA_MAX_RETRIES = 3;
 const EXA_INITIAL_BACKOFF_MS = 1000;
 
+// Deep Search API retry configuration
+const DEEP_SEARCH_RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 520, 521, 522, 523, 524];
+const DEEP_SEARCH_MAX_RETRIES = 3;
+const DEEP_SEARCH_INITIAL_BACKOFF_MS = 2000;
+
 // Helper function to call Exa API with retry logic
 async function callExaApiWithRetry(
   exaUrl: string,
@@ -157,7 +196,7 @@ async function callExaApiWithRetry(
     const exaKey = exaKeys[currentKeyIndex];
     
     console.log(`[investor-research] Exa API attempt ${attempt + 1}/${EXA_MAX_RETRIES}, key index: ${currentKeyIndex}`);
-    
+    console.log(JSON.stringify(payload, null, 2));
     const response = await fetch(exaUrl, {
       method: 'POST',
       headers: {
@@ -193,6 +232,50 @@ async function callExaApiWithRetry(
     if (attempt < EXA_MAX_RETRIES - 1) {
       const backoffMs = EXA_INITIAL_BACKOFF_MS * Math.pow(2, attempt);
       console.log(`[investor-research] Retrying Exa API in ${backoffMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
+
+  // All retries exhausted
+  throw { status: lastError?.status || 500, text: lastError?.text || 'Max retries exceeded', retryable: true };
+}
+
+// Helper function to call Deep Search API with retry logic
+async function callDeepSearchWithRetry(
+  url: string,
+  payload: object
+): Promise<Response> {
+  let lastError: { status: number; text: string } | null = null;
+
+  for (let attempt = 0; attempt < DEEP_SEARCH_MAX_RETRIES; attempt++) {
+    console.log(`[investor-research] Deep Search API attempt ${attempt + 1}/${DEEP_SEARCH_MAX_RETRIES}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (response.ok) {
+      return response;
+    }
+
+    const status = response.status;
+    const errText = await response.text();
+    lastError = { status, text: errText };
+
+    console.warn(`[investor-research] Deep Search API error (attempt ${attempt + 1}): status=${status}, error=${errText.substring(0, 200)}`);
+
+    // Check if this is a retryable error
+    if (!DEEP_SEARCH_RETRYABLE_STATUS_CODES.includes(status)) {
+      // Non-retryable error, throw immediately
+      throw { status, text: errText, retryable: false };
+    }
+
+    // If we have more retries left, apply exponential backoff
+    if (attempt < DEEP_SEARCH_MAX_RETRIES - 1) {
+      const backoffMs = DEEP_SEARCH_INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+      console.log(`[investor-research] Retrying Deep Search API in ${backoffMs}ms...`);
       await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }
   }
@@ -503,6 +586,8 @@ export async function POST(req: NextRequest) {
       sendSlackNotification(`❌ Investor Research - Exa API Error (after ${EXA_MAX_RETRIES} retries)\nInput: ${cleaned}\nStatus: ${status}\nError: ${errText}`).catch(
         (slackErr) => console.error('Failed to send Slack notification:', slackErr)
       );
+      // Add to missing_investors table
+      await addToMissingInvestors(supabase, input, cleaned, type, 'exa_api', `Status ${status}: ${errText}`);
       return NextResponse.json(
         { error: 'Exa API failed', details: errText },
         { status: status >= 500 ? 502 : 400 }
@@ -516,6 +601,8 @@ export async function POST(req: NextRequest) {
       sendSlackNotification(`❌ Investor Research - Exa API No Results\nInput: ${cleaned}\nError: No results returned from Exa API`).catch(
         (err) => console.error('Failed to send Slack notification:', err)
       );
+      // Add to missing_investors table
+      await addToMissingInvestors(supabase, input, cleaned, type, 'exa_no_results', 'No results returned from Exa API');
       return NextResponse.json(
         { error: 'No results from Exa API', cleaned },
         { status: 502 }
@@ -636,21 +723,22 @@ export async function POST(req: NextRequest) {
 
     console.log('[investor-research] Step 2: Calling fashion-deep-search for:', cleanName);
 
-    const deepSearchRes = await fetch(FASHION_DEEP_SEARCH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: step2Input }),
-    });
-
-    if (!deepSearchRes.ok) {
-      const errText = await deepSearchRes.text();
-      console.error('[investor-research] fashion-deep-search error:', deepSearchRes.status, errText);
-      sendSlackNotification(`❌ Investor Research - Deep Search API Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nStatus: ${deepSearchRes.status}\nError: ${errText}`).catch(
-        (err) => console.error('Failed to send Slack notification:', err)
+    let deepSearchRes: Response;
+    try {
+      deepSearchRes = await callDeepSearchWithRetry(FASHION_DEEP_SEARCH_URL, { input: step2Input });
+    } catch (deepSearchError: unknown) {
+      const err = deepSearchError as { status?: number; text?: string; retryable?: boolean };
+      const status = err?.status || 500;
+      const errText = err?.text || 'Unknown Deep Search API error';
+      console.error('[investor-research] fashion-deep-search error after retries:', status, errText.substring(0, 200));
+      sendSlackNotification(`❌ Investor Research - Deep Search API Error (after ${DEEP_SEARCH_MAX_RETRIES} retries)\nInput: ${cleaned}\nInvestor: ${cleanName}\nStatus: ${status}\nError: ${errText.substring(0, 500)}`).catch(
+        (slackErr) => console.error('Failed to send Slack notification:', slackErr)
       );
+      // Add to missing_investors table
+      await addToMissingInvestors(supabase, input, cleaned, type, 'deep_search_api', `Status ${status}: ${errText.substring(0, 500)}`);
       return NextResponse.json(
-        { error: 'Deep search API failed', details: errText },
-        { status: deepSearchRes.status >= 500 ? 502 : 400 }
+        { error: 'Deep search API failed', details: errText.substring(0, 1000) },
+        { status: status >= 500 ? 502 : 400 }
       );
     }
 
@@ -677,6 +765,8 @@ export async function POST(req: NextRequest) {
       sendSlackNotification(`❌ Investor Research - Deep Search Invalid Response\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: Could not extract deep research text from response`).catch(
         (err) => console.error('Failed to send Slack notification:', err)
       );
+      // Add to missing_investors table
+      await addToMissingInvestors(supabase, input, cleaned, type, 'deep_search_invalid_response', 'Could not extract deep research text from response');
       return NextResponse.json(
         { error: 'Invalid deep search response format', details: deepSearchData },
         { status: 502 }
@@ -701,6 +791,9 @@ export async function POST(req: NextRequest) {
       sendSlackNotification(`❌ Investor Research - Gemini/Azure Extraction Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${typeof extracted.error === 'string' ? extracted.error : JSON.stringify(extracted.error)}`).catch(
         (err) => console.error('Failed to send Slack notification:', err)
       );
+      // Add to missing_investors table
+      const extractionErrMsg = typeof extracted.error === 'string' ? extracted.error : JSON.stringify(extracted.error);
+      await addToMissingInvestors(supabase, input, cleaned, type, 'extraction_error', extractionErrMsg);
       return NextResponse.json(
         { error: 'Structured extraction failed', details: extracted.error },
         { status: 500 }
@@ -1012,6 +1105,22 @@ export async function POST(req: NextRequest) {
     sendSlackNotification(`❌ Investor Research - Unexpected Error\nError: ${fullMsg}`).catch(
       (slackErr) => console.error('Failed to send Slack notification:', slackErr)
     );
+    // Try to add to missing_investors if we have the required info
+    try {
+      const body = await req.clone().json().catch(() => null);
+      const inputForMissing = body?.input;
+      if (inputForMissing && typeof inputForMissing === 'string') {
+        const { cleaned: cleanedForMissing, type: typeForMissing } = cleanInvestorInput(inputForMissing);
+        if (cleanedForMissing) {
+          const supabaseForMissing = getSupabaseClient();
+          if (supabaseForMissing) {
+            await addToMissingInvestors(supabaseForMissing, inputForMissing, cleanedForMissing, typeForMissing, 'unexpected_error', fullMsg);
+          }
+        }
+      }
+    } catch (missingErr) {
+      console.error('[investor-research] Failed to add to missing_investors in catch block:', missingErr);
+    }
     return NextResponse.json({ error: 'Investor research failed', details: fullMsg }, { status: 500 });
   }
 }
