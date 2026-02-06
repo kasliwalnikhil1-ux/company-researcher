@@ -76,20 +76,25 @@ async function processUrlWithKeys(
 }
 
 // B2B flow: query and schema for prefilling (user provides company name; no company_size)
-const B2B_QUERY = `You are an assistant that extracts company information from a company website for B2B onboarding.
+function getB2BQuery(companyName?: string): string {
+  const company = companyName || 'the company';
+  const companyPossessive = companyName ? `${companyName}'s` : "the company's";
+  
+  return `You are an assistant that extracts company information from a company website for B2B onboarding.
 
-Your job: from the website content, extract and return STRICT JSON following the schema. The user will provide company name separately; do not include it.
+Your job: from the website content, extract and return STRICT JSON following the schema.${companyName ? ` The company name is "${companyName}".` : ''}
 
 Rules:
-- product_or_service: What product or service does this company offer? Brief description (2–4 sentences) for "What You Sell". Empty string if not found.
-- features: Up to 5 key product/service features or capabilities. Array of strings; use empty array if none found.
-- why_different: What makes this company's product stand out (e.g. "Faster to deploy", "Lower cost", "Better UX", "More accurate results", "Better support", "Easier integration", "Industry-specific", "Scalable", "Secure"). Array of strings; empty array if unclear.
-- industry: Primary industry this company sells to or operates in (e.g. SaaS, E-commerce, Fintech, Fashion). Single string; empty string if not found.
-- buyer_role: Who at the customer company typically buys or evaluates this product. Return 1–4 values from exactly: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern. Array of strings; empty array if unclear.
-- problems_you_solve: What customer problems or pain points does this product solve? Short paragraph. Empty string if not found.
-- when_customers_buy: When do customers usually buy or what triggers a purchase (e.g. new funding, expansion, pain point). Short paragraph. Empty string if not found.
+- product_or_service: What product or service does ${company} offer? Brief description (2–4 sentences). Empty string if not found.
+- features: Up to 5 key product/service features or capabilities of ${company}. Array of strings; use empty array if none found.
+- why_different: What makes ${companyPossessive} product stand out (e.g. "Faster to deploy", "Lower cost", "Better UX", "More accurate results", "Better support", "Easier integration", "Industry-specific", "Scalable", "Secure"). Array of strings; empty array if unclear.
+- industry: Primary industry ${company} sells to or operates in (e.g. SaaS, E-commerce, Fintech, Fashion). Single string; empty string if not found.
+- buyer_role: Who at the customer company typically buys or evaluates ${companyPossessive} product. Return 1–4 values from exactly: owner, founder, c_suite, partner, vp, head, director, manager, senior, entry, intern. Array of strings; empty array if unclear.
+- problems_you_solve: What customer problems or pain points does ${companyPossessive} product solve? Short paragraph. Empty string if not found.
+- when_customers_buy: When do customers usually buy from ${company} or what triggers a purchase (e.g. new funding, expansion, pain point). Short paragraph. Empty string if not found.
 
 Return only valid JSON matching the schema.`;
+}
 
 const B2B_SCHEMA = {
   description: 'B2B onboarding prefilling from website',
@@ -124,20 +129,25 @@ const B2B_SCHEMA = {
 };
 
 // Fundraising flow: query and schema for startup/company prefilling (no company_name; user provides)
-const FUNDRAISING_QUERY = `You are an assistant that extracts startup/company information from a company website for fundraising onboarding.
+function getFundraisingQuery(companyName?: string): string {
+  const company = companyName || 'the company';
+  const companyPossessive = companyName ? `${companyName}'s` : "the company's";
+  
+  return `You are an assistant that extracts startup/company information from a company website for fundraising onboarding.
 
-Your job: from the website content, extract and return STRICT JSON following the schema. The user will provide company name separately; do not include it.
+Your job: from the website content, extract and return STRICT JSON following the schema.${companyName ? ` The company name is "${companyName}".` : ''}
 
 Rules:
-- company_summary: One or two sentence description of what the company does and who it serves. Empty string if not found.
-- sector: List of relevant sectors (use exact slugs) from: artificial-intelligence, machine-learning, healthtech, biotech, digital-health, mental-health, wellness, longevity, fitness, consumer-health, medtech, pharma, genomics, bioinformatics, neuroscience, consumer-tech, enterprise-software, saas, vertical-saas, developer-tools, productivity, collaboration, fintech, payments, lending, credit, insurtech, regtech, wealthtech, climate-tech, energy, clean-energy, carbon-removal, sustainability, web3, blockchain, crypto, defi, nft, social-platforms, marketplaces, creator-economy, edtech, hr-tech, future-of-work, mobility, transportation, autonomous-vehicles, robotics, hardware, deep-tech, semiconductors, data-infrastructure, cloud-infrastructure, devops, cybersecurity, security, privacy, identity, digital-identity, consumer-internet, ecommerce, retail-tech, proptech, real-estate, construction-tech, smart-cities, supply-chain, logistics, manufacturing, industrial-tech, agtech, foodtech, gaming, esports, media, entertainment, music-tech, sports-tech, travel-tech, hospitality, martech, adtech, legal-tech, govtech, defense-tech, space-tech, aerospace, iot, edge-computing, network-effects. Return 1-3 most relevant; empty array if unclear.
-- product_description: Clear description of the product or service (2-4 sentences). Empty string if not found.
-- who_are_your_customers: Who are this company's customers? Target audience, customer segments, or who they sell to. Short paragraph. Empty string if not found.
-- business_model: Which business model(s) apply? Select all that apply from exactly: B2B, B2C, B2G, Marketplace. Return 1-4 values; empty array if unclear.
-- what_makes_you_unique: What differentiates this company from competitors? Unique value proposition, key differentiators, or why they stand out. Short paragraph. Empty string if not found.
-- key_milestones_or_traction: Key milestones achieved and early traction (e.g. users, revenue, partnerships, launches, growth metrics). Short paragraph. Empty string if not found.
+- company_summary: One or two sentence description of what ${company} does and who it serves. Empty string if not found.
+- sector: List of relevant sectors for ${company} (use exact slugs) from: artificial-intelligence, machine-learning, healthtech, biotech, digital-health, mental-health, wellness, longevity, fitness, consumer-health, medtech, pharma, genomics, bioinformatics, neuroscience, consumer-tech, enterprise-software, saas, vertical-saas, developer-tools, productivity, collaboration, fintech, payments, lending, credit, insurtech, regtech, wealthtech, climate-tech, energy, clean-energy, carbon-removal, sustainability, web3, blockchain, crypto, defi, nft, social-platforms, marketplaces, creator-economy, edtech, hr-tech, future-of-work, mobility, transportation, autonomous-vehicles, robotics, hardware, deep-tech, semiconductors, data-infrastructure, cloud-infrastructure, devops, cybersecurity, security, privacy, identity, digital-identity, consumer-internet, ecommerce, retail-tech, proptech, real-estate, construction-tech, smart-cities, supply-chain, logistics, manufacturing, industrial-tech, agtech, foodtech, gaming, esports, media, entertainment, music-tech, sports-tech, travel-tech, hospitality, martech, adtech, legal-tech, govtech, defense-tech, space-tech, aerospace, iot, edge-computing, network-effects. Return 1-3 most relevant; empty array if unclear.
+- product_description: Clear description of ${companyPossessive} product or service (2-4 sentences). Empty string if not found.
+- who_are_your_customers: Who are ${companyPossessive} customers? Target audience, customer segments, or who they sell to. Short paragraph. Empty string if not found.
+- business_model: Which business model(s) apply to ${company}? Select all that apply from exactly: B2B, B2C, B2G, Marketplace. Return 1-4 values; empty array if unclear.
+- what_makes_you_unique: What differentiates ${company} from competitors? Unique value proposition, key differentiators, or why they stand out. Short paragraph. Empty string if not found.
+- key_milestones_or_traction: Key milestones ${company} has achieved and early traction (e.g. users, revenue, partnerships, launches, growth metrics). Short paragraph. Empty string if not found.
 
 Return only valid JSON matching the schema.`;
+}
 
 const BUSINESS_MODEL_VALUES = ['B2B', 'B2C', 'B2G', 'Marketplace'];
 
@@ -165,14 +175,14 @@ const FUNDRAISING_SCHEMA = {
   },
 };
 
-function getQueryAndSchema(flowType: 'b2b' | 'fundraising'): {
+function getQueryAndSchema(flowType: 'b2b' | 'fundraising', companyName?: string): {
   query: string;
   schema: Record<string, unknown>;
 } {
   if (flowType === 'b2b') {
-    return { query: B2B_QUERY, schema: B2B_SCHEMA as Record<string, unknown> };
+    return { query: getB2BQuery(companyName), schema: B2B_SCHEMA as Record<string, unknown> };
   }
-  return { query: FUNDRAISING_QUERY, schema: FUNDRAISING_SCHEMA as Record<string, unknown> };
+  return { query: getFundraisingQuery(companyName), schema: FUNDRAISING_SCHEMA as Record<string, unknown> };
 }
 
 function cleanUrl(url: string): string {
@@ -191,7 +201,7 @@ function cleanUrl(url: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { websiteurl, flowType } = body;
+    const { websiteurl, flowType, companyName } = body;
 
     if (!websiteurl || typeof websiteurl !== 'string') {
       console.error('[onboarding-enrich] Bad request: websiteurl missing or invalid', { websiteurl: body?.websiteurl });
@@ -202,10 +212,11 @@ export async function POST(req: NextRequest) {
     }
 
     const flow = flowType === 'fundraising' ? 'fundraising' : 'b2b';
-    const { query, schema } = getQueryAndSchema(flow);
+    const companyNameStr = typeof companyName === 'string' ? companyName.trim() : undefined;
+    const { query, schema } = getQueryAndSchema(flow, companyNameStr);
     const normalizedUrl = cleanUrl(websiteurl);
 
-    console.log('[onboarding-enrich] Starting enrich for url:', normalizedUrl, 'flow:', flow);
+    console.log('[onboarding-enrich] Starting enrich for url:', normalizedUrl, 'flow:', flow, 'companyName:', companyNameStr || '(not provided)');
 
     const result = await processUrlWithKeys(normalizedUrl, query, schema);
 

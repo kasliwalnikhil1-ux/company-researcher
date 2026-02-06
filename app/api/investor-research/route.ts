@@ -12,6 +12,26 @@ const FASHION_DEEP_SEARCH_URL = 'https://quycdewohkhmetiawogg.supabase.co/functi
 const FOUNDER_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/founder-search';
 const INVESTOR_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/investor-search';
 
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+
+// Helper function to send Slack notification
+async function sendSlackNotification(message: string): Promise<void> {
+  if (!SLACK_WEBHOOK_URL) {
+    console.warn('SLACK_WEBHOOK_URL not configured, skipping notification');
+    return;
+  }
+
+  try {
+    await fetch(SLACK_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: message }),
+    });
+  } catch (error) {
+    console.error('Failed to send Slack notification:', error);
+  }
+}
+
 const STEP2_INPUT_TEMPLATE = `Act as a research analyst.
 
 Create a full investor profile for {clean_name} ({investor_type}) including:
@@ -81,8 +101,8 @@ function buildStep3Schema(isPerson: boolean): string {
     roleHint +
     currentFirmHint +
     'hq_state, hq_country: as per ISO 3166-2 standard\n' +
-    'investment_stages: pick from "pre-seed","seed","post-seed","series-a","series-b","series-c","growth","late-stage","pre-ipo","public-equity","angel"\n' +
-    'investment_industries: pick from "artificial-intelligence","machine-learning","healthtech","biotech","digital-health","mental-health","wellness","longevity","fitness","consumer-health","medtech","pharma","genomics","bioinformatics","neuroscience","consumer-tech","enterprise-software","saas","vertical-saas","developer-tools","productivity","collaboration","fintech","payments","lending","credit","insurtech","regtech","wealthtech","climate-tech","energy","clean-energy","carbon-removal","sustainability","web3","blockchain","crypto","defi","nft","social-platforms","marketplaces","creator-economy","edtech","hr-tech","future-of-work","mobility","transportation","autonomous-vehicles","robotics","hardware","deep-tech","semiconductors","data-infrastructure","cloud-infrastructure","devops","cybersecurity","security","privacy","identity","digital-identity","consumer-internet","ecommerce","retail-tech","proptech","real-estate","construction-tech","smart-cities","supply-chain","logistics","manufacturing","industrial-tech","agtech","foodtech","gaming","esports","media","entertainment","music-tech","sports-tech","travel-tech","hospitality","martech","adtech","legal-tech","govtech","defense-tech","space-tech","aerospace","iot","edge-computing","network-effects"\n' +
+    'investment_stages: pick all those that apply to the investor "pre-seed","seed","post-seed","series-a","series-b","series-c","growth","late-stage","pre-ipo","public-equity","angel"\n' +
+    'investment_industries: pick all those that apply to the investor "artificial-intelligence","machine-learning","healthtech","biotech","digital-health","mental-health","wellness","longevity","fitness","consumer-health","medtech","pharma","genomics","bioinformatics","neuroscience","consumer-tech","enterprise-software","saas","vertical-saas","developer-tools","productivity","collaboration","fintech","payments","lending","credit","insurtech","regtech","wealthtech","climate-tech","energy","clean-energy","carbon-removal","sustainability","web3","blockchain","crypto","defi","nft","social-platforms","marketplaces","creator-economy","edtech","hr-tech","future-of-work","mobility","transportation","autonomous-vehicles","robotics","hardware","deep-tech","semiconductors","data-infrastructure","cloud-infrastructure","devops","cybersecurity","security","privacy","identity","digital-identity","consumer-internet","ecommerce","retail-tech","proptech","real-estate","construction-tech","smart-cities","supply-chain","logistics","manufacturing","industrial-tech","agtech","foodtech","gaming","esports","media","entertainment","music-tech","sports-tech","travel-tech","hospitality","martech","adtech","legal-tech","govtech","defense-tech","space-tech","aerospace","iot","edge-computing","network-effects"\n' +
     'investment_geographies: as per ISO 3166-2 standard\n' +
     'investment_thesis: Precise criteria to qualify, starts with Invests in....\n' +
     'notable_investments and coinvestors: list of strings in format [name](url)\n' +
@@ -161,6 +181,7 @@ function normalizeUrlForCompare(url: string | null | undefined): string | null {
 }
 
 // Clean domain or LinkedIn URL for display and API use
+// Ensures lowercase and consistent formatting (e.g. accel.com, in/scottshleifer, company/accel, school/stanford)
 export function cleanInvestorInput(input: string): { cleaned: string; type: 'domain' | 'linkedin'; domain: string | null; linkedinUrl: string | null } {
   if (!input || typeof input !== 'string') {
     return { cleaned: '', type: 'domain', domain: null, linkedinUrl: null };
@@ -168,38 +189,39 @@ export function cleanInvestorInput(input: string): { cleaned: string; type: 'dom
   let s = input.trim();
   if (!s) return { cleaned: '', type: 'domain', domain: null, linkedinUrl: null };
 
+  // Detect LinkedIn: URL contains linkedin.com OR path-only format like in/name, company/name, school/name
   const isLinkedIn =
-    /linkedin\.com\/(company|in)\/[\w.-]+/i.test(s) ||
+    /linkedin\.com\/[a-z]+\/[\w.-]+/i.test(s) ||
     s.toLowerCase().includes('linkedin.com') ||
-    /^(in|company)\/[\w.-]+$/i.test(s); // path-only e.g. in/namankas
+    /^[a-z]+\/[\w.-]+$/i.test(s); // path-only e.g. in/namankas, company/accel, school/stanford
 
   if (isLinkedIn) {
-    // Path-only input (e.g. in/namankas) - use as-is
-    if (/^(in|company)\/[\w.-]+$/i.test(s)) {
-      return { cleaned: s, type: 'linkedin', domain: null, linkedinUrl: s };
+    // Path-only input (e.g. in/namankas, company/accel, school/stanford) - lowercase and clean
+    if (/^[a-z]+\/[\w.-]+$/i.test(s)) {
+      const cleaned = s.toLowerCase().replace(/^\/+|\/+$/g, '');
+      return { cleaned, type: 'linkedin', domain: null, linkedinUrl: cleaned };
     }
     if (!s.startsWith('http')) s = 'https://' + s;
     try {
       const u = new URL(s);
-      // Store just the path (e.g. in/namankas, company/accel) for efficiency
-      const path = u.pathname.replace(/^\/+|\/+$/g, '') || '';
-      const cleaned = path;
-      return { cleaned, type: 'linkedin', domain: null, linkedinUrl: cleaned };
+      // Store just the path (e.g. in/namankas, company/accel, school/stanford) - lowercase, no leading/trailing slashes
+      const path = u.pathname.toLowerCase().replace(/^\/+|\/+$/g, '') || '';
+      return { cleaned: path, type: 'linkedin', domain: null, linkedinUrl: path };
     } catch {
-      const path = s.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/+|\/+$/g, '') || s;
+      const path = s.replace(/^https?:\/\/[^/]+/i, '').toLowerCase().replace(/^\/+|\/+$/g, '') || s.toLowerCase();
       return { cleaned: path, type: 'linkedin', domain: null, linkedinUrl: path };
     }
   }
 
-  // Domain: cleaned is always just the domain (e.g. accel.com), not the full URL
+  // Domain: cleaned is always just the domain (e.g. accel.com), lowercase, no www
   if (!s.startsWith('http')) s = 'https://' + s;
   try {
     const u = new URL(s);
-    const hostname = u.hostname;
-    const domain = hostname.replace(/^www\./, '');
+    // URL.hostname is already lowercase per spec
+    const domain = u.hostname.replace(/^www\./, '');
     return { cleaned: domain, type: 'domain', domain, linkedinUrl: null };
   } catch {
-    const domain = s.replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0] || s;
+    const domain = s.toLowerCase().replace(/^www\./, '').replace(/^https?:\/\//, '').split('/')[0] || s.toLowerCase();
     return { cleaned: domain, type: 'domain', domain, linkedinUrl: null };
   }
 }
@@ -386,6 +408,9 @@ export async function POST(req: NextRequest) {
     if (!exaRes.ok) {
       const errText = await exaRes.text();
       console.error('Exa API error:', exaRes.status, errText);
+      sendSlackNotification(`❌ Investor Research - Exa API Error\nInput: ${cleaned}\nStatus: ${exaRes.status}\nError: ${errText}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json(
         { error: 'Exa API failed', details: errText },
         { status: exaRes.status >= 500 ? 502 : 400 }
@@ -396,6 +421,9 @@ export async function POST(req: NextRequest) {
     const results = exaData?.results;
     console.log('[investor-research] Exa API response:', { hasResults: !!results, resultsLength: results?.length, firstResultKeys: results?.[0] ? Object.keys(results[0]) : [] });
     if (!results || !Array.isArray(results) || results.length === 0) {
+      sendSlackNotification(`❌ Investor Research - Exa API No Results\nInput: ${cleaned}\nError: No results returned from Exa API`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json(
         { error: 'No results from Exa API', cleaned },
         { status: 502 }
@@ -471,6 +499,9 @@ export async function POST(req: NextRequest) {
         const { error: updErr } = await supabase.from('investors').update(row).eq('id', existingId);
         if (updErr) {
           console.error('Investor update error:', updErr);
+          sendSlackNotification(`❌ Investor Research - Database Update Error\nInput: ${cleaned}\nError: ${updErr.message}`).catch(
+            (err) => console.error('Failed to send Slack notification:', err)
+          );
           return NextResponse.json({ error: 'Failed to update investor', details: updErr.message }, { status: 500 });
         }
       } else {
@@ -480,6 +511,9 @@ export async function POST(req: NextRequest) {
         });
         if (insErr) {
           console.error('Investor insert error:', insErr);
+          sendSlackNotification(`❌ Investor Research - Database Insert Error\nInput: ${cleaned}\nError: ${insErr.message}`).catch(
+            (err) => console.error('Failed to send Slack notification:', err)
+          );
           return NextResponse.json({ error: 'Failed to insert investor', details: insErr.message }, { status: 500 });
         }
       }
@@ -507,6 +541,9 @@ export async function POST(req: NextRequest) {
       const { error: updErr } = await supabase.from('investors').update(baseRow).eq('id', existingId);
       if (updErr) {
         console.error('Investor update error:', updErr);
+        sendSlackNotification(`❌ Investor Research - Database Update Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${updErr.message}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ error: 'Failed to update investor', details: updErr.message }, { status: 500 });
       }
     } else {
@@ -516,6 +553,9 @@ export async function POST(req: NextRequest) {
       });
       if (insErr) {
         console.error('Investor insert error:', insErr);
+        sendSlackNotification(`❌ Investor Research - Database Insert Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${insErr.message}`).catch(
+          (err) => console.error('Failed to send Slack notification:', err)
+        );
         return NextResponse.json({ error: 'Failed to insert investor', details: insErr.message }, { status: 500 });
       }
     }
@@ -542,6 +582,9 @@ export async function POST(req: NextRequest) {
     if (!deepSearchRes.ok) {
       const errText = await deepSearchRes.text();
       console.error('[investor-research] fashion-deep-search error:', deepSearchRes.status, errText);
+      sendSlackNotification(`❌ Investor Research - Deep Search API Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nStatus: ${deepSearchRes.status}\nError: ${errText}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json(
         { error: 'Deep search API failed', details: errText },
         { status: deepSearchRes.status >= 500 ? 502 : 400 }
@@ -568,6 +611,9 @@ export async function POST(req: NextRequest) {
 
     if (!deepResearchText) {
       console.error('[investor-research] Could not extract deep research text from:', deepSearchData);
+      sendSlackNotification(`❌ Investor Research - Deep Search Invalid Response\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: Could not extract deep research text from response`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json(
         { error: 'Invalid deep search response format', details: deepSearchData },
         { status: 502 }
@@ -584,12 +630,14 @@ export async function POST(req: NextRequest) {
       [
         { role: 'system', content: STEP3_SYSTEM_MESSAGE },
         { role: 'user', content: step3UserMessage },
-      ],
-      { max_tokens: 4000 }
+      ]
     );
 
     if (extracted?.error) {
       console.error('[investor-research] Azure extraction error:', extracted);
+      sendSlackNotification(`❌ Investor Research - Gemini/Azure Extraction Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${typeof extracted.error === 'string' ? extracted.error : JSON.stringify(extracted.error)}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json(
         { error: 'Structured extraction failed', details: extracted.error },
         { status: 500 }
@@ -617,8 +665,12 @@ export async function POST(req: NextRequest) {
         applyUrl = null;
       }
     }
+    // Clean extracted linkedin_url (AI may return full URL) - lowercase, no leading/trailing slashes
+    const extractedLinkedinUrl = extracted?.linkedin_url
+      ? cleanInvestorInput(extracted.linkedin_url).linkedinUrl
+      : null;
     const updateRow: Record<string, unknown> = {
-      linkedin_url: extracted?.linkedin_url ?? null,
+      linkedin_url: extractedLinkedinUrl ?? linkedinUrl ?? null,
       twitter_url: extracted?.twitter_url ?? null,
       active: extracted?.active ?? null,
       apply_url: applyUrl,
@@ -647,6 +699,9 @@ export async function POST(req: NextRequest) {
     const { error: finalUpdErr } = await supabase.from('investors').update(updateRow).eq('id', rowId);
     if (finalUpdErr) {
       console.error('[investor-research] Final update error:', finalUpdErr);
+      sendSlackNotification(`❌ Investor Research - Database Final Update Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${finalUpdErr.message}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json({ error: 'Failed to update investor with deep research', details: finalUpdErr.message }, { status: 500 });
     }
 
@@ -836,6 +891,9 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('Investor research error:', err);
     const msg = err instanceof Error ? err.message : String(err);
+    sendSlackNotification(`❌ Investor Research - Unexpected Error\nError: ${msg}`).catch(
+      (slackErr) => console.error('Failed to send Slack notification:', slackErr)
+    );
     return NextResponse.json({ error: 'Investor research failed', details: msg }, { status: 500 });
   }
 }

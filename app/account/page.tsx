@@ -596,7 +596,7 @@ function AccountContent() {
                     showExcludeReminderToast();
                   }
                 }}
-                onPaste={(e) => {
+                onPaste={(e) => {   
                   const pasted = e.clipboardData.getData('text').trim();
                   if (pasted && /[\n,]/.test(pasted)) {
                     e.preventDefault();

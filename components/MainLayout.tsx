@@ -175,6 +175,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || err.details || res.statusText);
       }
+      // Clear investors localStorage filters
+      localStorage.removeItem('investors-filters');
+      localStorage.removeItem('investors-mode');
+      localStorage.removeItem('investors-type');
+      localStorage.removeItem('investors-view-mode');
       setIsResetAccountModalOpen(false);
       await Promise.all([fetchOnboarding(), refreshTemplates()]);
     } catch (error) {

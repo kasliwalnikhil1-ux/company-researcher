@@ -50,7 +50,7 @@ Positive signal on team, product, growth.
 Bullet points make it easy to read. Names and numbers make it tangible.
 No features or roadmap.
 
-Can we connect for a quick call on \${followUpRelativeDay}?
+Can we connect for a quick call on \${followUpShortDay}?
 
 Cheers,
 <<<FOUNDER_SIGNATURE>>>

@@ -8,6 +8,7 @@ const FUNDRAISING_CHIPS: { variable: string; sampleLabel: string }[] = [
   { variable: '${twitter_line}', sampleLabel: 'I just read your tweet about...' },
   { variable: '${line1}', sampleLabel: 'I saw ..., which is why I\'m reaching out to your company.' },
   { variable: '${line2}', sampleLabel: 'I believe ... could greatly benefit us at my company.' },
+  { variable: '${additional_line}', sampleLabel: 'Your custom note here...' },
   { variable: '${cleaned_name}', sampleLabel: 'Accel or John' },
   { variable: '${followUpFullDate}', sampleLabel: 'Tuesday, Jan 15' },
   { variable: '${followUpWeekdayDate}', sampleLabel: 'Tuesday Jan 15' },

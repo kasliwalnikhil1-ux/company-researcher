@@ -203,8 +203,21 @@ const formatKebabLabel = (value: string): string =>
     .join(' ');
 
 const parseNotableInvestment: (s: string) => { name: string; url: string } | null = (s) => {
-  const match = s.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
-  return match ? { name: match[1], url: match[2] } : null;
+  // Match markdown links with optional URL: [Name](url) or [Name]()
+  const match = s.match(/^\[([^\]]+)\]\(([^)]*)\)$/);
+  if (match) {
+    const name = match[1];
+    const url = match[2];
+    // Only return as a link if URL is non-empty
+    return url ? { name, url } : null;
+  }
+  return null;
+};
+
+/** Extract clean name from markdown link format [Name](url) or [Name]() */
+const extractNameFromMarkdown = (s: string): string => {
+  const match = s.match(/^\[([^\]]+)\]\([^)]*\)$/);
+  return match ? match[1] : s;
 };
 
 /** Parse comma-separated text into trimmed non-empty list */
@@ -539,6 +552,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [aiMetadataTwitterLine, setAiMetadataTwitterLine] = useState('');
   const [aiMetadataLine1, setAiMetadataLine1] = useState('');
   const [aiMetadataLine2, setAiMetadataLine2] = useState('');
+  const [aiMetadataAdditionalLine, setAiMetadataAdditionalLine] = useState('');
   const [aiMetadataMutualInterestsText, setAiMetadataMutualInterestsText] = useState('');
   const [aiMetadataSaving, setAiMetadataSaving] = useState(false);
   const [investorNews, setInvestorNews] = useState<InvestorNews | null>(null);
@@ -617,6 +631,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       setAiMetadataTwitterLine(typeof meta.twitter_line === 'string' ? meta.twitter_line : '');
       setAiMetadataLine1(typeof meta.line1 === 'string' ? meta.line1 : '');
       setAiMetadataLine2(typeof meta.line2 === 'string' ? meta.line2 : '');
+      setAiMetadataAdditionalLine(typeof meta.additional_line === 'string' ? meta.additional_line : '');
       const interests = Array.isArray(meta.mutual_interests)
         ? (meta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
         : [];
@@ -625,6 +640,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       setAiMetadataTwitterLine('');
       setAiMetadataLine1('');
       setAiMetadataLine2('');
+      setAiMetadataAdditionalLine('');
       setAiMetadataMutualInterestsText('');
     }
     setEditingAiMetadata(false);
@@ -956,10 +972,12 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     const newTwitterLine = aiMetadataTwitterLine.trim() || null;
     const newLine1 = aiMetadataLine1.trim() || null;
     const newLine2 = aiMetadataLine2.trim() || null;
+    const newAdditionalLine = aiMetadataAdditionalLine.trim() || null;
 
     const currentTwitterLine = typeof meta.twitter_line === 'string' ? meta.twitter_line.trim() || null : null;
     const currentLine1 = typeof meta.line1 === 'string' ? meta.line1.trim() || null : null;
     const currentLine2 = typeof meta.line2 === 'string' ? meta.line2.trim() || null : null;
+    const currentAdditionalLine = typeof meta.additional_line === 'string' ? meta.additional_line.trim() || null : null;
     const currentInterests = Array.isArray(meta.mutual_interests)
       ? (meta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
       : [];
@@ -968,6 +986,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       newTwitterLine !== currentTwitterLine ||
       newLine1 !== currentLine1 ||
       newLine2 !== currentLine2 ||
+      newAdditionalLine !== currentAdditionalLine ||
       mutualInterests.length !== currentInterests.length ||
       mutualInterests.some((s, i) => s !== currentInterests[i]);
 
@@ -981,6 +1000,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       twitter_line: newTwitterLine,
       line1: newLine1,
       line2: newLine2,
+      additional_line: newAdditionalLine,
       mutual_interests: mutualInterests,
     };
 
@@ -998,13 +1018,14 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     } finally {
       setAiMetadataSaving(false);
     }
-  }, [investor, aiMetadataTwitterLine, aiMetadataLine1, aiMetadataLine2, aiMetadataMutualInterestsText, updateInvestor, onInvestorChange]);
+  }, [investor, aiMetadataTwitterLine, aiMetadataLine1, aiMetadataLine2, aiMetadataAdditionalLine, aiMetadataMutualInterestsText, updateInvestor, onInvestorChange]);
 
   const handleCancelEditAiMetadata = useCallback(() => {
     const meta = investor?.ai_metadata && typeof investor.ai_metadata === 'object' ? investor.ai_metadata : {};
     setAiMetadataTwitterLine(typeof meta.twitter_line === 'string' ? meta.twitter_line : '');
     setAiMetadataLine1(typeof meta.line1 === 'string' ? meta.line1 : '');
     setAiMetadataLine2(typeof meta.line2 === 'string' ? meta.line2 : '');
+    setAiMetadataAdditionalLine(typeof meta.additional_line === 'string' ? meta.additional_line : '');
     const interests = Array.isArray(meta.mutual_interests)
       ? (meta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
       : [];
@@ -1446,7 +1467,6 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 {(investor.domain?.trim() ||
                     investor.linkedin_url?.trim() ||
                     investor.twitter_url?.trim() ||
-                    investor.apply_url?.trim() ||
                     parseCommaList(investor.email).length > 0 ||
                     parseCommaList(investor.phone).length > 0) && (
                     <div>
@@ -1517,18 +1537,6 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                             aria-label="Open Twitter"
                           >
                             <Twitter className="w-5 h-5" />
-                          </a>
-                        )}
-                        {investor.apply_url?.trim() && (
-                          <a
-                            href={investor.apply_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                            title="Apply"
-                            aria-label="Open Apply URL"
-                          >
-                            <ExternalLink className="w-5 h-5" />
                           </a>
                         )}
                       </div>
@@ -1610,6 +1618,21 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         ) : null;
                       })()}
                     </div>
+                    </div>
+                  )}
+
+                  {investor.apply_url?.trim() && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Apply for Funding</h3>
+                      <a
+                        href={investor.apply_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100 hover:text-indigo-700 transition-colors"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        Submit Application
+                      </a>
                     </div>
                   )}
 
@@ -1843,7 +1866,19 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                             )}
                           </div>
                         </div>
-                      ) : null;
+                      ) : (
+                        <div>
+                          <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Messages</h3>
+                          <button
+                            type="button"
+                            onClick={() => router.push('/templates')}
+                            className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 cursor-pointer"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Add message templates</span>
+                          </button>
+                        </div>
+                      );
                     })()}
 
                   {investor.has_personalization && updateInvestor && <hr className="border-gray-200" />}
@@ -1855,7 +1890,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         <ul className="space-y-2">
                           {investor.links.map((item, idx) => {
                             const parsed = parseNotableInvestment(item);
-                            const displayName = parsed ? parsed.name : item;
+                            const displayName = parsed ? parsed.name : extractNameFromMarkdown(item);
                             const displayUrl = parsed ? parsed.url : undefined;
                             return (
                               <li key={idx} className="flex items-center gap-3">
@@ -1870,7 +1905,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                     {parsed.name}
                                   </a>
                                 ) : (
-                                  <span className="text-sm text-gray-700">{item}</span>
+                                  <span className="text-sm text-gray-700">{displayName}</span>
                                 )}
                               </li>
                             );
@@ -1963,6 +1998,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         <ul className="list-disc list-inside space-y-2">
                           {investorNews.citations.map((item, idx) => {
                             const parsed = parseNotableInvestment(item);
+                            const displayName = parsed ? parsed.name : extractNameFromMarkdown(item);
                             return (
                               <li key={idx}>
                                 {parsed ? (
@@ -1975,7 +2011,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                     {parsed.name}
                                   </a>
                                 ) : (
-                                  <span className="text-sm text-gray-700">{item}</span>
+                                  <span className="text-sm text-gray-700">{displayName}</span>
                                 )}
                               </li>
                             );
@@ -2191,9 +2227,10 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       </div>
                     )}
 
-                    {/* Personalization - line1 & line2 - editable (show when has content, or when editing, or when updateInvestor to allow adding) */}
+                    {/* Personalization - line1 & line2 & additional_line - editable (show when has content, or when editing, or when updateInvestor to allow adding) */}
                     {(typeof investor.ai_metadata.line1 === 'string' && investor.ai_metadata.line1.trim()) ||
                     (typeof investor.ai_metadata.line2 === 'string' && investor.ai_metadata.line2.trim()) ||
+                    (typeof investor.ai_metadata.additional_line === 'string' && investor.ai_metadata.additional_line.trim()) ||
                     (typeof investor.ai_metadata.twitter_line === 'string' && investor.ai_metadata.twitter_line.trim()) ||
                     (Array.isArray(investor.ai_metadata.mutual_interests) && investor.ai_metadata.mutual_interests.length > 0) ||
                     editingAiMetadata ||
@@ -2275,6 +2312,16 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                               />
                             </div>
                             <div>
+                              <label className="block text-xs font-medium text-gray-600 mb-1">Additional Line (custom note)</label>
+                              <textarea
+                                value={aiMetadataAdditionalLine}
+                                onChange={(e) => setAiMetadataAdditionalLine(e.target.value)}
+                                rows={2}
+                                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                placeholder="Add your own custom note..."
+                              />
+                            </div>
+                            <div>
                               <label className="block text-xs font-medium text-gray-600 mb-1">Mutual Interests (one per line)</label>
                               <textarea
                                 value={aiMetadataMutualInterestsText}
@@ -2334,6 +2381,31 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                 </button>
                               </div>
                             )}
+                            <div className="flex items-start gap-2">
+                              {typeof investor.ai_metadata.additional_line === 'string' && investor.ai_metadata.additional_line.trim() ? (
+                                <>
+                                  <p className="text-sm text-gray-700 flex-1">{investor.ai_metadata.additional_line}</p>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyField(investor.ai_metadata!.additional_line as string, 'additional_line')}
+                                    className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-gray-700 flex-shrink-0"
+                                    title="Copy"
+                                  >
+                                    {copiedField === 'additional_line' ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                                  </button>
+                                </>
+                              ) : updateInvestor ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingAiMetadata(true)}
+                                  className="text-sm text-indigo-600 hover:text-indigo-700 italic cursor-pointer"
+                                >
+                                  Add an additional note to your messages
+                                </button>
+                              ) : (
+                                <p className="text-sm text-gray-400 italic flex-1">Add an additional note to your messages</p>
+                              )}
+                            </div>
                             {Array.isArray(investor.ai_metadata.mutual_interests) && investor.ai_metadata.mutual_interests.length > 0 && (
                               <DetailSection
                                 label="Mutual Interests"
@@ -2367,7 +2439,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       {Array.isArray(investor.education_orgs) && investor.education_orgs.length > 0 ? (
                         investor.education_orgs.map((item, idx) => {
                           const parsed = parseNotableInvestment(item);
-                          const displayName = parsed ? parsed.name : item;
+                          const displayName = parsed ? parsed.name : extractNameFromMarkdown(item);
                           return (
                             <li key={idx} className="flex items-center gap-3">
                               <CompanyLogo name={displayName} url={parsed?.url} />
@@ -2381,7 +2453,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                   {parsed.name}
                                 </a>
                               ) : (
-                                <span>{item}</span>
+                                <span>{displayName}</span>
                               )}
                             </li>
                           );
@@ -2397,7 +2469,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       {Array.isArray(investor.work_experience_orgs) && investor.work_experience_orgs.length > 0 ? (
                         investor.work_experience_orgs.map((item, idx) => {
                           const parsed = parseNotableInvestment(item);
-                          const displayName = parsed ? parsed.name : item;
+                          const displayName = parsed ? parsed.name : extractNameFromMarkdown(item);
                           return (
                             <li key={idx} className="flex items-center gap-3">
                               <CompanyLogo name={displayName} url={parsed?.url} />
@@ -2411,7 +2483,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                   {parsed.name}
                                 </a>
                               ) : (
-                                <span>{item}</span>
+                                <span>{displayName}</span>
                               )}
                             </li>
                           );
@@ -2545,7 +2617,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         <ul className="space-y-2">
                           {items.map((item, idx) => {
                             const parsed = parseNotableInvestment(item);
-                            const displayName = parsed ? parsed.name : item;
+                            const displayName = parsed ? parsed.name : extractNameFromMarkdown(item);
                             const displayUrl = parsed ? parsed.url : undefined;
                             return (
                               <li key={idx} className="flex items-center gap-3">
@@ -2560,7 +2632,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                     {parsed.name}
                                   </a>
                                 ) : (
-                                  <span className="text-sm text-gray-700">{item}</span>
+                                  <span className="text-sm text-gray-700">{displayName}</span>
                                 )}
                               </li>
                             );
@@ -2608,7 +2680,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         <ul className="space-y-2">
                           {items.map((item, idx) => {
                             const parsed = parseNotableInvestment(item);
-                            const displayName = parsed ? parsed.name : item;
+                            const displayName = parsed ? parsed.name : extractNameFromMarkdown(item);
                             const displayUrl = parsed ? parsed.url : undefined;
                             return (
                               <li key={idx} className="flex items-center gap-3">
@@ -2623,7 +2695,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                                     {parsed.name}
                                   </a>
                                 ) : (
-                                  <span className="text-sm text-gray-700">{item}</span>
+                                  <span className="text-sm text-gray-700">{displayName}</span>
                                 )}
                               </li>
                             );
@@ -2668,7 +2740,14 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         .map(({ domain, founders }) => (
                           <div key={domain} className="flex flex-wrap items-center gap-2">
                             <CompanyLogo name={domain} url={`https://${domain}`} />
-                            <span className="text-xs font-medium text-gray-500 shrink-0">{domain}</span>
+                            <a
+                              href={`https://${domain}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs font-medium text-gray-500 hover:text-indigo-600 hover:underline shrink-0"
+                            >
+                              {domain}
+                            </a>
                             <div className="flex flex-wrap gap-1.5">
                               {founders.map((f, i) => {
                                 const loc = [f.city, f.state, f.country].filter(Boolean).join(', ');

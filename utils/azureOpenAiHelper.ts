@@ -1,15 +1,18 @@
 /**
  * Azure OpenAI & Google Gemini API Helper Module (server-only)
  *
- * This module provides centralized configuration and helper functions for Azure OpenAI and Google Gemini API calls.
- * Uses API key authentication. Keys must be set via environment variables (no hardcoded fallbacks).
+ * This module provides centralized configuration and helper functions for Azure OpenAI, 
+ * Google Gemini (API key), and Vertex AI (service account) API calls.
+ * Keys must be set via environment variables (no hardcoded fallbacks).
  *
- * Default: Gemini first, fallback to Azure on failure (missing key, API error).
+ * Default: Vertex AI first, fallback to Gemini (API key), then Azure on failure.
  *
  * Usage:
- *   const response = await callAzureOpenAI(payload);  // Gemini default, Azure fallback
+ *   const response = await callAzureOpenAI(payload);  // Vertex default, Gemini fallback, Azure fallback
  *   const response = await callAzureOpenAI(payload, { provider: "azure" });  // Azure only
- *   const result = await getCompletion(messages);  // Gemini default, Azure fallback
+ *   const response = await callAzureOpenAI(payload, { provider: "gemini" });  // Gemini (API key) only
+ *   const response = await callAzureOpenAI(payload, { provider: "vertex" });  // Vertex AI only
+ *   const result = await getCompletion(messages);  // Vertex default, Gemini fallback, Azure fallback
  *   const result = await getJsonCompletion(messages, { provider: "azure" });  // Azure only
  */
 
@@ -23,10 +26,130 @@ const DEPLOYMENT_NAME_MINI = process.env.AZURE_OPENAI_DEPLOYMENT_NAME_MINI || pr
 const API_VERSION = process.env.AZURE_OPENAI_API_VERSION || "2024-05-01-preview";
 const API_KEY = process.env.AZURE_OPENAI_API_KEY || process.env.AZURE_API_KEY || "";
 
-// Gemini Configuration (key from env only)
+// Gemini Configuration (API key authentication)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_MODEL_ID = process.env.GEMINI_MODEL_ID || "gemini-3-flash-preview";
 const GEMINI_BASE_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}";
+
+// Vertex AI Configuration (service account authentication)
+// Set USE_VERTEX=true to enable Vertex AI (skipped by default)
+const USE_VERTEX = /^(?:true|1|yes)$/i.test(process.env.USE_VERTEX ?? "false");
+const GCP_SERVICE_ACCOUNT_KEY = process.env.GCP_SERVICE_ACCOUNT_KEY || "";
+const GCP_PROJECT_ID = process.env.GCP_PROJECT_ID || "";
+const GCP_LOCATION = process.env.GCP_LOCATION || "us-central1";
+const VERTEX_MODEL_ID = process.env.VERTEX_MODEL_ID || "gemini-3-flash-preview";
+
+// -----------------------------------------------------------
+// VERTEX AI TOKEN MANAGEMENT
+// -----------------------------------------------------------
+let cachedToken: string | null = null;
+let tokenExpiry = 0;
+
+/**
+ * Base64URL encode a string (for JWT creation)
+ */
+function encodeBase64Url(input: string): string {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Base64URL encode a Uint8Array (for JWT signature)
+ */
+function encodeBase64UrlBytes(input: Uint8Array): string {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Create a signed JWT and exchange it for a Google Cloud access token
+ */
+async function getAccessTokenFromServiceAccount(): Promise<string> {
+  if (!GCP_SERVICE_ACCOUNT_KEY) {
+    throw new Error("GCP_SERVICE_ACCOUNT_KEY is not configured");
+  }
+
+  const sa = JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+  const now = Math.floor(Date.now() / 1000);
+  const exp = now + 3600;
+
+  const header = { alg: "RS256", typ: "JWT" };
+  const claimSet = {
+    iss: sa.client_email,
+    scope: "https://www.googleapis.com/auth/cloud-platform",
+    aud: sa.token_uri,
+    exp,
+    iat: now,
+  };
+
+  const headerB64 = encodeBase64Url(JSON.stringify(header));
+  const claimB64 = encodeBase64Url(JSON.stringify(claimSet));
+  const unsignedJwt = `${headerB64}.${claimB64}`;
+
+  // Parse the private key from PEM format
+  const keyData = sa.private_key.replace(/\\n/g, "\n");
+  const pemContents = keyData
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");
+  const pkcs8 = Buffer.from(pemContents, 'base64');
+
+  // Import the key and sign the JWT
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    pkcs8,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(unsignedJwt)
+  );
+
+  const signedJwt = `${unsignedJwt}.${encodeBase64UrlBytes(new Uint8Array(signature))}`;
+
+  // Exchange the signed JWT for an access token
+  const res = await fetch(sa.token_uri, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion: signedJwt,
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(`Token exchange failed: ${JSON.stringify(data)}`);
+  }
+
+  return data.access_token;
+}
+
+/**
+ * Get a cached access token (refreshes if expired or about to expire)
+ */
+async function getAccessToken(): Promise<string> {
+  // Return cached token if still valid (with 60 second buffer)
+  if (cachedToken && Date.now() < tokenExpiry - 60_000) {
+    return cachedToken;
+  }
+
+  // Get a new token
+  const token = await getAccessTokenFromServiceAccount();
+  cachedToken = token;
+  tokenExpiry = Date.now() + 55 * 60 * 1000; // valid ~55 min
+  return token;
+}
 
 // Initialize Azure OpenAI client with API key authentication
 // Note: We'll create the client on-demand to support different deployments
@@ -81,7 +204,7 @@ export interface AzureOpenAIResponse {
 
 export interface CallOptions {
   endpoint?: string;
-  provider?: "azure" | "gemini";
+  provider?: "azure" | "gemini" | "vertex";
 }
 
 /**
@@ -109,7 +232,7 @@ async function callGeminiApi(
   payload: AzureOpenAIPayload,
   model: string = GEMINI_MODEL_ID,
   apiKey: string = GEMINI_API_KEY,
-  retries: number = 3,
+  retries: number = 2,
   backoff: number = 1.0
 ): Promise<AzureOpenAIResponse> {
   if (!apiKey) {
@@ -146,25 +269,10 @@ async function callGeminiApi(
     }
   }
 
-  // Build Gemini request body (non-streaming: generateContent endpoint)
-  const body: any = {
-    contents: geminiContents,
-    generationConfig: {
-      temperature: temperature,
-      maxOutputTokens: maxTokens,
-      thinkingConfig: {
-        thinkingLevel: "HIGH",
-      },
-      responseMimeType: "application/json",
-    },
-  };
-
   // Add system instruction if present
-  if (systemInstruction) {
-    body.systemInstruction = {
-      parts: [{ text: systemInstruction }],
-    };
-  }
+  const systemInstructionObj = systemInstruction ? {
+    parts: [{ text: systemInstruction }],
+  } : undefined;
 
   // If JSON response format is requested, add to prompt
   if (responseFormat && typeof responseFormat === "object" && responseFormat.type === "json_object") {
@@ -180,100 +288,349 @@ async function callGeminiApi(
   const endpoint = GEMINI_BASE_ENDPOINT.replace("{model}", model).replace("{key}", apiKey);
   const headers = { "Content-Type": "application/json" };
 
-  // Retry logic
+  // Helper function to build request body
+  const buildBody = (includeMaxTokens: boolean) => {
+    const generationConfig: any = {
+      temperature: temperature,
+      thinkingConfig: {
+        thinkingLevel: "HIGH",
+      },
+      responseMimeType: "application/json",
+    };
+    if (includeMaxTokens) {
+      generationConfig.maxOutputTokens = maxTokens;
+    }
+    const body: any = {
+      contents: geminiContents,
+      generationConfig,
+    };
+    if (systemInstructionObj) {
+      body.systemInstruction = systemInstructionObj;
+    }
+    return body;
+  };
+
+  // Helper function to make the API call and parse response
+  const makeCall = async (body: any): Promise<AzureOpenAIResponse> => {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60000), // 60 second timeout
+    });
+
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      throw new Error(`Gemini API returned ${resp.status}: ${errorText.substring(0, 400)}`);
+    }
+
+    const data = await resp.json();
+
+    // Convert Gemini response to Azure OpenAI format
+    const candidates = data.candidates || [];
+    if (candidates.length === 0) {
+      throw new Error("No candidates in Gemini response");
+    }
+
+    const contentParts = candidates[0].content?.parts || [];
+    if (contentParts.length === 0) {
+      throw new Error("No content parts in Gemini response");
+    }
+
+    const responseContent = contentParts[0].text || "";
+    console.log(`🔍 Raw response from Gemini: ${responseContent}`);
+
+    // Clean JSON from markdown code blocks if present
+    const cleanedContent = cleanJsonResponse(responseContent);
+    if (cleanedContent !== responseContent) {
+      console.log(`✅ Cleaned JSON from markdown code blocks`);
+    }
+
+    // Extract usage metadata
+    const usageMetadata = data.usageMetadata || {};
+    const promptTokens = usageMetadata.promptTokenCount || 0;
+    const completionTokens = usageMetadata.candidatesTokenCount || 0;
+    const totalTokens = usageMetadata.totalTokenCount || promptTokens + completionTokens;
+
+    // Build Azure OpenAI-compatible response
+    return {
+      choices: [
+        {
+          message: {
+            content: cleanedContent,
+            role: "assistant",
+          },
+          finish_reason: candidates[0].finishReason || "stop",
+          index: 0,
+        },
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens,
+      },
+      id: `gemini-${Date.now()}-${Math.random()}`,
+      model: model,
+      created: Math.floor(Date.now() / 1000),
+    };
+  };
+
+  // Retry logic: first try with maxOutputTokens, then without on failure
+  let lastError: Error | null = null;
+
+  // Phase 1: Try with maxOutputTokens
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(60000), // 60 second timeout
-      });
-
-      if (!resp.ok) {
-        const errorText = await resp.text();
-        const errorMsg = `Gemini API returned ${resp.status}: ${errorText.substring(0, 400)}`;
-        console.error(errorMsg);
-        if (attempt < retries) {
-          await new Promise((resolve) => setTimeout(resolve, backoff * attempt * 1000));
-          continue;
-        }
-        throw new Error(errorMsg);
-      }
-
-      const data = await resp.json();
-
-      // Convert Gemini response to Azure OpenAI format
-      const candidates = data.candidates || [];
-      if (candidates.length === 0) {
-        throw new Error("No candidates in Gemini response");
-      }
-
-      const contentParts = candidates[0].content?.parts || [];
-      if (contentParts.length === 0) {
-        throw new Error("No content parts in Gemini response");
-      }
-
-      const responseContent = contentParts[0].text || "";
-      console.log(`🔍 Raw response from Gemini: ${responseContent}`);
-
-      // Clean JSON from markdown code blocks if present
-      const cleanedContent = cleanJsonResponse(responseContent);
-      if (cleanedContent !== responseContent) {
-        console.log(`✅ Cleaned JSON from markdown code blocks`);
-      }
-
-      // Extract usage metadata
-      const usageMetadata = data.usageMetadata || {};
-      const promptTokens = usageMetadata.promptTokenCount || 0;
-      const completionTokens = usageMetadata.candidatesTokenCount || 0;
-      const totalTokens = usageMetadata.totalTokenCount || promptTokens + completionTokens;
-
-      // Build Azure OpenAI-compatible response
-      const responseDict: AzureOpenAIResponse = {
-        choices: [
-          {
-            message: {
-              content: cleanedContent,
-              role: "assistant",
-            },
-            finish_reason: candidates[0].finishReason || "stop",
-            index: 0,
-          },
-        ],
-        usage: {
-          prompt_tokens: promptTokens,
-          completion_tokens: completionTokens,
-          total_tokens: totalTokens,
-        },
-        id: `gemini-${Date.now()}-${Math.random()}`,
-        model: model,
-        created: Math.floor(Date.now() / 1000),
-      };
-
-      return responseDict;
+      const body = buildBody(true);
+      return await makeCall(body);
     } catch (error) {
-      console.error(`Error in Gemini API call (attempt ${attempt}/${retries}):`, error);
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error in Gemini API call with maxOutputTokens (attempt ${attempt}/${retries}):`, error);
       if (attempt < retries) {
         await new Promise((resolve) => setTimeout(resolve, backoff * attempt * 1000));
         continue;
       }
-      throw error;
     }
   }
 
-  throw new Error(`Gemini API call failed after ${retries} attempts`);
+  // Phase 2: Retry without maxOutputTokens
+  console.warn("[azureOpenAiHelper] Gemini failed with maxOutputTokens, retrying without maxOutputTokens...");
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const body = buildBody(false);
+      return await makeCall(body);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error in Gemini API call without maxOutputTokens (attempt ${attempt}/${retries}):`, error);
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, backoff * attempt * 1000));
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error(`Gemini API call failed after ${retries * 2} attempts (with and without maxOutputTokens)`);
 }
 
 /**
- * Make a call to Azure OpenAI API or Gemini API using the SDK.
- * Default: try Gemini first, fallback to Azure on failure.
+ * Call Vertex AI (Google Cloud) Gemini API with Azure OpenAI-like payload format.
+ * Uses service account authentication via GCP_SERVICE_ACCOUNT_KEY environment variable.
+ */
+async function callVertexApi(
+  payload: AzureOpenAIPayload,
+  model: string = VERTEX_MODEL_ID,
+  retries: number = 2,
+  backoff: number = 1.0
+): Promise<AzureOpenAIResponse> {
+  if (!GCP_SERVICE_ACCOUNT_KEY) {
+    throw new Error("GCP_SERVICE_ACCOUNT_KEY is not configured");
+  }
+
+  // Get project ID from service account if not explicitly set
+  let projectId = GCP_PROJECT_ID;
+  if (!projectId) {
+    try {
+      const sa = JSON.parse(GCP_SERVICE_ACCOUNT_KEY);
+      projectId = sa.project_id;
+    } catch (e) {
+      throw new Error("GCP_PROJECT_ID is not set and could not be extracted from service account");
+    }
+  }
+
+  if (!projectId) {
+    throw new Error("GCP_PROJECT_ID is not configured");
+  }
+
+  // Extract parameters from Azure OpenAI-style payload
+  const messages = payload.messages || [];
+  const temperature = payload.temperature ?? 0.5;
+  const maxTokens = payload.max_tokens ?? 65536;
+  const responseFormat = payload.response_format;
+
+  // Convert messages to Gemini format
+  const geminiContents: any[] = [];
+  let systemInstruction: string | null = null;
+
+  for (const msg of messages) {
+    const role = msg.role;
+    const content = msg.content;
+
+    if (role === "system") {
+      // Gemini handles system instructions separately
+      systemInstruction = content;
+    } else if (role === "user") {
+      geminiContents.push({
+        role: "user",
+        parts: [{ text: content }],
+      });
+    } else if (role === "assistant") {
+      geminiContents.push({
+        role: "model", // Gemini uses "model" instead of "assistant"
+        parts: [{ text: content }],
+      });
+    }
+  }
+
+  // Add system instruction if present
+  const systemInstructionObj = systemInstruction ? {
+    parts: [{ text: systemInstruction }],
+  } : undefined;
+
+  // If JSON response format is requested, add to prompt
+  if (responseFormat && typeof responseFormat === "object" && responseFormat.type === "json_object") {
+    // Prepend JSON instruction to the last user message
+    if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === "user") {
+      const originalText = geminiContents[geminiContents.length - 1].parts[0].text;
+      geminiContents[geminiContents.length - 1].parts[0].text =
+        "Please respond with ONLY valid JSON. Do not include markdown code blocks or explanations.\n\n" +
+        originalText;
+    }
+  }
+
+  // Vertex AI endpoint format
+  const endpoint = `https://${GCP_LOCATION}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${GCP_LOCATION}/publishers/google/models/${model}:generateContent`;
+
+  // Helper function to build request body
+  const buildBody = (includeMaxTokens: boolean) => {
+    const generationConfig: any = {
+      temperature: temperature,
+      thinkingConfig: {
+        thinkingLevel: "HIGH",
+      },
+      responseMimeType: "application/json",
+    };
+    if (includeMaxTokens) {
+      generationConfig.maxOutputTokens = maxTokens;
+    }
+    const body: any = {
+      contents: geminiContents,
+      generationConfig,
+    };
+    if (systemInstructionObj) {
+      body.systemInstruction = systemInstructionObj;
+    }
+    return body;
+  };
+
+  // Helper function to make the API call and parse response
+  const makeCall = async (body: any): Promise<AzureOpenAIResponse> => {
+    // Get access token (handles token refresh)
+    const accessToken = await getAccessToken();
+    
+    const headers = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    };
+
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60000), // 60 second timeout
+    });
+
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      throw new Error(`Vertex AI API returned ${resp.status}: ${errorText.substring(0, 400)}`);
+    }
+
+    const data = await resp.json();
+
+    // Convert Gemini response to Azure OpenAI format
+    const candidates = data.candidates || [];
+    if (candidates.length === 0) {
+      throw new Error("No candidates in Vertex AI response");
+    }
+
+    const contentParts = candidates[0].content?.parts || [];
+    if (contentParts.length === 0) {
+      throw new Error("No content parts in Vertex AI response");
+    }
+
+    const responseContent = contentParts[0].text || "";
+    console.log(`🔍 Raw response from Vertex AI: ${responseContent}`);
+
+    // Clean JSON from markdown code blocks if present
+    const cleanedContent = cleanJsonResponse(responseContent);
+    if (cleanedContent !== responseContent) {
+      console.log(`✅ Cleaned JSON from markdown code blocks`);
+    }
+
+    // Extract usage metadata
+    const usageMetadata = data.usageMetadata || {};
+    const promptTokens = usageMetadata.promptTokenCount || 0;
+    const completionTokens = usageMetadata.candidatesTokenCount || 0;
+    const totalTokens = usageMetadata.totalTokenCount || promptTokens + completionTokens;
+
+    // Build Azure OpenAI-compatible response
+    return {
+      choices: [
+        {
+          message: {
+            content: cleanedContent,
+            role: "assistant",
+          },
+          finish_reason: candidates[0].finishReason || "stop",
+          index: 0,
+        },
+      ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: totalTokens,
+      },
+      id: `vertex-${Date.now()}-${Math.random()}`,
+      model: model,
+      created: Math.floor(Date.now() / 1000),
+    };
+  };
+
+  // Retry logic: first try with maxOutputTokens, then without on failure
+  let lastError: Error | null = null;
+
+  // Phase 1: Try with maxOutputTokens
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const body = buildBody(true);
+      return await makeCall(body);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error in Vertex AI API call with maxOutputTokens (attempt ${attempt}/${retries}):`, error);
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, backoff * attempt * 1000));
+        continue;
+      }
+    }
+  }
+
+  // Phase 2: Retry without maxOutputTokens
+  console.warn("[azureOpenAiHelper] Vertex AI failed with maxOutputTokens, retrying without maxOutputTokens...");
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const body = buildBody(false);
+      return await makeCall(body);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error in Vertex AI API call without maxOutputTokens (attempt ${attempt}/${retries}):`, error);
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, backoff * attempt * 1000));
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error(`Vertex AI API call failed after ${retries * 2} attempts (with and without maxOutputTokens)`);
+}
+
+/**
+ * Make a call to Azure OpenAI API, Gemini API, or Vertex AI using the SDK.
+ * Default: try Vertex AI first, fallback to Gemini (API key), then Azure on failure.
  */
 export async function callAzureOpenAI(
   payload: AzureOpenAIPayload,
   options: CallOptions = {}
 ): Promise<AzureOpenAIResponse> {
-  const { provider = "gemini" } = options;
+  const { provider = "vertex" } = options;
 
   // If explicitly Azure, use Azure only
   if (provider.toLowerCase() === "azure") {
@@ -285,11 +642,43 @@ export async function callAzureOpenAI(
     return result;
   }
 
-  // Default / Gemini: try Gemini first, fallback to Azure
+  // If explicitly Gemini (API key), use Gemini only
+  if (provider.toLowerCase() === "gemini") {
+    if (!GEMINI_API_KEY) {
+      throw new Error("Gemini API key is not set. Please set GEMINI_API_KEY.");
+    }
+    const result = await callGeminiApi(payload);
+    console.log(`[azureOpenAiHelper] Used: Gemini (${result.model})`);
+    return result;
+  }
+
+  // Default / Vertex: try Vertex AI first (if enabled), fallback to Gemini (API key), then Azure
+  
+  // Try Vertex AI first (only if USE_VERTEX is enabled)
+  if (USE_VERTEX) {
+    try {
+      if (GCP_SERVICE_ACCOUNT_KEY) {
+        const result = await callVertexApi(payload);
+        console.log(`[azureOpenAiHelper] Used: Vertex AI (${result.model})`);
+        return result;
+      }
+    } catch (vertexError) {
+      const errorStr =
+        vertexError instanceof Error
+          ? `${vertexError.name}: ${vertexError.message}\n${vertexError.stack ?? ""}`
+          : String(vertexError);
+      console.error("[azureOpenAiHelper] Vertex AI error:", errorStr);
+      console.warn("[azureOpenAiHelper] Vertex AI failed, falling back to Gemini (API key)");
+    }
+  } else {
+    console.log("[azureOpenAiHelper] Vertex AI skipped (USE_VERTEX not enabled)");
+  }
+
+  // Try Gemini (API key) as first fallback
   try {
     if (GEMINI_API_KEY) {
       const result = await callGeminiApi(payload);
-      console.log(`[azureOpenAiHelper] Used: Gemini (${result.model})`);
+      console.log(`[azureOpenAiHelper] Used: Gemini (${result.model}) [fallback from Vertex]`);
       return result;
     }
   } catch (geminiError) {
@@ -304,7 +693,7 @@ export async function callAzureOpenAI(
   // Fallback to Azure
   if (!API_KEY) {
     throw new Error(
-      "Neither Gemini nor Azure is configured. Set GEMINI_API_KEY or AZURE_OPENAI_API_KEY."
+      "No provider configured. Set GCP_SERVICE_ACCOUNT_KEY, GEMINI_API_KEY, or AZURE_OPENAI_API_KEY."
     );
   }
   const result = await callAzureOpenAIInternal(payload, options);
@@ -324,7 +713,7 @@ async function callAzureOpenAIInternal(
   const messages = payload.messages || [];
   const temperature = payload.temperature ?? 0.3;
   const topP = payload.top_p ?? 0.85;
-  const maxTokens = payload.max_tokens ?? 4096;
+  const maxTokens = payload.max_tokens ?? 128000;
   const responseFormat = payload.response_format;
 
   // Determine which deployment to use
@@ -432,11 +821,12 @@ export interface GetCompletionOptions {
   max_tokens?: number;
   response_format?: "json_object" | "text";
   endpoint?: string;
-  provider?: "azure" | "gemini";
+  provider?: "azure" | "gemini" | "vertex";
 }
 
 /**
- * Get a completion from Azure OpenAI or Gemini with simplified parameters and robust JSON handling.
+ * Get a completion from Vertex AI, Gemini, or Azure OpenAI with simplified parameters and robust JSON handling.
+ * Default: Vertex AI first, fallback to Gemini (API key), then Azure.
  */
 export async function getCompletion(
   messages: Message[],
@@ -445,13 +835,16 @@ export async function getCompletion(
   const {
     temperature = 0.5,
     top_p = 0.85,
-    max_tokens = 4000,
+    max_tokens,
     response_format = "json_object",
     endpoint,
-    provider = "gemini",
+    provider = "vertex",
   } = options;
 
-  const providerName = provider.toLowerCase() === "azure" ? "Azure OpenAI" : "Gemini (fallback: Azure)";
+  const providerName = 
+    provider.toLowerCase() === "azure" ? "Azure OpenAI" : 
+    provider.toLowerCase() === "gemini" ? "Gemini (API key)" :
+    "Vertex AI (fallback: Gemini, Azure)";
   console.log(
     `🚀 Making request to ${providerName} with ${messages.length} messages, format: ${response_format}`
   );
@@ -476,7 +869,7 @@ export async function getCompletion(
   };
 
   const callAndParse = async (
-    useProvider: "azure" | "gemini"
+    useProvider: "azure" | "gemini" | "vertex"
   ): Promise<{ ok: true; data: any } | { ok: false; error: string; raw_content?: string }> => {
     const responseData = await callAzureOpenAI(payload, { endpoint, provider: useProvider });
     if (!responseData.choices?.length) return { ok: false, error: "No response from API" };
@@ -488,12 +881,18 @@ export async function getCompletion(
   };
 
   try {
-    // First attempt with configured provider (default: gemini)
+    // First attempt with configured provider (default: vertex)
     let result = await callAndParse(provider);
     if (!result.ok && result.raw_content) {
       console.warn("[azureOpenAiHelper] JSON parse failed, retrying once with same provider");
       result = await callAndParse(provider);
     }
+    // If vertex failed, try gemini
+    if (!result.ok && result.raw_content && provider === "vertex") {
+      console.warn("[azureOpenAiHelper] Retry failed, switching to Gemini (API key)");
+      result = await callAndParse("gemini");
+    }
+    // If still failed (vertex or gemini), try azure
     if (!result.ok && result.raw_content && provider !== "azure") {
       console.warn("[azureOpenAiHelper] Retry failed, switching to Azure OpenAI");
       result = await callAndParse("azure");
@@ -515,8 +914,9 @@ export async function getCompletion(
 }
 
 /**
- * Get a JSON completion from Azure OpenAI or Gemini with robust error handling.
+ * Get a JSON completion from Vertex AI, Gemini, or Azure OpenAI with robust error handling.
  * This is a convenience function for scripts that expect JSON responses.
+ * Default: Vertex AI first, fallback to Gemini (API key), then Azure.
  */
 export async function getJsonCompletion(
   messages: Message[],

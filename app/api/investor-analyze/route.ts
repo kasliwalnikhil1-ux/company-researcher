@@ -8,6 +8,26 @@ import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 import { formatOnboardingCompanySummary, type OnboardingDataForSummary } from '@/lib/utils';
 import { fetchTwitterTimeline, type TwitterTweet } from '@/utils/twitterApi';
 
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
+
+// Helper function to send Slack notification
+async function sendSlackNotification(message: string): Promise<void> {
+  if (!SLACK_WEBHOOK_URL) {
+    console.warn('SLACK_WEBHOOK_URL not configured, skipping notification');
+    return;
+  }
+
+  try {
+    await fetch(SLACK_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: message }),
+    });
+  } catch (error) {
+    console.error('Failed to send Slack notification:', error);
+  }
+}
+
 const SYSTEM_MESSAGE = `You are an investment analysis assistant. Your role is to evaluate <<COMPANY_NAME>>> using only the provided company information and determine whether it is a good fit for investment based on investor criteria.
 
 You must:
@@ -280,6 +300,9 @@ export async function POST(req: NextRequest) {
       if (errorCode === 'UNKNOWN') {
         console.error('[investor-analyze] AI extraction error:', { message: errMsg, userId, investorId: investorIdParam, extracted });
       }
+      sendSlackNotification(`❌ Investor Analyze - Gemini/AI Extraction Error\nUser: ${userId}\nInvestor: ${investorIdParam}\nError: ${errMsg}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json({ error: userMessage, errorCode }, { status: 500 });
     }
 
@@ -367,6 +390,9 @@ export async function POST(req: NextRequest) {
       if (errorCode === 'UNKNOWN') {
         console.error('[investor-analyze] RPC error:', { message: rpcError.message, userId, investorId: investorIdParam });
       }
+      sendSlackNotification(`❌ Investor Analyze - RPC/Database Error\nUser: ${userId}\nInvestor: ${investorIdParam}\nError: ${rpcError.message}`).catch(
+        (err) => console.error('Failed to send Slack notification:', err)
+      );
       return NextResponse.json({ error: userMessage, errorCode }, { status: 500 });
     }
 
@@ -385,6 +411,9 @@ export async function POST(req: NextRequest) {
     if (errorCode === 'UNKNOWN') {
       console.error('[investor-analyze] Error:', { message: msg, userId, investorId: investorIdParam, err });
     }
+    sendSlackNotification(`❌ Investor Analyze - Unexpected Error\nUser: ${userId}\nInvestor: ${investorIdParam}\nError: ${msg}`).catch(
+      (slackErr) => console.error('Failed to send Slack notification:', slackErr)
+    );
     return NextResponse.json({ error: userMessage, errorCode }, { status: 500 });
   }
 }

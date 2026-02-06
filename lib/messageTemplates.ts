@@ -1,21 +1,13 @@
 // Shared message template generator
 // This is the single source of truth for all message templates
 
+import { substituteVariables } from './utils';
+
 interface QualificationData {
   product_types: string[] | null;
   sales_opener_sentence?: string;
   company_industry?: string;
   profile_industry?: string;
-}
-
-// Helper function to unescape common escape sequences in strings
-// Converts literal \n, \t, etc. to actual newlines, tabs, etc.
-function unescapeString(str: string): string {
-  return str
-    .replace(/\\n/g, '\n')  // Convert \n to actual newline
-    .replace(/\\t/g, '\t')  // Convert \t to actual tab
-    .replace(/\\r/g, '\r')  // Convert \r to carriage return
-    .replace(/\\\\/g, '\\'); // Convert \\ to single \
 }
 
 /**
@@ -110,72 +102,8 @@ export function getFollowUpDate(baseDate = new Date(), holidays: string[] = []) 
   };
 }
 
-/**
- * Template substitution helper function
- * Replaces ${variable} syntax with actual values and unescapes escape sequences
- *
- * If a placeholder is immediately followed by punctuation (`,`, `!`, `.`), and the variable
- * value ends with any punctuation, the trailing punctuation is removed from the value
- * to avoid duplication (regardless of whether it matches the following punctuation).
- *
- * @param template - Template string with ${variable} placeholders
- * @param variables - Object mapping variable names to their values
- * @returns Template string with variables substituted and escape sequences unescaped
- *
- * @example
- * ```typescript
- * const template = "Hello ${name}, welcome to ${product}";
- * const variables = { name: "John", product: "Company Researcher" };
- * const result = substituteVariables(template, variables);
- * // Returns: "Hello John, welcome to Company Researcher"
- * ```
- *
- * @example
- * ```typescript
- * // Removes duplicate punctuation
- * const template = "${sales_opener_sentence}, we can help";
- * const variables = { sales_opener_sentence: "Hello." };
- * const result = substituteVariables(template, variables);
- * // Returns: "Hello, we can help" (removed . since followed by ,)
- * ```
- *
- * @example
- * ```typescript
- * // Date placeholders
- * const template = "Let's schedule a call ${followUpRelativeDay} at 2 PM";
- * const result = substituteVariables(template, { followUpRelativeDay: "this Tuesday" });
- * // Returns: "Let's schedule a call this Tuesday at 2 PM"
- * ```
- */
-export function substituteVariables(template: string, variables: Record<string, string>): string {
-  // First unescape the template string to convert \n to actual newlines
-  let result = unescapeString(template);
-
-  Object.entries(variables).forEach(([key, value]) => {
-    // Match ${variable} followed by optional punctuation (`,`, `!`, `.`)
-    // Use a capturing group to check what follows the placeholder
-    const regex = new RegExp(`\\$\\{${key}\\}([,\\!.])?`, 'g');
-
-    result = result.replace(regex, (match, followingPunctuation) => {
-      let substitutedValue = value;
-
-      // If placeholder is followed by punctuation, remove any trailing punctuation from value
-      // This prevents "sentence.," situations by removing punctuation from value when followed by punctuation
-      if (followingPunctuation) {
-        const lastChar = substitutedValue.slice(-1);
-        // Remove trailing punctuation (comma, period, exclamation mark)
-        if ([',', '.', '!'].includes(lastChar)) {
-          substitutedValue = substitutedValue.slice(0, -1);
-        }
-      }
-
-      // Return substituted value with the following punctuation (if any)
-      return substitutedValue + (followingPunctuation || '');
-    });
-  });
-
-  return result;
-}
+// Re-export substituteVariables from utils for backwards compatibility
+export { substituteVariables } from './utils';
 
 /**
  * Generate message templates based on qualification data and research mode
@@ -279,6 +207,7 @@ export const generateMessageTemplates = (
 export interface InvestorAiMetadata {
   line1?: string | null;
   line2?: string | null;
+  additional_line?: string | null;
   reason?: string | null;
   investor_fit?: boolean | null;
   twitter_line?: string | null;
@@ -309,6 +238,7 @@ export const generateInvestorMessageTemplates = (
   const aiMeta = investorData?.ai_metadata ?? {};
   const line1 = typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '';
   const line2 = typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '';
+  const additionalLine = typeof aiMeta.additional_line === 'string' ? aiMeta.additional_line : '';
   const reason = typeof aiMeta.reason === 'string' ? aiMeta.reason : '';
   const twitterLine = typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : '';
   const investorFit = aiMeta.investor_fit;
@@ -323,6 +253,8 @@ export const generateInvestorMessageTemplates = (
   const variables: Record<string, string> = {
     line1,
     line2,
+    additional_line: additionalLine,
+    additionalLine,
     reason,
     twitter_line: twitterLine,
     twitterLine,
@@ -341,8 +273,18 @@ export const generateInvestorMessageTemplates = (
     followUpDateOnly: followUpDate.dateOnly,
   };
 
+  // Sentence fields that should always end with punctuation (period added if missing)
+  const sentenceFields = [
+    'line1',
+    'line2',
+    'additional_line',
+    'additionalLine',
+    'twitter_line',
+    'twitterLine',
+  ];
+
   return dbTemplates
     .map((t) => t?.trim())
     .filter((t) => t && t.length > 0)
-    .map((t) => substituteVariables(t!, variables));
+    .map((t) => substituteVariables(t!, variables, sentenceFields));
 };

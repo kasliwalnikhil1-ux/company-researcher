@@ -221,14 +221,14 @@ export default function OnboardingFlow() {
     }
   };
 
-  const fetchAndPrefillFromWebsite = async (websiteUrl: string, flowType: 'b2b' | 'fundraising'): Promise<Partial<OnboardingData> | null> => {
+  const fetchAndPrefillFromWebsite = async (websiteUrl: string, flowType: 'b2b' | 'fundraising', companyName?: string): Promise<Partial<OnboardingData> | null> => {
     if (!isValidUrl(websiteUrl)) return null;
     setEnrichError(null);
     try {
       const res = await fetch('/api/onboarding-enrich', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ websiteurl: websiteUrl.trim(), flowType }),
+        body: JSON.stringify({ websiteurl: websiteUrl.trim(), flowType, companyName: companyName?.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -310,7 +310,11 @@ export default function OnboardingFlow() {
       if (!alreadyEnriched) {
         setEnrichLoading(true);
         setEnrichError(null);
-        const prefillUpdates = await fetchAndPrefillFromWebsite(websiteUrl, flowTypeForEnrich);
+        // Get company name for the enrich call
+        const companyNameForEnrich = isWebsiteStepB2B
+          ? formData.b2bStep3?.companyName?.trim()
+          : formData.step5?.companyName?.trim();
+        const prefillUpdates = await fetchAndPrefillFromWebsite(websiteUrl, flowTypeForEnrich, companyNameForEnrich);
         setEnrichLoading(false);
         if (prefillUpdates) {
           setLastEnrichedUrl(normalizedUrl);
@@ -456,28 +460,45 @@ export default function OnboardingFlow() {
               <div className="font-semibold text-gray-900">Fundraising</div>
               <div className="text-sm text-gray-600 mt-1">Investor discovery, outreach, and deal management</div>
             </button>
-            <div
-              className={`w-full p-6 text-left border-2 rounded-lg transition-all opacity-60 cursor-not-allowed border-gray-200`}
-            >
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-gray-900">B2B Outreach</span>
-                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
-                  Coming Soon
-                </span>
+            {typeof window !== 'undefined' && window.location.hostname === 'localhost' ? (
+              <button
+                onClick={() => setFormData({
+                  ...formData,
+                  step0: { primaryUse: 'b2b' }
+                })}
+                className={`w-full p-6 text-left border-2 rounded-lg transition-all ${
+                  formData.step0?.primaryUse === 'b2b'
+                    ? 'border-indigo-500 bg-indigo-50'
+                    : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="font-semibold text-gray-900">B2B Outreach</div>
+                <div className="text-sm text-gray-600 mt-1">Lead generation, prospecting, and sales outreach</div>
+              </button>
+            ) : (
+              <div
+                className={`w-full p-6 text-left border-2 rounded-lg transition-all opacity-60 cursor-not-allowed border-gray-200`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-900">B2B Outreach</span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">
+                    Coming Soon
+                  </span>
+                </div>
+                <div className="text-sm text-gray-600 mt-1">Lead generation, prospecting, and sales outreach</div>
+                <div className="text-sm text-indigo-600 mt-2">
+                Meet the world's most intelligent sales platform.{' '}
+                  <a
+                    href="https://calendly.com/founders-capitalxai/20min"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium underline hover:text-indigo-700 cursor-pointer"
+                  >
+                    Request early access
+                  </a>
+                </div>
               </div>
-              <div className="text-sm text-gray-600 mt-1">Lead generation, prospecting, and sales outreach</div>
-              <div className="text-sm text-indigo-600 mt-2">
-              Meet the world's most intelligent sales platform.{' '}
-                <a
-                  href="https://calendly.com/founders-capitalxai/20min"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium underline hover:text-indigo-700 cursor-pointer"
-                >
-                  Request early access
-                </a>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       );

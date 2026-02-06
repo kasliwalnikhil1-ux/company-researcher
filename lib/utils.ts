@@ -5,6 +5,133 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Helper function to unescape common escape sequences in strings
+// Converts literal \n, \t, etc. to actual newlines, tabs, etc.
+export function unescapeString(str: string): string {
+  return str
+    .replace(/\\n/g, '\n')  // Convert \n to actual newline
+    .replace(/\\t/g, '\t')  // Convert \t to actual tab
+    .replace(/\\r/g, '\r')  // Convert \r to carriage return
+    .replace(/\\\\/g, '\\'); // Convert \\ to single \
+}
+
+/**
+ * Template substitution helper function
+ * Replaces ${variable} syntax with actual values and unescapes escape sequences
+ *
+ * If a placeholder is immediately followed by punctuation (`,`, `!`, `.`), and the variable
+ * value ends with any punctuation, the trailing punctuation is removed from the value
+ * to avoid duplication (regardless of whether it matches the following punctuation).
+ *
+ * If a placeholder is at the end of the template (or followed only by whitespace) and the
+ * variable value doesn't end with punctuation, a period is automatically added to complete
+ * the sentence.
+ *
+ * @param template - Template string with ${variable} placeholders
+ * @param variables - Object mapping variable names to their values
+ * @param sentenceFields - Optional array of field names that should always end with punctuation (adds period if missing)
+ * @returns Template string with variables substituted and escape sequences unescaped
+ *
+ * @example
+ * ```typescript
+ * const template = "Hello ${name}, welcome to ${product}";
+ * const variables = { name: "John", product: "Company Researcher" };
+ * const result = substituteVariables(template, variables);
+ * // Returns: "Hello John, welcome to Company Researcher"
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Removes duplicate punctuation
+ * const template = "${sales_opener_sentence}, we can help";
+ * const variables = { sales_opener_sentence: "Hello." };
+ * const result = substituteVariables(template, variables);
+ * // Returns: "Hello, we can help" (removed . since followed by ,)
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Adds period when placeholder is at end and value lacks punctuation
+ * const template = "${sales_opener_sentence}";
+ * const variables = { sales_opener_sentence: "Your products look great" };
+ * const result = substituteVariables(template, variables);
+ * // Returns: "Your products look great." (added period at end)
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Date placeholders
+ * const template = "Let's schedule a call ${followUpRelativeDay} at 2 PM";
+ * const result = substituteVariables(template, { followUpRelativeDay: "this Tuesday" });
+ * // Returns: "Let's schedule a call this Tuesday at 2 PM"
+ * ```
+ *
+ * @example
+ * ```typescript
+ * // Sentence fields always get punctuation added
+ * const template = "${line1} ${line2}";
+ * const variables = { line1: "Great work", line2: "Keep it up" };
+ * const result = substituteVariables(template, variables, ['line1', 'line2']);
+ * // Returns: "Great work. Keep it up." (periods added to both sentence fields)
+ * ```
+ */
+export function substituteVariables(
+  template: string,
+  variables: Record<string, string>,
+  sentenceFields?: string[]
+): string {
+  // First unescape the template string to convert \n to actual newlines
+  let result = unescapeString(template);
+
+  // Pre-process sentence fields to ensure they end with punctuation
+  const processedVariables: Record<string, string> = { ...variables };
+  if (sentenceFields && sentenceFields.length > 0) {
+    for (const field of sentenceFields) {
+      const value = processedVariables[field];
+      if (value && value.trim().length > 0) {
+        const lastChar = value.slice(-1);
+        const endsWithPunctuation = [',', '.', '!', '?'].includes(lastChar);
+        if (!endsWithPunctuation) {
+          processedVariables[field] = value + '.';
+        }
+      }
+    }
+  }
+
+  Object.entries(processedVariables).forEach(([key, value]) => {
+    // Match ${variable} followed by optional punctuation (`,`, `!`, `.`) or end of string/whitespace
+    // Use capturing groups to check what follows the placeholder
+    const regex = new RegExp(`\\$\\{${key}\\}([,\\!.])?(\\s*$)?`, 'g');
+
+    result = result.replace(regex, (match, followingPunctuation, atEnd) => {
+      let substitutedValue = value;
+      const lastChar = substitutedValue.slice(-1);
+      const endsWithPunctuation = [',', '.', '!', '?'].includes(lastChar);
+
+      // If placeholder is followed by punctuation, remove any trailing punctuation from value
+      // This prevents "sentence.," situations by removing punctuation from value when followed by punctuation
+      if (followingPunctuation) {
+        if (endsWithPunctuation) {
+          substitutedValue = substitutedValue.slice(0, -1);
+        }
+        // Return substituted value with the following punctuation
+        return substitutedValue + followingPunctuation;
+      }
+
+      // If placeholder is at end of template (or followed only by whitespace) and value doesn't end with punctuation,
+      // add a period to complete the sentence
+      if (atEnd !== undefined && !endsWithPunctuation && substitutedValue.trim().length > 0) {
+        return substitutedValue + '.' + (atEnd || '');
+      }
+
+      // Return substituted value as-is
+      return substitutedValue;
+    });
+  });
+
+  return result;
+}
+
 /**
  * Extracts Instagram ID/username from various input formats
  * Supports:
@@ -106,8 +233,8 @@ const NAME_URL_MARKDOWN_REGEX = /^\[([^\]]+)\]\(([^)]+)\)$/;
 /**
  * Parses a list of strings in format [name](url) into domains and LinkedIn paths
  * for use with search_investors (p_domains, p_linkedin_urls).
- * - URLs whose host contains "linkedin.com" → pathname (e.g. /in/namankas) added to linkedin_urls.
- * - Other URLs → hostname (www stripped) added to domains if it looks like a valid domain.
+ * - URLs whose host contains "linkedin.com" → pathname cleaned and lowercased (e.g. in/namankas) added to linkedin_urls.
+ * - Other URLs → hostname (www stripped, lowercased) added to domains if it looks like a valid domain (e.g. accel.com).
  * Reusable from Featured Co-investors, notable investments, or any [name](url) list.
  */
 export function parseNameUrlListToSearchParams(items: string[]): {
@@ -127,9 +254,14 @@ export function parseNameUrlListToSearchParams(items: string[]): {
       const parsed = new URL(href);
       const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
       if (host.includes('linkedin.com')) {
-        const path = parsed.pathname || '';
+        // Clean LinkedIn path: lowercase, remove leading/trailing slashes (e.g. in/scottshleifer)
+        const path = (parsed.pathname || '')
+          .toLowerCase()
+          .replace(/^\/+/, '')
+          .replace(/\/+$/, '');
         if (path) linkedinSet.add(path);
       } else {
+        // Clean domain: lowercase, just the domain (e.g. accel.com)
         if (host && /[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(host)) {
           domainsSet.add(host);
         }
@@ -156,7 +288,7 @@ export function normalizeExcludeDomain(input: string): string | null {
   return s;
 }
 
-/** Normalize LinkedIn URL to path for exclude list (e.g. /in/namankas) */
+/** Normalize LinkedIn URL to path for exclude list (e.g. in/namankas, company/accel, school/stanford) - lowercase, no leading/trailing slashes */
 export function normalizeExcludeLinkedinUrl(input: string): string | null {
   const s = (input || '').trim();
   if (!s) return null;
@@ -164,13 +296,20 @@ export function normalizeExcludeLinkedinUrl(input: string): string | null {
     const href = s.startsWith('http') ? s : `https://linkedin.com${s.startsWith('/') ? s : `/${s}`}`;
     const parsed = new URL(href);
     if (parsed.hostname.toLowerCase().includes('linkedin.com')) {
-      const path = (parsed.pathname || '').trim();
-      if (path && path.startsWith('/')) return path;
+      // Clean path: lowercase, remove leading/trailing slashes (e.g. in/namankas, company/accel, school/stanford)
+      const path = (parsed.pathname || '')
+        .toLowerCase()
+        .replace(/^\/+/, '')
+        .replace(/\/+$/, '');
+      if (path) return path;
     }
   } catch {
     // ignore
   }
-  if (s.startsWith('/in/')) return s;
+  // Handle raw paths like /in/namankas, company/accel, school/stanford - any LinkedIn path type
+  const cleaned = s.toLowerCase().replace(/^\/+/, '').replace(/\/+$/, '');
+  // Accept any path that looks like a LinkedIn path (type/identifier format)
+  if (/^[a-z]+\/[\w.-]+/.test(cleaned)) return cleaned;
   return null;
 }
 

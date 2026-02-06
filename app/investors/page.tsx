@@ -326,12 +326,13 @@ const INVESTOR_BASE_COLUMNS = [
   'twitter_line',
   'line1',
   'line2',
+  'additional_line',
   'mutual_interests',
   'reason',
   'notes',
 ];
 
-const EDITABLE_AI_METADATA_COLUMNS = ['twitter_line', 'line1', 'line2', 'mutual_interests'] as const;
+const EDITABLE_AI_METADATA_COLUMNS = ['twitter_line', 'line1', 'line2', 'additional_line', 'mutual_interests'] as const;
 
 const DEFAULT_FILTERS: InvestorSearchFilters = {
   type: 'firm',
@@ -448,10 +449,10 @@ function InvestorsContent() {
   const [scrollStartX, setScrollStartX] = useState(0);
   const tableScrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // Inline editing state for ai_metadata columns (twitter_line, line1, line2, mutual_interests)
+  // Inline editing state for ai_metadata columns (twitter_line, line1, line2, additional_line, mutual_interests)
   const [editingCell, setEditingCell] = useState<{
     investorId: string;
-    columnKey: 'twitter_line' | 'line1' | 'line2' | 'mutual_interests';
+    columnKey: 'twitter_line' | 'line1' | 'line2' | 'additional_line' | 'mutual_interests';
     value: string;
   } | null>(null);
   const editInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -1179,6 +1180,7 @@ function InvestorsContent() {
       twitter_line: 'Twitter Line',
       line1: 'Line 1',
       line2: 'Line 2',
+      additional_line: 'Additional Line',
       mutual_interests: 'Mutual Interests',
       reason: 'Reason',
       notes: 'Notes',
@@ -1296,6 +1298,8 @@ function InvestorsContent() {
           return (typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '') || '-';
         case 'line2':
           return (typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '') || '-';
+        case 'additional_line':
+          return (typeof aiMeta.additional_line === 'string' ? aiMeta.additional_line : '') || '-';
         case 'mutual_interests': {
           const interests = Array.isArray(aiMeta.mutual_interests)
             ? (aiMeta.mutual_interests as string[]).filter((s): s is string => typeof s === 'string')
@@ -1351,6 +1355,7 @@ function InvestorsContent() {
         'Twitter Line',
         'Line 1',
         'Line 2',
+        'Additional Line',
         'Mutual Interests',
         'Notes',
       ];
@@ -1396,6 +1401,7 @@ function InvestorsContent() {
           typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : '',
           typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '',
           typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '',
+          typeof aiMeta.additional_line === 'string' ? aiMeta.additional_line : '',
           mutualInterests,
           notesStr,
         ];
@@ -1642,7 +1648,7 @@ function InvestorsContent() {
       const value = getInvestorCellValue(investor, columnKey, pendingAnalyzeResults[investor.id]);
       setEditingCell({
         investorId: investor.id,
-        columnKey: columnKey as 'twitter_line' | 'line1' | 'line2' | 'mutual_interests',
+        columnKey: columnKey as 'twitter_line' | 'line1' | 'line2' | 'additional_line' | 'mutual_interests',
         value: value === '-' ? '' : value,
       });
     },
@@ -2242,7 +2248,7 @@ function InvestorsContent() {
                     {viewMode === 'table' && <col style={{ width: '40px' }} />}
                     {orderedVisibleColumns.map((col: string) => {
                       const isTemplate = col.startsWith('template_');
-                      const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'mutual_interests' || col === 'reason' || isTemplate;
+                      const isWide = col === 'investment_thesis' || col === 'notes' || col === 'twitter_line' || col === 'line1' || col === 'line2' || col === 'additional_line' || col === 'mutual_interests' || col === 'reason' || isTemplate;
                       return <col key={col} style={{ width: isWide ? '280px' : '160px', minWidth: isTemplate ? '200px' : '120px' }} />;
                     })}
                     <col style={{ width: '160px' }} />
@@ -2404,18 +2410,33 @@ function InvestorsContent() {
 
                           const isRowHovered = hoveredRowId === investor.id;
 
+                          // Determine if this column should open the drawer on click
+                          const shouldOpenDrawerOnClick = !isTemplateColumn && !isEditableAiMetadataColumn && !href && !isInvestorFitColumn;
+
+                          const handleCellClick = (e: React.MouseEvent) => {
+                            if (isTemplateColumn && value !== '-') {
+                              handleTemplateClick(e);
+                            } else if (shouldOpenDrawerOnClick) {
+                              e.stopPropagation();
+                              setInvestorToView(investor);
+                              setDrawerOpen(true);
+                            }
+                          };
+
                           return (
                             <td
                               key={columnKey}
                               className={`px-3 md:px-4 py-3 text-sm text-gray-700 max-w-[200px] align-middle ${
                                 (href || isTemplateColumn) && value !== '-' ? 'cursor-pointer hover:bg-blue-50' : ''
-                              } ${isEditableAiMetadataColumn ? 'cursor-text hover:bg-indigo-50/50' : ''}`}
+                              } ${isEditableAiMetadataColumn ? 'cursor-text hover:bg-indigo-50/50' : ''} ${
+                                shouldOpenDrawerOnClick ? 'cursor-pointer' : ''
+                              }`}
                               title={
                                 isEditableAiMetadataColumn
                                   ? 'Double-click to edit'
                                   : value
                               }
-                              onClick={isTemplateColumn && value !== '-' ? handleTemplateClick : undefined}
+                              onClick={handleCellClick}
                               onDoubleClick={
                                 isEditableAiMetadataColumn
                                   ? (e) => {
