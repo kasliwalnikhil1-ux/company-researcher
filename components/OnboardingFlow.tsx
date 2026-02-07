@@ -2060,7 +2060,7 @@ export default function OnboardingFlow() {
             <button
               onClick={async () => {
                 await completeOnboarding();
-                router.push('/');
+                router.push('/investors');
               }}
               className="px-8 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
             >

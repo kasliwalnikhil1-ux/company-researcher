@@ -55,7 +55,6 @@ function AccountContent() {
 
   // Email settings state
   const [emailProvider, setEmailProvider] = useState<'gmail' | 'outlook'>('gmail');
-  const [emailSignature, setEmailSignature] = useState('');
   const [emailSaving, setEmailSaving] = useState(false);
 
   // Twitter personalization (stored in onboarding)
@@ -165,7 +164,6 @@ function AccountContent() {
         const parsed = typeof es === 'string' ? JSON.parse(es) : es;
         if (parsed && (parsed.provider === 'gmail' || parsed.provider === 'outlook')) {
           setEmailProvider(parsed.provider);
-          setEmailSignature(typeof parsed.signature === 'string' ? parsed.signature : '');
         }
       }
 
@@ -312,7 +310,6 @@ function AccountContent() {
 
       const email_settings: EmailSettings = {
         provider: emailProvider,
-        signature: emailSignature.trim(),
       };
 
       const payload = {
@@ -456,7 +453,7 @@ function AccountContent() {
       <section className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Emails</h2>
         <p className="text-sm text-gray-500 mb-4">
-          Choose your email provider and signature for compose links on the companies page and in contact cards.
+          Choose your email provider for compose links on the companies page and in contact cards.
         </p>
         <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
           <div className="space-y-4">
@@ -470,16 +467,6 @@ function AccountContent() {
                 <option value="gmail">Gmail</option>
                 <option value="outlook">Outlook</option>
               </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Signature</label>
-              <textarea
-                value={emailSignature}
-                onChange={(e) => setEmailSignature(e.target.value)}
-                placeholder="e.g. Aarushi Jain&#10;CEO, Kaptured AI"
-                rows={3}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-y"
-              />
             </div>
             <button
               type="button"

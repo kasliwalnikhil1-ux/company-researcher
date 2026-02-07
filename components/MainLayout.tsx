@@ -70,7 +70,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     const canAccessMeData = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
     const canAccessResetAccount = isFundraising && RESET_ACCOUNT_ALLOWED_USER_IDS.has(user?.id ?? '');
     return {
-      showResearch: isFundraising ? canAccessResearch : true,
+      showResearch: isFundraising ? false : true,
       showCompanies: isB2B,
       showInvestors: isFundraising,
       showEnrich: isB2B,
@@ -83,7 +83,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       canAccessPersonalization,
       canAccessMeData,
       canAccessResetAccount,
-      defaultRoute: isFundraising && !canAccessResearch ? '/investors' : '/',
+      defaultRoute: isFundraising ? '/investors' : '/',
     };
   }, [primaryUse, user?.id]);
 
@@ -123,7 +123,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     if (onboardingLoading || !onboarding?.completed) return;
     if (pathname === '/login' || pathname === '/signup' || pathname === '/auth/callback' || pathname.startsWith('/reset-password')) return;
 
-    if (pathname === '/' && !routeAccess.canAccessResearch) {
+    if (pathname === '/' && routeAccess.canAccessInvestors) {
       router.replace('/investors');
       return;
     }
@@ -201,6 +201,15 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   // Show onboarding flow if needed
   if (showOnboarding) {
     return <OnboardingFlow />;
+  }
+
+  // Prevent flash of home page content while redirecting fundraising users to /investors
+  if (pathname === '/' && routeAccess.canAccessInvestors) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+      </div>
+    );
   }
 
   return (
