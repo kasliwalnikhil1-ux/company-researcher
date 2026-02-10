@@ -1,16 +1,15 @@
 /**
- * Find investors of a company using Gemini (no streaming).
+ * Find investors of a company using fashion-deep-search.
  * Accepts company name/details, returns list of [name](url) strings for use with
  * parseNameUrlListToSearchParams and search_investors (p_domains, p_linkedin_urls).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-const MODEL_ID = process.env.GEMINI_MODEL_ID || 'gemini-3-flash-preview';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent`;
+const FASHION_DEEP_SEARCH_URL = 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
 const RETRIES = 3;
-const RETRY_BACKOFF_MS = 1500;
+const RETRY_BACKOFF_MS = 2000;
+const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 520, 521, 522, 523, 524];
 
 function buildPrompt(companyInput: string): string {
   return `Find all investors of "${companyInput}"
@@ -31,11 +30,40 @@ function extractJsonFromText(text: string): string {
   return trimmed;
 }
 
-export async function POST(request: NextRequest) {
-  if (!GEMINI_API_KEY) {
-    return NextResponse.json({ error: 'GEMINI_API_KEY is not configured' }, { status: 500 });
-  }
+/** Normalise an investor string into [name](url) markdown-link format.
+ *  Handles variants the model may return:
+ *    "Accel (https://www.accel.com)"  →  "[Accel](https://www.accel.com)"
+ *    "[Accel](https://www.accel.com)" →  kept as-is
+ */
+function normalizeInvestorFormat(s: string): string {
+  const t = s.trim();
+  // Already in [name](url) format
+  if (/^\[.+\]\(.+\)$/.test(t)) return t;
+  // Convert "name (url)" → "[name](url)"
+  const match = t.match(/^(.+?)\s*\((https?:\/\/[^)]+)\)$/);
+  if (match) return `[${match[1].trim()}](${match[2].trim()})`;
+  return t;
+}
 
+/** Extract text content from fashion-deep-search response (may come in various formats) */
+function extractDeepSearchText(data: unknown): string {
+  if (typeof data === 'string') return data;
+  if (!data || typeof data !== 'object') return '';
+  const obj = data as Record<string, unknown>;
+  if (obj.data) {
+    return typeof obj.data === 'string' ? obj.data : JSON.stringify(obj.data);
+  }
+  const literalKey = 'The response text from deep research is...';
+  if (obj[literalKey]) return String(obj[literalKey]);
+  const keys = Object.keys(obj);
+  const textKey = keys.find((k) =>
+    k.toLowerCase().includes('response') || k.toLowerCase().includes('text') || k.toLowerCase().includes('content')
+  );
+  if (textKey) return String(obj[textKey] || '');
+  return String(obj.result || obj.output || JSON.stringify(obj));
+}
+
+export async function POST(request: NextRequest) {
   let body: { company?: string };
   try {
     body = await request.json();
@@ -50,61 +78,37 @@ export async function POST(request: NextRequest) {
   console.log('[find-company-investors] request', { company: companyInput });
 
   const prompt = buildPrompt(companyInput);
-  const requestBody = {
-    contents: [
-      {
-        role: 'user',
-        parts: [{ text: prompt }],
-      },
-    ],
-    generationConfig: {
-      thinkingConfig: {
-        thinkingLevel: 'HIGH',
-      },
-      responseMimeType: 'application/json',
-    },
-    tools: [{ urlContext: {} }],
-  };
-
-  const url = `${GEMINI_URL}?key=${encodeURIComponent(GEMINI_API_KEY)}`;
   let lastError: string = '';
 
   for (let attempt = 1; attempt <= RETRIES; attempt++) {
     try {
-      const res = await fetch(url, {
+      console.log(`[find-company-investors] fashion-deep-search attempt ${attempt}/${RETRIES}`);
+      const res = await fetch(FASHION_DEEP_SEARCH_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(90000),
+        body: JSON.stringify({ input: prompt }),
+        signal: AbortSignal.timeout(120000),
       });
 
       if (!res.ok) {
         const errText = await res.text();
-        lastError = `Gemini API ${res.status}: ${errText.slice(0, 300)}`;
-        if (attempt < RETRIES) {
-          await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * attempt));
+        lastError = `Deep Search API ${res.status}: ${errText.slice(0, 300)}`;
+        if (attempt < RETRIES && RETRYABLE_STATUS_CODES.includes(res.status)) {
+          const backoffMs = RETRY_BACKOFF_MS * Math.pow(2, attempt - 1);
+          console.log(`[find-company-investors] Retrying in ${backoffMs}ms...`);
+          await new Promise((r) => setTimeout(r, backoffMs));
           continue;
         }
         return NextResponse.json({ error: lastError }, { status: 502 });
       }
 
-      const data = await res.json();
-      const candidates = data.candidates || [];
-      if (candidates.length === 0) {
-        lastError = 'No candidates in Gemini response';
-        if (attempt < RETRIES) {
-          await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * attempt));
-          continue;
-        }
-        return NextResponse.json({ error: lastError }, { status: 502 });
-      }
-
-      const parts = candidates[0].content?.parts || [];
-      const rawText = (parts[0]?.text || '').trim();
+      const deepSearchData = await res.json();
+      const rawText = extractDeepSearchText(deepSearchData);
       if (!rawText) {
-        lastError = 'Empty content in Gemini response';
+        lastError = 'Empty content in Deep Search response';
         if (attempt < RETRIES) {
-          await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * attempt));
+          const backoffMs = RETRY_BACKOFF_MS * Math.pow(2, attempt - 1);
+          await new Promise((r) => setTimeout(r, backoffMs));
           continue;
         }
         return NextResponse.json({ error: lastError }, { status: 502 });
@@ -113,14 +117,17 @@ export async function POST(request: NextRequest) {
       const jsonStr = extractJsonFromText(rawText);
       const parsed = JSON.parse(jsonStr) as { investors?: unknown };
       const list = Array.isArray(parsed.investors)
-        ? parsed.investors.filter((x): x is string => typeof x === 'string')
+        ? parsed.investors
+            .filter((x): x is string => typeof x === 'string')
+            .map(normalizeInvestorFormat)
         : [];
       console.log('[find-company-investors] success', { company: companyInput, investorsCount: list.length, investors: list });
       return NextResponse.json({ investors: list });
     } catch (e) {
       lastError = e instanceof Error ? e.message : String(e);
       if (attempt < RETRIES) {
-        await new Promise((r) => setTimeout(r, RETRY_BACKOFF_MS * attempt));
+        const backoffMs = RETRY_BACKOFF_MS * Math.pow(2, attempt - 1);
+        await new Promise((r) => setTimeout(r, backoffMs));
         continue;
       }
       return NextResponse.json({ error: lastError }, { status: 502 });

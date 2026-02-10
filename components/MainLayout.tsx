@@ -10,7 +10,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
 import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
@@ -63,14 +63,12 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   const routeAccess = useMemo(() => {
     const isFundraising = primaryUse === 'fundraising';
     const isB2B = primaryUse === 'b2b';
-    const canAccessResearch = isFundraising
-      ? RESEARCH_ALLOWED_USER_IDS.has(user?.id ?? '')
-      : true;
+    const canAccessResearch = RESEARCH_ALLOWED_USER_IDS.has(user?.id ?? '');
     const canAccessPersonalization = PERSONALIZATION_ALLOWED_USER_IDS.has(user?.id ?? '');
     const canAccessMeData = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
     const canAccessResetAccount = isFundraising && RESET_ACCOUNT_ALLOWED_USER_IDS.has(user?.id ?? '');
     return {
-      showResearch: isFundraising ? false : true,
+      showResearch: canAccessResearch,
       showCompanies: isB2B,
       showInvestors: isFundraising,
       showEnrich: isB2B,
@@ -88,8 +86,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }, [primaryUse, user?.id]);
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
-  // me-data and me-data-prospects are accessible irrespective of onboarding
-  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects';
+  // me-data, me-data-prospects, and data-pipelines are accessible irrespective of onboarding
+  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines';
   const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute;
 
   // Detect mobile screen size
@@ -123,7 +121,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     if (onboardingLoading || !onboarding?.completed) return;
     if (pathname === '/login' || pathname === '/signup' || pathname === '/auth/callback' || pathname.startsWith('/reset-password')) return;
 
-    if (pathname === '/' && routeAccess.canAccessInvestors) {
+    if (pathname === '/' && routeAccess.canAccessInvestors && !routeAccess.canAccessResearch) {
       router.replace('/investors');
       return;
     }
@@ -143,7 +141,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.replace(routeAccess.defaultRoute);
       return;
     }
-    if ((pathname === '/me-data' || pathname === '/me-data-prospects') && !routeAccess.canAccessMeData) {
+    if (pathname === '/new-fundings' && !routeAccess.canAccessInvestors) {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
+    if ((pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines') && !routeAccess.canAccessMeData) {
       router.replace(routeAccess.defaultRoute);
       return;
     }
@@ -204,7 +206,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
   }
 
   // Prevent flash of home page content while redirecting fundraising users to /investors
-  if (pathname === '/' && routeAccess.canAccessInvestors) {
+  if (pathname === '/' && routeAccess.canAccessInvestors && !routeAccess.canAccessResearch) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
@@ -316,18 +318,32 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           )}
 
           {routeAccess.showInvestors && (
-            <Link
-              href="/investors"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/investors')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Investors"
-            >
-              <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Investors</span>}
-            </Link>
+            <>
+              <Link
+                href="/investors"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/investors')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Investors"
+              >
+                <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Investors</span>}
+              </Link>
+              <Link
+                href="/new-fundings"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/new-fundings')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="New Fundings"
+              >
+                <Banknote className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>New Fundings</span>}
+              </Link>
+            </>
           )}
           
           {routeAccess.showEnrich && (
@@ -463,6 +479,18 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               >
                 <Users className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
                 {(!isCollapsed || isMobile) && <span>ME Prospects</span>}
+              </Link>
+              <Link
+                href="/data-pipelines"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/data-pipelines')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Data Updation Pipelines"
+              >
+                <Wrench className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Data Pipelines</span>}
               </Link>
             </>
           )}

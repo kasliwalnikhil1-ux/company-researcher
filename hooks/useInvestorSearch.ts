@@ -192,11 +192,24 @@ function buildRpcParams(
   if (filters.investor_fit.length > 0) {
     params.p_investor_fit = filters.investor_fit;
   }
-  if (filters.domains?.length) {
-    params.p_domains = filters.domains;
-  }
-  if (filters.linkedin_urls?.length) {
-    params.p_linkedin_urls = filters.linkedin_urls;
+  // When both domains and linkedin_urls are provided (e.g. from find-company-investors),
+  // only pass the relevant filter based on investor type. The SQL uses AND between
+  // p_domains and p_linkedin_urls, so passing both requires every row to match BOTH
+  // conditions — firms (with domain but no matching linkedin) and people (with linkedin
+  // but no matching domain) would all be excluded. Split by type to get OR semantics.
+  if (filters.domains?.length && filters.linkedin_urls?.length) {
+    if (filters.type === 'firm') {
+      params.p_domains = filters.domains;
+    } else {
+      params.p_linkedin_urls = filters.linkedin_urls;
+    }
+  } else {
+    if (filters.domains?.length) {
+      params.p_domains = filters.domains;
+    }
+    if (filters.linkedin_urls?.length) {
+      params.p_linkedin_urls = filters.linkedin_urls;
+    }
   }
   if (excludeInvestors?.domains?.length) {
     params.p_exclude_domains = excludeInvestors.domains;

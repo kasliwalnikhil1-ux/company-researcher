@@ -32,6 +32,71 @@ async function sendSlackNotification(message: string): Promise<void> {
   }
 }
 
+// Helper function to upsert into not_an_investor table
+// status: null/empty for "not an investor" classification, "error" for processing errors
+async function upsertNotAnInvestor(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  domain: string | null,
+  linkedinUrl: string | null,
+  status: string | null
+): Promise<void> {
+  try {
+    if (!domain && !linkedinUrl) return;
+
+    // Check if a row already exists by domain or linkedin_url
+    let existingId: string | null = null;
+
+    if (domain) {
+      const { data } = await supabase
+        .from('not_an_investor')
+        .select('id')
+        .eq('domain', domain)
+        .limit(1)
+        .maybeSingle();
+      existingId = data?.id || null;
+    }
+
+    if (!existingId && linkedinUrl) {
+      const { data } = await supabase
+        .from('not_an_investor')
+        .select('id')
+        .eq('linkedin_url', linkedinUrl)
+        .limit(1)
+        .maybeSingle();
+      existingId = data?.id || null;
+    }
+
+    if (existingId) {
+      // Update existing row - merge domain/linkedin_url if newly available
+      const updateData: Record<string, unknown> = { status: status || null };
+      if (domain) updateData.domain = domain;
+      if (linkedinUrl) updateData.linkedin_url = linkedinUrl;
+      const { error } = await supabase.from('not_an_investor').update(updateData).eq('id', existingId);
+      if (error) {
+        console.error('[investor-research] Failed to update not_an_investor:', error.message);
+      } else {
+        console.log('[investor-research] Updated not_an_investor:', existingId, '| status:', status || '(empty)');
+      }
+    } else {
+      // Insert new row
+      const { error } = await supabase.from('not_an_investor').insert({
+        id: randomUUID(),
+        domain: domain || null,
+        linkedin_url: linkedinUrl || null,
+        status: status || null,
+      });
+      if (error) {
+        console.error('[investor-research] Failed to insert not_an_investor:', error.message);
+      } else {
+        console.log('[investor-research] Inserted not_an_investor:', domain || linkedinUrl, '| status:', status || '(empty)');
+      }
+    }
+  } catch (e) {
+    console.error('[investor-research] Error upserting not_an_investor:', e);
+  }
+}
+
 // Helper function to add failed investor to missing_investors table
 async function addToMissingInvestors(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,7 +153,7 @@ Use structured sections and keep the analysis concise but thorough.
 For each section, give links for citations to ensure 100% correct information
 Give a high-quality answer.`;
 
-const STEP3_SYSTEM_MESSAGE = `Convert the following investor profile into a structured JSON object using the schema below.
+export const STEP3_SYSTEM_MESSAGE = `Convert the following investor profile into a structured JSON object using the schema below.
 
 Rules:
 Use null if a field cannot be confidently inferred.
@@ -100,7 +165,7 @@ If multiple values apply, include all of them.
 Use accurate text.
 Output valid JSON only`;
 
-function buildStep3Schema(isPerson: boolean): string {
+export function buildStep3Schema(isPerson: boolean): string {
   const personFields = isPerson
     ? '  "role": "",\n  "current_firm": "",\n  "work_experience_orgs": [],\n  "education_orgs": [],\n'
     : '  "current_firm": "",\n';
@@ -138,7 +203,7 @@ function buildStep3Schema(isPerson: boolean): string {
     'hq_state, hq_country: as per ISO 3166-2 standard\n' +
     'investment_stages: pick all those that apply to the investor "pre-seed","seed","post-seed","series-a","series-b","series-c","growth","late-stage","pre-ipo","public-equity","angel"\n' +
     'investment_industries: pick all those that apply to the investor "artificial-intelligence","machine-learning","healthtech","biotech","digital-health","mental-health","wellness","longevity","fitness","consumer-health","medtech","pharma","genomics","bioinformatics","neuroscience","consumer-tech","enterprise-software","saas","vertical-saas","developer-tools","productivity","collaboration","fintech","payments","lending","credit","insurtech","regtech","wealthtech","climate-tech","energy","clean-energy","carbon-removal","sustainability","web3","blockchain","crypto","defi","nft","social-platforms","marketplaces","creator-economy","edtech","hr-tech","future-of-work","mobility","transportation","autonomous-vehicles","robotics","hardware","deep-tech","semiconductors","data-infrastructure","cloud-infrastructure","devops","cybersecurity","security","privacy","identity","digital-identity","consumer-internet","ecommerce","retail-tech","proptech","real-estate","construction-tech","smart-cities","supply-chain","logistics","manufacturing","industrial-tech","agtech","foodtech","gaming","esports","media","entertainment","music-tech","sports-tech","travel-tech","hospitality","martech","adtech","legal-tech","govtech","defense-tech","space-tech","aerospace","iot","edge-computing","network-effects"\n' +
-    'investment_geographies: as per ISO 3166-2 standard\n' +
+    'investment_geographies: Summarize by country ISO codes (e.g. US, GB, IN) where possible, otherwise by region: MENA, APAC, LATAM, EMEA, North America, Sub-Saharan Africa\n' +
     'investment_thesis: Precise criteria to qualify, starts with Invests in....\n' +
     'notable_investments and coinvestors: list of strings in format [name](url)\n' +
     'tier: A|B|C - Grade this investor A, B, or C based on how popular, reputable, helpful, strong network, and founder-friendly they are\n' +
@@ -284,37 +349,59 @@ async function callDeepSearchWithRetry(
   throw { status: lastError?.status || 500, text: lastError?.text || 'Max retries exceeded', retryable: true };
 }
 
-// Parse [name](url) format into { name, url }
-function parseNameUrlFormat(s: string | null | undefined): { name: string; url: string } | null {
+// Parse [name](url) or name (url) format into { name, url }
+export function parseNameUrlFormat(s: string | null | undefined): { name: string; url: string } | null {
   if (!s || typeof s !== 'string') return null;
-  const m = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(s.trim());
-  if (!m) return null;
-  const name = (m[1] || '').trim();
-  const url = (m[2] || '').trim();
-  return name || url ? { name, url } : null;
+  const t = s.trim();
+  // [name](url) markdown-link format
+  const md = /^\[([^\]]*)\]\(([^)]*)\)$/.exec(t);
+  if (md) {
+    const name = (md[1] || '').trim();
+    const url = (md[2] || '').trim();
+    return name || url ? { name, url } : null;
+  }
+  // name (url) parenthesised format (Gemini sometimes returns this)
+  const paren = /^(.+?)\s*\((https?:\/\/[^)]+)\)$/.exec(t);
+  if (paren) {
+    const name = (paren[1] || '').trim();
+    const url = (paren[2] || '').trim();
+    return name || url ? { name, url } : null;
+  }
+  return null;
 }
 
-// Extract URLs from notable_investments in format [name](url)
+// Extract URLs from notable_investments in format [name](url) or name (url)
 function extractDomainsFromNotableInvestments(notableInvestments: string[] | null): string[] {
   if (!Array.isArray(notableInvestments) || notableInvestments.length === 0) return [];
-  const re = /\[([^\]]*)\]\(([^)]*)\)/g;
+  const mdRe = /\[([^\]]*)\]\(([^)]*)\)/g;
+  const parenRe = /^(.+?)\s*\((https?:\/\/[^)]+)\)$/;
   const urls = new Set<string>();
   for (const s of notableInvestments) {
     if (typeof s !== 'string') continue;
+    // Try [name](url) markdown-link format (can appear multiple times)
     let m: RegExpExecArray | null;
-    re.lastIndex = 0;
-    while ((m = re.exec(s)) !== null) {
+    mdRe.lastIndex = 0;
+    let matched = false;
+    while ((m = mdRe.exec(s)) !== null) {
+      matched = true;
       const url = (m[2] || '').trim();
       if (!url) continue;
-      const normalized = url.startsWith('http') ? url : `https://${url}`;
-      urls.add(normalized);
+      urls.add(url.startsWith('http') ? url : `https://${url}`);
+    }
+    // Fallback: try name (url) parenthesised format
+    if (!matched) {
+      const pm = parenRe.exec(s.trim());
+      if (pm) {
+        const url = (pm[2] || '').trim();
+        if (url) urls.add(url.startsWith('http') ? url : `https://${url}`);
+      }
     }
   }
   return [...urls];
 }
 
 // Normalize URL for comparison (origin + normalized path)
-function normalizeUrlForCompare(url: string | null | undefined): string | null {
+export function normalizeUrlForCompare(url: string | null | undefined): string | null {
   if (!url || typeof url !== 'string') return null;
   const s = url.trim();
   if (!s) return null;
@@ -587,6 +674,7 @@ export async function POST(req: NextRequest) {
       );
       // Add to missing_investors table
       await addToMissingInvestors(supabase, input, cleaned, type, 'exa_api', `Status ${status}: ${errText}`);
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'exa-api-error');
       return NextResponse.json(
         { error: 'Exa API failed', details: errText },
         { status: status >= 500 ? 502 : 400 }
@@ -602,6 +690,7 @@ export async function POST(req: NextRequest) {
       );
       // Add to missing_investors table
       await addToMissingInvestors(supabase, input, cleaned, type, 'exa_no_results', 'No results returned from Exa API');
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'exa-no-results');
       return NextResponse.json(
         { error: 'No results from Exa API', cleaned },
         { status: 502 }
@@ -664,9 +753,10 @@ export async function POST(req: NextRequest) {
       existingId = data?.id || null;
     }
 
-    // Non-investor: skip entirely (do not add to database)
+    // Non-investor: skip entirely (do not add to database), but track in not_an_investor table
     if (!isInvestor) {
       console.log('[investor-research] Non-investor: skipping:', { cleaned, entityType, cleanName });
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, null);
       return NextResponse.json({
         skipped: true,
         reason: 'not_investor',
@@ -693,6 +783,7 @@ export async function POST(req: NextRequest) {
         sendSlackNotification(`❌ Investor Research - Database Update Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${updErr.message}`).catch(
           (err) => console.error('Failed to send Slack notification:', err)
         );
+        await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'db-update-error');
         return NextResponse.json({ error: 'Failed to update investor', details: updErr.message }, { status: 500 });
       }
     } else {
@@ -705,6 +796,7 @@ export async function POST(req: NextRequest) {
         sendSlackNotification(`❌ Investor Research - Database Insert Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${insErr.message}`).catch(
           (err) => console.error('Failed to send Slack notification:', err)
         );
+        await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'db-insert-error');
         return NextResponse.json({ error: 'Failed to insert investor', details: insErr.message }, { status: 500 });
       }
     }
@@ -735,6 +827,7 @@ export async function POST(req: NextRequest) {
       );
       // Add to missing_investors table
       await addToMissingInvestors(supabase, input, cleaned, type, 'deep_search_api', `Status ${status}: ${errText.substring(0, 500)}`);
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'deep-search-error');
       return NextResponse.json(
         { error: 'Deep search API failed', details: errText.substring(0, 1000) },
         { status: status >= 500 ? 502 : 400 }
@@ -766,6 +859,7 @@ export async function POST(req: NextRequest) {
       );
       // Add to missing_investors table
       await addToMissingInvestors(supabase, input, cleaned, type, 'deep_search_invalid_response', 'Could not extract deep research text from response');
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'deep-search-invalid-response');
       return NextResponse.json(
         { error: 'Invalid deep search response format', details: deepSearchData },
         { status: 502 }
@@ -793,6 +887,7 @@ export async function POST(req: NextRequest) {
       // Add to missing_investors table
       const extractionErrMsg = typeof extracted.error === 'string' ? extracted.error : JSON.stringify(extracted.error);
       await addToMissingInvestors(supabase, input, cleaned, type, 'extraction_error', extractionErrMsg);
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'extraction-error');
       return NextResponse.json(
         { error: 'Structured extraction failed', details: extracted.error },
         { status: 500 }
@@ -860,6 +955,7 @@ export async function POST(req: NextRequest) {
       sendSlackNotification(`❌ Investor Research - Database Final Update Error\nInput: ${cleaned}\nInvestor: ${cleanName}\nError: ${finalUpdErr.message}`).catch(
         (err) => console.error('Failed to send Slack notification:', err)
       );
+      await upsertNotAnInvestor(supabase, domain, linkedinUrl, 'db-final-update-error');
       return NextResponse.json({ error: 'Failed to update investor with deep research', details: finalUpdErr.message }, { status: 500 });
     }
 
@@ -920,6 +1016,9 @@ export async function POST(req: NextRequest) {
     }
 
     // --- Person flow: get firm, lookup or research, create affiliation ---
+    // Track firm info for contact fetching after Person flow
+    let personFlowFirmId: string | null = null;
+    let personFlowFirmDomain: string | null = null;
     // Skip if: (1) already researching firm from person (infinite loop prevention), or (2) affiliateWithFirmId is provided (we already know the firm)
     if (entityType === 'Person' && researchContext === 'firm_from_person') {
       console.log('[investor-research] Person flow: skipped (researchContext=firm_from_person, infinite loop prevention)');
@@ -978,8 +1077,13 @@ export async function POST(req: NextRequest) {
           
           const firmData = await firmRes.json();
           const firmInvestorId = firmData?.investor_id;
-          console.log('[investor-research] Person flow: firm research result:', { firmInvestorId, error: firmData?.error, research_status: firmData?.research_status });
-          if (firmInvestorId && !firmData?.error && !firmData?.skipped) {
+          console.log('[investor-research] Person flow: firm research result:', { firmInvestorId, error: firmData?.error, research_status: firmData?.research_status, skipped: firmData?.skipped });
+          if (firmInvestorId && !firmData?.error) {
+            // Only fetch firm contacts when the firm is newly added (not already in DB)
+            if (!firmData?.skipped) {
+              personFlowFirmId = firmInvestorId;
+              personFlowFirmDomain = firmDomainForRpc;
+            }
             const { data: existingAff } = await supabase
               .from('investor_affiliations')
               .select('id')
@@ -1013,6 +1117,59 @@ export async function POST(req: NextRequest) {
       }
     } else if (entityType === 'Person' && researchContext !== 'firm_from_person' && !affiliateWithFirmId && !currentFirmParsed?.url) {
       console.log('[investor-research] Person flow: skipped (no current_firm in Step 3)');
+    }
+
+    // --- Person flow: fetch all contacts for the affiliated firm ---
+    if (entityType === 'Person' && personFlowFirmId && personFlowFirmDomain && !PAUSE_CONTACTS && researchContext !== 'firm_from_person') {
+      console.log('[investor-research] Person flow: fetching contacts for firm domain:', personFlowFirmDomain);
+      try {
+        const investorSearchRes = await fetch(INVESTOR_SEARCH_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain: personFlowFirmDomain }),
+        });
+        if (investorSearchRes.ok) {
+          const investorSearchData = await investorSearchRes.json();
+          const contacts = Array.isArray(investorSearchData?.results) ? investorSearchData.results : [];
+          console.log('[investor-research] Person flow: got', contacts.length, 'contacts from investor-search for firm');
+          const contactsPending: { input: string; affiliateContactEmail?: string; full_name?: string }[] = [];
+          for (const contact of contacts) {
+            const contactLinkedIn = contact?.linkedin_url;
+            if (!contactLinkedIn || typeof contactLinkedIn !== 'string') {
+              console.log('[investor-research] Person flow: skipping contact (no linkedin_url):', contact?.full_name || contact?.person_id);
+              continue;
+            }
+            // Skip the current person being researched (avoid re-researching self)
+            const contactLinkedInCleaned = cleanInvestorInput(contactLinkedIn).linkedinUrl;
+            if (contactLinkedInCleaned && linkedinUrl && contactLinkedInCleaned === linkedinUrl) {
+              console.log('[investor-research] Person flow: skipping self in contacts:', contactLinkedInCleaned);
+              continue;
+            }
+            const linkedInInput = contactLinkedIn.startsWith('http') ? contactLinkedIn : `https://www.linkedin.com/${contactLinkedIn.replace(/^\//, '')}`;
+            const affiliateContactEmail = contact?.email && contact?.email_status === 'verified' ? contact.email : undefined;
+            contactsPending.push({
+              input: linkedInInput,
+              affiliateContactEmail,
+              full_name: contact?.full_name,
+            });
+          }
+          if (contactsPending.length > 0) {
+            contactsPendingResponse = { firm_id: personFlowFirmId, contacts: contactsPending };
+            console.log('[investor-research] Person flow: returning', contactsPending.length, 'contacts for frontend to process');
+          }
+        } else {
+          console.log('[investor-research] Person flow: investor-search failed', investorSearchRes.status);
+        }
+      } catch (e) {
+        let errMsg = e instanceof Error ? e.message : String(e);
+        const errCause = e instanceof Error && 'cause' in e ? e.cause : undefined;
+        if (errCause instanceof Error) {
+          errMsg += ` | Cause: ${errCause.message}`;
+        }
+        console.error('[investor-research] Person flow: investor-search error:', errMsg);
+      }
+    } else if (entityType === 'Person' && personFlowFirmId && personFlowFirmDomain && PAUSE_CONTACTS) {
+      console.log('[investor-research] Person flow: contacts fetching skipped (PAUSE_CONTACTS=true)');
     }
 
     // Fire-and-forget founder-search for all notable investment domains
@@ -1104,21 +1261,22 @@ export async function POST(req: NextRequest) {
     sendSlackNotification(`❌ Investor Research - Unexpected Error\nError: ${fullMsg}`).catch(
       (slackErr) => console.error('Failed to send Slack notification:', slackErr)
     );
-    // Try to add to missing_investors if we have the required info
+    // Try to add to missing_investors and not_an_investor if we have the required info
     try {
       const body = await req.clone().json().catch(() => null);
       const inputForMissing = body?.input;
       if (inputForMissing && typeof inputForMissing === 'string') {
-        const { cleaned: cleanedForMissing, type: typeForMissing } = cleanInvestorInput(inputForMissing);
+        const { cleaned: cleanedForMissing, type: typeForMissing, domain: domainForMissing, linkedinUrl: linkedinUrlForMissing } = cleanInvestorInput(inputForMissing);
         if (cleanedForMissing) {
           const supabaseForMissing = getSupabaseClient();
           if (supabaseForMissing) {
             await addToMissingInvestors(supabaseForMissing, inputForMissing, cleanedForMissing, typeForMissing, 'unexpected_error', fullMsg);
+            await upsertNotAnInvestor(supabaseForMissing, domainForMissing, linkedinUrlForMissing, 'unexpected-error');
           }
         }
       }
     } catch (missingErr) {
-      console.error('[investor-research] Failed to add to missing_investors in catch block:', missingErr);
+      console.error('[investor-research] Failed to add to missing_investors/not_an_investor in catch block:', missingErr);
     }
     return NextResponse.json({ error: 'Investor research failed', details: fullMsg }, { status: 500 });
   }

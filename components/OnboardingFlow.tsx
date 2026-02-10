@@ -9,8 +9,14 @@ import { SectorSelector, SECTORS } from '@/components/ui/SectorSelector';
 import { Sparkles } from '@/components/ui/Sparkles';
 import { AutoResizeTextarea } from '@/components/ui/AutoResizeTextarea';
 
+// Regions aligned with investor-research route (investment_geographies)
+const GEOGRAPHY_REGIONS = [
+  'North America', 'MENA', 'APAC', 'LATAM', 'EMEA', 'Sub-Saharan Africa',
+];
+
 // Comprehensive country list
 const COUNTRIES = [
+  ...GEOGRAPHY_REGIONS,
   'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany', 'France', 'India',
   'Japan', 'China', 'Brazil', 'Mexico', 'Spain', 'Italy', 'Netherlands', 'Sweden',
   'Switzerland', 'Singapore', 'South Korea', 'Israel', 'United Arab Emirates', 'Saudi Arabia',

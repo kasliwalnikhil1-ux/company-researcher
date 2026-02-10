@@ -94,6 +94,9 @@ const GEOGRAPHY_REGION_LABELS: Record<string, string> = {
   LATAM: 'Latin America',
   APAC: 'Asia-Pacific',
   EMEA: 'Europe, Middle East & Africa',
+  MENA: 'Middle East & North Africa',
+  'North America': 'North America',
+  'Sub-Saharan Africa': 'Sub-Saharan Africa',
 };
 
 /**

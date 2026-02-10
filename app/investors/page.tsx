@@ -178,7 +178,7 @@ const INDUSTRY_OPTIONS = [
   'network-effects',
 ];
 
-// ISO 3166-2: country codes (alpha-2) and common subdivisions
+// ISO country codes (alpha-2) and regions aligned with investor-research route
 const GEOGRAPHY_OPTIONS = [
   'US',
   'GB',
@@ -200,10 +200,18 @@ const GEOGRAPHY_OPTIONS = [
   'BR',
   'MX',
   'ZA',
+  'AE',
+  'SA',
+  'NG',
+  'KE',
+  'EG',
   'EU',
-  'LATAM',
+  'North America',
+  'MENA',
   'APAC',
+  'LATAM',
   'EMEA',
+  'Sub-Saharan Africa',
 ];
 
 const ROLE_OPTIONS = [
@@ -267,7 +275,11 @@ function storedToFilters(stored: StoredInvestorFilters | null): Partial<Investor
     partial.investment_stages = Array.isArray(stage) ? [...stage] : [stage];
   }
   if (stored.step8?.hqCountry?.trim()) {
-    const resolved = resolveCountryInput(stored.step8.hqCountry.trim());
+    const hq = stored.step8.hqCountry.trim();
+    // Region names (MENA, APAC, etc.) pass through as-is; country names resolve to ISO code
+    const REGION_NAMES = ['North America', 'MENA', 'APAC', 'LATAM', 'EMEA', 'Sub-Saharan Africa'];
+    const regionMatch = REGION_NAMES.find(r => r.toLowerCase() === hq.toLowerCase());
+    const resolved = regionMatch || resolveCountryInput(hq);
     if (resolved) partial.investment_geographies = [resolved];
   }
   if (stored.step11?.lookingToRaiseFrom?.length) partial.investor_type = [...stored.step11.lookingToRaiseFrom];
@@ -301,7 +313,10 @@ function filtersToStored(filters: InvestorSearchFilters): StoredInvestorFilters 
   if (filters.investment_stages?.length) stored.step7 = { stage: [...filters.investment_stages] };
   if (filters.investment_geographies?.length) {
     const geo = filters.investment_geographies[0].trim();
-    stored.step8 = { hqCountry: getCountryName(geo) || geo };
+    // Region names (MENA, APAC, etc.) pass through as-is; ISO codes convert to country name
+    const REGION_NAMES = ['North America', 'MENA', 'APAC', 'LATAM', 'EMEA', 'Sub-Saharan Africa'];
+    const regionMatch = REGION_NAMES.find(r => r.toLowerCase() === geo.toLowerCase());
+    stored.step8 = { hqCountry: regionMatch || getCountryName(geo) || geo };
   }
   stored.step10 = {};
   if (filters.investor_type?.length) stored.step11 = { lookingToRaiseFrom: [...filters.investor_type] };
@@ -1115,6 +1130,27 @@ function InvestorsContent() {
     }
     hasAppliedOnboardingFallback.current = true;
   }, [onboarding]);
+
+  // Pick up pending coinvestor search from another page (e.g. New Fundings)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = localStorage.getItem('new-fundings-coinvestor-search');
+    if (!raw) return;
+    localStorage.removeItem('new-fundings-coinvestor-search');
+    try {
+      const { investors, companyName } = JSON.parse(raw) as { investors: string[]; companyName: string };
+      if (Array.isArray(investors) && investors.length > 0) {
+        const { domains, linkedin_urls } = parseNameUrlListToSearchParams(investors);
+        if (domains.length > 0 || linkedin_urls.length > 0) {
+          setFilters((prev) => ({ ...prev, name: '', domains, linkedin_urls }));
+          setLocalSearchInput('');
+          setCoInvestorsChipLabel(`Investors of ${companyName}`);
+        }
+      }
+    } catch {
+      // ignore malformed data
+    }
+  }, []);
 
   // Persist filters to localStorage when user changes them (excluding debounced name)
   useEffect(() => {
