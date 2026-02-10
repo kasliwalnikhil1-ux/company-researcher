@@ -1896,6 +1896,7 @@ interface UnverifiedEmailInvestor {
   linkedin_url: string | null;
   email: string | null;
   email_verified: boolean | null;
+  firm_domain: string | null;
 }
 
 interface UnverifiedEmailRow {
@@ -1906,6 +1907,7 @@ interface UnverifiedEmailRow {
   linkedin_url: string;
   email: string;
   email_verified: string;
+  firm_domain: string;
 }
 
 function UnverifiedEmailsTool() {
@@ -1961,6 +1963,7 @@ function UnverifiedEmailsTool() {
         const nameParts = fullName.trim().split(/\s+/);
         const firstName = nameParts[0] || '';
         const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+        const firmDomain = inv.firm_domain || '';
 
         if (!inv.email || inv.email.trim() === '') {
           // Missing email — add a row with empty email and "missing" status
@@ -1972,6 +1975,7 @@ function UnverifiedEmailsTool() {
             linkedin_url: linkedinVal,
             email: '',
             email_verified: 'missing',
+            firm_domain: firmDomain,
           });
         } else {
           // Split comma/semicolon separated emails into individual rows
@@ -1985,6 +1989,7 @@ function UnverifiedEmailsTool() {
               linkedin_url: linkedinVal,
               email: '',
               email_verified: 'missing',
+              firm_domain: firmDomain,
             });
           } else {
             for (const email of emails) {
@@ -1996,6 +2001,7 @@ function UnverifiedEmailsTool() {
                 linkedin_url: linkedinVal,
                 email,
                 email_verified: verifiedVal,
+                firm_domain: firmDomain,
               });
             }
           }
@@ -2013,8 +2019,8 @@ function UnverifiedEmailsTool() {
   const downloadCSV = useCallback(() => {
     if (!csvRows.length) return;
 
-    const headers = ['investor_id', 'name', 'first_name', 'last_name', 'linkedin_url', 'email', 'email_verified'];
-    const rows = csvRows.map((r) => [r.id, r.name, r.first_name, r.last_name, r.linkedin_url, r.email, r.email_verified]);
+    const headers = ['investor_id', 'name', 'first_name', 'last_name', 'firm_domain', 'linkedin_url', 'email', 'email_verified'];
+    const rows = csvRows.map((r) => [r.id, r.name, r.first_name, r.last_name, r.firm_domain, r.linkedin_url, r.email, r.email_verified]);
 
     const csvContent = [headers, ...rows]
       .map((row) =>
@@ -2160,6 +2166,9 @@ function UnverifiedEmailsTool() {
                           Name
                         </th>
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Firm Domain
+                        </th>
+                        <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           LinkedIn
                         </th>
                         <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -2181,6 +2190,20 @@ function UnverifiedEmailsTool() {
                           </td>
                           <td className="px-4 py-2 text-gray-900 text-xs font-medium">
                             {row.name || <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-2 text-gray-600 font-mono text-[11px]">
+                            {row.firm_domain ? (
+                              <a
+                                href={`https://${row.firm_domain}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                              >
+                                {row.firm_domain}
+                              </a>
+                            ) : (
+                              <span className="text-gray-300">—</span>
+                            )}
                           </td>
                           <td className="px-4 py-2">
                             {row.linkedin_url ? (

@@ -29,7 +29,7 @@ function getServiceClient() {
  * POST /api/data-pipelines/unverified-emails
  *
  * Find all investors of type 'person' whose email_verified is false or null.
- * Returns: { count, investors: { id, name, linkedin_url, email, email_verified }[] }
+ * Returns: { count, investors: { id, name, linkedin_url, email, email_verified, firm_domain }[] }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -70,9 +70,67 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch investors' }, { status: 500 });
     }
 
+    const personIds = (investors || []).map((inv) => inv.id);
+
+    // Fetch firm domains via investor_affiliations for all these person IDs
+    // person_id -> firm_id, then get domain from the firm investor row
+    const firmDomainMap = new Map<string, string>();
+
+    if (personIds.length > 0) {
+      // Batch in chunks of 500 to avoid query size limits
+      const chunkSize = 500;
+      for (let i = 0; i < personIds.length; i += chunkSize) {
+        const chunk = personIds.slice(i, i + chunkSize);
+        const { data: affiliations, error: affError } = await supabase
+          .from('investor_affiliations')
+          .select('person_id, firm_id')
+          .in('person_id', chunk);
+
+        if (affError) {
+          console.error('Failed to fetch affiliations:', affError);
+          continue;
+        }
+
+        if (affiliations && affiliations.length > 0) {
+          // Collect unique firm IDs
+          const firmIds = [...new Set(affiliations.map((a) => a.firm_id))];
+
+          // Fetch firm domains
+          const { data: firms, error: firmError } = await supabase
+            .from('investors')
+            .select('id, domain')
+            .in('id', firmIds);
+
+          if (firmError) {
+            console.error('Failed to fetch firm domains:', firmError);
+            continue;
+          }
+
+          const firmIdToDomain = new Map<string, string>();
+          for (const firm of firms || []) {
+            if (firm.domain) firmIdToDomain.set(firm.id, firm.domain);
+          }
+
+          // Map person_id -> first available firm domain
+          for (const aff of affiliations) {
+            if (!firmDomainMap.has(aff.person_id)) {
+              const domain = firmIdToDomain.get(aff.firm_id);
+              if (domain) firmDomainMap.set(aff.person_id, domain);
+            }
+          }
+        }
+      }
+    }
+
+    // Attach firm_domain to each investor
+    const investorsWithFirm = (investors || []).map((inv) => ({
+      ...inv,
+      firm_domain: firmDomainMap.get(inv.id) || null,
+    }));
+
     return NextResponse.json({
-      count: (investors || []).length,
-      investors: investors || [],
+      count: investorsWithFirm.length,
+      investors: investorsWithFirm,
     });
   } catch (error) {
     console.error('data-pipelines/unverified-emails error:', error);

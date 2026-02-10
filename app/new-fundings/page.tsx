@@ -7,6 +7,9 @@ import { supabase } from '@/utils/supabase/client';
 import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOwner } from '@/contexts/OwnerContext';
+import { usePricingModal } from '@/contexts/PricingModalContext';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /** User IDs allowed to add new fundings (same as ME_DATA_ALLOWED_USER_IDS) */
 const ADD_FUNDING_ALLOWED_USER_IDS = new Set([
@@ -147,6 +150,9 @@ export default function NewFundingsPage() {
 function NewFundingsContent() {
   const router = useRouter();
   const { user } = useAuth();
+  const { isFreePlan, plan } = useOwner();
+  const { openPricingModal, openROIModal } = usePricingModal();
+  const isLimitedPlan = isFreePlan || plan === 'basic';
   const canAddFunding = ADD_FUNDING_ALLOWED_USER_IDS.has(user?.id ?? '');
   const [fundings, setFundings] = useState<NewFunding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -154,7 +160,7 @@ function NewFundingsContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const PAGE_SIZE = 10;
+  const PAGE_SIZE = isLimitedPlan ? 3 : 10;
 
   const fetchFundings = useCallback(async () => {
     try {
@@ -286,10 +292,42 @@ function NewFundingsContent() {
                 onSearchInvestors={() => handleSearchInvestors(funding)}
               />
             ))}
+
+            {/* Free / Basic plan: skeletons + Upgrade overlay */}
+            {isLimitedPlan && filteredFundings.length > 0 && (
+              <div className="relative pt-2">
+                <div className="space-y-4">
+                  {[1, 2, 3].map((i) => (
+                    <FundingCardSkeleton key={i} />
+                  ))}
+                </div>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg">
+                  <p className="text-sm text-gray-600 text-center">
+                    Upgrade your plan to see all recently funded companies and their investors.
+                  </p>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openPricingModal()}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-brand-default hover:bg-brand-dark text-white border-2 border-brand-fainter transition-colors shadow-sm"
+                    >
+                      Upgrade Plan
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openROIModal()}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 border-2 border-gray-300 hover:border-brand-subtle transition-colors"
+                    >
+                      Why it&apos;s worth it
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
+          {/* Pagination – hidden for free/basic plans */}
+          {!isLimitedPlan && totalPages > 1 && (
             <div className="mt-6 flex items-center justify-between">
               <p className="text-sm text-gray-500">
                 Showing {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredFundings.length)} of {filteredFundings.length}
@@ -600,6 +638,49 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
               </button>
             )}
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FundingCardSkeleton() {
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm opacity-60">
+      {/* Top row */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-6 w-2/5" />
+          <Skeleton className="h-4 w-1/4" />
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <Skeleton className="h-8 w-16 rounded-full" />
+          <Skeleton className="h-8 w-28 rounded-full" />
+        </div>
+      </div>
+      {/* Description */}
+      <div className="mt-3 space-y-1.5">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+      </div>
+      {/* Founders row */}
+      <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
+        <Skeleton className="h-3 w-16" />
+        <div className="flex gap-2">
+          <Skeleton className="h-7 w-24 rounded-md" />
+          <Skeleton className="h-7 w-28 rounded-md" />
+        </div>
+      </div>
+      {/* Investors row */}
+      <div className="mt-4 pt-3 border-t border-gray-100 space-y-2">
+        <Skeleton className="h-3 w-16" />
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="h-5 w-5 rounded-full" />
+          <Skeleton className="h-4 w-32" />
+        </div>
+        <div className="flex items-center gap-2.5">
+          <Skeleton className="h-5 w-5 rounded-full" />
+          <Skeleton className="h-4 w-28" />
         </div>
       </div>
     </div>
