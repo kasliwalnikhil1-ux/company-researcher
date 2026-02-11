@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { supabase } from '@/utils/supabase/client';
-import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight, Upload, FileText } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner } from '@/contexts/OwnerContext';
@@ -392,14 +392,47 @@ function NewFundingsContent() {
    Add Funding Modal
    ═══════════════════════════════════════════════════════ */
 
+/** Parse a CSV string into an array of { domain, description } rows.
+ *  Accepts comma or tab delimiters. Expects headers containing "domain" and "description". */
+function parseCsv(text: string): { domain: string; description: string }[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return [];
+
+  // Detect delimiter (tab or comma)
+  const delimiter = lines[0].includes('\t') ? '\t' : ',';
+
+  const headers = lines[0].split(delimiter).map((h) => h.trim().toLowerCase().replace(/^["']|["']$/g, ''));
+  const domainIdx = headers.findIndex((h) => h === 'domain');
+  const descIdx = headers.findIndex((h) => h === 'description');
+
+  if (domainIdx === -1 && descIdx === -1) return [];
+
+  const rows: { domain: string; description: string }[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(delimiter).map((c) => c.trim().replace(/^["']|["']$/g, ''));
+    const domain = domainIdx !== -1 ? (cols[domainIdx] || '') : '';
+    const description = descIdx !== -1 ? (cols[descIdx] || '') : '';
+    if (domain || description) {
+      rows.push({ domain, description });
+    }
+  }
+  return rows;
+}
+
+const BATCH_SIZE = 15;
+
 function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onComplete: () => void }) {
   const nextId = useRef(1);
+  const [inputMode, setInputMode] = useState<'manual' | 'csv'>('manual');
   const [entries, setEntries] = useState<FundingEntry[]>([
     { id: String(nextId.current++), domain: '', description: '' },
   ]);
   const [results, setResults] = useState<Record<string, EntryResult>>({});
   const [isProcessing, setIsProcessing] = useState(false);
   const abortRef = useRef(false);
+  const [csvFileName, setCsvFileName] = useState<string | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addEntry = () => {
     setEntries((prev) => [...prev, { id: String(nextId.current++), domain: '', description: '' }]);
@@ -413,7 +446,76 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
     setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, [field]: value } : e)));
   };
 
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCsvError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const text = evt.target?.result;
+      if (typeof text !== 'string') {
+        setCsvError('Could not read file');
+        return;
+      }
+
+      const rows = parseCsv(text);
+      if (rows.length === 0) {
+        setCsvError('No valid rows found. Make sure your CSV has "domain" and/or "description" column headers.');
+        return;
+      }
+
+      const newEntries: FundingEntry[] = rows.map((r) => ({
+        id: String(nextId.current++),
+        domain: r.domain,
+        description: r.description,
+      }));
+      setEntries(newEntries);
+      setResults({});
+    };
+    reader.onerror = () => setCsvError('Failed to read file');
+    reader.readAsText(file);
+
+    // Reset file input so same file can be re-selected
+    e.target.value = '';
+  };
+
   const validEntries = entries.filter((e) => e.description.trim());
+
+  /** Process a single entry and update results state */
+  const processEntry = async (entry: FundingEntry, accessToken: string) => {
+    if (abortRef.current) return;
+
+    setResults((prev) => ({ ...prev, [entry.id]: { status: 'processing' } }));
+
+    try {
+      const res = await fetch('/api/new-fundings/research', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ description: entry.description.trim(), domain: entry.domain.trim() }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || res.statusText);
+      }
+
+      const body = await res.json();
+      setResults((prev) => ({
+        ...prev,
+        [entry.id]: { status: 'done', row: body.row },
+      }));
+    } catch (err) {
+      setResults((prev) => ({
+        ...prev,
+        [entry.id]: { status: 'error', error: err instanceof Error ? err.message : 'Failed' },
+      }));
+    }
+  };
 
   const handleProcess = async () => {
     if (validEntries.length === 0) return;
@@ -433,38 +535,12 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
       return;
     }
 
-    // Process entries sequentially (one Gemini call at a time to avoid rate limits)
-    for (const entry of validEntries) {
+    // Process entries in parallel batches of BATCH_SIZE
+    for (let i = 0; i < validEntries.length; i += BATCH_SIZE) {
       if (abortRef.current) break;
 
-      setResults((prev) => ({ ...prev, [entry.id]: { status: 'processing' } }));
-
-      try {
-        const res = await fetch('/api/new-fundings/research', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ description: entry.description.trim(), domain: entry.domain.trim() }),
-        });
-
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || res.statusText);
-        }
-
-        const body = await res.json();
-        setResults((prev) => ({
-          ...prev,
-          [entry.id]: { status: 'done', row: body.row },
-        }));
-      } catch (err) {
-        setResults((prev) => ({
-          ...prev,
-          [entry.id]: { status: 'error', error: err instanceof Error ? err.message : 'Failed' },
-        }));
-      }
+      const batch = validEntries.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map((entry) => processEntry(entry, session.access_token)));
     }
 
     setIsProcessing(false);
@@ -472,6 +548,7 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
 
   const doneCount = Object.values(results).filter((r) => r.status === 'done').length;
   const errorCount = Object.values(results).filter((r) => r.status === 'error').length;
+  const processingCount = Object.values(results).filter((r) => r.status === 'processing').length;
   const allDone = validEntries.length > 0 && (doneCount + errorCount) === validEntries.length && !isProcessing;
 
   return (
@@ -490,89 +567,168 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
           </button>
         </div>
 
-        {/* Body */}
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-          <p className="text-sm text-gray-500 mb-3">
-            Describe recently funded companies. We&apos;ll research each one using AI and add them to the database.
-          </p>
-
-          {entries.map((entry, idx) => {
-            const result = results[entry.id];
-            const statusIcon = result?.status === 'processing' ? (
-              <Loader2 className="w-4 h-4 animate-spin text-indigo-500 shrink-0" />
-            ) : result?.status === 'done' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            ) : result?.status === 'error' ? (
-              <div className="group relative">
-                <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                {result.error && (
-                  <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap max-w-xs truncate">
-                    {result.error}
-                  </div>
-                )}
-              </div>
-            ) : null;
-
-            return (
-              <div
-                key={entry.id}
-                className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
-                  result?.status === 'done'
-                    ? 'border-emerald-200 bg-emerald-50'
-                    : result?.status === 'error'
-                      ? 'border-red-200 bg-red-50'
-                      : result?.status === 'processing'
-                        ? 'border-indigo-200 bg-indigo-50'
-                        : 'border-gray-200 bg-white'
-                }`}
-              >
-                <span className="text-xs font-medium text-gray-400 mt-2.5 w-5 text-right shrink-0">
-                  {idx + 1}
-                </span>
-                <div className="flex-1 min-w-0 space-y-2">
-                  <input
-                    type="text"
-                    placeholder="Description (e.g. Serval is the AI-native ITSM for modern teams)"
-                    value={entry.description}
-                    onChange={(e) => updateEntry(entry.id, 'description', e.target.value)}
-                    disabled={isProcessing}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Domain (optional, e.g. company.com)"
-                    value={entry.domain}
-                    onChange={(e) => updateEntry(entry.id, 'domain', e.target.value)}
-                    disabled={isProcessing}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
-                  />
-                </div>
-                <div className="flex items-center gap-2 mt-2">
-                  {statusIcon}
-                  {!isProcessing && entries.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeEntry(entry.id)}
-                      className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                      title="Remove"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
-          {!isProcessing && !allDone && (
+        {/* Input mode tabs */}
+        {!isProcessing && !allDone && (
+          <div className="px-6 pt-4 pb-0 flex gap-1">
             <button
               type="button"
-              onClick={addEntry}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 border border-dashed border-gray-300 hover:border-indigo-300 transition-colors w-full justify-center"
+              onClick={() => setInputMode('manual')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                inputMode === 'manual'
+                  ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                  : 'text-gray-600 hover:bg-gray-100 border border-transparent'
+              }`}
             >
-              <Plus className="w-4 h-4" />
-              Add Another
+              <Plus className="w-3.5 h-3.5" />
+              Manual
             </button>
+            <button
+              type="button"
+              onClick={() => setInputMode('csv')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                inputMode === 'csv'
+                  ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                  : 'text-gray-600 hover:bg-gray-100 border border-transparent'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              CSV Upload
+            </button>
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          {/* CSV upload area */}
+          {inputMode === 'csv' && !isProcessing && !allDone && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-500">
+                Upload a CSV file with <span className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">domain</span> and <span className="font-mono text-xs bg-gray-100 px-1 py-0.5 rounded">description</span> columns.
+              </p>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="flex flex-col items-center justify-center gap-2 p-6 border-2 border-dashed border-gray-300 hover:border-indigo-400 rounded-lg cursor-pointer transition-colors bg-gray-50 hover:bg-indigo-50"
+              >
+                <FileText className="w-8 h-8 text-gray-400" />
+                <p className="text-sm text-gray-600">
+                  {csvFileName ? (
+                    <span>Loaded <span className="font-medium text-indigo-600">{csvFileName}</span></span>
+                  ) : (
+                    <span>Click to select a <span className="font-medium">.csv</span> file</span>
+                  )}
+                </p>
+                <p className="text-xs text-gray-400">Comma or tab delimited</p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv,.tsv,.txt"
+                  onChange={handleCsvUpload}
+                  className="hidden"
+                />
+              </div>
+              {csvError && (
+                <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  {csvError}
+                </div>
+              )}
+              {entries.length > 1 && csvFileName && (
+                <p className="text-xs text-gray-500">
+                  {entries.length} rows loaded from CSV. Processing in batches of {BATCH_SIZE}.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Description for manual mode */}
+          {inputMode === 'manual' && !isProcessing && !allDone && (
+            <p className="text-sm text-gray-500 mb-3">
+              Describe recently funded companies. We&apos;ll research each one using AI and add them to the database.
+            </p>
+          )}
+
+          {/* Entries list */}
+          {(inputMode === 'manual' || isProcessing || allDone || (inputMode === 'csv' && entries.length > 0 && csvFileName)) && (
+            <>
+              {entries.map((entry, idx) => {
+                const result = results[entry.id];
+                const statusIcon = result?.status === 'processing' ? (
+                  <Loader2 className="w-4 h-4 animate-spin text-indigo-500 shrink-0" />
+                ) : result?.status === 'done' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                ) : result?.status === 'error' ? (
+                  <div className="group relative">
+                    <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                    {result.error && (
+                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap max-w-xs truncate">
+                        {result.error}
+                      </div>
+                    )}
+                  </div>
+                ) : null;
+
+                return (
+                  <div
+                    key={entry.id}
+                    className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                      result?.status === 'done'
+                        ? 'border-emerald-200 bg-emerald-50'
+                        : result?.status === 'error'
+                          ? 'border-red-200 bg-red-50'
+                          : result?.status === 'processing'
+                            ? 'border-indigo-200 bg-indigo-50'
+                            : 'border-gray-200 bg-white'
+                    }`}
+                  >
+                    <span className="text-xs font-medium text-gray-400 mt-2.5 w-5 text-right shrink-0">
+                      {idx + 1}
+                    </span>
+                    <div className="flex-1 min-w-0 space-y-2">
+                      <input
+                        type="text"
+                        placeholder="Description (e.g. Serval is the AI-native ITSM for modern teams)"
+                        value={entry.description}
+                        onChange={(e) => updateEntry(entry.id, 'description', e.target.value)}
+                        disabled={isProcessing}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Domain (optional, e.g. company.com)"
+                        value={entry.domain}
+                        onChange={(e) => updateEntry(entry.id, 'domain', e.target.value)}
+                        disabled={isProcessing}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-50 disabled:text-gray-500"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      {statusIcon}
+                      {!isProcessing && entries.length > 1 && inputMode === 'manual' && (
+                        <button
+                          type="button"
+                          onClick={() => removeEntry(entry.id)}
+                          className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                          title="Remove"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {!isProcessing && !allDone && inputMode === 'manual' && (
+                <button
+                  type="button"
+                  onClick={addEntry}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 border border-dashed border-gray-300 hover:border-indigo-300 transition-colors w-full justify-center"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Another
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -581,7 +737,7 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
           <div className="text-sm text-gray-500">
             {isProcessing && (
               <span>
-                Processing {doneCount + errorCount + 1} of {validEntries.length}...
+                Processing: {processingCount} active, {doneCount + errorCount} of {validEntries.length} done (batches of {BATCH_SIZE})
               </span>
             )}
             {allDone && (
@@ -728,12 +884,12 @@ function FundingCard({
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {funding.how_much_funding != null && funding.how_much_funding > 0 && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200" title="Funding amount">
               {formatCurrency(funding.how_much_funding)}
             </span>
           )}
           {funding.funding_date && (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600" title="Funding date">
               <Calendar className="w-3.5 h-3.5" />
               {formatDate(funding.funding_date)}
             </span>
@@ -748,7 +904,7 @@ function FundingCard({
 
       {/* USP */}
       {funding.usp && (
-        <div className="mt-2 flex items-start gap-1.5">
+        <div className="mt-2 flex items-start gap-1.5" title="CapitalxAI's assessment of this business's USP">
           <Lightbulb className="w-4 h-4 text-amber-500 mt-0.5 flex-shrink-0" />
           <p className="text-sm text-gray-600 leading-relaxed">{funding.usp.trimEnd().endsWith('.') ? funding.usp : `${funding.usp.trimEnd()}.`}</p>
         </div>

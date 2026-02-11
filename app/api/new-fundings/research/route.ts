@@ -38,9 +38,15 @@ function getServiceClient() {
 function buildPrompt(description: string, domain: string): string {
   const companyInput = domain ? `${description} (${domain})` : description;
   return `${companyInput} company has recently raised funding. Research and tell me:
-Individuals or firms in format [name](url) where url is domain for firm and LinkedIn URL for individual.
 
-Founders in format [name](url) where url is LinkedIn URL for individual.
+Rules:
+- how_much_funding should be a number in USD (e.g. 5000000 for $5M)
+- funding_date should be in YYYY-MM-DD format
+- company_website should be the clean domain without https://
+- investors can be firms and individuals in format [name](url) where url is domain for firm and LinkedIn URL for individual.
+- Give all investors, from earliest to latest funding round.
+- founders in format [name](url) where url is LinkedIn URL for founder.
+
 Reply in valid JSON only:
 {
   "clean_name": str, // Company name without legal suffixes
@@ -52,14 +58,7 @@ Reply in valid JSON only:
   "founded_in_year": int like 2023,
   "investors": ["[Investor Name](url)", ...],
   "funding_date": str like "2023-01-01" for Jan 1, 2023
-}
-
-Important:
-- how_much_funding should be a number in USD (e.g. 5000000 for $5M)
-- funding_date should be in YYYY-MM-DD format
-- founders should be an array of strings in [name](linkedin_url) format
-- investors should be an array of strings in [name](url) format where url is domain for firms and LinkedIn URL for individuals
-- company_website should be the clean domain without https://`;
+}`;
 }
 
 function extractJsonFromText(text: string): string {

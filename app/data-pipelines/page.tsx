@@ -1958,7 +1958,7 @@ function UnverifiedEmailsTool() {
             ? rawLinkedin
             : `https://www.linkedin.com/${rawLinkedin.replace(/^\/+/, '')}`
           : '';
-        const verifiedVal = inv.email_verified === true ? 'true' : inv.email_verified === false ? 'false' : 'null';
+        const verifiedVal = inv.email_verified === true ? 'verified' : 'unverified';
         const fullName = inv.name || '';
         const nameParts = fullName.trim().split(/\s+/);
         const firstName = nameParts[0] || '';
@@ -2232,15 +2232,10 @@ function UnverifiedEmailsTool() {
                                 <XCircle className="w-3 h-3" />
                                 Missing
                               </span>
-                            ) : row.email_verified === 'false' ? (
+                            ) : (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-orange-50 text-orange-700">
                                 <AlertCircle className="w-3 h-3" />
                                 Unverified
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-600">
-                                <AlertCircle className="w-3 h-3" />
-                                Null
                               </span>
                             )}
                           </td>
