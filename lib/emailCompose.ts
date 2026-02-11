@@ -3,7 +3,7 @@
  */
 export type EmailSettings = {
   provider: 'gmail' | 'outlook';
-  signature: string;
+  signature?: string;
 };
 
 const DEFAULT_SIGNATURE = 'Founder Name\nCEO, Company Name';
