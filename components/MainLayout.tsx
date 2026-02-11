@@ -14,6 +14,7 @@ import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Glob
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
 import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
+import { useWhitelabel } from '@/hooks/useWhitelabel';
 
 // User IDs allowed to access /research when primaryUse is "fundraising"
 const RESEARCH_ALLOWED_USER_IDS = new Set([
@@ -41,6 +42,7 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
 
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
+  const whitelabel = useWhitelabel();
   const { selectedOwner, setSelectedOwner, availableOwners, ownerColors } = useOwner();
   const defaultOwnerStyles = { bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200' };
   const ownerStyle = ownerColors[selectedOwner] ?? defaultOwnerStyles;
@@ -264,14 +266,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : 'justify-between'}`}>
             <div className={`flex items-center ${isCollapsed && !isMobile ? '' : 'gap-2'}`}>
               <Image
-                src="/logo.png"
-                alt="CapitalxAI"
+                src={whitelabel.logoPath}
+                alt={whitelabel.sidebarTitle}
                 width={32}
                 height={32}
                 className="h-8 w-8 flex-shrink-0 object-contain"
               />
               {(!isCollapsed || isMobile) && (
-                <h1 className="text-xl font-bold text-gray-900">CapitalxAI</h1>
+                <h1 className="text-xl font-bold text-gray-900">{whitelabel.sidebarTitle}</h1>
               )}
             </div>
             {isMobile && (

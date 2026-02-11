@@ -9,6 +9,16 @@ import { OwnerProvider } from '@/contexts/OwnerContext';
 import { CountryProvider } from '@/contexts/CountryContext';
 import { OnboardingProvider } from '@/contexts/OnboardingContext';
 import { PricingModalProvider } from '@/contexts/PricingModalContext';
+import { headers } from 'next/headers';
+import {
+  getWhitelabelConfig,
+  getFaviconIcoPath,
+  getFavicon16Path,
+  getFavicon32Path,
+  getAppleTouchIconPath,
+  getOgImagePath,
+  getTwitterImagePath,
+} from '@/lib/whitelabel';
 
 // Load the ABCDiatype font (Regular and Bold only)
 const abcdDiatype = localFont({
@@ -30,31 +40,37 @@ const reckless = localFont({
 
 const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.capitalxai.com';
 
-export const metadata: Metadata = {
-  metadataBase: new URL(appUrl),
-  title: "CapitalxAI CRM",
-  description: "Instantly get detailed research insights and know everything about any company inside out.",
-  icons: {
-    icon: [
-      { url: '/favicon.ico', sizes: 'any' },
-      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-    ],
-    apple: '/apple-touch-icon.png',
-  },
-  openGraph: {
-    url: appUrl,
-    title: 'CapitalxAI CRM',
-    description: 'Instantly get detailed research insights and know everything about any company inside out.',
-    images: ['/Open%20Graph%20CapitalxAI.png'],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    title: 'CapitalxAI CRM',
-    description: 'Instantly get detailed research insights and know everything about any company inside out.',
-    images: ['/Twitter%20Banner%20CapitalxAI.png'],
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const headersList = await headers();
+  const host = headersList.get('host') ?? undefined;
+  const config = getWhitelabelConfig(host);
+
+  return {
+    metadataBase: new URL(appUrl),
+    title: config.pageTitle,
+    description: "Instantly get detailed research insights and know everything about any company inside out.",
+    icons: {
+      icon: [
+        { url: getFaviconIcoPath(config), sizes: 'any' },
+        { url: getFavicon16Path(config), sizes: '16x16', type: 'image/png' },
+        { url: getFavicon32Path(config), sizes: '32x32', type: 'image/png' },
+      ],
+      apple: getAppleTouchIconPath(config),
+    },
+    openGraph: {
+      url: appUrl,
+      title: config.pageTitle,
+      description: 'Instantly get detailed research insights and know everything about any company inside out.',
+      images: [getOgImagePath(config)],
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: config.pageTitle,
+      description: 'Instantly get detailed research insights and know everything about any company inside out.',
+      images: [getTwitterImagePath(config)],
+    },
+  };
+}
 
 export default function RootLayout({
   children,

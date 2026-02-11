@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useAuth, SIGNUP_USER_EXISTS_MESSAGE } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
+import { useWhitelabel } from '@/hooks/useWhitelabel';
 
 const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
 const CHAR_SPEED_MS = 45;
@@ -28,6 +29,7 @@ export default function Signup() {
   const cursorRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { signUp, signInWithGoogle } = useAuth();
+  const whitelabel = useWhitelabel();
 
   // Cursor blink
   useEffect(() => {
@@ -126,8 +128,8 @@ export default function Signup() {
         </div>
         <div className="relative">
           <div className="flex items-center gap-2">
-            <Image src="/logo.png" alt="CapitalxAI CRM" width={32} height={32} className="h-8 w-auto" />
-            <span className="text-xl font-semibold tracking-tight">CapitalxAI CRM</span>
+            <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={32} height={32} className="h-8 w-auto" />
+            <span className="text-xl font-semibold tracking-tight">{whitelabel.pageTitle}</span>
           </div>
         </div>
         <div className="relative space-y-4 max-w-sm">
@@ -151,7 +153,7 @@ export default function Signup() {
           </p>
         </div>
         <div className="relative text-sm text-white/60">
-          © ResourcePlan Solution Private Limited
+          {whitelabel.showCopyright ? `© ${whitelabel.companyName}` : whitelabel.companyName}
         </div>
       </div>
 
@@ -160,8 +162,8 @@ export default function Signup() {
         <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <Image src="/logo.png" alt="CapitalxAI CRM" width={28} height={28} className="h-7 w-auto" />
-            <span className="text-lg font-semibold text-gray-900 tracking-tight">CapitalxAI CRM</span>
+            <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={28} height={28} className="h-7 w-auto" />
+            <span className="text-lg font-semibold text-gray-900 tracking-tight">{whitelabel.pageTitle}</span>
           </div>
 
           <h2 className="text-2xl font-medium text-gray-900 mb-1">Create an account</h2>

@@ -32,16 +32,24 @@ function extractJsonFromText(text: string): string {
 
 /** Normalise an investor string into [name](url) markdown-link format.
  *  Handles variants the model may return:
+ *    "Accel(accel.com)"               →  "[Accel](accel.com)"
+ *    "Accel (accel.com)"              →  "[Accel](accel.com)"
  *    "Accel (https://www.accel.com)"  →  "[Accel](https://www.accel.com)"
  *    "[Accel](https://www.accel.com)" →  kept as-is
+ *    "[Accel](accel.com)"             →  kept as-is
  */
 function normalizeInvestorFormat(s: string): string {
   const t = s.trim();
   // Already in [name](url) format
   if (/^\[.+\]\(.+\)$/.test(t)) return t;
-  // Convert "name (url)" → "[name](url)"
-  const match = t.match(/^(.+?)\s*\((https?:\/\/[^)]+)\)$/);
-  if (match) return `[${match[1].trim()}](${match[2].trim()})`;
+  // Convert "name(url)" or "name (url)" → "[name](url)"
+  // The url may or may not have a protocol prefix (https://, http://)
+  const match = t.match(/^(.+?)\s*\(([^)]+)\)$/);
+  if (match) {
+    const name = match[1].trim();
+    const url = match[2].trim();
+    if (name && url) return `[${name}](${url})`;
+  }
   return t;
 }
 

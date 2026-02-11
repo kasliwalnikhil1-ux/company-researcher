@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
 import { Lock } from 'lucide-react';
+import { useWhitelabel } from '@/hooks/useWhitelabel';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
@@ -16,6 +17,7 @@ export default function ResetPassword() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [canReset, setCanReset] = useState(false);
   const { updatePassword } = useAuth();
+  const whitelabel = useWhitelabel();
   const router = useRouter();
 
   // Supabase redirects with tokens in the hash fragment (#access_token=...&refresh_token=...&type=recovery)
@@ -149,8 +151,8 @@ export default function ResetPassword() {
         </div>
         <div className="relative">
           <div className="flex items-center gap-2">
-            <Image src="/logo.png" alt="CapitalxAI CRM" width={32} height={32} className="h-8 w-auto" />
-            <span className="text-xl font-semibold tracking-tight">CapitalxAI CRM</span>
+            <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={32} height={32} className="h-8 w-auto" />
+            <span className="text-xl font-semibold tracking-tight">{whitelabel.pageTitle}</span>
           </div>
         </div>
         <div className="relative space-y-4 max-w-sm">
@@ -162,7 +164,7 @@ export default function ResetPassword() {
           </p>
         </div>
         <div className="relative text-sm text-white/60">
-          © CapitalxAI
+          {whitelabel.showCopyright ? `© ${whitelabel.companyName}` : whitelabel.companyName}
         </div>
       </div>
 
@@ -171,8 +173,8 @@ export default function ResetPassword() {
         <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
           <div className="flex items-center gap-2 mb-8 lg:hidden">
-            <Image src="/logo.png" alt="CapitalxAI CRM" width={28} height={28} className="h-7 w-auto" />
-            <span className="text-lg font-semibold text-gray-900 tracking-tight">CapitalxAI CRM</span>
+            <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={28} height={28} className="h-7 w-auto" />
+            <span className="text-lg font-semibold text-gray-900 tracking-tight">{whitelabel.pageTitle}</span>
           </div>
 
           <h2 className="text-2xl font-medium text-gray-900 mb-1">

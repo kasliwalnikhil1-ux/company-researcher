@@ -426,6 +426,8 @@ function InvestorsContent() {
     subjectColumn?: string | null;
     phoneClickBehavior?: 'whatsapp' | 'call';
   } | null>(null);
+  // Track whether a coinvestor search from another page (e.g. New Fundings) was found at init
+  const hadCoinvestorSearchAtInit = useRef(false);
   const [filters, setFilters] = useState<InvestorSearchFilters>(() => {
     const base = { ...DEFAULT_FILTERS };
     if (typeof window !== 'undefined') {
@@ -433,6 +435,43 @@ function InvestorsContent() {
       if (saved === 'global' || saved === 'reviewed') base.mode = saved;
       const savedType = localStorage.getItem('investors-type');
       if (savedType === 'firm' || savedType === 'person') base.type = savedType;
+
+      // Check for pending coinvestor search from another page (e.g. New Fundings).
+      // Apply domains/linkedin_urls to the initial state so the very first fetch
+      // uses them, avoiding a flash of unfiltered results.
+      const coinvestorRaw = localStorage.getItem('new-fundings-coinvestor-search');
+      if (coinvestorRaw) {
+        try {
+          const { investors } = JSON.parse(coinvestorRaw) as { investors: string[]; companyName: string };
+          if (Array.isArray(investors) && investors.length > 0) {
+            const { domains, linkedin_urls } = parseNameUrlListToSearchParams(investors);
+            if (domains.length > 0 || linkedin_urls.length > 0) {
+              base.name = '';
+              base.domains = domains;
+              base.linkedin_urls = linkedin_urls;
+              hadCoinvestorSearchAtInit.current = true;
+            }
+          }
+        } catch {
+          // ignore malformed data
+        }
+      }
+
+      // Also apply stored filters from localStorage (if no coinvestor search overrides them)
+      if (!hadCoinvestorSearchAtInit.current) {
+        const raw = localStorage.getItem(INVESTORS_FILTERS_KEY);
+        if (raw && raw !== 'null') {
+          try {
+            const stored = JSON.parse(raw) as StoredInvestorFilters | null;
+            if (stored) {
+              const partial = storedToFilters(stored);
+              Object.assign(base, partial);
+            }
+          } catch {
+            // fall through
+          }
+        }
+      }
     }
     return base;
   });
@@ -1092,9 +1131,15 @@ function InvestorsContent() {
     }, 2000);
   }, [selectedInvestorIds, data, onboarding, plan, refresh]);
 
-  // Initial load: read from localStorage (client-only, runs once on mount)
+  // Initial load: mark onboarding fallback as handled if we already applied stored filters
+  // or coinvestor search in the useState initializer (client-only, runs once on mount).
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // If coinvestor search was applied at init, skip stored-filter logic
+    if (hadCoinvestorSearchAtInit.current) {
+      hasAppliedOnboardingFallback.current = true;
+      return;
+    }
     const raw = localStorage.getItem(INVESTORS_FILTERS_KEY);
     if (raw === 'null') {
       // User explicitly cleared filters - keep DEFAULT_FILTERS, don't apply onboarding
@@ -1102,16 +1147,8 @@ function InvestorsContent() {
       return;
     }
     if (raw) {
-      try {
-        const stored = JSON.parse(raw) as StoredInvestorFilters | null;
-        if (stored) {
-          const partial = storedToFilters(stored);
-          setFilters((prev) => ({ ...prev, ...partial }));
-          hasAppliedOnboardingFallback.current = true; // prevent onboarding from overwriting
-        }
-      } catch {
-        // fall through to onboarding fallback
-      }
+      // Stored filters were already applied in the initializer; just mark onboarding as handled
+      hasAppliedOnboardingFallback.current = true;
     }
   }, []);
 
@@ -1131,7 +1168,10 @@ function InvestorsContent() {
     hasAppliedOnboardingFallback.current = true;
   }, [onboarding]);
 
-  // Pick up pending coinvestor search from another page (e.g. New Fundings)
+  // Pick up pending coinvestor search from another page (e.g. New Fundings).
+  // Filter state (domains/linkedin_urls) was already applied in the useState initializer
+  // to avoid a flash of unfiltered results. This effect only handles side effects:
+  // setting the chip label and cleaning up localStorage.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const raw = localStorage.getItem('new-fundings-coinvestor-search');
@@ -1142,7 +1182,7 @@ function InvestorsContent() {
       if (Array.isArray(investors) && investors.length > 0) {
         const { domains, linkedin_urls } = parseNameUrlListToSearchParams(investors);
         if (domains.length > 0 || linkedin_urls.length > 0) {
-          setFilters((prev) => ({ ...prev, name: '', domains, linkedin_urls }));
+          // Filters already applied in useState init; just set the chip label
           setLocalSearchInput('');
           setCoInvestorsChipLabel(`Investors of ${companyName}`);
         }
@@ -1178,9 +1218,12 @@ function InvestorsContent() {
     clearedFiltersRef.current = true;
     localStorage.setItem(INVESTORS_FILTERS_KEY, 'null');
     setLocalSearchInput('');
-    setCoInvestorsChipLabel(null);
-    setFilters(DEFAULT_FILTERS);
-  }, []);
+    // Preserve the "Investors of" chip and its associated domains/linkedin_urls
+    setFilters((prev) => ({
+      ...DEFAULT_FILTERS,
+      ...(coInvestorsChipLabel ? { domains: prev.domains, linkedin_urls: prev.linkedin_urls } : {}),
+    }));
+  }, [coInvestorsChipLabel]);
 
   // Debounced search - cleans domains and LinkedIn URLs before searching
   useEffect(() => {

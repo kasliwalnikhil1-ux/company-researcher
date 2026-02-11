@@ -349,7 +349,11 @@ async function callDeepSearchWithRetry(
   throw { status: lastError?.status || 500, text: lastError?.text || 'Max retries exceeded', retryable: true };
 }
 
-// Parse [name](url) or name (url) format into { name, url }
+// Parse [name](url) or name(url) or name (url) format into { name, url }
+// Handles variants the AI model may return:
+//   "[Accel](accel.com)"             → { name: "Accel", url: "accel.com" }
+//   "Accel(accel.com)"               → { name: "Accel", url: "accel.com" }
+//   "Accel (https://www.accel.com)"  → { name: "Accel", url: "https://www.accel.com" }
 export function parseNameUrlFormat(s: string | null | undefined): { name: string; url: string } | null {
   if (!s || typeof s !== 'string') return null;
   const t = s.trim();
@@ -360,8 +364,8 @@ export function parseNameUrlFormat(s: string | null | undefined): { name: string
     const url = (md[2] || '').trim();
     return name || url ? { name, url } : null;
   }
-  // name (url) parenthesised format (Gemini sometimes returns this)
-  const paren = /^(.+?)\s*\((https?:\/\/[^)]+)\)$/.exec(t);
+  // name(url) or name (url) parenthesised format — url may or may not have protocol
+  const paren = /^(.+?)\s*\(([^)]+)\)$/.exec(t);
   if (paren) {
     const name = (paren[1] || '').trim();
     const url = (paren[2] || '').trim();
@@ -370,11 +374,12 @@ export function parseNameUrlFormat(s: string | null | undefined): { name: string
   return null;
 }
 
-// Extract URLs from notable_investments in format [name](url) or name (url)
+// Extract URLs from notable_investments in format [name](url) or name(url) or name (url)
 function extractDomainsFromNotableInvestments(notableInvestments: string[] | null): string[] {
   if (!Array.isArray(notableInvestments) || notableInvestments.length === 0) return [];
   const mdRe = /\[([^\]]*)\]\(([^)]*)\)/g;
-  const parenRe = /^(.+?)\s*\((https?:\/\/[^)]+)\)$/;
+  // Fallback: name(url) or name (url) — url may or may not have protocol
+  const parenRe = /^(.+?)\s*\(([^)]+)\)$/;
   const urls = new Set<string>();
   for (const s of notableInvestments) {
     if (typeof s !== 'string') continue;
@@ -388,7 +393,7 @@ function extractDomainsFromNotableInvestments(notableInvestments: string[] | nul
       if (!url) continue;
       urls.add(url.startsWith('http') ? url : `https://${url}`);
     }
-    // Fallback: try name (url) parenthesised format
+    // Fallback: try name(url) or name (url) parenthesised format
     if (!matched) {
       const pm = parenRe.exec(s.trim());
       if (pm) {

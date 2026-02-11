@@ -69,20 +69,28 @@ function extractJsonFromText(text: string): string {
   return trimmed;
 }
 
-/** Parse [name](url) or name (url) format into { name, url } object */
+/** Parse [name](url) or name(url) or name (url) format into { name, url } object.
+ *  Handles variants the AI model may return:
+ *    "[Accel](accel.com)"             → { name: "Accel", url: "accel.com" }
+ *    "Accel(accel.com)"               → { name: "Accel", url: "accel.com" }
+ *    "Accel (https://www.accel.com)"  → { name: "Accel", url: "https://www.accel.com" }
+ */
 function parseNameUrl(s: string): { name: string; url?: string } {
   if (typeof s !== 'string') return { name: String(s) };
+  const t = s.trim();
   // [name](url) markdown-link format
-  const mdMatch = s.match(/^\[([^\]]+)\]\(([^)]*)\)$/);
+  const mdMatch = t.match(/^\[([^\]]+)\]\(([^)]*)\)$/);
   if (mdMatch) {
     return { name: mdMatch[1].trim(), url: mdMatch[2].trim() || undefined };
   }
-  // name (url) parenthesised format (Gemini sometimes returns this)
-  const parenMatch = s.match(/^(.+?)\s*\((https?:\/\/[^)]+)\)$/);
+  // name(url) or name (url) parenthesised format — url may or may not have protocol
+  const parenMatch = t.match(/^(.+?)\s*\(([^)]+)\)$/);
   if (parenMatch) {
-    return { name: parenMatch[1].trim(), url: parenMatch[2].trim() };
+    const name = parenMatch[1].trim();
+    const url = parenMatch[2].trim();
+    if (name && url) return { name, url };
   }
-  return { name: s.trim() };
+  return { name: t };
 }
 
 /** Extract text content from fashion-deep-search response (may come in various formats) */

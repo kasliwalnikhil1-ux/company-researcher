@@ -37,6 +37,7 @@ import {
   ExternalLink,
   DollarSign,
   Sparkles,
+  FileSearch,
 } from 'lucide-react';
 
 const ALLOWED_USER_IDS = new Set([
@@ -110,6 +111,7 @@ function DataPipelinesContent() {
         <UpdateVerifiedEmailsTool />
         <NotAnInvestorTool />
         <MissingFundingInvestorsTool />
+        <MissingDeepResearchTool />
       </div>
     </div>
   );
@@ -683,58 +685,68 @@ function RerunContactsTool() {
       }
       setContactResults(new Map(newResults));
 
-      for (const contact of contactsToProcess) {
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < contactsToProcess.length; i += BATCH_SIZE) {
         if (stopRef.current) {
           console.log('[rerun-contacts] Processing stopped by user');
           break;
         }
 
-        // Set current contact to running
-        newResults.set(contact.key, { status: 'running' });
+        const batch = contactsToProcess.slice(i, i + BATCH_SIZE);
+
+        // Set all contacts in this batch to running
+        for (const contact of batch) {
+          newResults.set(contact.key, { status: 'running' });
+        }
         setContactResults(new Map(newResults));
 
-        try {
-          const res = await fetch('/api/investor-research', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              input: contact.input,
-              skipExisting,
-              affiliateWithFirmId: contact.firmId,
-              affiliateContactEmail: contact.email || undefined,
-            }),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data.skipped) {
-              newResults.set(contact.key, {
-                status: 'skipped',
-                message: data.reason || 'Already exists',
-                investor_id: data.investor_id,
+        // Process batch in parallel
+        await Promise.all(
+          batch.map(async (contact) => {
+            try {
+              const res = await fetch('/api/investor-research', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  input: contact.input,
+                  skipExisting,
+                  affiliateWithFirmId: contact.firmId,
+                  affiliateContactEmail: contact.email || undefined,
+                }),
               });
-            } else {
+
+              if (res.ok) {
+                const data = await res.json();
+                if (data.skipped) {
+                  newResults.set(contact.key, {
+                    status: 'skipped',
+                    message: data.reason || 'Already exists',
+                    investor_id: data.investor_id,
+                  });
+                } else {
+                  newResults.set(contact.key, {
+                    status: 'done',
+                    message: data.summary?.clean_name || 'Processed',
+                    investor_id: data.investor_id,
+                  });
+                }
+              } else {
+                const errData = await res.json().catch(() => null);
+                newResults.set(contact.key, {
+                  status: 'failed',
+                  message: errData?.error || `HTTP ${res.status}`,
+                });
+              }
+            } catch (err) {
               newResults.set(contact.key, {
-                status: 'done',
-                message: data.summary?.clean_name || 'Processed',
-                investor_id: data.investor_id,
+                status: 'failed',
+                message: err instanceof Error ? err.message : 'Unknown error',
               });
             }
-          } else {
-            const errData = await res.json().catch(() => null);
-            newResults.set(contact.key, {
-              status: 'failed',
-              message: errData?.error || `HTTP ${res.status}`,
-            });
-          }
-        } catch (err) {
-          newResults.set(contact.key, {
-            status: 'failed',
-            message: err instanceof Error ? err.message : 'Unknown error',
-          });
-        }
 
-        setContactResults(new Map(newResults));
+            setContactResults(new Map(newResults));
+          })
+        );
       }
 
       setProcessing(false);
@@ -1348,54 +1360,65 @@ function RerunProfileTool() {
       }
       setResults(new Map(newResults));
 
-      for (const inv of investorsToProcess) {
+      const BATCH_SIZE = 100;
+      for (let i = 0; i < investorsToProcess.length; i += BATCH_SIZE) {
         if (stopRef.current) {
           console.log('[rerun-profile] Processing stopped by user');
           break;
         }
 
-        newResults.set(inv.id, { status: 'running' });
-        setResults(new Map(newResults));
+        const batch = investorsToProcess.slice(i, i + BATCH_SIZE);
 
-        try {
-          const accessToken = await getAccessToken();
-          if (!accessToken) {
-            newResults.set(inv.id, { status: 'failed', message: 'No session' });
-            setResults(new Map(newResults));
-            continue;
-          }
-
-          const res = await fetch('/api/data-pipelines/rerun-profile/process', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({ investorId: inv.id }),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            newResults.set(inv.id, {
-              status: 'done',
-              message: `${data.fieldsUpdated?.length || 0} fields updated`,
-              fieldsUpdated: data.fieldsUpdated?.length || 0,
-            });
-          } else {
-            const errData = await res.json().catch(() => null);
-            newResults.set(inv.id, {
-              status: 'failed',
-              message: errData?.error || `HTTP ${res.status}`,
-            });
-          }
-        } catch (err) {
-          newResults.set(inv.id, {
-            status: 'failed',
-            message: err instanceof Error ? err.message : 'Unknown error',
-          });
+        // Set all investors in this batch to running
+        for (const inv of batch) {
+          newResults.set(inv.id, { status: 'running' });
         }
-
         setResults(new Map(newResults));
+
+        // Process batch in parallel
+        await Promise.all(
+          batch.map(async (inv) => {
+            try {
+              const accessToken = await getAccessToken();
+              if (!accessToken) {
+                newResults.set(inv.id, { status: 'failed', message: 'No session' });
+                setResults(new Map(newResults));
+                return;
+              }
+
+              const res = await fetch('/api/data-pipelines/rerun-profile/process', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify({ investorId: inv.id }),
+              });
+
+              if (res.ok) {
+                const data = await res.json();
+                newResults.set(inv.id, {
+                  status: 'done',
+                  message: `${data.fieldsUpdated?.length || 0} fields updated`,
+                  fieldsUpdated: data.fieldsUpdated?.length || 0,
+                });
+              } else {
+                const errData = await res.json().catch(() => null);
+                newResults.set(inv.id, {
+                  status: 'failed',
+                  message: errData?.error || `HTTP ${res.status}`,
+                });
+              }
+            } catch (err) {
+              newResults.set(inv.id, {
+                status: 'failed',
+                message: err instanceof Error ? err.message : 'Unknown error',
+              });
+            }
+
+            setResults(new Map(newResults));
+          })
+        );
       }
 
       setProcessing(false);
@@ -3562,6 +3585,602 @@ function MissingFundingInvestorsTool() {
         </div>
       )}
     </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Tool 8: Missing Deep Research
+   ───────────────────────────────────────────────────────────── */
+
+interface MissingDeepResearchInvestor {
+  id: string;
+  name: string;
+  type: 'firm' | 'person';
+  domain: string | null;
+  linkedin_url: string | null;
+  updated_at: string;
+}
+
+type DeepResearchStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+
+interface DeepResearchResult {
+  status: DeepResearchStatus;
+  message?: string;
+}
+
+function MissingDeepResearchTool() {
+  const [expanded, setExpanded] = useState(false);
+
+  // Filters
+  const [typeFilter, setTypeFilter] = useState<'all' | 'firm' | 'person'>('all');
+
+  // Investors
+  const [investors, setInvestors] = useState<MissingDeepResearchInvestor[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loadingInvestors, setLoadingInvestors] = useState(false);
+  const [investorsError, setInvestorsError] = useState<string | null>(null);
+
+  // Processing
+  const [processing, setProcessing] = useState(false);
+  const [results, setResults] = useState<Map<string, DeepResearchResult>>(new Map());
+  const stopRef = useRef(false);
+
+  const getAccessToken = useCallback(async (): Promise<string | null> => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    return sessionData?.session?.access_token || null;
+  }, []);
+
+  // ── Fetch Investors ──
+  const fetchInvestors = useCallback(async () => {
+    setLoadingInvestors(true);
+    setInvestorsError(null);
+    setInvestors([]);
+    setSelectedIds(new Set());
+    setResults(new Map());
+
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        setInvestorsError('No active session. Please log in again.');
+        return;
+      }
+
+      const body: Record<string, string> = {};
+      if (typeFilter !== 'all') body.type = typeFilter;
+
+      const res = await fetch('/api/data-pipelines/missing-deep-research', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setInvestorsError(data?.error || `Request failed (${res.status})`);
+        return;
+      }
+
+      const data = await res.json();
+      setInvestors(data.investors || []);
+    } catch (err) {
+      setInvestorsError(err instanceof Error ? err.message : 'Unknown error');
+    } finally {
+      setLoadingInvestors(false);
+    }
+  }, [typeFilter, getAccessToken]);
+
+  // ── Process Investors (full investor-research pipeline) ──
+  const processInvestors = useCallback(
+    async (investorsToProcess: MissingDeepResearchInvestor[]) => {
+      if (investorsToProcess.length === 0) return;
+
+      setProcessing(true);
+      stopRef.current = false;
+
+      const newResults = new Map(results);
+      for (const inv of investorsToProcess) {
+        newResults.set(inv.id, { status: 'pending' });
+      }
+      setResults(new Map(newResults));
+
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < investorsToProcess.length; i += BATCH_SIZE) {
+        if (stopRef.current) {
+          console.log('[missing-deep-research] Processing stopped by user');
+          break;
+        }
+
+        const batch = investorsToProcess.slice(i, i + BATCH_SIZE);
+
+        // Set all investors in this batch to running
+        for (const inv of batch) {
+          newResults.set(inv.id, { status: 'running' });
+        }
+        setResults(new Map(newResults));
+
+        // Process batch in parallel
+        await Promise.all(
+          batch.map(async (inv) => {
+            try {
+              const accessToken = await getAccessToken();
+              if (!accessToken) {
+                newResults.set(inv.id, { status: 'failed', message: 'No session' });
+                setResults(new Map(newResults));
+                return;
+              }
+
+              const res = await fetch('/api/data-pipelines/missing-deep-research/process', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify({ investorId: inv.id }),
+              });
+
+              if (res.ok) {
+                const data = await res.json();
+                if (data.skipped) {
+                  newResults.set(inv.id, {
+                    status: 'skipped',
+                    message: data.reason || 'Skipped',
+                  });
+                } else {
+                  newResults.set(inv.id, {
+                    status: 'done',
+                    message: data.deepResearchComplete
+                      ? `Research complete (${data.result?.entity_type || 'unknown'})`
+                      : 'Processed',
+                  });
+                }
+              } else {
+                const errData = await res.json().catch(() => null);
+                newResults.set(inv.id, {
+                  status: 'failed',
+                  message: errData?.error || `HTTP ${res.status}`,
+                });
+              }
+            } catch (err) {
+              newResults.set(inv.id, {
+                status: 'failed',
+                message: err instanceof Error ? err.message : 'Unknown error',
+              });
+            }
+
+            setResults(new Map(newResults));
+          })
+        );
+      }
+
+      setProcessing(false);
+    },
+    [results, getAccessToken]
+  );
+
+  const handleRunSelected = useCallback(() => {
+    const selected = investors.filter((inv) => selectedIds.has(inv.id));
+    processInvestors(selected);
+  }, [investors, selectedIds, processInvestors]);
+
+  const handleRunAll = useCallback(() => {
+    processInvestors(investors);
+  }, [investors, processInvestors]);
+
+  const handleStop = useCallback(() => {
+    stopRef.current = true;
+  }, []);
+
+  // ── Selection helpers ──
+  const toggleInvestor = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllInvestors = () => {
+    if (selectedIds.size === investors.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(investors.map((inv) => inv.id)));
+    }
+  };
+
+  // Stats
+  const doneCount = Array.from(results.values()).filter((r) => r.status === 'done').length;
+  const skippedCount = Array.from(results.values()).filter((r) => r.status === 'skipped').length;
+  const failedCount = Array.from(results.values()).filter((r) => r.status === 'failed').length;
+  const runningCount = Array.from(results.values()).filter((r) => r.status === 'running').length;
+  const totalProcessed = doneCount + skippedCount + failedCount;
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      {/* Tool Header */}
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="p-1.5 bg-rose-50 rounded-lg">
+            <FileSearch className="w-5 h-5 text-rose-600" />
+          </div>
+          <div className="text-left">
+            <h2 className="text-base font-semibold text-gray-900">
+              Tool 8: Missing Deep Research
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Find investors with no deep research and run the full research pipeline on them
+            </p>
+          </div>
+        </div>
+        {expanded ? (
+          <ChevronUp className="w-5 h-5 text-gray-400" />
+        ) : (
+          <ChevronDown className="w-5 h-5 text-gray-400" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-gray-100">
+          {/* Description & Filters */}
+          <div className="px-6 py-4 bg-gray-50 border-b border-gray-100">
+            <div className="text-sm text-gray-600 space-y-1 mb-4">
+              <p>
+                Find all investors whose{' '}
+                <span className="font-medium text-gray-800">deep_research</span> column is{' '}
+                <span className="font-medium text-gray-800">null or empty</span>. Then process
+                each investor through the{' '}
+                <span className="font-medium text-gray-800">full investor-research pipeline</span>{' '}
+                (Step 1: Exa classification + Step 2: Deep Search + Step 3: LLM extraction).
+              </p>
+              <p className="text-xs text-gray-500">
+                This runs the same pipeline as the investor-research API. Investors are
+                processed in parallel batches of 10. Processing may take 30-60 seconds per investor.
+              </p>
+            </div>
+
+            {/* Filters */}
+            <div className="flex flex-wrap items-end gap-4">
+              {/* Type filter */}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  <Building2 className="w-3 h-3 inline mr-1" />
+                  Type
+                </label>
+                <select
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value as 'all' | 'firm' | 'person')}
+                  disabled={loadingInvestors || processing}
+                  className="block w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg bg-white focus:ring-2 focus:ring-rose-500 focus:border-rose-500"
+                >
+                  <option value="all">All Types</option>
+                  <option value="firm">Firm</option>
+                  <option value="person">Person</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchInvestors}
+                disabled={loadingInvestors || processing}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm"
+              >
+                {loadingInvestors ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Fetching...
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-4 h-4" />
+                    Find Missing Investors
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Error */}
+          {investorsError && (
+            <div className="px-6 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2 text-sm text-red-700">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {investorsError}
+            </div>
+          )}
+
+          {/* Investors Table */}
+          {investors.length > 0 && (
+            <div className="px-6 py-4">
+              {/* Header + Action bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+                <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                  <Users className="w-4 h-4 text-gray-500" />
+                  Investors Missing Deep Research ({investors.length})
+                  {selectedIds.size > 0 && selectedIds.size < investors.length && (
+                    <span className="text-xs font-normal text-rose-600">
+                      ({selectedIds.size} selected)
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {processing ? (
+                    <button
+                      type="button"
+                      onClick={handleStop}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm"
+                    >
+                      <StopCircle className="w-3.5 h-3.5" />
+                      Stop
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleRunSelected}
+                        disabled={selectedIds.size === 0}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        Run Selected ({selectedIds.size})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleRunAll}
+                        disabled={investors.length === 0}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        Run All ({investors.length})
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Processing Progress */}
+              {results.size > 0 && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-3 text-xs text-gray-600 mb-2">
+                    {runningCount > 0 && (
+                      <span className="inline-flex items-center gap-1 text-rose-600">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Running: {runningCount}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 text-green-600">
+                      <CheckCircle2 className="w-3 h-3" />
+                      Done: {doneCount}
+                    </span>
+                    {skippedCount > 0 && (
+                      <span className="inline-flex items-center gap-1 text-amber-600">
+                        <SkipForward className="w-3 h-3" />
+                        Skipped: {skippedCount}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-1 text-red-600">
+                      <XCircle className="w-3 h-3" />
+                      Failed: {failedCount}
+                    </span>
+                    <span className="text-gray-400">
+                      {totalProcessed} / {results.size} total
+                    </span>
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-1.5">
+                    <div
+                      className="h-1.5 rounded-full bg-rose-500 transition-all duration-300"
+                      style={{
+                        width: results.size > 0
+                          ? `${((totalProcessed + runningCount) / results.size) * 100}%`
+                          : '0%',
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Table */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                  <table className="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-3 py-2.5 text-left w-10">
+                          <button
+                            type="button"
+                            onClick={toggleAllInvestors}
+                            disabled={processing}
+                            className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                          >
+                            {selectedIds.size === investors.length ? (
+                              <CheckSquare className="w-4 h-4 text-rose-600" />
+                            ) : (
+                              <Square className="w-4 h-4" />
+                            )}
+                          </button>
+                        </th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Name
+                        </th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Domain / LinkedIn
+                        </th>
+                        <th className="px-3 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Updated At
+                        </th>
+                        <th className="px-3 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-100">
+                      {investors.map((inv) => {
+                        const result = results.get(inv.id);
+                        const status = result?.status;
+                        return (
+                          <tr
+                            key={inv.id}
+                            className={`hover:bg-gray-50 cursor-pointer ${
+                              selectedIds.has(inv.id) ? 'bg-rose-50/30' : ''
+                            } ${status === 'running' ? 'bg-yellow-50/50' : ''}`}
+                            onClick={() => !processing && toggleInvestor(inv.id)}
+                          >
+                            <td className="px-3 py-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleInvestor(inv.id);
+                                }}
+                                disabled={processing}
+                                className="disabled:opacity-50"
+                              >
+                                {selectedIds.has(inv.id) ? (
+                                  <CheckSquare className="w-4 h-4 text-rose-600" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-gray-300" />
+                                )}
+                              </button>
+                            </td>
+                            <td className="px-3 py-2 font-medium text-gray-900 text-xs">
+                              {inv.name || '—'}
+                            </td>
+                            <td className="px-3 py-2">
+                              {inv.type === 'firm' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                                  <Building2 className="w-3 h-3" />
+                                  Firm
+                                </span>
+                              ) : inv.type === 'person' ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+                                  <Users className="w-3 h-3" />
+                                  Person
+                                </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-gray-600 font-mono text-[11px]">
+                              {inv.domain ? (
+                                <a
+                                  href={`https://${inv.domain}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {inv.domain}
+                                </a>
+                              ) : inv.linkedin_url ? (
+                                <a
+                                  href={`https://www.linkedin.com/${inv.linkedin_url}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {inv.linkedin_url}
+                                </a>
+                              ) : (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-gray-500 text-xs">
+                              {formatDate(inv.updated_at)}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <DeepResearchStatusBadge status={status} message={result?.message} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state after fetching with zero results */}
+          {!loadingInvestors && investors.length === 0 && !investorsError && results.size === 0 && (
+            <div className="px-6 py-12 text-center text-gray-400 text-sm">
+              Click <span className="font-medium text-gray-600">&quot;Find Missing Investors&quot;</span> to
+              find investors without deep research.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeepResearchStatusBadge({ status, message }: { status?: DeepResearchStatus; message?: string }) {
+  if (!status) return <span className="text-gray-300 text-xs">—</span>;
+
+  const config: Record<DeepResearchStatus, { bg: string; text: string; icon: React.ReactNode; label: string }> = {
+    pending: {
+      bg: 'bg-gray-100',
+      text: 'text-gray-500',
+      icon: <Square className="w-3 h-3" />,
+      label: 'Pending',
+    },
+    running: {
+      bg: 'bg-yellow-50',
+      text: 'text-yellow-700',
+      icon: <Loader2 className="w-3 h-3 animate-spin" />,
+      label: 'Running',
+    },
+    done: {
+      bg: 'bg-green-50',
+      text: 'text-green-700',
+      icon: <CheckCircle2 className="w-3 h-3" />,
+      label: 'Done',
+    },
+    skipped: {
+      bg: 'bg-amber-50',
+      text: 'text-amber-700',
+      icon: <SkipForward className="w-3 h-3" />,
+      label: 'Skipped',
+    },
+    failed: {
+      bg: 'bg-red-50',
+      text: 'text-red-700',
+      icon: <XCircle className="w-3 h-3" />,
+      label: 'Failed',
+    },
+  };
+
+  const c = config[status];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${c.bg} ${c.text}`}
+      title={message || c.label}
+    >
+      {c.icon}
+      {c.label}
+    </span>
   );
 }
 
