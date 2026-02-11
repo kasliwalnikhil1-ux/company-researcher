@@ -36,7 +36,7 @@ export const DEFAULT_CONFIG: WhitelabelConfig = {
   pageTitle: 'CapitalxAI CRM',
   companyName: 'ResourcePlan Solution Private Limited',
   assetsFolder: '', // assets live at public/ root
-  showCopyright: false,
+  showCopyright: true,
 };
 
 // ---------------------------------------------------------------------------
