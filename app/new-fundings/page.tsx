@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { supabase } from '@/utils/supabase/client';
-import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight, Upload, FileText } from 'lucide-react';
+import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight, Upload, FileText, Linkedin } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner } from '@/contexts/OwnerContext';
@@ -947,14 +947,15 @@ function FundingCard({
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 hover:border-indigo-200 transition-colors"
                 >
+                  <Linkedin className="w-3.5 h-3.5" />
                   {founder.name}
-                  <ExternalLink className="w-3 h-3" />
                 </a>
               ) : (
                 <span
                   key={idx}
-                  className="inline-flex items-center px-2.5 py-1 rounded-md text-sm font-medium text-gray-700 bg-gray-100 border border-gray-200"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-sm font-medium text-gray-700 bg-gray-100 border border-gray-200"
                 >
+                  <Linkedin className="w-3.5 h-3.5 text-gray-400" />
                   {founder.name}
                 </span>
               );
