@@ -1124,7 +1124,7 @@ export default function CompanyResearcher() {
     };
     
     // Concurrency limit for parallel processing (adjust based on API rate limits)
-    const CONCURRENCY_LIMIT = 10;
+    const CONCURRENCY_LIMIT = 30;
 
     // Helper function to save progress after each row is processed
     const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor', identifier: string) => {

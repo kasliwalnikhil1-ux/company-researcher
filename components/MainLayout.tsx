@@ -150,6 +150,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.replace(routeAccess.defaultRoute);
       return;
     }
+    if (pathname === '/domains-extractor' && !routeAccess.canAccessMeData) {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
     if ((pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines') && !routeAccess.canAccessMeData) {
       router.replace(routeAccess.defaultRoute);
       return;
@@ -450,18 +454,20 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             {(!isCollapsed || isMobile) && <span>Usage</span>}
           </Link>
 
-          <Link
-            href="/domains-extractor"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/domains-extractor')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Extract Domains"
-          >
-            <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
-          </Link>
+          {routeAccess.showMeData && (
+            <Link
+              href="/domains-extractor"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/domains-extractor')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Extract Domains"
+            >
+              <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
+            </Link>
+          )}
 
           {routeAccess.showMeData && (
             <>

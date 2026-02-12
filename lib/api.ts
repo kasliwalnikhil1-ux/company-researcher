@@ -125,14 +125,16 @@ export function cleanInvestorInput(input: string): {
   let s = input.trim();
   if (!s) return { cleaned: '', type: 'domain', domain: null, linkedinUrl: null };
 
+  // Path-only: "word/word" where first segment has no dot (so it's not a domain like foo.com/bar)
+  const isPathOnly = /^[a-z][\w-]*\/[\w.-]+$/i.test(s) && !s.includes('.');
+
   const isLinkedIn =
-    /linkedin\.com\/(company|in)\/[\w.-]+/i.test(s) ||
     s.toLowerCase().includes('linkedin.com') ||
-    /^(in|company)\/[\w.-]+$/i.test(s); // path-only e.g. in/namankas
+    isPathOnly; // path-only e.g. in/namankas, company/accel, pub/john
 
   if (isLinkedIn) {
-    // Path-only input (e.g. in/namankas) - use as-is
-    if (/^(in|company)\/[\w.-]+$/i.test(s)) {
+    // Path-only input (e.g. in/namankas, pub/john) - use as-is
+    if (isPathOnly) {
       console.log('[cleanInvestorInput] LinkedIn path-only:', { cleaned: s, type: 'linkedin' });
       return { cleaned: s, type: 'linkedin', domain: null, linkedinUrl: s };
     }

@@ -70,14 +70,11 @@ const parseCsvLine = (line: string): string[] => {
 // Convert CSV data back to CSV string
 export const csvToString = (headers: string[], rows: CsvRow[]): string => {
   const escapeCsvField = (value: any): string => {
-    if (value === null || value === undefined) return '';
+    if (value === null || value === undefined) return '""';
     
     const str = String(value);
-    // If the string contains commas, quotes, or newlines, wrap it in quotes and escape existing quotes
-    if (/[,\n"]/.test(str)) {
-      return `"${str.replace(/"/g, '""')}"`;
-    }
-    return str;
+    // Always wrap in quotes and escape existing quotes (prevents URLs with / from breaking columns)
+    return `"${str.replace(/"/g, '""')}"`;
   };
 
   const headerLine = headers.map(escapeCsvField).join(',');

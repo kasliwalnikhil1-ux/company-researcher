@@ -46,10 +46,16 @@ const normalizeCompanyData = (companyName: string, data: any): ExportableCompany
   };
 
   // Extract LinkedIn profile URL with fallbacks for different possible field names
-  const linkedInProfile = data?.linkedinData?.url || 
+  const rawLinkedIn = data?.linkedinData?.url || 
                          data?.linkedInUrl || 
                          data?.linkedinUrl || 
                          data?.url || '';
+  // Ensure full LinkedIn URL (e.g. in/namankas -> https://www.linkedin.com/in/namankas)
+  const linkedInProfile = rawLinkedIn
+    ? rawLinkedIn.startsWith('http')
+      ? rawLinkedIn
+      : `https://www.linkedin.com/${rawLinkedIn.replace(/^\/+/, '')}`
+    : '';
   // Extract CEO and CTO profile links
   const ceoProfile = data?.founders?.find((f: any) => f.title === 'CEO')?.url || '';
   const ctoProfile = data?.founders?.find((f: any) => f.title === 'CTO')?.url || '';

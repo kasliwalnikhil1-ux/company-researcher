@@ -1598,13 +1598,21 @@ function InvestorsContent() {
           ? inv.notes.map((n) => (n?.message ?? '').trim()).filter(Boolean).join('; ')
           : '';
 
+        // Ensure full LinkedIn URL (e.g. in/namankas -> https://www.linkedin.com/in/namankas)
+        const rawLinkedin = inv.linkedin_url ?? '';
+        const fullLinkedin = rawLinkedin
+          ? rawLinkedin.startsWith('http')
+            ? rawLinkedin
+            : `https://www.linkedin.com/${rawLinkedin.replace(/^\/+/, '')}`
+          : '';
+
         const row: string[] = [
           inv.name ?? '',
           ...(isPerson ? [firstName, inv.role ?? '', inv.associated_firm_name ?? ''] : []),
           inv.owner ?? '',
           inv.stage ?? '',
           inv.set_name ?? '',
-          inv.linkedin_url ?? '',
+          fullLinkedin,
           inv.twitter_url ?? '',
           inv.apply_url ?? '',
           emails[0] ?? '',
