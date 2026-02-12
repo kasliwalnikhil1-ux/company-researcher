@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const Papa = require('papaparse');
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import {
@@ -29,15 +31,13 @@ import {
   StopCircle,
   UserSearch,
   MailX,
-  MailCheck,
-  Upload,
-  FileUp,
   ShieldOff,
   Trash2,
   ExternalLink,
   DollarSign,
   Sparkles,
   FileSearch,
+  Upload,
 } from 'lucide-react';
 
 const ALLOWED_USER_IDS = new Set([
@@ -108,7 +108,6 @@ function DataPipelinesContent() {
         <RerunContactsTool />
         <RerunProfileTool />
         <UnverifiedEmailsTool />
-        <UpdateVerifiedEmailsTool />
         <NotAnInvestorTool />
         <MissingFundingInvestorsTool />
         <MissingDeepResearchTool />
@@ -1940,6 +1939,210 @@ function UnverifiedEmailsTool() {
   const [investors, setInvestors] = useState<UnverifiedEmailInvestor[]>([]);
   const [csvRows, setCsvRows] = useState<UnverifiedEmailRow[]>([]);
 
+  // Master CSV upload state
+  interface MasterMatchRow {
+    linkedin_url: string;
+    investorId: string | null;
+    investorName: string | null;
+    work_email: string;
+    personal_email: string;
+    work_phone: string;
+    personal_phone: string;
+    twitter_nickname: string;
+    about: string;
+    matched: boolean;
+  }
+  const [masterMatches, setMasterMatches] = useState<MasterMatchRow[]>([]);
+  const [masterParsedRows, setMasterParsedRows] = useState<Array<{
+    linkedin_url: string;
+    work_email: string;
+    personal_email: string;
+    work_phone: string;
+    personal_phone: string;
+    twitter_nickname: string;
+    about: string;
+  }>>([]);
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [updateLoading, setUpdateLoading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{
+    total: number;
+    matched: number;
+    updated: number;
+    notFound: number;
+    failed: number;
+  } | null>(null);
+  const masterFileInputRef = useRef<HTMLInputElement>(null);
+
+  /** Normalize a LinkedIn URL to short path like "in/namankas" for matching */
+  const normalizeLinkedInUrl = (url: string): string => {
+    let cleaned = url.trim();
+    if (!cleaned) return '';
+    cleaned = cleaned.replace(/^https?:\/\/(www\.)?linkedin\.com\/?/i, '');
+    cleaned = cleaned.replace(/^\/+|\/+$/g, '');
+    return cleaned.toLowerCase();
+  };
+
+  /** Step 1: Parse CSV and match against fetched investors — show preview */
+  const handleMasterCsvUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadLoading(true);
+    setUploadError(null);
+    setUploadResult(null);
+    setMasterMatches([]);
+    setMasterParsedRows([]);
+
+    try {
+      const text = await file.text();
+
+      // Parse CSV using papaparse (handles quoted fields, newlines in fields, etc.)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const parsed = Papa.parse(text, { header: true, skipEmptyLines: true }) as { data: Record<string, string>[]; meta: { fields?: string[] }; errors: any[] };
+
+      if (!parsed.data || parsed.data.length === 0) {
+        setUploadError('CSV must have a header row and at least one data row.');
+        return;
+      }
+
+      const headers = parsed.meta.fields || [];
+
+      // Find column names (case-insensitive, ignore special chars)
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const findCol = (target: string) => headers.find((h) => normalize(h) === normalize(target)) || null;
+
+      const linkedinCol = findCol('linkedinurl');
+      const workEmailCol = findCol('workemail');
+      const personalEmailCol = findCol('personalemail');
+      const workPhoneCol = findCol('workphonenumber');
+      const personalPhoneCol = findCol('personalphonenumber');
+      const twitterCol = findCol('twitternickname');
+      const aboutCol = findCol('about');
+
+      if (!linkedinCol) {
+        setUploadError('Could not find "LinkedIn URL" column in the CSV. Found columns: ' + headers.join(', '));
+        return;
+      }
+
+      // Build rows from parsed data
+      const rows: Array<{
+        linkedin_url: string;
+        work_email: string;
+        personal_email: string;
+        work_phone: string;
+        personal_phone: string;
+        twitter_nickname: string;
+        about: string;
+      }> = [];
+
+      for (const record of parsed.data) {
+        const linkedinUrl = (record[linkedinCol] || '').trim();
+        if (!linkedinUrl) continue;
+
+        rows.push({
+          linkedin_url: linkedinUrl,
+          work_email: workEmailCol ? (record[workEmailCol] || '').trim() : '',
+          personal_email: personalEmailCol ? (record[personalEmailCol] || '').trim() : '',
+          work_phone: workPhoneCol ? (record[workPhoneCol] || '').trim() : '',
+          personal_phone: personalPhoneCol ? (record[personalPhoneCol] || '').trim() : '',
+          twitter_nickname: twitterCol ? (record[twitterCol] || '').trim() : '',
+          about: aboutCol ? (record[aboutCol] || '').trim() : '',
+        });
+      }
+
+      if (rows.length === 0) {
+        setUploadError('No valid rows found in the CSV (all LinkedIn URL values were empty).');
+        return;
+      }
+
+      // Build investor lookup map by normalized LinkedIn URL
+      const investorMap = new Map<string, UnverifiedEmailInvestor>();
+      for (const inv of investors) {
+        if (inv.linkedin_url) {
+          const normalized = normalizeLinkedInUrl(inv.linkedin_url);
+          if (normalized) investorMap.set(normalized, inv);
+        }
+      }
+
+      // Match CSV rows against investors
+      const matches: MasterMatchRow[] = rows.map((row) => {
+        const normalized = normalizeLinkedInUrl(row.linkedin_url);
+        const inv = investorMap.get(normalized);
+        return {
+          ...row,
+          investorId: inv?.id || null,
+          investorName: inv?.name || null,
+          matched: !!inv,
+        };
+      });
+
+      setMasterParsedRows(rows);
+      setMasterMatches(matches);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to process CSV');
+    } finally {
+      setUploadLoading(false);
+      if (masterFileInputRef.current) {
+        masterFileInputRef.current.value = '';
+      }
+    }
+  }, [investors]);
+
+  /** Step 2: Send matched rows to API for actual DB update */
+  const runMasterUpdates = useCallback(async () => {
+    const matchedRows = masterParsedRows.filter((row) => {
+      const normalized = normalizeLinkedInUrl(row.linkedin_url);
+      return investors.some((inv) => inv.linkedin_url && normalizeLinkedInUrl(inv.linkedin_url) === normalized);
+    });
+
+    if (matchedRows.length === 0) {
+      setUploadError('No matched rows to update.');
+      return;
+    }
+
+    setUpdateLoading(true);
+    setUploadError(null);
+    setUploadResult(null);
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        setUploadError('No active session. Please log in again.');
+        return;
+      }
+
+      const res = await fetch('/api/data-pipelines/update-verified-emails', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ rows: masterParsedRows }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setUploadError(body?.error || `Update failed (${res.status})`);
+        return;
+      }
+
+      const result = await res.json();
+      setUploadResult({
+        total: result.total,
+        matched: result.matched,
+        updated: result.updated,
+        notFound: result.notFound,
+        failed: result.failed,
+      });
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Failed to run updates');
+    } finally {
+      setUpdateLoading(false);
+    }
+  }, [masterParsedRows, investors]);
+
   const runPipeline = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -2001,33 +2204,18 @@ function UnverifiedEmailsTool() {
             firm_domain: firmDomain,
           });
         } else {
-          // Split comma/semicolon separated emails into individual rows
+          // Join comma/semicolon separated emails into a single comma-separated string
           const emails = inv.email.split(/[,;]\s*/).map((e) => e.trim()).filter(Boolean);
-          if (emails.length === 0) {
-            rows.push({
-              id: inv.id,
-              name: fullName,
-              first_name: firstName,
-              last_name: lastName,
-              linkedin_url: linkedinVal,
-              email: '',
-              email_verified: 'missing',
-              firm_domain: firmDomain,
-            });
-          } else {
-            for (const email of emails) {
-              rows.push({
-                id: inv.id,
-                name: fullName,
-                first_name: firstName,
-                last_name: lastName,
-                linkedin_url: linkedinVal,
-                email,
-                email_verified: verifiedVal,
-                firm_domain: firmDomain,
-              });
-            }
-          }
+          rows.push({
+            id: inv.id,
+            name: fullName,
+            first_name: firstName,
+            last_name: lastName,
+            linkedin_url: linkedinVal,
+            email: emails.length > 0 ? emails.join(', ') : '',
+            email_verified: emails.length > 0 ? verifiedVal : 'missing',
+            firm_domain: firmDomain,
+          });
         }
       }
 
@@ -2173,6 +2361,224 @@ function UnverifiedEmailsTool() {
                 </button>
               </div>
 
+              {/* Upload Master CSV */}
+              <div className="border border-dashed border-indigo-200 rounded-lg bg-indigo-50/30 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                      <Upload className="w-4 h-4 text-indigo-600" />
+                      Upload Master CSV
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Upload the enriched CSV to update investors. Expected columns:{' '}
+                      <span className="font-medium text-gray-600">LinkedIn URL</span>,{' '}
+                      <span className="font-medium text-gray-600">Work Email</span>,{' '}
+                      <span className="font-medium text-gray-600">Personal Email</span>,{' '}
+                      <span className="font-medium text-gray-600">Work Phone Number</span>,{' '}
+                      <span className="font-medium text-gray-600">Personal Phone Number</span>,{' '}
+                      <span className="font-medium text-gray-600">Twitter Nickname</span>,{' '}
+                      <span className="font-medium text-gray-600">About</span>.
+                    </p>
+                    <p className="text-[11px] text-gray-400 mt-1">
+                      Matches by LinkedIn URL. Sets email_verified=true. Only overwrites fields where the master has non-empty values.
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <input
+                      ref={masterFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleMasterCsvUpload}
+                      className="hidden"
+                      id="master-csv-upload"
+                    />
+                    <label
+                      htmlFor="master-csv-upload"
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors shadow-sm cursor-pointer ${
+                        uploadLoading
+                          ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                          : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      }`}
+                    >
+                      {uploadLoading ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Parsing...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-3.5 h-3.5" />
+                          Choose CSV
+                        </>
+                      )}
+                    </label>
+                  </div>
+                </div>
+
+                {/* Upload Error */}
+                {uploadError && (
+                  <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {uploadError}
+                  </div>
+                )}
+
+                {/* Matches Preview (Step 1 result) */}
+                {masterMatches.length > 0 && !uploadResult && (
+                  <div className="space-y-3">
+                    {/* Match summary stats */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-gray-900">{masterMatches.length}</div>
+                        <div className="text-[10px] text-gray-500 uppercase tracking-wider">CSV Rows</div>
+                      </div>
+                      <div className="bg-green-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-green-700">{masterMatches.filter((m) => m.matched).length}</div>
+                        <div className="text-[10px] text-green-600 uppercase tracking-wider">Matched</div>
+                      </div>
+                      <div className="bg-orange-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-orange-700">{masterMatches.filter((m) => !m.matched).length}</div>
+                        <div className="text-[10px] text-orange-600 uppercase tracking-wider">Not Found</div>
+                      </div>
+                    </div>
+
+                    {/* Matches preview table */}
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto max-h-[360px] overflow-y-auto">
+                        <table className="min-w-full divide-y divide-gray-200 text-xs">
+                          <thead className="bg-gray-50 sticky top-0 z-10">
+                            <tr>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">#</th>
+                              <th className="px-3 py-2 text-center font-medium text-gray-500 uppercase tracking-wider">Match</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Investor</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">LinkedIn URL</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Work Email</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Personal Email</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Work Phone</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Personal Phone</th>
+                              <th className="px-3 py-2 text-left font-medium text-gray-500 uppercase tracking-wider">Twitter</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-100">
+                            {masterMatches.slice(0, 200).map((row, idx) => (
+                              <tr
+                                key={`${row.linkedin_url}-${idx}`}
+                                className={row.matched ? 'hover:bg-gray-50' : 'bg-red-50/40 hover:bg-red-50/60'}
+                              >
+                                <td className="px-3 py-1.5 text-gray-400">{idx + 1}</td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {row.matched ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-green-500 inline" />
+                                  ) : (
+                                    <XCircle className="w-3.5 h-3.5 text-red-400 inline" />
+                                  )}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-900 font-medium max-w-[140px] truncate">
+                                  {row.investorName || <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600 font-mono text-[10px] max-w-[180px] truncate">
+                                  {row.linkedin_url}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600 max-w-[150px] truncate">
+                                  {row.work_email || <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600 max-w-[150px] truncate">
+                                  {row.personal_email || <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600 max-w-[120px] truncate">
+                                  {row.work_phone || <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600 max-w-[120px] truncate">
+                                  {row.personal_phone || <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-3 py-1.5 text-gray-600 max-w-[100px] truncate">
+                                  {row.twitter_nickname || <span className="text-gray-300">—</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {masterMatches.length > 200 && (
+                        <div className="px-3 py-1.5 bg-gray-50 border-t border-gray-100 text-[11px] text-gray-500 text-center">
+                          Showing first 200 of {masterMatches.length} rows.
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Run Updates button */}
+                    <div className="flex items-center justify-end gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => { setMasterMatches([]); setMasterParsedRows([]); }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={runMasterUpdates}
+                        disabled={updateLoading || masterMatches.filter((m) => m.matched).length === 0}
+                        className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                      >
+                        {updateLoading ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Updating...
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Run Updates ({masterMatches.filter((m) => m.matched).length} matched)
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Upload Result (Step 2 result) */}
+                {uploadResult && (
+                  <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-green-700">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Update Complete
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                      <div className="bg-gray-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-gray-900">{uploadResult.total}</div>
+                        <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total Rows</div>
+                      </div>
+                      <div className="bg-blue-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-blue-700">{uploadResult.matched}</div>
+                        <div className="text-[10px] text-blue-600 uppercase tracking-wider">Matched</div>
+                      </div>
+                      <div className="bg-green-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-green-700">{uploadResult.updated}</div>
+                        <div className="text-[10px] text-green-600 uppercase tracking-wider">Updated</div>
+                      </div>
+                      <div className="bg-orange-50 rounded-lg px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-orange-700">{uploadResult.notFound}</div>
+                        <div className="text-[10px] text-orange-600 uppercase tracking-wider">Not Found</div>
+                      </div>
+                      <div className={`rounded-lg px-3 py-2 text-center ${uploadResult.failed > 0 ? 'bg-red-50' : 'bg-gray-50'}`}>
+                        <div className={`text-lg font-bold ${uploadResult.failed > 0 ? 'text-red-700' : 'text-gray-400'}`}>{uploadResult.failed}</div>
+                        <div className={`text-[10px] uppercase tracking-wider ${uploadResult.failed > 0 ? 'text-red-600' : 'text-gray-400'}`}>Failed</div>
+                      </div>
+                    </div>
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="button"
+                        onClick={() => { setUploadResult(null); setMasterMatches([]); setMasterParsedRows([]); }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 transition-colors"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Results Table (preview first 100 rows) */}
               <div className="border border-gray-200 rounded-lg overflow-hidden">
                 <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
@@ -2298,404 +2704,7 @@ function UnverifiedEmailsTool() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Tool 5: Update Verified Emails from CSV
-   ───────────────────────────────────────────────────────────── */
-
-interface GroupedUpdate {
-  investorId: string;
-  emails: string[];
-}
-
-type UpdateStatus = 'idle' | 'uploading' | 'running' | 'done';
-
-function UpdateVerifiedEmailsTool() {
-  const [expanded, setExpanded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<UpdateStatus>('idle');
-  const [grouped, setGrouped] = useState<GroupedUpdate[]>([]);
-  const [totalCsvRows, setTotalCsvRows] = useState(0);
-  const [skippedRows, setSkippedRows] = useState(0);
-  const [updateResult, setUpdateResult] = useState<{ total: number; succeeded: number; failed: number } | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Parse CSV text
-  const parseCSV = useCallback((text: string) => {
-    const lines = text.split(/\r?\n/).filter((l) => l.trim());
-    if (lines.length < 2) {
-      setError('CSV must have a header row and at least one data row.');
-      return;
-    }
-
-    // Parse header to find column indices
-    const headerLine = lines[0];
-    const headers = parseCSVLine(headerLine).map((h) => h.trim().toLowerCase());
-
-    const idIdx = headers.findIndex((h) => h === 'investor_id' || h === 'id');
-    const emailIdx = headers.findIndex((h) => h === 'email');
-    const verifiedIdx = headers.findIndex((h) => h === 'email_verified');
-
-    if (idIdx === -1) {
-      setError('CSV must have an "investor_id" or "id" column.');
-      return;
-    }
-    if (emailIdx === -1) {
-      setError('CSV must have an "email" column.');
-      return;
-    }
-    if (verifiedIdx === -1) {
-      setError('CSV must have an "email_verified" column.');
-      return;
-    }
-
-    // Parse rows, filter only email_verified === 'true'
-    const dataLines = lines.slice(1);
-    setTotalCsvRows(dataLines.length);
-    let skipped = 0;
-
-    // Group emails by investor ID
-    const emailMap = new Map<string, Set<string>>();
-
-    for (const line of dataLines) {
-      if (!line.trim()) continue;
-      const cols = parseCSVLine(line);
-      const investorId = (cols[idIdx] || '').trim();
-      const email = (cols[emailIdx] || '').trim();
-      const verified = (cols[verifiedIdx] || '').trim().toLowerCase();
-
-      if (!investorId) {
-        skipped++;
-        continue;
-      }
-
-      if (verified !== 'true') {
-        skipped++;
-        continue;
-      }
-
-      if (!emailMap.has(investorId)) {
-        emailMap.set(investorId, new Set());
-      }
-
-      // email may itself be comma-separated within the cell
-      if (email) {
-        const parts = email.split(/[,;]\s*/).map((e) => e.trim()).filter(Boolean);
-        for (const part of parts) {
-          emailMap.get(investorId)!.add(part);
-        }
-      }
-    }
-
-    setSkippedRows(skipped);
-
-    const updates: GroupedUpdate[] = [];
-    for (const [investorId, emailSet] of emailMap) {
-      updates.push({ investorId, emails: Array.from(emailSet) });
-    }
-
-    setGrouped(updates);
-  }, []);
-
-  const handleFileUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setError(null);
-      setGrouped([]);
-      setUpdateResult(null);
-      setTotalCsvRows(0);
-      setSkippedRows(0);
-
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      if (!file.name.endsWith('.csv')) {
-        setError('Please upload a .csv file.');
-        return;
-      }
-
-      setStatus('uploading');
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        parseCSV(text);
-        setStatus('idle');
-      };
-      reader.onerror = () => {
-        setError('Failed to read the file.');
-        setStatus('idle');
-      };
-      reader.readAsText(file);
-    },
-    [parseCSV]
-  );
-
-  const runUpdate = useCallback(async () => {
-    if (grouped.length === 0) return;
-
-    setStatus('running');
-    setError(null);
-    setUpdateResult(null);
-
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) {
-        setError('No active session. Please log in again.');
-        setStatus('idle');
-        return;
-      }
-
-      const res = await fetch('/api/data-pipelines/update-verified-emails', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ updates: grouped }),
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        setError(body?.error || `Request failed (${res.status})`);
-        setStatus('idle');
-        return;
-      }
-
-      const data = await res.json();
-      setUpdateResult({ total: data.total, succeeded: data.succeeded, failed: data.failed });
-      setStatus('done');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-      setStatus('idle');
-    }
-  }, [grouped]);
-
-  const reset = useCallback(() => {
-    setError(null);
-    setGrouped([]);
-    setUpdateResult(null);
-    setTotalCsvRows(0);
-    setSkippedRows(0);
-    setStatus('idle');
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  }, []);
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-      {/* Tool Header */}
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="p-1.5 bg-green-50 rounded-lg">
-            <MailCheck className="w-5 h-5 text-green-600" />
-          </div>
-          <div className="text-left">
-            <h2 className="text-base font-semibold text-gray-900">
-              Tool 5: Update Verified Emails from CSV
-            </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Upload a CSV with verified emails to bulk-update investor email and email_verified fields
-            </p>
-          </div>
-        </div>
-        {expanded ? (
-          <ChevronUp className="w-5 h-5 text-gray-400" />
-        ) : (
-          <ChevronDown className="w-5 h-5 text-gray-400" />
-        )}
-      </button>
-
-      {expanded && (
-        <div className="border-t border-gray-100">
-          {/* Description */}
-          <div className="px-6 py-4 bg-gray-50 border-b border-gray-100">
-            <div className="text-sm text-gray-600 space-y-1">
-              <p>
-                Upload a CSV containing columns{' '}
-                <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">investor_id</span>,{' '}
-                <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">email</span>, and{' '}
-                <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded">email_verified</span>.
-                Other columns are ignored.
-              </p>
-              <p className="text-xs text-gray-500">
-                Only rows where <span className="font-medium text-gray-700">email_verified</span> is{' '}
-                <span className="font-medium text-gray-700">true</span> are processed.
-                Rows are grouped by investor ID &mdash; all emails for the same investor are merged as comma-separated
-                and the investor&apos;s <span className="font-medium text-gray-700">email</span> and{' '}
-                <span className="font-medium text-gray-700">email_verified = true</span> are saved to the database.
-              </p>
-            </div>
-          </div>
-
-          <div className="px-6 py-4 space-y-4">
-            {/* File Upload */}
-            <div className="flex items-center gap-4">
-              <label
-                className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border-2 border-dashed cursor-pointer transition-colors ${
-                  status === 'running'
-                    ? 'border-gray-200 text-gray-400 cursor-not-allowed'
-                    : 'border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600 hover:bg-indigo-50/30'
-                }`}
-              >
-                <FileUp className="w-4 h-4" />
-                {grouped.length > 0 ? 'Replace CSV' : 'Choose CSV File'}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".csv"
-                  onChange={handleFileUpload}
-                  disabled={status === 'running'}
-                  className="hidden"
-                />
-              </label>
-
-              {grouped.length > 0 && status !== 'done' && (
-                <button
-                  type="button"
-                  onClick={runUpdate}
-                  disabled={status === 'running'}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors shadow-sm"
-                >
-                  {status === 'running' ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      Updating...
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-4 h-4" />
-                      Update {grouped.length} Investors
-                    </>
-                  )}
-                </button>
-              )}
-
-              {(grouped.length > 0 || updateResult) && status !== 'running' && (
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="text-xs text-gray-500 hover:text-gray-700 underline"
-                >
-                  Reset
-                </button>
-              )}
-            </div>
-
-            {/* Error */}
-            {error && (
-              <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 text-red-700 text-sm">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                {error}
-              </div>
-            )}
-
-            {/* Parse Summary */}
-            {grouped.length > 0 && !updateResult && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <StatCard label="Total CSV Rows" value={totalCsvRows} />
-                  <StatCard label="Skipped (not verified)" value={skippedRows} color="orange" />
-                  <StatCard label="Unique Investors" value={grouped.length} color="green" />
-                  <StatCard
-                    label="Total Emails"
-                    value={grouped.reduce((sum, g) => sum + g.emails.length, 0)}
-                  />
-                </div>
-
-                {/* Preview Table */}
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto max-h-[400px] overflow-y-auto">
-                    <table className="min-w-full divide-y divide-gray-200 text-sm">
-                      <thead className="bg-gray-50 sticky top-0 z-10">
-                        <tr>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            #
-                          </th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Investor ID
-                          </th>
-                          <th className="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Emails (merged)
-                          </th>
-                          <th className="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                            Count
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-100">
-                        {grouped.slice(0, 100).map((g, idx) => (
-                          <tr key={g.investorId} className="hover:bg-gray-50">
-                            <td className="px-4 py-2 text-gray-400 text-xs">{idx + 1}</td>
-                            <td className="px-4 py-2 text-gray-700 font-mono text-[11px]">
-                              {g.investorId.slice(0, 8)}...
-                            </td>
-                            <td className="px-4 py-2 text-gray-600 text-xs max-w-[400px]">
-                              <span className="block truncate" title={g.emails.join(', ')}>
-                                {g.emails.join(', ')}
-                              </span>
-                            </td>
-                            <td className="px-4 py-2 text-center">
-                              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-50 text-green-700 text-xs font-medium">
-                                {g.emails.length}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {grouped.length > 100 && (
-                    <div className="px-4 py-2 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
-                      Showing first 100 of {grouped.length} investors.
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Update Result */}
-            {updateResult && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-3 gap-3">
-                  <StatCard label="Total" value={updateResult.total} />
-                  <StatCard label="Succeeded" value={updateResult.succeeded} color="green" />
-                  <StatCard
-                    label="Failed"
-                    value={updateResult.failed}
-                    color={updateResult.failed > 0 ? 'orange' : 'green'}
-                  />
-                </div>
-                {updateResult.failed === 0 && (
-                  <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-green-50 text-green-700 text-sm">
-                    <CheckCircle2 className="w-5 h-5" />
-                    All {updateResult.succeeded} investors updated successfully with verified emails.
-                  </div>
-                )}
-                {updateResult.failed > 0 && (
-                  <div className="flex items-center gap-2 px-4 py-3 rounded-lg bg-amber-50 text-amber-700 text-sm">
-                    <AlertCircle className="w-5 h-5" />
-                    {updateResult.succeeded} succeeded, {updateResult.failed} failed. Check console for details.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Empty state */}
-            {grouped.length === 0 && !error && !updateResult && status === 'idle' && (
-              <div className="py-8 text-center text-gray-400 text-sm">
-                Upload a CSV file to preview and apply verified email updates.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────
-   Tool 6: Not An Investor Viewer
+   Tool 5: Not An Investor Viewer
    ───────────────────────────────────────────────────────────── */
 
 interface NotAnInvestorRow {
@@ -2869,7 +2878,7 @@ function NotAnInvestorTool() {
           </div>
           <div className="text-left">
             <h2 className="text-base font-semibold text-gray-900">
-              Tool 6: Not An Investor Viewer
+              Tool 5: Not An Investor Viewer
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               View entries flagged as &quot;not an investor&quot; or that errored during research
@@ -3319,7 +3328,7 @@ function MissingFundingInvestorsTool() {
           </div>
           <div className="text-left">
             <h2 className="text-base font-semibold text-gray-900">
-              Tool 7: Missing Investors from New Fundings
+              Tool 6: Missing Investors from New Fundings
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               Find investors listed in New Fundings that are not yet in the investors database
@@ -3589,7 +3598,7 @@ function MissingFundingInvestorsTool() {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   Tool 8: Missing Deep Research
+   Tool 7: Missing Deep Research
    ───────────────────────────────────────────────────────────── */
 
 interface MissingDeepResearchInvestor {
@@ -3826,7 +3835,7 @@ function MissingDeepResearchTool() {
           </div>
           <div className="text-left">
             <h2 className="text-base font-semibold text-gray-900">
-              Tool 8: Missing Deep Research
+              Tool 7: Missing Deep Research
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
               Find investors with no deep research and run the full research pipeline on them

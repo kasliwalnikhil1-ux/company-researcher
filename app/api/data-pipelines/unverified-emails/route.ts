@@ -77,8 +77,11 @@ export async function POST(request: NextRequest) {
     const firmDomainMap = new Map<string, string>();
 
     if (personIds.length > 0) {
-      // Batch in chunks of 500 to avoid query size limits
-      const chunkSize = 500;
+      // Batch in small chunks to avoid HeadersOverflowError (UUIDs in .in() go into URL params)
+      const chunkSize = 50;
+
+      // First collect all affiliations
+      const allAffiliations: Array<{ person_id: string; firm_id: string }> = [];
       for (let i = 0; i < personIds.length; i += chunkSize) {
         const chunk = personIds.slice(i, i + chunkSize);
         const { data: affiliations, error: affError } = await supabase
@@ -91,32 +94,36 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        if (affiliations && affiliations.length > 0) {
-          // Collect unique firm IDs
-          const firmIds = [...new Set(affiliations.map((a) => a.firm_id))];
+        if (affiliations) allAffiliations.push(...affiliations);
+      }
 
-          // Fetch firm domains
+      if (allAffiliations.length > 0) {
+        // Collect unique firm IDs and fetch their domains in batches
+        const allFirmIds = [...new Set(allAffiliations.map((a) => a.firm_id))];
+        const firmIdToDomain = new Map<string, string>();
+
+        for (let i = 0; i < allFirmIds.length; i += chunkSize) {
+          const firmChunk = allFirmIds.slice(i, i + chunkSize);
           const { data: firms, error: firmError } = await supabase
             .from('investors')
             .select('id, domain')
-            .in('id', firmIds);
+            .in('id', firmChunk);
 
           if (firmError) {
             console.error('Failed to fetch firm domains:', firmError);
             continue;
           }
 
-          const firmIdToDomain = new Map<string, string>();
           for (const firm of firms || []) {
             if (firm.domain) firmIdToDomain.set(firm.id, firm.domain);
           }
+        }
 
-          // Map person_id -> first available firm domain
-          for (const aff of affiliations) {
-            if (!firmDomainMap.has(aff.person_id)) {
-              const domain = firmIdToDomain.get(aff.firm_id);
-              if (domain) firmDomainMap.set(aff.person_id, domain);
-            }
+        // Map person_id -> first available firm domain
+        for (const aff of allAffiliations) {
+          if (!firmDomainMap.has(aff.person_id)) {
+            const domain = firmIdToDomain.get(aff.firm_id);
+            if (domain) firmDomainMap.set(aff.person_id, domain);
           }
         }
       }
