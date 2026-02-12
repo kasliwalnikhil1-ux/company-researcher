@@ -29,10 +29,13 @@ function getServiceClient() {
  * POST /api/domains-extractor/filter-existing
  *
  * Takes arrays of domains and LinkedIn URLs, checks which ones already exist
- * in the `investors` table, and returns only the ones that do NOT exist.
+ * in the `investors` table OR the `not_an_investor` table, and returns only
+ * the ones that do NOT exist in either table.
  *
  * Body: { domains: string[], linkedinUrls: string[] }
- * Returns: { domains: string[], linkedinUrls: string[], removedDomains: number, removedLinkedIn: number }
+ * Returns: { domains, linkedinUrls, removedDomains, removedLinkedIn,
+ *            removedDomainsInvestors, removedDomainsNotInvestor,
+ *            removedLinkedInInvestors, removedLinkedInNotInvestor }
  */
 export async function POST(req: NextRequest) {
   try {
@@ -132,15 +135,73 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // --- Filter out existing ---
-    const remainingDomains = domains.filter(d => !existingDomains.has(d.toLowerCase()));
-    const remainingLinkedIn = linkedinUrls.filter(l => !existingLinkedInPaths.has(toLinkedInPath(l).toLowerCase()));
+    // --- Check domains in not_an_investor table ---
+    const notInvestorDomains = new Set<string>();
+
+    for (let i = 0; i < domains.length; i += DOMAIN_BATCH) {
+      const batch = domains.slice(i, i + DOMAIN_BATCH);
+      const { data, error } = await supabase
+        .from('not_an_investor')
+        .select('domain')
+        .in('domain', batch);
+
+      if (error) {
+        console.error('Error querying not_an_investor domains:', error);
+        continue;
+      }
+      if (data) {
+        for (const row of data) {
+          if (row.domain) notInvestorDomains.add(row.domain.toLowerCase());
+        }
+      }
+    }
+
+    // --- Check LinkedIn URLs in not_an_investor table ---
+    const notInvestorLinkedInPaths = new Set<string>();
+
+    for (let i = 0; i < allPaths.length; i += LINKEDIN_BATCH) {
+      const batch = allPaths.slice(i, i + LINKEDIN_BATCH);
+      const { data, error } = await supabase
+        .from('not_an_investor')
+        .select('linkedin_url')
+        .in('linkedin_url', batch);
+
+      if (error) {
+        console.error('Error querying not_an_investor LinkedIn URLs:', error);
+        continue;
+      }
+      if (data) {
+        for (const row of data) {
+          if (row.linkedin_url) notInvestorLinkedInPaths.add(row.linkedin_url.toLowerCase());
+        }
+      }
+    }
+
+    // --- Filter out existing (from both investors and not_an_investor tables) ---
+    const remainingDomains = domains.filter(d => {
+      const lower = d.toLowerCase();
+      return !existingDomains.has(lower) && !notInvestorDomains.has(lower);
+    });
+    const remainingLinkedIn = linkedinUrls.filter(l => {
+      const path = toLinkedInPath(l).toLowerCase();
+      return !existingLinkedInPaths.has(path) && !notInvestorLinkedInPaths.has(path);
+    });
+
+    // Compute per-table removal counts
+    const removedDomainsInvestors = domains.filter(d => existingDomains.has(d.toLowerCase())).length;
+    const removedDomainsNotInvestor = domains.filter(d => !existingDomains.has(d.toLowerCase()) && notInvestorDomains.has(d.toLowerCase())).length;
+    const removedLinkedInInvestors = linkedinUrls.filter(l => existingLinkedInPaths.has(toLinkedInPath(l).toLowerCase())).length;
+    const removedLinkedInNotInvestor = linkedinUrls.filter(l => !existingLinkedInPaths.has(toLinkedInPath(l).toLowerCase()) && notInvestorLinkedInPaths.has(toLinkedInPath(l).toLowerCase())).length;
 
     return NextResponse.json({
       domains: remainingDomains,
       linkedinUrls: remainingLinkedIn,
       removedDomains: domains.length - remainingDomains.length,
       removedLinkedIn: linkedinUrls.length - remainingLinkedIn.length,
+      removedDomainsInvestors,
+      removedDomainsNotInvestor,
+      removedLinkedInInvestors,
+      removedLinkedInNotInvestor,
     });
   } catch (err: any) {
     console.error('filter-existing error:', err);

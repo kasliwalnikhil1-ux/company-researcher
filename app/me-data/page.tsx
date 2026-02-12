@@ -7,7 +7,8 @@ import { supabase } from '@/utils/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
-import { Database, Plus, Loader2, Trash2, ChevronLeft, ChevronRight, Play } from 'lucide-react';
+import { downloadCsv } from '@/lib/csvExport';
+import { Database, Plus, Loader2, Trash2, ChevronLeft, ChevronRight, Play, Download, X } from 'lucide-react';
 
 const ME_DATA_ALLOWED_USER_IDS = new Set([
   '2793f3da-9340-44f4-b285-b7836bfb8591',
@@ -36,6 +37,37 @@ type MeDataRow = {
   processed: boolean | null;
   created_at: string;
 };
+
+type SavedProspect = {
+  linkedin_url: string;
+  name: string | null;
+  headline: string | null;
+  intent: string;
+  status: string | null;
+  convo_date: string | null;
+};
+
+const PROSPECT_COLUMNS: { key: keyof SavedProspect; label: string }[] = [
+  { key: 'name', label: 'Name' },
+  { key: 'headline', label: 'Headline' },
+  { key: 'intent', label: 'Intent' },
+  { key: 'status', label: 'Status' },
+  { key: 'convo_date', label: 'Convo Date' },
+  { key: 'linkedin_url', label: 'LinkedIn URL' },
+];
+
+function prospectsToCsvString(prospects: SavedProspect[]): string {
+  const csvEscape = (value: unknown): string => {
+    if (value == null) return '';
+    const str = String(value);
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+  const headers = PROSPECT_COLUMNS.map((c) => c.label);
+  const rows = prospects.map((p) =>
+    PROSPECT_COLUMNS.map((col) => csvEscape(p[col.key] ?? '')).join(',')
+  );
+  return [headers.map(csvEscape).join(','), ...rows].join('\n');
+}
 
 function formatDateTime(iso: string): string {
   try {
@@ -92,6 +124,7 @@ function MeDataContent() {
   const [totalCount, setTotalCount] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [lastSavedProspects, setLastSavedProspects] = useState<SavedProspect[]>([]);
 
   const fetchRows = useCallback(async (overridePage?: number) => {
     if (!user?.id) {
@@ -189,6 +222,7 @@ function MeDataContent() {
   const handleProcess = async (id: string) => {
     setProcessingId(id);
     setProcessError(null);
+    setLastSavedProspects([]);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token) {
@@ -205,6 +239,13 @@ function MeDataContent() {
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || data.details || 'Failed to process');
+      }
+      // Capture saved prospects and auto-download CSV
+      const saved = (data.saved ?? []) as SavedProspect[];
+      if (saved.length > 0) {
+        setLastSavedProspects(saved);
+        const csv = prospectsToCsvString(saved);
+        downloadCsv(csv, `me-data-prospects-${new Date().toISOString().slice(0, 10)}.csv`);
       }
       await fetchRows();
     } catch (e) {
@@ -247,6 +288,8 @@ function MeDataContent() {
     if (ids.length === 0) return;
     setBulkProcessing(true);
     setProcessError(null);
+    setLastSavedProspects([]);
+    const allSaved: SavedProspect[] = [];
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       setProcessingId(id);
@@ -267,6 +310,9 @@ function MeDataContent() {
         if (!res.ok) {
           throw new Error(data.error || data.details || 'Failed to process');
         }
+        // Accumulate saved prospects
+        const saved = (data.saved ?? []) as SavedProspect[];
+        allSaved.push(...saved);
         setSelectedIds((prev) => {
           const next = new Set(prev);
           next.delete(id);
@@ -279,6 +325,19 @@ function MeDataContent() {
       } finally {
         setProcessingId(null);
       }
+    }
+    // Deduplicate by linkedin_url and auto-download CSV
+    const uniqueMap = new Map<string, SavedProspect>();
+    for (const p of allSaved) {
+      if (!uniqueMap.has(p.linkedin_url)) {
+        uniqueMap.set(p.linkedin_url, p);
+      }
+    }
+    const uniqueProspects = Array.from(uniqueMap.values());
+    if (uniqueProspects.length > 0) {
+      setLastSavedProspects(uniqueProspects);
+      const csv = prospectsToCsvString(uniqueProspects);
+      downloadCsv(csv, `me-data-prospects-${new Date().toISOString().slice(0, 10)}.csv`);
     }
     setBulkProcessing(false);
   };
@@ -544,6 +603,93 @@ function MeDataContent() {
           </div>
         )}
       </section>
+
+      {/* Processed prospects table */}
+      {lastSavedProspects.length > 0 && (
+        <section className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden mt-6">
+          <div className="p-6 pb-0 flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Saved Prospects ({lastSavedProspects.length})
+              </h2>
+              <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-800">
+                Auto-downloaded
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const csv = prospectsToCsvString(lastSavedProspects);
+                  downloadCsv(csv, `me-data-prospects-${new Date().toISOString().slice(0, 10)}.csv`);
+                }}
+                className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors"
+                title="Download CSV again"
+              >
+                <Download className="w-4 h-4" />
+                Download CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => setLastSavedProspects([])}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  {PROSPECT_COLUMNS.map((col) => (
+                    <th
+                      key={col.key}
+                      className="text-left px-4 py-3 font-medium text-gray-700 whitespace-nowrap"
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {lastSavedProspects.map((p) => (
+                  <tr
+                    key={p.linkedin_url}
+                    className="border-b border-gray-100 last:border-0 hover:bg-gray-50"
+                  >
+                    {PROSPECT_COLUMNS.map((col) => (
+                      <td key={col.key} className="px-4 py-3 text-gray-900">
+                        {col.key === 'linkedin_url' && p.linkedin_url ? (
+                          <a
+                            href={p.linkedin_url.startsWith('http') ? p.linkedin_url : `https://${p.linkedin_url}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-600 hover:underline truncate block max-w-[220px]"
+                          >
+                            {p.linkedin_url}
+                          </a>
+                        ) : col.key === 'convo_date' ? (
+                          p.convo_date
+                            ? new Date(p.convo_date).toLocaleDateString(undefined, {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })
+                            : '—'
+                        ) : (
+                          (p[col.key] ?? '—')
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <DeleteConfirmationModal
         isOpen={rowToDelete !== null}

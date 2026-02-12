@@ -104,6 +104,10 @@ export default function UniqueDomainsExtractor() {
   const [filterResult, setFilterResult] = useState<{
     removedDomains: number;
     removedLinkedIn: number;
+    removedDomainsInvestors: number;
+    removedDomainsNotInvestor: number;
+    removedLinkedInInvestors: number;
+    removedLinkedInNotInvestor: number;
   } | null>(null);
 
   const isWizardOpen = wizardFileIdx !== null && wizardFileIdx < uploadedFiles.length;
@@ -388,6 +392,10 @@ export default function UniqueDomainsExtractor() {
 
       const removedDomains = data.removedDomains ?? 0;
       const removedLinkedIn = data.removedLinkedIn ?? 0;
+      const removedDomainsInvestors = data.removedDomainsInvestors ?? 0;
+      const removedDomainsNotInvestor = data.removedDomainsNotInvestor ?? 0;
+      const removedLinkedInInvestors = data.removedLinkedInInvestors ?? 0;
+      const removedLinkedInNotInvestor = data.removedLinkedInNotInvestor ?? 0;
 
       setExtractedDomains(data.domains ?? []);
       setExtractedLinkedIn(data.linkedinUrls ?? []);
@@ -398,15 +406,22 @@ export default function UniqueDomainsExtractor() {
         uniqueLinkedIn: (data.linkedinUrls ?? []).length,
       } : prev);
 
-      setFilterResult({ removedDomains, removedLinkedIn });
+      setFilterResult({
+        removedDomains,
+        removedLinkedIn,
+        removedDomainsInvestors,
+        removedDomainsNotInvestor,
+        removedLinkedInInvestors,
+        removedLinkedInNotInvestor,
+      });
 
       const parts: string[] = [];
       if (removedDomains > 0) parts.push(`${removedDomains} domains`);
       if (removedLinkedIn > 0) parts.push(`${removedLinkedIn} LinkedIn URLs`);
       if (parts.length > 0) {
-        setToastMessage(`Removed ${parts.join(' and ')} already in investors table`);
+        setToastMessage(`Removed ${parts.join(' and ')} (from investors & not-an-investor tables)`);
       } else {
-        setToastMessage('No existing investors found — all entries are new');
+        setToastMessage('No existing entries found in either table — all entries are new');
       }
       setShowToast(true);
     } catch (error: any) {
@@ -558,7 +573,7 @@ export default function UniqueDomainsExtractor() {
             <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
             <span>
               {isFiltering
-                ? 'Checking investors table for existing entries...'
+                ? 'Checking investors & not-an-investor tables for existing entries...'
                 : 'Extracting unique domains & LinkedIn URLs...'}
             </span>
           </div>
@@ -607,14 +622,26 @@ export default function UniqueDomainsExtractor() {
                     : 'bg-orange-600 text-white hover:bg-orange-700'
                 }`}
               >
-                {isFiltering ? 'Checking...' : 'Remove existing investors (optional)'}
+                {isFiltering ? 'Checking...' : 'Remove existing entries (investors & not-an-investor)'}
               </button>
             )}
             {filterResult && (
-              <span className="text-sm text-gray-700">
-                Removed {filterResult.removedDomains} domain{filterResult.removedDomains !== 1 ? 's' : ''} and{' '}
-                {filterResult.removedLinkedIn} LinkedIn URL{filterResult.removedLinkedIn !== 1 ? 's' : ''} already in DB.
-              </span>
+              <div className="text-sm text-gray-700 space-y-1">
+                <div>
+                  Removed <strong>{filterResult.removedDomains}</strong> domain{filterResult.removedDomains !== 1 ? 's' : ''} and{' '}
+                  <strong>{filterResult.removedLinkedIn}</strong> LinkedIn URL{filterResult.removedLinkedIn !== 1 ? 's' : ''} total.
+                </div>
+                {(filterResult.removedDomainsInvestors > 0 || filterResult.removedLinkedInInvestors > 0) && (
+                  <div className="text-xs text-gray-500">
+                    Investors table: {filterResult.removedDomainsInvestors} domain{filterResult.removedDomainsInvestors !== 1 ? 's' : ''}, {filterResult.removedLinkedInInvestors} LinkedIn
+                  </div>
+                )}
+                {(filterResult.removedDomainsNotInvestor > 0 || filterResult.removedLinkedInNotInvestor > 0) && (
+                  <div className="text-xs text-gray-500">
+                    Not-an-investor table: {filterResult.removedDomainsNotInvestor} domain{filterResult.removedDomainsNotInvestor !== 1 ? 's' : ''}, {filterResult.removedLinkedInNotInvestor} LinkedIn
+                  </div>
+                )}
+              </div>
             )}
             <div className="flex-1" />
             <button
