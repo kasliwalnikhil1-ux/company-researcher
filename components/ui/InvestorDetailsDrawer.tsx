@@ -818,14 +818,21 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const contactsLimit = isFreePlan ? CONTACTS_FREE_LIMIT : 100;
   const CONTACTS_STORAGE_KEY = (id: string) => `investor-contacts-${id}-${contactsLimit}`;
 
-  const loadContacts = useCallback(async (firmId: string) => {
+  const loadContacts = useCallback(async (firmId: string, expectedCount?: number | null) => {
     if (typeof window === 'undefined') return;
     const cached = localStorage.getItem(CONTACTS_STORAGE_KEY(firmId));
     if (cached !== null) {
       try {
         const parsed = JSON.parse(cached) as InvestorDetails[];
-        setContactsData(Array.isArray(parsed) ? parsed : []);
-        return;
+        const list = Array.isArray(parsed) ? parsed : [];
+        // If the expected count (associated_people_count) differs from the
+        // number of locally stored contacts, skip the cache and re-fetch.
+        if (expectedCount != null && expectedCount > 0 && list.length !== expectedCount) {
+          // fall through to fetch fresh data
+        } else {
+          setContactsData(list);
+          return;
+        }
       } catch {
         // Invalid cache, fetch fresh
       }
@@ -879,9 +886,9 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
 
   useEffect(() => {
     if (investor?.type === 'firm' && investor.id && activeTab === 'contacts') {
-      loadContacts(investor.id);
+      loadContacts(investor.id, investor.associated_people_count);
     }
-  }, [investor?.id, investor?.type, activeTab, loadContacts]);
+  }, [investor?.id, investor?.type, activeTab, loadContacts, investor?.associated_people_count]);
 
   const loadInvestorNews = useCallback(async (investorId: string) => {
     if (typeof window === 'undefined') return;

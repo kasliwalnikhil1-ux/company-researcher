@@ -473,6 +473,69 @@ export function cleanInvestorInput(input: string): { cleaned: string; type: 'dom
   }
 }
 
+// --- Validation helpers for investor field sanitization ---
+
+/** Check if value looks like a LinkedIn person profile path (in/...) */
+function looksLikeLinkedInPersonPath(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  return /^in\//i.test(value.trim());
+}
+
+/** Check if value looks like any LinkedIn path (in/..., company/..., school/...) */
+function looksLikeLinkedInPath(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  return /^(in|company|school)\//i.test(value.trim());
+}
+
+/** Check if value looks like a web domain (e.g., accel.com, sequoiacap.com) - not a LinkedIn path */
+function looksLikeDomain(value: string | null | undefined): boolean {
+  if (!value || typeof value !== 'string') return false;
+  const v = value.trim().toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0]
+    .split('?')[0];
+  return /^[\w-]+(\.[\w-]+)+$/.test(v) && /\.[a-z]{2,}$/i.test(v);
+}
+
+/**
+ * Sanitize domain and linkedin_url to prevent cross-contamination before saving to investors table.
+ * Rules:
+ *   1. domain must never be a LinkedIn path (in/..., company/..., school/...)
+ *   2. For person rows: linkedin_url must never be a domain (e.g., accel.com)
+ *   3. For firm rows: linkedin_url must never be a person LinkedIn path (in/...)
+ *   4. Empty/whitespace strings are treated as null
+ */
+function sanitizeInvestorFields(
+  entityType: string | null,
+  domainVal: string | null | undefined,
+  linkedinUrlVal: string | null | undefined
+): { domain: string | null; linkedin_url: string | null } {
+  // Normalize empty/whitespace to null
+  let cleanDomain = domainVal && typeof domainVal === 'string' && domainVal.trim() ? domainVal.trim() : null;
+  let cleanLinkedinUrl = linkedinUrlVal && typeof linkedinUrlVal === 'string' && linkedinUrlVal.trim() ? linkedinUrlVal.trim() : null;
+
+  // Rule 1: domain must never be a LinkedIn path
+  if (cleanDomain && looksLikeLinkedInPath(cleanDomain)) {
+    console.warn('[investor-research] Sanitize: removed LinkedIn path from domain field:', cleanDomain);
+    cleanDomain = null;
+  }
+
+  // Rule 2: person's linkedin_url must never be a domain
+  if (entityType === 'person' && cleanLinkedinUrl && looksLikeDomain(cleanLinkedinUrl) && !looksLikeLinkedInPath(cleanLinkedinUrl)) {
+    console.warn('[investor-research] Sanitize: removed domain-like value from person linkedin_url:', cleanLinkedinUrl);
+    cleanLinkedinUrl = null;
+  }
+
+  // Rule 3: firm's linkedin_url must never be a person LinkedIn path (in/...)
+  if (entityType === 'firm' && cleanLinkedinUrl && looksLikeLinkedInPersonPath(cleanLinkedinUrl)) {
+    console.warn('[investor-research] Sanitize: removed person LinkedIn path (in/...) from firm linkedin_url:', cleanLinkedinUrl);
+    cleanLinkedinUrl = null;
+  }
+
+  return { domain: cleanDomain, linkedin_url: cleanLinkedinUrl };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -751,11 +814,13 @@ export async function POST(req: NextRequest) {
 
     const typeDb = entityType === 'Person' ? 'person' : entityType === 'Organization' ? 'firm' : null;
 
+    // Sanitize domain/linkedin_url to prevent cross-contamination (e.g., LinkedIn path as domain, domain as linkedin_url)
+    const sanitizedBase = sanitizeInvestorFields(typeDb, domain || null, linkedinUrl || null);
     const baseRow = {
       type: typeDb,
       name: cleanName,
-      domain: domain || null,
-      linkedin_url: linkedinUrl || null,
+      domain: sanitizedBase.domain,
+      linkedin_url: sanitizedBase.linkedin_url,
       investor_type: investorTypes,
       links: links.length ? links : null,
     };
@@ -935,7 +1000,7 @@ export async function POST(req: NextRequest) {
     }
     // Clean extracted linkedin_url (AI may return full URL) - lowercase, no leading/trailing slashes
     const extractedLinkedinUrl = extracted?.linkedin_url
-      ? cleanInvestorInput(extracted.linkedin_url).linkedinUrl
+      ? cleanInvestorInput(extracted.linkedin_url).linkedinUrl || null
       : null;
     // Prefer the original input linkedinUrl over AI-extracted one for consistency in duplicate detection
     // The input URL is the source of truth; AI extraction may return a different format (e.g., without numeric suffix)
@@ -966,6 +1031,10 @@ export async function POST(req: NextRequest) {
       leads_round: typeof extracted?.leads_round === 'boolean' ? extracted.leads_round : null,
       tier: typeof extracted?.tier === 'string' && ['A', 'B', 'C'].includes(extracted.tier) ? extracted.tier : null,
     };
+
+    // Sanitize linkedin_url in updateRow before final save (prevent domain in person's linkedin_url, person path in firm's linkedin_url)
+    const sanitizedUpdate = sanitizeInvestorFields(typeDb, null, updateRow.linkedin_url as string | null);
+    updateRow.linkedin_url = sanitizedUpdate.linkedin_url;
 
     const { error: finalUpdErr } = await supabase.from('investors').update(updateRow).eq('id', rowId);
     if (finalUpdErr) {
