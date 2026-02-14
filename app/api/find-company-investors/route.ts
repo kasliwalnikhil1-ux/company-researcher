@@ -6,7 +6,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 
-const FASHION_DEEP_SEARCH_URL = 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
+const FASHION_DEEP_SEARCH_URL =
+  process.env.NODE_ENV === 'development'
+    ? `http://localhost:${process.env.PORT || 3000}/api/fashion-deep-search`
+    : 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
 const RETRIES = 3;
 const RETRY_BACKOFF_MS = 2000;
 const RETRYABLE_STATUS_CODES = [429, 500, 502, 503, 520, 521, 522, 523, 524];

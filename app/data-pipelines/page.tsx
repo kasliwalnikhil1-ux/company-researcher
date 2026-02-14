@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
+import { getValidAccessToken } from '@/lib/api';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const Papa = require('papaparse');
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -135,8 +136,7 @@ function MissingCoinvestorsTool() {
     setError(null);
     setResult(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         setError('No active session. Please log in again.');
         return;
@@ -556,8 +556,7 @@ function RerunContactsTool() {
   const stopRef = useRef(false);
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    return sessionData?.session?.access_token || null;
+    return getValidAccessToken();
   }, []);
 
   // ── Fetch Firms ──
@@ -1304,8 +1303,7 @@ function RerunProfileTool() {
   const stopRef = useRef(false);
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    return sessionData?.session?.access_token || null;
+    return getValidAccessToken();
   }, []);
 
   // ── Fetch Investors ──
@@ -2113,8 +2111,7 @@ function UnverifiedEmailsTool() {
     setUploadResult(null);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         setUploadError('No active session. Please log in again.');
         return;
@@ -2157,8 +2154,7 @@ function UnverifiedEmailsTool() {
     setCsvRows([]);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         setError('No active session. Please log in again.');
         return;
@@ -2756,8 +2752,7 @@ function NotAnInvestorTool() {
     setLoading(true);
     setError(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         setError('No active session. Please log in again.');
         return;
@@ -2796,8 +2791,7 @@ function NotAnInvestorTool() {
   const handleDelete = useCallback(async (id: string) => {
     setDeletingIds((prev) => new Set(prev).add(id));
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) return;
 
       // Use supabase client directly with service role via API isn't possible from client,
@@ -3246,8 +3240,7 @@ function MissingFundingInvestorsTool() {
     setError(null);
     setResult(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         setError('No active session. Please log in again.');
         return;
@@ -3642,8 +3635,7 @@ function MissingDeepResearchTool() {
   const stopRef = useRef(false);
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
-    const { data: sessionData } = await supabase.auth.getSession();
-    return sessionData?.session?.access_token || null;
+    return getValidAccessToken();
   }, []);
 
   // ── Fetch Investors ──

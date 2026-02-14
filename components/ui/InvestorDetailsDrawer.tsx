@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw } from 'lucide-react';
-import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, type InvestorNews } from '@/lib/api';
+import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, getValidAccessToken, type InvestorNews } from '@/lib/api';
 import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT, type ExcludeInvestorsOption } from '@/hooks/useInvestorSearch';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -625,13 +625,13 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     setRerunSelectedKeys(new Set());
     setRerunResults(new Map());
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error('Not authenticated');
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) throw new Error('Not authenticated');
       const res = await fetch('/api/data-pipelines/rerun-contacts/fetch-contacts', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ firmId: investor.id }),
       });
@@ -678,8 +678,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
         batch.forEach((c) => next.set(c.key, { status: 'running' }));
         return next;
       });
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) break;
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) break;
       await Promise.all(
         batch.map(async (contact) => {
           try {
@@ -687,7 +687,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${session.access_token}`,
+                Authorization: `Bearer ${accessToken}`,
               },
               body: JSON.stringify({
                 input: contact.input,
@@ -1013,8 +1013,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     setFounderSearchLoading(true);
     setFounderSearchResult(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) {
         setFounderSearchResult({ success: false, message: 'Not authenticated' });
         setFounderSearchLoading(false);
         return;
@@ -1023,7 +1023,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ investorId: investor.id }),
       });

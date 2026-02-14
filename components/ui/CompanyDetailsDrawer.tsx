@@ -6,6 +6,7 @@ import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from "@/lib/emailCompose";
 import { supabase } from "@/utils/supabase/client";
+import { getValidAccessToken } from "@/lib/api";
 
 interface CompanyDetailsDrawerProps {
   isOpen: boolean;
@@ -354,8 +355,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
     setContactsLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) {
         throw new Error("Not authenticated");
       }
 
@@ -365,7 +366,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({ domain }),
         }

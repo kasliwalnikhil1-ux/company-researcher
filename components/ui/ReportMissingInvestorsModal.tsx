@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { getValidAccessToken } from '@/lib/api';
 
 interface ReportMissingInvestorsModalProps {
   isOpen: boolean;
@@ -34,8 +34,7 @@ export default function ReportMissingInvestorsModal({
     setIsSubmitting(true);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getValidAccessToken();
 
       if (!token) {
         setError('Please sign in to report missing investors.');

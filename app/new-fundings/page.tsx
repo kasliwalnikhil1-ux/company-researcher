@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
-import { supabase } from '@/utils/supabase/client';
+import { getValidAccessToken } from '@/lib/api';
 import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight, Upload, FileText, Linkedin } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
@@ -168,14 +168,14 @@ function NewFundingsContent() {
   const fetchFundings = useCallback(async () => {
     try {
       setLoading(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) {
         setError('Not authenticated');
         return;
       }
 
       const res = await fetch('/api/new-fundings', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
 
       if (!res.ok) {
@@ -529,8 +529,8 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
     }
     setResults(initial);
 
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken) {
       setIsProcessing(false);
       return;
     }
@@ -540,7 +540,7 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
       if (abortRef.current) break;
 
       const batch = validEntries.slice(i, i + BATCH_SIZE);
-      await Promise.all(batch.map((entry) => processEntry(entry, session.access_token)));
+      await Promise.all(batch.map((entry) => processEntry(entry, accessToken)));
     }
 
     setIsProcessing(false);

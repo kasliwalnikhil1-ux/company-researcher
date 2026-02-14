@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
+import { getValidAccessToken } from '@/lib/api';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
@@ -224,15 +225,15 @@ function MeDataContent() {
     setProcessError(null);
     setLastSavedProspects([]);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) {
         throw new Error('Not authenticated');
       }
       const res = await fetch('/api/me-data-process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ meDataId: id }),
       });
@@ -294,15 +295,15 @@ function MeDataContent() {
       const id = ids[i];
       setProcessingId(id);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.access_token) {
+        const accessToken = await getValidAccessToken();
+        if (!accessToken) {
           throw new Error('Not authenticated');
         }
         const res = await fetch('/api/me-data-process', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${session.access_token}`,
+            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({ meDataId: id }),
         });

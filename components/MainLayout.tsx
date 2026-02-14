@@ -3,6 +3,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
+import { getValidAccessToken } from '@/lib/api';
 import { useOwner } from '@/contexts/OwnerContext';
 import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
@@ -177,14 +178,14 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
     if (isResettingAccount) return;
     try {
       setIsResettingAccount(true);
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
+      const accessToken = await getValidAccessToken();
+      if (!accessToken) {
         console.error('No session');
         return;
       }
       const res = await fetch('/api/reset-account', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));

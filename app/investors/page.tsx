@@ -45,6 +45,7 @@ import { useRouter } from 'next/navigation';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
+import { getValidAccessToken } from '@/lib/api';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
 import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams, normalizeLinkedInUrl, cleanSearchInput } from '@/lib/utils';
@@ -709,8 +710,7 @@ function InvestorsContent() {
       // Call API to report missing investors (async, fire-and-forget)
       (async () => {
         try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
+          const accessToken = await getValidAccessToken();
           if (!accessToken) {
             console.warn('[Missing Investors] No session, skipping report');
             return;

@@ -93,7 +93,9 @@ export async function POST(request: NextRequest) {
     console.log(`[missing-deep-research/process] Processing investor ${investorId} (${investor.name}) | input=${input}`);
 
     // Call the investor-research API endpoint
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+    // Always use the request's own origin for self-calls so they stay on the same server
+    // (NEXT_PUBLIC_APP_URL points to production, which would route dev self-calls to prod)
+    const baseUrl = new URL(request.url).origin;
     const researchRes = await fetch(`${baseUrl}/api/investor-research`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

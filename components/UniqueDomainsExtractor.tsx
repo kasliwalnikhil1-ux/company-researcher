@@ -5,6 +5,7 @@ import { parseCsv, CsvRow, csvToString } from "../lib/csvImport";
 import { downloadCsv } from "../lib/csvExport";
 import { cleanInvestorInput } from "../lib/api";
 import { supabase } from "@/utils/supabase/client";
+import { getValidAccessToken } from "@/lib/api";
 import Toast from "./ui/Toast";
 
 // Invalid domains that should be blocked
@@ -359,8 +360,7 @@ export default function UniqueDomainsExtractor() {
     setFilterResult(null);
 
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      const accessToken = await getValidAccessToken();
       if (!accessToken) {
         setToastMessage('No active session. Please log in again.');
         setShowToast(true);

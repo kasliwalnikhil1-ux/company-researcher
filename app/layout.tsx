@@ -38,12 +38,15 @@ const reckless = localFont({
   variable: "--font-reckless",
 });
 
-const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.capitalxai.com';
+const fallbackAppUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.capitalxai.com';
 
 export async function generateMetadata(): Promise<Metadata> {
   const headersList = await headers();
   const host = headersList.get('host') ?? undefined;
   const config = getWhitelabelConfig(host);
+  // Derive URL from the request host so metadata matches the current environment (dev/prod)
+  const protocol = host?.startsWith('localhost') ? 'http' : 'https';
+  const appUrl = host ? `${protocol}://${host}` : fallbackAppUrl;
 
   return {
     metadataBase: new URL(appUrl),

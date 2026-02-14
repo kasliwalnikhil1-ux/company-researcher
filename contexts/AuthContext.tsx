@@ -112,6 +112,62 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
+  // Refresh session when the tab becomes visible again.
+  // Browser timers are throttled/paused in background tabs, so Supabase's
+  // autoRefreshToken may not fire while inactive. This ensures we get a
+  // fresh access token when the user returns after a period of inactivity.
+  useEffect(() => {
+    let lastRefresh = Date.now();
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      // Only attempt refresh if at least 5 minutes have passed since last refresh
+      // to avoid unnecessary network requests on rapid tab switches
+      const elapsed = Date.now() - lastRefresh;
+      if (elapsed < 5 * 60 * 1000) return;
+
+      try {
+        const {
+          data: { session: current },
+        } = await supabase.auth.getSession();
+
+        if (!current) return; // No session to refresh
+
+        // Check if the access token is expired or will expire within 2 minutes
+        const expiresAt = current.expires_at; // Unix timestamp in seconds
+        const now = Math.floor(Date.now() / 1000);
+        const isExpiringSoon = expiresAt != null && expiresAt - now < 120;
+
+        if (isExpiringSoon) {
+          const {
+            data: { session: refreshed },
+            error,
+          } = await supabase.auth.refreshSession();
+          lastRefresh = Date.now();
+
+          if (error) {
+            if (isInvalidRefreshTokenError(error)) {
+              clearInvalidAuthStorage();
+            }
+            setSession(null);
+            setUser(null);
+          } else if (refreshed) {
+            setSession(refreshed);
+            setUser(refreshed.user);
+          }
+        } else {
+          lastRefresh = Date.now();
+        }
+      } catch (err) {
+        console.error('Error refreshing session on visibility change:', err);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
+
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -152,8 +208,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const getBaseUrl = () => {
-    if (typeof window === 'undefined') return 'https://app.capitalxai.com';
-    return (process.env.NEXT_PUBLIC_APP_URL || window.location.origin).replace(/\/$/, '');
+    // On client side, always use current origin so auth redirects come back to the running app
+    // (avoids redirecting to production when developing locally)
+    if (typeof window !== 'undefined') return window.location.origin;
+    // SSR fallback
+    return (process.env.NEXT_PUBLIC_APP_URL || 'https://app.capitalxai.com').replace(/\/$/, '');
   };
 
   const resetPassword = async (email: string) => {

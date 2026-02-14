@@ -186,6 +186,9 @@ export default function CompanyResearcher() {
   const csvDataRef = useRef<{ headers: string[]; rows: CsvRow[] } | null>(null);
   const shouldStopProcessingRef = useRef<boolean>(false);
 
+  // Text-input batch processing progress (for large lists pasted in textarea)
+  const [textBatchProgress, setTextBatchProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+
   // Toast state
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
@@ -322,27 +325,35 @@ export default function CompanyResearcher() {
       .map(company => company.trim())
       .filter(company => company.length > 0);
 
+    // Use Set for O(n) deduplication instead of findIndex which is O(n²)
+    const seen = new Set<string>();
+    const dedupe = (arr: string[]): string[] => {
+      const result: string[] = [];
+      for (const item of arr) {
+        const key = item.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          result.push(item);
+        }
+      }
+      return result;
+    };
+
     if (researchMode === 'investor') {
-      const result = lines
-        .map(line => {
-          const { cleaned } = cleanInvestorInput(line);
-          return cleaned || line;
-        })
-        .filter((company, index, self) =>
-          index === self.findIndex(c => c.toLowerCase() === company.toLowerCase())
-        );
-      console.log('[CompanyResearchHome] parseCompanyInput (investor):', { lines, result });
+      const cleaned = lines.map(line => {
+        const { cleaned } = cleanInvestorInput(line);
+        return cleaned || line;
+      });
+      const result = dedupe(cleaned);
+      console.log('[CompanyResearchHome] parseCompanyInput (investor):', { lines: lines.length, result: result.length });
       return result;
     }
 
-    return lines
-      .map(company => {
-        const cleaned = cleanUrl(company, researchMode);
-        return cleaned || company;
-      })
-      .filter((company, index, self) =>
-        index === self.findIndex(c => c.toLowerCase() === company.toLowerCase())
-      );
+    const cleaned = lines.map(company => {
+      const c = cleanUrl(company, researchMode);
+      return c || company;
+    });
+    return dedupe(cleaned);
   }, [researchMode]);
 
   // Research a single company
@@ -537,7 +548,7 @@ export default function CompanyResearcher() {
         if (data?.contacts_pending?.contacts?.length) {
           const { firm_id, contacts } = data.contacts_pending;
           const result = await processContactsPending(firm_id, contacts, {
-            concurrency: 5,
+            concurrency: 3,
             maxRetries: 3,
             onProgress: (current, total, failed) => {
               setResultsByCompany(prev => {
@@ -1010,7 +1021,9 @@ export default function CompanyResearcher() {
               const investorData = cleaned ? qualificationDataMap.get(cleaned) : null;
               const investorError = cleaned ? errorMap.get(cleaned) : null;
               if (investorData && !investorData.error) {
-                updatedRow['Research Status'] = investorData.skipped ? 'skipped (exists)' : 'completed';
+                updatedRow['Research Status'] = investorData.skipped
+                  ? (investorData.reason === 'not_an_investor' || investorData.reason === 'not_investor' ? 'skipped (not an investor)' : 'skipped (exists)')
+                  : 'completed';
                 updatedRow['Cleaned URL'] = investorData.cleaned || cleaned;
                 if (investorData.summary) {
                   updatedRow['Entity Type'] = investorData.summary.entity_type || '';
@@ -1265,7 +1278,9 @@ export default function CompanyResearcher() {
               const investorData = cleaned ? qualificationDataMap.get(cleaned) : null;
               const investorError = cleaned ? errorMap.get(cleaned) : null;
               if (investorData && !investorData.error) {
-                updatedRow['Research Status'] = investorData.skipped ? 'skipped (exists)' : 'completed';
+                updatedRow['Research Status'] = investorData.skipped
+                  ? (investorData.reason === 'not_an_investor' || investorData.reason === 'not_investor' ? 'skipped (not an investor)' : 'skipped (exists)')
+                  : 'completed';
                 updatedRow['Cleaned URL'] = investorData.cleaned || cleaned;
                 if (investorData.summary) {
                   updatedRow['Entity Type'] = investorData.summary.entity_type || '';
@@ -2133,6 +2148,11 @@ export default function CompanyResearcher() {
 
       const investorUrlsToProcess = uniqueDomainsArray.slice(startFromIndex);
       console.log('[CompanyResearchHome] processCsvRows investor batch:', { startFromIndex, toProcess: investorUrlsToProcess.length, total: uniqueDomainsArray.length });
+
+      // Collect contacts_pending items to process AFTER all primary investor research
+      // This avoids nested concurrency (30 investors × 5 contacts = 150 simultaneous requests)
+      const deferredContacts: { firmId: string; contacts: { input: string; affiliateContactEmail?: string; full_name?: string }[] }[] = [];
+
       await processInBatches(
         investorUrlsToProcess,
         async (cleanedUrl, batchIndex) => {
@@ -2143,20 +2163,9 @@ export default function CompanyResearcher() {
               errorMap.set(cleanedUrl, data.error + (data.details ? `: ${data.details}` : ''));
             } else {
               qualificationDataMap.set(cleanedUrl, data);
+              // Defer contacts processing to avoid nested concurrency explosion
               if (data?.contacts_pending?.contacts?.length) {
-                const { firm_id, contacts } = data.contacts_pending;
-                await processContactsPending(firm_id, contacts, {
-                  concurrency: 5,
-                  maxRetries: 3,
-                  onProgress: (current, total, failed) => {
-                    setCsvProcessingProgress({
-                      current: startFromIndex + processedDomainIndices.length,
-                      total: uniqueDomainsArray.length,
-                      contactsLabel: `Contacts: ${current}/${total}${failed ? ` (${failed} failed)` : ''}`,
-                    });
-                  },
-                });
-                setCsvProcessingProgress(prev => ({ ...prev, contactsLabel: undefined }));
+                deferredContacts.push({ firmId: data.contacts_pending.firm_id, contacts: data.contacts_pending.contacts });
               }
             }
           } catch (error) {
@@ -2172,6 +2181,31 @@ export default function CompanyResearcher() {
           setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
         }
       );
+
+      // Process deferred contacts sequentially (one firm at a time) to avoid overloading
+      if (deferredContacts.length > 0 && !shouldStopProcessingRef.current) {
+        console.log(`[CompanyResearchHome] Processing deferred contacts for ${deferredContacts.length} firms`);
+        let contactsFirmsDone = 0;
+        for (const { firmId, contacts } of deferredContacts) {
+          if (shouldStopProcessingRef.current) break;
+          setCsvProcessingProgress(prev => ({
+            ...prev,
+            contactsLabel: `Contacts: firm ${contactsFirmsDone + 1}/${deferredContacts.length}`,
+          }));
+          await processContactsPending(firmId, contacts, {
+            concurrency: 3,
+            maxRetries: 3,
+            onProgress: (current, total, failed) => {
+              setCsvProcessingProgress(prev => ({
+                ...prev,
+                contactsLabel: `Contacts: firm ${contactsFirmsDone + 1}/${deferredContacts.length} — ${current}/${total}${failed ? ` (${failed} failed)` : ''}`,
+              }));
+            },
+          });
+          contactsFirmsDone++;
+        }
+        setCsvProcessingProgress(prev => ({ ...prev, contactsLabel: undefined }));
+      }
 
       if (shouldStopProcessingRef.current) {
         const currentCsvData = csvDataRef.current || csvData;
@@ -2732,6 +2766,8 @@ export default function CompanyResearcher() {
 
   // Clear all data function
   const handleClearAll = useCallback(() => {
+    // Stop any in-flight batch processing (text-input or CSV)
+    shouldStopProcessingRef.current = true;
     setRawCompanyInput('');
     setSubmittedCompanies([]);
     setActiveCompany('');
@@ -2742,6 +2778,7 @@ export default function CompanyResearcher() {
     setIsSearching(false);
     setIsProcessingCsv(false);
     setCsvProcessingProgress({ current: 0, total: 0 });
+    setTextBatchProgress({ current: 0, total: 0 });
     clearCsvProgress();
     setHasSavedProgress(false);
     setSetName('');
@@ -3011,28 +3048,17 @@ export default function CompanyResearcher() {
     setSubmittedCompanies(companies);
     setActiveCompany(companies[0]);
     
-    // Clear previous results and errors for these companies
-    setResultsByCompany(prev => {
-      const newState = { ...prev };
-      companies.forEach(company => {
-        if (!newState[company]) {
-          newState[company] = {
-            qualificationData: null,
-            instagramProfileData: null,
-            instagramQualificationData: null,
-            investorResearchData: null,
-          };
-        }
-      });
-      return newState;
-    });
-    
+    // Clear previous errors (each company's results are initialized lazily in researchCompany)
     setErrorsByCompany({});
 
-    // Start research for all companies in parallel
-    // Use Promise.allSettled to ensure all companies are processed even if some fail
-    const results = await Promise.allSettled(
-      companies.map(async (company) => {
+    // Process companies in batches with concurrency limit
+    const TEXT_BATCH_CONCURRENCY = 30;
+    shouldStopProcessingRef.current = false;
+    setTextBatchProgress({ current: 0, total: companies.length });
+
+    await processInBatches(
+      companies,
+      async (company) => {
         try {
           await researchCompany(company);
         } catch (error) {
@@ -3044,15 +3070,19 @@ export default function CompanyResearcher() {
             [company]: { general: `Unexpected error: ${msg}` }
           }));
         }
-      })
+        return null;
+      },
+      TEXT_BATCH_CONCURRENCY,
+      (processed, total) => {
+        setTextBatchProgress({ current: processed, total });
+      }
     );
-    
-    // Log any rejected promises for debugging
-    const rejected = results.filter(r => r.status === 'rejected');
-    if (rejected.length > 0) {
-      console.warn(`[CompanyResearchHome] ${rejected.length} research(es) failed:`, rejected);
+
+    if (shouldStopProcessingRef.current) {
+      console.log('[CompanyResearchHome] Text batch processing was stopped by user.');
     }
     
+    setTextBatchProgress({ current: 0, total: 0 });
     setIsSearching(false);
   }, [rawCompanyInput, researchCompany, researchMode]);
 
@@ -3304,11 +3334,36 @@ export default function CompanyResearcher() {
         </form>
       )}
       
-      {/* Global loading indicator */}
+      {/* Global loading indicator with progress for large batches */}
       {isSearching && (
-        <div className="mb-6 p-3 bg-blue-50 text-blue-700 rounded-sm flex items-center gap-2">
-          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
-          <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : 'Analyzing company qualification...'}</span>
+        <div className="mb-6 p-3 bg-blue-50 text-blue-700 rounded-sm">
+          {textBatchProgress.total > 1 ? (
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
+                  <span>Processing: {textBatchProgress.current} / {textBatchProgress.total}</span>
+                </div>
+                <button
+                  onClick={() => { shouldStopProcessingRef.current = true; }}
+                  className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors"
+                >
+                  Stop Processing
+                </button>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all"
+                  style={{ width: `${textBatchProgress.total > 0 ? (textBatchProgress.current / textBatchProgress.total) * 100 : 0}%` }}
+                ></div>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
+              <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : 'Analyzing company qualification...'}</span>
+            </div>
+          )}
         </div>
       )}
       
@@ -3381,7 +3436,9 @@ export default function CompanyResearcher() {
                     </div>
                     {investorResearchData.skipped ? (
                       <div className="p-4 bg-amber-50 border border-amber-200 rounded-sm text-amber-800">
-                        Skipped (already exists in investors table)
+                        {investorResearchData.reason === 'not_an_investor' || investorResearchData.reason === 'not_investor'
+                          ? 'Skipped (marked as not an investor)'
+                          : 'Skipped (already exists in investors table)'}
                         {investorResearchData.reason && (
                           <span className="ml-2 text-amber-700">({investorResearchData.reason})</span>
                         )}

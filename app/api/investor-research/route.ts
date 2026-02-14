@@ -8,7 +8,10 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 
-const FASHION_DEEP_SEARCH_URL = 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
+const FASHION_DEEP_SEARCH_URL =
+  process.env.NODE_ENV === 'development'
+    ? `http://localhost:${process.env.PORT || 3000}/api/fashion-deep-search`
+    : 'https://quycdewohkhmetiawogg.supabase.co/functions/v1/fashion-deep-search';
 const FOUNDER_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/founder-search';
 const INVESTOR_SEARCH_URL = 'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/investor-search';
 
@@ -211,7 +214,8 @@ export function buildStep3Schema(isPerson: boolean): string {
   );
 }
 
-export const maxDuration = 100;
+// 8 minutes: fashion-deep-search alone can take up to 4+ minutes, plus retries
+export const maxDuration = 480;
 
 const EXA_API_KEYS = process.env.EXA_API_KEYS
   ? process.env.EXA_API_KEYS.split(',').map((k) => k.trim()).filter((k) => k.length > 0)
@@ -668,6 +672,39 @@ export async function POST(req: NextRequest) {
             linkedinUrl,
           });
         }
+      }
+    }
+
+    // Check not_an_investor table — skip if domain or linkedin_url already marked there
+    {
+      let naiMatch = false;
+      if (domain) {
+        const { data: naiByDomain } = await supabase
+          .from('not_an_investor')
+          .select('id')
+          .eq('domain', domain)
+          .limit(1)
+          .maybeSingle();
+        if (naiByDomain) naiMatch = true;
+      }
+      if (!naiMatch && linkedinUrl) {
+        const { data: naiByLinkedin } = await supabase
+          .from('not_an_investor')
+          .select('id')
+          .eq('linkedin_url', linkedinUrl)
+          .limit(1)
+          .maybeSingle();
+        if (naiByLinkedin) naiMatch = true;
+      }
+      if (naiMatch) {
+        console.log('[investor-research] Skipped (found in not_an_investor):', cleaned);
+        return NextResponse.json({
+          skipped: true,
+          reason: 'not_an_investor',
+          cleaned,
+          domain,
+          linkedinUrl,
+        });
       }
     }
 
@@ -1141,7 +1178,9 @@ export async function POST(req: NextRequest) {
         }
       } else {
         console.log('[investor-research] Person flow: firm not in DB, researching firm:', firmDomainForRpc);
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (req.url ? new URL(req.url).origin : '');
+        // Always use the request's own origin for self-calls so they stay on the same server
+        // (NEXT_PUBLIC_APP_URL points to production, which would route dev self-calls to prod)
+        const baseUrl = req.url ? new URL(req.url).origin : '';
         if (baseUrl) {
         try {
           const firmRes = await fetch(`${baseUrl}/api/investor-research`, {

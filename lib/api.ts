@@ -3,13 +3,56 @@
 import { supabase } from '@/utils/supabase/client';
 import type { OnboardingDataForSummary } from '@/lib/utils';
 
+/**
+ * Get a valid access token, refreshing automatically if expired or about to expire.
+ * This prevents "session expired" errors after periods of inactivity where
+ * background tab throttling may have prevented Supabase's auto-refresh timer
+ * from firing.
+ *
+ * Returns null if no session exists or the refresh token is also invalid.
+ */
+export const getValidAccessToken = async (): Promise<string | null> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session) return null;
+
+  // Check if the token is expired or will expire within 60 seconds
+  const expiresAt = session.expires_at; // Unix timestamp in seconds
+  if (expiresAt != null) {
+    const now = Math.floor(Date.now() / 1000);
+    if (expiresAt - now < 60) {
+      // Token is expired or about to expire — force a refresh
+      const {
+        data: { session: refreshed },
+        error,
+      } = await supabase.auth.refreshSession();
+
+      if (error || !refreshed) {
+        return null;
+      }
+      return refreshed.access_token;
+    }
+  }
+
+  return session.access_token;
+};
+
+// Fetch with timeout to prevent hung requests from blocking batch processing
+const fetchWithTimeout = (url: string, options: RequestInit, timeoutMs: number = 120_000): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timeoutId));
+};
+
 export const fetchCompanyMap = async (
   domain: string, 
   userId?: string | null,
   personalization?: { query?: string; schema?: any } | null
 ): Promise<any> => {
   try {
-    const response = await fetch('/api/companymap', {
+    const response = await fetchWithTimeout('/api/companymap', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -19,7 +62,7 @@ export const fetchCompanyMap = async (
         userId: userId || null,
         personalization: personalization || null
       }),
-    });
+    }, 120_000); // 2-minute timeout per request
     
     if (!response.ok) {
       // Try to get error message from response
@@ -187,20 +230,30 @@ export const fetchInvestorResearch = async (
     if (options?.affiliateWithFirmId) body.affiliateWithFirmId = options.affiliateWithFirmId;
     if (options?.affiliateContactEmail) body.affiliateContactEmail = options.affiliateContactEmail;
     console.log('[fetchInvestorResearch] Calling API:', { input, skipExisting, affiliateWithFirmId: !!options?.affiliateWithFirmId });
-    const res = await fetch('/api/investor-research', {
+    // 8-minute timeout: investor-research can call fashion-deep-search which takes up to 4+ minutes
+    const res = await fetchWithTimeout('/api/investor-research', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    });
+    }, 480_000);
     const data = await res.json();
     console.log('[fetchInvestorResearch] API response:', { ok: res.ok, status: res.status, data: { ...data, links: data?.links?.length } });
     if (!res.ok) {
+      // Handle rate limiting: return retryable error so callers can back off
+      if (res.status === 429) {
+        return { error: 'Rate limited (429)', details: 'Too many requests. Will retry with backoff.' };
+      }
       console.error('Investor research API error:', data);
       return { error: data.error || 'Failed', details: data.details };
     }
     return data;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    // Distinguish abort (timeout) from other errors
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      console.error('Investor research timeout:', input);
+      return { error: 'Request timed out', details: `Request for ${input} timed out after 8 minutes` };
+    }
     console.error('Investor research error:', err);
     return { error: 'Network error', details: msg };
   }
@@ -218,7 +271,9 @@ export const processContactsPending = async (
     onProgress?: (processed: number, total: number, failed: number) => void;
   } = {}
 ): Promise<{ processed: number; failed: number; errors: { name?: string; input: string; error: string }[] }> => {
-  const { concurrency = 5, maxRetries = 3, onProgress } = options;
+  // Reduced default concurrency from 5 to 3 to limit total simultaneous requests
+  // when called from within batch processing (30 outer × 3 inner = 90 max)
+  const { concurrency = 3, maxRetries = 3, onProgress } = options;
   const errors: { name?: string; input: string; error: string }[] = [];
   let processed = 0;
   let failed = 0;
@@ -230,7 +285,11 @@ export const processContactsPending = async (
     });
     if (result?.error) {
       if (retriesLeft > 0) {
-        await sleep(1000 * (maxRetries - retriesLeft + 1));
+        // Use exponential backoff; longer delay for rate limits
+        const isRateLimit = result.error.includes('429') || result.error.includes('Rate limit');
+        const baseDelay = isRateLimit ? 3000 : 1000;
+        const attempt = maxRetries - retriesLeft + 1;
+        await sleep(baseDelay * Math.pow(2, attempt - 1));
         return processOne(contact, retriesLeft - 1);
       }
       errors.push({ name: contact.full_name, input: contact.input, error: result.error + (result.details ? `: ${result.details}` : '') });
@@ -274,8 +333,7 @@ export const fetchInvestorNewsCurrent = async (investorId: string): Promise<{
   error?: string;
 } | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = await getValidAccessToken();
 
     if (!token) {
       return { investor_news: null, error: 'You need to be signed in.' };
@@ -312,8 +370,7 @@ export const fetchInvestorNews = async (context: InvestorNewsContext): Promise<{
   error?: string;
 } | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = await getValidAccessToken();
 
     if (!token) {
       return { investor_news: null, error: 'You need to be signed in.' };
@@ -353,8 +410,7 @@ export const fetchInvestorDeepResearch = async (investorId: string): Promise<{
   details?: string;
 } | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = await getValidAccessToken();
 
     if (!token) {
       return { deep_research: null, error: 'You need to be signed in.' };
@@ -403,8 +459,7 @@ export const fetchInvestorAnalyze = async (
   details?: string;
 } | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = await getValidAccessToken();
 
     if (!token) {
       return {
@@ -452,8 +507,7 @@ export const fetchGenerateMessages = async (
   error?: string;
 } | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = await getValidAccessToken();
 
     if (!token) {
       return { error: 'You need to be signed in to perform this action.' };
@@ -511,8 +565,7 @@ export interface InvestorAnalytics {
 // Fetch investor analytics for fundraising dashboard
 export const fetchInvestorAnalytics = async (): Promise<InvestorAnalytics | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const token = session?.access_token;
+    const token = await getValidAccessToken();
 
     if (!token) {
       return null;
@@ -548,7 +601,7 @@ export const fetchInstagramProfile = async (
   personalization?: { systemPrompt?: string; userMessage?: string } | null
 ): Promise<any> => {
   try {
-    const response = await fetch('/api/instagram-profile', {
+    const response = await fetchWithTimeout('/api/instagram-profile', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
