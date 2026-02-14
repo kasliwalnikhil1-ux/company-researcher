@@ -254,7 +254,7 @@ async function callExaApiWithRetry(
   exaKeys: string[],
   initialKeyIndex: number
 ): Promise<{ response: Response; usedKeyIndex: number }> {
-  let lastError: { status: number; text: string } | null = null;
+  let lastError: { status: number; text: string; failedKey: string } | null = null;
   let currentKeyIndex = initialKeyIndex;
 
   for (let attempt = 0; attempt < EXA_MAX_RETRIES; attempt++) {
@@ -277,19 +277,25 @@ async function callExaApiWithRetry(
 
     const status = response.status;
     const errText = await response.text();
-    lastError = { status, text: errText };
+    lastError = { status, text: errText, failedKey: exaKey };
 
     console.warn(`[investor-research] Exa API error (attempt ${attempt + 1}): status=${status}, error=${errText}`);
 
     // Check if this is a retryable error
     if (!EXA_RETRYABLE_STATUS_CODES.includes(status)) {
       // Non-retryable error, throw immediately
-      throw { status, text: errText, retryable: false };
+      throw { status, text: errText, retryable: false, failedKey: exaKey };
     }
 
     // For auth/payment/rate limit errors (401, 402, 403, 429), switch to key at index 0 if not already using it
     if (EXA_KEY_SWITCH_STATUS_CODES.includes(status) && currentKeyIndex !== 0 && exaKeys.length > 1) {
-      console.log(`[investor-research] Key issue (${status}), switching to Exa API key at index 0`);
+      console.log(`[investor-research] Key issue (${status}), switching to Exa API key at index 0. Failed key index: ${currentKeyIndex}`);
+      // Send Slack notification for credit/auth errors so the key can be removed
+      if ([401, 402, 403].includes(status)) {
+        sendSlackNotification(`⚠️ Exa API Key Credits Issue\nStatus: ${status}\nFailed API Key: ${exaKey}\nSwitching to fallback key. Consider removing this key.`).catch(
+          (slackErr) => console.error('Failed to send Slack notification:', slackErr)
+        );
+      }
       currentKeyIndex = 0;
     }
 
@@ -302,7 +308,7 @@ async function callExaApiWithRetry(
   }
 
   // All retries exhausted
-  throw { status: lastError?.status || 500, text: lastError?.text || 'Max retries exceeded', retryable: true };
+  throw { status: lastError?.status || 500, text: lastError?.text || 'Max retries exceeded', retryable: true, failedKey: lastError?.failedKey || null };
 }
 
 // Helper function to call Deep Search API with retry logic
@@ -674,11 +680,14 @@ export async function POST(req: NextRequest) {
       const result = await callExaApiWithRetry(exaUrl, payload, EXA_API_KEYS, initialKeyIndex);
       exaRes = result.response;
     } catch (exaError: unknown) {
-      const err = exaError as { status?: number; text?: string; retryable?: boolean };
+      const err = exaError as { status?: number; text?: string; retryable?: boolean; failedKey?: string };
       const status = err?.status || 500;
       const errText = err?.text || 'Unknown Exa API error';
+      const failedKey = err?.failedKey || null;
       console.error('Exa API error after retries:', status, errText);
-      sendSlackNotification(`❌ Investor Research - Exa API Error (after ${EXA_MAX_RETRIES} retries)\nInput: ${cleaned}\nStatus: ${status}\nError: ${errText}`).catch(
+      const isCreditsError = [401, 402, 403].includes(status);
+      const keyInfo = isCreditsError && failedKey ? `\nFailed API Key: ${failedKey}` : '';
+      sendSlackNotification(`❌ Investor Research - Exa API Error (after ${EXA_MAX_RETRIES} retries)\nInput: ${cleaned}\nStatus: ${status}\nError: ${errText}${keyInfo}`).catch(
         (slackErr) => console.error('Failed to send Slack notification:', slackErr)
       );
       // Add to missing_investors table
