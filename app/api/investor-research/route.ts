@@ -495,14 +495,16 @@ export async function POST(req: NextRequest) {
     // Check existing if skip_existing_values
     if (skipExistingValues) {
       if (domain) {
+        // Only skip if domain exists in a firm row (a person row with same domain shouldn't block firm research)
         const { data: byDomain } = await supabase
           .from('investors')
           .select('id')
           .eq('domain', domain)
+          .eq('type', 'firm')
           .limit(1)
           .maybeSingle();
         if (byDomain) {
-          console.log('[investor-research] Skipped (domain exists):', domain);
+          console.log('[investor-research] Skipped (domain exists in firm row):', domain);
           if (affiliateWithFirmId) {
             const { data: existingAff } = await supabase
               .from('investor_affiliations')
@@ -540,21 +542,23 @@ export async function POST(req: NextRequest) {
         const linkedinUsername = linkedinUrl.replace(/^in\//, '').replace(/-[a-z0-9]+$/i, '');
         console.log('[investor-research] Checking for existing linkedin_url:', linkedinUrl, '| username:', linkedinUsername);
         
-        // First try exact match
+        // First try exact match (only in person rows - a firm row with same linkedin shouldn't block person research)
         const { data: byLinkedIn } = await supabase
           .from('investors')
           .select('id, linkedin_url')
           .eq('linkedin_url', linkedinUrl)
+          .eq('type', 'person')
           .limit(1)
           .maybeSingle();
         
-        // If no exact match, try matching by username prefix (in/username or in/username-SUFFIX)
+        // If no exact match, try matching by username prefix (in/username or in/username-SUFFIX), person rows only
         let matchedInvestor = byLinkedIn;
         if (!matchedInvestor && linkedinUsername) {
           const { data: byLinkedInPrefix } = await supabase
             .from('investors')
             .select('id, linkedin_url')
             .like('linkedin_url', `in/${linkedinUsername}%`)
+            .eq('type', 'person')
             .limit(1)
             .maybeSingle();
           if (byLinkedInPrefix) {

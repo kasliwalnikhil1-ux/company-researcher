@@ -2,17 +2,24 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, type InvestorNews } from '@/lib/api';
 import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT, type ExcludeInvestorsOption } from '@/hooks/useInvestorSearch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePricingModal } from '@/contexts/PricingModalContext';
 import { useOwner } from '@/contexts/OwnerContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { copyToClipboard, extractPhoneNumber, parseNameUrlListToSearchParams, normalizeLinkedInUrl, normalizeTwitterUrl } from '@/lib/utils';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
 import { supabase } from '@/utils/supabase/client';
 import { useRouter } from 'next/navigation';
+
+// User IDs allowed to access Rerun Contacts (same as ME Data in MainLayout)
+const RERUN_CONTACTS_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
 
 const INVESTOR_DRAWER_MESSAGES_SEARCH_KEY = 'investor-drawer-messages-search';
 const INVESTOR_DRAWER_MESSAGES_CHANNEL_KEY = 'investor-drawer-messages-channel';
@@ -533,7 +540,9 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
 }) => {
   const { openPricingModal, openROIModal } = usePricingModal();
   const { plan } = useOwner();
+  const { user } = useAuth();
   const router = useRouter();
+  const canRerunContacts = RERUN_CONTACTS_ALLOWED_USER_IDS.has(user?.id ?? '');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'profile' | 'pipeline' | 'deep-research' | 'latest-news' | 'contacts'>('profile');
   const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
@@ -572,6 +581,154 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [founderSearchResult, setFounderSearchResult] = useState<{ success: boolean; message: string } | null>(null);
   const returningToFirmRef = useRef(false);
 
+  // Rerun Contacts state
+  type RerunContactStatus = 'pending' | 'running' | 'done' | 'skipped' | 'failed';
+  interface RerunContact {
+    key: string;
+    firmId: string;
+    firmName: string;
+    firmDomain: string;
+    full_name: string | null;
+    linkedin_url: string;
+    input: string;
+    email: string | null;
+    title: string | null;
+  }
+  interface RerunContactResult {
+    status: RerunContactStatus;
+    message?: string;
+    investor_id?: string;
+  }
+  const [rerunContactsOpen, setRerunContactsOpen] = useState(false);
+  const [rerunFetchingContacts, setRerunFetchingContacts] = useState(false);
+  const [rerunContacts, setRerunContacts] = useState<RerunContact[]>([]);
+  const [rerunSelectedKeys, setRerunSelectedKeys] = useState<Set<string>>(new Set());
+  const [rerunProcessing, setRerunProcessing] = useState(false);
+  const [rerunResults, setRerunResults] = useState<Map<string, RerunContactResult>>(new Map());
+  const [rerunSkipExisting, setRerunSkipExisting] = useState(true);
+  const rerunStopRef = useRef(false);
+
+  // Reset rerun state when investor changes
+  useEffect(() => {
+    setRerunContactsOpen(false);
+    setRerunContacts([]);
+    setRerunSelectedKeys(new Set());
+    setRerunResults(new Map());
+    setRerunProcessing(false);
+    rerunStopRef.current = false;
+  }, [investor?.id]);
+
+  const handleRerunFetchContacts = useCallback(async () => {
+    if (!investor?.id || investor?.type !== 'firm') return;
+    setRerunFetchingContacts(true);
+    setRerunContacts([]);
+    setRerunSelectedKeys(new Set());
+    setRerunResults(new Map());
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not authenticated');
+      const res = await fetch('/api/data-pipelines/rerun-contacts/fetch-contacts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ firmId: investor.id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || res.statusText);
+      }
+      const data = await res.json();
+      const firmDomain = data.domain || investor.domain || '';
+      const contacts: RerunContact[] = (data.contacts ?? []).map((c: { full_name: string | null; linkedin_url: string; input: string; email: string | null; title: string | null }) => ({
+        key: `${investor.id}:${c.linkedin_url}`,
+        firmId: investor.id,
+        firmName: investor.name,
+        firmDomain,
+        full_name: c.full_name,
+        linkedin_url: c.linkedin_url,
+        input: c.input,
+        email: c.email,
+        title: c.title,
+      }));
+      setRerunContacts(contacts);
+      setRerunSelectedKeys(new Set(contacts.map((c) => c.key)));
+    } catch (err) {
+      console.error('Failed to fetch contacts for rerun:', err);
+      alert(err instanceof Error ? err.message : 'Failed to fetch contacts');
+    } finally {
+      setRerunFetchingContacts(false);
+    }
+  }, [investor?.id, investor?.domain, investor?.name, investor?.type]);
+
+  const handleRerunProcessContacts = useCallback(async () => {
+    if (rerunSelectedKeys.size === 0) return;
+    const selected = rerunContacts.filter((c) => rerunSelectedKeys.has(c.key));
+    if (selected.length === 0) return;
+    setRerunProcessing(true);
+    rerunStopRef.current = false;
+    const batchSize = 10;
+    for (let i = 0; i < selected.length; i += batchSize) {
+      if (rerunStopRef.current) break;
+      const batch = selected.slice(i, i + batchSize);
+      // Mark batch as running
+      setRerunResults((prev) => {
+        const next = new Map(prev);
+        batch.forEach((c) => next.set(c.key, { status: 'running' }));
+        return next;
+      });
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) break;
+      await Promise.all(
+        batch.map(async (contact) => {
+          try {
+            const res = await fetch('/api/investor-research', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${session.access_token}`,
+              },
+              body: JSON.stringify({
+                input: contact.input,
+                skipExisting: rerunSkipExisting,
+                affiliateWithFirmId: contact.firmId,
+                ...(contact.email ? { affiliateContactEmail: contact.email } : {}),
+              }),
+            });
+            const data = await res.json();
+            if (data.skipped) {
+              setRerunResults((prev) => {
+                const next = new Map(prev);
+                next.set(contact.key, { status: 'skipped', message: data.reason, investor_id: data.investor_id });
+                return next;
+              });
+            } else if (data.error) {
+              setRerunResults((prev) => {
+                const next = new Map(prev);
+                next.set(contact.key, { status: 'failed', message: data.error });
+                return next;
+              });
+            } else {
+              setRerunResults((prev) => {
+                const next = new Map(prev);
+                next.set(contact.key, { status: 'done', investor_id: data.investor_id });
+                return next;
+              });
+            }
+          } catch (err) {
+            setRerunResults((prev) => {
+              const next = new Map(prev);
+              next.set(contact.key, { status: 'failed', message: err instanceof Error ? err.message : 'Unknown error' });
+              return next;
+            });
+          }
+        })
+      );
+    }
+    setRerunProcessing(false);
+  }, [rerunContacts, rerunSelectedKeys, rerunSkipExisting]);
+
   const [messagesSearch, setMessagesSearch] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem(INVESTOR_DRAWER_MESSAGES_SEARCH_KEY) ?? '';
@@ -600,7 +757,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
 
   // Reset tab when investor changes
   useEffect(() => {
-    if (returningToFirmRef.current && investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0) {
+    if (returningToFirmRef.current && investor?.type === 'firm' && ((investor?.associated_people_count ?? 0) > 0 || canRerunContacts)) {
       setActiveTab('contacts');
       returningToFirmRef.current = false;
     } else {
@@ -1199,67 +1356,73 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
           </button>
         </div>
 
-        {/* Tabs - when has_personalization or (firm with contacts) */}
-        {(investor?.has_personalization || (investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0)) && (
-          <div className="flex gap-1 px-4 pt-2 border-b border-gray-200 flex-shrink-0">
-            <button
-              onClick={() => setActiveTab('profile')}
-              className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                activeTab === 'profile'
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Investor Profile
-            </button>
-            {investor?.has_personalization && (
+        {/* Tabs - when has_personalization or (firm with contacts) or (firm with rerun permission) */}
+        {(investor?.has_personalization || (investor?.type === 'firm' && ((investor?.associated_people_count ?? 0) > 0 || canRerunContacts))) && (
+          <div className="relative border-b border-gray-200 flex-shrink-0">
+            <div className="flex gap-0.5 sm:gap-1 px-2 sm:px-4 pt-2 overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
               <button
-                onClick={() => setActiveTab('pipeline')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  activeTab === 'pipeline'
+                onClick={() => setActiveTab('profile')}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'profile'
                     ? 'border-indigo-600 text-indigo-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                Pipeline
+                Investor Profile
               </button>
-            )}
-            {investor?.type === 'firm' && (investor?.associated_people_count ?? 0) > 0 && (
-              <button
-                onClick={() => setActiveTab('contacts')}
-                className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  activeTab === 'contacts'
-                    ? 'border-indigo-600 text-indigo-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                Contacts
-              </button>
-            )}
-            {investor?.has_personalization && (
-              <>
+              {investor?.has_personalization && (
                 <button
-                  onClick={() => setActiveTab('deep-research')}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeTab === 'deep-research'
+                  onClick={() => setActiveTab('pipeline')}
+                  className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                    activeTab === 'pipeline'
                       ? 'border-indigo-600 text-indigo-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  Deep Research
+                  Pipeline
                 </button>
+              )}
+              {investor?.type === 'firm' && ((investor?.associated_people_count ?? 0) > 0 || canRerunContacts) && (
                 <button
-                  onClick={() => setActiveTab('latest-news')}
-                  className={`px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    activeTab === 'latest-news'
+                  onClick={() => setActiveTab('contacts')}
+                  className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                    activeTab === 'contacts'
                       ? 'border-indigo-600 text-indigo-600'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  Latest News
+                  Contacts
                 </button>
-              </>
-            )}
+              )}
+              {investor?.has_personalization && (
+                <>
+                  <button
+                    onClick={() => setActiveTab('deep-research')}
+                    className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                      activeTab === 'deep-research'
+                        ? 'border-indigo-600 text-indigo-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Deep Research
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('latest-news')}
+                    className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                      activeTab === 'latest-news'
+                        ? 'border-indigo-600 text-indigo-600'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    Latest News
+                  </button>
+                </>
+              )}
+              {/* Spacer to ensure last tab isn't clipped by fade */}
+              <div className="flex-shrink-0 w-4 sm:hidden" aria-hidden="true" />
+            </div>
+            {/* Right fade indicator for overflowing tabs on mobile */}
+            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none sm:hidden" />
           </div>
         )}
 
@@ -1346,6 +1509,184 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           {filteredContacts.length} of {contactsData.length} contacts
                         </p>
                       </div>
+
+                      {/* Rerun Contacts — visible only to allowed users for firms */}
+                      {canRerunContacts && investor?.type === 'firm' && (
+                        <div className="border border-orange-200 bg-orange-50 rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => setRerunContactsOpen((v) => !v)}
+                            className="flex items-center justify-between w-full px-4 py-3 text-sm font-medium text-orange-800 hover:bg-orange-100 rounded-lg transition-colors"
+                          >
+                            <span className="flex items-center gap-2">
+                              <RotateCcw className="w-4 h-4" />
+                              Rerun Firm Contacts
+                            </span>
+                            <ChevronDown className={`w-4 h-4 transition-transform ${rerunContactsOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {rerunContactsOpen && (
+                            <div className="px-4 pb-4 space-y-3">
+                              <p className="text-xs text-orange-700">
+                                Fetch contacts for <strong>{investor.name}</strong>{investor.domain ? ` (${investor.domain})` : ''} and process them through the research pipeline.
+                              </p>
+                              {/* Fetch contacts button */}
+                              {rerunContacts.length === 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleRerunFetchContacts}
+                                  disabled={rerunFetchingContacts}
+                                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-50 transition-colors"
+                                >
+                                  {rerunFetchingContacts ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      Fetching contacts…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Search className="w-4 h-4" />
+                                      Fetch Contacts
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                              {/* Contacts list */}
+                              {rerunContacts.length > 0 && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-xs font-medium text-orange-800">{rerunContacts.length} contacts found</p>
+                                    <div className="flex items-center gap-3">
+                                      <label className="flex items-center gap-1.5 text-xs text-orange-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={rerunSkipExisting}
+                                          onChange={(e) => setRerunSkipExisting(e.target.checked)}
+                                          className="rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                        />
+                                        Skip existing
+                                      </label>
+                                      <label className="flex items-center gap-1.5 text-xs text-orange-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={rerunSelectedKeys.size === rerunContacts.length}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setRerunSelectedKeys(new Set(rerunContacts.map((c) => c.key)));
+                                            } else {
+                                              setRerunSelectedKeys(new Set());
+                                            }
+                                          }}
+                                          className="rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                        />
+                                        Select all
+                                      </label>
+                                    </div>
+                                  </div>
+                                  <div className="max-h-60 overflow-y-auto space-y-1 border border-orange-200 rounded-md bg-white p-2">
+                                    {rerunContacts.map((c) => {
+                                      const result = rerunResults.get(c.key);
+                                      return (
+                                        <label
+                                          key={c.key}
+                                          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-orange-50 cursor-pointer text-sm"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={rerunSelectedKeys.has(c.key)}
+                                            onChange={() => {
+                                              setRerunSelectedKeys((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(c.key)) next.delete(c.key);
+                                                else next.add(c.key);
+                                                return next;
+                                              });
+                                            }}
+                                            disabled={rerunProcessing}
+                                            className="rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                          />
+                                          <div className="flex-1 min-w-0">
+                                            <span className="text-gray-900 truncate block">{c.full_name || c.linkedin_url}</span>
+                                            {c.title && <span className="text-xs text-gray-500 truncate block">{c.title}</span>}
+                                          </div>
+                                          {result && (
+                                            <span className={`flex-shrink-0 text-xs font-medium px-1.5 py-0.5 rounded ${
+                                              result.status === 'done' ? 'bg-green-100 text-green-700' :
+                                              result.status === 'skipped' ? 'bg-yellow-100 text-yellow-700' :
+                                              result.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                                              result.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                              'bg-gray-100 text-gray-600'
+                                            }`}>
+                                              {result.status === 'running' ? (
+                                                <Loader2 className="w-3 h-3 animate-spin inline" />
+                                              ) : result.status}
+                                            </span>
+                                          )}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                  {/* Progress summary */}
+                                  {rerunResults.size > 0 && (
+                                    <div className="flex flex-wrap gap-2 text-xs">
+                                      {(() => {
+                                        const vals = Array.from(rerunResults.values());
+                                        const done = vals.filter((r) => r.status === 'done').length;
+                                        const skipped = vals.filter((r) => r.status === 'skipped').length;
+                                        const failed = vals.filter((r) => r.status === 'failed').length;
+                                        const running = vals.filter((r) => r.status === 'running').length;
+                                        return (
+                                          <>
+                                            {done > 0 && <span className="text-green-700">{done} done</span>}
+                                            {skipped > 0 && <span className="text-yellow-700">{skipped} skipped</span>}
+                                            {failed > 0 && <span className="text-red-700">{failed} failed</span>}
+                                            {running > 0 && <span className="text-blue-700">{running} running</span>}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
+                                  {/* Action buttons */}
+                                  <div className="flex items-center gap-2">
+                                    {!rerunProcessing ? (
+                                      <button
+                                        type="button"
+                                        onClick={handleRerunProcessContacts}
+                                        disabled={rerunSelectedKeys.size === 0}
+                                        className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-50 transition-colors"
+                                      >
+                                        <RotateCcw className="w-4 h-4" />
+                                        Run Selected ({rerunSelectedKeys.size})
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => { rerunStopRef.current = true; }}
+                                        className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                                      >
+                                        <XCircle className="w-4 h-4" />
+                                        Stop
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRerunContacts([]);
+                                        setRerunSelectedKeys(new Set());
+                                        setRerunResults(new Map());
+                                      }}
+                                      disabled={rerunProcessing}
+                                      className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 disabled:opacity-50 transition-colors"
+                                    >
+                                      Clear
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="space-y-3 relative">
                         {filteredContacts.length > 0 ? (
                           <>
@@ -1399,7 +1740,181 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       </div>
                     </>
                   ) : (
-                    <p className="text-gray-500 text-sm">No contacts found for this firm.</p>
+                    <div className="space-y-4">
+                      <p className="text-gray-500 text-sm">No contacts found for this firm.</p>
+                      {/* Rerun Contacts for firms with no existing contacts */}
+                      {canRerunContacts && (
+                        <div className="border border-orange-200 bg-orange-50 rounded-lg">
+                          <button
+                            type="button"
+                            onClick={() => setRerunContactsOpen((v) => !v)}
+                            className="flex items-center justify-between w-full px-4 py-3 text-sm font-medium text-orange-800 hover:bg-orange-100 rounded-lg transition-colors"
+                          >
+                            <span className="flex items-center gap-2">
+                              <RotateCcw className="w-4 h-4" />
+                              Rerun Firm Contacts
+                            </span>
+                            <ChevronDown className={`w-4 h-4 transition-transform ${rerunContactsOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          {rerunContactsOpen && (
+                            <div className="px-4 pb-4 space-y-3">
+                              <p className="text-xs text-orange-700">
+                                Fetch contacts for <strong>{investor.name}</strong>{investor.domain ? ` (${investor.domain})` : ''} and process them through the research pipeline.
+                              </p>
+                              {rerunContacts.length === 0 && (
+                                <button
+                                  type="button"
+                                  onClick={handleRerunFetchContacts}
+                                  disabled={rerunFetchingContacts}
+                                  className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-50 transition-colors"
+                                >
+                                  {rerunFetchingContacts ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      Fetching contacts…
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Search className="w-4 h-4" />
+                                      Fetch Contacts
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                              {rerunContacts.length > 0 && (
+                                <div className="space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-xs font-medium text-orange-800">{rerunContacts.length} contacts found</p>
+                                    <div className="flex items-center gap-3">
+                                      <label className="flex items-center gap-1.5 text-xs text-orange-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={rerunSkipExisting}
+                                          onChange={(e) => setRerunSkipExisting(e.target.checked)}
+                                          className="rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                        />
+                                        Skip existing
+                                      </label>
+                                      <label className="flex items-center gap-1.5 text-xs text-orange-700 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={rerunSelectedKeys.size === rerunContacts.length}
+                                          onChange={(e) => {
+                                            if (e.target.checked) {
+                                              setRerunSelectedKeys(new Set(rerunContacts.map((c) => c.key)));
+                                            } else {
+                                              setRerunSelectedKeys(new Set());
+                                            }
+                                          }}
+                                          className="rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                        />
+                                        Select all
+                                      </label>
+                                    </div>
+                                  </div>
+                                  <div className="max-h-60 overflow-y-auto space-y-1 border border-orange-200 rounded-md bg-white p-2">
+                                    {rerunContacts.map((c) => {
+                                      const result = rerunResults.get(c.key);
+                                      return (
+                                        <label
+                                          key={c.key}
+                                          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-orange-50 cursor-pointer text-sm"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={rerunSelectedKeys.has(c.key)}
+                                            onChange={() => {
+                                              setRerunSelectedKeys((prev) => {
+                                                const next = new Set(prev);
+                                                if (next.has(c.key)) next.delete(c.key);
+                                                else next.add(c.key);
+                                                return next;
+                                              });
+                                            }}
+                                            disabled={rerunProcessing}
+                                            className="rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+                                          />
+                                          <div className="flex-1 min-w-0">
+                                            <span className="text-gray-900 truncate block">{c.full_name || c.linkedin_url}</span>
+                                            {c.title && <span className="text-xs text-gray-500 truncate block">{c.title}</span>}
+                                          </div>
+                                          {result && (
+                                            <span className={`flex-shrink-0 text-xs font-medium px-1.5 py-0.5 rounded ${
+                                              result.status === 'done' ? 'bg-green-100 text-green-700' :
+                                              result.status === 'skipped' ? 'bg-yellow-100 text-yellow-700' :
+                                              result.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                                              result.status === 'failed' ? 'bg-red-100 text-red-700' :
+                                              'bg-gray-100 text-gray-600'
+                                            }`}>
+                                              {result.status === 'running' ? (
+                                                <Loader2 className="w-3 h-3 animate-spin inline" />
+                                              ) : result.status}
+                                            </span>
+                                          )}
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                  {rerunResults.size > 0 && (
+                                    <div className="flex flex-wrap gap-2 text-xs">
+                                      {(() => {
+                                        const vals = Array.from(rerunResults.values());
+                                        const done = vals.filter((r) => r.status === 'done').length;
+                                        const skipped = vals.filter((r) => r.status === 'skipped').length;
+                                        const failed = vals.filter((r) => r.status === 'failed').length;
+                                        const running = vals.filter((r) => r.status === 'running').length;
+                                        return (
+                                          <>
+                                            {done > 0 && <span className="text-green-700">{done} done</span>}
+                                            {skipped > 0 && <span className="text-yellow-700">{skipped} skipped</span>}
+                                            {failed > 0 && <span className="text-red-700">{failed} failed</span>}
+                                            {running > 0 && <span className="text-blue-700">{running} running</span>}
+                                          </>
+                                        );
+                                      })()}
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {!rerunProcessing ? (
+                                      <button
+                                        type="button"
+                                        onClick={handleRerunProcessContacts}
+                                        disabled={rerunSelectedKeys.size === 0}
+                                        className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-orange-600 hover:bg-orange-700 text-white disabled:opacity-50 transition-colors"
+                                      >
+                                        <RotateCcw className="w-4 h-4" />
+                                        Run Selected ({rerunSelectedKeys.size})
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => { rerunStopRef.current = true; }}
+                                        className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-red-600 hover:bg-red-700 text-white transition-colors"
+                                      >
+                                        <XCircle className="w-4 h-4" />
+                                        Stop
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setRerunContacts([]);
+                                        setRerunSelectedKeys(new Set());
+                                        setRerunResults(new Map());
+                                      }}
+                                      disabled={rerunProcessing}
+                                      className="inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 disabled:opacity-50 transition-colors"
+                                    >
+                                      Clear
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               );

@@ -19,6 +19,14 @@ function getAuthClient(accessToken: string) {
   });
 }
 
+/** Service role client for data queries (bypasses RLS) */
+function getServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!url || !key) throw new Error('Missing Supabase service role key');
+  return createClient(url, key);
+}
+
 export const maxDuration = 60;
 
 /**
@@ -52,10 +60,29 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { firmId, domain } = body;
+    const { firmId } = body;
+    let { domain } = body;
 
-    if (!firmId || !domain) {
-      return NextResponse.json({ error: 'firmId and domain are required' }, { status: 400 });
+    if (!firmId) {
+      return NextResponse.json({ error: 'firmId is required' }, { status: 400 });
+    }
+
+    // If domain not provided, look it up from the investors table
+    if (!domain) {
+      const supabase = getServiceClient();
+      const { data: firm, error: firmError } = await supabase
+        .from('investors')
+        .select('domain')
+        .eq('id', firmId)
+        .single();
+
+      if (firmError || !firm?.domain) {
+        return NextResponse.json(
+          { error: 'Could not find domain for this firm. The firm may not have a domain set.' },
+          { status: 404 }
+        );
+      }
+      domain = firm.domain;
     }
 
     // Call investor-search to find contacts for this firm

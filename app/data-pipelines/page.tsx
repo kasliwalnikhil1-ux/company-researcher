@@ -59,6 +59,8 @@ interface MissingCoinvestorsResult {
   totalInvestorsWithCoinvestors: number;
   existingDomainCount: number;
   existingLinkedinCount: number;
+  notInvestorDomainCount: number;
+  notInvestorLinkedinCount: number;
   missingCount: number;
   missing: MissingCoinvestor[];
 }
@@ -286,7 +288,7 @@ function MissingCoinvestorsTool() {
           {result && (
             <div className="px-6 py-4 space-y-4">
               {/* Summary Stats */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                 <StatCard
                   label="Investors with Co-investors"
                   value={result.totalInvestorsWithCoinvestors}
@@ -296,8 +298,13 @@ function MissingCoinvestorsTool() {
                   value={result.totalCoinvestorEntries}
                 />
                 <StatCard
-                  label="Already in DB"
-                  value={result.totalCoinvestorEntries - result.missingCount}
+                  label="Already in Investors"
+                  value={result.existingDomainCount + result.existingLinkedinCount}
+                  color="green"
+                />
+                <StatCard
+                  label="In Not-an-Investor"
+                  value={(result.notInvestorDomainCount || 0) + (result.notInvestorLinkedinCount || 0)}
                   color="green"
                 />
                 <StatCard

@@ -419,7 +419,7 @@ function parseCsv(text: string): { domain: string; description: string }[] {
   return rows;
 }
 
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 5;
 
 function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onComplete: () => void }) {
   const nextId = useRef(1);

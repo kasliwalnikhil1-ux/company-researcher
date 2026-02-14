@@ -91,16 +91,25 @@ export async function POST(request: NextRequest) {
     // Use service role client for data queries (bypasses RLS)
     const supabase = getServiceClient();
 
-    // Step 1: Fetch all investors with non-null coinvestors
-    // We select: id, name, coinvestors, domain, linkedin_url
-    const { data: investors, error: fetchError } = await supabase
-      .from('investors')
-      .select('id, name, coinvestors')
-      .not('coinvestors', 'is', null);
+    // Step 1: Fetch all investors with non-null coinvestors (paginated to avoid Supabase 1000-row default limit)
+    const PAGE_SIZE = 1000;
+    const allInvestors: { id: string; name: string; coinvestors: string[] | null }[] = [];
+    let offset = 0;
+    while (true) {
+      const { data: page, error: fetchError } = await supabase
+        .from('investors')
+        .select('id, name, coinvestors')
+        .not('coinvestors', 'is', null)
+        .range(offset, offset + PAGE_SIZE - 1);
 
-    if (fetchError) {
-      console.error('Failed to fetch investors:', fetchError);
-      return NextResponse.json({ error: 'Failed to fetch investors' }, { status: 500 });
+      if (fetchError) {
+        console.error('Failed to fetch investors:', fetchError);
+        return NextResponse.json({ error: 'Failed to fetch investors' }, { status: 500 });
+      }
+      if (!page || page.length === 0) break;
+      allInvestors.push(...page);
+      if (page.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
     }
 
     // Step 2: Flatten and deduplicate all coinvestor entries
@@ -110,7 +119,7 @@ export async function POST(request: NextRequest) {
       ParsedCoinvestor & { sourceInvestors: string[]; count: number }
     >();
 
-    for (const inv of investors || []) {
+    for (const inv of allInvestors) {
       const coinvestors = inv.coinvestors as string[] | null;
       if (!Array.isArray(coinvestors)) continue;
       for (const entry of coinvestors) {
@@ -133,50 +142,99 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Step 3: Fetch all existing domains and linkedin URLs from the investors table
-    const { data: existingDomains, error: domainError } = await supabase
-      .from('investors')
-      .select('domain')
-      .not('domain', 'is', null);
+    // Step 3: Check which co-investor identifiers already exist in the investors table
+    // AND the not_an_investor table, using batched .in() queries (same pattern as filter-existing)
+    // to avoid the Supabase default 1000-row limit on .select() queries.
 
-    if (domainError) {
-      console.error('Failed to fetch existing domains:', domainError);
-      return NextResponse.json({ error: 'Failed to fetch existing domains' }, { status: 500 });
-    }
-
-    const { data: existingLinkedins, error: linkedinError } = await supabase
-      .from('investors')
-      .select('linkedin_url')
-      .not('linkedin_url', 'is', null);
-
-    if (linkedinError) {
-      console.error('Failed to fetch existing linkedin URLs:', linkedinError);
-      return NextResponse.json({ error: 'Failed to fetch existing linkedin URLs' }, { status: 500 });
-    }
-
-    // Build sets of existing identifiers
-    const existingDomainSet = new Set<string>();
-    for (const row of existingDomains || []) {
-      if (row.domain) {
-        existingDomainSet.add(row.domain.toLowerCase());
+    // Separate domain and linkedin identifiers
+    const domainIdentifiers: string[] = [];
+    const linkedinIdentifiers: string[] = [];
+    for (const [, entry] of coinvestorMap) {
+      if (entry.type === 'domain') {
+        domainIdentifiers.push(entry.identifier.toLowerCase());
+      } else if (entry.type === 'linkedin') {
+        linkedinIdentifiers.push(entry.identifier.toLowerCase());
       }
     }
 
-    const existingLinkedinSet = new Set<string>();
-    for (const row of existingLinkedins || []) {
-      if (row.linkedin_url) {
-        // linkedin_url could be a full URL or a path like "in/username"
-        const url = row.linkedin_url.toLowerCase();
-        const match = url.match(/linkedin\.com\/(.+)/);
-        if (match) {
-          existingLinkedinSet.add(match[1].replace(/^\/+/, '').replace(/\/+$/, ''));
-        } else {
-          existingLinkedinSet.add(url.replace(/^\/+/, '').replace(/\/+$/, ''));
+    // Check domains against investors table (batched .in() queries)
+    const BATCH_SIZE = 100;
+    const existingDomainSet = new Set<string>();
+    for (let i = 0; i < domainIdentifiers.length; i += BATCH_SIZE) {
+      const batch = domainIdentifiers.slice(i, i + BATCH_SIZE);
+      const { data, error } = await supabase
+        .from('investors')
+        .select('domain')
+        .in('domain', batch);
+      if (error) {
+        console.error('Failed to check investor domains batch:', error);
+        continue;
+      }
+      if (data) {
+        for (const row of data) {
+          if (row.domain) existingDomainSet.add(row.domain.toLowerCase());
         }
       }
     }
 
-    // Step 4: Find missing coinvestors
+    // Check domains against not_an_investor table
+    const notInvestorDomainSet = new Set<string>();
+    for (let i = 0; i < domainIdentifiers.length; i += BATCH_SIZE) {
+      const batch = domainIdentifiers.slice(i, i + BATCH_SIZE);
+      const { data, error } = await supabase
+        .from('not_an_investor')
+        .select('domain')
+        .in('domain', batch);
+      if (error) {
+        console.error('Failed to check not_an_investor domains batch:', error);
+        continue;
+      }
+      if (data) {
+        for (const row of data) {
+          if (row.domain) notInvestorDomainSet.add(row.domain.toLowerCase());
+        }
+      }
+    }
+
+    // Check linkedin URLs against investors table (batched .in() queries)
+    const existingLinkedinSet = new Set<string>();
+    for (let i = 0; i < linkedinIdentifiers.length; i += BATCH_SIZE) {
+      const batch = linkedinIdentifiers.slice(i, i + BATCH_SIZE);
+      const { data, error } = await supabase
+        .from('investors')
+        .select('linkedin_url')
+        .in('linkedin_url', batch);
+      if (error) {
+        console.error('Failed to check investor linkedin batch:', error);
+        continue;
+      }
+      if (data) {
+        for (const row of data) {
+          if (row.linkedin_url) existingLinkedinSet.add(row.linkedin_url.toLowerCase());
+        }
+      }
+    }
+
+    // Check linkedin URLs against not_an_investor table
+    const notInvestorLinkedinSet = new Set<string>();
+    for (let i = 0; i < linkedinIdentifiers.length; i += BATCH_SIZE) {
+      const batch = linkedinIdentifiers.slice(i, i + BATCH_SIZE);
+      const { data, error } = await supabase
+        .from('not_an_investor')
+        .select('linkedin_url')
+        .in('linkedin_url', batch);
+      if (error) {
+        console.error('Failed to check not_an_investor linkedin batch:', error);
+        continue;
+      }
+      if (data) {
+        for (const row of data) {
+          if (row.linkedin_url) notInvestorLinkedinSet.add(row.linkedin_url.toLowerCase());
+        }
+      }
+    }
+
+    // Step 4: Find missing coinvestors (not in investors table AND not in not_an_investor table)
     const missing: Array<{
       name: string;
       url: string;
@@ -187,8 +245,9 @@ export async function POST(request: NextRequest) {
     }> = [];
 
     for (const [, entry] of coinvestorMap) {
+      const id = entry.identifier.toLowerCase();
       if (entry.type === 'domain') {
-        if (!existingDomainSet.has(entry.identifier.toLowerCase())) {
+        if (!existingDomainSet.has(id) && !notInvestorDomainSet.has(id)) {
           missing.push({
             name: entry.name,
             url: entry.url,
@@ -199,7 +258,7 @@ export async function POST(request: NextRequest) {
           });
         }
       } else if (entry.type === 'linkedin') {
-        if (!existingLinkedinSet.has(entry.identifier.toLowerCase())) {
+        if (!existingLinkedinSet.has(id) && !notInvestorLinkedinSet.has(id)) {
           missing.push({
             name: entry.name,
             url: entry.url,
@@ -217,9 +276,11 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       totalCoinvestorEntries: coinvestorMap.size,
-      totalInvestorsWithCoinvestors: (investors || []).length,
+      totalInvestorsWithCoinvestors: allInvestors.length,
       existingDomainCount: existingDomainSet.size,
       existingLinkedinCount: existingLinkedinSet.size,
+      notInvestorDomainCount: notInvestorDomainSet.size,
+      notInvestorLinkedinCount: notInvestorLinkedinSet.size,
       missingCount: missing.length,
       missing,
     });

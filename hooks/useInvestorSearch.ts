@@ -261,8 +261,22 @@ export function useInvestorSearch({
           return;
         }
 
-        const list = Array.isArray(result) ? (result as InvestorSearchResult[]) : [];
-        setData((prev) => (append ? [...prev, ...list] : list));
+        const raw = Array.isArray(result) ? (result as InvestorSearchResult[]) : [];
+        // Deduplicate by id — the RPC may return duplicate rows (e.g. from JOINs)
+        const seen = new Set<string>();
+        const list = raw.filter((r) => {
+          if (seen.has(r.id)) return false;
+          seen.add(r.id);
+          return true;
+        });
+        if (append) {
+          setData((prev) => {
+            const prevIds = new Set(prev.map((p) => p.id));
+            return [...prev, ...list.filter((r) => !prevIds.has(r.id))];
+          });
+        } else {
+          setData(list);
+        }
         setHasMore(list.length >= pageSize);
       } catch (err) {
         if (!abortRef.current?.signal.aborted) {

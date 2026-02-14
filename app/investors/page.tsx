@@ -23,7 +23,6 @@ import {
   ChevronDown,
   Eye,
   X,
-  Search,
   Check,
   Sparkles,
   Loader2,
@@ -34,6 +33,7 @@ import {
   List,
   Download,
   Building2,
+  User,
 } from 'lucide-react';
 import { formatGeographyForDisplay, formatHqLocationShort, getCountryName, resolveCountryInput } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -362,7 +362,7 @@ const DEFAULT_FILTERS: InvestorSearchFilters = {
   type: 'firm',
   mode: 'global',
   name: '',
-  active: null,
+  active: true,
   role: [],
   hq_state: null,
   hq_country: null,
@@ -1221,6 +1221,8 @@ function InvestorsContent() {
     // Preserve the "Investors of" chip and its associated domains/linkedin_urls
     setFilters((prev) => ({
       ...DEFAULT_FILTERS,
+      type: prev.type,
+      mode: prev.mode,
       ...(coInvestorsChipLabel ? { domains: prev.domains, linkedin_urls: prev.linkedin_urls } : {}),
     }));
   }, [coInvestorsChipLabel]);
@@ -2161,10 +2163,14 @@ function InvestorsContent() {
           <div className="flex flex-col sm:flex-row flex-1 gap-2">
             {/* Search input - full width on mobile, flex on desktop */}
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              {filters.type === 'person' ? (
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              ) : (
+                <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              )}
               <input
                 type="text"
-                placeholder="Search by name, domain, or LinkedIn..."
+                placeholder={filters.type === 'person' ? "Search person by name or LinkedIn..." : "Search firm by name, domain, or LinkedIn..."}
                 value={localSearchInput}
                 onChange={(e) => setLocalSearchInput(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
@@ -2366,7 +2372,7 @@ function InvestorsContent() {
                   !filters.investor_type?.length &&
                   !filters.tier?.length &&
                   filters.type === 'firm' &&
-                  filters.active === null &&
+                  filters.active === true &&
                   filters.leads_round === null &&
                   !filters.role?.length &&
                   !filters.hq_country &&
@@ -2451,12 +2457,40 @@ function InvestorsContent() {
       ) : data.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-lg p-8 md:p-12 text-center">
           <Handshake className="w-10 h-10 md:w-12 md:h-12 text-gray-400 mx-auto mb-4" />
-          <p className="text-sm md:text-base text-gray-500 mb-4">
-            {(filters.name || (filters.domains?.length ?? 0) > 0 || (filters.linkedin_urls?.length ?? 0) > 0 || filters.investment_stages.length || filters.investment_industries.length ||
-             filters.investment_geographies.length || filters.investor_type.length || filters.tier.length ||
-             filters.reviewed_stage.length || filters.set.length || filters.owner.length || filters.investor_fit.length)
-              ? 'No investors found matching your filters.'
-              : 'No investors found. Try adjusting your search or filters.'}
+          <p className="text-sm md:text-base text-gray-500 mb-4 inline-flex items-center justify-center flex-wrap gap-x-2">
+            {(() => {
+              const activeFilterNames: string[] = [];
+              if (filters.name) activeFilterNames.push('Name');
+              if ((filters.domains?.length ?? 0) > 0) activeFilterNames.push('Domains');
+              if ((filters.linkedin_urls?.length ?? 0) > 0) activeFilterNames.push('LinkedIn URLs');
+              if (filters.investment_stages.length) activeFilterNames.push('Stages');
+              if (filters.investment_industries.length) activeFilterNames.push('Industries');
+              if (filters.investment_geographies.length) activeFilterNames.push('Geographies');
+              if (filters.investor_type.length) activeFilterNames.push('Investor Type');
+              if (filters.tier.length) activeFilterNames.push('Tier');
+              if (filters.reviewed_stage.length) activeFilterNames.push('Reviewed Stage');
+              if (filters.set.length) activeFilterNames.push('Set');
+              if (filters.owner.length) activeFilterNames.push('Owner');
+              if (filters.investor_fit.length) activeFilterNames.push('Investor Fit');
+              if (activeFilterNames.length > 0) {
+                const formatted = activeFilterNames.length === 1
+                  ? activeFilterNames[0]
+                  : `${activeFilterNames.slice(0, -1).join(', ')} and ${activeFilterNames[activeFilterNames.length - 1]}`;
+                return (
+                  <>
+                    <span>No investors found matching <span className="text-indigo-500">{formatted}</span> filters.</span>
+                    <button
+                      onClick={handleClearFilters}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Clear Filters
+                    </button>
+                  </>
+                );
+              }
+              return <span>No investors found. Try adjusting your search or filters.</span>;
+            })()}
           </p>
           <p className="text-sm text-gray-600 mb-3">Spot a missing investor? Tell us and we&apos;ll add them for free.</p>
           <button
@@ -3541,6 +3575,19 @@ function InvestorResultCard({
     typeof investorFit === 'boolean' || investorFit === null;
   const hasReason = typeof reason === 'string' && reason.trim().length > 0;
 
+  // Expandable thesis text
+  const [thesisExpanded, setThesisExpanded] = useState(false);
+  const [thesisClamped, setThesisClamped] = useState(false);
+  const thesisRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = thesisRef.current;
+    if (el) {
+      setThesisClamped(el.scrollHeight > el.clientHeight + 1);
+    }
+  }, [thesis]);
+
+
   return (
     <div
       className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm cursor-pointer hover:bg-gray-50 hover:border-gray-300 transition-colors"
@@ -3612,7 +3659,25 @@ function InvestorResultCard({
 
       {/* Investment thesis - full width row */}
       {thesis && (
-        <p className="text-sm text-gray-600 mt-2 line-clamp-3 leading-relaxed">{thesis}</p>
+        <div className="mt-2">
+          <p
+            ref={thesisRef}
+            className={`text-sm text-gray-600 leading-relaxed ${thesisExpanded ? '' : 'line-clamp-3'}`}
+          >
+            {thesis}
+          </p>
+          {(thesisClamped || thesisExpanded) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setThesisExpanded((v) => !v);
+              }}
+              className="text-xs text-indigo-600 hover:text-indigo-800 mt-1 font-medium"
+            >
+              {thesisExpanded ? 'Show less' : 'Read more'}
+            </button>
+          )}
+        </div>
       )}
 
       {/* investor_fit and reason - compact display like InvestorDetailsDrawer */}
@@ -3650,7 +3715,7 @@ function InvestorResultCard({
                       : 'bg-gray-50 border-gray-100'
               }`}
             >
-              <p className="text-xs text-gray-800 line-clamp-2 leading-relaxed">{reason.trim()}</p>
+              <p className="text-xs text-gray-800 leading-relaxed">{reason.trim()}</p>
             </div>
           )}
         </div>
