@@ -20,6 +20,15 @@ import {
   CheckCircle2,
   Clock,
   ExternalLink,
+  Info,
+  X,
+  Briefcase,
+  Mail,
+  Phone,
+  MapPin,
+  Globe,
+  Linkedin,
+  Award,
 } from 'lucide-react';
 
 /* ────────────────────────── Types ────────────────────────── */
@@ -47,16 +56,82 @@ interface Conversation {
   sender_profile_uuid?: string; // from the outbox messages in this conversation
 }
 
+interface LeadExperience {
+  company_name?: string;
+  position?: string;
+  company_nickname?: string;
+  employment_type?: string;
+  location?: string;
+  start_date?: string;
+  end_date?: string;
+  description?: string;
+}
+
 interface LeadInfo {
   uuid: string;
   name?: string;
   first_name?: string;
   last_name?: string;
   company_name?: string;
+  company_uuid?: string;
+  company_ln_id?: string;
   linkedin?: string;
   avatar_url?: string;
   position?: string;
   headline?: string;
+  about?: string;
+  work_email?: string;
+  personal_email?: string;
+  work_phone_number?: string;
+  personal_phone_number?: string;
+  facebook?: string;
+  twitter?: string;
+  connections_number?: number;
+  followers_number?: number;
+  primary_language?: string;
+  raw_address?: string;
+  location?: {
+    country?: string;
+    region?: string;
+    city?: string;
+    timezone?: string;
+  };
+  experience?: LeadExperience[];
+  skills?: string[];
+  status?: string;
+  linkedin_status?: string;
+  email_status?: string;
+  created_at?: string;
+  [key: string]: unknown;
+}
+
+interface CompanyInfo {
+  uuid: string;
+  name?: string;
+  domain?: string;
+  website?: string;
+  linkedin?: string;
+  logo_url?: string;
+  phone?: string;
+  industry?: string;
+  employees_range?: string;
+  followers?: number;
+  employees_on_linkedin?: number;
+  year_established?: number;
+  tagline?: string;
+  about?: string;
+  specialities?: string[];
+  hq_raw_address?: string;
+  hq_location?: {
+    country?: string;
+    region?: string;
+    city?: string;
+    zip?: string;
+    timezone?: string;
+    address_string?: string;
+  };
+  facebook?: string;
+  twitter?: string;
   [key: string]: unknown;
 }
 
@@ -147,6 +222,12 @@ export default function LinkedInConversationsPage() {
   // Sender profiles
   const [senderProfiles, setSenderProfiles] = useState<SenderProfile[]>([]);
   const [selectedSenderProfile, setSelectedSenderProfile] = useState<string>('');
+
+  // Contact details panel
+  const [showContactDetails, setShowContactDetails] = useState(false);
+  const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
+  const [companyLoading, setCompanyLoading] = useState(false);
+  const companyCacheRef = useRef<Record<string, CompanyInfo>>({});
 
   // Lead cache
   const leadCacheRef = useRef<Record<string, LeadInfo>>({});
@@ -325,6 +406,35 @@ export default function LinkedInConversationsPage() {
     }
   }, []);
 
+  const fetchCompanyInfo = useCallback(async (companyUuid: string) => {
+    // Check cache first
+    if (companyCacheRef.current[companyUuid]) {
+      setCompanyInfo(companyCacheRef.current[companyUuid]);
+      return;
+    }
+
+    try {
+      setCompanyLoading(true);
+      const token = await getValidAccessToken();
+      if (!token) return;
+
+      const res = await fetch(`/api/linkedin-conversations/companies?uuid=${encodeURIComponent(companyUuid)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const company: CompanyInfo = json.company || json;
+        companyCacheRef.current[companyUuid] = company;
+        setCompanyInfo(company);
+      }
+    } catch (err) {
+      console.error('Failed to fetch company info:', err);
+    } finally {
+      setCompanyLoading(false);
+    }
+  }, []);
+
   const fetchSenderProfiles = useCallback(async () => {
     try {
       const token = await getValidAccessToken();
@@ -452,6 +562,8 @@ export default function LinkedInConversationsPage() {
     setReplyText('');
     setReplyError(null);
     setReplySuccess(false);
+    setShowContactDetails(false);
+    setCompanyInfo(null);
     // Auto-select the sender profile that was used in this conversation
     if (conv.sender_profile_uuid) {
       setSelectedSenderProfile(conv.sender_profile_uuid);
@@ -463,6 +575,7 @@ export default function LinkedInConversationsPage() {
     setSelectedConversation(null);
     setThreadMessages([]);
     setThreadError(null);
+    setShowContactDetails(false);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -492,6 +605,13 @@ export default function LinkedInConversationsPage() {
     );
     return conv?.lead || selectedConversation.lead || null;
   }, [selectedConversation, conversations]);
+
+  // Fetch company info when contact panel opens
+  useEffect(() => {
+    if (showContactDetails && activeLead?.company_uuid && !companyInfo) {
+      fetchCompanyInfo(activeLead.company_uuid as string);
+    }
+  }, [showContactDetails, activeLead, companyInfo, fetchCompanyInfo]);
 
   /* ────────────────── Pagination ────────────────── */
 
@@ -691,60 +811,79 @@ export default function LinkedInConversationsPage() {
               ) : (
                 <>
                   {/* Thread Header */}
-                  <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-4 flex-shrink-0">
-                    <button
-                      onClick={closeThread}
-                      className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors hidden md:block"
-                    >
-                      <ArrowLeft className="w-5 h-5 text-gray-500" />
-                    </button>
-
-                    {/* Thread header avatar */}
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 overflow-hidden">
-                      {activeLead?.avatar_url ? (
-                        <img
-                          src={activeLead.avatar_url}
-                          alt=""
-                          className="w-9 h-9 rounded-full object-cover"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).style.display = 'none';
-                          }}
-                        />
-                      ) : (
-                        getLeadDisplayName(activeLead).charAt(0).toUpperCase()
-                      )}
-                    </div>
-
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 text-sm truncate">
-                        {getLeadDisplayName(activeLead)}
-                      </h3>
-                      {activeLead?.company_name && (
-                        <p className="text-xs text-gray-500 truncate">
-                          {activeLead.position
-                            ? `${activeLead.position} at ${activeLead.company_name}`
-                            : activeLead.company_name}
-                        </p>
-                      )}
-                    </div>
-
-                    {activeLead?.linkedin && (
-                      <a
-                        href={
-                          activeLead.linkedin.startsWith('http')
-                            ? activeLead.linkedin
-                            : `https://linkedin.com/in/${activeLead.linkedin}`
-                        }
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                  <div className="bg-white border-b border-gray-200 px-4 py-3 flex-shrink-0">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={closeThread}
+                        className="p-1.5 rounded-lg hover:bg-gray-100 transition-colors hidden md:block flex-shrink-0"
                       >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        LinkedIn
-                      </a>
-                    )}
+                        <ArrowLeft className="w-5 h-5 text-gray-500" />
+                      </button>
+
+                      {/* Thread header avatar */}
+                      <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-semibold text-sm flex-shrink-0 overflow-hidden">
+                        {activeLead?.avatar_url ? (
+                          <img
+                            src={activeLead.avatar_url}
+                            alt=""
+                            className="w-9 h-9 rounded-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          getLeadDisplayName(activeLead).charAt(0).toUpperCase()
+                        )}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-900 text-sm truncate">
+                          {getLeadDisplayName(activeLead)}
+                        </h3>
+                        {(activeLead?.position || activeLead?.company_name) && (
+                          <p className="text-xs text-gray-500 line-clamp-2">
+                            {activeLead.position && <span>{activeLead.position}</span>}
+                            {activeLead.position && activeLead.company_name && <span className="text-gray-400"> at </span>}
+                            {activeLead.company_name && <span>{activeLead.company_name}</span>}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {activeLead?.linkedin && (
+                          <a
+                            href={
+                              activeLead.linkedin.startsWith('http')
+                                ? activeLead.linkedin
+                                : `https://linkedin.com/in/${activeLead.linkedin}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">LinkedIn</span>
+                          </a>
+                        )}
+                        <button
+                          onClick={() => setShowContactDetails(!showContactDetails)}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                            showContactDetails
+                              ? 'text-indigo-700 bg-indigo-100'
+                              : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                          }`}
+                        >
+                          <Info className="w-3.5 h-3.5" />
+                          <span className="hidden sm:inline">Contact Info</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
+                  {/* Content: Messages + optional Contact Panel */}
+                  <div className="flex-1 flex overflow-hidden">
+                  {/* Messages + Reply column */}
+                  <div className={`flex-1 flex flex-col min-w-0 ${showContactDetails ? 'hidden lg:flex' : 'flex'}`}>
                   {/* Messages Area */}
                   <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                     {threadLoading && threadMessages.length === 0 ? (
@@ -921,6 +1060,347 @@ export default function LinkedInConversationsPage() {
                         )}
                       </button>
                     </div>
+                  </div>
+                  {/* end Messages + Reply column */}
+                  </div>
+
+                  {/* Contact Details Panel */}
+                  {showContactDetails && activeLead && (
+                    <div className="w-full lg:w-80 xl:w-96 border-l border-gray-200 bg-white overflow-y-auto overflow-x-hidden flex-shrink-0">
+                      {/* Panel Header */}
+                      <div className="sticky top-0 bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between z-10">
+                        <h4 className="font-semibold text-sm text-gray-900">Contact Details</h4>
+                        <button
+                          onClick={() => setShowContactDetails(false)}
+                          className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                        >
+                          <X className="w-4 h-4 text-gray-500" />
+                        </button>
+                      </div>
+
+                      <div className="px-5 py-4 space-y-5 overflow-hidden">
+                        {/* Profile card */}
+                        <div className="flex items-center gap-3">
+                          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">
+                            {activeLead.avatar_url ? (
+                              <img src={activeLead.avatar_url} alt="" className="w-14 h-14 rounded-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                            ) : (
+                              getLeadDisplayName(activeLead).charAt(0).toUpperCase()
+                            )}
+                          </div>
+                          <div className="min-w-0 overflow-hidden">
+                            <p className="font-semibold text-gray-900 text-sm truncate">{getLeadDisplayName(activeLead)}</p>
+                            {activeLead.position && (
+                              <p className="text-xs text-gray-600 truncate">{activeLead.position}</p>
+                            )}
+                            {activeLead.company_name && (
+                              <p className="text-xs text-gray-500 truncate">{activeLead.company_name}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Headline */}
+                        {activeLead.headline && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Headline</p>
+                            <p className="text-xs text-gray-700 leading-relaxed break-words overflow-hidden">{activeLead.headline}</p>
+                          </div>
+                        )}
+
+                        {/* About */}
+                        {activeLead.about && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">About</p>
+                            <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-line max-h-40 overflow-y-auto">{activeLead.about}</p>
+                          </div>
+                        )}
+
+                        {/* Contact Info */}
+                        {(activeLead.work_email || activeLead.personal_email || activeLead.work_phone_number || activeLead.personal_phone_number) && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Contact</p>
+                            <div className="space-y-2">
+                              {activeLead.work_email && (
+                                <div className="flex items-center gap-2">
+                                  <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <a href={`mailto:${activeLead.work_email}`} className="text-xs text-indigo-600 hover:underline truncate">{activeLead.work_email}</a>
+                                  <span className="text-[10px] text-gray-400">Work</span>
+                                </div>
+                              )}
+                              {activeLead.personal_email && (
+                                <div className="flex items-center gap-2">
+                                  <Mail className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <a href={`mailto:${activeLead.personal_email}`} className="text-xs text-indigo-600 hover:underline truncate">{activeLead.personal_email}</a>
+                                  <span className="text-[10px] text-gray-400">Personal</span>
+                                </div>
+                              )}
+                              {activeLead.work_phone_number && (
+                                <div className="flex items-center gap-2">
+                                  <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <a href={`tel:${activeLead.work_phone_number}`} className="text-xs text-gray-700 hover:underline">{activeLead.work_phone_number}</a>
+                                  <span className="text-[10px] text-gray-400">Work</span>
+                                </div>
+                              )}
+                              {activeLead.personal_phone_number && (
+                                <div className="flex items-center gap-2">
+                                  <Phone className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                  <a href={`tel:${activeLead.personal_phone_number}`} className="text-xs text-gray-700 hover:underline">{activeLead.personal_phone_number}</a>
+                                  <span className="text-[10px] text-gray-400">Personal</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Location */}
+                        {(activeLead.location?.country || activeLead.raw_address) && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Location</p>
+                            <div className="flex items-center gap-2">
+                              <MapPin className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                              <span className="text-xs text-gray-700">
+                                {[activeLead.location?.city, activeLead.location?.region, activeLead.location?.country].filter(Boolean).join(', ') || activeLead.raw_address}
+                              </span>
+                            </div>
+                            {activeLead.location?.timezone && (
+                              <div className="flex items-center gap-2 mt-1">
+                                <Globe className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                                <span className="text-xs text-gray-500">{activeLead.location.timezone}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Social Links */}
+                        {(activeLead.linkedin || activeLead.twitter || activeLead.facebook) && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Social</p>
+                            <div className="flex flex-wrap gap-2">
+                              {activeLead.linkedin && (
+                                <a
+                                  href={activeLead.linkedin.startsWith('http') ? activeLead.linkedin : `https://linkedin.com/in/${activeLead.linkedin}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+                                >
+                                  <Linkedin className="w-3 h-3" />
+                                  LinkedIn
+                                </a>
+                              )}
+                              {activeLead.twitter && (
+                                <a
+                                  href={activeLead.twitter.startsWith('http') ? activeLead.twitter : `https://twitter.com/${activeLead.twitter}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-sky-600 bg-sky-50 rounded-md hover:bg-sky-100 transition-colors"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Twitter
+                                </a>
+                              )}
+                              {activeLead.facebook && (
+                                <a
+                                  href={activeLead.facebook.startsWith('http') ? activeLead.facebook : `https://facebook.com/${activeLead.facebook}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  Facebook
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* ───── Company Details ───── */}
+                        {(activeLead.company_uuid || activeLead.company_name) && (
+                          <div>
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide">Company</p>
+                            </div>
+
+                            {companyLoading ? (
+                              <div className="flex items-center gap-2 py-3">
+                                <Loader2 className="w-4 h-4 text-indigo-400 animate-spin" />
+                                <span className="text-xs text-gray-500">Loading company details...</span>
+                              </div>
+                            ) : companyInfo ? (
+                              <div className="bg-gray-50 rounded-lg p-3 space-y-3">
+                                {/* Company header */}
+                                <div className="flex items-center gap-2.5">
+                                  {companyInfo.logo_url && (
+                                    <img src={companyInfo.logo_url} alt="" className="w-9 h-9 rounded-lg object-cover bg-white border border-gray-200" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                  )}
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-gray-900">{companyInfo.name || activeLead.company_name}</p>
+                                    {companyInfo.industry && (
+                                      <p className="text-[10px] text-gray-500">{companyInfo.industry}</p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Tagline */}
+                                {companyInfo.tagline && (
+                                  <p className="text-xs text-gray-600 italic">{companyInfo.tagline}</p>
+                                )}
+
+                                {/* Quick facts */}
+                                <div className="grid grid-cols-2 gap-2">
+                                  {companyInfo.domain && (
+                                    <div className="flex items-center gap-1.5">
+                                      <Globe className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                      <a href={companyInfo.website || `https://${companyInfo.domain}`} target="_blank" rel="noopener noreferrer" className="text-[11px] text-indigo-600 hover:underline truncate">
+                                        {companyInfo.domain}
+                                      </a>
+                                    </div>
+                                  )}
+                                  {companyInfo.employees_range && (
+                                    <div className="flex items-center gap-1.5">
+                                      <User className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                      <span className="text-[11px] text-gray-700">{companyInfo.employees_range} employees</span>
+                                    </div>
+                                  )}
+                                  {companyInfo.phone && (
+                                    <div className="flex items-center gap-1.5">
+                                      <Phone className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                      <a href={`tel:${companyInfo.phone}`} className="text-[11px] text-gray-700 hover:underline">{companyInfo.phone}</a>
+                                    </div>
+                                  )}
+                                  {companyInfo.followers != null && (
+                                    <div className="flex items-center gap-1.5">
+                                      <Linkedin className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                      <span className="text-[11px] text-gray-700">{companyInfo.followers.toLocaleString()} followers</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* HQ Location */}
+                                {(companyInfo.hq_location?.city || companyInfo.hq_raw_address) && (
+                                  <div className="flex items-start gap-1.5">
+                                    <MapPin className="w-3 h-3 text-gray-400 flex-shrink-0 mt-0.5" />
+                                    <span className="text-[11px] text-gray-700">
+                                      {companyInfo.hq_location?.address_string ||
+                                        [companyInfo.hq_location?.city, companyInfo.hq_location?.region, companyInfo.hq_location?.country].filter(Boolean).join(', ') ||
+                                        companyInfo.hq_raw_address}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Company LinkedIn */}
+                                {companyInfo.linkedin && (
+                                  <a
+                                    href={`https://linkedin.com/company/${companyInfo.linkedin}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-blue-600 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+                                  >
+                                    <Linkedin className="w-3 h-3" />
+                                    Company LinkedIn
+                                  </a>
+                                )}
+
+                                {/* About */}
+                                {companyInfo.about && (
+                                  <div>
+                                    <p className="text-[10px] font-medium text-gray-400 uppercase mb-1">About</p>
+                                    <p className="text-[11px] text-gray-700 leading-relaxed whitespace-pre-line max-h-32 overflow-y-auto">{companyInfo.about}</p>
+                                  </div>
+                                )}
+
+                                {/* Specialities */}
+                                {companyInfo.specialities && companyInfo.specialities.length > 0 && (
+                                  <div>
+                                    <p className="text-[10px] font-medium text-gray-400 uppercase mb-1">Specialities</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {companyInfo.specialities.map((s, idx) => (
+                                        <span key={idx} className="px-1.5 py-0.5 text-[10px] text-gray-600 bg-white border border-gray-200 rounded">
+                                          {s.trim()}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-500">{activeLead.company_name || 'No company info'}</p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Stats */}
+                        {(activeLead.connections_number || activeLead.followers_number) && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">LinkedIn Stats</p>
+                            <div className="flex gap-4">
+                              {activeLead.connections_number != null && (
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900">{activeLead.connections_number.toLocaleString()}</p>
+                                  <p className="text-[10px] text-gray-500">Connections</p>
+                                </div>
+                              )}
+                              {activeLead.followers_number != null && (
+                                <div>
+                                  <p className="text-sm font-semibold text-gray-900">{activeLead.followers_number.toLocaleString()}</p>
+                                  <p className="text-[10px] text-gray-500">Followers</p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Experience */}
+                        {activeLead.experience && activeLead.experience.length > 0 && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Experience</p>
+                            <div className="space-y-3">
+                              {activeLead.experience.map((exp, idx) => (
+                                <div key={idx} className="flex gap-2.5">
+                                  <Briefcase className="w-3.5 h-3.5 text-gray-400 flex-shrink-0 mt-0.5" />
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-medium text-gray-900">{exp.position || 'Role'}</p>
+                                    <p className="text-xs text-gray-600">{exp.company_name}</p>
+                                    <p className="text-[10px] text-gray-400">
+                                      {exp.start_date ? new Date(exp.start_date).getFullYear() : '?'}
+                                      {' - '}
+                                      {exp.end_date ? new Date(exp.end_date).getFullYear() : 'Present'}
+                                      {exp.employment_type ? ` · ${exp.employment_type}` : ''}
+                                    </p>
+                                    {exp.location && (
+                                      <p className="text-[10px] text-gray-400">{exp.location}</p>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Skills */}
+                        {activeLead.skills && activeLead.skills.length > 0 && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-2">Skills</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {activeLead.skills.map((skill, idx) => (
+                                <span key={idx} className="px-2 py-0.5 text-[10px] font-medium text-indigo-700 bg-indigo-50 rounded-full">
+                                  {skill}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Language */}
+                        {activeLead.primary_language && (
+                          <div>
+                            <p className="text-[11px] font-medium text-gray-400 uppercase tracking-wide mb-1">Language</p>
+                            <p className="text-xs text-gray-700">{activeLead.primary_language.toUpperCase()}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* end Content flex */}
                   </div>
                 </>
               )}
