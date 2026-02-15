@@ -214,8 +214,8 @@ export function buildStep3Schema(isPerson: boolean): string {
   );
 }
 
-// 8 minutes: fashion-deep-search alone can take up to 4+ minutes, plus retries
-export const maxDuration = 480;
+// Vercel hobby plan limit is 300s; use 300 for deployed, no limit locally
+export const maxDuration = 300;
 
 const EXA_API_KEYS = process.env.EXA_API_KEYS
   ? process.env.EXA_API_KEYS.split(',').map((k) => k.trim()).filter((k) => k.length > 0)
