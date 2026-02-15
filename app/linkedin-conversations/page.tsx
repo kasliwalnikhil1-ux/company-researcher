@@ -141,6 +141,7 @@ interface SenderProfile {
   last_name?: string;
   full_name?: string;
   linkedin_account_uuid?: string;
+  avatar_url?: string;
   [key: string]: unknown;
 }
 

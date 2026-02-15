@@ -79,6 +79,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       showPersonalization: canAccessPersonalization,
       showMeData: canAccessMeData,
       showAdminStats: canAccessAdminStats,
+      showLinkedInInbox: canAccessMeData,
+      showSenderProfiles: canAccessMeData,
       canAccessResearch,
       canAccessCompanies: isB2B,
       canAccessInvestors: isFundraising,
@@ -86,6 +88,8 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       canAccessPersonalization,
       canAccessMeData,
       canAccessAdminStats,
+      canAccessLinkedInInbox: canAccessMeData,
+      canAccessSenderProfiles: canAccessMeData,
       canAccessResetAccount,
       defaultRoute: isFundraising ? '/investors' : '/',
     };
@@ -93,7 +97,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
   // me-data, me-data-prospects, and data-pipelines are accessible irrespective of onboarding
-  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines' || pathname === '/admin-stats';
+  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines' || pathname === '/admin-stats' || pathname === '/linkedin-conversations' || pathname === '/sender-profiles';
   const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute;
 
   // Detect mobile screen size
@@ -151,11 +155,11 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       router.replace(routeAccess.defaultRoute);
       return;
     }
-    if (pathname === '/linkedin-conversations' && !routeAccess.canAccessInvestors) {
+    if (pathname === '/linkedin-conversations' && !routeAccess.canAccessLinkedInInbox) {
       router.replace(routeAccess.defaultRoute);
       return;
     }
-    if (pathname === '/sender-profiles' && !routeAccess.canAccessInvestors) {
+    if (pathname === '/sender-profiles' && !routeAccess.canAccessSenderProfiles) {
       router.replace(routeAccess.defaultRoute);
       return;
     }
@@ -365,31 +369,37 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                 <Banknote className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
                 {(!isCollapsed || isMobile) && <span>New Fundings</span>}
               </Link>
-              <Link
-                href="/linkedin-conversations"
-                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/linkedin-conversations')
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                title="LinkedIn Conversations"
-              >
-                <MessageSquare className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>LinkedIn Inbox</span>}
-              </Link>
-              <Link
-                href="/sender-profiles"
-                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/sender-profiles')
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                title="Sender Profiles"
-              >
-                <Contact className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>Sender Profiles</span>}
-              </Link>
             </>
+          )}
+
+          {routeAccess.showLinkedInInbox && (
+            <Link
+              href="/linkedin-conversations"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/linkedin-conversations')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="LinkedIn Conversations"
+            >
+              <MessageSquare className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>LinkedIn Inbox</span>}
+            </Link>
+          )}
+
+          {routeAccess.showSenderProfiles && (
+            <Link
+              href="/sender-profiles"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/sender-profiles')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Sender Profiles"
+            >
+              <Contact className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Sender Profiles</span>}
+            </Link>
           )}
           
           {routeAccess.showEnrich && (
