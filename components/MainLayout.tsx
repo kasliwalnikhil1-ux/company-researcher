@@ -242,21 +242,37 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen flex">
-      {/* Mobile Menu Button */}
-      {isMobile && !isMobileMenuOpen && (
-        <button
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="fixed top-4 left-4 z-50 bg-white border border-gray-200 rounded-lg p-2 shadow-md hover:shadow-lg transition-shadow md:hidden"
-          aria-label="Toggle menu"
-        >
-          <Menu className="w-5 h-5 text-gray-600" />
-        </button>
+      {/* Mobile Top Bar */}
+      {isMobile && (
+        <header className="fixed top-0 left-0 right-0 z-30 bg-white border-b border-gray-200 flex items-center h-14 px-4 md:hidden">
+          <button
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+            aria-label="Toggle menu"
+          >
+            {isMobileMenuOpen ? (
+              <X className="w-5 h-5 text-gray-600" />
+            ) : (
+              <Menu className="w-5 h-5 text-gray-600" />
+            )}
+          </button>
+          <div className="flex items-center gap-2 ml-3">
+            <Image
+              src={whitelabel.logoPath}
+              alt={whitelabel.sidebarTitle}
+              width={28}
+              height={28}
+              className="h-7 w-7 flex-shrink-0 object-contain"
+            />
+            <span className="text-lg font-semibold text-gray-900">{whitelabel.sidebarTitle}</span>
+          </div>
+        </header>
       )}
 
       {/* Mobile Overlay */}
       {isMobile && isMobileMenuOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          className="fixed inset-0 top-14 bg-black bg-opacity-50 z-40 md:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
@@ -264,12 +280,13 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       {/* Sidebar */}
       <aside className={`
         ${isMobile 
-          ? `fixed top-0 left-0 w-64 h-screen z-40 transform transition-transform duration-300 ${
+          ? `fixed top-14 left-0 w-64 z-40 transform transition-transform duration-300 ${
               isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
             }`
           : `fixed top-0 left-0 h-screen transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
         }
         bg-white border-r border-gray-200 flex flex-col
+        ${isMobile ? 'h-[calc(100vh-3.5rem)]' : ''}
       `}>
         {/* Toggle Button - Desktop only */}
         {!isMobile && (
@@ -286,31 +303,24 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </button>
         )}
 
-        <div className={`p-6 border-b border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
-          <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : 'justify-between'}`}>
-            <div className={`flex items-center ${isCollapsed && !isMobile ? '' : 'gap-2'}`}>
-              <Image
-                src={whitelabel.logoPath}
-                alt={whitelabel.sidebarTitle}
-                width={32}
-                height={32}
-                className="h-8 w-8 flex-shrink-0 object-contain"
-              />
-              {(!isCollapsed || isMobile) && (
-                <h1 className="text-xl font-bold text-gray-900">{whitelabel.sidebarTitle}</h1>
-              )}
+        {!isMobile && (
+          <div className={`p-6 border-b border-gray-200 ${isCollapsed ? 'px-2' : ''}`}>
+            <div className={`flex items-center ${isCollapsed ? 'justify-center' : 'justify-between'}`}>
+              <div className={`flex items-center ${isCollapsed ? '' : 'gap-2'}`}>
+                <Image
+                  src={whitelabel.logoPath}
+                  alt={whitelabel.sidebarTitle}
+                  width={32}
+                  height={32}
+                  className="h-8 w-8 flex-shrink-0 object-contain"
+                />
+                {!isCollapsed && (
+                  <h1 className="text-xl font-bold text-gray-900">{whitelabel.sidebarTitle}</h1>
+                )}
+              </div>
             </div>
-            {isMobile && (
-              <button
-                onClick={() => setIsMobileMenuOpen(false)}
-                className="p-1 text-gray-500 hover:text-gray-700"
-                aria-label="Close menu"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
           </div>
-        </div>
+        )}
         
         <nav className={`flex-1 py-6 space-y-2 overflow-y-auto ${isCollapsed && !isMobile ? 'px-2' : 'px-4'}`}>
           {routeAccess.showResearch && (
@@ -677,7 +687,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
       <main className={`
         ${isMobile ? 'ml-0' : isCollapsed ? 'ml-16' : 'ml-64'}
         flex-1 flex flex-col overflow-hidden transition-all duration-300
-        ${isMobile ? 'pt-16' : ''}
+        ${isMobile ? 'pt-14 isolate' : ''}
       `}>
         {children}
       </main>

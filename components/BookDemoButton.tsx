@@ -12,7 +12,7 @@ export const CALENDLY_URL = 'https://calendly.com/founders-capitalxai/20min';
 export function BookDemoButton() {
   const { user } = useAuth();
   const { isFreePlan, isLoading } = useOwner();
-  const [isCondensed, setIsCondensed] = useState(false);
+  const [isCondensed, setIsCondensed] = useState(true);
 
   useEffect(() => {
     try {

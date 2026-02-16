@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { getValidAccessToken } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   Users,
   Plus,
@@ -28,6 +29,12 @@ import {
   PauseCircle,
   CircleDot,
 } from 'lucide-react';
+
+/** User IDs allowed to create profiles and connect GoLogin */
+const MANAGE_PROFILES_ALLOWED_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
 
 /* ────────────────────────── Types ────────────────────────── */
 
@@ -220,6 +227,9 @@ export default function SenderProfilesPage() {
 /* ────────────────────────── Content ────────────────────────── */
 
 function SenderProfilesContent() {
+  const { user } = useAuth();
+  const canManageProfiles = MANAGE_PROFILES_ALLOWED_USER_IDS.has(user?.id ?? '');
+
   // List state
   const [profiles, setProfiles] = useState<SenderProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -370,20 +380,24 @@ function SenderProfilesContent() {
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
-            <button
-              onClick={() => setActiveModal('create')}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Create Profile
-            </button>
-            <button
-              onClick={() => setActiveModal('connect-external')}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-            >
-              <Globe className="w-4 h-4" />
-              Connect GoLogin
-            </button>
+            {canManageProfiles && (
+              <button
+                onClick={() => setActiveModal('create')}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Create Profile
+              </button>
+            )}
+            {canManageProfiles && (
+              <button
+                onClick={() => setActiveModal('connect-external')}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+              >
+                <Globe className="w-4 h-4" />
+                Connect GoLogin
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -439,7 +453,7 @@ function SenderProfilesContent() {
                 : 'Create your first sender profile to get started'}
             </p>
           </div>
-          {!searchQuery && (
+          {!searchQuery && canManageProfiles && (
             <div className="flex gap-2">
               <button
                 onClick={() => setActiveModal('create')}

@@ -61,10 +61,11 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await gsRes.json();
-    // GetSales wraps in { lead: {...}, markers: [...], ... }
-    // Return just the lead object to the frontend
+    // GetSales wraps in { lead: {...}, markers: [...], flows: [...], custom_fields: [...] }
     const lead = data?.lead || data;
-    return NextResponse.json({ lead });
+    const markers = data?.markers || [];
+    const flows = data?.flows || [];
+    return NextResponse.json({ lead, markers, flows });
   } catch (err) {
     console.error('[leads] Unexpected error:', err);
     return NextResponse.json(
