@@ -6,7 +6,8 @@ import QualificationDisplay from './qualification/QualificationDisplay';
 import InstagramProfileDisplay from './qualification/InstagramProfileDisplay';
 import Image from "next/image";
 import Link from "next/link";
-import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
+import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, fetchJobsResearch, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
+import type { JobsResearchSummary } from "../lib/api";
 import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
 import ConfirmationModal from './ui/ConfirmationModal';
@@ -14,6 +15,7 @@ import ResumeDialog from './ui/ResumeDialog';
 import Toast from './ui/Toast';
 import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvRow } from "../lib/csvImport";
 import { downloadCsv } from "../lib/csvExport";
+import { writeSummaryToCsvRow } from "../lib/summaryUtils";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
 import { useCompanies } from "@/contexts/CompaniesContext";
 import { useOwner } from "@/contexts/OwnerContext";
@@ -22,16 +24,8 @@ import { useOnboarding } from "@/contexts/OnboardingContext";
 import { extractUsernameFromUrl } from "../utils/instagramUrl";
 import { supabase } from "@/utils/supabase/client";
 
-// Interface for qualification data
-interface QualificationData {
-  company_summary: string;
-  company_industry: string;
-  sales_opener_sentence: string;
-  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
-  confidence_score: number;
-  product_types: string[] | null;
-  sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
-}
+// Generic qualification/summary data - keys depend on personalization schema
+type QualificationData = Record<string, any>;
 
 // Utility functions
 const extractDomain = (url: string): string | null => {
@@ -49,7 +43,15 @@ const extractDomain = (url: string): string | null => {
 // Clean URL to base domain with protocol (remove paths, query params, etc.)
 // For Instagram mode, preserves the full URL including username path
 // For investor mode, uses cleanInvestorInput (domain or LinkedIn)
-const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' = 'domain'): string | null => {
+const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' | 'jobs' = 'domain'): string | null => {
+  if (mode === 'jobs') {
+    if (!url) return null;
+    let u = url.trim();
+    if (!u.startsWith('http://') && !u.startsWith('https://')) {
+      u = 'https://' + u;
+    }
+    return u;
+  }
   if (mode === 'investor') {
     const { cleaned } = cleanInvestorInput(url);
     return cleaned || null;
@@ -100,6 +102,29 @@ const INVALID_DOMAINS = [
   'pinterest.com'
 ];
 
+// Job portal URL patterns for auto-detection
+const JOB_URL_PATTERNS = [
+  /linkedin\.com\/jobs/i,
+  /shine\.com\/jobs/i,
+  /naukri\.com\/job-listings/i,
+  /naukri\.com\/job\//i,
+  /indeed\.com\/viewjob/i,
+  /indeed\.com\/jobs/i,
+  /glassdoor\.com\/job-listing/i,
+  /glassdoor\.com\/Jobs/i,
+  /monster\.com\/job/i,
+  /ziprecruiter\.com\/jobs/i,
+  /wellfound\.com\/jobs/i,
+  /angel\.co\/jobs/i,
+  /lever\.co\//i,
+  /greenhouse\.io\/.*\/jobs/i,
+  /jobs\.lever\.co\//i,
+  /boards\.greenhouse\.io\//i,
+  /careers\./i,
+  /\/careers\//i,
+  /\/jobs\//i,
+];
+
 export default function CompanyResearcher() {
   // Companies context for saving summaries (but don't fetch companies list on mount)
   const { createCompany, updateCompany } = useCompanies();
@@ -122,8 +147,8 @@ export default function CompanyResearcher() {
     instagram?: { systemPrompt?: string; userMessage?: string };
   } | null>(null);
   
-  // Research mode: 'domain', 'instagram', or 'investor'
-  const [researchMode, setResearchMode] = useState<'domain' | 'instagram' | 'investor'>('domain');
+  // Research mode: 'domain', 'instagram', 'investor', or 'jobs'
+  const [researchMode, setResearchMode] = useState<'domain' | 'instagram' | 'investor' | 'jobs'>('domain');
 
   // Sync researchMode when primaryUse changes
   useEffect(() => {
@@ -133,6 +158,12 @@ export default function CompanyResearcher() {
       setResearchMode('domain');
     }
   }, [isFundraising, isB2B, researchMode]);
+
+  const containsJobUrl = useCallback((text: string): boolean => {
+    if (!text || typeof text !== 'string') return false;
+    const lines = text.split(/[,\n]+/).map(l => l.trim()).filter(Boolean);
+    return lines.some(line => JOB_URL_PATTERNS.some(pattern => pattern.test(line)));
+  }, []);
 
   // Set name for batch processing
   const [setName, setSetName] = useState('');
@@ -148,15 +179,7 @@ export default function CompanyResearcher() {
     [company: string]: {
       qualificationData: QualificationData | null;
       instagramProfileData: any | null;
-      instagramQualificationData: {
-        profile_summary: string;
-        profile_industry: string;
-        sales_opener_sentence: string;
-        classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
-        confidence_score?: number; // Optional
-        product_types: string[] | null;
-        sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
-      } | null;
+      instagramQualificationData: Record<string, any> | null;
       investorResearchData: {
         cleaned: string;
         skipped?: boolean;
@@ -165,6 +188,10 @@ export default function CompanyResearcher() {
         links?: string[];
         updated?: boolean;
         contactsProcessing?: { current: number; total: number; failed: number };
+      } | null;
+      jobsResearchData: {
+        url: string;
+        summary?: JobsResearchSummary;
       } | null;
     }
   }>({});
@@ -244,11 +271,12 @@ export default function CompanyResearcher() {
       instagramProfileData: null,
       instagramQualificationData: null,
       investorResearchData: null,
+      jobsResearchData: null,
     };
   }, [resultsByCompany]); 
 
   // Get data for active company
-  const { qualificationData, instagramProfileData, instagramQualificationData, investorResearchData } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
+  const { qualificationData, instagramProfileData, instagramQualificationData, investorResearchData, jobsResearchData } = activeCompany ? getCurrentCompanyData(activeCompany) : getCurrentCompanyData('');
 
   // Prepare companies data for CSV export
   const companiesForExport = useMemo(() => {
@@ -295,8 +323,8 @@ export default function CompanyResearcher() {
 
   // Function to filter out invalid domains from input
   const filterInvalidDomains = useCallback((input: string): { filteredInput: string; removedDomains: string[] } => {
-    // Investor mode accepts domain or LinkedIn - no filtering
-    if (researchMode === 'investor') {
+    // Investor and jobs modes accept various URLs - no filtering
+    if (researchMode === 'investor' || researchMode === 'jobs') {
       return { filteredInput: input, removedDomains: [] };
     }
     const lines = input.split(/[,\n]/).map(line => line.trim()).filter(line => line.length > 0);
@@ -304,6 +332,12 @@ export default function CompanyResearcher() {
     const removedDomains: string[] = [];
 
     lines.forEach(line => {
+      // Never filter out job URLs — they should auto-switch to jobs mode
+      if (JOB_URL_PATTERNS.some(pattern => pattern.test(line))) {
+        validLines.push(line);
+        return;
+      }
+
       const cleanedUrl = cleanUrl(line, researchMode);
       const domain = cleanedUrl ? extractDomain(cleanedUrl) : null;
 
@@ -349,6 +383,18 @@ export default function CompanyResearcher() {
       return result;
     }
 
+    if (researchMode === 'jobs') {
+      const result = dedupe(lines.map(line => {
+        let u = line.trim();
+        if (u && !u.startsWith('http://') && !u.startsWith('https://')) {
+          u = 'https://' + u;
+        }
+        return u;
+      }));
+      console.log('[CompanyResearchHome] parseCompanyInput (jobs):', { lines: lines.length, result: result.length });
+      return result;
+    }
+
     const cleaned = lines.map(company => {
       const c = cleanUrl(company, researchMode);
       return c || company;
@@ -376,6 +422,7 @@ export default function CompanyResearcher() {
           instagramProfileData: null,
           instagramQualificationData: null,
           investorResearchData: null,
+          jobsResearchData: null,
         }
       }));
       
@@ -583,6 +630,117 @@ export default function CompanyResearcher() {
           [company]: { investorResearch: msg }
         }));
       }
+    } else if (researchMode === 'jobs') {
+      // Jobs research mode
+      console.log('[CompanyResearchHome] researchCompany (jobs) starting:', company);
+
+      setResultsByCompany(prev => ({
+        ...prev,
+        [company]: {
+          ...prev[company],
+          qualificationData: null,
+          instagramProfileData: null,
+          instagramQualificationData: null,
+          investorResearchData: null,
+          jobsResearchData: { url: company },
+        }
+      }));
+      setErrorsByCompany(prev => ({ ...prev, [company]: {} }));
+
+      try {
+        const data = await fetchJobsResearch(company);
+        console.log('[CompanyResearchHome] researchCompany (jobs) API result:', data);
+        if (data?.error) {
+          setErrorsByCompany(prev => ({
+            ...prev,
+            [company]: { jobsResearch: data.error + (data.details ? `: ${data.details}` : '') }
+          }));
+          return;
+        }
+
+        const summary = data?.summary;
+        setResultsByCompany(prev => ({
+          ...prev,
+          [company]: {
+            ...prev[company],
+            jobsResearchData: {
+              url: data?.url || company,
+              summary,
+            },
+          }
+        }));
+
+        // Save as company in database using extracted company info
+        if (summary?.company_name) {
+          try {
+            if (!user) {
+              console.error('User not available, cannot save company');
+              return;
+            }
+
+            const companyDomain = summary.company_website
+              ? summary.company_website.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?]/)[0]
+              : null;
+
+            const qualificationSummary: Record<string, any> = {
+              company_name: summary.company_name,
+              company_description: summary.company_description || '',
+              company_customers: summary.company_customers || '',
+              job_title: summary.job_title || '',
+              compensation_type: summary.compensation_type || '',
+              compensation_amount: summary.compensation_amount || '',
+              job_application_fit_for_B2B_GTM_ABM_expert: summary.job_application_fit_for_B2B_GTM_ABM_expert ?? null,
+              source_job_url: data?.url || company,
+            };
+
+            if (companyDomain) {
+              const { data: existingCompanyData } = await supabase
+                .from('companies')
+                .select('id, domain, email, phone')
+                .eq('user_id', user.id)
+                .eq('domain', companyDomain)
+                .maybeSingle();
+
+              if (existingCompanyData) {
+                await updateCompany(existingCompanyData.id, {
+                  summary: qualificationSummary,
+                  email: existingCompanyData.email || '',
+                  phone: existingCompanyData.phone || '',
+                  owner: selectedOwner,
+                });
+              } else {
+                await createCompany({
+                  domain: companyDomain,
+                  instagram: '',
+                  summary: qualificationSummary,
+                  email: '',
+                  phone: '',
+                  set_name: setName || null,
+                  owner: selectedOwner,
+                });
+              }
+            } else {
+              await createCompany({
+                domain: '',
+                instagram: '',
+                summary: qualificationSummary,
+                email: '',
+                phone: '',
+                set_name: setName || null,
+                owner: selectedOwner,
+              });
+            }
+          } catch (saveError) {
+            console.error('Error saving company from job research:', saveError);
+          }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { jobsResearch: msg }
+        }));
+      }
     } else {
       // Domain research mode (existing logic)
       const domainName = extractDomain(company);
@@ -602,6 +760,7 @@ export default function CompanyResearcher() {
           instagramProfileData: null,
           instagramQualificationData: null,
           investorResearchData: null,
+          jobsResearchData: null,
         }
       }));
       
@@ -814,7 +973,7 @@ export default function CompanyResearcher() {
     useDualColumns: boolean,
     selectedColumns: { domain: string | null; instagram: string | null },
     selectedUrlColumn: string | null,
-    researchMode: 'domain' | 'instagram' | 'investor'
+    researchMode: 'domain' | 'instagram' | 'investor' | 'jobs'
   ) => {
     const isInstagramUrl = (url: string): boolean => {
       if (!url || typeof url !== 'string') return false;
@@ -864,6 +1023,14 @@ export default function CompanyResearcher() {
                            !!(row['Research Status'] && row['Research Status'].trim() !== '');
             }
           }
+        } else if (researchMode === 'jobs') {
+          if (url && url.includes('.')) {
+            const cleaned = cleanUrl(url, 'jobs');
+            if (cleaned) {
+              isProcessed = qualificationDataMap.has(cleaned) || errorMap.has(cleaned) ||
+                           !!(row['Research Status'] && row['Research Status'].trim() !== '');
+            }
+          }
         } else {
           if (url) {
             const cleanedUrl = cleanUrl(url, researchMode);
@@ -899,30 +1066,7 @@ export default function CompanyResearcher() {
           if (finalQualificationData) {
             updatedRow['Research Status'] = 'completed';
             if (domainQualificationData) {
-              updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
-              updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
-              updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
-              updatedRow['Classification'] = domainQualificationData.classification || '';
-              updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
-              updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
-              
-              if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
-                const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                if (productTypes.length > 0) {
-                  if (productTypes.length === 1) {
-                    updatedRow['Product Types'] = productTypes[0];
-                  } else if (productTypes.length === 2) {
-                    updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                  } else {
-                    const allButLast = productTypes.slice(0, -1).join(', ');
-                    updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                  }
-                  
-                  productTypes.forEach((pt: string, index: number) => {
-                    updatedRow[`PRODUCT${index + 1}`] = pt;
-                  });
-                }
-              }
+              writeSummaryToCsvRow(domainQualificationData, updatedRow);
             }
             
             if (instagramData && !('error' in instagramData)) {
@@ -936,32 +1080,7 @@ export default function CompanyResearcher() {
             }
             
             if (!domainQualificationData && instagramQualificationData) {
-              updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
-              updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
-              updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
-              updatedRow['Classification'] = instagramQualificationData.classification || '';
-              if (instagramQualificationData.confidence_score !== undefined) {
-                updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
-              }
-              updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
-              
-              if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
-                const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                if (productTypes.length > 0) {
-                  if (productTypes.length === 1) {
-                    updatedRow['Product Types'] = productTypes[0];
-                  } else if (productTypes.length === 2) {
-                    updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                  } else {
-                    const allButLast = productTypes.slice(0, -1).join(', ');
-                    updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                  }
-                  
-                  productTypes.forEach((pt: string, index: number) => {
-                    updatedRow[`PRODUCT${index + 1}`] = pt;
-                  });
-                }
-              }
+              writeSummaryToCsvRow(instagramQualificationData, updatedRow);
             }
           } else {
             const error = domainName ? errorMap.get(domainName) : (instagramUrl ? errorMap.get(instagramUrl) : null);
@@ -984,31 +1103,7 @@ export default function CompanyResearcher() {
                 updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
                 
                 if (profileData.qualificationData) {
-                  const qual = profileData.qualificationData;
-                  updatedRow['Company Summary'] = qual.profile_summary || '';
-                  updatedRow['Company Industry'] = qual.profile_industry || '';
-                  updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
-                  updatedRow['Classification'] = qual.classification || '';
-                  if (qual.confidence_score !== undefined) {
-                    updatedRow['Confidence Score'] = String(qual.confidence_score);
-                  }
-                  updatedRow['Sales Action'] = qual.sales_action || '';
-                  
-                  if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
-                    const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
+                  writeSummaryToCsvRow(profileData.qualificationData, updatedRow);
                 }
               } else {
                 const error = errorMap.get(url);
@@ -1040,6 +1135,28 @@ export default function CompanyResearcher() {
                 updatedRow['Research Status'] = 'Failed to fetch investor data';
               }
             }
+          } else if (researchMode === 'jobs') {
+            if (url && url.includes('.')) {
+              const cleaned = cleanUrl(url, 'jobs');
+              const jobData = cleaned ? qualificationDataMap.get(cleaned) : null;
+              const jobError = cleaned ? errorMap.get(cleaned) : null;
+              if (jobData && !jobData.error) {
+                updatedRow['Research Status'] = 'completed';
+                const s = jobData.summary || {};
+                updatedRow['Job Title'] = s.job_title || '';
+                updatedRow['Company Name'] = s.company_name || '';
+                updatedRow['Company Website'] = s.company_website || '';
+                updatedRow['Company Description'] = s.company_description || '';
+                updatedRow['Company Customers'] = s.company_customers || '';
+                updatedRow['Compensation Type'] = s.compensation_type || '';
+                updatedRow['Compensation Amount'] = s.compensation_amount || '';
+                updatedRow['B2B GTM/ABM Fit'] = s.job_application_fit_for_B2B_GTM_ABM_expert === true ? 'Yes' : s.job_application_fit_for_B2B_GTM_ABM_expert === false ? 'No' : '';
+              } else if (jobError) {
+                updatedRow['Research Status'] = jobError;
+              } else {
+                updatedRow['Research Status'] = 'Failed to fetch job data';
+              }
+            }
           } else {
             const cleanedUrl = cleanUrl(url, researchMode);
             const domainNameValue = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
@@ -1047,31 +1164,7 @@ export default function CompanyResearcher() {
 
             if (qualificationData) {
               updatedRow['Research Status'] = 'completed';
-              updatedRow['Company Summary'] = qualificationData.company_summary || '';
-              updatedRow['Company Industry'] = qualificationData.company_industry || '';
-              updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || '';
-              updatedRow['Classification'] = qualificationData.classification || '';
-              updatedRow['Confidence Score'] = String(qualificationData.confidence_score || '');
-              
-              if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
-                const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                if (productTypes.length > 0) {
-                  if (productTypes.length === 1) {
-                    updatedRow['Product Types'] = productTypes[0];
-                  } else if (productTypes.length === 2) {
-                    updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                  } else {
-                    const allButLast = productTypes.slice(0, -1).join(', ');
-                    updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                  }
-                  
-                  productTypes.forEach((pt: string, index: number) => {
-                    updatedRow[`PRODUCT${index + 1}`] = pt;
-                  });
-                }
-              }
-              
-              updatedRow['Sales Action'] = qualificationData.sales_action || '';
+              writeSummaryToCsvRow(qualificationData, updatedRow);
             } else if (domainNameValue) {
               const error = errorMap.get(domainNameValue);
               updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
@@ -1140,7 +1233,7 @@ export default function CompanyResearcher() {
     const CONCURRENCY_LIMIT = 30;
 
     // Helper function to save progress after each row is processed
-    const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor', identifier: string) => {
+    const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor' | 'jobs', identifier: string) => {
       const processedCount = processedDomainIndices.length;
       if (shouldAutoSave(lastSavedAt, processedCount)) {
         // Merge data into rows for saving
@@ -1186,30 +1279,7 @@ export default function CompanyResearcher() {
             if (finalQualificationData) {
               updatedRow['Research Status'] = 'completed';
               if (domainQualificationData) {
-                updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
-                updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
-                updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
-                updatedRow['Classification'] = domainQualificationData.classification || '';
-                updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
-                updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
-                
-                if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
-                  const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length > 0) {
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
-                }
+                writeSummaryToCsvRow(domainQualificationData, updatedRow);
               }
               
               if (instagramData && !('error' in instagramData)) {
@@ -1223,32 +1293,7 @@ export default function CompanyResearcher() {
               }
               
               if (!domainQualificationData && instagramQualificationData) {
-                updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
-                updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
-                updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
-                updatedRow['Classification'] = instagramQualificationData.classification || '';
-                if (instagramQualificationData.confidence_score !== undefined) {
-                  updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
-                }
-                updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
-                
-                if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
-                  const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length > 0) {
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
-                }
+                writeSummaryToCsvRow(instagramQualificationData, updatedRow);
               }
             } else {
               const hasValidDomain = domainUrl && domainUrl.includes('.');
@@ -1319,31 +1364,7 @@ export default function CompanyResearcher() {
                 updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
                 
                 if (profileData.qualificationData) {
-                  const qual = profileData.qualificationData;
-                  updatedRow['Company Summary'] = qual.profile_summary || '';
-                  updatedRow['Company Industry'] = qual.profile_industry || '';
-                  updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
-                  updatedRow['Classification'] = qual.classification || '';
-                  if (qual.confidence_score !== undefined) {
-                    updatedRow['Confidence Score'] = String(qual.confidence_score);
-                  }
-                  updatedRow['Sales Action'] = qual.sales_action || '';
-                  
-                  if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
-                    const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
+                  writeSummaryToCsvRow(profileData.qualificationData, updatedRow);
                 }
               } else {
                 const error = errorMap.get(url);
@@ -1373,31 +1394,7 @@ export default function CompanyResearcher() {
 
               if (qualificationData) {
                 updatedRow['Research Status'] = 'completed';
-                updatedRow['Company Summary'] = qualificationData.company_summary || updatedRow['Company Summary'] || '';
-                updatedRow['Company Industry'] = qualificationData.company_industry || updatedRow['Company Industry'] || '';
-                updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
-                updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
-                updatedRow['Confidence Score'] = String((qualificationData.confidence_score ?? updatedRow['Confidence Score']) || '');
-                
-                if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
-                  const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length > 0) {
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
-                }
-                
-                updatedRow['Sales Action'] = qualificationData.sales_action || updatedRow['Sales Action'] || '';
+                writeSummaryToCsvRow(qualificationData, updatedRow);
               } else if (domainName) {
                 const error = errorMap.get(domainName);
                 updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
@@ -1502,30 +1499,7 @@ export default function CompanyResearcher() {
             if (finalQualificationData) {
               updatedRow['Research Status'] = 'completed';
               if (domainQualificationData) {
-                updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
-                updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
-                updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
-                updatedRow['Classification'] = domainQualificationData.classification || '';
-                updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
-                updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
-                
-                if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
-                  const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length > 0) {
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
-                }
+                writeSummaryToCsvRow(domainQualificationData, updatedRow);
               }
               
               if (instagramData && !('error' in instagramData)) {
@@ -1539,32 +1513,7 @@ export default function CompanyResearcher() {
               }
               
               if (!domainQualificationData && instagramQualificationData) {
-                updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
-                updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
-                updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
-                updatedRow['Classification'] = instagramQualificationData.classification || '';
-                if (instagramQualificationData.confidence_score !== undefined) {
-                  updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
-                }
-                updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
-                
-                if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
-                  const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length > 0) {
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
-                }
+                writeSummaryToCsvRow(instagramQualificationData, updatedRow);
               }
             } else {
               const hasValidDomain = domainUrl && domainUrl.includes('.');
@@ -1593,31 +1542,7 @@ export default function CompanyResearcher() {
                   updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
                   
                   if (profileData.qualificationData) {
-                    const qual = profileData.qualificationData;
-                    updatedRow['Company Summary'] = qual.profile_summary || '';
-                    updatedRow['Company Industry'] = qual.profile_industry || '';
-                    updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
-                    updatedRow['Classification'] = qual.classification || '';
-                    if (qual.confidence_score !== undefined) {
-                      updatedRow['Confidence Score'] = String(qual.confidence_score);
-                    }
-                    updatedRow['Sales Action'] = qual.sales_action || '';
-                    
-                    if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
-                      const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                      if (productTypes.length === 1) {
-                        updatedRow['Product Types'] = productTypes[0];
-                      } else if (productTypes.length === 2) {
-                        updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                      } else {
-                        const allButLast = productTypes.slice(0, -1).join(', ');
-                        updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                      }
-                      
-                      productTypes.forEach((pt: string, index: number) => {
-                        updatedRow[`PRODUCT${index + 1}`] = pt;
-                      });
-                    }
+                    writeSummaryToCsvRow(profileData.qualificationData, updatedRow);
                   }
                 } else {
                   const error = errorMap.get(url);
@@ -1632,30 +1557,7 @@ export default function CompanyResearcher() {
               
               if (qualificationData) {
                 updatedRow['Research Status'] = 'completed';
-                updatedRow['Company Summary'] = qualificationData.company_summary || '';
-                updatedRow['Company Industry'] = qualificationData.company_industry || '';
-                updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || '';
-                updatedRow['Classification'] = qualificationData.classification || '';
-                updatedRow['Confidence Score'] = String(qualificationData.confidence_score || '');
-                updatedRow['Sales Action'] = qualificationData.sales_action || '';
-                
-                if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
-                  const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length > 0) {
-                    if (productTypes.length === 1) {
-                      updatedRow['Product Types'] = productTypes[0];
-                    } else if (productTypes.length === 2) {
-                      updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                    } else {
-                      const allButLast = productTypes.slice(0, -1).join(', ');
-                      updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                    }
-                    
-                    productTypes.forEach((pt: string, index: number) => {
-                      updatedRow[`PRODUCT${index + 1}`] = pt;
-                    });
-                  }
-                }
+                writeSummaryToCsvRow(qualificationData, updatedRow);
               } else if (domainName) {
                 const error = errorMap.get(domainName);
                 updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
@@ -1708,6 +1610,11 @@ export default function CompanyResearcher() {
         } else if (researchMode === 'investor') {
           if (url && (url.includes('.') || url.toLowerCase().includes('linkedin'))) {
             const { cleaned } = cleanInvestorInput(url);
+            if (cleaned) allValidUrls.push(cleaned);
+          }
+        } else if (researchMode === 'jobs') {
+          if (url && url.includes('.')) {
+            const cleaned = cleanUrl(url, 'jobs');
             if (cleaned) allValidUrls.push(cleaned);
           }
         } else {
@@ -1763,6 +1670,11 @@ export default function CompanyResearcher() {
           }
           const { cleaned } = cleanInvestorInput(url);
           if (!cleaned) return false;
+        } else if (researchMode === 'jobs') {
+          // Jobs mode: include any URL with a dot
+          if (!url || !url.includes('.')) {
+            return false;
+          }
         } else {
           // Domain mode: existing logic
           const classification = row['Classification']?.trim() || '';
@@ -2224,6 +2136,127 @@ export default function CompanyResearcher() {
         setShowConfirmationModal(true);
         return;
       }
+    } else if (researchMode === 'jobs') {
+      // Jobs mode: single column with job posting URLs
+      console.log('[CompanyResearchHome] processCsvRows jobs mode:', { rowsToProcess: rowsToProcess.length, selectedUrlColumn });
+      if (!savedProgress) {
+        const uniqueUrls = new Set<string>();
+        rowsToProcess.forEach(row => {
+          const url = row[selectedUrlColumn!]?.trim() || '';
+          if (url && url.includes('.')) {
+            const cleaned = cleanUrl(url, 'jobs');
+            if (cleaned) uniqueUrls.add(cleaned);
+          }
+        });
+        uniqueDomainsArray = Array.from(uniqueUrls);
+        console.log('[CompanyResearchHome] processCsvRows jobs unique URLs:', uniqueDomainsArray.length);
+      }
+
+      const jobUrlsToProcess = uniqueDomainsArray.slice(startFromIndex);
+
+      await processInBatches(
+        jobUrlsToProcess,
+        async (jobUrl, batchIndex) => {
+          const actualIndex = startFromIndex + batchIndex;
+          try {
+            const data = await fetchJobsResearch(jobUrl);
+            if (data?.error) {
+              errorMap.set(jobUrl, data.error + (data.details ? `: ${data.details}` : ''));
+            } else {
+              qualificationDataMap.set(jobUrl, data);
+
+              // Save as company
+              const summary = data?.summary;
+              if (summary?.company_name && user) {
+                try {
+                  const companyDomain = summary.company_website
+                    ? summary.company_website.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?]/)[0]
+                    : null;
+
+                  const qualificationSummary: Record<string, any> = {
+                    company_name: summary.company_name,
+                    company_description: summary.company_description || '',
+                    company_customers: summary.company_customers || '',
+                    job_title: summary.job_title || '',
+                    compensation_type: summary.compensation_type || '',
+                    compensation_amount: summary.compensation_amount || '',
+                    job_application_fit_for_B2B_GTM_ABM_expert: summary.job_application_fit_for_B2B_GTM_ABM_expert ?? null,
+                    source_job_url: data?.url || jobUrl,
+                  };
+
+                  if (companyDomain) {
+                    const { data: existingCompanyData } = await supabase
+                      .from('companies')
+                      .select('id, domain, email, phone')
+                      .eq('user_id', user.id)
+                      .eq('domain', companyDomain)
+                      .maybeSingle();
+
+                    if (existingCompanyData) {
+                      await updateCompany(existingCompanyData.id, {
+                        summary: qualificationSummary,
+                        email: existingCompanyData.email || '',
+                        phone: existingCompanyData.phone || '',
+                        owner: selectedOwner,
+                      });
+                    } else {
+                      await createCompany({
+                        domain: companyDomain,
+                        instagram: '',
+                        summary: qualificationSummary,
+                        email: '',
+                        phone: '',
+                        set_name: setName || null,
+                        owner: selectedOwner,
+                      });
+                    }
+                  } else {
+                    await createCompany({
+                      domain: '',
+                      instagram: '',
+                      summary: qualificationSummary,
+                      email: '',
+                      phone: '',
+                      set_name: setName || null,
+                      owner: selectedOwner,
+                    });
+                  }
+                } catch (saveError) {
+                  console.error('Error saving company from job CSV processing:', saveError);
+                }
+              }
+            }
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            errorMap.set(jobUrl, msg);
+          }
+          processedDomainIndices.push(actualIndex);
+          saveProgressAfterRow('jobs', jobUrl);
+          return jobUrl;
+        },
+        CONCURRENCY_LIMIT,
+        (processed, total) => {
+          setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+        }
+      );
+
+      if (shouldStopProcessingRef.current) {
+        const currentCsvData = csvDataRef.current || csvData;
+        generateProcessedAndPendingCsvs(
+          currentCsvData.rows,
+          currentCsvData.headers,
+          qualificationDataMap,
+          errorMap,
+          false,
+          { domain: null, instagram: null },
+          selectedUrlColumn || null,
+          researchMode
+        );
+        setIsProcessingCsv(false);
+        setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+        setShowConfirmationModal(true);
+        return;
+      }
     } else {
       // Domain mode processing (existing logic)
       // Extract unique domains from URLs (clean URLs first) - only if not resuming
@@ -2406,30 +2439,7 @@ export default function CompanyResearcher() {
           
           // Add domain-based fields if we have domain data
           if (domainQualificationData) {
-            updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
-            updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
-            updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
-            updatedRow['Classification'] = domainQualificationData.classification || '';
-            updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
-            updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
-            
-            if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
-              const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-              if (productTypes.length > 0) {
-                if (productTypes.length === 1) {
-                  updatedRow['Product Types'] = productTypes[0];
-                } else if (productTypes.length === 2) {
-                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                } else {
-                  const allButLast = productTypes.slice(0, -1).join(', ');
-                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                }
-                
-                productTypes.forEach((pt: string, index: number) => {
-                  updatedRow[`PRODUCT${index + 1}`] = pt;
-                });
-              }
-            }
+            writeSummaryToCsvRow(domainQualificationData, updatedRow);
           }
           
           // Add Instagram-based fields if we have Instagram data
@@ -2445,32 +2455,7 @@ export default function CompanyResearcher() {
           
           // If we only have Instagram qualification data, use those fields
           if (!domainQualificationData && instagramQualificationData) {
-            updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
-            updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
-            updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
-            updatedRow['Classification'] = instagramQualificationData.classification || '';
-            if (instagramQualificationData.confidence_score !== undefined) {
-              updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
-            }
-            updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
-            
-            if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
-              const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-              if (productTypes.length > 0) {
-                if (productTypes.length === 1) {
-                  updatedRow['Product Types'] = productTypes[0];
-                } else if (productTypes.length === 2) {
-                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                } else {
-                  const allButLast = productTypes.slice(0, -1).join(', ');
-                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                }
-                
-                productTypes.forEach((pt: string, index: number) => {
-                  updatedRow[`PRODUCT${index + 1}`] = pt;
-                });
-              }
-            }
+            writeSummaryToCsvRow(instagramQualificationData, updatedRow);
           }
         } else {
           // No qualification data found
@@ -2513,6 +2498,35 @@ export default function CompanyResearcher() {
         } else {
           const error = errorMap.get(url);
           updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
+        }
+      } else if (researchMode === 'jobs') {
+        // Jobs mode: update with job research data
+        if (!url || !url.includes('.')) {
+          if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+            updatedRow['Research Status'] = 'skipped (invalid URL)';
+          }
+          return updatedRow;
+        }
+
+        const cleaned = cleanUrl(url, 'jobs');
+        const jobData = cleaned ? qualificationDataMap.get(cleaned) : null;
+        const jobError = cleaned ? errorMap.get(cleaned) : null;
+
+        if (jobData && !jobData.error) {
+          updatedRow['Research Status'] = 'completed';
+          const s = jobData.summary || {};
+          updatedRow['Job Title'] = s.job_title || '';
+          updatedRow['Company Name'] = s.company_name || '';
+          updatedRow['Company Website'] = s.company_website || '';
+          updatedRow['Company Description'] = s.company_description || '';
+          updatedRow['Company Customers'] = s.company_customers || '';
+          updatedRow['Compensation Type'] = s.compensation_type || '';
+          updatedRow['Compensation Amount'] = s.compensation_amount || '';
+          updatedRow['B2B GTM/ABM Fit'] = s.job_application_fit_for_B2B_GTM_ABM_expert === true ? 'Yes' : s.job_application_fit_for_B2B_GTM_ABM_expert === false ? 'No' : '';
+        } else if (jobError) {
+          updatedRow['Research Status'] = jobError;
+        } else {
+          updatedRow['Research Status'] = 'Failed to fetch job data';
         }
       } else {
         // Domain mode: existing logic
@@ -2559,44 +2573,7 @@ export default function CompanyResearcher() {
         updatedRow['Research Status'] = researchStatus;
         
         if (qualificationData) {
-          // We have qualification data, use it
-          updatedRow['Company Summary'] = qualificationData.company_summary || updatedRow['Company Summary'] || '';
-          updatedRow['Company Industry'] = qualificationData.company_industry || updatedRow['Company Industry'] || '';
-          updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
-          updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
-          updatedRow['Confidence Score'] = String((qualificationData.confidence_score ?? updatedRow['Confidence Score']) || '');
-          
-          // Handle product types
-          if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
-            const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-            if (productTypes.length > 0) {
-              // Format product types as string
-              if (productTypes.length === 1) {
-                updatedRow['Product Types'] = productTypes[0];
-              } else if (productTypes.length === 2) {
-                updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-              } else {
-                const allButLast = productTypes.slice(0, -1).join(', ');
-                updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-              }
-              
-              // Add individual product type columns
-              productTypes.forEach((pt: string, index: number) => {
-                updatedRow[`PRODUCT${index + 1}`] = pt;
-              });
-            }
-          }
-          
-          updatedRow['Sales Action'] = qualificationData.sales_action || updatedRow['Sales Action'] || '';
-        } else {
-          // No qualification data, but still add empty columns to maintain structure
-          updatedRow['Company Summary'] = updatedRow['Company Summary'] || '';
-          updatedRow['Company Industry'] = updatedRow['Company Industry'] || '';
-          updatedRow['Sales Opener Sentence'] = updatedRow['Sales Opener Sentence'] || '';
-          updatedRow['Classification'] = updatedRow['Classification'] || '';
-          updatedRow['Confidence Score'] = updatedRow['Confidence Score'] || '';
-          updatedRow['Product Types'] = updatedRow['Product Types'] || '';
-          updatedRow['Sales Action'] = updatedRow['Sales Action'] || '';
+          writeSummaryToCsvRow(qualificationData, updatedRow);
         }
       }
       
@@ -2688,6 +2665,7 @@ export default function CompanyResearcher() {
             instagramProfileData: profileDataWithoutQualification || null,
             instagramQualificationData: instagramQualificationData || null,
             investorResearchData: null,
+            jobsResearchData: null,
           };
         }
       } else {
@@ -2707,6 +2685,7 @@ export default function CompanyResearcher() {
                 instagramProfileData: profileDataWithoutQualification,
                 instagramQualificationData: instagramQualificationData,
                 investorResearchData: null,
+                jobsResearchData: null,
               };
             }
           } else if (researchMode === 'investor') {
@@ -2725,6 +2704,22 @@ export default function CompanyResearcher() {
                   links: investorData.links,
                   updated: investorData.updated,
                 },
+                jobsResearchData: null,
+              };
+            }
+          } else if (researchMode === 'jobs') {
+            const cleaned = cleanUrl(url, 'jobs');
+            const jobData = cleaned ? qualificationDataMap.get(cleaned) : null;
+            if (cleaned && jobData && !jobData.error) {
+              newResults[cleaned] = {
+                qualificationData: null,
+                instagramProfileData: null,
+                instagramQualificationData: null,
+                investorResearchData: null,
+                jobsResearchData: {
+                  url: jobData.url || cleaned,
+                  summary: jobData.summary,
+                },
               };
             }
           } else {
@@ -2739,6 +2734,7 @@ export default function CompanyResearcher() {
                 instagramProfileData: null,
                 instagramQualificationData: null,
                 investorResearchData: null,
+                jobsResearchData: null,
               };
             }
           }
@@ -2838,30 +2834,7 @@ export default function CompanyResearcher() {
         if (finalQualificationData) {
           updatedRow['Research Status'] = 'completed';
           if (domainQualificationData) {
-            updatedRow['Company Summary'] = domainQualificationData.company_summary || '';
-            updatedRow['Company Industry'] = domainQualificationData.company_industry || '';
-            updatedRow['Sales Opener Sentence'] = domainQualificationData.sales_opener_sentence || '';
-            updatedRow['Classification'] = domainQualificationData.classification || '';
-            updatedRow['Confidence Score'] = String(domainQualificationData.confidence_score || '');
-            updatedRow['Sales Action'] = domainQualificationData.sales_action || '';
-            
-            if (domainQualificationData.product_types && Array.isArray(domainQualificationData.product_types)) {
-              const productTypes = domainQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-              if (productTypes.length > 0) {
-                if (productTypes.length === 1) {
-                  updatedRow['Product Types'] = productTypes[0];
-                } else if (productTypes.length === 2) {
-                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                } else {
-                  const allButLast = productTypes.slice(0, -1).join(', ');
-                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                }
-                
-                productTypes.forEach((pt: string, index: number) => {
-                  updatedRow[`PRODUCT${index + 1}`] = pt;
-                });
-              }
-            }
+            writeSummaryToCsvRow(domainQualificationData, updatedRow);
           }
           
           if (instagramData && !('error' in instagramData)) {
@@ -2875,32 +2848,7 @@ export default function CompanyResearcher() {
           }
           
           if (!domainQualificationData && instagramQualificationData) {
-            updatedRow['Company Summary'] = instagramQualificationData.profile_summary || '';
-            updatedRow['Company Industry'] = instagramQualificationData.profile_industry || '';
-            updatedRow['Sales Opener Sentence'] = instagramQualificationData.sales_opener_sentence || '';
-            updatedRow['Classification'] = instagramQualificationData.classification || '';
-            if (instagramQualificationData.confidence_score !== undefined) {
-              updatedRow['Confidence Score'] = String(instagramQualificationData.confidence_score);
-            }
-            updatedRow['Sales Action'] = instagramQualificationData.sales_action || '';
-            
-            if (instagramQualificationData.product_types && Array.isArray(instagramQualificationData.product_types)) {
-              const productTypes = instagramQualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-              if (productTypes.length > 0) {
-                if (productTypes.length === 1) {
-                  updatedRow['Product Types'] = productTypes[0];
-                } else if (productTypes.length === 2) {
-                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                } else {
-                  const allButLast = productTypes.slice(0, -1).join(', ');
-                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                }
-                
-                productTypes.forEach((pt: string, index: number) => {
-                  updatedRow[`PRODUCT${index + 1}`] = pt;
-                });
-              }
-            }
+            writeSummaryToCsvRow(instagramQualificationData, updatedRow);
           }
         } else {
           const hasValidDomain = domainUrl && domainUrl.includes('.');
@@ -2929,31 +2877,7 @@ export default function CompanyResearcher() {
               updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
               
               if (profileData.qualificationData) {
-                const qual = profileData.qualificationData;
-                updatedRow['Company Summary'] = qual.profile_summary || '';
-                updatedRow['Company Industry'] = qual.profile_industry || '';
-                updatedRow['Sales Opener Sentence'] = qual.sales_opener_sentence || '';
-                updatedRow['Classification'] = qual.classification || '';
-                if (qual.confidence_score !== undefined) {
-                  updatedRow['Confidence Score'] = String(qual.confidence_score);
-                }
-                updatedRow['Sales Action'] = qual.sales_action || '';
-                
-                if (qual.product_types && Array.isArray(qual.product_types) && qual.product_types.length > 0) {
-                  const productTypes = qual.product_types.filter((pt: any) => pt && typeof pt === 'string');
-                  if (productTypes.length === 1) {
-                    updatedRow['Product Types'] = productTypes[0];
-                  } else if (productTypes.length === 2) {
-                    updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                  } else {
-                    const allButLast = productTypes.slice(0, -1).join(', ');
-                    updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                  }
-                  
-                  productTypes.forEach((pt: string, index: number) => {
-                    updatedRow[`PRODUCT${index + 1}`] = pt;
-                  });
-                }
+                writeSummaryToCsvRow(profileData.qualificationData, updatedRow);
               }
             } else {
               const error = errorMap.get(url);
@@ -2968,30 +2892,7 @@ export default function CompanyResearcher() {
           
           if (qualificationData) {
             updatedRow['Research Status'] = 'completed';
-            updatedRow['Company Summary'] = qualificationData.company_summary || '';
-            updatedRow['Company Industry'] = qualificationData.company_industry || '';
-            updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || '';
-            updatedRow['Classification'] = qualificationData.classification || '';
-            updatedRow['Confidence Score'] = String(qualificationData.confidence_score || '');
-            updatedRow['Sales Action'] = qualificationData.sales_action || '';
-            
-            if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
-              const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-              if (productTypes.length > 0) {
-                if (productTypes.length === 1) {
-                  updatedRow['Product Types'] = productTypes[0];
-                } else if (productTypes.length === 2) {
-                  updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                } else {
-                  const allButLast = productTypes.slice(0, -1).join(', ');
-                  updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                }
-                
-                productTypes.forEach((pt: string, index: number) => {
-                  updatedRow[`PRODUCT${index + 1}`] = pt;
-                });
-              }
-            }
+            writeSummaryToCsvRow(qualificationData, updatedRow);
           } else if (domainName) {
             const error = errorMap.get(domainName);
             updatedRow['Research Status'] = error || 'Failed to fetch company qualification data';
@@ -3039,7 +2940,7 @@ export default function CompanyResearcher() {
     if (companies.length === 0) {
       setErrorsByCompany(prev => ({
         ...prev,
-        _form: { form: researchMode === 'investor' ? 'Please enter at least one domain or LinkedIn URL' : 'Please enter at least one company URL' }
+        _form: { form: researchMode === 'investor' ? 'Please enter at least one domain or LinkedIn URL' : researchMode === 'jobs' ? 'Please enter at least one job URL' : 'Please enter at least one company URL' }
       }));
       return;
     }
@@ -3155,6 +3056,19 @@ export default function CompanyResearcher() {
               >
                 Instagram Research
               </button>
+              <button
+                onClick={() => {
+                  setResearchMode('jobs');
+                  handleClearAll();
+                }}
+                className={`px-6 py-3 rounded-sm font-medium transition-colors ${
+                  researchMode === 'jobs'
+                    ? 'bg-brand-default text-white ring-2 ring-brand-default'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Jobs Research
+              </button>
             </>
           )}
         </div>
@@ -3185,6 +3099,8 @@ export default function CompanyResearcher() {
           ? 'Enter domains (e.g. boldcap.com) or LinkedIn URLs (comma or newline separated) for investor research, or upload a CSV file.'
           : researchMode === 'instagram'
           ? 'Enter Instagram URLs (comma or newline separated) for profile research, or upload a CSV file with Instagram columns.'
+          : researchMode === 'jobs'
+          ? 'Enter job posting URLs from LinkedIn, Naukri, Shine, Indeed, etc. (comma or newline separated) to extract company info and B2B fit.'
           : 'Enter company URLs (comma or newline separated) for qualification assessment, or upload a CSV file.'}
       </p>
 
@@ -3199,6 +3115,8 @@ export default function CompanyResearcher() {
                   ? 'Upload a CSV file to process multiple investors. Select the column containing domains or LinkedIn URLs.'
                   : researchMode === 'instagram'
                   ? 'Upload a CSV file to process multiple Instagram profiles. Select the column containing Instagram URLs.'
+                  : researchMode === 'jobs'
+                  ? 'Upload a CSV file to process multiple job postings. Select the column containing job URLs.'
                   : 'Upload a CSV file to process multiple companies. Select the column containing website URLs.'}
               </p>
             </div>
@@ -3301,13 +3219,17 @@ export default function CompanyResearcher() {
                 setShowToast(true);
               }
 
-              // Check if filtered input contains Instagram URL and switch mode accordingly (skip for investor mode)
+              // Auto-detect input type and switch mode accordingly (skip for investor mode)
               if (researchMode !== 'investor') {
-                if (containsInstagramUrl(filteredInput)) {
+                if (containsJobUrl(filteredInput)) {
+                  if (researchMode !== 'jobs') {
+                    setResearchMode('jobs');
+                  }
+                } else if (containsInstagramUrl(filteredInput)) {
                   if (researchMode !== 'instagram') {
                     setResearchMode('instagram');
                   }
-                } else if (filteredInput.trim().length > 0 && researchMode === 'instagram') {
+                } else if (filteredInput.trim().length > 0 && (researchMode === 'instagram' || researchMode === 'jobs')) {
                   setResearchMode('domain');
                 }
               }
@@ -3316,6 +3238,8 @@ export default function CompanyResearcher() {
               ? "Enter domains or LinkedIn URLs (e.g., boldcap.com, linkedin.com/in/garrytan)"
               : researchMode === 'instagram' 
               ? "Enter Instagram URLs (e.g., instagram.com/username, instagram.com/another_username)"
+              : researchMode === 'jobs'
+              ? "Enter job URLs (e.g., linkedin.com/jobs/view/123456, shine.com/jobs/..., naukri.com/job-listings-...)"
               : "Enter company URLs (e.g., capitalxai.com, another-company.com)"}
             rows={4}
             className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-brand-default resize-none opacity-0 animate-fade-up [animation-delay:600ms]"
@@ -3328,8 +3252,8 @@ export default function CompanyResearcher() {
             disabled={isSearching}
           >
             {isSearching 
-              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : 'Analyzing...') 
-              : (researchMode === 'investor' ? 'Research Investor' : researchMode === 'instagram' ? 'Research Instagram Profiles' : 'Analyze Companies')}
+              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : researchMode === 'jobs' ? 'Researching job posting...' : 'Analyzing...') 
+              : (researchMode === 'investor' ? 'Research Investor' : researchMode === 'instagram' ? 'Research Instagram Profiles' : researchMode === 'jobs' ? 'Research Job Postings' : 'Analyze Companies')}
           </button>
         </form>
       )}
@@ -3361,7 +3285,7 @@ export default function CompanyResearcher() {
           ) : (
             <div className="flex items-center gap-2">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
-              <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : 'Analyzing company qualification...'}</span>
+              <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : researchMode === 'jobs' ? 'Researching job posting...' : 'Analyzing company qualification...'}</span>
             </div>
           )}
         </div>
@@ -3407,16 +3331,99 @@ export default function CompanyResearcher() {
       
       <div className="space-y-12">
         {/* Qualification/Profile Section */}
-        {(isSearching || qualificationData || instagramProfileData || investorResearchData) && (
+        {(isSearching || qualificationData || instagramProfileData || investorResearchData || jobsResearchData) && (
           <div className="space-y-8">
             <div className="flex items-center">
               <h2 className="text-3xl font-medium">
-                {researchMode === 'investor' ? 'Investor Research' : researchMode === 'instagram' ? 'Instagram Profile' : 'Qualification Assessment'}
+                {researchMode === 'investor' ? 'Investor Research' : researchMode === 'instagram' ? 'Instagram Profile' : researchMode === 'jobs' ? 'Jobs Research' : 'Qualification Assessment'}
               </h2>
             </div>
 
             <div className="opacity-0 animate-fade-up [animation-delay:300ms]">
-              {researchMode === 'investor' ? (
+              {researchMode === 'jobs' ? (
+                // Jobs Research Display
+                isSearching && (!jobsResearchData || !jobsResearchData.summary) ? (
+                  <div className="animate-pulse">
+                    <div className="h-[300px] bg-gray-100 rounded-lg flex items-center justify-center">
+                      <div className="text-center">
+                        <div className="text-gray-500 mb-2">Researching job posting...</div>
+                        <div className="flex justify-center">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : jobsResearchData?.summary ? (
+                  <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
+                    <div className="text-sm text-gray-600 break-all">
+                      <span className="font-medium">Source URL:</span>{' '}
+                      <a href={jobsResearchData.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                        {jobsResearchData.url}
+                      </a>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="text-sm font-medium text-gray-500">Job Title</span>
+                        <p className="text-base">{jobsResearchData.summary.job_title || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-gray-500">Company</span>
+                        <p className="text-base">{jobsResearchData.summary.company_name || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-gray-500">Company Website</span>
+                        <p className="text-base">
+                          {jobsResearchData.summary.company_website ? (
+                            <a href={jobsResearchData.summary.company_website.startsWith('http') ? jobsResearchData.summary.company_website : `https://${jobsResearchData.summary.company_website}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                              {jobsResearchData.summary.company_website}
+                            </a>
+                          ) : '-'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-gray-500">Company Customers</span>
+                        <p className="text-base">{jobsResearchData.summary.company_customers || '-'}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-sm font-medium text-gray-500">Company Description</span>
+                        <p className="text-base">{jobsResearchData.summary.company_description || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-gray-500">Compensation Type</span>
+                        <p className="text-base capitalize">{jobsResearchData.summary.compensation_type?.replace(/_/g, ' ') || '-'}</p>
+                      </div>
+                      <div>
+                        <span className="text-sm font-medium text-gray-500">Compensation Amount</span>
+                        <p className="text-base">{jobsResearchData.summary.compensation_amount || '-'}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <span className="text-sm font-medium text-gray-500">B2B GTM/ABM Fit</span>
+                        <p className="text-base">
+                          {jobsResearchData.summary.job_application_fit_for_B2B_GTM_ABM_expert === true ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Good Fit</span>
+                          ) : jobsResearchData.summary.job_application_fit_for_B2B_GTM_ABM_expert === false ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Not a Fit</span>
+                          ) : '-'}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-green-600">Company saved to database.</p>
+                  </div>
+                ) : (
+                  <div className="h-[300px] bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center">
+                    <div className="text-center p-6">
+                      <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <h3 className="mt-2 text-sm font-medium text-gray-900">No job data available</h3>
+                      <p className="mt-1 text-sm text-gray-500">We couldn&apos;t fetch job posting data for this URL.</p>
+                      {errorsByCompany[activeCompany || '']?.jobsResearch && (
+                        <p className="mt-2 text-sm text-red-600">{errorsByCompany[activeCompany || ''].jobsResearch}</p>
+                      )}
+                    </div>
+                  </div>
+                )
+              ) : researchMode === 'investor' ? (
                 // Investor Research Display
                 isSearching && (!investorResearchData || (!investorResearchData.summary && !investorResearchData.skipped)) ? (
                   <div className="animate-pulse">
@@ -3590,7 +3597,7 @@ export default function CompanyResearcher() {
         selectedColumn={selectedUrlColumn}
         selectedColumns={selectedColumns}
         mode={researchMode}
-        allowBoth={researchMode !== 'investor'}
+        allowBoth={researchMode !== 'investor' && researchMode !== 'jobs'}
         onSelectColumn={(column) => {
           setSelectedUrlColumn(column);
         }}

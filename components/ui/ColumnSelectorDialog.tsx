@@ -16,7 +16,7 @@ interface ColumnSelectorDialogProps {
   onSelectColumns?: (columns: { domain: string | null; instagram: string | null }) => void;
   onConfirm: () => void;
   onClose: () => void;
-  mode?: 'domain' | 'instagram' | 'investor';
+  mode?: 'domain' | 'instagram' | 'investor' | 'jobs';
   allowBoth?: boolean;
 }
 

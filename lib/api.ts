@@ -90,15 +90,7 @@ export const fetchCompanyMap = async (
       // In this case, return an EXPIRED classification instead of null
       if (response.status === 500 && errorMessage.includes('No results returned from Exa API')) {
         console.warn(`Marking ${domain} as EXPIRED due to Exa API returning no results`);
-        return {
-          classification: 'EXPIRED',
-          company_summary: '',
-          company_industry: '',
-          sales_opener_sentence: '',
-          confidence_score: 0,
-          product_types: null,
-          sales_action: 'MANUAL_REVIEW'
-        };
+        return { classification: 'EXPIRED' };
       }
       
       console.error(`API Error for ${domain}:`, fullErrorMessage, `Status: ${response.status}`);
@@ -255,6 +247,48 @@ export const fetchInvestorResearch = async (
       return { error: 'Request timed out', details: `Request for ${input} timed out after 8 minutes` };
     }
     console.error('Investor research error:', err);
+    return { error: 'Network error', details: msg };
+  }
+};
+
+export type JobsResearchSummary = {
+  job_title?: string;
+  company_name?: string;
+  company_website?: string;
+  company_description?: string;
+  company_customers?: string;
+  compensation_type?: string;
+  compensation_amount?: string;
+  job_application_fit_for_B2B_GTM_ABM_expert?: boolean;
+};
+
+export const fetchJobsResearch = async (
+  url: string
+): Promise<{
+  url?: string;
+  summary?: JobsResearchSummary;
+  error?: string;
+  details?: string;
+} | null> => {
+  try {
+    console.log('[fetchJobsResearch] Calling API:', { url });
+    const res = await fetchWithTimeout('/api/jobs-research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }, 120_000);
+    const data = await res.json();
+    console.log('[fetchJobsResearch] API response:', { ok: res.ok, status: res.status });
+    if (!res.ok) {
+      return { error: data.error || 'Failed', details: data.details };
+    }
+    return data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return { error: 'Request timed out', details: `Request for ${url} timed out after 2 minutes` };
+    }
+    console.error('[fetchJobsResearch] error:', err);
     return { error: 'Network error', details: msg };
   }
 };

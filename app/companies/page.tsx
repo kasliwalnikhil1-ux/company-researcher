@@ -15,8 +15,10 @@ import ManageColumnsDrawer from '@/components/ui/ManageColumnsDrawer';
 import CompanyFormModal from '@/components/ui/CompanyFormModal';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
+import { summaryKeyToLabel, formatSummaryValue, discoverSummaryKeys } from '@/lib/summaryUtils';
 import { Building2, Edit2, Trash2, Plus, X, Filter, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
 import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
+import PhoneInputField from '@/components/ui/PhoneInputField';
 import {
   DndContext,
   closestCenter,
@@ -92,17 +94,7 @@ const cleanSearchQuery = (query: string): string => {
 };
 
 
-interface SummaryData {
-  sales_action?: string;
-  product_types?: string[] | null;
-  classification?: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
-  company_summary?: string;
-  company_industry?: string;
-  confidence_score?: number;
-  sales_opener_sentence?: string;
-  profile_summary?: string;
-  profile_industry?: string;
-}
+type SummaryData = Record<string, any>;
 
 export default function CompaniesPage() {
   return (
@@ -304,24 +296,17 @@ function CompaniesContent() {
     return [...directColumns, ...instagramColumns];
   }, [templates]);
 
-  // Column ordering and visibility - base columns without template columns
-  const baseColumnOrder = [
-    'domain',
-    'instagram',
-    'phone',
-    'email',
-    'set_name',
-    'notes',
-    'company_summary',
-    'company_industry',
-    'profile_summary',
-    'profile_industry',
-    'sales_opener_sentence',
-    'classification',
-    'confidence_score',
-    'product_types',
-    'sales_action',
-  ];
+  // Discover dynamic summary keys from loaded companies
+  const dynamicSummaryKeys = useMemo(() => discoverSummaryKeys(companies), [companies]);
+
+  // Fixed top-level columns that aren't part of the summary JSON
+  const fixedColumns = ['domain', 'instagram', 'phone', 'email', 'set_name', 'notes'];
+
+  // Column ordering and visibility - fixed columns plus dynamic summary keys
+  const baseColumnOrder = useMemo(() => {
+    const summaryKeysOrdered = dynamicSummaryKeys.filter(k => !fixedColumns.includes(k));
+    return [...fixedColumns, ...summaryKeysOrdered];
+  }, [dynamicSummaryKeys]);
 
   // Get template columns dynamically
   const templateColumns = getTemplateColumnKeys();
@@ -645,16 +630,14 @@ function CompaniesContent() {
       email: 'Email',
       set_name: 'Set Name',
       notes: 'Notes',
-      company_summary: 'Company Summary',
-      company_industry: 'Company Industry',
-      profile_summary: 'Profile Summary',
-      profile_industry: 'Profile Industry',
-      sales_opener_sentence: 'Sales Opener Sentence',
-      classification: 'Classification',
-      confidence_score: 'Confidence Score',
-      product_types: 'Product Types',
-      sales_action: 'Sales Action',
     };
+
+    // Auto-generate labels for all dynamic summary keys
+    for (const key of dynamicSummaryKeys) {
+      if (!(key in baseLabels)) {
+        baseLabels[key] = summaryKeyToLabel(key);
+      }
+    }
 
     // Add template-based labels
     templates.forEach(template => {
@@ -663,7 +646,7 @@ function CompaniesContent() {
     });
 
     return baseLabels;
-  }, [templates]);
+  }, [templates, dynamicSummaryKeys]);
   
   
   // Extract summary data from company summary JSON
@@ -680,36 +663,16 @@ function CompaniesContent() {
     if (!template) return '';
 
     const summaryData = getSummaryData(company);
-    
-    // Check if qualified and has product types
-    if (
-      summaryData.classification !== 'QUALIFIED' ||
-      !summaryData.product_types ||
-      !Array.isArray(summaryData.product_types) ||
-      summaryData.product_types.length === 0
-    ) {
-      return '';
-    }
-    
-    // Prepare qualification data for message generation
-    const qualificationData = {
-      product_types: summaryData.product_types,
-      sales_opener_sentence: summaryData.sales_opener_sentence || '',
-      company_industry: summaryData.company_industry || '',
-      profile_industry: summaryData.profile_industry || '',
-    };
 
     const isInstagram = template.channel === 'instagram';
-    const messages = generateMessageTemplates(qualificationData, isInstagram, [template.template]);
+    const messages = generateMessageTemplates(summaryData, isInstagram, [template.template]);
     
-    // Return the first message (each template generates one message)
     return messages.length > 0 ? messages[0] : '';
   }, [getSummaryData, templates]);
   
   // Get cell display value
   const getCellValue = useCallback((company: Company, columnKey: string): string => {
-    const summaryData = getSummaryData(company);
-    
+    // Direct company fields (not in summary)
     switch (columnKey) {
       case 'domain':
         return company.domain || '-';
@@ -725,63 +688,27 @@ function CompaniesContent() {
         if (!company.notes || !Array.isArray(company.notes) || company.notes.length === 0) {
           return '-';
         }
-        // Show count and latest note preview
         const latestNote = company.notes[company.notes.length - 1];
         const notePreview = latestNote?.message ? latestNote.message.substring(0, 50) : '';
         return `${company.notes.length} note${company.notes.length !== 1 ? 's' : ''}${notePreview ? `: ${notePreview}${notePreview.length >= 50 ? '...' : ''}` : ''}`;
-      case 'company_summary':
-        return summaryData.company_summary || '-';
-      case 'company_industry':
-        return summaryData.company_industry || '-';
-      case 'profile_summary':
-        return summaryData.profile_summary || '-';
-      case 'profile_industry':
-        return summaryData.profile_industry || '-';
-      case 'sales_opener_sentence':
-        return summaryData.sales_opener_sentence || '-';
-      case 'classification':
-        return summaryData.classification || '-';
-      case 'confidence_score':
-        return summaryData.confidence_score !== undefined 
-          ? `${(summaryData.confidence_score * 100).toFixed(0)}%` 
-          : '-';
-      case 'product_types':
-        return summaryData.product_types && Array.isArray(summaryData.product_types)
-          ? summaryData.product_types.join(', ')
-          : '-';
-      case 'sales_action':
-        return summaryData.sales_action || '-';
       default:
-        // Check if this is a template column
-        if (columnKey.startsWith('template_')) {
-          const templateId = columnKey.replace('template_', '');
-          return getMessageForTemplate(company, templateId);
-        }
-        return '-';
+        break;
     }
+
+    // Template columns
+    if (columnKey.startsWith('template_')) {
+      const templateId = columnKey.replace('template_', '');
+      return getMessageForTemplate(company, templateId);
+    }
+
+    // Generic summary field lookup
+    const summaryData = getSummaryData(company);
+    return formatSummaryValue(summaryData[columnKey]);
   }, [getSummaryData, getMessageForTemplate]);
   
   // Generate messages for a company
   const getMessages = useCallback((company: Company, channel: 'direct' | 'instagram'): string[] => {
     const summaryData = getSummaryData(company);
-    
-    // Check if qualified and has product types
-    if (
-      summaryData.classification !== 'QUALIFIED' ||
-      !summaryData.product_types ||
-      !Array.isArray(summaryData.product_types) ||
-      summaryData.product_types.length === 0
-    ) {
-      return [];
-    }
-    
-    // Prepare qualification data for message generation
-    const qualificationData = {
-      product_types: summaryData.product_types,
-      sales_opener_sentence: summaryData.sales_opener_sentence || '',
-      company_industry: summaryData.company_industry || '',
-      profile_industry: summaryData.profile_industry || '',
-    };
     
     // Get templates from database
     const dbTemplates = templates
@@ -792,7 +719,7 @@ function CompaniesContent() {
     const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
     const isInstagram = channel === 'instagram';
     
-    return generateMessageTemplates(qualificationData, isInstagram, templateStrings);
+    return generateMessageTemplates(summaryData, isInstagram, templateStrings);
   }, [getSummaryData, templates]);
   
   // Handle cell click (copy to clipboard)
@@ -874,45 +801,20 @@ function CompaniesContent() {
       
       const summaryData = getSummaryData(company);
       const updatedSummary = { ...summaryData };
-      
-      // Update the specific field
-      switch (columnKey) {
-        case 'company_summary':
-          updatedSummary.company_summary = value;
-          break;
-        case 'company_industry':
-          updatedSummary.company_industry = value;
-          break;
-        case 'profile_summary':
-          updatedSummary.profile_summary = value;
-          break;
-        case 'profile_industry':
-          updatedSummary.profile_industry = value;
-          break;
-        case 'sales_opener_sentence':
-          updatedSummary.sales_opener_sentence = value;
-          break;
-        case 'classification':
-          if (['QUALIFIED', 'NOT_QUALIFIED', 'MAYBE', 'EXPIRED'].includes(value.toUpperCase())) {
-            updatedSummary.classification = value.toUpperCase() as 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
-          }
-          break;
-        case 'confidence_score':
-          const score = parseFloat(value.replace('%', ''));
-          if (!isNaN(score) && score >= 0 && score <= 100) {
-            updatedSummary.confidence_score = score / 100;
-          }
-          break;
-        case 'product_types':
-          updatedSummary.product_types = value.split(',').map(s => s.trim()).filter(s => s.length > 0);
-          break;
-        case 'sales_action':
-          if (['OUTREACH', 'EXCLUDE', 'PARTNERSHIP', 'MANUAL_REVIEW'].includes(value.toUpperCase())) {
-            updatedSummary.sales_action = value.toUpperCase() as 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
-          }
-          break;
+      const prevValue = summaryData[columnKey];
+
+      // Infer type from the previous value to store in the correct format
+      if (Array.isArray(prevValue)) {
+        updatedSummary[columnKey] = value.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+      } else if (typeof prevValue === 'number') {
+        const parsed = parseFloat(value.replace('%', ''));
+        if (!isNaN(parsed)) {
+          updatedSummary[columnKey] = parsed <= 100 && parsed >= 0 && prevValue <= 1 ? parsed / 100 : parsed;
+        }
+      } else {
+        updatedSummary[columnKey] = value;
       }
-      
+
       await updateCompany(companyId, { summary: updatedSummary });
       setEditingCell(null);
       setToastMessage(`${columnLabels[columnKey]} updated successfully`);
@@ -1328,36 +1230,13 @@ function CompaniesContent() {
           if (!currentSummary) {
             mergedData.summary = { ...otherSummary };
           } else {
-            // Merge summary fields - for conflicts, keep newest (already in currentSummary)
+            // Generically merge all summary keys - fill empty fields from other company
             const mergedSummary: SummaryData = { ...currentSummary };
 
-            // Only add non-empty values from other company if current is empty
-            if (isEmpty(mergedSummary.company_summary) && isNotEmpty(otherSummary.company_summary)) {
-              mergedSummary.company_summary = otherSummary.company_summary;
-            }
-            if (isEmpty(mergedSummary.company_industry) && isNotEmpty(otherSummary.company_industry)) {
-              mergedSummary.company_industry = otherSummary.company_industry;
-            }
-            if (isEmpty(mergedSummary.profile_summary) && isNotEmpty(otherSummary.profile_summary)) {
-              mergedSummary.profile_summary = otherSummary.profile_summary;
-            }
-            if (isEmpty(mergedSummary.profile_industry) && isNotEmpty(otherSummary.profile_industry)) {
-              mergedSummary.profile_industry = otherSummary.profile_industry;
-            }
-            if (isEmpty(mergedSummary.sales_opener_sentence) && isNotEmpty(otherSummary.sales_opener_sentence)) {
-              mergedSummary.sales_opener_sentence = otherSummary.sales_opener_sentence;
-            }
-            if (isEmpty(mergedSummary.classification) && isNotEmpty(otherSummary.classification)) {
-              mergedSummary.classification = otherSummary.classification;
-            }
-            if ((mergedSummary.confidence_score === undefined || mergedSummary.confidence_score === null) && (otherSummary.confidence_score !== undefined && otherSummary.confidence_score !== null)) {
-              mergedSummary.confidence_score = otherSummary.confidence_score;
-            }
-            if (isEmpty(mergedSummary.product_types) && isNotEmpty(otherSummary.product_types)) {
-              mergedSummary.product_types = otherSummary.product_types;
-            }
-            if (isEmpty(mergedSummary.sales_action) && isNotEmpty(otherSummary.sales_action)) {
-              mergedSummary.sales_action = otherSummary.sales_action;
+            for (const key of Object.keys(otherSummary)) {
+              if (isEmpty(mergedSummary[key]) && isNotEmpty(otherSummary[key])) {
+                mergedSummary[key] = otherSummary[key];
+              }
             }
 
             mergedData.summary = mergedSummary;
@@ -2367,6 +2246,21 @@ function CompaniesContent() {
                                     }}
                                     className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
                                     rows={3}
+                                  />
+                                ) : isPhoneColumn ? (
+                                  <PhoneInputField
+                                    value={editingCell?.value || ''}
+                                    onChange={(phone) => setEditingCell({ ...editingCell!, value: phone })}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        handleInlineEditSave();
+                                      } else if (e.key === 'Escape') {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    compact
+                                    autoFocus
+                                    className="flex-1"
                                   />
                                 ) : (
                                   <input

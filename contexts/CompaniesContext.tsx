@@ -181,12 +181,11 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId);
 
-      // Apply search filter
+      // Apply search filter - search top-level fields and entire summary JSON as text
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase();
-        // Search across multiple fields using OR conditions
         countQuery = countQuery.or(
-          `domain.ilike.%${query}%,instagram.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%,summary->>company_summary.ilike.%${query}%,summary->>company_industry.ilike.%${query}%,summary->>profile_summary.ilike.%${query}%,summary->>profile_industry.ilike.%${query}%,summary->>sales_opener_sentence.ilike.%${query}%`
+          `domain.ilike.%${query}%,instagram.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%,summary::text.ilike.%${query}%`
         );
       }
 
@@ -254,12 +253,11 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         .eq('user_id', userId)
         .range(offset, offset + pageSize - 1);
 
-      // Apply search filter
+      // Apply search filter - search top-level fields and entire summary JSON as text
       if (searchQuery.trim()) {
         const query_text = searchQuery.trim().toLowerCase();
-        // Search across multiple fields using OR conditions
         query = query.or(
-          `domain.ilike.%${query_text}%,instagram.ilike.%${query_text}%,phone.ilike.%${query_text}%,email.ilike.%${query_text}%,summary->>company_summary.ilike.%${query_text}%,summary->>company_industry.ilike.%${query_text}%,summary->>profile_summary.ilike.%${query_text}%,summary->>profile_industry.ilike.%${query_text}%,summary->>sales_opener_sentence.ilike.%${query_text}%`
+          `domain.ilike.%${query_text}%,instagram.ilike.%${query_text}%,phone.ilike.%${query_text}%,email.ilike.%${query_text}%,summary::text.ilike.%${query_text}%`
         );
       }
 

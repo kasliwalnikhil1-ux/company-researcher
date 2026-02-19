@@ -79,19 +79,9 @@ export async function fetchInstagramProfile(
 }
 
 /**
- * Qualification result interface for Instagram profiles
+ * Qualification result - generic record whose keys depend on the LLM schema
  */
-export interface InstagramQualificationResult {
-  profile_summary: string;
-  profile_industry: string;
-  sales_opener_sentence: string;
-  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE';
-  confidence_score?: number; // Optional - only include if provided by LLM
-  product_types: string[] | null;
-  sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
-  email: string | null;
-  phone: string | null;
-}
+export type InstagramQualificationResult = Record<string, any>;
 
 /**
  * Qualifies an Instagram profile using Azure OpenAI (similar to Exa's summary call)
@@ -216,28 +206,10 @@ Return the assessment in the exact JSON schema format.`;
       throw new Error(`API returned error: ${result.error}`);
     }
 
-    // Ensure all required fields are present
-    const qualification: InstagramQualificationResult = {
-      profile_summary: result.profile_summary || '',
-      profile_industry: result.profile_industry || '',
-      sales_opener_sentence: result.sales_opener_sentence || '',
-      classification: result.classification || 'MAYBE',
-      // Only include confidence_score if provided by LLM
-      ...(result.confidence_score !== undefined && { confidence_score: result.confidence_score }),
-      product_types: result.product_types && Array.isArray(result.product_types) && result.product_types.length > 0 
-        ? result.product_types.filter((pt: any) => pt && typeof pt === 'string')
-        : null,
-      sales_action: result.sales_action || 'MANUAL_REVIEW',
-      email: result.email || null,
-      phone: result.phone || null,
-    };
-    
-    // Log product_types for debugging
-    if (qualification.classification === 'QUALIFIED') {
-      console.log(`[Instagram Qualification] Product types for ${profile.username}:`, qualification.product_types);
-    }
+    // Return the LLM result as-is (generic record)
+    const qualification: InstagramQualificationResult = { ...result };
 
-    console.log(`[Instagram Qualification] Successfully qualified profile: ${profile.username} as ${qualification.classification}`);
+    console.log(`[Instagram Qualification] Successfully qualified profile: ${profile.username} as ${qualification.classification ?? 'unknown'}`);
     return qualification;
   } catch (error) {
     console.error(`[Instagram Qualification] Error qualifying profile ${profile.username}:`, error);

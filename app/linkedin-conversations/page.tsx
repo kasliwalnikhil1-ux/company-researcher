@@ -5,6 +5,11 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { getValidAccessToken } from '@/lib/api';
+import { useMessageTemplates, MessageTemplate, TemplateChannel, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
+import { substituteVariables } from '@/lib/utils';
+import { getFollowUpDate } from '@/lib/messageTemplates';
+import { duplicateTemplate, replaceInPresentation } from '@/lib/googleSlides';
+import { supabase } from '@/utils/supabase/client';
 import {
   MessageSquare,
   Send,
@@ -38,11 +43,16 @@ import {
   Tag,
   List,
   ArrowDownUp,
+  UserSearch,
+  ClipboardCopy,
+  Check,
+  Presentation,
 } from 'lucide-react';
 
 /* ────────────────────────── Stage Constants ────────────────────────── */
 
 const STAGE_OPTIONS = [
+  { value: 'attempted_to_contact', label: 'Attempted to Contact', color: 'bg-gray-100 text-gray-700 border-gray-200' },
   { value: 'reply_received', label: 'Reply Received', color: 'bg-blue-100 text-blue-700 border-blue-200' },
   { value: 'meeting_scheduled', label: 'Meeting Scheduled', color: 'bg-purple-100 text-purple-700 border-purple-200' },
   { value: 'demo_completed', label: 'Demo Completed', color: 'bg-indigo-100 text-indigo-700 border-indigo-200' },
@@ -82,6 +92,7 @@ interface Conversation {
   lead?: LeadInfo | null;
   sender_profile_uuid?: string; // from the outbox messages in this conversation
   has_unread: boolean; // true if the last message is from the lead (awaiting reply)
+  has_prospect_reply: boolean; // true if any message in this conversation is from the prospect
   automation_type?: string | null; // "auto" | "synced" | null — from messages
 }
 
@@ -258,6 +269,95 @@ function formatFullDate(dateStr: string): string {
 
 /* ────────────────────────── Main Component ────────────────────────── */
 
+function SearchableDropdown({
+  value,
+  onChange,
+  placeholder,
+  options,
+  icon: Icon,
+}: {
+  value: string;
+  onChange: (val: string) => void;
+  placeholder: string;
+  options: { value: string; label: string }[];
+  icon?: React.ComponentType<{ className?: string }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = filter
+    ? options.filter((o) => o.label.toLowerCase().includes(filter.toLowerCase()))
+    : options;
+
+  const selectedLabel = options.find((o) => o.value === value)?.label;
+
+  return (
+    <div ref={ref} className="relative flex-1 min-w-0">
+      <button
+        type="button"
+        onClick={() => { setOpen(!open); setFilter(''); }}
+        className="w-full flex items-center gap-1 text-[11px] px-2 py-1.5 border border-gray-200 rounded-md bg-white text-gray-600 hover:border-gray-300 transition-colors truncate"
+      >
+        {Icon && <Icon className="w-3 h-3 flex-shrink-0 text-gray-400" />}
+        <span className="truncate flex-1 text-left">{selectedLabel || placeholder}</span>
+        {value ? (
+          <X
+            className="w-3 h-3 flex-shrink-0 text-gray-400 hover:text-gray-600"
+            onClick={(e) => { e.stopPropagation(); onChange(''); setOpen(false); }}
+          />
+        ) : (
+          <ChevronDown className="w-3 h-3 flex-shrink-0 text-gray-400" />
+        )}
+      </button>
+      {open && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 flex flex-col">
+          <div className="p-1.5 border-b border-gray-100">
+            <input
+              autoFocus
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Type to filter..."
+              className="w-full text-[11px] px-2 py-1 border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-teal-400"
+            />
+          </div>
+          <div className="overflow-y-auto flex-1">
+            <button
+              type="button"
+              onClick={() => { onChange(''); setOpen(false); }}
+              className={`w-full text-left text-[11px] px-3 py-1.5 hover:bg-teal-50 transition-colors ${!value ? 'text-teal-600 font-medium' : 'text-gray-500'}`}
+            >
+              {placeholder}
+            </button>
+            {filtered.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { onChange(o.value); setOpen(false); }}
+                className={`w-full text-left text-[11px] px-3 py-1.5 hover:bg-teal-50 transition-colors truncate ${o.value === value ? 'text-teal-600 font-medium bg-teal-50/50' : 'text-gray-700'}`}
+              >
+                {o.label}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p className="text-[11px] text-gray-400 px-3 py-2 text-center">No matches</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LinkedInConversationsPage() {
   // Auth
   const { user } = useAuth();
@@ -288,6 +388,26 @@ export default function LinkedInConversationsPage() {
   const [generatingReply, setGeneratingReply] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
 
+  // Template picker state
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templatePickerTab, setTemplatePickerTab] = useState<TemplateChannel | null>(null);
+  const templatePickerRef = useRef<HTMLDivElement>(null);
+  const { templates: allTemplates, loading: templatesLoading } = useMessageTemplates();
+  const templatesByChannel = useMemo(() => {
+    const grouped: Partial<Record<TemplateChannel, MessageTemplate[]>> = {};
+    for (const t of allTemplates) {
+      (grouped[t.channel] ??= []).push(t);
+    }
+    return grouped;
+  }, [allTemplates]);
+  const templateChannels = useMemo(
+    () => (Object.keys(templatesByChannel) as TemplateChannel[]).sort((a, b) => {
+      const order: TemplateChannel[] = ['linkedin', 'direct', 'email', 'instagram'];
+      return order.indexOf(a) - order.indexOf(b);
+    }),
+    [templatesByChannel]
+  );
+
   // Drafts: keyed by linkedin_conversation_uuid
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
@@ -305,11 +425,26 @@ export default function LinkedInConversationsPage() {
   // Automation type filter (auto, synced, is_null, is_not_null)
   const [automationFilter, setAutomationFilter] = useState<string>('');
 
+  // Search Contacts mode
+  const [contactSearchMode, setContactSearchMode] = useState(false);
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
+  const [contactSearchLoading, setContactSearchLoading] = useState(false);
+  const [contactSearchError, setContactSearchError] = useState<string | null>(null);
+  const [contactSearchResults, setContactSearchResults] = useState<LeadInfo[]>([]);
+  const [contactSearchConversations, setContactSearchConversations] = useState<Conversation[]>([]);
+  const [contactSearchTruncated, setContactSearchTruncated] = useState(false);
+  const [contactSearchListFilter, setContactSearchListFilter] = useState<string>('');
+  const [contactSearchTagFilter, setContactSearchTagFilter] = useState<string>('');
+
   // Contact details panel
   const [showContactDetails, setShowContactDetails] = useState(false);
+  const [copiedContact, setCopiedContact] = useState(false);
   const [companyInfo, setCompanyInfo] = useState<CompanyInfo | null>(null);
   const [companyLoading, setCompanyLoading] = useState(false);
   const companyCacheRef = useRef<Record<string, CompanyInfo>>({});
+  const [pptLoading, setPptLoading] = useState(false);
+  const [pptError, setPptError] = useState<string | null>(null);
+  const [pptUrl, setPptUrl] = useState<string | null>(null);
 
   // Automations, Lists & Tags lookup maps
   const [automationsMap, setAutomationsMap] = useState<Record<string, AutomationInfo>>({});
@@ -440,6 +575,7 @@ export default function LinkedInConversationsPage() {
           lead: leadCacheRef.current[val.lead_uuid] || null,
           sender_profile_uuid: val.sender_profile_uuid,
           has_unread: lastMsg.type === 'inbox',
+          has_prospect_reply: val.messages.some((m) => m.type === 'inbox'),
           automation_type: val.automation_type || null,
         });
       });
@@ -544,6 +680,153 @@ export default function LinkedInConversationsPage() {
       console.error('Failed to fetch company info:', err);
     } finally {
       setCompanyLoading(false);
+    }
+  }, []);
+
+  const handleMakePpt = useCallback(async (lead: LeadInfo, company: CompanyInfo | null) => {
+    const TEMPLATE_URL = 'https://docs.google.com/presentation/d/1_Fnoq1loiBkKgp3s8WQQBIK_6pJBBYiMMtdavmS6T34/edit';
+
+    setPptLoading(true);
+    setPptError(null);
+    setPptUrl(null);
+
+    try {
+      // Verify the user has an active session before calling edge functions
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session) {
+        throw new Error('You must be signed in to generate a presentation. Please refresh the page and sign in again.');
+      }
+
+      const fullName = getLeadDisplayName(lead);
+      const firstName = lead.first_name || fullName.split(/\s+/)[0] || '';
+      const followUp = getFollowUpDate();
+
+      const data: Record<string, unknown> = {
+        // Same variables used in Message Templates
+        name: fullName,
+        cleaned_name: firstName,
+        cleanedName: firstName,
+        first_name: firstName,
+        firstName: firstName,
+        last_name: lead.last_name || '',
+        lastName: lead.last_name || '',
+        company_name: company?.name || lead.company_name || '',
+        companyName: company?.name || lead.company_name || '',
+        position: lead.position || '',
+        headline: lead.headline || '',
+        company_industry: company?.industry || '',
+        companyIndustry: company?.industry || '',
+        followUpFullDate: followUp.fullDate,
+        followUpWeekdayDate: followUp.weekdayDate,
+        followUpShortDay: followUp.shortDay,
+        followUpRelativeDay: followUp.relativeDay,
+        followUpRelativeShortDay: followUp.relativeShortDay,
+        followUpDateOnly: followUp.dateOnly,
+
+        // Additional contact & company fields
+        // contact_email: lead.work_email || lead.personal_email || '',
+        // work_email: lead.work_email || '',
+        // personal_email: lead.personal_email || '',
+        // contact_phone: lead.work_phone_number || lead.personal_phone_number || '',
+        // work_phone: lead.work_phone_number || '',
+        // personal_phone: lead.personal_phone_number || '',
+        // contact_linkedin: lead.linkedin || '',
+        // contact_location: lead.raw_address ||
+        //   [lead.location?.city, lead.location?.region, lead.location?.country].filter(Boolean).join(', ') || '',
+        company_domain: company?.domain || '',
+        company_website: company?.website || '',
+        // company_employees: company?.employees_range || '',
+        company_tagline: company?.tagline || '',
+        // company_about: company?.about || '',
+        // company_phone: company?.phone || '',
+        company_hq: company?.hq_location?.address_string ||
+          [company?.hq_location?.city, company?.hq_location?.region, company?.hq_location?.country].filter(Boolean).join(', ') ||
+          company?.hq_raw_address || '',
+        // company_linkedin: company?.linkedin || '',
+        // company_specialities: company?.specialities?.join(', ') || '',
+      };
+
+      const companyName = data.company_name;
+      const personName = fullName;
+      const copyName = companyName
+        ? `CapitalxAI - ${companyName}`
+        : `CapitalxAI - ${personName}`;
+
+      const hasCompanyDetails = !!(company?.about || company?.tagline || company?.name);
+
+      const buildCompanyDescription = (): string => {
+        const parts: string[] = [];
+        if (company?.name) parts.push(`Company: ${company.name}`);
+        if (company?.tagline) parts.push(`Tagline: ${company.tagline}`);
+        if (company?.about) parts.push(`About: ${company.about}`);
+        if (company?.industry) parts.push(`Industry: ${company.industry}`);
+        if (company?.specialities?.length) parts.push(`Specialities: ${company.specialities.join(', ')}`);
+        if (company?.employees_range) parts.push(`Employees: ${company.employees_range}`);
+        if (company?.year_established) parts.push(`Founded: ${company.year_established}`);
+        if (company?.website) parts.push(`Website: ${company.website}`);
+        const hq = company?.hq_location?.address_string ||
+          [company?.hq_location?.city, company?.hq_location?.region, company?.hq_location?.country].filter(Boolean).join(', ') ||
+          company?.hq_raw_address;
+        if (hq) parts.push(`HQ: ${hq}`);
+        if (lead.position) parts.push(`Contact Position: ${lead.position}`);
+        if (lead.headline) parts.push(`Contact Headline: ${lead.headline}`);
+        return parts.join('\n');
+      };
+
+      const duplicatePromise = duplicateTemplate({
+        supabaseClient: supabase,
+        templateUrl: TEMPLATE_URL,
+        copyName,
+      });
+
+      const analyzePromise = hasCompanyDetails
+        ? fetch('/api/linkedin-conversations/analyze-company', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ company_description: buildCompanyDescription() }),
+          })
+            .then(res => res.ok ? res.json() : null)
+            .catch(() => null)
+        : Promise.resolve(null);
+
+      const [dupResult, analysisResult] = await Promise.all([duplicatePromise, analyzePromise]);
+
+      if (analysisResult && !analysisResult.error) {
+        for (const [key, value] of Object.entries(analysisResult)) {
+          if (Array.isArray(value)) {
+            data[key] = value;
+            value.forEach((item, i) => {
+              if (typeof item === 'string') {
+                data[`${key}_${i + 1}`] = item;
+              }
+            });
+          } else {
+            data[key] = value;
+          }
+        }
+      }
+
+      const result = await replaceInPresentation({
+        supabaseClient: supabase,
+        presentationId: dupResult.presentationId,
+        presentationUrl: dupResult.presentationUrl,
+        data,
+        accessToken: dupResult.accessToken,
+        imageIdentifier: 'company_logo',
+        faviconUrl: company?.logo_url || '',
+      });
+
+      setPptUrl(result.presentationUrl);
+      window.open(result.presentationUrl, '_blank');
+    } catch (err: unknown) {
+      console.error('Make PPT failed:', err);
+      if (err instanceof TypeError && err.message === 'Failed to fetch') {
+        setPptError('Network error — please check your internet connection and try again.');
+      } else {
+        setPptError(err instanceof Error ? err.message : 'An unexpected error occurred while generating the presentation.');
+      }
+    } finally {
+      setPptLoading(false);
     }
   }, []);
 
@@ -671,6 +954,71 @@ export default function LinkedInConversationsPage() {
       setTagsMap(map);
     } catch (err) {
       console.error('Failed to fetch tags:', err);
+    }
+  }, []);
+
+  // Search contacts by name/company and fetch their LinkedIn conversations
+  const searchContacts = useCallback(async (query: string, listUuid?: string, tagUuid?: string) => {
+    if (!query.trim()) return;
+    try {
+      setContactSearchLoading(true);
+      setContactSearchError(null);
+      setContactSearchResults([]);
+      setContactSearchConversations([]);
+      setContactSearchTruncated(false);
+
+      const token = await getValidAccessToken();
+      if (!token) throw new Error('Not authenticated');
+
+      const payload: Record<string, unknown> = { query: query.trim() };
+      if (listUuid) payload.list_uuid = listUuid;
+      if (tagUuid) payload.tag_uuid = tagUuid;
+
+      const res = await fetch('/api/linkedin-conversations/search-contacts', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Search failed (${res.status})`);
+      }
+
+      const json = await res.json();
+      const contacts: LeadInfo[] = json.contacts || [];
+      setContactSearchResults(contacts);
+
+      // Build contact lookup for hydrating conversations
+      const contactLookup: Record<string, LeadInfo> = {};
+      for (const c of contacts) {
+        contactLookup[c.uuid] = c;
+      }
+
+      // Map conversation results to our Conversation type
+      const convos: Conversation[] = (json.conversations || []).map(
+        (c: {
+          linkedin_conversation_uuid: string;
+          lead_uuid: string;
+          last_message: LinkedInMessage;
+          message_count: number;
+          sender_profile_uuid?: string;
+          has_unread: boolean;
+        }) => ({
+          ...c,
+          lead: contactLookup[c.lead_uuid] || null,
+          automation_type: null,
+        })
+      );
+      setContactSearchConversations(convos);
+      setContactSearchTruncated(json.truncated || false);
+    } catch (err) {
+      setContactSearchError(err instanceof Error ? err.message : 'Search failed');
+    } finally {
+      setContactSearchLoading(false);
     }
   }, []);
 
@@ -858,6 +1206,11 @@ export default function LinkedInConversationsPage() {
 
       const data = await res.json();
 
+      // Auto-update stage if AI returned one
+      if (data.stage && selectedConversation.lead_uuid && selectedConversation.sender_profile_uuid) {
+        updateStage(selectedConversation.lead_uuid, selectedConversation.sender_profile_uuid, data.stage);
+      }
+
       if (data.action === 'handover') {
         setGenerateError('AI suggests handing over this conversation to a human team member.');
         return;
@@ -877,7 +1230,7 @@ export default function LinkedInConversationsPage() {
     } finally {
       setGeneratingReply(false);
     }
-  }, [selectedConversation, threadMessages, generatingReply]);
+  }, [selectedConversation, threadMessages, generatingReply, updateStage]);
 
   /* ────────────────── Effects ────────────────── */
 
@@ -923,6 +1276,18 @@ export default function LinkedInConversationsPage() {
       setTimeout(() => textareaRef.current?.focus(), 200);
     }
   }, [selectedConversation]);
+
+  // Close template picker on outside click
+  useEffect(() => {
+    if (!showTemplatePicker) return;
+    const handler = (e: MouseEvent) => {
+      if (templatePickerRef.current && !templatePickerRef.current.contains(e.target as Node)) {
+        setShowTemplatePicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showTemplatePicker]);
 
   /* ────────────────── Handlers ────────────────── */
 
@@ -1123,6 +1488,9 @@ export default function LinkedInConversationsPage() {
             if (data.action === 'reply' && data.message) {
               setDrafts((prev) => ({ ...prev, [conv.linkedin_conversation_uuid]: data.message }));
             }
+            if (data.stage && conv.lead_uuid && conv.sender_profile_uuid) {
+              updateStage(conv.lead_uuid, conv.sender_profile_uuid, data.stage);
+            }
           } else {
             errorCount++;
             setBulkErrors(errorCount);
@@ -1139,7 +1507,7 @@ export default function LinkedInConversationsPage() {
     } finally {
       setBulkGenerating(false);
     }
-  }, [bulkGenerating, fetchThreadMessagesForBulk]);
+  }, [bulkGenerating, fetchThreadMessagesForBulk, updateStage]);
 
   const stopBulkGeneration = useCallback(() => {
     bulkAbortRef.current = true;
@@ -1153,6 +1521,77 @@ export default function LinkedInConversationsPage() {
     );
     return conv?.lead || selectedConversation.lead || null;
   }, [selectedConversation, conversations]);
+
+  const copyProspectForHubSpot = useCallback(() => {
+    if (!activeLead) return;
+    const lead = activeLead;
+    const name = getLeadDisplayName(lead);
+    const stageKey = selectedConversation?.sender_profile_uuid
+      ? `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`
+      : '';
+    const stageValue = stageKey
+      ? stagesMap[stageKey] || (selectedConversation?.has_prospect_reply ? 'reply_received' : 'attempted_to_contact')
+      : '';
+    const stageLabel = stageValue ? getStageOption(stageValue).label : '';
+
+    const lines: string[] = [];
+    lines.push('Create / Update Contact');
+    lines.push('');
+    lines.push(`Name: ${name}`);
+    if (lead.first_name) lines.push(`First Name: ${lead.first_name}`);
+    if (lead.last_name) lines.push(`Last Name: ${lead.last_name}`);
+    if (lead.position) lines.push(`Job Title: ${lead.position}`);
+    if (lead.company_name) lines.push(`Company: ${lead.company_name}`);
+    if (lead.work_email) lines.push(`Work Email: ${lead.work_email}`);
+    if (lead.personal_email) lines.push(`Personal Email: ${lead.personal_email}`);
+    if (lead.work_phone_number) lines.push(`Work Phone: ${lead.work_phone_number}`);
+    if (lead.personal_phone_number) lines.push(`Personal Phone: ${lead.personal_phone_number}`);
+    if (lead.linkedin) {
+      const url = lead.linkedin.startsWith('http') ? lead.linkedin : `https://linkedin.com/in/${lead.linkedin}`;
+      lines.push(`LinkedIn: ${url}`);
+    }
+    const loc = [lead.location?.city, lead.location?.region, lead.location?.country].filter(Boolean).join(', ') || lead.raw_address;
+    if (loc) lines.push(`Location: ${loc}`);
+    if (lead.headline) lines.push(`Headline: ${lead.headline}`);
+    if (stageLabel) lines.push(`Stage: ${stageLabel}`);
+
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setCopiedContact(true);
+      setTimeout(() => setCopiedContact(false), 2000);
+    });
+  }, [activeLead, selectedConversation, stagesMap]);
+
+  const fillTemplateVariables = useCallback((templateStr: string): string => {
+    const lead = activeLead ?? selectedConversation?.lead;
+    const fullName = getLeadDisplayName(lead);
+    const firstName = lead?.first_name || fullName.split(/\s+/)[0] || '';
+
+    const followUp = getFollowUpDate();
+
+    const variables: Record<string, string> = {
+      name: fullName,
+      cleaned_name: firstName,
+      cleanedName: firstName,
+      first_name: firstName,
+      firstName: firstName,
+      last_name: lead?.last_name || '',
+      lastName: lead?.last_name || '',
+      company_name: lead?.company_name || '',
+      companyName: lead?.company_name || '',
+      position: lead?.position || '',
+      headline: lead?.headline || '',
+      company_industry: companyInfo?.industry || '',
+      companyIndustry: companyInfo?.industry || '',
+      followUpFullDate: followUp.fullDate,
+      followUpWeekdayDate: followUp.weekdayDate,
+      followUpShortDay: followUp.shortDay,
+      followUpRelativeDay: followUp.relativeDay,
+      followUpRelativeShortDay: followUp.relativeShortDay,
+      followUpDateOnly: followUp.dateOnly,
+    };
+
+    return substituteVariables(templateStr, variables);
+  }, [activeLead, selectedConversation, companyInfo]);
 
   // Fetch company info when contact panel opens
   useEffect(() => {
@@ -1274,84 +1713,266 @@ export default function LinkedInConversationsPage() {
             >
               {/* Search + Unread filter */}
               <div className="px-4 py-3 border-b border-gray-100 space-y-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search conversations..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50"
-                  />
-                </div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <button
-                    onClick={() => { setShowUnrepliedOnly(!showUnrepliedOnly); if (!showUnrepliedOnly) setShowUnreadOnly(false); }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                      showUnrepliedOnly
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Filter className="w-3 h-3" />
-                    Unreplied
-                    {unrepliedCount > 0 && (
-                      <span
-                        className={`ml-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full leading-none ${
-                          showUnrepliedOnly ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'
+                {contactSearchMode ? (
+                  <>
+                    {/* Contact search input */}
+                    <div className="relative">
+                      <UserSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-teal-500" />
+                      <input
+                        type="text"
+                        placeholder="Search by full name..."
+                        value={contactSearchQuery}
+                        onChange={(e) => setContactSearchQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && contactSearchQuery.trim()) {
+                            searchContacts(contactSearchQuery, contactSearchListFilter, contactSearchTagFilter);
+                          }
+                        }}
+                        autoFocus
+                        className="w-full pl-9 pr-20 py-2 text-sm border border-teal-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent bg-teal-50/30"
+                      />
+                      <button
+                        onClick={() => contactSearchQuery.trim() && searchContacts(contactSearchQuery, contactSearchListFilter, contactSearchTagFilter)}
+                        disabled={contactSearchLoading || !contactSearchQuery.trim()}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-white bg-teal-600 rounded-md hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {contactSearchLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                        Search
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <SearchableDropdown
+                        value={contactSearchListFilter}
+                        onChange={setContactSearchListFilter}
+                        placeholder="All Lists"
+                        icon={List}
+                        options={Object.values(listsMap)
+                          .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                          .map((l) => ({ value: l.uuid, label: l.name || l.uuid }))}
+                      />
+                      <SearchableDropdown
+                        value={contactSearchTagFilter}
+                        onChange={setContactSearchTagFilter}
+                        placeholder="All Tags"
+                        icon={Tag}
+                        options={Object.entries(tagsMap)
+                          .sort((a, b) => a[1].localeCompare(b[1]))
+                          .map(([uuid, name]) => ({ value: uuid, label: name }))}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setContactSearchMode(false);
+                          setContactSearchQuery('');
+                          setContactSearchResults([]);
+                          setContactSearchConversations([]);
+                          setContactSearchError(null);
+                          setContactSearchListFilter('');
+                          setContactSearchTagFilter('');
+                        }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
+                      >
+                        <ArrowLeft className="w-3 h-3" />
+                        Back to conversations
+                      </button>
+                      {contactSearchResults.length > 0 && (
+                        <span className="text-xs text-gray-500">
+                          {contactSearchResults.length} contact{contactSearchResults.length !== 1 ? 's' : ''} · {contactSearchConversations.length} conversation{contactSearchConversations.length !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                    </div>
+                    {contactSearchTruncated && (
+                      <div className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-[11px] text-amber-700">
+                          Too many matches — try typing more of the name
+                          {!contactSearchListFilter && !contactSearchTagFilter ? ' or narrow by list/tag' : ''}.
+                        </p>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Search conversations..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-gray-50"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => setContactSearchMode(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full bg-teal-50 text-teal-700 border border-teal-200 hover:bg-teal-100 transition-colors"
+                      >
+                        <UserSearch className="w-3 h-3" />
+                        Search Contacts
+                      </button>
+                      <button
+                        onClick={() => { setShowUnrepliedOnly(!showUnrepliedOnly); if (!showUnrepliedOnly) setShowUnreadOnly(false); }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                          showUnrepliedOnly
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
                       >
-                        {unrepliedCount}
-                      </span>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => { setShowUnreadOnly(!showUnreadOnly); if (!showUnreadOnly) setShowUnrepliedOnly(false); }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
-                      showUnreadOnly
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                    }`}
-                  >
-                    <Mail className="w-3 h-3" />
-                    Unread
-                    {unreadCount > 0 && (
-                      <span
-                        className={`ml-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full leading-none ${
-                          showUnreadOnly ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
+                        <Filter className="w-3 h-3" />
+                        Unreplied
+                        {unrepliedCount > 0 && (
+                          <span
+                            className={`ml-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full leading-none ${
+                              showUnrepliedOnly ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'
+                            }`}
+                          >
+                            {unrepliedCount}
+                          </span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => { setShowUnreadOnly(!showUnreadOnly); if (!showUnreadOnly) setShowUnrepliedOnly(false); }}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-full transition-colors ${
+                          showUnreadOnly
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                         }`}
                       >
-                        {unreadCount}
-                      </span>
-                    )}
-                  </button>
+                        <Mail className="w-3 h-3" />
+                        Unread
+                        {unreadCount > 0 && (
+                          <span
+                            className={`ml-0.5 px-1.5 py-0.5 text-[10px] font-bold rounded-full leading-none ${
+                              showUnreadOnly ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-700'
+                            }`}
+                          >
+                            {unreadCount}
+                          </span>
+                        )}
+                      </button>
 
-                  {/* Automation type filter */}
-                  <div className="relative inline-flex items-center">
-                    <Zap className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none ${automationFilter ? 'text-white' : 'text-gray-400'}`} />
-                    <select
-                      value={automationFilter}
-                      onChange={(e) => setAutomationFilter(e.target.value)}
-                      className={`appearance-none pl-7 pr-7 py-1.5 text-xs font-medium rounded-full cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors ${
-                        automationFilter
-                          ? 'bg-purple-600 text-white'
-                          : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                      }`}
-                    >
-                      <option value="">All Messages</option>
-                      <option value="auto">Flow-Automated</option>
-                      <option value="synced">Synced from LinkedIn</option>
-                      <option value="is_not_null">All Non-Manual</option>
-                      <option value="is_null">Manual Only</option>
-                    </select>
-                    <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none ${automationFilter ? 'text-white' : 'text-gray-400'}`} />
-                  </div>
-                </div>
+                      {/* Automation type filter */}
+                      <div className="relative inline-flex items-center">
+                        <Zap className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none ${automationFilter ? 'text-white' : 'text-gray-400'}`} />
+                        <select
+                          value={automationFilter}
+                          onChange={(e) => setAutomationFilter(e.target.value)}
+                          className={`appearance-none pl-7 pr-7 py-1.5 text-xs font-medium rounded-full cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors ${
+                            automationFilter
+                              ? 'bg-purple-600 text-white'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          <option value="">All Messages</option>
+                          <option value="auto">Flow-Automated</option>
+                          <option value="synced">Synced from LinkedIn</option>
+                          <option value="is_not_null">All Non-Manual</option>
+                          <option value="is_null">Manual Only</option>
+                        </select>
+                        <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none ${automationFilter ? 'text-white' : 'text-gray-400'}`} />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {/* Conversations List */}
               <div className="flex-1 overflow-y-auto">
-                {conversationsLoading ? (
+                {contactSearchMode ? (
+                  /* Contact search results */
+                  contactSearchLoading ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-3">
+                      <Loader2 className="w-8 h-8 text-teal-500 animate-spin" />
+                      <p className="text-sm text-gray-500">Searching contacts...</p>
+                    </div>
+                  ) : contactSearchError ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-3 px-6">
+                      <AlertCircle className="w-8 h-8 text-red-400" />
+                      <p className="text-sm text-red-600 text-center">{contactSearchError}</p>
+                    </div>
+                  ) : contactSearchConversations.length > 0 ? (
+                    contactSearchConversations.map((conv) => (
+                      <button
+                        key={conv.linkedin_conversation_uuid}
+                        onClick={() => openConversation(conv)}
+                        className={`w-full text-left px-4 py-3.5 border-b border-gray-50 hover:bg-gray-50 transition-colors ${
+                          selectedConversation?.linkedin_conversation_uuid === conv.linkedin_conversation_uuid
+                            ? 'bg-teal-50 border-l-2 border-l-teal-500'
+                            : ''
+                        } ${conv.has_unread ? 'bg-blue-50/40' : ''}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="relative flex-shrink-0">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-teal-400 to-emerald-500 flex items-center justify-center text-white font-semibold text-sm">
+                              {conv.lead?.avatar_url ? (
+                                <img
+                                  src={conv.lead.avatar_url}
+                                  alt=""
+                                  className="w-10 h-10 rounded-full object-cover"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                    (e.target as HTMLImageElement).parentElement!.textContent = getLeadDisplayName(conv.lead).charAt(0).toUpperCase();
+                                  }}
+                                />
+                              ) : (
+                                getLeadDisplayName(conv.lead).charAt(0).toUpperCase()
+                              )}
+                            </div>
+                            {conv.has_unread && (
+                              <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 border-2 border-white rounded-full" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`text-sm truncate ${conv.has_unread ? 'font-bold text-gray-900' : 'font-semibold text-gray-900'}`}>
+                                {getLeadDisplayName(conv.lead)}
+                              </span>
+                              <span className={`text-xs whitespace-nowrap ${conv.has_unread ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
+                                {formatDate(conv.last_message.created_at)}
+                              </span>
+                            </div>
+                            {conv.lead?.company_name && (
+                              <p className="text-xs text-gray-500 truncate mt-0.5">{conv.lead.company_name}</p>
+                            )}
+                            {conv.lead?.position && (
+                              <p className="text-[10px] text-gray-400 truncate">{conv.lead.position}</p>
+                            )}
+                            <div className="flex items-center gap-1.5 mt-1">
+                              {conv.last_message.type === 'outbox' && (
+                                <span className="text-xs text-indigo-500 font-medium">You:</span>
+                              )}
+                              <p className={`text-xs truncate ${conv.has_unread ? 'text-gray-700 font-medium' : 'text-gray-500'}`}>
+                                {conv.last_message.text || '(No content)'}
+                              </p>
+                            </div>
+                            <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 text-[9px] font-medium text-teal-700 bg-teal-50 border border-teal-200 rounded">
+                              <MessageSquare className="w-2.5 h-2.5" />
+                              {conv.message_count} message{conv.message_count !== 1 ? 's' : ''}
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  ) : contactSearchQuery ? (
+                    <div className="flex flex-col items-center justify-center py-20 gap-3">
+                      <Inbox className="w-10 h-10 text-gray-300" />
+                      <p className="text-sm text-gray-500">No conversations found</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-20 gap-4 px-6">
+                      <div className="w-16 h-16 rounded-full bg-teal-50 flex items-center justify-center">
+                        <UserSearch className="w-8 h-8 text-teal-400" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-gray-700">Search for contacts</p>
+                        <p className="text-xs text-gray-400 mt-1">
+                          Enter a full name to find contacts with LinkedIn conversations
+                        </p>
+                      </div>
+                    </div>
+                  )
+                ) : conversationsLoading ? (
                   <div className="flex flex-col items-center justify-center py-20 gap-3">
                     <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
                     <p className="text-sm text-gray-500">Loading conversations...</p>
@@ -1449,7 +2070,8 @@ export default function LinkedInConversationsPage() {
                           {(() => {
                             const stageKey = conv.sender_profile_uuid ? `${conv.lead_uuid}::${conv.sender_profile_uuid}` : '';
                             const stageValue = stageKey ? stagesMap[stageKey] : undefined;
-                            const stage = getStageOption(stageValue || 'reply_received');
+                            const defaultStage = conv.has_prospect_reply ? 'reply_received' : 'attempted_to_contact';
+                            const stage = getStageOption(stageValue || defaultStage);
                             return (
                               <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-semibold rounded border mt-0.5 ${stage.color}`}>
                                 <ArrowDownUp className="w-2.5 h-2.5" />
@@ -1574,46 +2196,47 @@ export default function LinkedInConversationsPage() {
                       </button>
                     </div>
 
-                    {/* Row 2: Stage dropdown */}
-                    {selectedConversation?.sender_profile_uuid && (
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className="text-[11px] font-medium text-gray-500 flex-shrink-0">Stage:</span>
-                        <div className="relative inline-flex items-center">
-                          <select
-                            value={
-                              stagesMap[`${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`] || 'reply_received'
-                            }
-                            onChange={(e) => {
-                              updateStage(
-                                selectedConversation.lead_uuid,
-                                selectedConversation.sender_profile_uuid!,
-                                e.target.value
-                              );
-                            }}
-                            disabled={stageUpdating === `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`}
-                            className={`appearance-none pl-3 pr-7 py-1 text-xs font-medium rounded-lg cursor-pointer border focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors ${
-                              (() => {
-                                const val = stagesMap[`${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`] || 'reply_received';
-                                return getStageOption(val).color;
-                              })()
-                            } ${stageUpdating === `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}` ? 'opacity-50' : ''}`}
-                          >
-                            {STAGE_OPTIONS.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none" />
-                          {stageUpdating === `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}` && (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 ml-2" />
-                          )}
+                    {/* Row 2: Stage dropdown + Action buttons (side-by-side on lg) */}
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mt-2 gap-2">
+                      {selectedConversation?.sender_profile_uuid && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-[11px] font-medium text-gray-500 flex-shrink-0">Stage:</span>
+                          <div className="relative inline-flex items-center">
+                            <select
+                              value={
+                                stagesMap[`${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`] || (selectedConversation.has_prospect_reply ? 'reply_received' : 'attempted_to_contact')
+                              }
+                              onChange={(e) => {
+                                updateStage(
+                                  selectedConversation.lead_uuid,
+                                  selectedConversation.sender_profile_uuid!,
+                                  e.target.value
+                                );
+                              }}
+                              disabled={stageUpdating === `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`}
+                              className={`appearance-none pl-3 pr-7 py-1 text-xs font-medium rounded-lg cursor-pointer border focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors ${
+                                (() => {
+                                  const val = stagesMap[`${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}`] || (selectedConversation.has_prospect_reply ? 'reply_received' : 'attempted_to_contact');
+                                  return getStageOption(val).color;
+                                })()
+                              } ${stageUpdating === `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}` ? 'opacity-50' : ''}`}
+                            >
+                              {STAGE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 pointer-events-none" />
+                            {stageUpdating === `${selectedConversation.lead_uuid}::${selectedConversation.sender_profile_uuid}` && (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-gray-400 ml-2" />
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Row 3: Action buttons */}
-                    <div className="flex items-center gap-1.5 sm:gap-2 mt-2 overflow-x-auto scrollbar-hide">
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto scrollbar-hide lg:ml-auto">
                       {activeLead?.linkedin && (
                         <a
                           href={
@@ -1665,6 +2288,7 @@ export default function LinkedInConversationsPage() {
                           </>
                         );
                       })()}
+                      </div>
                     </div>
                   </div>
 
@@ -1840,6 +2464,89 @@ export default function LinkedInConversationsPage() {
                         )}
                         <span className="hidden sm:inline text-xs font-medium">AI Reply</span>
                       </button>
+                      {/* Template picker */}
+                      <div className="relative flex-shrink-0" ref={templatePickerRef}>
+                        <button
+                          onClick={() => {
+                            setShowTemplatePicker((v) => !v);
+                            if (!showTemplatePicker && templateChannels.length > 0 && !templatePickerTab) {
+                              setTemplatePickerTab(templateChannels[0]);
+                            }
+                          }}
+                          title="Use a message template"
+                          className="flex items-center justify-center gap-1.5 h-10 px-3 border border-gray-200 bg-white text-gray-700 rounded-xl hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm"
+                        >
+                          <FileText className="w-4 h-4" />
+                          <span className="hidden sm:inline text-xs font-medium">Templates</span>
+                        </button>
+                        {showTemplatePicker && (
+                          <div className="absolute bottom-full left-0 mb-2 w-80 max-h-72 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden flex flex-col">
+                            <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between">
+                              <span className="text-xs font-semibold text-gray-700">Message Templates</span>
+                              <button onClick={() => setShowTemplatePicker(false)} className="p-0.5 hover:bg-gray-100 rounded">
+                                <X className="w-3.5 h-3.5 text-gray-400" />
+                              </button>
+                            </div>
+                            {templatesLoading ? (
+                              <div className="flex items-center justify-center py-6">
+                                <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                                <span className="ml-2 text-xs text-gray-400">Loading...</span>
+                              </div>
+                            ) : templateChannels.length === 0 ? (
+                              <div className="px-3 py-6 text-center">
+                                <FileText className="w-6 h-6 text-gray-300 mx-auto mb-2" />
+                                <p className="text-xs text-gray-400">No templates found.</p>
+                                <p className="text-[11px] text-gray-300 mt-1">Create templates on the Templates page.</p>
+                              </div>
+                            ) : (
+                              <>
+                                {templateChannels.length > 1 && (
+                                  <div className="flex border-b border-gray-100 px-1 gap-0.5 bg-gray-50/60">
+                                    {templateChannels.map((ch) => (
+                                      <button
+                                        key={ch}
+                                        onClick={() => setTemplatePickerTab(ch)}
+                                        className={`px-2.5 py-1.5 text-[11px] font-medium transition-colors relative ${
+                                          (templatePickerTab ?? templateChannels[0]) === ch
+                                            ? 'text-indigo-700'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                        }`}
+                                      >
+                                        {CHANNEL_LABELS[ch]}
+                                        <span className="ml-1 text-[10px] text-gray-400">{templatesByChannel[ch]?.length}</span>
+                                        {(templatePickerTab ?? templateChannels[0]) === ch && (
+                                          <span className="absolute bottom-0 left-1 right-1 h-0.5 bg-indigo-600 rounded-full" />
+                                        )}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                <div className="overflow-y-auto flex-1">
+                                  {(templatesByChannel[templatePickerTab ?? templateChannels[0]] ?? []).map((tpl) => (
+                                    <button
+                                      key={tpl.id}
+                                      onClick={() => {
+                                        const filled = fillTemplateVariables(tpl.template);
+                                        setReplyText(filled);
+                                        if (selectedConversation) {
+                                          setDrafts((prev) => ({ ...prev, [selectedConversation.linkedin_conversation_uuid]: filled }));
+                                        }
+                                        resizeTextarea();
+                                        setShowTemplatePicker(false);
+                                        setTimeout(() => textareaRef.current?.focus(), 50);
+                                      }}
+                                      className="w-full text-left px-3 py-2.5 hover:bg-indigo-50 transition-colors border-b border-gray-50 last:border-b-0 group"
+                                    >
+                                      <div className="text-xs font-medium text-gray-800 group-hover:text-indigo-700 truncate">{tpl.title}</div>
+                                      <div className="text-[11px] text-gray-400 mt-0.5 line-clamp-2 leading-relaxed">{fillTemplateVariables(tpl.template)}</div>
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <textarea
                         ref={textareaRef}
                         value={replyText}
@@ -1901,15 +2608,81 @@ export default function LinkedInConversationsPage() {
                       {/* Panel Header */}
                       <div className="sticky top-0 bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between z-10">
                         <h4 className="font-semibold text-sm text-gray-900">Contact Details</h4>
-                        <button
-                          onClick={() => setShowContactDetails(false)}
-                          className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
-                        >
-                          <X className="w-4 h-4 text-gray-500" />
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={copyProspectForHubSpot}
+                            title="Copy prospect details for HubSpot"
+                            className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-lg transition-colors ${
+                              copiedContact
+                                ? 'text-green-700 bg-green-100'
+                                : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                            }`}
+                          >
+                            {copiedContact ? <Check className="w-3.5 h-3.5" /> : <ClipboardCopy className="w-3.5 h-3.5" />}
+                            <span>{copiedContact ? 'Copied!' : 'Copy for HubSpot'}</span>
+                          </button>
+                          <button
+                            onClick={() => setShowContactDetails(false)}
+                            className="p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                          >
+                            <X className="w-4 h-4 text-gray-500" />
+                          </button>
+                        </div>
                       </div>
 
                       <div className="px-5 py-4 space-y-5 overflow-hidden">
+                        {/* Make PPT */}
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleMakePpt(activeLead, companyInfo)}
+                              disabled={pptLoading}
+                              title="Generate a presentation for this contact"
+                              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors w-full justify-center ${
+                                pptLoading
+                                  ? 'text-gray-400 bg-gray-100 cursor-not-allowed'
+                                  : 'text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200'
+                              }`}
+                            >
+                              {pptLoading ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Presentation className="w-3.5 h-3.5" />
+                              )}
+                              {pptLoading ? 'Generating...' : 'Make PPT'}
+                            </button>
+                          </div>
+                          {pptUrl && !pptError && (
+                            <a
+                              href={pptUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 mt-2 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors w-full justify-center"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                              Open Generated PPT
+                            </a>
+                          )}
+                          {pptError && (
+                            <div className="mt-2 px-3 py-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2">
+                              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <p className="break-words">{pptError}</p>
+                                <div className="flex items-center gap-3 mt-1.5">
+                                  <button
+                                    onClick={() => { setPptError(null); handleMakePpt(activeLead, companyInfo); }}
+                                    className="text-[10px] font-medium text-red-600 hover:underline"
+                                  >
+                                    Retry
+                                  </button>
+                                  <button onClick={() => setPptError(null)} className="text-[10px] text-red-400 hover:underline">
+                                    Dismiss
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                         {/* Profile card */}
                         <div className="flex items-center gap-3">
                           <div className="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-lg flex-shrink-0 overflow-hidden">

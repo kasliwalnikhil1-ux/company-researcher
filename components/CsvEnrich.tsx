@@ -3,6 +3,7 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import { parseCsv, CsvRow, csvToString } from "../lib/csvImport";
 import { downloadCsv } from "../lib/csvExport";
+import { writeSummaryToCsvRow } from "../lib/summaryUtils";
 import ColumnSelectorDialog from "./ui/ColumnSelectorDialog";
 import Toast from "./ui/Toast";
 import { useCompanies } from "@/contexts/CompaniesContext";
@@ -206,42 +207,9 @@ export default function CsvEnrich() {
           matchedCount++;
           const company = domainMap.get(domain)!;
           
-          // Add company data to the row
-          if (company.summary) {
-            const summary = company.summary;
-            
-            // Add company summary fields
-            enrichedRow['Company Summary'] = summary.company_summary || summary.profile_summary || '';
-            enrichedRow['Company Industry'] = summary.company_industry || summary.profile_industry || '';
-            enrichedRow['Sales Opener Sentence'] = summary.sales_opener_sentence || '';
-            enrichedRow['Classification'] = summary.classification || '';
-            
-            if (summary.confidence_score !== undefined) {
-              enrichedRow['Confidence Score'] = String(summary.confidence_score);
-            }
-            
-            // Handle product types
-            if (summary.product_types && Array.isArray(summary.product_types)) {
-              const productTypes = summary.product_types.filter((pt: any) => pt && typeof pt === 'string');
-              if (productTypes.length > 0) {
-                // Format product types as string
-                if (productTypes.length === 1) {
-                  enrichedRow['Product Types'] = productTypes[0];
-                } else if (productTypes.length === 2) {
-                  enrichedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-                } else {
-                  const allButLast = productTypes.slice(0, -1).join(', ');
-                  enrichedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-                }
-                
-                // Add individual product type columns
-                productTypes.forEach((pt: string, idx: number) => {
-                  enrichedRow[`PRODUCT${idx + 1}`] = pt;
-                });
-              }
-            }
-            
-            enrichedRow['Sales Action'] = summary.sales_action || '';
+          // Add company summary data to the row (generic)
+          if (company.summary && typeof company.summary === 'object') {
+            writeSummaryToCsvRow(company.summary, enrichedRow);
           }
           
           // Add contact information

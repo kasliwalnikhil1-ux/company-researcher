@@ -4,6 +4,7 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight, Plus, Edit2 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
+import PhoneInputField from "@/components/ui/PhoneInputField";
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from "@/lib/emailCompose";
 import { supabase } from "@/utils/supabase/client";
 import { getValidAccessToken } from "@/lib/api";
@@ -139,63 +140,21 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
       const summaryData = getSummaryData(company);
       const updatedSummary = { ...summaryData };
+      const prevValue = summaryData[columnKey];
 
-      // Update the specific field
-      switch (columnKey) {
-        case "company_summary":
-          updatedSummary.company_summary = value;
-          break;
-        case "company_industry":
-          updatedSummary.company_industry = value;
-          break;
-        case "profile_summary":
-          updatedSummary.profile_summary = value;
-          break;
-        case "profile_industry":
-          updatedSummary.profile_industry = value;
-          break;
-        case "sales_opener_sentence":
-          updatedSummary.sales_opener_sentence = value;
-          break;
-        case "classification":
-          if (
-            ["QUALIFIED", "NOT_QUALIFIED", "MAYBE", "EXPIRED"].includes(
-              value.toUpperCase()
-            )
-          ) {
-            updatedSummary.classification = value.toUpperCase() as
-              | "QUALIFIED"
-              | "NOT_QUALIFIED"
-              | "MAYBE"
-              | "EXPIRED";
-          }
-          break;
-        case "confidence_score": {
-          const score = parseFloat(value.replace("%", ""));
-          if (!isNaN(score) && score >= 0 && score <= 100) {
-            updatedSummary.confidence_score = score / 100;
-          }
-          break;
+      // Infer type from the previous value to store in the correct format
+      if (Array.isArray(prevValue)) {
+        updatedSummary[columnKey] = value
+          .split(",")
+          .map((s: string) => s.trim())
+          .filter((s: string) => s.length > 0);
+      } else if (typeof prevValue === 'number') {
+        const parsed = parseFloat(value.replace("%", ""));
+        if (!isNaN(parsed)) {
+          updatedSummary[columnKey] = parsed <= 100 && parsed >= 0 && prevValue <= 1 ? parsed / 100 : parsed;
         }
-        case "product_types":
-          updatedSummary.product_types = value
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-          break;
-        case "sales_action":
-          if (
-            ["OUTREACH", "EXCLUDE", "PARTNERSHIP", "MANUAL_REVIEW"].includes(
-              value.toUpperCase()
-            )
-          ) {
-            updatedSummary.sales_action = value.toUpperCase() as
-              | "OUTREACH"
-              | "EXCLUDE"
-              | "PARTNERSHIP"
-              | "MANUAL_REVIEW";
-          }
-          break;
+      } else {
+        updatedSummary[columnKey] = value;
       }
 
       await updateCompany(companyId, { summary: updatedSummary });
@@ -1119,16 +1078,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     {editingCell?.companyId === company.id &&
                     editingCell?.columnKey === "phone" ? (
                       <div className="flex items-center gap-2">
-                        <input
-                          ref={editInputRef as React.RefObject<HTMLInputElement>}
-                          type="text"
+                        <PhoneInputField
                           value={editingCell.value}
-                          onChange={(e) =>
+                          onChange={(phone) =>
                             setEditingCell((prev) =>
-                              prev ? { ...prev, value: e.target.value } : prev
+                              prev ? { ...prev, value: phone } : prev
                             )
                           }
-                          onBlur={handleInlineEditSave}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               handleInlineEditSave();
@@ -1136,7 +1092,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                               setEditingCell(null);
                             }
                           }}
-                          className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          compact
+                          autoFocus
+                          className="flex-1"
                         />
                         <button
                           onClick={handleInlineEditSave}
@@ -1572,9 +1530,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                           columnKey !== "domain" &&
                           columnKey !== "instagram";
 
-                        const isTextareaField =
-                          columnKey === "company_summary" ||
-                          columnKey === "sales_opener_sentence";
+                        const cellValue = getCellValue(company, columnKey);
+                        const isTextareaField = cellValue.length > 60;
 
                         // Special handling for classification field - use dropdown
                         if (isClassification) {

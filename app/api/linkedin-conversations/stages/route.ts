@@ -20,6 +20,7 @@ function getServiceClient() {
 }
 
 const VALID_STAGES = [
+  'attempted_to_contact',
   'reply_received',
   'meeting_scheduled',
   'demo_completed',

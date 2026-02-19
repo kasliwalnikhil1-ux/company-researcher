@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJsonCompletion, Message } from '@/utils/azureOpenAiHelper';
 
+const VALID_STAGES = [
+  'reply_received',
+  'meeting_scheduled',
+  'demo_completed',
+  'proposal_sent',
+  'negotiating',
+  'closed_won',
+  'closed_lost',
+];
+
 const SYSTEM_PROMPT = `You are an autonomous AI sales agent for CapitalxAI.
 
 CapitalxAI is an AI-powered fundraising platform that helps founders:
@@ -55,6 +65,20 @@ Otherwise use "reply"
 
 ---
 
+STAGE CLASSIFICATION:
+
+Based on the conversation, classify the current stage of this prospect. Choose EXACTLY ONE:
+
+• "reply_received" — default when prospect has just replied, early conversation, no clear advancement yet
+• "meeting_scheduled" — prospect has agreed to or is scheduling a meeting/call/demo
+• "demo_completed" — a demo or meeting has already happened, follow-up discussion
+• "proposal_sent" — a proposal, pricing, or offer has been shared with the prospect
+• "negotiating" — prospect is discussing terms, pricing, timelines, or conditions
+• "closed_won" — prospect has agreed to buy/sign up
+• "closed_lost" — prospect has clearly declined, gone silent after multiple follow-ups, or said no
+
+---
+
 OUTPUT FORMAT:
 
 Return ONLY valid JSON.
@@ -65,14 +89,16 @@ If replying:
 
 {
   "action": "reply",
-  "message": "message text"
+  "message": "message text",
+  "stage": "stage_value"
 }
 
 If handover:
 
 {
   "action": "handover",
-  "message": null
+  "message": null,
+  "stage": "stage_value"
 }
 
 ---
@@ -137,6 +163,10 @@ Respond according to system instructions.`;
         { error: result.error, raw_content: result.raw_content },
         { status: 500 }
       );
+    }
+
+    if (result?.stage && !VALID_STAGES.includes(result.stage)) {
+      result.stage = 'reply_received';
     }
 
     return NextResponse.json(result);

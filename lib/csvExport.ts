@@ -1,171 +1,45 @@
 import { generateMessageTemplates } from './messageTemplates';
+import { summaryKeyToLabel, formatArrayNatural } from './summaryUtils';
 
-// Types for our normalized company data
-type ExportableCompany = {
-  companyName: string;
-  linkedInProfile: string;
-  ceoProfile: string;
-  ctoProfile: string;
-  founders: string[];
-  similarCompanies: string[];
-  latestNews: string[];
-  companyMentionsOnReddit: string[];
-  github: string;
-  summary: string;
-  mindMap: string;
-  productTypes: string[];
-  companySummary: string;
-  companyIndustry: string;
-  salesOpenerSentence: string;
-  classification: string;
-  confidenceScore: string;
-  productTypesFormatted: string;
-  salesAction: string;
-  email: string;
-  phone: string;
-  messageTemplates: string[]; // Array of message templates
-};
+// Normalize company data from the app's state to an exportable record.
+// All summary fields are mapped generically from qualificationData.
+const normalizeCompanyData = (companyName: string, data: any): Record<string, any> => {
+  const result: Record<string, any> = { companyName };
 
-// Normalize company data from the app's state to our exportable format
-const normalizeCompanyData = (companyName: string, data: any): ExportableCompany => {
-  const getField = (possibleKeys: string[], defaultValue: any = '') => {
-    if (!data) return defaultValue;
-    
-    for (const key of possibleKeys) {
-      if (data[key] !== undefined && data[key] !== null) {
-        return data[key];
-      }
-    }
-    return defaultValue;
-  };
+  // Extract qualification data (the AI-generated summary)
+  const qualificationData: Record<string, any> = data?.qualificationData || {};
 
-  // Helper to convert array of objects to formatted strings
-  const formatArray = (items: any[], formatFn: (item: any) => string) => {
-    if (!items || !Array.isArray(items)) return [];
-    return items.map(item => formatFn(item));
-  };
-
-  // Extract LinkedIn profile URL with fallbacks for different possible field names
-  const rawLinkedIn = data?.linkedinData?.url || 
-                         data?.linkedInUrl || 
-                         data?.linkedinUrl || 
-                         data?.url || '';
-  // Ensure full LinkedIn URL (e.g. in/namankas -> https://www.linkedin.com/in/namankas)
-  const linkedInProfile = rawLinkedIn
-    ? rawLinkedIn.startsWith('http')
-      ? rawLinkedIn
-      : `https://www.linkedin.com/${rawLinkedIn.replace(/^\/+/, '')}`
-    : '';
-  // Extract CEO and CTO profile links
-  const ceoProfile = data?.founders?.find((f: any) => f.title === 'CEO')?.url || '';
-  const ctoProfile = data?.founders?.find((f: any) => f.title === 'CTO')?.url || '';
-  
-  const founders = formatArray(data?.founders || [], (f: any) => {
-    if (f.title && f.name) return `${f.title}: ${f.name} (${f.url || 'No URL'})`;
-    if (f.title) return f.title;
-    if (f.name) return f.name;
-    return '';
-  }).filter(Boolean);
-  const similarCompanies = formatArray(data?.competitors || [], (c: any) => c.title || c.name || '').filter(Boolean);
-  
-  const latestNews = formatArray(data?.news || [], (n: any) => {
-    if (n.title && n.url) return `${n.title} - ${n.url}`;
-    if (n.title) return n.title;
-    if (n.url) return n.url;
-    return '';
-  }).filter(Boolean);
-
-  const companyMentionsOnReddit = formatArray(data?.redditPosts || [], (p: any) => {
-    if (p.title && p.url) return `${p.title} - ${p.url}`;
-    if (p.title) return p.title;
-    if (p.url) return p.url;
-    return '';
-  }).filter(Boolean);
-
-  const github = data?.githubUrl || '';
-  const summary = data?.companySummary?.summary || data?.summary || '';
-  
-  // Convert mind map to a simplified string representation
-  let mindMap = '';
-  if (data?.companyMap?.rootNode) {
-    try {
-      const { title, children = [] } = data.companyMap.rootNode;
-      const sections = children.map((section: any) => 
-        `${section.title}: ${(section.children || []).map((item: any) => item.title).join('; ')}`
-      );
-      mindMap = `${title} | ${sections.join(' | ')}`;
-    } catch (e) {
-      console.warn('Failed to stringify mind map', e);
+  // Map each summary key to a Title-Case column name
+  const summaryColumns: Record<string, string> = {};
+  for (const [key, value] of Object.entries(qualificationData)) {
+    if (value === null || value === undefined) continue;
+    const label = summaryKeyToLabel(key);
+    if (Array.isArray(value)) {
+      const filtered = value.filter((v: any) => v != null && typeof v === 'string' && v.trim());
+      summaryColumns[label] = formatArrayNatural(filtered);
+    } else {
+      summaryColumns[label] = String(value);
     }
   }
+  result.summaryColumns = summaryColumns;
 
-  // Extract product_types from qualificationData
-  const productTypes: string[] = [];
-  if (data?.qualificationData?.product_types && Array.isArray(data.qualificationData.product_types)) {
-    productTypes.push(...data.qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string'));
-  }
+  // Extract email and phone (may come from qualification data or top-level)
+  result.email = qualificationData.email || data?.email || '';
+  result.phone = qualificationData.phone || data?.phone || '';
 
-  // Extract qualification data fields
-  const qualificationData = data?.qualificationData || {};
-  const companySummary = qualificationData.company_summary || qualificationData.profile_summary || '';
-  const companyIndustry = qualificationData.company_industry || qualificationData.profile_industry || '';
-  const salesOpenerSentence = qualificationData.sales_opener_sentence || '';
-  const classification = qualificationData.classification || '';
-  const confidenceScore = qualificationData.confidence_score !== undefined ? String(qualificationData.confidence_score) : '';
-  const salesAction = qualificationData.sales_action || '';
-  // Extract email and phone from qualification data, or fall back to top-level data
-  const email = qualificationData.email || data?.email || '';
-  const phone = qualificationData.phone || data?.phone || '';
-
-  // Format product types as string: "A", "A and B", or "A, B, and C"
-  const formatProductTypes = (types: string[]): string => {
-    if (!types || types.length === 0) return '';
-    if (types.length === 1) return types[0];
-    if (types.length === 2) return `${types[0]} and ${types[1]}`;
-    // For 3 or more: "A, B, and C"
-    const allButLast = types.slice(0, -1).join(', ');
-    return `${allButLast}, and ${types[types.length - 1]}`;
-  };
-  const productTypesFormatted = formatProductTypes(productTypes);
-
-  // Determine if this is Instagram research (check for profile_summary vs company_summary)
+  // Determine if this is Instagram research
   const isInstagram = !!qualificationData.profile_summary && !qualificationData.company_summary;
-  
-  // Generate message templates - only for QUALIFIED companies
-  // CSV export only includes messages for the correct mode (domain vs Instagram)
-  const messageTemplates =
+
+  // Generate message templates
+  result.messageTemplates =
     qualificationData.classification === 'QUALIFIED'
       ? generateMessageTemplates(qualificationData, isInstagram)
       : [];
 
-  return {
-    companyName,
-    linkedInProfile,
-    ceoProfile,
-    ctoProfile,
-    founders,
-    similarCompanies,
-    latestNews,
-    companyMentionsOnReddit,
-    github,
-    summary,
-    mindMap,
-    productTypes,
-    companySummary,
-    companyIndustry,
-    salesOpenerSentence,
-    classification,
-    confidenceScore,
-    productTypesFormatted,
-    salesAction,
-    email,
-    phone,
-    messageTemplates
-  };
+  return result;
 };
 
-// Safe helper function to escape and quote CSV field values
-// Always quotes fields and escapes existing quotes by doubling them
+// Safe helper to escape and quote CSV field values
 const csvEscape = (value: any): string => {
   if (value == null) return "";
   const str = String(value);
@@ -177,42 +51,29 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
   if (!companies.length) return '';
 
   // Normalize all company data
-  const normalizedCompanies = companies.map(({ companyName, data }) => 
+  const normalized = companies.map(({ companyName, data }) =>
     normalizeCompanyData(companyName, data)
   );
 
-  // Calculate maximum number of product types across all companies
-  const maxProductTypes = normalizedCompanies.reduce((max, company) => {
-    return Math.max(max, company.productTypes?.length || 0);
-  }, 0);
-
-  // Calculate maximum number of message templates across all companies
-  const maxMessages = normalizedCompanies.reduce((max, company) => {
-    return Math.max(max, company.messageTemplates?.length || 0);
-  }, 0);
-
-  // Define CSV headers in the required order
-  const headers = [
-    'Company Name',
-    'Company Summary',
-    'Company Industry',
-    'Sales Opener Sentence',
-    'Classification',
-    'Confidence Score',
-    'Product Types',
-    'Sales Action',
-    'Email',
-    'Phone'
-  ];
-
-  // Add dynamic product type headers if there are any product types
-  if (maxProductTypes > 0) {
-    for (let i = 1; i <= maxProductTypes; i++) {
-      headers.push(`PRODUCT${i}`);
+  // Discover all unique summary column labels across all companies
+  const summaryLabelSet = new Set<string>();
+  for (const entry of normalized) {
+    if (entry.summaryColumns) {
+      for (const label of Object.keys(entry.summaryColumns)) {
+        summaryLabelSet.add(label);
+      }
     }
   }
+  const summaryLabels = Array.from(summaryLabelSet);
 
-  // Add dynamic message template headers if there are any messages
+  // Calculate maximum number of message templates
+  const maxMessages = normalized.reduce((max, entry) =>
+    Math.max(max, entry.messageTemplates?.length || 0), 0
+  );
+
+  // Build headers: Company Name, then all dynamic summary columns, Email, Phone, then messages
+  const headers = ['Company Name', ...summaryLabels, 'Email', 'Phone'];
+
   if (maxMessages > 0) {
     for (let i = 1; i <= maxMessages; i++) {
       headers.push(`Message ${i}`);
@@ -220,52 +81,35 @@ export const companiesToCsv = (companies: Array<{companyName: string, data: any}
   }
 
   // Convert each company to a CSV row
-  const rows = normalizedCompanies.map(company => {
-    // Join array fields with appropriate separators
-    const row = [
-      company.companyName,
-      company.companySummary,
-      company.companyIndustry,
-      company.salesOpenerSentence,
-      company.classification,
-      company.confidenceScore,
-      company.productTypesFormatted,
-      company.salesAction,
-      company.email,
-      company.phone
-    ];
+  const rows = normalized.map(entry => {
+    const row: string[] = [entry.companyName];
 
-    // Add product types as separate columns
-    if (maxProductTypes > 0) {
-      for (let i = 0; i < maxProductTypes; i++) {
-        row.push(company.productTypes?.[i] || '');
-      }
+    // Summary columns in order
+    for (const label of summaryLabels) {
+      row.push(entry.summaryColumns?.[label] || '');
     }
 
-    // Add message templates as separate columns
+    row.push(entry.email || '');
+    row.push(entry.phone || '');
+
     if (maxMessages > 0) {
       for (let i = 0; i < maxMessages; i++) {
-        row.push(company.messageTemplates?.[i] || '');
+        row.push(entry.messageTemplates?.[i] || '');
       }
     }
-    
-    // Escape each field and join with commas
+
     return row.map(csvEscape).join(',');
   });
 
-  // Combine headers and rows
   return [
     headers.map(csvEscape).join(','),
-    ...rows
+    ...rows,
   ].join('\n');
 };
 
 // Trigger CSV download in the browser
 export const downloadCsv = (csvString: string, filename: string = 'search-results.csv'): void => {
-  // Create a Blob with the CSV data
   const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-  
-  // Create a download link and trigger it
   const link = document.createElement('a');
   const url = URL.createObjectURL(blob);
   

@@ -322,290 +322,290 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
           </div>
         )}
         
-        <nav className={`flex-1 py-6 space-y-2 overflow-y-auto ${isCollapsed && !isMobile ? 'px-2' : 'px-4'}`}>
-          {routeAccess.showResearch && (
-            <Link
-              href="/"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Research"
-            >
-              <Search className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Research</span>}
-            </Link>
-          )}
+        <div className={`flex-1 overflow-y-auto ${isCollapsed && !isMobile ? 'px-2' : 'px-4'}`}>
+          <nav className="py-6 space-y-2">
+            {routeAccess.showResearch && (
+              <Link
+                href="/"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Research"
+              >
+                <Search className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Research</span>}
+              </Link>
+            )}
 
-          {routeAccess.showCompanies && (
+            {routeAccess.showCompanies && (
+              <Link
+                href="/companies"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/companies')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Companies"
+              >
+                <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Companies</span>}
+              </Link>
+            )}
+
+            {routeAccess.showInvestors && (
+              <>
+                <Link
+                  href="/investors"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive('/investors')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Investors"
+                >
+                  <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>Investors</span>}
+                </Link>
+                <Link
+                  href="/new-fundings"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive('/new-fundings')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="New Fundings"
+                >
+                  <Banknote className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>New Fundings</span>}
+                </Link>
+              </>
+            )}
+
+            {routeAccess.showLinkedInInbox && (
+              <Link
+                href="/linkedin-conversations"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/linkedin-conversations')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="LinkedIn Conversations"
+              >
+                <MessageSquare className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>LinkedIn Inbox</span>}
+              </Link>
+            )}
+
+            {routeAccess.showSenderProfiles && (
+              <Link
+                href="/sender-profiles"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/sender-profiles')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Sender Profiles"
+              >
+                <Contact className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Sender Profiles</span>}
+              </Link>
+            )}
+            
+            {routeAccess.showEnrich && (
+              <Link
+                href="/enrich"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/enrich')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Enrich CSV"
+              >
+                <Sparkles className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Enrich</span>}
+              </Link>
+            )}
+            
             <Link
-              href="/companies"
+              href="/templates"
               className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/companies')
+                isActive('/templates')
                   ? 'bg-indigo-50 text-indigo-700'
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
-              title="Companies"
+              title="Templates"
+            >
+              <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Message Templates</span>}
+            </Link>
+            
+            {routeAccess.showPersonalization && (
+              <Link
+                href="/personalization"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/personalization')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Personalization"
+              >
+                <Target className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Personalization</span>}
+              </Link>
+            )}
+
+            <Link
+              href="/company-profile"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/company-profile')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Company Profile"
             >
               <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Companies</span>}
+              {(!isCollapsed || isMobile) && <span>Company Profile</span>}
             </Link>
-          )}
 
-          {routeAccess.showInvestors && (
-            <>
+            <Link
+              href="/account"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/account')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Account & Security"
+            >
+              <UserCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Account</span>}
+            </Link>
+
+            <Link
+              href="/analytics"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/analytics')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Analytics"
+            >
+              <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Analytics</span>}
+            </Link>
+
+            <Link
+              href="/usage"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                isActive('/usage')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Usage"
+            >
+              <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Usage</span>}
+            </Link>
+
+            {routeAccess.showMeData && (
               <Link
-                href="/investors"
+                href="/domains-extractor"
                 className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/investors')
+                  isActive('/domains-extractor')
                     ? 'bg-indigo-50 text-indigo-700'
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
-                title="Investors"
+                title="Extract Domains"
               >
-                <Handshake className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>Investors</span>}
+                <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
               </Link>
+            )}
+
+            {routeAccess.showMeData && (
+              <>
+                <Link
+                  href="/me-data"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive('/me-data')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="ME Data"
+                >
+                  <Database className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>ME Data</span>}
+                </Link>
+                <Link
+                  href="/me-data-prospects"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive('/me-data-prospects')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="ME Data Prospects"
+                >
+                  <Users className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>ME Prospects</span>}
+                </Link>
+                <Link
+                  href="/data-pipelines"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isActive('/data-pipelines')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Data Updation Pipelines"
+                >
+                  <Wrench className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>Data Pipelines</span>}
+                </Link>
+              </>
+            )}
+
+            {routeAccess.showAdminStats && (
               <Link
-                href="/new-fundings"
+                href="/admin-stats"
                 className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/new-fundings')
+                  isActive('/admin-stats')
                     ? 'bg-indigo-50 text-indigo-700'
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
-                title="New Fundings"
+                title="Admin Stats"
               >
-                <Banknote className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>New Fundings</span>}
+                <ShieldCheck className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Admin Stats</span>}
               </Link>
-            </>
-          )}
+            )}
 
-          {routeAccess.showLinkedInInbox && (
-            <Link
-              href="/linkedin-conversations"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/linkedin-conversations')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="LinkedIn Conversations"
-            >
-              <MessageSquare className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>LinkedIn Inbox</span>}
-            </Link>
-          )}
-
-          {routeAccess.showSenderProfiles && (
-            <Link
-              href="/sender-profiles"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/sender-profiles')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Sender Profiles"
-            >
-              <Contact className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Sender Profiles</span>}
-            </Link>
-          )}
-          
-          {routeAccess.showEnrich && (
-            <Link
-              href="/enrich"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/enrich')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Enrich CSV"
-            >
-              <Sparkles className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Enrich</span>}
-            </Link>
-          )}
-          
-          <Link
-            href="/templates"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/templates')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Templates"
-          >
-            <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Message Templates</span>}
-          </Link>
-          
-          {routeAccess.showPersonalization && (
-            <Link
-              href="/personalization"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/personalization')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Personalization"
-            >
-              <Target className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Personalization</span>}
-            </Link>
-          )}
-
-          <Link
-            href="/company-profile"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/company-profile')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Company Profile"
-          >
-            <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Company Profile</span>}
-          </Link>
-
-          <Link
-            href="/account"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/account')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Account & Security"
-          >
-            <UserCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Account</span>}
-          </Link>
-
-          <Link
-            href="/analytics"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/analytics')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Analytics"
-          >
-            <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Analytics</span>}
-          </Link>
-
-          <Link
-            href="/usage"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-              isActive('/usage')
-                ? 'bg-indigo-50 text-indigo-700'
-                : 'text-gray-700 hover:bg-gray-50'
-            }`}
-            title="Usage"
-          >
-            <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Usage</span>}
-          </Link>
-
-          {routeAccess.showMeData && (
-            <Link
-              href="/domains-extractor"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/domains-extractor')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Extract Domains"
-            >
-              <Globe className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Extract Domains</span>}
-            </Link>
-          )}
-
-          {routeAccess.showMeData && (
-            <>
-              <Link
-                href="/me-data"
-                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/me-data')
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                title="ME Data"
+            {routeAccess.canAccessResetAccount && (
+              <button
+                type="button"
+                onClick={() => setIsResetAccountModalOpen(true)}
+                className={`flex items-center w-full ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
+                title="Reset Account"
               >
-                <Database className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>ME Data</span>}
-              </Link>
-              <Link
-                href="/me-data-prospects"
-                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/me-data-prospects')
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                title="ME Data Prospects"
-              >
-                <Users className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>ME Prospects</span>}
-              </Link>
-              <Link
-                href="/data-pipelines"
-                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                  isActive('/data-pipelines')
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-700 hover:bg-gray-50'
-                }`}
-                title="Data Updation Pipelines"
-              >
-                <Wrench className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>Data Pipelines</span>}
-              </Link>
-            </>
-          )}
+                <RotateCcw className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Reset Account</span>}
+              </button>
+            )}
 
-          {routeAccess.showAdminStats && (
-            <Link
-              href="/admin-stats"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/admin-stats')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Admin Stats"
+            <a
+              href="https://calendly.com/founders-capitalxai/20min"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
+              title="Need Help - Book a 15 min call"
             >
-              <ShieldCheck className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Admin Stats</span>}
-            </Link>
-          )}
+              <HelpCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Need Help</span>}
+            </a>
+          </nav>
 
-          {routeAccess.canAccessResetAccount && (
-            <button
-              type="button"
-              onClick={() => setIsResetAccountModalOpen(true)}
-              className={`flex items-center w-full ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
-              title="Reset Account"
-            >
-              <RotateCcw className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Reset Account</span>}
-            </button>
-          )}
-
-          <a
-            href="https://calendly.com/founders-capitalxai/20min"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
-            title="Need Help - Book a 15 min call"
-          >
-            <HelpCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-            {(!isCollapsed || isMobile) && <span>Need Help</span>}
-          </a>
-        </nav>
-
-        {/* User info and logout at bottom */}
-        <div className={`p-4 border-t border-gray-200 space-y-3 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+          {/* User info */}
           {(!isCollapsed || isMobile) && (
-            <div className="px-4 py-2 space-y-3">
+            <div className={`px-4 py-2 space-y-3 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
               {/* Owner Dropdown */}
               <div>
                 <p className="text-xs text-gray-500 mb-2">Owner</p>
@@ -669,6 +669,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
               )}
             </div>
           )}
+        </div>
+
+        {/* Logout pinned at bottom */}
+        <div className={`shrink-0 p-4 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
           <button
             onClick={handleSignOut}
             className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'justify-center px-4'} py-2.5 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors`}

@@ -9,7 +9,7 @@ import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
 import { fetchGenerateMessages } from '@/lib/api';
 
-const B2B_CHANNELS: TemplateChannel[] = ['direct', 'instagram'];
+const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 
 export default function TemplatesPage() {
@@ -93,10 +93,12 @@ function TemplatesContent() {
 
   const handleCreate = async (data: { title: string; channel: TemplateChannel; template: string }) => {
     await createTemplate(data);
+    setActiveTab(data.channel);
   };
 
   const handleUpdate = async (id: string, data: { title: string; channel: TemplateChannel; template: string }) => {
     await updateTemplate(id, data);
+    setActiveTab(data.channel);
   };
 
   const handleDeleteClick = (id: string) => {

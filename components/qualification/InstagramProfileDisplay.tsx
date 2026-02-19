@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { generateMessageTemplates } from '../../lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { copyToClipboard } from '@/lib/utils';
+import { summaryKeyToLabel, formatSummaryValue } from '@/lib/summaryUtils';
 
 export interface InstagramProfileData {
   id: string;
@@ -24,23 +25,25 @@ export interface InstagramProfileData {
   };
 }
 
-interface InstagramQualificationData {
-  profile_summary: string;
-  profile_industry: string;
-  sales_opener_sentence: string;
-  classification: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED';
-  confidence_score?: number; // Optional - only show if present
-  product_types: string[] | null;
-  sales_action: 'OUTREACH' | 'EXCLUDE' | 'PARTNERSHIP' | 'MANUAL_REVIEW';
-  email?: string | null;
-  phone?: string | null;
-}
-
 interface InstagramProfileDisplayProps {
   data: InstagramProfileData | null;
   instagramUrl: string;
-  qualificationData?: InstagramQualificationData | null;
+  qualificationData?: Record<string, any> | null;
 }
+
+const CLASSIFICATION_COLORS: Record<string, string> = {
+  QUALIFIED: 'bg-green-100 text-green-800 border-green-300',
+  NOT_QUALIFIED: 'bg-red-100 text-red-800 border-red-300',
+  MAYBE: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+  EXPIRED: 'bg-gray-100 text-gray-800 border-gray-300',
+};
+
+const SALES_ACTION_COLORS: Record<string, string> = {
+  OUTREACH: 'bg-blue-100 text-blue-800 border-blue-300',
+  EXCLUDE: 'bg-red-100 text-red-800 border-red-300',
+  PARTNERSHIP: 'bg-purple-100 text-purple-800 border-purple-300',
+  MANUAL_REVIEW: 'bg-orange-100 text-orange-800 border-orange-300',
+};
 
 const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data, instagramUrl, qualificationData }) => {
   const [copiedMessage, setCopiedMessage] = useState<number | null>(null);
@@ -63,6 +66,97 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
       </div>
     );
   }
+
+  const renderQualificationValue = (key: string, value: any) => {
+    if (value === null || value === undefined) return null;
+    const label = summaryKeyToLabel(key);
+
+    if (key === 'classification' && typeof value === 'string') {
+      const color = CLASSIFICATION_COLORS[value] || 'bg-gray-100 text-gray-800 border-gray-300';
+      return (
+        <div key={key} className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <div className={`inline-flex items-center px-3 py-1.5 rounded-full border font-semibold text-sm ${color}`}>
+            {value}
+          </div>
+        </div>
+      );
+    }
+
+    if (key === 'sales_action' && typeof value === 'string') {
+      const color = SALES_ACTION_COLORS[value] || 'bg-gray-100 text-gray-800 border-gray-300';
+      return (
+        <div key={key} className="space-y-2 mb-6">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <div className={`inline-flex items-center px-4 py-2 rounded-lg border font-semibold ${color}`}>
+            {value.replace(/_/g, ' ')}
+          </div>
+        </div>
+      );
+    }
+
+    if (key === 'confidence_score' && typeof value === 'number') {
+      const pct = value <= 1 ? value * 100 : value;
+      const color = pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-yellow-600' : 'text-red-600';
+      const barColor = pct >= 80 ? 'bg-green-600' : pct >= 60 ? 'bg-yellow-600' : 'bg-red-600';
+      return (
+        <div key={key} className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <div className="flex items-center gap-2">
+            <span className={`text-2xl font-bold ${color}`}>{pct.toFixed(0)}%</span>
+            <div className="flex-1 bg-gray-200 rounded-full h-2.5">
+              <div className={`h-2.5 rounded-full ${barColor}`} style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (Array.isArray(value)) {
+      const filtered = value.filter(v => v != null && String(v).trim() !== '');
+      if (filtered.length === 0) return null;
+      return (
+        <div key={key} className="space-y-2 mb-6">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <div className="flex flex-wrap gap-2">
+            {filtered.map((item, idx) => (
+              <span key={idx} className="inline-flex items-center px-3 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-sm font-medium capitalize">
+                {String(item)}
+              </span>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (key === 'email' && typeof value === 'string' && value.includes('@')) {
+      return (
+        <div key={key} className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <a href={`mailto:${value}`} className="text-blue-600 hover:text-blue-800 hover:underline break-all">{value}</a>
+        </div>
+      );
+    }
+
+    if (key === 'phone' && typeof value === 'string' && value.trim()) {
+      return (
+        <div key={key} className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800 hover:underline">{value}</a>
+        </div>
+      );
+    }
+
+    const displayValue = formatSummaryValue(value);
+    if (displayValue === '-') return null;
+
+    return (
+      <div key={key} className="space-y-2 mb-6">
+        <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+        <p className="text-gray-700 leading-relaxed text-sm sm:text-base">{displayValue}</p>
+      </div>
+    );
+  };
 
   return (
     <div className="w-full bg-white border shadow-sm p-4 sm:p-8 mt-2 rounded-lg">
@@ -133,163 +227,37 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
           </a>
         </div>
 
-        {/* Qualification Section */}
+        {/* Qualification Section - renders all fields dynamically */}
         {qualificationData ? (
           <div className="pt-6 mt-6 border-t border-gray-200">
-            <h3 className="text-xl font-semibold text-gray-900 mb-4">Sales Qualification Assessment</h3>
+            <h3 className="text-xl font-semibold text-gray-900 mb-4">Research Summary</h3>
             
-            {/* Profile Summary */}
-            {qualificationData.profile_summary && (
-              <div className="space-y-2 mb-6">
-                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Profile Summary</h4>
-                <p className="text-gray-700 leading-relaxed text-sm sm:text-base">
-                  {qualificationData.profile_summary}
-                </p>
-              </div>
-            )}
-
-            {/* Profile Industry */}
-            {qualificationData.profile_industry && (
-              <div className="space-y-2 mb-6">
-                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Profile Industry</h4>
-                <p className="text-gray-700 leading-relaxed text-sm sm:text-base">
-                  {qualificationData.profile_industry}
-                </p>
-              </div>
-            )}
-
-            {/* Sales Opener Sentence */}
-            {qualificationData.sales_opener_sentence && (
-              <div className="space-y-2 mb-6">
-                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Sales Opener Sentence</h4>
-                <p className="text-gray-700 leading-relaxed text-sm sm:text-base italic">
-                  {qualificationData.sales_opener_sentence}
-                </p>
-              </div>
-            )}
-
-            <div className={`grid ${qualificationData.confidence_score !== undefined ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'} gap-4 mb-6`}>
-              {/* Classification */}
-              <div className="space-y-2">
-                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Classification</h4>
-                <div className={`inline-flex items-center px-3 py-1.5 rounded-full border font-semibold text-sm ${
-                  qualificationData.classification === 'QUALIFIED' 
-                    ? 'bg-green-100 text-green-800 border-green-300'
-                    : qualificationData.classification === 'NOT_QUALIFIED'
-                    ? 'bg-red-100 text-red-800 border-red-300'
-                    : qualificationData.classification === 'MAYBE'
-                    ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-                    : 'bg-gray-100 text-gray-800 border-gray-300'
-                }`}>
-                  {qualificationData.classification}
-                </div>
-              </div>
-
-              {/* Confidence Score - Only show if present */}
-              {qualificationData.confidence_score !== undefined && (
-                <div className="space-y-2">
-                  <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Confidence Score</h4>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-2xl font-bold ${
-                      qualificationData.confidence_score >= 0.8
-                        ? 'text-green-600'
-                        : qualificationData.confidence_score >= 0.6
-                        ? 'text-yellow-600'
-                        : 'text-red-600'
-                    }`}>
-                      {(qualificationData.confidence_score * 100).toFixed(0)}%
-                    </span>
-                    <div className="flex-1 bg-gray-200 rounded-full h-2.5">
-                      <div
-                        className={`h-2.5 rounded-full ${
-                          qualificationData.confidence_score >= 0.8
-                            ? 'bg-green-600'
-                            : qualificationData.confidence_score >= 0.6
-                            ? 'bg-yellow-600'
-                            : 'bg-red-600'
-                        }`}
-                        style={{ width: `${qualificationData.confidence_score * 100}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Product Types - Show when QUALIFIED and product_types exist (can be 1 or more items) */}
-            {qualificationData.classification === 'QUALIFIED' && qualificationData.product_types && Array.isArray(qualificationData.product_types) && qualificationData.product_types.length > 0 && (
-              <div className="space-y-2 mb-6">
-                <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Product Types</h4>
-                <div className="flex flex-wrap gap-2">
-                  {qualificationData.product_types.map((type, index) => (
-                    <span
-                      key={index}
-                      className="inline-flex items-center px-3 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-sm font-medium capitalize"
-                    >
-                      {type}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Sales Action */}
-            <div className="space-y-2 mb-6">
-              <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Recommended Sales Action</h4>
-              <div className={`inline-flex items-center px-4 py-2 rounded-lg border font-semibold ${
-                qualificationData.sales_action === 'OUTREACH'
-                  ? 'bg-blue-100 text-blue-800 border-blue-300'
-                  : qualificationData.sales_action === 'EXCLUDE'
-                  ? 'bg-red-100 text-red-800 border-red-300'
-                  : qualificationData.sales_action === 'PARTNERSHIP'
-                  ? 'bg-purple-100 text-purple-800 border-purple-300'
-                  : 'bg-orange-100 text-orange-800 border-orange-300'
-              }`}>
-                {qualificationData.sales_action.replace('_', ' ')}
-              </div>
-            </div>
+            {Object.entries(qualificationData)
+              .filter(([key]) => key !== 'email' && key !== 'phone')
+              .map(([key, value]) => renderQualificationValue(key, value))}
 
             {/* Contact Information */}
             {(qualificationData.email || qualificationData.phone) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-                {qualificationData.email && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Email</h4>
-                    <a 
-                      href={`mailto:${qualificationData.email}`}
-                      className="text-blue-600 hover:text-blue-800 hover:underline break-all"
-                    >
-                      {qualificationData.email}
-                    </a>
-                  </div>
-                )}
-                {qualificationData.phone && (
-                  <div className="space-y-2">
-                    <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">Phone</h4>
-                    <a 
-                      href={`tel:${qualificationData.phone}`}
-                      className="text-blue-600 hover:text-blue-800 hover:underline"
-                    >
-                      {qualificationData.phone}
-                    </a>
-                  </div>
-                )}
+                {qualificationData.email && renderQualificationValue('email', qualificationData.email)}
+                {qualificationData.phone && renderQualificationValue('phone', qualificationData.phone)}
               </div>
             )}
 
-            {/* Message Templates for Instagram Research */}
-            {qualificationData.classification === 'QUALIFIED' && qualificationData.product_types && qualificationData.product_types.length > 0 && (() => {
-              // Get all templates from database for 'instagram' channel, or use undefined to fallback to hard-coded
+            {/* Message Templates */}
+            {(() => {
               const dbTemplates = templates
                 .filter(t => t.channel === 'instagram')
                 .map(t => t.template)
                 .filter(t => t && t.trim().length > 0);
               const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
-              const messages = generateMessageTemplates(qualificationData, true, templateStrings); // true = Instagram research
+              const messages = generateMessageTemplates(qualificationData, true, templateStrings);
               
+              if (messages.length === 0) return null;
+
               return (
                 <div className="pt-6 mt-6 border-t border-gray-200">
-                  <h3 className="text-xl font-semibold text-gray-900 mb-4">Instagram Research Message Templates</h3>
+                  <h3 className="text-xl font-semibold text-gray-900 mb-4">Message Templates</h3>
                   <div className="space-y-4">
                     {messages.map((message, index) => (
                       <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
@@ -337,4 +305,3 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
 };
 
 export default InstagramProfileDisplay;
-

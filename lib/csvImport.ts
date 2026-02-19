@@ -85,87 +85,45 @@ export const csvToString = (headers: string[], rows: CsvRow[]): string => {
   return [headerLine, ...rowLines].join('\n');
 };
 
-// Add or update columns in CSV rows
+// Add or update columns in CSV rows using generic summary data
 export const mergeQualificationData = (
   rows: CsvRow[],
   urlColumn: string,
   qualificationDataMap: Map<string, any>
 ): CsvRow[] => {
+  const { writeSummaryToCsvRow } = require('./summaryUtils');
+
   const newRows = rows.map(row => {
     const url = row[urlColumn] || '';
     const qualificationData = qualificationDataMap.get(url);
     
     if (!qualificationData) {
-      return row; // No data to merge
+      return row;
     }
 
     const updatedRow = { ...row };
-    
-    // Add or update qualification columns
-    updatedRow['Company Summary'] = qualificationData.company_summary || qualificationData.profile_summary || updatedRow['Company Summary'] || '';
-    updatedRow['Company Industry'] = qualificationData.company_industry || qualificationData.profile_industry || updatedRow['Company Industry'] || '';
-    updatedRow['Sales Opener Sentence'] = qualificationData.sales_opener_sentence || updatedRow['Sales Opener Sentence'] || '';
-    updatedRow['Classification'] = qualificationData.classification || updatedRow['Classification'] || '';
-    // Only update confidence score if it exists
-    if (qualificationData.confidence_score !== undefined) {
-      updatedRow['Confidence Score'] = String(qualificationData.confidence_score);
-    }
-    
-    // Handle product types
-    if (qualificationData.product_types && Array.isArray(qualificationData.product_types)) {
-      const productTypes = qualificationData.product_types.filter((pt: any) => pt && typeof pt === 'string');
-      if (productTypes.length > 0) {
-        // Format product types as string: "A", "A and B", or "A, B, and C"
-        if (productTypes.length === 1) {
-          updatedRow['Product Types'] = productTypes[0];
-        } else if (productTypes.length === 2) {
-          updatedRow['Product Types'] = `${productTypes[0]} and ${productTypes[1]}`;
-        } else {
-          const allButLast = productTypes.slice(0, -1).join(', ');
-          updatedRow['Product Types'] = `${allButLast}, and ${productTypes[productTypes.length - 1]}`;
-        }
-        
-        // Add individual product type columns
-        productTypes.forEach((pt: string, index: number) => {
-          updatedRow[`PRODUCT${index + 1}`] = pt;
-        });
-      }
-    }
-    
-    updatedRow['Sales Action'] = qualificationData.sales_action || updatedRow['Sales Action'] || '';
-    
+    writeSummaryToCsvRow(qualificationData, updatedRow);
     return updatedRow;
   });
 
   return newRows;
 };
 
-// Ensure all required columns exist in headers
-export const ensureColumnsExist = (headers: string[]): string[] => {
-  const requiredColumns = [
-    'Company Summary',
-    'Company Industry',
-    'Sales Opener Sentence',
-    'Classification',
-    'Confidence Score',
-    'Product Types',
-    'Sales Action',
-    'Research Status',
-    'Cleaned URL',
-    'Entity Type',
-    'Is Investor',
-    'Clean Name',
-    'Investor Types',
-    'Links',
-  ];
+// Ensure required non-summary columns exist in headers.
+// Summary columns are added dynamically based on what the AI returns.
+export const ensureColumnsExist = (
+  headers: string[],
+  extraColumns?: string[],
+): string[] => {
+  const alwaysRequired = ['Research Status'];
   
   const newHeaders = [...headers];
   
-  requiredColumns.forEach(col => {
+  for (const col of [...alwaysRequired, ...(extraColumns ?? [])]) {
     if (!newHeaders.includes(col)) {
       newHeaders.push(col);
     }
-  });
+  }
   
   return newHeaders;
 };
