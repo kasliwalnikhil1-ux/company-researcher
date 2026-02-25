@@ -2155,12 +2155,12 @@ export default function LinkedInConversationsPage() {
               ) : (
                 <>
                   {/* Thread Header */}
-                  <div className="bg-white border-b border-gray-200 px-3 sm:px-4 py-2.5 sm:py-3 flex-shrink-0">
+                  <div className="bg-white border-b border-gray-200 px-3 sm:px-4 py-2.5 sm:py-3 flex-shrink-0 sticky top-0 z-10">
                     {/* Row 1: Back + avatar + name + contact info toggle */}
                     <div className="flex items-center gap-2 sm:gap-3">
                       <button
                         onClick={closeThread}
-                        className="p-1 sm:p-1.5 rounded-lg hover:bg-gray-100 transition-colors hidden md:block flex-shrink-0"
+                        className="p-1 sm:p-1.5 rounded-lg hover:bg-gray-100 transition-colors block md:hidden flex-shrink-0"
                       >
                         <ArrowLeft className="w-5 h-5 text-gray-500" />
                       </button>
