@@ -1,5 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 import { getJsonCompletion, Message } from '@/utils/azureOpenAiHelper';
+import {
+  DEFAULT_LINKEDIN_GENERATE_REPLY_SYSTEM_PROMPT,
+  DEFAULT_LINKEDIN_INTRO,
+  DEFAULT_LINKEDIN_CONTEXT,
+  DEFAULT_LINKEDIN_HANDOVER_RULES,
+  buildLinkedinGenerateReplyPrompt,
+} from '@/app/personalization/linkedinGenerateReplyDefault';
+
+/** Auth client (anon key + user token) for verifying user identity */
+function getAuthClient(accessToken: string) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  if (!url || !anonKey) throw new Error('Missing Supabase environment variables');
+  return createClient(url, anonKey, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
+}
+
+/** Service client (service role key) for DB operations */
+function getServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!url || !key) throw new Error('Missing Supabase service role environment variables');
+  return createClient(url, key);
+}
 
 const VALID_STAGES = [
   'reply_received',
@@ -11,116 +37,24 @@ const VALID_STAGES = [
   'closed_lost',
 ];
 
-const SYSTEM_PROMPT = `You are an autonomous AI sales agent for CapitalxAI.
-
-CapitalxAI is an AI-powered fundraising platform that helps founders:
-
-• Find mission-aligned investors from a database of 3000+ investors
-• Discover investors using AI research across millions of websites
-• Generate ultra-personalized outreach messages
-• Run automated outreach campaigns
-• Book more investor meetings faster
-
-Your job is to talk with founders who are raising capital.
-
-Your goals:
-
-• Understand their fundraising situation
-• Qualify whether they are raising capital
-• Answer questions about CapitalxAI
-• Help them see how CapitalxAI can help
-• Guide them toward booking a demo if relevant
-
-You must behave like a professional human team member.
-
-Never sound robotic.
-
-Never say you are an AI.
-
-Never invent facts.
-
-Only use known information.
-
----
-
-DECISION:
-
-You must decide ONE action:
-
-"reply"
-or
-"handover"
-
-Use "handover" if:
-
-• user asks for pricing details you do not know
-• user asks for discounts or negotiation
-• user asks technical questions you cannot answer confidently
-• user asks to speak with human
-• user is ready to buy
-• user is upset
-• you are unsure what to say
-
-Otherwise use "reply"
-
----
-
-STAGE CLASSIFICATION:
-
-Based on the conversation, classify the current stage of this prospect. Choose EXACTLY ONE:
-
-• "reply_received" — default when prospect has just replied, early conversation, no clear advancement yet
-• "meeting_scheduled" — prospect has agreed to or is scheduling a meeting/call/demo
-• "demo_completed" — a demo or meeting has already happened, follow-up discussion
-• "proposal_sent" — a proposal, pricing, or offer has been shared with the prospect
-• "negotiating" — prospect is discussing terms, pricing, timelines, or conditions
-• "closed_won" — prospect has agreed to buy/sign up
-• "closed_lost" — prospect has clearly declined, gone silent after multiple follow-ups, or said no
-
----
-
-OUTPUT FORMAT:
-
-Return ONLY valid JSON.
-
-Format:
-
-If replying:
-
-{
-  "action": "reply",
-  "message": "message text",
-  "stage": "stage_value"
-}
-
-If handover:
-
-{
-  "action": "handover",
-  "message": null,
-  "stage": "stage_value"
-}
-
----
-
-MESSAGE RULES:
-
-Your message must:
-
-• be natural
-• be concise
-• be human sounding
-• be helpful
-• ask questions when useful
-
-Focus on helping founders raise capital using CapitalxAI.
-
-Your main objective:
-
-book a demo.`;
+/** Fallback when personalization.linkedinConversations.systemPrompt is null */
+const DEFAULT_SYSTEM_PROMPT = DEFAULT_LINKEDIN_GENERATE_REPLY_SYSTEM_PROMPT;
 
 export async function POST(request: NextRequest) {
   try {
+    const authHeader = request.headers.get('authorization') || '';
+    const accessToken = authHeader.replace(/^Bearer\s+/i, '');
+    if (!accessToken) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const authClient = getAuthClient(accessToken);
+    const { data: userData, error: userError } = await authClient.auth.getUser();
+    if (userError || !userData?.user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const userId = userData.user.id;
+
     const body = await request.json();
     const conversation_history = body.conversation_history ?? '';
     const user_message = body.user_message ?? '';
@@ -139,6 +73,56 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch personalization once (like onboarding from user_settings)
+    let systemPrompt = DEFAULT_SYSTEM_PROMPT;
+    try {
+      const supabase = getServiceClient();
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('personalization')
+        .eq('id', userId)
+        .single();
+
+      if (!error && data?.personalization) {
+        const personalization = typeof data.personalization === 'string'
+          ? JSON.parse(data.personalization)
+          : data.personalization;
+
+        const lcRaw = personalization?.linkedinConversations;
+        const lc = lcRaw && typeof lcRaw === 'object' ? lcRaw : null;
+
+        let custom: string | null = null;
+
+        if (lc) {
+          const hasSegmentOverrides =
+            (typeof lc.intro === 'string' && lc.intro.trim().length > 0) ||
+            (typeof lc.context === 'string' && lc.context.trim().length > 0) ||
+            (typeof lc.handoverRules === 'string' && lc.handoverRules.trim().length > 0);
+
+          if (hasSegmentOverrides) {
+            const intro =
+              (typeof lc.intro === 'string' && lc.intro.trim()) || DEFAULT_LINKEDIN_INTRO;
+            const context =
+              (typeof lc.context === 'string' && lc.context.trim()) || DEFAULT_LINKEDIN_CONTEXT;
+            const handoverRules =
+              (typeof lc.handoverRules === 'string' && lc.handoverRules.trim()) ||
+              DEFAULT_LINKEDIN_HANDOVER_RULES;
+
+            custom = buildLinkedinGenerateReplyPrompt(intro, context, handoverRules);
+          } else if (typeof lc.systemPrompt === 'string' && lc.systemPrompt.trim()) {
+            // Backwards compatibility: use legacy full systemPrompt if present
+            custom = lc.systemPrompt.trim();
+          }
+        }
+
+        if (custom) {
+          systemPrompt = custom;
+        }
+      }
+    } catch (e) {
+      console.warn('[generate-reply] Failed to fetch personalization, using default:', e);
+    }
+
     const userPrompt = `Conversation history:
 
 ${conversation_history}
@@ -150,7 +134,7 @@ ${user_message}
 Respond according to system instructions.`;
 
     const messages: Message[] = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ];
 

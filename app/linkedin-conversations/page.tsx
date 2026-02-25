@@ -1174,6 +1174,12 @@ export default function LinkedInConversationsPage() {
       setGeneratingReply(true);
       setGenerateError(null);
 
+      const token = await getValidAccessToken();
+      if (!token) {
+        setGenerateError('Not authenticated');
+        return;
+      }
+
       // Build conversation history from the last 20 messages
       const recentMessages = threadMessages.slice(-20);
       const conversationHistory = recentMessages
@@ -1192,7 +1198,10 @@ export default function LinkedInConversationsPage() {
 
       const res = await fetch('/api/linkedin-conversations/generate-reply', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           conversation_history: conversationHistory,
           user_message: userMessage,
@@ -1476,7 +1485,10 @@ export default function LinkedInConversationsPage() {
 
           const res = await fetch('/api/linkedin-conversations/generate-reply', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
             body: JSON.stringify({
               conversation_history: conversationHistory,
               user_message: userMessage,
@@ -2570,7 +2582,6 @@ export default function LinkedInConversationsPage() {
                         rows={1}
                         className="flex-1 px-4 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none bg-gray-50 max-h-32"
                         style={{
-                          height: 'auto',
                           minHeight: '42px',
                           maxHeight: '128px',
                           overflow: replyText.split('\n').length > 4 ? 'auto' : 'hidden',

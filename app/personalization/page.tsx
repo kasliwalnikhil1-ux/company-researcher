@@ -1,12 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 import Toast from '@/components/ui/Toast';
+import { getValidAccessToken } from '@/lib/api';
+import {
+  DEFAULT_LINKEDIN_GENERATE_REPLY_SYSTEM_PROMPT,
+  DEFAULT_LINKEDIN_INTRO,
+  DEFAULT_LINKEDIN_CONTEXT,
+  DEFAULT_LINKEDIN_HANDOVER_RULES,
+  buildLinkedinGenerateReplyPrompt,
+} from './linkedinGenerateReplyDefault';
 
 const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
   '2793f3da-9340-44f4-b285-b7836bfb8591',
@@ -45,16 +53,59 @@ interface PersonalizationData {
     systemPrompt: string;
     userMessage: string;
   };
+  linkedinConversations: {
+    intro: string;
+    context: string;
+    handoverRules: string;
+    systemPrompt?: string | null;
+  };
 }
 
 function PersonalizationContent() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram'>('direct');
+  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations'>('direct');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState('');
   const [showToast, setShowToast] = useState(false);
+  const [testSlots, setTestSlots] = useState<
+    {
+      input: string;
+      loading: boolean;
+      result: {
+        action?: string;
+        message?: string | null;
+        stage?: string;
+        error?: string;
+      } | null;
+    }[]
+  >(() =>
+    Array.from({ length: 10 }, () => ({
+      input: '',
+      loading: false,
+      result: null,
+    })),
+  );
+  const linkedinIntroRef = useRef<HTMLTextAreaElement | null>(null);
+  const linkedinContextRef = useRef<HTMLTextAreaElement | null>(null);
+  const linkedinHandoverRulesRef = useRef<HTMLTextAreaElement | null>(null);
+  const testReplyRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
+
+  const autoGrow = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+
+  useEffect(() => {
+    testReplyRefs.current.forEach((el) => {
+      if (el) {
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+      }
+    });
+  }, [testSlots]);
   const [formData, setFormData] = useState<PersonalizationData>({
     direct: {
       query: '',
@@ -64,7 +115,19 @@ function PersonalizationContent() {
       systemPrompt: '',
       userMessage: '',
     },
+    linkedinConversations: {
+      intro: '',
+      context: '',
+      handoverRules: '',
+    },
   });
+
+  useEffect(() => {
+    if (activeTab !== 'linkedinConversations') return;
+    autoGrow(linkedinIntroRef.current);
+    autoGrow(linkedinContextRef.current);
+    autoGrow(linkedinHandoverRulesRef.current);
+  }, [activeTab]);
 
   // Default values
   const defaultDirectQuery = "You are a sales qualification assistant for a company that sells an AI software service to fashion/apparel/jewelry BRANDS that sell PHYSICAL products.\n\nYour job: classify the input company as:\n- QUALIFIED (sells physical fashion/apparel/jewelry products)\n- NOT_QUALIFIED (does NOT sell physical products; or is software/SaaS/IT/service provider)\n- MAYBE (unclear)\n\nCRITICAL RULE:\nOnly mark QUALIFIED if the company sells PHYSICAL consumer products (apparel, jewelry, accessories, etc.) to customers.\nIf the company sells software, SaaS, IT services, consulting, agencies, marketplaces, manufacturing/export services, or is a tool/vendor/provider, it is NOT_QUALIFIED.\n\nReturn STRICT JSON only following the schema.\nQualification Rules\nQUALIFIED ✅\n\nMark QUALIFIED only if you see some evidence of physical product commerce in the profile, such as:\n- product categories mentioned in bio (e.g., \"shirts\", \"kurtas\", \"rings\", \"earrings\")\n- shop links, website links, or e-commerce indicators\n- product-focused content in bio\n- brand/store indicators\n- fashion/apparel/jewelry business signals\n- fashion/apparel/jewelry Manufacturer / exporter / OEM / ODM / supplier / wholesaler\n- fashion/apparel/jewelry marketplace indicators (e.g., \"shop on Amazon\", \"shop on Flipkart\", \"shop on Myntra\", \"shop on Etsy\")\n\nNOT_QUALIFIED ❌\n\nMark NOT_QUALIFIED if ANY are true:\n- Sells software subscription / Is SaaS / Is app / Is AI tool\n- \"We provide services to brands\" (not selling products, like IT services / marketing agency / consulting)\n\nOnly return product_types when classification = \"QUALIFIED\".\n\nproduct_types must be EXACTLY 2 items:\n- generic physical product types (e.g., \"earrings\", \"rings\", \"kurtas\", \"shirts\")\n- NOT \"apparel\", \"jewelry\", \"fashion\" (too broad)\n- NOT services (\"photoshoots\", \"videography\")\n- NOT software (\"platform\", \"tool\", \"API\")\n\nIf you cannot find 2 real product types on the website text, then:\n- classification must be MAYBE (not QUALIFIED)\n- product_types must be null\n- sales_opener_sentence: Message to send to founder, follow exact sentence structure, starting with I think your...\n\nemail and phone as strings if present on the website else null";
@@ -233,7 +296,7 @@ Return the assessment in the exact JSON schema format.`;
         // PGRST116 = no rows returned (user hasn't set personalization yet)
         if (error && error.code === 'PGRST116') {
           // No personalization set yet, use defaults
-          const defaultData = {
+          const defaultData: PersonalizationData = {
             direct: {
               query: defaultDirectQuery,
               schema: defaultDirectSchema,
@@ -241,6 +304,11 @@ Return the assessment in the exact JSON schema format.`;
             instagram: {
               systemPrompt: defaultInstagramSystemPrompt,
               userMessage: defaultInstagramUserMessage,
+            },
+            linkedinConversations: {
+              intro: DEFAULT_LINKEDIN_INTRO,
+              context: DEFAULT_LINKEDIN_CONTEXT,
+              handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
             },
           };
           setFormData(defaultData);
@@ -261,14 +329,19 @@ Return the assessment in the exact JSON schema format.`;
               systemPrompt: defaultInstagramSystemPrompt,
               userMessage: defaultInstagramUserMessage,
             },
+            linkedinConversations: {
+              intro: DEFAULT_LINKEDIN_INTRO,
+              context: DEFAULT_LINKEDIN_CONTEXT,
+              handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
+            },
           });
         } else if (data?.personalization) {
           // Personalization exists, load it
           const parsed = typeof data.personalization === 'string' 
             ? JSON.parse(data.personalization) 
             : data.personalization;
-          
-          const loadedData = {
+
+          const loadedData: PersonalizationData = {
             direct: {
               query: parsed.direct?.query || defaultDirectQuery,
               schema: parsed.direct?.schema || defaultDirectSchema,
@@ -277,8 +350,14 @@ Return the assessment in the exact JSON schema format.`;
               systemPrompt: parsed.instagram?.systemPrompt || defaultInstagramSystemPrompt,
               userMessage: parsed.instagram?.userMessage || defaultInstagramUserMessage,
             },
+            linkedinConversations: {
+              intro: parsed.linkedinConversations?.intro || DEFAULT_LINKEDIN_INTRO,
+              context: parsed.linkedinConversations?.context || DEFAULT_LINKEDIN_CONTEXT,
+              handoverRules: parsed.linkedinConversations?.handoverRules || DEFAULT_LINKEDIN_HANDOVER_RULES,
+              systemPrompt: parsed.linkedinConversations?.systemPrompt ?? DEFAULT_LINKEDIN_GENERATE_REPLY_SYSTEM_PROMPT,
+            },
           };
-          
+
           setFormData(loadedData);
           
           // Validate schema if it exists
@@ -296,6 +375,11 @@ Return the assessment in the exact JSON schema format.`;
               systemPrompt: defaultInstagramSystemPrompt,
               userMessage: defaultInstagramUserMessage,
             },
+            linkedinConversations: {
+              intro: DEFAULT_LINKEDIN_INTRO,
+              context: DEFAULT_LINKEDIN_CONTEXT,
+              handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
+            },
           });
         }
       } catch (error) {
@@ -309,6 +393,11 @@ Return the assessment in the exact JSON schema format.`;
           instagram: {
             systemPrompt: defaultInstagramSystemPrompt,
             userMessage: defaultInstagramUserMessage,
+          },
+          linkedinConversations: {
+            intro: DEFAULT_LINKEDIN_INTRO,
+            context: DEFAULT_LINKEDIN_CONTEXT,
+            handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
           },
         });
       } finally {
@@ -339,6 +428,19 @@ Return the assessment in the exact JSON schema format.`;
         }
       }
 
+      const intro =
+        (formData.linkedinConversations.intro || DEFAULT_LINKEDIN_INTRO).trim();
+      const context =
+        (formData.linkedinConversations.context || DEFAULT_LINKEDIN_CONTEXT).trim();
+      const handoverRules =
+        (formData.linkedinConversations.handoverRules || DEFAULT_LINKEDIN_HANDOVER_RULES).trim();
+
+      const linkedinSystemPrompt = buildLinkedinGenerateReplyPrompt(
+        intro,
+        context,
+        handoverRules,
+      );
+
       const personalizationData = {
         direct: {
           query: formData.direct.query,
@@ -347,6 +449,12 @@ Return the assessment in the exact JSON schema format.`;
         instagram: {
           systemPrompt: formData.instagram.systemPrompt,
           userMessage: formData.instagram.userMessage,
+        },
+        linkedinConversations: {
+          intro,
+          context,
+          handoverRules,
+          systemPrompt: linkedinSystemPrompt,
         },
       };
 
@@ -385,6 +493,186 @@ Return the assessment in the exact JSON schema format.`;
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleTestLinkedinPrompt = async (index: number) => {
+    const slot = testSlots[index];
+    if (!user) {
+      setToastMessage('You must be logged in to run a test.');
+      setShowToast(true);
+      return;
+    }
+
+    if (!slot.input.trim()) {
+      setToastMessage('Please paste a LinkedIn conversation to test.');
+      setShowToast(true);
+      return;
+    }
+
+    try {
+      setTestSlots((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], loading: true, result: null };
+        return next;
+      });
+
+      const token = await getValidAccessToken();
+      if (!token) {
+        setToastMessage('Not authenticated. Please sign in again.');
+        setShowToast(true);
+        return;
+      }
+
+      const res = await fetch('/api/linkedin-conversations/generate-reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          conversation_history: '',
+          user_message: slot.input,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        const msg = data?.error || `Test failed (${res.status})`;
+        setTestSlots((prev) => {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            loading: false,
+            result: { error: msg },
+          };
+          return next;
+        });
+        setToastMessage(msg);
+        setShowToast(true);
+        return;
+      }
+
+      setTestSlots((prev) => {
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          loading: false,
+          result: {
+            action: data.action,
+            message: data.message,
+            stage: data.stage,
+          },
+        };
+        return next;
+      });
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to run test';
+      setTestSlots((prev) => {
+        const next = [...prev];
+        next[index] = {
+          ...next[index],
+          loading: false,
+          result: { error: msg },
+        };
+        return next;
+      });
+      setToastMessage(msg);
+      setShowToast(true);
+    }
+  };
+
+  const handleTestAllLinkedinPrompts = async () => {
+    if (!user) {
+      setToastMessage('You must be logged in to run tests.');
+      setShowToast(true);
+      return;
+    }
+
+    const hasAnyInput = testSlots.some((slot) => slot.input.trim());
+    if (!hasAnyInput) {
+      setToastMessage('Please paste at least one LinkedIn conversation to test.');
+      setShowToast(true);
+      return;
+    }
+
+    const token = await getValidAccessToken();
+    if (!token) {
+      setToastMessage('Not authenticated. Please sign in again.');
+      setShowToast(true);
+      return;
+    }
+
+    setTestSlots((prev) =>
+      prev.map((slot) =>
+        slot.input.trim()
+          ? { ...slot, loading: true, result: null }
+          : slot,
+      ),
+    );
+
+    await Promise.all(
+      testSlots.map(async (slot, index) => {
+        if (!slot.input.trim()) return;
+
+        try {
+          const res = await fetch('/api/linkedin-conversations/generate-reply', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              conversation_history: '',
+              user_message: slot.input,
+            }),
+          });
+
+          const data = await res.json().catch(() => ({}));
+
+          if (!res.ok) {
+            const msg = data?.error || `Test failed (${res.status})`;
+            setTestSlots((prev) => {
+              const next = [...prev];
+              next[index] = {
+                ...next[index],
+                loading: false,
+                result: { error: msg },
+              };
+              return next;
+            });
+            return;
+          }
+
+          setTestSlots((prev) => {
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              loading: false,
+              result: {
+                action: data.action,
+                message: data.message,
+                stage: data.stage,
+              },
+            };
+            return next;
+          });
+        } catch (err) {
+          const msg =
+            err instanceof Error ? err.message : 'Failed to run test';
+          setTestSlots((prev) => {
+            const next = [...prev];
+            next[index] = {
+              ...next[index],
+              loading: false,
+              result: { error: msg },
+            };
+            return next;
+          });
+        }
+      }),
+    );
   };
 
   if (loading) {
@@ -444,6 +732,19 @@ Return the assessment in the exact JSON schema format.`;
             }`}
           >
             Instagram
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('linkedinConversations');
+              setSchemaError(null);
+            }}
+            className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'linkedinConversations'
+                ? 'border-indigo-500 text-indigo-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            LinkedIn Conversations
           </button>
         </nav>
       </div>
@@ -543,6 +844,218 @@ Return the assessment in the exact JSON schema format.`;
             <p className="mt-2 text-xs text-gray-500">
               Use placeholders like {"{"}username{"}"}, {"{"}full_name{"}"}, {"{"}biography{"}"}, {"{"}is_private{"}"}, {"{"}posts_count{"}"}, {"{"}followers{"}"}, {"{"}following{"}"}, {"{"}profile_pic_url{"}"} for dynamic values.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* LinkedIn Conversations Tab */}
+      {activeTab === 'linkedinConversations' && (
+        <div className="space-y-6">
+          {/* Prompt builder card */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">
+              LinkedIn AI System Prompt
+            </h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Build, test, and deploy your autonomous AI sales agent.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">INTRO</h3>
+                <textarea
+                  ref={linkedinIntroRef}
+                  value={formData.linkedinConversations.intro}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData({
+                      ...formData,
+                      linkedinConversations: {
+                        ...formData.linkedinConversations,
+                        intro: e.target.value,
+                      },
+                    });
+                  }}
+                  rows={1}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_LINKEDIN_INTRO}
+                />
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">CONTEXT</h3>
+                <textarea
+                  ref={linkedinContextRef}
+                  value={formData.linkedinConversations.context}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData({
+                      ...formData,
+                      linkedinConversations: {
+                        ...formData.linkedinConversations,
+                        context: e.target.value,
+                      },
+                    });
+                  }}
+                  rows={1}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_LINKEDIN_CONTEXT}
+                />
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">
+                  HANDOVER RULES
+                </h3>
+                <textarea
+                  ref={linkedinHandoverRulesRef}
+                  value={formData.linkedinConversations.handoverRules}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData({
+                      ...formData,
+                      linkedinConversations: {
+                        ...formData.linkedinConversations,
+                        handoverRules: e.target.value,
+                      },
+                    });
+                  }}
+                  rows={1}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_LINKEDIN_HANDOVER_RULES}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Test area card */}
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-sm font-semibold text-gray-900 mb-2">
+              Test with a conversation
+            </h2>
+            <p className="text-xs text-gray-500 mb-2">
+              Paste up to 10 LinkedIn conversations and generate replies using your
+              current saved settings.
+            </p>
+
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[11px] text-gray-500">
+                You can test up to 10 conversations in parallel.
+              </p>
+              <button
+                type="button"
+                onClick={async () => {
+                  await handleTestAllLinkedinPrompts();
+                }}
+                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+              >
+                Test All
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {testSlots.map((slot, index) => (
+                <div
+                  key={index}
+                  className="border border-gray-100 rounded-md p-3 bg-gray-50/50"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <p className="text-[11px] font-semibold text-gray-700">
+                      Conversation {index + 1}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleTestLinkedinPrompt(index)}
+                      disabled={slot.loading || !slot.input.trim()}
+                      className="inline-flex items-center px-2.5 py-0.5 border border-transparent text-[11px] font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-1 focus:ring-offset-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {slot.loading ? 'Testing...' : 'Test'}
+                    </button>
+                  </div>
+                  <textarea
+                    value={slot.input}
+                    onChange={(e) =>
+                      setTestSlots((prev) => {
+                        const next = [...prev];
+                        next[index] = {
+                          ...next[index],
+                          input: e.target.value,
+                        };
+                        return next;
+                      })
+                    }
+                    rows={4}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-xs mb-2"
+                    placeholder={
+                      index === 0
+                        ? `Prospect: Hi, I'm interested in learning more about CapitalxAI...\nYou: Great to hear that!`
+                        : 'Paste a LinkedIn conversation...'
+                    }
+                  />
+
+                  {slot.result && (
+                    <div className="mt-1 space-y-1">
+                      {slot.result.error ? (
+                        <p className="text-[11px] text-red-600">
+                          Error: {slot.result.error}
+                        </p>
+                      ) : (
+                        <>
+                          <p className="text-[11px] text-gray-700">
+                            <span className="font-semibold">Action:</span>{' '}
+                            {slot.result.action || '(none)'}
+                            {'  '}
+                            <span className="font-semibold ml-3">Stage:</span>{' '}
+                            {slot.result.stage || '(none)'}
+                          </p>
+                          {typeof slot.result.message === 'string' && (
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <p className="text-[11px] font-semibold text-gray-700">
+                                  Generated Reply
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(
+                                        slot.result?.message || '',
+                                      );
+                                      setToastMessage(
+                                        'Reply copied to clipboard.',
+                                      );
+                                      setShowToast(true);
+                                    } catch {
+                                      setToastMessage(
+                                        'Failed to copy to clipboard.',
+                                      );
+                                      setShowToast(true);
+                                    }
+                                  }}
+                                  className="text-[11px] px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-100"
+                                >
+                                  Copy
+                                </button>
+                              </div>
+                              <textarea
+                                ref={(el) => {
+                                  testReplyRefs.current[index] = el;
+                                  if (el) autoGrow(el);
+                                }}
+                                readOnly
+                                value={slot.result.message || ''}
+                                rows={1}
+                                className="block w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 font-mono text-[11px] resize-none overflow-hidden"
+                              />
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
