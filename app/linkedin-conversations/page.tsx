@@ -2186,7 +2186,7 @@ export default function LinkedInConversationsPage() {
                           {getLeadDisplayName(activeLead)}
                         </h3>
                         {(activeLead?.position || activeLead?.company_name) && (
-                          <p className="text-[10px] sm:text-xs text-gray-500 truncate sm:line-clamp-2">
+                          <p className="text-[10px] sm:text-xs text-gray-500 overflow-hidden line-clamp-1 sm:line-clamp-2">
                             {activeLead.position && <span>{activeLead.position}</span>}
                             {activeLead.position && activeLead.company_name && <span className="text-gray-400"> at </span>}
                             {activeLead.company_name && <span>{activeLead.company_name}</span>}
