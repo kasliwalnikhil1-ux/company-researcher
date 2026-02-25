@@ -7,6 +7,11 @@ import { createClient } from '@supabase/supabase-js';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 import { formatOnboardingCompanySummary, type OnboardingDataForSummary } from '@/lib/utils';
 import { fetchTwitterTimeline, type TwitterTweet } from '@/utils/twitterApi';
+import {
+  DEFAULT_INVESTOR_SYSTEM_PROMPT,
+  DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+  DEFAULT_INVESTOR_TWITTER_PROMPT,
+} from '../../personalization/investorAnalyzeDefault';
 
 const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 
@@ -263,12 +268,55 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const userMessage = USER_MESSAGE_TEMPLATE(companyContext, companyName)
-      .replace('<<<COMPANY_CONTEXT>>>', companyContext)
-      .replace(/<<<COMPANY_NAME>>>/g, companyName)
-      .replace('<<<DEEP_RESEARCH>>>', deepResearch.trim());
+    // Attempt to load user personalization overrides from user_settings.personalization
+    let systemContent: string;
+    let userMessage: string;
 
-    const systemContent = SYSTEM_MESSAGE.replace(/<<COMPANY_NAME>>>/g, companyName);
+    try {
+      const { data: userSettings } = await supabase
+        .from('user_settings')
+        .select('personalization')
+        .eq('id', user.id)
+        .single();
+
+      let personalization: any = userSettings?.personalization ?? null;
+      if (typeof personalization === 'string') {
+        try {
+          personalization = JSON.parse(personalization);
+        } catch {
+          personalization = null;
+        }
+      }
+
+      const investorPersonalization = personalization?.investorAnalyze ?? null;
+
+      const systemTemplate = investorPersonalization?.systemPrompt ?? DEFAULT_INVESTOR_SYSTEM_PROMPT;
+      systemContent = typeof systemTemplate === 'string'
+        ? systemTemplate.replace(/<<COMPANY_NAME>>>/g, companyName)
+        : DEFAULT_INVESTOR_SYSTEM_PROMPT.replace(/<<COMPANY_NAME>>>/g, companyName);
+
+      const userTemplate = investorPersonalization?.userMessage ?? DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE;
+      if (typeof userTemplate === 'string' && userTemplate.includes('<<<DEEP_RESEARCH>>>')) {
+        userMessage = userTemplate
+          .replace('<<<COMPANY_CONTEXT>>>', companyContext)
+          .replace(/<<<COMPANY_NAME>>>/g, companyName)
+          .replace('<<<DEEP_RESEARCH>>>', deepResearch.trim());
+      } else {
+        // Fallback to the default user-message template
+        userMessage = DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE
+          .replace('<<<COMPANY_CONTEXT>>>', companyContext)
+          .replace(/<<<COMPANY_NAME>>>/g, companyName)
+          .replace('<<<DEEP_RESEARCH>>>', deepResearch.trim());
+      }
+    } catch (personalizationErr) {
+      // If personalization fetch fails, fall back to defaults
+      const systemDefault = DEFAULT_INVESTOR_SYSTEM_PROMPT;
+      systemContent = systemDefault.replace(/<<COMPANY_NAME>>>/g, companyName);
+      userMessage = DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE
+        .replace('<<<COMPANY_CONTEXT>>>', companyContext)
+        .replace(/<<<COMPANY_NAME>>>/g, companyName)
+        .replace('<<<DEEP_RESEARCH>>>', deepResearch.trim());
+    }
     const userHasPlaceholder = userMessage.includes('<<<COMPANY_NAME>>>');
     const systemHasPlaceholder = systemContent.includes('<<COMPANY_NAME>>>');
     if (userHasPlaceholder || systemHasPlaceholder) {
@@ -347,12 +395,48 @@ export async function POST(req: NextRequest) {
             month: 'long',
             day: 'numeric',
           });
-          const twitterPrompt = TWITTER_ICEBREAKER_PROMPT(
-            investorName || 'They',
-            firstName || 'them',
-            allValidTweets,
-            dateString
-          );
+          // Attempt to use user's personalized twitter prompt template, fallback to default function
+          let twitterPrompt: string;
+          try {
+            const { data: userSettings } = await supabase
+              .from('user_settings')
+              .select('personalization')
+              .eq('id', user.id)
+              .single();
+
+            let personalization: any = userSettings?.personalization ?? null;
+            if (typeof personalization === 'string') {
+              try {
+                personalization = JSON.parse(personalization);
+              } catch {
+                personalization = null;
+              }
+            }
+
+            const twitterTemplate = personalization?.investorTwitter?.prompt ?? DEFAULT_INVESTOR_TWITTER_PROMPT;
+
+            if (typeof twitterTemplate === 'string') {
+              twitterPrompt = twitterTemplate
+                .replace(/{name}/g, investorName || 'They')
+                .replace(/{first_name}/g, firstName || 'them')
+                .replace(/{allValidTweets}/g, allValidTweets)
+                .replace(/{dateString}/g, dateString);
+            } else {
+              twitterPrompt = TWITTER_ICEBREAKER_PROMPT(
+                investorName || 'They',
+                firstName || 'them',
+                allValidTweets,
+                dateString
+              );
+            }
+          } catch (e) {
+            twitterPrompt = TWITTER_ICEBREAKER_PROMPT(
+              investorName || 'They',
+              firstName || 'them',
+              allValidTweets,
+              dateString
+            );
+          }
           const twitterExtracted = await getJsonCompletion(
             [{ role: 'user', content: twitterPrompt }],
             { max_tokens: 200 }

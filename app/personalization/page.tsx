@@ -15,6 +15,11 @@ import {
   DEFAULT_LINKEDIN_HANDOVER_RULES,
   buildLinkedinGenerateReplyPrompt,
 } from './linkedinGenerateReplyDefault';
+import {
+  DEFAULT_INVESTOR_SYSTEM_PROMPT,
+  DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+  DEFAULT_INVESTOR_TWITTER_PROMPT,
+} from './investorAnalyzeDefault';
 
 const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
   '2793f3da-9340-44f4-b285-b7836bfb8591',
@@ -59,11 +64,18 @@ interface PersonalizationData {
     handoverRules: string;
     systemPrompt?: string | null;
   };
+  investorAnalyze: {
+    systemPrompt: string;
+    userMessage: string;
+  };
+  investorTwitter: {
+    prompt: string;
+  };
 }
 
 function PersonalizationContent() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations'>('direct');
+  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter'>('direct');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -90,6 +102,9 @@ function PersonalizationContent() {
   const linkedinIntroRef = useRef<HTMLTextAreaElement | null>(null);
   const linkedinContextRef = useRef<HTMLTextAreaElement | null>(null);
   const linkedinHandoverRulesRef = useRef<HTMLTextAreaElement | null>(null);
+  const investorSystemRef = useRef<HTMLTextAreaElement | null>(null);
+  const investorUserRef = useRef<HTMLTextAreaElement | null>(null);
+  const investorTwitterRef = useRef<HTMLTextAreaElement | null>(null);
   const testReplyRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
 
   const autoGrow = (el: HTMLTextAreaElement | null) => {
@@ -120,13 +135,26 @@ function PersonalizationContent() {
       context: '',
       handoverRules: '',
     },
+    investorAnalyze: {
+      systemPrompt: DEFAULT_INVESTOR_SYSTEM_PROMPT,
+      userMessage: DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+    },
+    investorTwitter: {
+      prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
+    },
   });
+  const [initialFormData, setInitialFormData] = useState<PersonalizationData | null>(null);
+  const isDirty = initialFormData ? JSON.stringify(formData) !== JSON.stringify(initialFormData) : false;
+  const saveDisabled = saving || !isDirty || (activeTab === 'direct' && schemaError !== null);
 
   useEffect(() => {
-    if (activeTab !== 'linkedinConversations') return;
+    if (!['linkedinConversations', 'investorAnalyze', 'investorTwitter'].includes(activeTab)) return;
     autoGrow(linkedinIntroRef.current);
     autoGrow(linkedinContextRef.current);
     autoGrow(linkedinHandoverRulesRef.current);
+    autoGrow(investorSystemRef.current);
+    autoGrow(investorUserRef.current);
+    autoGrow(investorTwitterRef.current);
   }, [activeTab]);
 
   // Default values
@@ -310,8 +338,16 @@ Return the assessment in the exact JSON schema format.`;
               context: DEFAULT_LINKEDIN_CONTEXT,
               handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
             },
+            investorAnalyze: {
+              systemPrompt: DEFAULT_INVESTOR_SYSTEM_PROMPT,
+              userMessage: DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+            },
+            investorTwitter: {
+              prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
+            },
           };
           setFormData(defaultData);
+          setInitialFormData(defaultData);
           // Validate default schema
           if (defaultData.direct.schema) {
             validateSchema(defaultData.direct.schema);
@@ -320,7 +356,7 @@ Return the assessment in the exact JSON schema format.`;
           // Other error occurred
           console.error('Error fetching personalization:', error);
           // Use defaults on error
-          setFormData({
+          const fallbackData = {
             direct: {
               query: defaultDirectQuery,
               schema: defaultDirectSchema,
@@ -334,7 +370,16 @@ Return the assessment in the exact JSON schema format.`;
               context: DEFAULT_LINKEDIN_CONTEXT,
               handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
             },
-          });
+            investorAnalyze: {
+              systemPrompt: DEFAULT_INVESTOR_SYSTEM_PROMPT,
+              userMessage: DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+            },
+            investorTwitter: {
+              prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
+            },
+          };
+          setFormData(fallbackData);
+          setInitialFormData(fallbackData);
         } else if (data?.personalization) {
           // Personalization exists, load it
           const parsed = typeof data.personalization === 'string' 
@@ -356,9 +401,17 @@ Return the assessment in the exact JSON schema format.`;
               handoverRules: parsed.linkedinConversations?.handoverRules || DEFAULT_LINKEDIN_HANDOVER_RULES,
               systemPrompt: parsed.linkedinConversations?.systemPrompt ?? DEFAULT_LINKEDIN_GENERATE_REPLY_SYSTEM_PROMPT,
             },
+            investorAnalyze: {
+              systemPrompt: parsed.investorAnalyze?.systemPrompt || DEFAULT_INVESTOR_SYSTEM_PROMPT,
+              userMessage: parsed.investorAnalyze?.userMessage || DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+            },
+            investorTwitter: {
+              prompt: parsed.investorTwitter?.prompt || DEFAULT_INVESTOR_TWITTER_PROMPT,
+            },
           };
 
           setFormData(loadedData);
+          setInitialFormData(loadedData);
           
           // Validate schema if it exists
           if (loadedData.direct.schema) {
@@ -366,7 +419,7 @@ Return the assessment in the exact JSON schema format.`;
           }
         } else {
           // No personalization data, use defaults
-          setFormData({
+          const defaults = {
             direct: {
               query: defaultDirectQuery,
               schema: defaultDirectSchema,
@@ -380,12 +433,21 @@ Return the assessment in the exact JSON schema format.`;
               context: DEFAULT_LINKEDIN_CONTEXT,
               handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
             },
-          });
+            investorAnalyze: {
+              systemPrompt: DEFAULT_INVESTOR_SYSTEM_PROMPT,
+              userMessage: DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+            },
+            investorTwitter: {
+              prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
+            },
+          };
+          setFormData(defaults);
+          setInitialFormData(defaults);
         }
       } catch (error) {
         console.error('Error in fetchPersonalization:', error);
         // Use defaults on error
-        setFormData({
+        const errorDefaults = {
           direct: {
             query: defaultDirectQuery,
             schema: defaultDirectSchema,
@@ -399,7 +461,16 @@ Return the assessment in the exact JSON schema format.`;
             context: DEFAULT_LINKEDIN_CONTEXT,
             handoverRules: DEFAULT_LINKEDIN_HANDOVER_RULES,
           },
-        });
+          investorAnalyze: {
+            systemPrompt: DEFAULT_INVESTOR_SYSTEM_PROMPT,
+            userMessage: DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
+          },
+          investorTwitter: {
+            prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
+          },
+        };
+        setFormData(errorDefaults);
+        setInitialFormData(errorDefaults);
       } finally {
         setLoading(false);
       }
@@ -441,7 +512,7 @@ Return the assessment in the exact JSON schema format.`;
         handoverRules,
       );
 
-      const personalizationData = {
+        const personalizationData = {
         direct: {
           query: formData.direct.query,
           schema: formData.direct.schema,
@@ -455,6 +526,13 @@ Return the assessment in the exact JSON schema format.`;
           context,
           handoverRules,
           systemPrompt: linkedinSystemPrompt,
+        },
+        investorAnalyze: {
+          systemPrompt: formData.investorAnalyze.systemPrompt,
+          userMessage: formData.investorAnalyze.userMessage,
+        },
+        investorTwitter: {
+          prompt: formData.investorTwitter?.prompt ?? DEFAULT_INVESTOR_TWITTER_PROMPT,
         },
       };
 
@@ -484,6 +562,8 @@ Return the assessment in the exact JSON schema format.`;
         throw new Error(error.message || 'Failed to save personalization settings');
       }
 
+      // Mark current saved state as the new baseline
+      setInitialFormData(personalizationData);
       setToastMessage('Personalization settings saved successfully!');
       setShowToast(true);
     } catch (error: any) {
@@ -690,8 +770,10 @@ Return the assessment in the exact JSON schema format.`;
         <div className="flex gap-2">
           <button
             onClick={handleSave}
-            disabled={saving || (activeTab === 'direct' && schemaError !== null)}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={saveDisabled}
+            className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
+              saveDisabled ? 'bg-gray-300 hover:bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+            } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed`}
           >
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
@@ -699,54 +781,87 @@ Return the assessment in the exact JSON schema format.`;
       </div>
 
       {/* Tabs */}
-      <div className="mb-6 border-b border-gray-200">
-        <nav className="-mb-px flex space-x-8">
-          <button
-            onClick={() => {
-              setActiveTab('direct');
-              // Validate schema when switching to direct tab
-              if (formData.direct.schema.trim()) {
-                validateSchema(formData.direct.schema);
-              } else {
+      <div className="mb-6">
+        <div className="relative border-b border-gray-200 flex-shrink-0">
+          <div className="flex gap-0.5 sm:gap-1 px-2 sm:px-4 pt-2 overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
+            <button
+              onClick={() => {
+                setActiveTab('direct');
+                // Validate schema when switching to direct tab
+                if (formData.direct.schema.trim()) {
+                  validateSchema(formData.direct.schema);
+                } else {
+                  setSchemaError(null);
+                }
+              }}
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'direct'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Direct
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('instagram');
+                // Clear schema error when switching away from direct tab
                 setSchemaError(null);
-              }
-            }}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'direct'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Direct
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('instagram');
-              // Clear schema error when switching away from direct tab
-              setSchemaError(null);
-            }}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'instagram'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            Instagram
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('linkedinConversations');
-              setSchemaError(null);
-            }}
-            className={`py-4 px-1 border-b-2 font-medium text-sm ${
-              activeTab === 'linkedinConversations'
-                ? 'border-indigo-500 text-indigo-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            LinkedIn Conversations
-          </button>
-        </nav>
+              }}
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'instagram'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Instagram
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('linkedinConversations');
+                setSchemaError(null);
+              }}
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'linkedinConversations'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              LinkedIn Conversations
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('investorAnalyze');
+                setSchemaError(null);
+              }}
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'investorAnalyze'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Investor Analyze
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('investorTwitter');
+                setSchemaError(null);
+              }}
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                activeTab === 'investorTwitter'
+                  ? 'border-indigo-500 text-indigo-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              Investor Twitter
+            </button>
+
+            {/* Spacer to ensure last tab isn't clipped by fade on mobile */}
+            <div className="flex-shrink-0 w-4 sm:hidden" aria-hidden="true" />
+          </div>
+          {/* Right fade indicator for overflowing tabs on mobile */}
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none sm:hidden" />
+        </div>
       </div>
 
       {/* Direct Tab */}
@@ -1055,6 +1170,104 @@ Return the assessment in the exact JSON schema format.`;
                   )}
                 </div>
               ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Investor Analyze Tab */}
+      {activeTab === 'investorAnalyze' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Investor Analyze Prompts</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Edit the system prompt and user message template used by the Investor Analyze AI.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">System Prompt</h3>
+                <textarea
+                  ref={investorSystemRef}
+                  value={formData.investorAnalyze.systemPrompt}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData({
+                      ...formData,
+                      investorAnalyze: {
+                        ...formData.investorAnalyze,
+                        systemPrompt: e.target.value,
+                      },
+                    });
+                  }}
+                  rows={6}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_INVESTOR_SYSTEM_PROMPT}
+                />
+              </div>
+
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">User Message Template</h3>
+                <textarea
+                  ref={investorUserRef}
+                  value={formData.investorAnalyze.userMessage}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData({
+                      ...formData,
+                      investorAnalyze: {
+                        ...formData.investorAnalyze,
+                        userMessage: e.target.value,
+                      },
+                    });
+                  }}
+                  rows={10}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE}
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Use placeholders: {"{"}COMPANY_CONTEXT{"}"}, {"{"}DEEP_RESEARCH{"}"}, {"{"}COMPANY_NAME{"}"} (use exact tokens like &lt;&lt;&lt;DEEP_RESEARCH&gt;&gt;&gt; in templates).
+                </p>
+              </div>
+              {/* Twitter prompt moved to its own tab */}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Investor Twitter Tab */}
+      {activeTab === 'investorTwitter' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Investor Twitter Icebreaker</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Edit the Twitter icebreaker prompt used to generate one-line tweets-based icebreakers.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">Twitter Icebreaker Prompt</h3>
+                <textarea
+                  ref={investorTwitterRef}
+                  value={formData.investorTwitter?.prompt ?? ''}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData((prev) => ({
+                      ...prev,
+                      investorTwitter: {
+                        ...(prev?.investorTwitter ?? { prompt: DEFAULT_INVESTOR_TWITTER_PROMPT }),
+                        prompt: e.target.value,
+                      },
+                    }));
+                  }}
+                  rows={6}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_INVESTOR_TWITTER_PROMPT}
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Use placeholders: {"{"}name{"}"}, {"{"}first_name{"}"}, {"{"}allValidTweets{"}"}, {"{"}dateString{"}"}.
+                </p>
+              </div>
             </div>
           </div>
         </div>
