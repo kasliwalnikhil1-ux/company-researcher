@@ -75,7 +75,7 @@ interface PersonalizationData {
 
 function PersonalizationContent() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter'>('direct');
+  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter'>('linkedinConversations');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
