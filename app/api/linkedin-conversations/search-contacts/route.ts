@@ -28,6 +28,55 @@ function getGetsalesKey() {
   return key;
 }
 
+function parseConversationDate(dateStr?: string | null): Date | null {
+  if (!dateStr) return null;
+  const raw = dateStr.trim();
+  if (!raw) return null;
+
+  // Handle dd/mm/yyyy and dd-mm-yyyy explicitly to avoid month/day flips.
+  const dayFirstMatch = raw.match(
+    /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:[,\sT]+(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(AM|PM)?)?$/i
+  );
+  if (dayFirstMatch) {
+    const day = Number(dayFirstMatch[1]);
+    const month = Number(dayFirstMatch[2]);
+    let year = Number(dayFirstMatch[3]);
+    let hour = Number(dayFirstMatch[4] || '0');
+    const minute = Number(dayFirstMatch[5] || '0');
+    const second = Number(dayFirstMatch[6] || '0');
+    const ampm = (dayFirstMatch[7] || '').toUpperCase();
+
+    if (year < 100) year += 2000;
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+
+    const parsed = new Date(year, month - 1, day, hour, minute, second);
+    const isValid =
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day;
+    if (isValid) return parsed;
+  }
+
+  if (/^\d+$/.test(raw)) {
+    const num = Number(raw);
+    const ms = raw.length <= 10 ? num * 1000 : num;
+    const parsed = new Date(ms);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getMessageTimestamp(message: Record<string, unknown>): string | null {
+  const sentAt = message.sent_at;
+  if (typeof sentAt === 'string' && sentAt.trim()) return sentAt;
+  const createdAt = message.created_at;
+  if (typeof createdAt === 'string' && createdAt.trim()) return createdAt;
+  return null;
+}
+
 async function resolveAllowedSenderUuids(labels: string[]): Promise<Set<string>> {
   const gsRes = await fetch(
     `${GETSALES_BASE}/flows/api/sender-profiles?limit=1000&offset=0`,
@@ -164,7 +213,7 @@ export async function POST(req: NextRequest) {
           const params = new URLSearchParams({
             limit: '500',
             offset: '0',
-            order_field: 'created_at',
+            order_field: 'sent_at',
             order_type: 'desc',
           });
           batch.forEach((uuid) => params.append('filter[lead_uuid][]', uuid));
@@ -220,8 +269,8 @@ export async function POST(req: NextRequest) {
       .map(([uuid, bucket]) => {
         const sorted = bucket.messages.sort(
           (a, b) =>
-            new Date(b.created_at as string).getTime() -
-            new Date(a.created_at as string).getTime()
+            (parseConversationDate(getMessageTimestamp(b))?.getTime() ?? 0) -
+            (parseConversationDate(getMessageTimestamp(a))?.getTime() ?? 0)
         );
         const lastMsg = sorted[0];
         return {
@@ -235,8 +284,8 @@ export async function POST(req: NextRequest) {
       })
       .sort(
         (a, b) =>
-          new Date(b.last_message.created_at as string).getTime() -
-          new Date(a.last_message.created_at as string).getTime()
+          (parseConversationDate(getMessageTimestamp(b.last_message as Record<string, unknown>))?.getTime() ?? 0) -
+          (parseConversationDate(getMessageTimestamp(a.last_message as Record<string, unknown>))?.getTime() ?? 0)
       );
 
     const leadUuidsWithConvos = new Set(conversations.map((c) => c.lead_uuid));

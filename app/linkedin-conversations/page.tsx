@@ -234,37 +234,84 @@ function getLeadDisplayName(lead?: LeadInfo | null): string {
   return parts.length > 0 ? parts.join(' ') : 'Unknown Contact';
 }
 
-function formatDate(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
-  } catch {
-    return dateStr;
+function parseConversationDate(dateStr?: string | null): Date | null {
+  if (!dateStr) return null;
+  const raw = dateStr.trim();
+  if (!raw) return null;
+
+  // Handle dd/mm/yyyy and dd-mm-yyyy explicitly so ambiguous values are deterministic.
+  const dayFirstMatch = raw.match(
+    /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})(?:[,\sT]+(\d{1,2})(?::(\d{2}))?(?::(\d{2}))?\s*(AM|PM)?)?$/i
+  );
+  if (dayFirstMatch) {
+    const day = Number(dayFirstMatch[1]);
+    const month = Number(dayFirstMatch[2]);
+    let year = Number(dayFirstMatch[3]);
+    let hour = Number(dayFirstMatch[4] || '0');
+    const minute = Number(dayFirstMatch[5] || '0');
+    const second = Number(dayFirstMatch[6] || '0');
+    const ampm = (dayFirstMatch[7] || '').toUpperCase();
+
+    if (year < 100) year += 2000;
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+
+    const parsed = new Date(year, month - 1, day, hour, minute, second);
+    const isValid =
+      parsed.getFullYear() === year &&
+      parsed.getMonth() === month - 1 &&
+      parsed.getDate() === day;
+    if (isValid) return parsed;
   }
+
+  // Handle unix timestamps (seconds or milliseconds).
+  if (/^\d+$/.test(raw)) {
+    const num = Number(raw);
+    const ms = raw.length <= 10 ? num * 1000 : num;
+    const parsed = new Date(ms);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getMessageTimestamp(message: Pick<LinkedInMessage, 'sent_at' | 'created_at'>): string {
+  return message.sent_at || message.created_at;
+}
+
+function formatDate(dateStr: string): string {
+  const d = parseConversationDate(dateStr);
+  if (!d) return dateStr;
+
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return d.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+  });
 }
 
 function formatFullDate(dateStr: string): string {
-  try {
-    return new Date(dateStr).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  } catch {
-    return dateStr;
-  }
+  const d = parseConversationDate(dateStr);
+  if (!d) return dateStr;
+
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 /* ────────────────────────── Main Component ────────────────────────── */
@@ -520,7 +567,7 @@ export default function LinkedInConversationsPage() {
       const params = new URLSearchParams({
         limit: '200',
         offset: String(offset),
-        order_field: 'created_at',
+        order_field: 'sent_at',
         order_type: 'desc',
       });
 
@@ -564,7 +611,11 @@ export default function LinkedInConversationsPage() {
       // Build conversations list sorted by most recent message
       const convList: Conversation[] = [];
       convMap.forEach((val, key) => {
-        const sorted = val.messages.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const sorted = val.messages.sort(
+          (a, b) =>
+            (parseConversationDate(getMessageTimestamp(b))?.getTime() ?? 0) -
+            (parseConversationDate(getMessageTimestamp(a))?.getTime() ?? 0)
+        );
         // Unread = last message is from the lead (inbox), meaning they replied and we haven't responded yet
         const lastMsg = sorted[0];
         convList.push({
@@ -580,7 +631,11 @@ export default function LinkedInConversationsPage() {
         });
       });
 
-      convList.sort((a, b) => new Date(b.last_message.created_at).getTime() - new Date(a.last_message.created_at).getTime());
+      convList.sort(
+        (a, b) =>
+          (parseConversationDate(getMessageTimestamp(b.last_message))?.getTime() ?? 0) -
+          (parseConversationDate(getMessageTimestamp(a.last_message))?.getTime() ?? 0)
+      );
 
       // Show conversations IMMEDIATELY (before lead details load)
       setConversations(convList);
@@ -612,7 +667,7 @@ export default function LinkedInConversationsPage() {
       const params = new URLSearchParams({
         limit: '100',
         offset: String(offset),
-        order_field: 'created_at',
+        order_field: 'sent_at',
         order_type: 'asc',
         'filter[linkedin_conversation_uuid]': conversationUuid,
       });
@@ -1416,7 +1471,7 @@ export default function LinkedInConversationsPage() {
     const params = new URLSearchParams({
       limit: '100',
       offset: '0',
-      order_field: 'created_at',
+      order_field: 'sent_at',
       order_type: 'asc',
       'filter[linkedin_conversation_uuid]': conversationUuid,
     });
@@ -1941,7 +1996,7 @@ export default function LinkedInConversationsPage() {
                                 {getLeadDisplayName(conv.lead)}
                               </span>
                               <span className={`text-xs whitespace-nowrap ${conv.has_unread ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
-                                {formatDate(conv.last_message.created_at)}
+                                {formatDate(getMessageTimestamp(conv.last_message))}
                               </span>
                             </div>
                             {conv.lead?.company_name && (
@@ -2069,7 +2124,7 @@ export default function LinkedInConversationsPage() {
                                 </span>
                               )}
                               <span className={`text-xs whitespace-nowrap ${conv.has_unread ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>
-                                {formatDate(conv.last_message.created_at)}
+                                {formatDate(getMessageTimestamp(conv.last_message))}
                               </span>
                             </div>
                           </div>
@@ -2396,7 +2451,7 @@ export default function LinkedInConversationsPage() {
                                       isOutbox ? 'text-indigo-200' : 'text-gray-400'
                                     }`}
                                   >
-                                    {formatFullDate(msg.created_at)}
+                                    {formatFullDate(getMessageTimestamp(msg))}
                                   </span>
                                   {isOutbox && msg.status && (
                                     <>
