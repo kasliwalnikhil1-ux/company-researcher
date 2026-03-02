@@ -406,10 +406,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                     ? 'bg-indigo-50 text-indigo-700'
                     : 'text-gray-700 hover:bg-gray-50'
                 }`}
-                title="Sender Profiles"
+                title="LinkedIn Profiles"
               >
                 <Contact className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                {(!isCollapsed || isMobile) && <span>Sender Profiles</span>}
+                {(!isCollapsed || isMobile) && <span>LinkedIn Profiles</span>}
               </Link>
             )}
             
