@@ -45,6 +45,8 @@ interface SenderProfile {
   full_name?: string;
   label?: string;
   status?: string;
+  enabled?: boolean | string | number;
+  is_enabled?: boolean | string | number;
   linkedin_account_uuid?: string;
   linkedin_browser_uuid?: string;
   assignee_user_id?: number;
@@ -65,6 +67,7 @@ interface PaginationMeta {
 }
 
 type ModalType = 'create' | 'connect-external' | null;
+type SenderProfileFilter = 'all' | 'connected' | 'enabled' | 'connected-enabled' | 'not-ready';
 
 /* ────────────────────────── Helpers ────────────────────────── */
 
@@ -210,6 +213,34 @@ function StatusIcon({ status }: { status?: string }) {
   return <CircleDot className={`${iconClass} text-white`} />;
 }
 
+function hasLinkedInConnection(profile: SenderProfile): boolean {
+  return !!profile.linkedin_account_uuid;
+}
+
+function toBooleanFlag(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'enabled', 'active'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'disabled', 'inactive'].includes(normalized)) return false;
+  }
+  return null;
+}
+
+function isProfileEnabled(profile: SenderProfile): boolean {
+  const directEnabled = toBooleanFlag(profile.enabled);
+  if (directEnabled !== null) return directEnabled;
+
+  const directIsEnabled = toBooleanFlag(profile.is_enabled);
+  if (directIsEnabled !== null) return directIsEnabled;
+
+  const status = profile.status?.toLowerCase();
+  if (!status) return false;
+
+  return !['disabled', 'paused', 'failed', 'error'].includes(status);
+}
+
 /* ────────────────────────── Page ────────────────────────── */
 
 export default function SenderProfilesPage() {
@@ -245,6 +276,7 @@ function SenderProfilesContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [orderField, setOrderField] = useState('created_at');
   const [orderType, setOrderType] = useState<'asc' | 'desc'>('desc');
+  const [activeFilter, setActiveFilter] = useState<SenderProfileFilter>('all');
 
   // Modal state
   const [activeModal, setActiveModal] = useState<ModalType>(null);
@@ -349,6 +381,45 @@ function SenderProfilesContent() {
     return profiles;
   }, [profiles]);
 
+  const profileStats = useMemo(() => {
+    const total = filteredProfiles.length;
+    let connected = 0;
+    let enabled = 0;
+    let connectedAndEnabled = 0;
+
+    for (const profile of filteredProfiles) {
+      const isConnected = hasLinkedInConnection(profile);
+      const isEnabled = isProfileEnabled(profile);
+      if (isConnected) connected += 1;
+      if (isEnabled) enabled += 1;
+      if (isConnected && isEnabled) connectedAndEnabled += 1;
+    }
+
+    return {
+      total,
+      connected,
+      enabled,
+      connectedAndEnabled,
+      notReady: Math.max(0, total - connectedAndEnabled),
+    };
+  }, [filteredProfiles]);
+
+  const visibleProfiles = useMemo(() => {
+    if (activeFilter === 'all') return filteredProfiles;
+
+    return filteredProfiles.filter((profile) => {
+      const isConnected = hasLinkedInConnection(profile);
+      const isEnabled = isProfileEnabled(profile);
+      const isReady = isConnected && isEnabled;
+
+      if (activeFilter === 'connected') return isConnected;
+      if (activeFilter === 'enabled') return isEnabled;
+      if (activeFilter === 'connected-enabled') return isReady;
+      if (activeFilter === 'not-ready') return !isReady;
+      return true;
+    });
+  }, [activeFilter, filteredProfiles]);
+
   /* ────────────────── Render ────────────────── */
 
   return (
@@ -419,6 +490,65 @@ function SenderProfilesContent() {
         </div>
       </div>
 
+      {/* Stats */}
+      <div className="mb-4 grid grid-cols-2 md:grid-cols-5 gap-3">
+        <button
+          onClick={() => setActiveFilter('all')}
+          className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+            activeFilter === 'all'
+              ? 'border-indigo-300 bg-indigo-50 ring-1 ring-indigo-200'
+              : 'border-gray-200 bg-white hover:bg-gray-50'
+          }`}
+        >
+          <p className="text-xs text-gray-500">Total</p>
+          <p className="text-lg font-semibold text-gray-900">{profileStats.total}</p>
+        </button>
+        <button
+          onClick={() => setActiveFilter('connected')}
+          className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+            activeFilter === 'connected'
+              ? 'border-green-400 bg-green-100 ring-1 ring-green-300'
+              : 'border-green-200 bg-green-50 hover:bg-green-100'
+          }`}
+        >
+          <p className="text-xs text-green-700">Connected</p>
+          <p className="text-lg font-semibold text-green-800">{profileStats.connected}</p>
+        </button>
+        <button
+          onClick={() => setActiveFilter('enabled')}
+          className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+            activeFilter === 'enabled'
+              ? 'border-blue-400 bg-blue-100 ring-1 ring-blue-300'
+              : 'border-blue-200 bg-blue-50 hover:bg-blue-100'
+          }`}
+        >
+          <p className="text-xs text-blue-700">Enabled</p>
+          <p className="text-lg font-semibold text-blue-800">{profileStats.enabled}</p>
+        </button>
+        <button
+          onClick={() => setActiveFilter('connected-enabled')}
+          className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+            activeFilter === 'connected-enabled'
+              ? 'border-emerald-400 bg-emerald-100 ring-1 ring-emerald-300'
+              : 'border-emerald-200 bg-emerald-50 hover:bg-emerald-100'
+          }`}
+        >
+          <p className="text-xs text-emerald-700">Connected + Enabled</p>
+          <p className="text-lg font-semibold text-emerald-800">{profileStats.connectedAndEnabled}</p>
+        </button>
+        <button
+          onClick={() => setActiveFilter('not-ready')}
+          className={`rounded-lg border px-4 py-3 text-left transition-colors ${
+            activeFilter === 'not-ready'
+              ? 'border-red-400 bg-red-100 ring-1 ring-red-300'
+              : 'border-red-200 bg-red-50 hover:bg-red-100'
+          }`}
+        >
+          <p className="text-xs text-red-700">Not Ready</p>
+          <p className="text-lg font-semibold text-red-800">{profileStats.notReady}</p>
+        </button>
+      </div>
+
       {/* Error state */}
       {error && (
         <div className="mb-4 flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-lg">
@@ -439,7 +569,7 @@ function SenderProfilesContent() {
           <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
           <p className="text-sm text-gray-500">Loading sender profiles...</p>
         </div>
-      ) : filteredProfiles.length === 0 && !loading ? (
+      ) : visibleProfiles.length === 0 && !loading ? (
         /* Empty state */
         <div className="flex flex-col items-center justify-center py-24 gap-4">
           <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
@@ -448,7 +578,9 @@ function SenderProfilesContent() {
           <div className="text-center">
             <h3 className="text-lg font-semibold text-gray-700">No sender profiles found</h3>
             <p className="text-sm text-gray-500 mt-1">
-              {searchQuery
+              {activeFilter !== 'all'
+                ? 'No profiles match the selected filter'
+                : searchQuery
                 ? 'Try adjusting your search query'
                 : 'Create your first sender profile to get started'}
             </p>
@@ -505,15 +637,19 @@ function SenderProfilesContent() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredProfiles.map((profile) => {
+                  {visibleProfiles.map((profile) => {
                     const statusStyle = getStatusStyle(profile.status);
-                    const hasLinkedIn = !!profile.linkedin_account_uuid;
+                    const hasLinkedIn = hasLinkedInConnection(profile);
+                    const isEnabled = isProfileEnabled(profile);
+                    const isReady = hasLinkedIn && isEnabled;
                     const photoUrl = getProfilePhoto(profile);
 
                     return (
                       <tr
                         key={profile.uuid}
-                        className="hover:bg-gray-50/70 transition-colors"
+                        className={`transition-colors ${
+                          isReady ? 'bg-green-200 hover:bg-green-300' : 'bg-red-200 hover:bg-red-300'
+                        }`}
                       >
                         {/* Name + Photo */}
                         <td className="px-5 py-4">
