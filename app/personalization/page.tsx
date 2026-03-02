@@ -109,8 +109,30 @@ function PersonalizationContent() {
 
   const autoGrow = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
+
+    const scrollableAncestors: HTMLElement[] = [];
+    let parent = el.parentElement;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      const hasScrollableY =
+        (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+        parent.scrollHeight > parent.clientHeight;
+      if (hasScrollableY) {
+        scrollableAncestors.push(parent);
+      }
+      parent = parent.parentElement;
+    }
+
+    const previousAncestorScroll = scrollableAncestors.map((node) => node.scrollTop);
+    const previousWindowScrollY = window.scrollY;
+
     el.style.height = 'auto';
     el.style.height = `${el.scrollHeight}px`;
+
+    scrollableAncestors.forEach((node, idx) => {
+      node.scrollTop = previousAncestorScroll[idx];
+    });
+    window.scrollTo({ top: previousWindowScrollY });
   };
 
   useEffect(() => {

@@ -119,6 +119,9 @@ Your message must:
 • be concise
 • be human sounding
 • be helpful
+• Add a line break between paragraphs
+• Do not combine paragraphs into one block
+• Do not use em dashes
 • Never invent facts.
 • Only use known information.`;
 };
