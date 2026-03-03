@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const GETSALES_BASE = 'https://amazing.getsales.io';
+const MAX_SENDER_PROFILES_LIMIT = 1000;
 
 /* ──────────────────────────────────────────────────────────────
  * Email → Sender-Profile Access Map
@@ -78,7 +79,7 @@ export async function GET(req: NextRequest) {
     });
 
     // Defaults
-    if (!params.has('limit')) params.set('limit', '20');
+    if (!params.has('limit')) params.set('limit', String(MAX_SENDER_PROFILES_LIMIT));
     if (!params.has('offset')) params.set('offset', '0');
     if (!params.has('order_field')) params.set('order_field', 'created_at');
     if (!params.has('order_type')) params.set('order_type', 'desc');
@@ -108,11 +109,11 @@ export async function GET(req: NextRequest) {
     }
 
     // ── Restricted user → fetch all, filter by allowed labels, then paginate ──
-    const requestedLimit = parseInt(params.get('limit') || '20', 10);
+    const requestedLimit = parseInt(params.get('limit') || String(MAX_SENDER_PROFILES_LIMIT), 10);
     const requestedOffset = parseInt(params.get('offset') || '0', 10);
 
     const fetchParams = new URLSearchParams(params);
-    fetchParams.set('limit', '1000');
+    fetchParams.set('limit', String(MAX_SENDER_PROFILES_LIMIT));
     fetchParams.set('offset', '0');
 
     const gsUrl = `${GETSALES_BASE}/flows/api/sender-profiles?${fetchParams.toString()}`;

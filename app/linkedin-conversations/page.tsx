@@ -280,6 +280,13 @@ function getMessageTimestamp(message: Pick<LinkedInMessage, 'sent_at' | 'created
   return message.sent_at || message.created_at;
 }
 
+function getLocalLocale(): string | undefined {
+  if (typeof navigator !== 'undefined' && navigator.language) {
+    return navigator.language;
+  }
+  return undefined;
+}
+
 function formatDate(dateStr: string): string {
   const d = parseConversationDate(dateStr);
   if (!d) return dateStr;
@@ -293,10 +300,12 @@ function formatDate(dateStr: string): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   const diffDays = Math.floor(diffHours / 24);
   if (diffDays < 7) return `${diffDays}d ago`;
-  return d.toLocaleDateString('en-US', {
+  const locale = getLocalLocale();
+  return d.toLocaleDateString(locale, {
     month: 'short',
     day: 'numeric',
     year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
 }
 
@@ -304,13 +313,15 @@ function formatFullDate(dateStr: string): string {
   const d = parseConversationDate(dateStr);
   if (!d) return dateStr;
 
-  return d.toLocaleString('en-US', {
+  const locale = getLocalLocale();
+  return d.toLocaleString(locale, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   });
 }
 

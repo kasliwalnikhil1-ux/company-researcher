@@ -258,6 +258,7 @@ export default function SenderProfilesPage() {
 /* ────────────────────────── Content ────────────────────────── */
 
 function SenderProfilesContent() {
+  const MAX_PAGINATION_LIMIT = 1000;
   const { user } = useAuth();
   const canManageProfiles = MANAGE_PROFILES_ALLOWED_USER_IDS.has(user?.id ?? '');
 
@@ -266,7 +267,7 @@ function SenderProfilesContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pagination, setPagination] = useState<PaginationMeta>({
-    limit: 20,
+    limit: MAX_PAGINATION_LIMIT,
     offset: 0,
     total: 0,
     has_more: false,
@@ -327,7 +328,7 @@ function SenderProfilesContent() {
         }
         setProfiles(json.data || []);
         setPagination({
-          limit: json.limit || 20,
+          limit: json.limit || MAX_PAGINATION_LIMIT,
           offset: json.offset || 0,
           total: json.total || 0,
           has_more: json.has_more || false,
