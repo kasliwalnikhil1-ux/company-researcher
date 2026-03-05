@@ -260,6 +260,50 @@ export type JobsResearchSummary = {
   compensation_type?: string;
   compensation_amount?: string;
   job_application_fit_for_B2B_GTM_ABM_expert?: boolean;
+  first_line_to_start_email?: string;
+  subject_line?: string;
+};
+
+export type NewsEmailOpener = {
+  first_line_to_start_email: string;
+  subject_line: string;
+};
+
+export const fetchCompanyNewsEmailOpener = async (
+  news: string
+): Promise<NewsEmailOpener | null> => {
+  try {
+    const res = await fetchWithTimeout('/api/company-news-email-opener', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ news }),
+    }, 120_000);
+    const data = await res.json();
+    if (!res.ok) {
+      return null;
+    }
+
+    const firstLine =
+      typeof data?.first_line_to_start_email === 'string'
+        ? data.first_line_to_start_email.trim()
+        : '';
+    const subjectLine =
+      typeof data?.subject_line === 'string'
+        ? data.subject_line.trim()
+        : '';
+
+    if (!firstLine || !subjectLine) {
+      return null;
+    }
+
+    return {
+      first_line_to_start_email: firstLine,
+      subject_line: subjectLine,
+    };
+  } catch (err) {
+    console.error('[fetchCompanyNewsEmailOpener] error:', err);
+    return null;
+  }
 };
 
 export const fetchJobsResearch = async (

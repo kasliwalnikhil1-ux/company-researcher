@@ -88,6 +88,20 @@ const cleanInstagramUsername = (instagram: string | undefined): string => {
     .replace(/^@/, '');
 };
 
+const buildCompanyTextSearchFilter = (rawQuery: string): string | null => {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return null;
+
+  return [
+    `domain.ilike.%${query}%`,
+    `instagram.ilike.%${query}%`,
+    `phone.ilike.%${query}%`,
+    `email.ilike.%${query}%`,
+    `set_name.ilike.%${query}%`,
+    `owner.ilike.%${query}%`,
+  ].join(',');
+};
+
 export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth();
   const userId = user?.id ?? null;
@@ -181,12 +195,10 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         .select('*', { count: 'exact', head: true })
         .eq('user_id', userId);
 
-      // Apply search filter - search top-level fields and entire summary JSON as text
-      if (searchQuery.trim()) {
-        const query = searchQuery.trim().toLowerCase();
-        countQuery = countQuery.or(
-          `domain.ilike.%${query}%,instagram.ilike.%${query}%,phone.ilike.%${query}%,email.ilike.%${query}%,summary::text.ilike.%${query}%`
-        );
+      // Apply text search filter on supported columns
+      const searchFilter = buildCompanyTextSearchFilter(searchQuery);
+      if (searchFilter) {
+        countQuery = countQuery.or(searchFilter);
       }
 
       // Apply date filter
@@ -253,12 +265,9 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         .eq('user_id', userId)
         .range(offset, offset + pageSize - 1);
 
-      // Apply search filter - search top-level fields and entire summary JSON as text
-      if (searchQuery.trim()) {
-        const query_text = searchQuery.trim().toLowerCase();
-        query = query.or(
-          `domain.ilike.%${query_text}%,instagram.ilike.%${query_text}%,phone.ilike.%${query_text}%,email.ilike.%${query_text}%,summary::text.ilike.%${query_text}%`
-        );
+      // Apply text search filter on supported columns
+      if (searchFilter) {
+        query = query.or(searchFilter);
       }
 
       // Apply date filter

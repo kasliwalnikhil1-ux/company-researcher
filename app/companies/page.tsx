@@ -401,7 +401,7 @@ function CompaniesContent() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getTemplateColumnKeys]); // clipboardColumn is accessed in closure - separate effect handles its changes
-  
+
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
     const initialTemplateColumns = templates
       .map(t => `template_${t.id}`);
@@ -463,6 +463,56 @@ function CompaniesContent() {
     }
     return 'whatsapp';
   });
+
+  // Keep column order/visibility synced with dynamic summary keys.
+  // This ensures newly added/removed keys in summary JSON are reflected in the UI.
+  useEffect(() => {
+    const currentTemplateColumns = getTemplateColumnKeys();
+
+    setColumnOrder(prev => {
+      const validBaseSet = new Set(baseColumnOrder);
+
+      const previousBase = prev.filter(
+        col => !col.startsWith('template_') && col !== clipboardColumn
+      );
+      const keptBase = previousBase.filter(col => validBaseSet.has(col));
+      const missingBase = baseColumnOrder.filter(col => !keptBase.includes(col));
+      const mergedBase = [...keptBase, ...missingBase];
+
+      const previousTemplates = prev.filter(col => col.startsWith('template_'));
+      const keptTemplates = previousTemplates.filter(col => currentTemplateColumns.includes(col));
+      const newTemplates = currentTemplateColumns.filter(col => !keptTemplates.includes(col));
+
+      const merged = [...mergedBase, ...keptTemplates, ...newTemplates];
+
+      if (clipboardColumn && merged.includes(clipboardColumn)) {
+        return [clipboardColumn, ...merged.filter(col => col !== clipboardColumn)];
+      }
+
+      return merged;
+    });
+
+    setVisibleColumns(prev => {
+      const next = new Set(prev);
+      const validColumns = new Set<string>([...baseColumnOrder, ...currentTemplateColumns]);
+
+      // Add newly discovered dynamic/base/template columns by default
+      validColumns.forEach(col => {
+        if (!next.has(col)) {
+          next.add(col);
+        }
+      });
+
+      // Remove stale dynamic/template columns that no longer exist
+      Array.from(next).forEach(col => {
+        if (!validColumns.has(col)) {
+          next.delete(col);
+        }
+      });
+
+      return next;
+    });
+  }, [baseColumnOrder, getTemplateColumnKeys, clipboardColumn]);
   
   // View mode state (table or list)
   const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {

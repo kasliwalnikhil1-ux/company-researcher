@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight, Plus, Edit2 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
@@ -54,7 +54,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [toastMessage, setToastMessage] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const [classificationValue, setClassificationValue] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"overview" | "contacts">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "outreach" | "contacts">("overview");
   const [contacts, setContacts] = useState<any[] | null>(null);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactToRemove, setContactToRemove] = useState<{
@@ -267,7 +267,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   // Track if we've already fetched contacts for this company/domain
   const fetchedDomainsRef = useRef<Set<string>>(new Set());
   // Track previous tab to only fetch when switching TO contacts tab
-  const prevTabRef = useRef<"overview" | "contacts">("overview");
+  const prevTabRef = useRef<"overview" | "outreach" | "contacts">("overview");
 
   // Fetch contacts from API or localStorage
   const fetchContacts = useCallback(async () => {
@@ -936,10 +936,61 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     );
   };
 
+  const summaryData = company ? getSummaryData(company) : {};
+  const isOutreachColumn = (columnKey: string) => {
+    const key = columnKey.toLowerCase();
+    const label = (columnLabels[columnKey] || columnKey).toLowerCase();
+    return key.startsWith("template_") || key.includes("message") || label.includes("message");
+  };
+  const shouldHideDrawerField = (columnKey: string) => {
+    const key = columnKey.toLowerCase();
+    const label = (columnLabels[columnKey] || columnKey).toLowerCase();
+    const keyOrLabel = `${key} ${label}`;
+    return (
+      keyOrLabel.includes("confidence_score") ||
+      keyOrLabel.includes("confidence score") ||
+      keyOrLabel.includes("sales_action") ||
+      keyOrLabel.includes("sales action")
+    );
+  };
+  const summaryColumnKeys = useMemo(() => {
+    const fromOrder = columnOrder.filter((column) => {
+      if (
+        column === "domain" ||
+        column === "instagram" ||
+        column === "phone" ||
+        column === "email" ||
+        column === "notes"
+      ) {
+        return false;
+      }
+      if (isOutreachColumn(column)) return false;
+      if (column === "classification") return false;
+      if (shouldHideDrawerField(column)) return false;
+      return true;
+    });
+
+    const fromSummary = Object.keys(summaryData || {}).filter((column) => {
+      if (
+        column === "domain" ||
+        column === "instagram" ||
+        column === "phone" ||
+        column === "email" ||
+        column === "notes"
+      ) {
+        return false;
+      }
+      if (isOutreachColumn(column)) return false;
+      if (column === "classification") return false;
+      if (shouldHideDrawerField(column)) return false;
+      return true;
+    });
+
+    return Array.from(new Set([...fromOrder, ...fromSummary]));
+  }, [columnOrder, summaryData, columnLabels]);
+
   // Early return AFTER all hooks have been called
   if (!isOpen || !company) return null;
-
-  const summaryData = getSummaryData(company);
 
   return (
     <>
@@ -1028,6 +1079,16 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               }`}
             >
               Overview
+            </button>
+            <button
+              onClick={() => setActiveTab("outreach")}
+              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+                activeTab === "outreach"
+                  ? "text-indigo-600 border-b-2 border-indigo-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              Outreach
             </button>
             <button
               onClick={() => setActiveTab("contacts")}
@@ -1300,6 +1361,43 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       </p>
                     )}
                   </div>
+
+                  <div
+                    className={`border-l-4 pl-4 py-2 rounded-r ${
+                      classificationValue === "QUALIFIED"
+                        ? "bg-green-50 text-green-700 border-green-200"
+                        : classificationValue === "UNQUALIFIED" ||
+                          classificationValue === "NOT_QUALIFIED"
+                        ? "bg-red-50 text-red-700 border-red-200"
+                        : classificationValue === "EXPIRED"
+                        ? "bg-amber-50 text-amber-700 border-amber-200"
+                        : "bg-gray-50 border-gray-200"
+                    }`}
+                  >
+                    <p className="text-sm font-medium text-gray-700 mb-1">
+                      {columnLabels.classification || "Classification"}
+                    </p>
+
+                    <select
+                      value={classificationValue}
+                      onChange={(e) => handleClassificationChange(e.target.value)}
+                      className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                        classificationValue === "QUALIFIED"
+                          ? "bg-green-50 text-green-700 border-green-300"
+                          : classificationValue === "UNQUALIFIED" ||
+                            classificationValue === "NOT_QUALIFIED"
+                          ? "bg-red-50 text-red-700 border-red-300"
+                          : classificationValue === "EXPIRED"
+                          ? "bg-amber-50 text-amber-700 border-amber-300"
+                          : "bg-gray-50 border-gray-300"
+                      } font-semibold`}
+                    >
+                      <option value="">Select classification...</option>
+                      <option value="QUALIFIED">QUALIFIED</option>
+                      <option value="UNQUALIFIED">UNQUALIFIED</option>
+                      <option value="EXPIRED">EXPIRED</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -1471,29 +1569,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               </div>
 
               {/* Summary Data */}
-              {((summaryData && Object.keys(summaryData).length > 0) ||
-                columnOrder.includes("classification")) && (
+              {summaryColumnKeys.length > 0 && (
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">
                     Summary Data
                   </h3>
 
                   <div className="space-y-3">
-                    {columnOrder
-                      .filter((column) => {
-                        // Only show columns that are not domain/instagram/phone/email/notes (already shown above or separately)
-                        if (
-                          column === "domain" ||
-                          column === "instagram" ||
-                          column === "phone" ||
-                          column === "email" ||
-                          column === "notes"
-                        )
-                          return false;
-
-                        return true;
-                      })
-                      .map((columnKey) => {
+                    {summaryColumnKeys.map((columnKey) => {
                         const value = getCellValue(company, columnKey);
                         const isClassification = columnKey === "classification";
 
@@ -1712,6 +1795,143 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 </div>
               </div>
             </div>
+            ) : activeTab === "outreach" ? (
+              /* Outreach Tab */
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Outreach
+                  </h3>
+                  <div className="space-y-3">
+                    {columnOrder
+                      .filter((column) => isOutreachColumn(column) && !shouldHideDrawerField(column))
+                      .map((columnKey) => {
+                        const value = getCellValue(company, columnKey);
+                        if (value === "-" || !value) return null;
+
+                        const label = columnLabels[columnKey] || columnKey;
+                        const isLongText = value.length > 100;
+                        const isEditing =
+                          editingCell?.companyId === company.id &&
+                          editingCell?.columnKey === columnKey;
+                        const isEditable = !columnKey.startsWith("template_");
+                        const isTextareaField = value.length > 60;
+
+                        return (
+                          <div
+                            key={columnKey}
+                            className="border-l-4 border-indigo-500 pl-4 py-2 rounded-r bg-gray-50 border-gray-200"
+                          >
+                            <p className="text-sm font-medium text-gray-700 mb-1">
+                              {label}
+                            </p>
+
+                            {isEditing ? (
+                              <div className="flex items-start gap-2">
+                                {isTextareaField ? (
+                                  <textarea
+                                    ref={
+                                      editInputRef as React.RefObject<HTMLTextAreaElement>
+                                    }
+                                    value={editingCell.value}
+                                    onChange={(e) =>
+                                      setEditingCell((prev) =>
+                                        prev
+                                          ? { ...prev, value: e.target.value }
+                                          : prev
+                                      )
+                                    }
+                                    onBlur={handleInlineEditSave}
+                                    onKeyDown={(e) => {
+                                      if (
+                                        e.key === "Enter" &&
+                                        (e.metaKey || e.ctrlKey)
+                                      ) {
+                                        handleInlineEditSave();
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                    rows={3}
+                                  />
+                                ) : (
+                                  <input
+                                    ref={
+                                      editInputRef as React.RefObject<HTMLInputElement>
+                                    }
+                                    type="text"
+                                    value={editingCell.value}
+                                    onChange={(e) =>
+                                      setEditingCell((prev) =>
+                                        prev
+                                          ? { ...prev, value: e.target.value }
+                                          : prev
+                                      )
+                                    }
+                                    onBlur={handleInlineEditSave}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        handleInlineEditSave();
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                    className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                                  />
+                                )}
+
+                                <div className="flex flex-col gap-1">
+                                  <button
+                                    onClick={handleInlineEditSave}
+                                    className="text-green-600 hover:text-green-800"
+                                    title="Save (Enter)"
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      setEditingCell(null);
+                                    }}
+                                    className="text-red-600 hover:text-red-800"
+                                    title="Cancel (Esc)"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <p
+                                className={`text-sm text-gray-900 ${isLongText ? "whitespace-pre-wrap break-words" : ""} ${
+                                  isEditable
+                                    ? "cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
+                                    : ""
+                                }`}
+                                onDoubleClick={
+                                  isEditable
+                                    ? () => handleCellDoubleClick(company, columnKey)
+                                    : undefined
+                                }
+                                title={isEditable ? "Double click to edit" : undefined}
+                              >
+                                {value}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                  {columnOrder.filter((column) => isOutreachColumn(column)).every((columnKey) => {
+                    const value = getCellValue(company, columnKey);
+                    return value === "-" || !value;
+                  }) && (
+                    <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
+                      <p className="text-sm text-gray-600">No outreach messages available for this company.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : (
               /* Contacts Tab */
               <div className="space-y-6">

@@ -6,8 +6,8 @@ import QualificationDisplay from './qualification/QualificationDisplay';
 import InstagramProfileDisplay from './qualification/InstagramProfileDisplay';
 import Image from "next/image";
 import Link from "next/link";
-import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, fetchJobsResearch, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
-import type { JobsResearchSummary } from "../lib/api";
+import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, fetchJobsResearch, fetchCompanyNewsEmailOpener, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
+import type { JobsResearchSummary, NewsEmailOpener } from "../lib/api";
 import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
 import ConfirmationModal from './ui/ConfirmationModal';
@@ -167,6 +167,8 @@ export default function CompanyResearcher() {
 
   // Set name for batch processing
   const [setName, setSetName] = useState('');
+  const [newsInput, setNewsInput] = useState('');
+  const newsDraftCacheRef = useRef<{ news: string; draft: NewsEmailOpener | null } | null>(null);
   
   // Company input and state
   const [rawCompanyInput, setRawCompanyInput] = useState('');
@@ -402,6 +404,46 @@ export default function CompanyResearcher() {
     return dedupe(cleaned);
   }, [researchMode]);
 
+  const shouldGenerateNewsOpener = useMemo(
+    () => isB2B && researchMode !== 'investor' && newsInput.trim().length > 0,
+    [isB2B, researchMode, newsInput]
+  );
+
+  const getNewsEmailOpener = useCallback(async (): Promise<NewsEmailOpener | null> => {
+    if (!shouldGenerateNewsOpener) {
+      return null;
+    }
+
+    const trimmedNews = newsInput.trim();
+    if (!trimmedNews) {
+      return null;
+    }
+
+    const cached = newsDraftCacheRef.current;
+    if (cached && cached.news === trimmedNews) {
+      return cached.draft;
+    }
+
+    const draft = await fetchCompanyNewsEmailOpener(trimmedNews);
+    newsDraftCacheRef.current = { news: trimmedNews, draft };
+    return draft;
+  }, [newsInput, shouldGenerateNewsOpener]);
+
+  const mergeNewsDraftIntoSummary = useCallback(
+    <T extends Record<string, any> | null | undefined>(summary: T, draft: NewsEmailOpener | null): T => {
+      if (!summary || !draft) {
+        return summary;
+      }
+
+      return {
+        ...summary,
+        first_line_to_start_email: draft.first_line_to_start_email,
+        subject_line: draft.subject_line,
+      } as T;
+    },
+    []
+  );
+
   // Research a single company
   const researchCompany = useCallback(async (company: string) => {
     if (researchMode === 'instagram') {
@@ -432,6 +474,7 @@ export default function CompanyResearcher() {
       }));
 
       try {
+        const newsDraft = await getNewsEmailOpener();
         let instagramProfileData = null;
         
         try {
@@ -462,7 +505,10 @@ export default function CompanyResearcher() {
         }
 
         // Extract qualification data from profile response if present
-        const instagramQualificationData = instagramProfileData?.qualificationData || null;
+        const instagramQualificationData = mergeNewsDraftIntoSummary(
+          instagramProfileData?.qualificationData || null,
+          newsDraft
+        );
         // Remove qualificationData from profile data to keep it separate
         const { qualificationData: _, ...profileDataWithoutQualification } = instagramProfileData || {};
         
@@ -648,6 +694,7 @@ export default function CompanyResearcher() {
       setErrorsByCompany(prev => ({ ...prev, [company]: {} }));
 
       try {
+        const newsDraft = await getNewsEmailOpener();
         const data = await fetchJobsResearch(company);
         console.log('[CompanyResearchHome] researchCompany (jobs) API result:', data);
         if (data?.error) {
@@ -658,7 +705,7 @@ export default function CompanyResearcher() {
           return;
         }
 
-        const summary = data?.summary;
+        const summary = mergeNewsDraftIntoSummary(data?.summary, newsDraft);
         setResultsByCompany(prev => ({
           ...prev,
           [company]: {
@@ -690,6 +737,8 @@ export default function CompanyResearcher() {
               compensation_type: summary.compensation_type || '',
               compensation_amount: summary.compensation_amount || '',
               job_application_fit_for_B2B_GTM_ABM_expert: summary.job_application_fit_for_B2B_GTM_ABM_expert ?? null,
+              first_line_to_start_email: summary.first_line_to_start_email || '',
+              subject_line: summary.subject_line || '',
               source_job_url: data?.url || company,
             };
 
@@ -770,11 +819,13 @@ export default function CompanyResearcher() {
       }));
 
       try {
+        const newsDraft = await getNewsEmailOpener();
         // Fetch company qualification data
         let qualificationData = null;
         
         try {
-          qualificationData = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+          const rawQualificationData = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+          qualificationData = mergeNewsDraftIntoSummary(rawQualificationData, newsDraft);
           // If fetchCompanyMap returns null, it means there was an error
           // (error notification already sent from fetchCompanyMap)
           if (!qualificationData) {
@@ -877,7 +928,7 @@ export default function CompanyResearcher() {
         );
       }
     }
-  }, [researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings]);
+  }, [researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary]);
 
   // Handle CSV file upload
   const handleCsvUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1151,6 +1202,8 @@ export default function CompanyResearcher() {
                 updatedRow['Compensation Type'] = s.compensation_type || '';
                 updatedRow['Compensation Amount'] = s.compensation_amount || '';
                 updatedRow['B2B GTM/ABM Fit'] = s.job_application_fit_for_B2B_GTM_ABM_expert === true ? 'Yes' : s.job_application_fit_for_B2B_GTM_ABM_expert === false ? 'No' : '';
+                updatedRow['First Line To Start Email'] = s.first_line_to_start_email || '';
+                updatedRow['Subject Line'] = s.subject_line || '';
               } else if (jobError) {
                 updatedRow['Research Status'] = jobError;
               } else {
@@ -1231,6 +1284,7 @@ export default function CompanyResearcher() {
     
     // Concurrency limit for parallel processing (adjust based on API rate limits)
     const CONCURRENCY_LIMIT = 30;
+    const newsDraft = await getNewsEmailOpener();
 
     // Helper function to save progress after each row is processed
     const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor' | 'jobs', identifier: string) => {
@@ -1809,7 +1863,8 @@ export default function CompanyResearcher() {
           async (domainName, batchIndex) => {
             const actualIndex = startFromIndex + batchIndex;
             try {
-              const data = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+              const rawData = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+              const data = mergeNewsDraftIntoSummary(rawData, newsDraft);
               if (data) {
                 qualificationDataMap.set(domainName, data);
                 
@@ -1880,13 +1935,16 @@ export default function CompanyResearcher() {
             try {
               const data = await fetchInstagramProfile(instagramUrl, user?.id, personalizationSettings?.instagram || null);
               if (data) {
-                qualificationDataMap.set(instagramUrl, data);
+                const mergedProfileData = data.qualificationData
+                  ? { ...data, qualificationData: mergeNewsDraftIntoSummary(data.qualificationData, newsDraft) }
+                  : data;
+                qualificationDataMap.set(instagramUrl, mergedProfileData);
                 
                 // Save companies immediately after getting response for all rows with this Instagram URL
                 const rowsForInstagram = instagramUrlToRowsMap.get(instagramUrl) || [];
                 for (const row of rowsForInstagram) {
-                  if (data.qualificationData) {
-                    await saveCompanyForRow(row, data.qualificationData, 'instagram', instagramUrl);
+                  if (mergedProfileData.qualificationData) {
+                    await saveCompanyForRow(row, mergedProfileData.qualificationData, 'instagram', instagramUrl);
                   }
                 }
               } else {
@@ -1955,10 +2013,13 @@ export default function CompanyResearcher() {
           try {
             const data = await fetchInstagramProfile(instagramUrl, user?.id, personalizationSettings?.instagram || null);
             if (data) {
-              qualificationDataMap.set(instagramUrl, data); // Reusing map for Instagram profiles
+              const mergedProfileData = data.qualificationData
+                ? { ...data, qualificationData: mergeNewsDraftIntoSummary(data.qualificationData, newsDraft) }
+                : data;
+              qualificationDataMap.set(instagramUrl, mergedProfileData); // Reusing map for Instagram profiles
               
               // Save/update company in database after summary is generated
-              if (data.qualificationData) {
+              if (mergedProfileData.qualificationData) {
                 try {
                   const username = extractUsernameFromUrl(instagramUrl);
                   if (username && user) {
@@ -1975,7 +2036,7 @@ export default function CompanyResearcher() {
                     if (existingCompany) {
                       // Update existing company
                       await updateCompany(existingCompany.id, {
-                        summary: data.qualificationData,
+                        summary: mergedProfileData.qualificationData,
                         domain: existingCompany.domain || '', // Keep existing domain if any
                         owner: selectedOwner,
                       });
@@ -1984,7 +2045,7 @@ export default function CompanyResearcher() {
                       await createCompany({
                         domain: '',
                         instagram: username,
-                        summary: data.qualificationData,
+                        summary: mergedProfileData.qualificationData,
                         email: '',
                         phone: '',
                         set_name: setName || null,
@@ -2163,10 +2224,13 @@ export default function CompanyResearcher() {
             if (data?.error) {
               errorMap.set(jobUrl, data.error + (data.details ? `: ${data.details}` : ''));
             } else {
-              qualificationDataMap.set(jobUrl, data);
+              const mergedJobData = data?.summary
+                ? { ...data, summary: mergeNewsDraftIntoSummary(data.summary, newsDraft) }
+                : data;
+              qualificationDataMap.set(jobUrl, mergedJobData);
 
               // Save as company
-              const summary = data?.summary;
+              const summary = mergedJobData?.summary;
               if (summary?.company_name && user) {
                 try {
                   const companyDomain = summary.company_website
@@ -2181,7 +2245,9 @@ export default function CompanyResearcher() {
                     compensation_type: summary.compensation_type || '',
                     compensation_amount: summary.compensation_amount || '',
                     job_application_fit_for_B2B_GTM_ABM_expert: summary.job_application_fit_for_B2B_GTM_ABM_expert ?? null,
-                    source_job_url: data?.url || jobUrl,
+                    first_line_to_start_email: summary.first_line_to_start_email || '',
+                    subject_line: summary.subject_line || '',
+                    source_job_url: mergedJobData?.url || jobUrl,
                   };
 
                   if (companyDomain) {
@@ -2291,7 +2357,8 @@ export default function CompanyResearcher() {
         async (domainName, batchIndex) => {
           const actualIndex = startFromIndex + batchIndex;
           try {
-            const data = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+            const rawData = await fetchCompanyMap(domainName, user?.id, personalizationSettings?.direct || null);
+            const data = mergeNewsDraftIntoSummary(rawData, newsDraft);
             if (data) {
               qualificationDataMap.set(domainName, data);
               
@@ -2523,6 +2590,8 @@ export default function CompanyResearcher() {
           updatedRow['Compensation Type'] = s.compensation_type || '';
           updatedRow['Compensation Amount'] = s.compensation_amount || '';
           updatedRow['B2B GTM/ABM Fit'] = s.job_application_fit_for_B2B_GTM_ABM_expert === true ? 'Yes' : s.job_application_fit_for_B2B_GTM_ABM_expert === false ? 'No' : '';
+          updatedRow['First Line To Start Email'] = s.first_line_to_start_email || '';
+          updatedRow['Subject Line'] = s.subject_line || '';
         } else if (jobError) {
           updatedRow['Research Status'] = jobError;
         } else {
@@ -2758,7 +2827,7 @@ export default function CompanyResearcher() {
     sendSlackNotification(`✅ CSV Processing Complete: Processed ${rowsToProcess.length} rows.`).catch(
       (error) => console.error('Failed to send Slack notification:', error)
     );
-  }, [csvData, selectedUrlColumn, selectedColumns, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings]);
+  }, [csvData, selectedUrlColumn, selectedColumns, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary]);
 
   // Clear all data function
   const handleClearAll = useCallback(() => {
@@ -2778,6 +2847,8 @@ export default function CompanyResearcher() {
     clearCsvProgress();
     setHasSavedProgress(false);
     setSetName('');
+    setNewsInput('');
+    newsDraftCacheRef.current = null;
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -3091,6 +3162,25 @@ export default function CompanyResearcher() {
           <p className="text-xs text-gray-500 mt-1">
             All processed companies will be tagged with this set name for easy identification and grouping.
           </p>
+        </div>
+      )}
+
+      {isB2B && researchMode !== 'investor' && (
+        <div className="mb-6 opacity-0 animate-fade-up [animation-delay:400ms]">
+          <label htmlFor="research-news" className="block text-sm font-medium text-gray-700 mb-2">
+            News (Optional)
+          </label>
+          <textarea
+            id="research-news"
+            value={newsInput}
+            onChange={(e) => {
+              setNewsInput(e.target.value);
+              newsDraftCacheRef.current = null;
+            }}
+            placeholder="Paste one or more news items. We will use one to generate an opener and subject line."
+            rows={4}
+            className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
+          />
         </div>
       )}
 
