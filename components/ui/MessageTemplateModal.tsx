@@ -22,6 +22,8 @@ const B2B_CHIPS: { variable: string; sampleLabel: string }[] = [
   { variable: '${PRODUCT1}', sampleLabel: 'jewelry' },
   { variable: '${PRODUCT2}', sampleLabel: 'accessories' },
   { variable: '${salesOpenerSentence}', sampleLabel: 'Loved your latest collection.' },
+  { variable: '${first_line_to_start_email}', sampleLabel: 'Congrats on your recent launch.' },
+  { variable: '${subject_line}', sampleLabel: 'Congrats on the launch!' },
   { variable: '${product_types}', sampleLabel: 'jewelry and accessories' },
   { variable: '${company_industry}', sampleLabel: 'fashion' },
   { variable: '${profile_industry}', sampleLabel: 'fashion' },
