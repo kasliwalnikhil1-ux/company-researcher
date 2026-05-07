@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
+import { isEmailAllowed } from '@/contexts/AuthContext';
 
 export default function AuthCallback() {
   const router = useRouter();
@@ -14,10 +15,15 @@ export default function AuthCallback() {
       
       if (code) {
         try {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
             console.error('Error exchanging code for session:', error);
             router.push('/login?error=auth_failed');
+            return;
+          }
+          if (!isEmailAllowed(data.session?.user?.email)) {
+            await supabase.auth.signOut();
+            router.push('/login?error=not_authorized');
             return;
           }
           // Successfully authenticated, redirect to home
@@ -31,6 +37,11 @@ export default function AuthCallback() {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session) {
+            if (!isEmailAllowed(session.user?.email)) {
+              await supabase.auth.signOut();
+              router.push('/login?error=not_authorized');
+              return;
+            }
             router.push('/');
           } else {
             router.push('/login');

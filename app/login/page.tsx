@@ -98,6 +98,8 @@ export default function Login() {
     const errorParam = searchParams.get('error');
     if (errorParam === 'auth_failed') {
       setError('Authentication failed. Please try again.');
+    } else if (errorParam === 'not_authorized') {
+      setError('This email is not authorized to access the app. Please contact the administrator.');
     }
   }, [searchParams]);
 

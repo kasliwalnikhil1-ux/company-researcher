@@ -46,6 +46,19 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const SIGNUP_USER_EXISTS_MESSAGE =
   'An account with this email already exists. Please sign in instead.';
 
+const ALLOWED_EMAILS = new Set<string>([
+  'kasliwalnikhil1@gmail.com',
+  'nkjaipur21@gmail.com',
+]);
+
+export const NOT_AUTHORIZED_MESSAGE =
+  'This email is not authorized to access the app. Please contact the administrator.';
+
+export function isEmailAllowed(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return ALLOWED_EMAILS.has(email.trim().toLowerCase());
+}
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -169,6 +182,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, password: string) => {
+    if (!isEmailAllowed(email)) {
+      throw new Error(NOT_AUTHORIZED_MESSAGE);
+    }
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -178,6 +194,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signUp = async (email: string, password: string) => {
+    if (!isEmailAllowed(email)) {
+      throw new Error(NOT_AUTHORIZED_MESSAGE);
+    }
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
