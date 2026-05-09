@@ -2139,14 +2139,10 @@ function CompaniesContent() {
                     return 'hover:bg-gray-50';
                   };
                   
-                  // Handle row click with Ctrl/Cmd to open drawer
-                  const handleRowClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
-                    // Only open drawer if Ctrl (Windows/Linux) or Cmd (Mac) is pressed
-                    if (e.ctrlKey || e.metaKey) {
-                      e.preventDefault();
-                      setCompanyToView(company);
-                      setDrawerOpen(true);
-                    }
+                  // Open drawer on any row/cell click (in addition to existing cell logic)
+                  const handleRowClick = () => {
+                    setCompanyToView(company);
+                    setDrawerOpen(true);
                   };
                   
                   return (
@@ -2260,16 +2256,9 @@ function CompaniesContent() {
                               isEditing ? '' : isTemplateColumn ? 'cursor-pointer hover:bg-blue-50' : (isLinkColumn || isPhoneColumn || isEmailColumn) && linkUrl ? 'cursor-pointer' : isClassificationColumn ? 'cursor-pointer hover:opacity-80' : 'cursor-pointer hover:bg-blue-50'
                             } transition-colors ${isTemplateColumn ? 'max-w-xl' : (isPhoneColumn || isEmailColumn) ? 'min-w-[12rem]' : 'max-w-md'}`}
                             onClick={!isEditing && !isLinkColumn && !isPhoneColumn && !isEmailColumn ? (e) => {
-                              // If Ctrl/Cmd is pressed, let the row handler handle it (for opening drawer)
-                              if (e.ctrlKey || e.metaKey) {
-                                return; // Let event bubble to row handler
-                              }
-                              e.stopPropagation();
-                              // Notes column opens drawer instead of copying
-                              if (isNotesColumn) {
-                                setCompanyToView(company);
-                                setDrawerOpen(true);
-                              } else {
+                              // Let click bubble to row handler so drawer also opens.
+                              // Notes column opens drawer (the row handler already does this); other columns also copy.
+                              if (!isNotesColumn && !(e.ctrlKey || e.metaKey)) {
                                 handleCellClick(company, columnKey);
                               }
                             } : undefined}
@@ -2376,8 +2365,8 @@ function CompaniesContent() {
                                         <span className="text-xs md:text-sm text-gray-900 flex-1 truncate">{trimmedItem}</span>
                                         {phoneLinkUrl && (
                                           <button
-                                            onClick={async (e) => {
-                                              e.stopPropagation();
+                                            onClick={async () => {
+                                              // Don't stopPropagation: let row handler also open drawer
                                               if (phoneClickBehavior === 'call') {
                                                 window.location.href = phoneLinkUrl;
                                               } else {
@@ -2438,8 +2427,8 @@ function CompaniesContent() {
                                     return (
                                       <div key={index} className="flex items-center gap-2">
                                         <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
+                                          onClick={() => {
+                                            // Don't stopPropagation: let row handler also open drawer
                                             window.open(emailLinkUrl, '_blank', 'noopener,noreferrer');
                                           }}
                                           onDoubleClick={(e) => {
@@ -2463,13 +2452,13 @@ function CompaniesContent() {
                                 target={isLinkColumn ? "_blank" : undefined}
                                 rel={isLinkColumn ? "noopener noreferrer" : undefined}
                                 onClick={async (e) => {
-                                  // If Ctrl/Cmd is pressed, let the row handler handle it (for opening drawer)
+                                  // On Ctrl/Cmd: prevent navigation so user can view drawer without the side trip.
+                                  // On plain click: let link navigate AND let row handler open drawer (no stopPropagation).
                                   if (e.ctrlKey || e.metaKey) {
                                     e.preventDefault();
-                                    return; // Let event bubble to row handler
+                                    return;
                                   }
-                                  e.stopPropagation();
-                                  
+
                                   // For domain/instagram columns, copy clipboard column value if set
                                   if (clipboardColumn) {
                                     const clipboardValue = getCellValue(company, clipboardColumn);

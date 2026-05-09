@@ -25,6 +25,8 @@ import {
   ExternalLink,
   Upload,
   Instagram,
+  Sparkles,
+  Search,
 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
@@ -147,6 +149,22 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     contactId: string | number;
     contactName: string;
   } | null>(null);
+  const [isAddingContact, setIsAddingContact] = useState(false);
+  const emptyNewContact = {
+    full_name: "",
+    title: "",
+    headline: "",
+    email: "",
+    phone: "",
+    linkedin_url: "",
+    photo_url: "",
+    status: "",
+  };
+  const [newContact, setNewContact] = useState<Record<string, string>>(emptyNewContact);
+  const [savingNewContact, setSavingNewContact] = useState(false);
+  const [editingContactId, setEditingContactId] = useState<string | number | null>(null);
+  const [enrichingContactId, setEnrichingContactId] = useState<string | number | null>(null);
+  const [enrichingMode, setEnrichingMode] = useState<"basic" | "email" | null>(null);
 
   // Notes management state
   const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
@@ -160,6 +178,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [jsonInput, setJsonInput] = useState('');
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [jsonImporting, setJsonImporting] = useState(false);
+
+  // Contact JSON import state (LinkedIn-style profile JSON)
+  const [contactJsonOpen, setContactJsonOpen] = useState(false);
+  const [contactJsonInput, setContactJsonInput] = useState('');
+  const [contactJsonError, setContactJsonError] = useState<string | null>(null);
 
   const [domainCopied, setDomainCopied] = useState(false);
 
@@ -513,11 +536,208 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     [company, contacts, updateCompany]
   );
 
+  const handleContactStatusChange = useCallback(
+    async (contactId: string | number, status: string) => {
+      if (!company || !contacts) return;
+
+      const previousContacts = contacts;
+
+      try {
+        const updatedContacts = contacts.map((contact) => {
+          const matches =
+            contact.person_id === contactId ||
+            contact.email === contactId ||
+            contact.full_name === contactId;
+
+          if (matches) {
+            return { ...contact, status };
+          }
+          return contact;
+        });
+
+        setContacts(updatedContacts);
+
+        const domain = company.domain;
+        const storageKey = `contacts_${domain}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
+
+        await updateCompany(company.id, { contacts: updatedContacts });
+
+        setToastMessage(status ? `Status set to ${status}` : "Status cleared");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 2000);
+      } catch (error: any) {
+        console.error("Error updating contact status:", error);
+        setToastMessage(`Error updating status: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        setContacts(previousContacts);
+      }
+    },
+    [company, contacts, updateCompany]
+  );
+
+  const handleContactFieldChange = useCallback(
+    async (contactId: string | number, field: string, value: string) => {
+      if (!company || !contacts) return;
+
+      const previousContacts = contacts;
+
+      try {
+        const updatedContacts = contacts.map((contact) => {
+          const matches =
+            contact.person_id === contactId ||
+            contact.email === contactId ||
+            contact.full_name === contactId;
+
+          if (matches) {
+            return { ...contact, [field]: value };
+          }
+          return contact;
+        });
+
+        setContacts(updatedContacts);
+
+        const domain = company.domain;
+        const storageKey = `contacts_${domain}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
+
+        await updateCompany(company.id, { contacts: updatedContacts });
+
+        setToastMessage(`${field.replace(/_/g, " ")} updated`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 2000);
+      } catch (error: any) {
+        console.error(`Error updating contact ${field}:`, error);
+        setToastMessage(`Error updating ${field}: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        setContacts(previousContacts);
+      }
+    },
+    [company, contacts, updateCompany]
+  );
+
   const handleContactRemoveClick = useCallback(
     (contactId: string | number, contactName: string) => {
       setContactToRemove({ contactId, contactName });
     },
     []
+  );
+
+  const handleAddContactSubmit = useCallback(
+    async () => {
+      if (!company) return;
+
+      const trimmed: Record<string, string> = {};
+      Object.entries(newContact).forEach(([k, v]) => {
+        const val = (v || "").trim();
+        if (val) trimmed[k] = val;
+      });
+
+      if (!trimmed.full_name && !trimmed.email && !trimmed.linkedin_url && !trimmed.phone) {
+        setToastMessage("Add at least a name, email, phone, or LinkedIn URL");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        return;
+      }
+
+      const previousContacts = contacts;
+      setSavingNewContact(true);
+
+      try {
+        const isEditing = editingContactId !== null;
+        let updatedContacts: any[];
+
+        if (isEditing && contacts) {
+          updatedContacts = contacts.map((contact) => {
+            const matches =
+              contact.person_id === editingContactId ||
+              contact.email === editingContactId ||
+              contact.full_name === editingContactId;
+            if (!matches) return contact;
+
+            const merged: Record<string, any> = { ...contact };
+            Object.keys(emptyNewContact).forEach((field) => {
+              if (trimmed[field]) {
+                merged[field] = trimmed[field];
+              } else {
+                delete merged[field];
+              }
+            });
+            return merged;
+          });
+        } else {
+          const contactToAdd: any = {
+            ...trimmed,
+            person_id: `manual_${Date.now()}`,
+            checked: false,
+          };
+          updatedContacts = [contactToAdd, ...(contacts || [])];
+        }
+
+        setContacts(updatedContacts);
+
+        const domain = company.domain;
+        const storageKey = `contacts_${domain}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
+
+        await updateCompany(company.id, { contacts: updatedContacts });
+
+        setNewContact(emptyNewContact);
+        setIsAddingContact(false);
+        setEditingContactId(null);
+        setContactJsonOpen(false);
+        setContactJsonInput("");
+        setContactJsonError(null);
+        setToastMessage(isEditing ? "Contact updated" : "Contact added");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 2000);
+      } catch (error: any) {
+        console.error("Error saving contact:", error);
+        setToastMessage(`Error saving contact: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        setContacts(previousContacts || null);
+      } finally {
+        setSavingNewContact(false);
+      }
+    },
+    [company, contacts, newContact, editingContactId, updateCompany]
+  );
+
+  const handleAddContactCancel = useCallback(() => {
+    setNewContact(emptyNewContact);
+    setIsAddingContact(false);
+    setEditingContactId(null);
+    setContactJsonOpen(false);
+    setContactJsonInput("");
+    setContactJsonError(null);
+  }, []);
+
+  const handleContactEditClick = useCallback(
+    (contactId: string | number) => {
+      if (!contacts) return;
+      const target = contacts.find(
+        (c) =>
+          c.person_id === contactId || c.email === contactId || c.full_name === contactId
+      );
+      if (!target) return;
+
+      setNewContact({
+        full_name: target.full_name || "",
+        title: target.title || "",
+        headline: target.headline || "",
+        email: target.email || "",
+        phone: target.phone || "",
+        linkedin_url: target.linkedin_url || "",
+        photo_url: target.photo_url || "",
+        status: target.status || "",
+      });
+      setEditingContactId(contactId);
+      setIsAddingContact(true);
+    },
+    [contacts]
   );
 
   const handleContactRemoveConfirm = useCallback(
@@ -561,6 +781,82 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const handleContactRemoveCancel = useCallback(() => {
     setContactToRemove(null);
   }, []);
+
+  const handleGetContactDetails = useCallback(
+    async (
+      contactId: string | number,
+      personId: string,
+      revealEmail: boolean
+    ) => {
+      if (!company || !contacts) return;
+      const domain = company.domain?.trim();
+      if (!domain) {
+        setToastMessage("Company has no domain");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        return;
+      }
+
+      const previousContacts = contacts;
+      setEnrichingContactId(contactId);
+      setEnrichingMode(revealEmail ? "email" : "basic");
+      try {
+        const accessToken = await getValidAccessToken();
+        if (!accessToken) {
+          throw new Error("Not authenticated");
+        }
+
+        const response = await fetch(
+          "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/enrich-company-contact",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              domain,
+              person_id: personId,
+              reveal_email: revealEmail,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Failed to enrich contact: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const result = data?.result;
+        if (!result || !result.person_id) {
+          throw new Error("Enrichment returned no result");
+        }
+
+        const updatedContacts = previousContacts.map((contact) =>
+          contact.person_id === result.person_id
+            ? { ...contact, ...result }
+            : contact
+        );
+
+        setContacts(updatedContacts);
+
+        const storageKey = `contacts_${domain}`;
+        localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
+
+        await updateCompany(company.id, { contacts: updatedContacts });
+      } catch (error: any) {
+        console.error("Error enriching contact:", error);
+        setToastMessage(`Error enriching contact: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+        setContacts(previousContacts);
+      } finally {
+        setEnrichingContactId(null);
+        setEnrichingMode(null);
+      }
+    },
+    [company, contacts, updateCompany]
+  );
 
   // Notes management handlers
   const handleAddNote = useCallback(() => {
@@ -819,23 +1115,75 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   }, [isOpen, company, hasPrevious, hasNext, handlePrevious, handleNext]);
 
   /* ---------- Contact Card (refreshed style) ---------- */
+  const CONTACT_STATUS_OPTIONS = [
+    "Not Contacted",
+    "Contacted",
+    "In Discussion",
+    "Interested",
+    "Not Interested",
+    "Closed",
+  ];
+
+  const getStatusPillClasses = (status: string) => {
+    switch (status) {
+      case "Contacted":
+        return "bg-blue-50 text-blue-700 border-blue-200";
+      case "In Discussion":
+        return "bg-amber-50 text-amber-700 border-amber-200";
+      case "Interested":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200";
+      case "Not Interested":
+        return "bg-red-50 text-red-700 border-red-200";
+      case "Closed":
+        return "bg-purple-50 text-purple-700 border-purple-200";
+      default:
+        return "bg-gray-50 text-gray-700 border-gray-200";
+    }
+  };
+
   const ContactCard = ({
     contact,
     index,
     onToggle,
     onRemove,
+    onStatusChange,
+    onEdit,
+    onFieldChange,
+    onGetDetails,
+    isEnriching,
+    enrichingMode,
   }: {
     contact: any;
     index: number;
     onToggle: (contactId: string | number, checked: boolean) => void;
     onRemove: (contactId: string | number, contactName: string) => void;
+    onStatusChange: (contactId: string | number, status: string) => void;
+    onEdit: (contactId: string | number) => void;
+    onFieldChange: (contactId: string | number, field: string, value: string) => void;
+    onGetDetails: (
+      contactId: string | number,
+      personId: string,
+      revealEmail: boolean
+    ) => void;
+    isEnriching: boolean;
+    enrichingMode: "basic" | "email" | null;
   }) => {
     const [imageError, setImageError] = useState(false);
     const [copiedItem, setCopiedItem] = useState<string | null>(null);
+    const [editingEmail, setEditingEmail] = useState(false);
+    const [emailDraft, setEmailDraft] = useState("");
     const showPlaceholder = !contact.photo_url || imageError;
 
     const contactId = contact.person_id || contact.email || contact.full_name || index;
     const isChecked = contact.checked === true;
+    const hasPersonId = Boolean(contact.person_id);
+    const isEnriched = Boolean(contact.enriched_at);
+    const hasBasicDetails = Boolean(
+      contact.linkedin_url || contact.title || contact.headline
+    );
+    const hasEmail = Boolean(contact.email);
+    const canGetDetails = hasPersonId && !isEnriched && !hasBasicDetails;
+    const canGetEmail = hasPersonId && !isEnriched && !hasEmail;
     const contactName =
       contact.full_name ||
       `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
@@ -920,9 +1268,97 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <h3 className="font-semibold text-gray-900 truncate">
-                  {contactName}
-                </h3>
+                {(() => {
+                  let firstName = contact.first_name || "";
+                  let lastName = contact.last_name || "";
+                  if ((!firstName || !lastName) && contact.full_name) {
+                    const parts = contact.full_name.trim().split(/\s+/);
+                    if (!firstName) firstName = parts[0] || "";
+                    if (!lastName) lastName = parts.slice(1).join(" ");
+                  }
+                  const domain = company?.domain || "";
+                  const nameToken = [firstName, lastName].filter(Boolean).join("_");
+                  const nameTokenSpaced = [firstName, lastName].filter(Boolean).join(" ");
+                  const composeTarget =
+                    nameToken && domain ? `${nameToken}@${domain}` : nameToken || domain;
+                  const copyTarget =
+                    nameTokenSpaced && domain
+                      ? `${nameTokenSpaced}@${domain}`
+                      : nameTokenSpaced || domain;
+
+                  const cleanDomain = domain
+                    .replace(/^https?:\/\//i, "")
+                    .replace(/^www\./, "")
+                    .replace(/\/.*$/, "")
+                    .trim();
+                  const companyToken = cleanDomain.split(".")[0] || "";
+                  const linkedInSearchUrl = (() => {
+                    if (!contactName || contactName === "Unknown") return null;
+                    const queryParts: string[] = [`"${contactName}"`];
+                    const orParts: string[] = [];
+                    if (company?.set_name) orParts.push(`"${company.set_name}"`);
+                    if (companyToken) orParts.push(companyToken);
+                    if (contact.title) orParts.push(`"${contact.title}"`);
+                    if (orParts.length) queryParts.push(`(${orParts.join(" OR ")})`);
+                    const query = `site:linkedin.com/in ${queryParts.join(" ")}`;
+                    return `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                  })();
+                  const linkedInSearchButton = linkedInSearchUrl ? (
+                    <button
+                      onClick={() =>
+                        window.open(linkedInSearchUrl, "_blank", "noopener,noreferrer")
+                      }
+                      className="p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors flex-shrink-0"
+                      title={`Search Google for ${contactName} on LinkedIn`}
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                    </button>
+                  ) : null;
+
+                  if (!composeTarget) {
+                    return (
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <h3 className="font-semibold text-gray-900 truncate">
+                          {contactName}
+                        </h3>
+                        {linkedInSearchButton}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <h3 className="font-semibold text-gray-900 truncate">
+                        <a
+                          href={getComposeUrl(composeTarget)}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            window.open(
+                              getComposeUrl(composeTarget),
+                              "_blank",
+                              "noopener,noreferrer"
+                            );
+                          }}
+                          className="hover:text-indigo-700 hover:underline"
+                          title={`Compose email to ${composeTarget}`}
+                        >
+                          {contactName}
+                        </a>
+                      </h3>
+                      <button
+                        onClick={() => handleCopy(copyTarget, `name-email-${index}`)}
+                        className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                        title={`Copy ${copyTarget}`}
+                      >
+                        {copiedItem === `name-email-${index}` ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      {linkedInSearchButton}
+                    </div>
+                  );
+                })()}
                 {contact.title && (
                   <p className="text-sm text-gray-600 mt-0.5 truncate">{contact.title}</p>
                 )}
@@ -932,53 +1368,131 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   </p>
                 )}
               </div>
-              <button
-                onClick={() => onRemove(contactId, contactName)}
-                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors flex-shrink-0"
-                title="Remove contact"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <select
+                  value={contact.status || ""}
+                  onChange={(e) => onStatusChange(contactId, e.target.value)}
+                  className={`text-xs font-medium border rounded px-2 py-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 ${getStatusPillClasses(
+                    contact.status || ""
+                  )}`}
+                  title="Set contact status"
+                >
+                  <option value="">No status</option>
+                  {CONTACT_STATUS_OPTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => onEdit(contactId)}
+                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                  title="Edit contact"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => onRemove(contactId, contactName)}
+                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                  title="Remove contact"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-x-4 gap-y-2">
-              {contact.email && (
-                <div className="flex items-center gap-1.5 text-sm">
-                  <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                  <a
-                    href={getComposeUrl(contact.email)}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      window.open(getComposeUrl(contact.email), '_blank', 'noopener,noreferrer');
-                    }}
-                    className="text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-[180px]"
-                  >
-                    {contact.email}
-                  </a>
-                  {contact.email_status && (
-                    <span
-                      className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                        contact.email_status === "verified"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-gray-100 text-gray-700"
-                      }`}
+              <div className="flex items-center gap-1.5 text-sm">
+                <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                {editingEmail ? (
+                  <>
+                    <input
+                      type="email"
+                      autoFocus
+                      value={emailDraft}
+                      onChange={(e) => setEmailDraft(e.target.value)}
+                      onBlur={() => {
+                        const next = emailDraft.trim();
+                        if (next !== (contact.email || "")) {
+                          onFieldChange(contactId, "email", next);
+                        }
+                        setEditingEmail(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        } else if (e.key === "Escape") {
+                          setEditingEmail(false);
+                        }
+                      }}
+                      placeholder="jane@example.com"
+                      className="flex-1 min-w-[180px] px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                  </>
+                ) : contact.email ? (
+                  <>
+                    <a
+                      href={getComposeUrl(contact.email)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        window.open(getComposeUrl(contact.email), '_blank', 'noopener,noreferrer');
+                      }}
+                      onDoubleClick={(e) => {
+                        e.preventDefault();
+                        setEmailDraft(contact.email || "");
+                        setEditingEmail(true);
+                      }}
+                      title="Double click to edit"
+                      className="text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-[180px]"
                     >
-                      {contact.email_status}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => handleCopy(contact.email, `email-${index}`)}
-                    className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-                    title="Copy email"
-                  >
-                    {copiedItem === `email-${index}` ? (
-                      <Check className="w-3.5 h-3.5 text-emerald-500" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
+                      {contact.email}
+                    </a>
+                    {contact.email_status && (
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                          contact.email_status === "verified"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {contact.email_status}
+                      </span>
                     )}
+                    <button
+                      onClick={() => handleCopy(contact.email, `email-${index}`)}
+                      className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                      title="Copy email"
+                    >
+                      {copiedItem === `email-${index}` ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEmailDraft(contact.email || "");
+                        setEditingEmail(true);
+                      }}
+                      className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                      title="Edit email"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setEmailDraft("");
+                      setEditingEmail(true);
+                    }}
+                    className="text-xs text-gray-500 hover:text-indigo-600 italic"
+                    title="Add email"
+                  >
+                    Add email
                   </button>
-                </div>
-              )}
+                )}
+              </div>
               {contact.phone && (
                 <div className="flex items-center gap-1.5 text-sm">
                   <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
@@ -1013,6 +1527,38 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     )}
                   </button>
                 </div>
+              )}
+              {canGetDetails && (
+                <button
+                  onClick={() => onGetDetails(contactId, contact.person_id, false)}
+                  disabled={isEnriching}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  title="Fetch missing details for this contact"
+                >
+                  {isEnriching && enrichingMode === "basic" ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5" />
+                  )}
+                  {isEnriching && enrichingMode === "basic" ? "Getting…" : "Get details"}
+                </button>
+              )}
+              {canGetEmail && (
+                <button
+                  onClick={() => onGetDetails(contactId, contact.person_id, true)}
+                  disabled={isEnriching}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  title="Fetch missing details and reveal email"
+                >
+                  {isEnriching && enrichingMode === "email" ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Mail className="w-3.5 h-3.5" />
+                  )}
+                  {isEnriching && enrichingMode === "email"
+                    ? "Getting…"
+                    : "Get details with email"}
+                </button>
               )}
             </div>
           </div>
@@ -1946,7 +2492,282 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     <span className="ml-1 text-gray-400 normal-case">({contacts.length})</span>
                   )}
                 </h3>
+                {!isAddingContact && (
+                  <div className="flex items-center gap-2">
+                    {company.domain?.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const domain = company.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '');
+                          const name = domain.split('.')[0];
+                          const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
+                          const query = `site:linkedin.com/in ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing") ("${capitalized}" OR "${domain}")`;
+                          const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                          window.open(url, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded transition-colors"
+                        title="Find people on LinkedIn via Google search"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        Find People
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setIsAddingContact(true)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Add contact
+                    </button>
+                  </div>
+                )}
               </div>
+
+              {isAddingContact && (
+                <div className="bg-white border border-indigo-200 rounded-lg p-4 shadow-sm space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-gray-900">
+                      {editingContactId !== null ? "Edit contact" : "New contact"}
+                    </h4>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setContactJsonOpen((v) => !v);
+                          setContactJsonError(null);
+                        }}
+                        className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+                      >
+                        {contactJsonOpen ? "Hide JSON import" : "Import JSON"}
+                      </button>
+                      <span className="text-xs text-gray-500">All fields optional</span>
+                    </div>
+                  </div>
+                  {contactJsonOpen && (
+                    <div className="border border-dashed border-indigo-300 bg-indigo-50/40 rounded p-3 space-y-2">
+                      <p className="text-xs text-gray-600">
+                        Paste LinkedIn profile JSON (with fields like <code>accountName</code>,{" "}
+                        <code>url</code>, <code>profilePhoto</code>, <code>connectionsText</code>,{" "}
+                        <code>aboutEmail</code>, <code>aboutPhoneNumber</code>) to autofill below.
+                      </p>
+                      <textarea
+                        value={contactJsonInput}
+                        onChange={(e) => {
+                          setContactJsonInput(e.target.value);
+                          if (contactJsonError) setContactJsonError(null);
+                        }}
+                        placeholder='{"url": "https://www.linkedin.com/in/...", "accountName": "Jane Doe", ...}'
+                        rows={6}
+                        className="w-full px-2.5 py-1.5 text-xs font-mono border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                      {contactJsonError && (
+                        <p className="text-xs text-red-600">{contactJsonError}</p>
+                      )}
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setContactJsonInput("");
+                            setContactJsonError(null);
+                          }}
+                          className="text-xs text-gray-600 hover:text-gray-800"
+                        >
+                          Clear
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const raw = contactJsonInput.trim();
+                            if (!raw) {
+                              setContactJsonError("Paste JSON first.");
+                              return;
+                            }
+                            let data: any;
+                            try {
+                              data = JSON.parse(raw);
+                            } catch (err: any) {
+                              setContactJsonError(`Invalid JSON: ${err.message}`);
+                              return;
+                            }
+                            if (!data || typeof data !== "object") {
+                              setContactJsonError("JSON must be an object.");
+                              return;
+                            }
+                            const fullName =
+                              (data.accountName || data.nameHeading || "").toString().trim();
+                            const linkedinUrl = (data.url || "").toString().trim();
+                            const photoUrl = (data.profilePhoto || "").toString().trim();
+                            const email = (data.aboutEmail || "").toString().trim();
+                            const phone = (data.aboutPhoneNumber || "").toString().trim();
+                            let headline = "";
+                            const connText = (data.connectionsText || "").toString();
+                            if (connText && fullName) {
+                              let txt = connText;
+                              if (txt.startsWith(fullName)) {
+                                txt = txt.slice(fullName.length).trim();
+                              }
+                              txt = txt
+                                .replace(/^(He\/Him|She\/Her|They\/Them)\s*/i, "")
+                                .trim();
+                              const loc = (data.locationText || "").toString().trim();
+                              if (loc) {
+                                const idx = txt.indexOf(loc);
+                                if (idx > 0) txt = txt.slice(0, idx).trim();
+                              }
+                              headline = txt;
+                            }
+                            setNewContact((prev) => ({
+                              ...prev,
+                              full_name: fullName || prev.full_name,
+                              linkedin_url: linkedinUrl || prev.linkedin_url,
+                              photo_url: photoUrl || prev.photo_url,
+                              email: email || prev.email,
+                              phone: phone || prev.phone,
+                              headline: headline || prev.headline,
+                            }));
+                            setContactJsonError(null);
+                            setContactJsonOpen(false);
+                            setContactJsonInput("");
+                            setToastMessage("Contact fields filled from JSON");
+                            setToastVisible(true);
+                          }}
+                          className="text-xs font-medium px-3 py-1.5 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+                        >
+                          Fill fields
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Full name
+                      </label>
+                      <input
+                        type="text"
+                        value={newContact.full_name}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, full_name: e.target.value })
+                        }
+                        placeholder="Jane Doe"
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={newContact.email}
+                        onChange={(e) => setNewContact({ ...newContact, email: e.target.value })}
+                        placeholder="jane@example.com"
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        LinkedIn URL
+                      </label>
+                      <input
+                        type="url"
+                        value={newContact.linkedin_url}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, linkedin_url: e.target.value })
+                        }
+                        placeholder="https://linkedin.com/in/..."
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Title</label>
+                      <input
+                        type="text"
+                        value={newContact.title}
+                        onChange={(e) => setNewContact({ ...newContact, title: e.target.value })}
+                        placeholder="Head of Sales"
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+                      <input
+                        type="tel"
+                        value={newContact.phone}
+                        onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
+                        placeholder="+1 555 123 4567"
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Headline
+                      </label>
+                      <input
+                        type="text"
+                        value={newContact.headline}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, headline: e.target.value })
+                        }
+                        placeholder="Short bio"
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Photo URL
+                      </label>
+                      <input
+                        type="url"
+                        value={newContact.photo_url}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, photo_url: e.target.value })
+                        }
+                        placeholder="https://..."
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+                      <select
+                        value={newContact.status}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, status: e.target.value })
+                        }
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
+                      >
+                        <option value="">No status</option>
+                        {CONTACT_STATUS_OPTIONS.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+                    <button
+                      onClick={handleAddContactCancel}
+                      disabled={savingNewContact}
+                      className="px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleAddContactSubmit}
+                      disabled={savingNewContact}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded transition-colors disabled:opacity-50"
+                    >
+                      {savingNewContact ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : editingContactId !== null ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Plus className="w-3.5 h-3.5" />
+                      )}
+                      {editingContactId !== null ? "Update contact" : "Save contact"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {contactsLoading ? (
                 <div className="flex justify-center py-12">
@@ -1954,15 +2775,27 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 </div>
               ) : contacts && contacts.length > 0 ? (
                 <div className="space-y-3">
-                  {contacts.map((contact, index) => (
-                    <ContactCard
-                      key={contact.person_id || index}
-                      contact={contact}
-                      index={index}
-                      onToggle={handleContactToggle}
-                      onRemove={handleContactRemoveClick}
-                    />
-                  ))}
+                  {contacts.map((contact, index) => {
+                    const cardContactId =
+                      contact.person_id || contact.email || contact.full_name || index;
+                    return (
+                      <ContactCard
+                        key={contact.person_id || index}
+                        contact={contact}
+                        index={index}
+                        onToggle={handleContactToggle}
+                        onFieldChange={handleContactFieldChange}
+                        onRemove={handleContactRemoveClick}
+                        onStatusChange={handleContactStatusChange}
+                        onEdit={handleContactEditClick}
+                        onGetDetails={handleGetContactDetails}
+                        isEnriching={enrichingContactId === cardContactId}
+                        enrichingMode={
+                          enrichingContactId === cardContactId ? enrichingMode : null
+                        }
+                      />
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50">
