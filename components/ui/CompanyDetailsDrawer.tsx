@@ -1,7 +1,31 @@
 "use client";
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { X, Mail, Phone, Linkedin, User, Loader2, Copy, Check, Trash2, ChevronLeft, ChevronRight, Plus, Edit2 } from "lucide-react";
+import {
+  X,
+  Mail,
+  Phone,
+  Linkedin,
+  Globe,
+  User,
+  Users,
+  Loader2,
+  Copy,
+  Check,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Edit2,
+  FileText,
+  CheckCircle,
+  XCircle,
+  Minus,
+  Eye,
+  ExternalLink,
+  Upload,
+  Instagram,
+} from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { extractPhoneNumber } from "@/lib/utils";
 import PhoneInputField from "@/components/ui/PhoneInputField";
@@ -24,6 +48,68 @@ interface CompanyDetailsDrawerProps {
   totalPages?: number;
   onPageChange?: (page: number) => void;
   emailSettings?: EmailSettings | null;
+}
+
+/* ---------- Shared layout helpers (mirrors InvestorDetailsDrawer) ---------- */
+
+function DetailRow({
+  label,
+  icon,
+  value,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="mt-0.5 flex-shrink-0">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">{label}</p>
+        <div className="text-sm text-gray-900 mt-0.5">{value}</div>
+      </div>
+    </div>
+  );
+}
+
+function DetailField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">{label}</p>
+      <div className="text-sm text-gray-900">{children}</div>
+    </div>
+  );
+}
+
+function DetailSection({
+  label,
+  icon,
+  action,
+  children,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1">
+          {icon}
+          {label}
+        </h3>
+        {action}
+      </div>
+      <div className="text-sm text-gray-700">{children}</div>
+    </div>
+  );
 }
 
 const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
@@ -61,7 +147,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     contactId: string | number;
     contactName: string;
   } | null>(null);
-  
+
   // Notes management state
   const [notes, setNotes] = useState<Array<{ message: string; date: string }>>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
@@ -69,28 +155,21 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [newNoteMessage, setNewNoteMessage] = useState('');
   const [noteToDelete, setNoteToDelete] = useState<number | null>(null);
 
+  // JSON import state
+  const [isJsonImportOpen, setIsJsonImportOpen] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [jsonImporting, setJsonImporting] = useState(false);
+
+  const [domainCopied, setDomainCopied] = useState(false);
+
   // Handle cell double click (edit)
   const handleCellDoubleClick = useCallback(
     (company: Company, columnKey: string) => {
-      // Template columns are read-only
-      if (columnKey.startsWith("template_")) {
-        return;
-      }
-
-      // Domain and instagram are not directly editable (they have special link behavior)
-      if (columnKey === "domain" || columnKey === "instagram") {
-        return;
-      }
-
-      // Classification uses a dropdown, not double-click editing
-      if (columnKey === "classification") {
-        return;
-      }
-
-      // Notes are managed in the Notes section, not via double-click
-      if (columnKey === "notes") {
-        return;
-      }
+      if (columnKey.startsWith("template_")) return;
+      if (columnKey === "domain" || columnKey === "instagram") return;
+      if (columnKey === "classification") return;
+      if (columnKey === "notes") return;
 
       const currentValue = getCellValue(company, columnKey);
       setEditingCell({
@@ -109,7 +188,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     const { companyId, columnKey, value } = editingCell;
 
     try {
-      // Handle direct company fields (not in summary)
       if (columnKey === "phone") {
         const cleanedPhone = extractPhoneNumber(value);
         await updateCompany(companyId, { [columnKey]: cleanedPhone });
@@ -142,7 +220,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       const updatedSummary = { ...summaryData };
       const prevValue = summaryData[columnKey];
 
-      // Infer type from the previous value to store in the correct format
       if (Array.isArray(prevValue)) {
         updatedSummary[columnKey] = value
           .split(",")
@@ -172,21 +249,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [editingCell, company, getSummaryData, updateCompany, columnLabels]);
 
-  /**
-   * ✅ FIX: Focus ONLY when starting to edit a NEW field.
-   * Previously the effect ran on every keystroke (because editingCell.value changes),
-   * which kept moving cursor to end.
-   */
   useEffect(() => {
     if (!editingCell || !editInputRef.current) return;
 
     const el = editInputRef.current;
-
-    // Wait for the input to be in the DOM and stable
     requestAnimationFrame(() => {
       el.focus();
-
-      // Put cursor at the end once when edit mode starts
       const length = el.value.length;
       if (typeof (el as any).setSelectionRange === "function") {
         (el as any).setSelectionRange(length, length);
@@ -194,12 +262,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     });
   }, [editingCell?.companyId, editingCell?.columnKey]);
 
-  // Update classification value when company changes
   useEffect(() => {
     if (company) {
       const summaryData = getSummaryData(company);
       const currentClassification = summaryData.classification || "";
-      // Map NOT_QUALIFIED to UNQUALIFIED for display
       const displayValue =
         currentClassification === "NOT_QUALIFIED"
           ? "UNQUALIFIED"
@@ -208,22 +274,18 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [company, company?.summary, getSummaryData]);
 
-  // Handle classification dropdown change
   const handleClassificationChange = useCallback(
     async (newValue: string) => {
       if (!company || !newValue) return;
 
-      // Optimistically update the UI
       setClassificationValue(newValue);
 
       try {
         const summaryData = getSummaryData(company);
         const updatedSummary = { ...summaryData };
 
-        // Map UNQUALIFIED to NOT_QUALIFIED for database compatibility
         const dbValue = newValue === "UNQUALIFIED" ? "NOT_QUALIFIED" : newValue;
 
-        // Validate and set classification
         if (["QUALIFIED", "NOT_QUALIFIED", "EXPIRED"].includes(dbValue.toUpperCase())) {
           updatedSummary.classification = dbValue.toUpperCase() as
             | "QUALIFIED"
@@ -231,7 +293,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
             | "MAYBE"
             | "EXPIRED";
         } else {
-          // Invalid value, revert
           const currentClassification = summaryData.classification || "";
           const displayValue =
             currentClassification === "NOT_QUALIFIED"
@@ -251,7 +312,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         setToastVisible(true);
         setTimeout(() => setToastVisible(false), 3000);
 
-        // Revert to previous value on error
         const summaryData = getSummaryData(company);
         const currentClassification = summaryData.classification || "";
         const displayValue =
@@ -264,19 +324,15 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     [company, getSummaryData, updateCompany]
   );
 
-  // Track if we've already fetched contacts for this company/domain
   const fetchedDomainsRef = useRef<Set<string>>(new Set());
-  // Track previous tab to only fetch when switching TO contacts tab
   const prevTabRef = useRef<"overview" | "outreach" | "contacts">("overview");
 
-  // Fetch contacts from API or localStorage
   const fetchContacts = useCallback(async () => {
     if (!company?.domain) return;
 
     const domain = company.domain;
     const storageKey = `contacts_${domain}`;
 
-    // If we've already fetched for this domain, use cached data
     if (fetchedDomainsRef.current.has(domain)) {
       const cachedContacts = localStorage.getItem(storageKey);
       if (cachedContacts) {
@@ -291,7 +347,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       return;
     }
 
-    // Check if contacts exist in company data
     if (company.contacts && Array.isArray(company.contacts)) {
       setContacts(company.contacts);
       localStorage.setItem(storageKey, JSON.stringify(company.contacts));
@@ -299,7 +354,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       return;
     }
 
-    // Check localStorage first
     const cachedContacts = localStorage.getItem(storageKey);
     if (cachedContacts) {
       try {
@@ -338,10 +392,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       const data = await response.json();
       const contactsList = data.results || [];
 
-      // Merge with existing company contacts to preserve checked state
       let mergedContacts = contactsList;
       if (company.contacts && Array.isArray(company.contacts)) {
-        // Create a map of existing contacts by their identifier
         const existingContactsMap = new Map();
         company.contacts.forEach((existingContact) => {
           const id = existingContact.person_id || existingContact.email || existingContact.full_name;
@@ -350,25 +402,18 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           }
         });
 
-        // Merge: preserve checked state and other properties from existing contacts
         mergedContacts = contactsList.map((newContact: any) => {
           const id = newContact.person_id || newContact.email || newContact.full_name;
           const existingContact = id ? existingContactsMap.get(id) : null;
           if (existingContact) {
-            // Merge: keep new contact data but preserve checked state and any other custom fields
             return { ...newContact, checked: existingContact.checked };
           }
           return newContact;
         });
       }
 
-      // Store in localStorage
       localStorage.setItem(storageKey, JSON.stringify(mergedContacts));
-
-      // Mark this domain as fetched
       fetchedDomainsRef.current.add(domain);
-
-      // Set merged contacts
       setContacts(mergedContacts);
     } catch (error: any) {
       console.error("Error fetching contacts:", error);
@@ -380,12 +425,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [company?.domain]);
 
-  // Fetch contacts only when user switches TO contacts tab (not when drawer opens)
   useEffect(() => {
-    // Only fetch if:
-    // 1. Current tab is "contacts"
-    // 2. Previous tab was NOT "contacts" (i.e., user just switched to contacts)
-    // 3. Company domain exists
     if (
       activeTab === "contacts" &&
       prevTabRef.current !== "contacts" &&
@@ -393,34 +433,25 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     ) {
       fetchContacts();
     }
-    // Update previous tab reference
     prevTabRef.current = activeTab;
   }, [activeTab, company?.domain, fetchContacts]);
 
-  // Track if we've made local notes changes to prevent overwriting
   const notesChangedLocallyRef = useRef(false);
-
-  // Track previous company ID to detect when we switch companies
   const prevCompanyIdRef = useRef<string | null>(null);
 
-  // Reset tab when company changes
   useEffect(() => {
     if (company) {
       const companyIdChanged = prevCompanyIdRef.current !== company.id;
-      
-      // If company ID changed, reset the local changes flag
+
       if (companyIdChanged) {
         notesChangedLocallyRef.current = false;
         prevCompanyIdRef.current = company.id;
       }
-      
+
       setActiveTab("overview");
       setContacts(null);
-      prevTabRef.current = "overview"; // Reset previous tab reference
-      // Don't clear fetchedDomainsRef - we want to keep the cache across company switches
-      
-      // Only load notes from company if we haven't made local changes
-      // This prevents overwriting local state when parent refreshes after our update
+      prevTabRef.current = "overview";
+
       if (!notesChangedLocallyRef.current) {
         if (company.notes && Array.isArray(company.notes)) {
           setNotes(company.notes);
@@ -428,12 +459,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           setNotes([]);
         }
       } else {
-        // If we have local changes, check if the company prop has been updated to match
-        // This happens when the parent refreshes after our update
         const propNotes = company.notes && Array.isArray(company.notes) ? company.notes : [];
         const notesMatch = JSON.stringify(propNotes) === JSON.stringify(notes);
         if (notesMatch) {
-          // Parent has synced our changes, reset the flag
           notesChangedLocallyRef.current = false;
         }
       }
@@ -446,35 +474,29 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [company?.id]);
 
-  // Handle contact checkbox toggle
   const handleContactToggle = useCallback(
     async (contactId: string | number, checked: boolean) => {
       if (!company || !contacts) return;
 
       try {
-        // Update the contact in the array
         const updatedContacts = contacts.map((contact) => {
-          // Match by person_id or email or full_name as identifier
           const matches =
             contact.person_id === contactId ||
             contact.email === contactId ||
             contact.full_name === contactId;
-          
+
           if (matches) {
             return { ...contact, checked };
           }
           return contact;
         });
 
-        // Update local state
         setContacts(updatedContacts);
 
-        // Update localStorage cache
         const domain = company.domain;
         const storageKey = `contacts_${domain}`;
         localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
 
-        // Update database
         await updateCompany(company.id, { contacts: updatedContacts });
 
         setToastMessage(checked ? "Contact checked" : "Contact unchecked");
@@ -485,14 +507,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         setToastMessage(`Error updating contact: ${error.message}`);
         setToastVisible(true);
         setTimeout(() => setToastVisible(false), 3000);
-        // Revert local state on error
         setContacts(contacts);
       }
     },
     [company, contacts, updateCompany]
   );
 
-  // Handle contact removal confirmation (shows modal)
   const handleContactRemoveClick = useCallback(
     (contactId: string | number, contactName: string) => {
       setContactToRemove({ contactId, contactName });
@@ -500,7 +520,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     []
   );
 
-  // Handle contact removal (actually removes)
   const handleContactRemoveConfirm = useCallback(
     async () => {
       if (!company || !contacts || !contactToRemove) return;
@@ -508,7 +527,6 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       const { contactId } = contactToRemove;
 
       try {
-        // Filter out the contact
         const updatedContacts = contacts.filter((contact) => {
           const matches =
             contact.person_id === contactId ||
@@ -517,18 +535,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           return !matches;
         });
 
-        // Update local state
         setContacts(updatedContacts);
 
-        // Update localStorage cache
         const domain = company.domain;
         const storageKey = `contacts_${domain}`;
         localStorage.setItem(storageKey, JSON.stringify(updatedContacts));
 
-        // Update database
         await updateCompany(company.id, { contacts: updatedContacts });
 
-        // Close modal and show success message
         setContactToRemove(null);
         setToastMessage("Contact removed");
         setToastVisible(true);
@@ -538,14 +552,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         setToastMessage(`Error removing contact: ${error.message}`);
         setToastVisible(true);
         setTimeout(() => setToastVisible(false), 3000);
-        // Revert local state on error
         setContacts(contacts);
       }
     },
     [company, contacts, contactToRemove, updateCompany]
   );
 
-  // Handle cancel removal
   const handleContactRemoveCancel = useCallback(() => {
     setContactToRemove(null);
   }, []);
@@ -566,16 +578,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
     try {
       const updatedNotes = [...notes];
-      
+
       if (editingNoteIndex !== null) {
-        // Update existing note - keep original date
         const originalNote = notes[editingNoteIndex];
         updatedNotes[editingNoteIndex] = {
           message: newNoteMessage.trim(),
-          date: originalNote.date, // Keep original date when editing
+          date: originalNote.date,
         };
       } else {
-        // Add new note - automatically set today's date
         const today = new Date().toISOString().split('T')[0];
         updatedNotes.push({
           message: newNoteMessage.trim(),
@@ -583,18 +593,16 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         });
       }
 
-      // Sort notes by date (newest first)
       updatedNotes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
       await updateCompany(company.id, { notes: updatedNotes });
       setNotes(updatedNotes);
       notesChangedLocallyRef.current = true;
-      
-      // Update the company prop if onCompanyChange is available
+
       if (onCompanyChange) {
         onCompanyChange({ ...company, notes: updatedNotes });
       }
-      
+
       setIsAddingNote(false);
       setEditingNoteIndex(null);
       setNewNoteMessage('');
@@ -607,7 +615,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       setToastVisible(true);
       setTimeout(() => setToastVisible(false), 3000);
     }
-  }, [company, notes, newNoteMessage, editingNoteIndex, updateCompany]);
+  }, [company, notes, newNoteMessage, editingNoteIndex, updateCompany, onCompanyChange]);
 
   const handleEditNote = useCallback((index: number) => {
     const note = notes[index];
@@ -637,12 +645,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       await updateCompany(company.id, { notes: finalNotes });
       setNotes(updatedNotes);
       notesChangedLocallyRef.current = true;
-      
-      // Update the company prop if onCompanyChange is available
+
       if (onCompanyChange) {
         onCompanyChange({ ...company, notes: finalNotes });
       }
-      
+
       setNoteToDelete(null);
       setToastMessage('Note deleted successfully');
       setToastVisible(true);
@@ -654,13 +661,102 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       setTimeout(() => setToastVisible(false), 3000);
       setNoteToDelete(null);
     }
-  }, [company, notes, noteToDelete, updateCompany]);
+  }, [company, notes, noteToDelete, updateCompany, onCompanyChange]);
 
   const handleDeleteNoteCancel = useCallback(() => {
     setNoteToDelete(null);
   }, []);
 
-  // Calculate current index and navigation helpers (must be before early return)
+  // JSON import handlers
+  const handleOpenJsonImport = useCallback(() => {
+    setJsonInput('');
+    setJsonError(null);
+    setIsJsonImportOpen(true);
+  }, []);
+
+  const handleCloseJsonImport = useCallback(() => {
+    setIsJsonImportOpen(false);
+    setJsonInput('');
+    setJsonError(null);
+  }, []);
+
+  const handleApplyJsonImport = useCallback(async () => {
+    if (!company) return;
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonInput);
+    } catch (e: any) {
+      setJsonError(`Invalid JSON: ${e.message}`);
+      return;
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      setJsonError('JSON must be an object');
+      return;
+    }
+
+    const asArray = (v: unknown): string[] => {
+      if (!Array.isArray(v)) return [];
+      return v
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter((s) => s.length > 0);
+    };
+
+    const emails = asArray(parsed.emails);
+    const phones = asArray(parsed.phones);
+    const instagrams = asArray(parsed.instagram);
+    const linkedins = asArray(parsed.linkedin);
+    const facebooks = asArray(parsed.facebook);
+
+    const updates: Partial<Company> = {};
+
+    if (emails.length > 0) {
+      updates.email = emails.join(', ');
+    }
+    if (phones.length > 0) {
+      updates.phone = phones.join(', ');
+    }
+    if (instagrams.length > 0) {
+      const first = instagrams[0];
+      const match = first.match(/instagram\.com\/([^/?#]+)/i);
+      updates.instagram = match ? match[1] : first.replace(/^@/, '');
+    }
+
+    if (linkedins.length > 0 || facebooks.length > 0) {
+      const currentSummary = getSummaryData(company);
+      const nextSummary = { ...currentSummary };
+      if (linkedins.length > 0) nextSummary.linkedin = linkedins;
+      if (facebooks.length > 0) nextSummary.facebook = facebooks;
+      updates.summary = nextSummary;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      setJsonError('No values to import (all arrays empty or unrecognized).');
+      return;
+    }
+
+    setJsonImporting(true);
+    try {
+      await updateCompany(company.id, updates);
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, ...updates });
+      }
+      setIsJsonImportOpen(false);
+      setJsonInput('');
+      setJsonError(null);
+      setToastMessage('Company updated from JSON');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } catch (error: any) {
+      console.error('Error importing JSON:', error);
+      setJsonError(`Update failed: ${error.message}`);
+    } finally {
+      setJsonImporting(false);
+    }
+  }, [company, jsonInput, getSummaryData, updateCompany, onCompanyChange]);
+
+  // Navigation
   const currentIndex = company ? companies.findIndex((c) => c.id === company.id) : -1;
   const hasNextInPage = currentIndex < companies.length - 1 && currentIndex >= 0;
   const hasNextPage = currentPage < totalPages;
@@ -672,14 +768,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const handlePrevious = useCallback(() => {
     if (!onCompanyChange || !company) return;
 
-    // If we're at the first company of current page, go to previous page
     if (currentIndex === 0 && hasPreviousPage && onPageChange) {
       onPageChange(currentPage - 1);
-      // The company will be updated when the new page loads
       return;
     }
 
-    // Otherwise, navigate to previous company in current page
     if (currentIndex > 0) {
       const previousCompany = companies[currentIndex - 1];
       if (previousCompany) {
@@ -691,28 +784,23 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const handleNext = useCallback(() => {
     if (!onCompanyChange || !company) return;
 
-    // If we're at the last company of current page, go to next page
     if (currentIndex === companies.length - 1 && hasNextPage && onPageChange) {
       onPageChange(currentPage + 1);
-      // The company will be updated when the new page loads
       return;
     }
 
-    // Otherwise, navigate to next company in current page
     if (currentIndex < companies.length - 1) {
       const nextCompany = companies[currentIndex + 1];
       if (nextCompany) {
         onCompanyChange(nextCompany);
       }
     }
-  }, [currentIndex, companies.length, hasNextPage, onPageChange, currentPage, onCompanyChange, company]);
+  }, [currentIndex, companies, hasNextPage, onPageChange, currentPage, onCompanyChange, company]);
 
-  // Handle keyboard navigation (must be before early return)
   useEffect(() => {
     if (!isOpen || !company) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle if no input is focused
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
         return;
       }
@@ -730,14 +818,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, company, hasPrevious, hasNext, handlePrevious, handleNext]);
 
-  // Contact Card Component (needs to be defined before the main component uses it)
-  const ContactCard = ({ 
-    contact, 
+  /* ---------- Contact Card (refreshed style) ---------- */
+  const ContactCard = ({
+    contact,
     index,
     onToggle,
-    onRemove
-  }: { 
-    contact: any; 
+    onRemove,
+  }: {
+    contact: any;
     index: number;
     onToggle: (contactId: string | number, checked: boolean) => void;
     onRemove: (contactId: string | number, contactName: string) => void;
@@ -745,11 +833,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     const [imageError, setImageError] = useState(false);
     const [copiedItem, setCopiedItem] = useState<string | null>(null);
     const showPlaceholder = !contact.photo_url || imageError;
-    
-    // Get unique identifier for this contact
+
     const contactId = contact.person_id || contact.email || contact.full_name || index;
     const isChecked = contact.checked === true;
-    const contactName = contact.full_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || contact.email || "Unknown";
+    const contactName =
+      contact.full_name ||
+      `${contact.first_name || ""} ${contact.last_name || ""}`.trim() ||
+      contact.email ||
+      "Unknown";
 
     const handleCopy = async (text: string, itemType: string) => {
       try {
@@ -761,11 +852,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       }
     };
 
-    // Generate compose URL (Gmail or Outlook) with pre-filled fields, using user email_settings
     const getComposeUrl = (email: string): string => {
-      if (!company) {
-        return `mailto:${email}`;
-      }
+      if (!company) return `mailto:${email}`;
       const trimmedEmail = email.trim();
       const subjectColumn = typeof window !== 'undefined'
         ? localStorage.getItem('companies-subject-column')
@@ -802,48 +890,44 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
     return (
       <div
-        className={`border rounded-lg p-4 hover:shadow-md transition-shadow ${
-          isChecked ? "border-indigo-500 bg-indigo-50/30" : "border-gray-200"
+        className={`bg-white border rounded-lg p-4 shadow-sm hover:bg-gray-50 hover:border-gray-300 transition-colors ${
+          isChecked ? "border-indigo-300 bg-indigo-50/30 hover:bg-indigo-50/50" : "border-gray-200"
         }`}
       >
-        <div className="flex items-start gap-4">
-          <div className="flex items-start gap-2 pt-1">
-            <input
-              type="checkbox"
-              checked={isChecked}
-              onChange={(e) => onToggle(contactId, e.target.checked)}
-              className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer"
-              title={isChecked ? "Uncheck contact" : "Check contact"}
-            />
-          </div>
-          <div className="relative w-20 h-20 flex-shrink-0">
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={isChecked}
+            onChange={(e) => onToggle(contactId, e.target.checked)}
+            className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 cursor-pointer flex-shrink-0"
+            title={isChecked ? "Uncheck contact" : "Check contact"}
+          />
+          <div className="relative w-12 h-12 flex-shrink-0">
             {contact.photo_url && !imageError && (
               <img
                 src={contact.photo_url}
                 alt={contact.full_name || "Contact"}
-                className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
+                className="w-12 h-12 rounded-full object-cover border border-gray-200"
                 onError={() => setImageError(true)}
               />
             )}
             {showPlaceholder && (
-              <div className="w-20 h-20 rounded-full bg-indigo-100 flex items-center justify-center border-2 border-gray-200">
-                <User className="w-10 h-10 text-indigo-600" />
+              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center border border-gray-200">
+                <User className="w-6 h-6 text-gray-400" />
               </div>
             )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
-              <div className="flex-1">
-                <h4 className="text-base font-semibold text-gray-900">
-                  {contact.full_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || "Unknown"}
-                </h4>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-semibold text-gray-900 truncate">
+                  {contactName}
+                </h3>
                 {contact.title && (
-                  <p className="text-sm text-gray-600 mt-1 font-medium">
-                    {contact.title}
-                  </p>
+                  <p className="text-sm text-gray-600 mt-0.5 truncate">{contact.title}</p>
                 )}
                 {contact.headline && (
-                  <p className="text-sm text-gray-500 mt-1 italic">
+                  <p className="text-xs text-gray-500 mt-0.5 line-clamp-2 leading-relaxed">
                     {contact.headline}
                   </p>
                 )}
@@ -856,9 +940,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 <Trash2 className="w-4 h-4" />
               </button>
             </div>
-            <div className="mt-3 space-y-2">
+
+            <div className="mt-3 pt-3 border-t border-gray-100 flex flex-wrap gap-x-4 gap-y-2">
               {contact.email && (
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-1.5 text-sm">
                   <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <a
                     href={getComposeUrl(contact.email)}
@@ -866,13 +951,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       e.preventDefault();
                       window.open(getComposeUrl(contact.email), '_blank', 'noopener,noreferrer');
                     }}
-                    className="text-indigo-600 hover:text-indigo-800 hover:underline cursor-pointer"
+                    className="text-indigo-600 hover:text-indigo-800 hover:underline truncate max-w-[180px]"
                   >
                     {contact.email}
                   </a>
                   {contact.email_status && (
                     <span
-                      className={`text-xs px-2 py-0.5 rounded flex-shrink-0 ${
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
                         contact.email_status === "verified"
                           ? "bg-green-100 text-green-700"
                           : "bg-gray-100 text-gray-700"
@@ -883,19 +968,19 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   )}
                   <button
                     onClick={() => handleCopy(contact.email, `email-${index}`)}
-                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                    className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
                     title="Copy email"
                   >
                     {copiedItem === `email-${index}` ? (
-                      <Check className="w-4 h-4 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
                     ) : (
-                      <Copy className="w-4 h-4" />
+                      <Copy className="w-3.5 h-3.5" />
                     )}
                   </button>
                 </div>
               )}
               {contact.phone && (
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-1.5 text-sm">
                   <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <a
                     href={`tel:${contact.phone}`}
@@ -906,7 +991,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 </div>
               )}
               {contact.linkedin_url && (
-                <div className="flex items-center gap-2 text-sm">
+                <div className="flex items-center gap-1.5 text-sm">
                   <Linkedin className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <a
                     href={contact.linkedin_url}
@@ -914,17 +999,17 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     rel="noopener noreferrer"
                     className="text-indigo-600 hover:text-indigo-800 hover:underline"
                   >
-                    LinkedIn Profile
+                    LinkedIn
                   </a>
                   <button
                     onClick={() => handleCopy(contact.linkedin_url, `linkedin-${index}`)}
-                    className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                    className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
                     title="Copy LinkedIn URL"
                   >
                     {copiedItem === `linkedin-${index}` ? (
-                      <Check className="w-4 h-4 text-green-600" />
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
                     ) : (
-                      <Copy className="w-4 h-4" />
+                      <Copy className="w-3.5 h-3.5" />
                     )}
                   </button>
                 </div>
@@ -954,460 +1039,643 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     );
   };
   const summaryColumnKeys = useMemo(() => {
-    const fromOrder = columnOrder.filter((column) => {
+    const exclude = (column: string) => {
       if (
         column === "domain" ||
         column === "instagram" ||
         column === "phone" ||
         column === "email" ||
-        column === "notes"
+        column === "notes" ||
+        column === "set_name" ||
+        column === "classification"
       ) {
-        return false;
+        return true;
       }
-      if (isOutreachColumn(column)) return false;
-      if (column === "classification") return false;
-      if (shouldHideDrawerField(column)) return false;
-      return true;
-    });
+      if (isOutreachColumn(column)) return true;
+      if (shouldHideDrawerField(column)) return true;
+      return false;
+    };
 
-    const fromSummary = Object.keys(summaryData || {}).filter((column) => {
-      if (
-        column === "domain" ||
-        column === "instagram" ||
-        column === "phone" ||
-        column === "email" ||
-        column === "notes"
-      ) {
-        return false;
-      }
-      if (isOutreachColumn(column)) return false;
-      if (column === "classification") return false;
-      if (shouldHideDrawerField(column)) return false;
-      return true;
-    });
-
+    const fromOrder = columnOrder.filter((c) => !exclude(c));
+    const fromSummary = Object.keys(summaryData || {}).filter((c) => !exclude(c));
     return Array.from(new Set([...fromOrder, ...fromSummary]));
   }, [columnOrder, summaryData, columnLabels]);
 
-  // Early return AFTER all hooks have been called
   if (!isOpen || !company) return null;
+
+  /* ---------- Display values ---------- */
+  const displayName =
+    company.domain?.trim() ||
+    company.instagram?.trim() ||
+    company.email?.trim() ||
+    "Company Details";
+
+  const classificationLabel =
+    classificationValue === "QUALIFIED"
+      ? "Qualified"
+      : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
+      ? "Unqualified"
+      : classificationValue === "EXPIRED"
+      ? "Expired"
+      : null;
+
+  const classificationPillClasses =
+    classificationValue === "QUALIFIED"
+      ? "bg-emerald-100 text-emerald-800"
+      : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
+      ? "bg-red-100 text-red-800"
+      : classificationValue === "EXPIRED"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-gray-100 text-gray-800";
+
+  const phones = (company.phone || "").split(',').map((s) => s.trim()).filter((s) => s && s !== '-');
+  const emails = (company.email || "").split(',').map((s) => s.trim()).filter((s) => s && s !== '-');
+
+  const buildEmailHref = (emailAddr: string): string => {
+    const subjectColumn = typeof window !== 'undefined'
+      ? localStorage.getItem('companies-subject-column')
+      : null;
+    const clipboardColumn = typeof window !== 'undefined'
+      ? localStorage.getItem('companies-clipboard-column')
+      : null;
+    let subject: string | undefined;
+    let body: string | undefined;
+    if (subjectColumn) {
+      try {
+        const v = getCellValue(company, subjectColumn);
+        if (v && v !== '-') subject = v;
+      } catch (_) {}
+    }
+    if (clipboardColumn) {
+      try {
+        const v = getCellValue(company, clipboardColumn);
+        if (v && v !== '-') body = buildEmailBody(v, 'Hi, \n\n', emailSettings);
+      } catch (_) {}
+    }
+    return buildEmailComposeUrl(emailAddr, { subject, body, emailSettings });
+  };
+
+  const renderEditableValue = (columnKey: string, value: string) => {
+    const isEditing =
+      editingCell?.companyId === company.id &&
+      editingCell?.columnKey === columnKey;
+    const isEditable =
+      !columnKey.startsWith("template_") &&
+      columnKey !== "domain" &&
+      columnKey !== "instagram";
+    const isLongText = value.length > 100;
+    const isTextareaField = value.length > 60;
+
+    if (isEditing) {
+      return (
+        <div className="flex items-start gap-2">
+          {isTextareaField ? (
+            <textarea
+              ref={editInputRef as React.RefObject<HTMLTextAreaElement>}
+              value={editingCell!.value}
+              onChange={(e) =>
+                setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+              }
+              onBlur={handleInlineEditSave}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  handleInlineEditSave();
+                } else if (e.key === "Escape") {
+                  setEditingCell(null);
+                }
+              }}
+              className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              rows={3}
+            />
+          ) : (
+            <input
+              ref={editInputRef as React.RefObject<HTMLInputElement>}
+              type="text"
+              value={editingCell!.value}
+              onChange={(e) =>
+                setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+              }
+              onBlur={handleInlineEditSave}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  handleInlineEditSave();
+                } else if (e.key === "Escape") {
+                  setEditingCell(null);
+                }
+              }}
+              className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          )}
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={handleInlineEditSave}
+              className="text-emerald-600 hover:text-emerald-800"
+              title="Save (Enter)"
+            >
+              ✓
+            </button>
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                setEditingCell(null);
+              }}
+              className="text-red-600 hover:text-red-800"
+              title="Cancel (Esc)"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <p
+        className={`text-sm text-gray-900 ${isLongText ? "whitespace-pre-wrap break-words" : ""} ${
+          isEditable ? "cursor-pointer hover:bg-blue-50 -mx-1 px-1 rounded transition-colors" : ""
+        }`}
+        onDoubleClick={isEditable ? () => handleCellDoubleClick(company, columnKey) : undefined}
+        title={isEditable ? "Double click to edit" : undefined}
+      >
+        {value}
+      </p>
+    );
+  };
 
   return (
     <>
       {/* Backdrop */}
       <div
-        className={`fixed inset-0 bg-white/30 backdrop-blur-sm z-40 transition-opacity duration-300 ${
-          isOpen ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
+        className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 transition-opacity duration-300"
         onClick={onClose}
+        aria-hidden="true"
       />
 
       {/* Drawer */}
       <div
-        className={`fixed right-0 top-0 h-full w-full max-w-4xl bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
+        className={`fixed right-0 top-0 h-full w-full max-w-2xl bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out flex flex-col ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <div className="flex flex-col h-full">
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <div className="flex items-center gap-3 flex-wrap flex-1">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-2xl font-semibold text-gray-900">
-                  Company Details
-                </h2>
-                {companies.length > 0 && currentIndex >= 0 && (
-                  <span className="text-sm text-gray-500">
-                    Company {currentIndex + 1} of {companies.length}
-                    {totalPages > 1 && ` • Page ${currentPage} of ${totalPages}`}
-                  </span>
-                )}
-                {company.domain && (
-                  <span className="px-2.5 py-1 text-xs font-medium bg-indigo-100 text-indigo-700 rounded-full">
-                    {company.domain}
-                  </span>
-                )}
-                {company.instagram && (
-                  <span className="px-2.5 py-1 text-xs font-medium bg-pink-100 text-pink-700 rounded-full">
-                    {company.instagram}
-                  </span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* Navigation Buttons - before close button */}
-              {(companies.length > 1 || totalPages > 1) && (
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={handlePrevious}
-                    disabled={!hasPrevious}
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    aria-label="Previous company"
-                    title="Previous company (←)"
-                  >
-                    <ChevronLeft className="w-5 h-5" />
-                  </button>
-                  <button
-                    onClick={handleNext}
-                    disabled={!hasNext}
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    aria-label="Next company"
-                    title="Next company (→)"
-                  >
-                    <ChevronRight className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
-              <button
-                onClick={onClose}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                aria-label="Close drawer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-gray-200 flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrevious}
+              disabled={!hasPrevious}
+              className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Previous company"
+              title="Previous company (←)"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <button
+              onClick={handleNext}
+              disabled={!hasNext}
+              className="p-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Next company"
+              title="Next company (→)"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+            {companies.length > 0 && currentIndex >= 0 && (
+              <span className="text-xs text-gray-500 ml-1">
+                {currentIndex + 1} of {companies.length}
+                {totalPages > 1 && ` • Page ${currentPage}/${totalPages}`}
+              </span>
+            )}
           </div>
+          <button
+            onClick={onClose}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-          {/* Tabs */}
-          <div className="flex border-b border-gray-200">
+        {/* Tabs */}
+        <div className="relative border-b border-gray-200 flex-shrink-0">
+          <div className="flex gap-0.5 sm:gap-1 px-2 sm:px-4 pt-2 overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
             <button
               onClick={() => setActiveTab("overview")}
-              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === "overview"
-                  ? "text-indigo-600 border-b-2 border-indigo-600"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "border-indigo-600 text-indigo-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
               Overview
             </button>
             <button
               onClick={() => setActiveTab("outreach")}
-              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === "outreach"
-                  ? "text-indigo-600 border-b-2 border-indigo-600"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "border-indigo-600 text-indigo-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
               Outreach
             </button>
             <button
               onClick={() => setActiveTab("contacts")}
-              className={`flex-1 px-6 py-3 text-sm font-medium transition-colors ${
+              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === "contacts"
-                  ? "text-indigo-600 border-b-2 border-indigo-600"
-                  : "text-gray-500 hover:text-gray-700"
+                  ? "border-indigo-600 text-indigo-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
               Contacts
             </button>
+            <div className="flex-shrink-0 w-4 sm:hidden" aria-hidden="true" />
           </div>
+          <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none sm:hidden" />
+        </div>
 
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {activeTab === "overview" ? (
-              <div className="space-y-6">
-                {/* Basic Information */}
-                <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Basic Information
-                </h3>
-                <div className="space-y-3">
-                  {company.domain && (
-                    <div className="border-l-4 border-indigo-500 pl-4">
-                      <p className="text-sm font-medium text-gray-500">
-                        {columnLabels.domain || "Domain"}
-                      </p>
-                      <p className="text-sm text-gray-900">{company.domain}</p>
-                    </div>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === "overview" ? (
+            <div className="space-y-6">
+              {/* Title + status pills */}
+              <div>
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="text-xl font-semibold text-gray-900 break-all">{displayName}</h2>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {company.domain?.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const domain = company.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '');
+                          const name = domain.split('.')[0];
+                          const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
+                          const query = `site:linkedin.com/in ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing") ("${capitalized}" OR "${domain}")`;
+                          const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                          window.open(url, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 rounded-md hover:bg-emerald-100 transition-colors"
+                        title="Find people on LinkedIn via Google search"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        Find People
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleOpenJsonImport}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors"
+                      title="Import contact details from JSON"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      Import JSON
+                    </button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 mt-2 items-center">
+                  {classificationLabel && (
+                    <span
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${classificationPillClasses}`}
+                    >
+                      {classificationValue === "QUALIFIED" ? (
+                        <CheckCircle className="w-3 h-3" />
+                      ) : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED" ? (
+                        <XCircle className="w-3 h-3" />
+                      ) : (
+                        <Minus className="w-3 h-3" />
+                      )}
+                      {classificationLabel}
+                    </span>
+                  )}
+                  {company.set_name && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
+                      {company.set_name}
+                    </span>
                   )}
                   {company.instagram && (
-                    <div className="border-l-4 border-indigo-500 pl-4">
-                      <p className="text-sm font-medium text-gray-500">
-                        {columnLabels.instagram || "Instagram"}
-                      </p>
-                      <p className="text-sm text-gray-900">
-                        {company.instagram}
-                      </p>
-                    </div>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-pink-100 text-pink-800">
+                      @{company.instagram.replace(/^@/, '')}
+                    </span>
                   )}
+                </div>
+              </div>
 
-                  <div className="border-l-4 border-indigo-500 pl-4">
-                    <p className="text-sm font-medium text-gray-500">
-                      {columnLabels.phone || "Phone"}
-                    </p>
-
-                    {editingCell?.companyId === company.id &&
-                    editingCell?.columnKey === "phone" ? (
-                      <div className="flex items-center gap-2">
-                        <PhoneInputField
-                          value={editingCell.value}
-                          onChange={(phone) =>
-                            setEditingCell((prev) =>
-                              prev ? { ...prev, value: phone } : prev
-                            )
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              handleInlineEditSave();
-                            } else if (e.key === "Escape") {
-                              setEditingCell(null);
+              {/* Start a Conversation */}
+              {(company.domain?.trim() || emails.length > 0 || phones.length > 0 || company.instagram?.trim()) && (
+                <div>
+                  <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                    Start a Conversation
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-1">
+                      {company.domain?.trim() && (
+                        <>
+                          <a
+                            href={
+                              /^https?:\/\//i.test(company.domain)
+                                ? company.domain
+                                : `https://${company.domain.replace(/^www\./, '')}`
                             }
-                          }}
-                          compact
-                          autoFocus
-                          className="flex-1"
-                        />
-                        <button
-                          onClick={handleInlineEditSave}
-                          className="text-green-600 hover:text-green-800"
-                          title="Save (Enter)"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            setEditingCell(null);
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                          title="Cancel (Esc)"
-                        >
-                          ✕
-                        </button>
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title={company.domain}
+                            aria-label="Visit website"
+                          >
+                            <Globe className="w-5 h-5" />
+                          </a>
+                          <a
+                            href={
+                              /^https?:\/\//i.test(company.domain)
+                                ? company.domain
+                                : `https://${company.domain.replace(/^www\./, '')}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline break-all"
+                            title={company.domain}
+                          >
+                            {company.domain.replace(/^https?:\/\//i, '').replace(/\/$/, '')}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const value = company.domain!.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+                                await navigator.clipboard.writeText(value);
+                                setDomainCopied(true);
+                                setToastMessage('Domain copied to clipboard');
+                                setToastVisible(true);
+                                setTimeout(() => setDomainCopied(false), 2000);
+                                setTimeout(() => setToastVisible(false), 2000);
+                              } catch (err) {
+                                console.error('Failed to copy domain:', err);
+                              }
+                            }}
+                            className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title="Copy domain"
+                            aria-label="Copy domain"
+                          >
+                            {domainCopied ? (
+                              <Check className="w-4 h-4 text-emerald-600" />
+                            ) : (
+                              <Copy className="w-4 h-4" />
+                            )}
+                          </button>
+                        </>
+                      )}
+                      {company.instagram?.trim() && (
+                        <>
+                          <a
+                            href={`https://instagram.com/${company.instagram.replace(/^@/, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="p-2 rounded-lg text-gray-500 hover:text-pink-600 hover:bg-pink-50 transition-colors"
+                            title="Instagram"
+                            aria-label="Open Instagram"
+                          >
+                            <Instagram className="w-5 h-5" />
+                          </a>
+                          <a
+                            href={`https://instagram.com/${company.instagram.replace(/^@/, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-pink-600 hover:text-pink-800 hover:underline break-all"
+                            title="Instagram"
+                          >
+                            @{company.instagram.replace(/^@/, '')}
+                          </a>
+                        </>
+                      )}
+                    </div>
+                    {emails.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        <div className="flex flex-wrap gap-x-3 gap-y-0">
+                          {emails.map((e, idx) => (
+                            <a
+                              key={idx}
+                              href={buildEmailHref(e)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(ev) => {
+                                ev.preventDefault();
+                                window.open(buildEmailHref(e), '_blank', 'noopener,noreferrer');
+                              }}
+                              className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
+                            >
+                              {e}
+                            </a>
+                          ))}
+                        </div>
                       </div>
-                    ) : (
-                      <div 
-                        className="space-y-2 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
-                        onDoubleClick={() => handleCellDoubleClick(company, "phone")}
-                        title="Double click to edit"
-                      >
-                        {(company.phone || "-").split(',').map((phoneNum, index) => {
-                          const trimmedPhone = phoneNum.trim();
-                          if (!trimmedPhone || trimmedPhone === '-') return null;
-                          const cleanedPhone = trimmedPhone.replace(/[^\d+]/g, '');
-                          return (
-                            <div key={index} className="flex items-center gap-2">
-                              <p className="text-sm text-gray-900 flex-1">{trimmedPhone}</p>
+                    )}
+                    {phones.length > 0 && (
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        <div className="flex flex-wrap gap-x-3 gap-y-0">
+                          {phones.map((p, idx) => {
+                            const cleaned = p.replace(/[^\d+]/g, '');
+                            return (
                               <a
-                                href={`tel:${cleanedPhone}`}
-                                className="p-1.5 rounded-full bg-green-100 text-green-700 hover:bg-green-200 transition-colors flex-shrink-0"
-                                title="Call"
-                                onClick={(e) => e.stopPropagation()}
+                                key={idx}
+                                href={`tel:${cleaned}`}
+                                className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline"
                               >
-                                <Phone className="w-4 h-4" />
+                                {p}
                               </a>
-                            </div>
-                          );
-                        })}
-                        {(!company.phone || company.phone === '-') && (
-                          <p className="text-sm text-gray-900">-</p>
-                        )}
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>
+                </div>
+              )}
 
-                  <div className="border-l-4 border-indigo-500 pl-4">
-                    <p className="text-sm font-medium text-gray-500">
-                      {columnLabels.email || "Email"}
-                    </p>
-
-                    {editingCell?.companyId === company.id &&
-                    editingCell?.columnKey === "email" ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          ref={editInputRef as React.RefObject<HTMLInputElement>}
-                          type="text"
-                          value={editingCell.value}
-                          onChange={(e) =>
-                            setEditingCell((prev) =>
-                              prev ? { ...prev, value: e.target.value } : prev
-                            )
-                          }
-                          onBlur={handleInlineEditSave}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              handleInlineEditSave();
-                            } else if (e.key === "Escape") {
-                              setEditingCell(null);
-                            }
-                          }}
-                          className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                        <button
-                          onClick={handleInlineEditSave}
-                          className="text-green-600 hover:text-green-800"
-                          title="Save (Enter)"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onMouseDown={(e) => {
-                            e.preventDefault();
+              {/* Editable Phone */}
+              {(editingCell?.companyId === company.id && editingCell?.columnKey === "phone") || !company.phone || phones.length === 0 ? (
+                <DetailField label={columnLabels.phone || "Phone"}>
+                  {editingCell?.companyId === company.id && editingCell?.columnKey === "phone" ? (
+                    <div className="flex items-center gap-2">
+                      <PhoneInputField
+                        value={editingCell.value}
+                        onChange={(phone) =>
+                          setEditingCell((prev) => (prev ? { ...prev, value: phone } : prev))
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleInlineEditSave();
+                          } else if (e.key === "Escape") {
                             setEditingCell(null);
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                          title="Cancel (Esc)"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <div 
-                        className="space-y-2 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
-                        onDoubleClick={() => handleCellDoubleClick(company, "email")}
-                        title="Double click to edit"
+                          }
+                        }}
+                        compact
+                        autoFocus
+                        className="flex-1"
+                      />
+                      <button
+                        onClick={handleInlineEditSave}
+                        className="text-emerald-600 hover:text-emerald-800"
+                        title="Save (Enter)"
                       >
-                        {(company.email || "-").split(',').map((emailAddr, index) => {
-                          const trimmedEmail = emailAddr.trim();
-                          if (!trimmedEmail || trimmedEmail === '-') return null;
-                          const subjectColumn = typeof window !== 'undefined'
-                            ? localStorage.getItem('companies-subject-column')
-                            : null;
-                          const clipboardColumn = typeof window !== 'undefined'
-                            ? localStorage.getItem('companies-clipboard-column')
-                            : null;
-                          let subject: string | undefined;
-                          let body: string | undefined;
-                          if (subjectColumn) {
-                            try {
-                              const v = getCellValue(company, subjectColumn);
-                              if (v && v !== '-') subject = v;
-                            } catch (_) {}
-                          }
-                          if (clipboardColumn) {
-                            try {
-                              const v = getCellValue(company, clipboardColumn);
-                              if (v && v !== '-') body = buildEmailBody(v, 'Hi, \n\n', emailSettings);
-                            } catch (_) {}
-                          }
-                          const composeUrl = buildEmailComposeUrl(trimmedEmail, { subject, body, emailSettings });
-                          return (
-                            <div key={index} className="flex items-center gap-2">
-                              <a
-                                href={composeUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  window.open(composeUrl, '_blank', 'noopener,noreferrer');
-                                }}
-                                className="text-sm text-indigo-600 hover:text-indigo-800 hover:underline flex-1"
-                                title="Click to open email"
-                              >
-                                {trimmedEmail}
-                              </a>
-                            </div>
-                          );
-                        })}
-                        {(!company.email || company.email === '-') && (
-                          <p className="text-sm text-gray-900">-</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="border-l-4 border-indigo-500 pl-4">
-                    <p className="text-sm font-medium text-gray-500">
-                      {columnLabels.set_name || "Set Name"}
+                        ✓
+                      </button>
+                      <button
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setEditingCell(null);
+                        }}
+                        className="text-red-600 hover:text-red-800"
+                        title="Cancel (Esc)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <p
+                      className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 -mx-1 px-1 rounded transition-colors"
+                      onDoubleClick={() => handleCellDoubleClick(company, "phone")}
+                      title="Double click to edit"
+                    >
+                      -
                     </p>
+                  )}
+                </DetailField>
+              ) : null}
 
-                    {editingCell?.companyId === company.id &&
-                    editingCell?.columnKey === "set_name" ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          ref={editInputRef as React.RefObject<HTMLInputElement>}
-                          type="text"
-                          value={editingCell.value}
-                          onChange={(e) =>
-                            setEditingCell((prev) =>
-                              prev ? { ...prev, value: e.target.value } : prev
-                            )
-                          }
-                          onBlur={handleInlineEditSave}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              handleInlineEditSave();
-                            } else if (e.key === "Escape") {
-                              setEditingCell(null);
-                            }
-                          }}
-                          className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        />
-                        <button
-                          onClick={handleInlineEditSave}
-                          className="text-green-600 hover:text-green-800"
-                          title="Save (Enter)"
-                        >
-                          ✓
-                        </button>
-                        <button
-                          onMouseDown={(e) => {
-                            e.preventDefault();
+              {/* Editable Email */}
+              {(editingCell?.companyId === company.id && editingCell?.columnKey === "email") || !company.email || emails.length === 0 ? (
+                <DetailField label={columnLabels.email || "Email"}>
+                  {editingCell?.companyId === company.id && editingCell?.columnKey === "email" ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={editInputRef as React.RefObject<HTMLInputElement>}
+                        type="text"
+                        value={editingCell.value}
+                        onChange={(e) =>
+                          setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+                        }
+                        onBlur={handleInlineEditSave}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleInlineEditSave();
+                          } else if (e.key === "Escape") {
                             setEditingCell(null);
-                          }}
-                          className="text-red-600 hover:text-red-800"
-                          title="Cancel (Esc)"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
-                      <p
-                        className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
-                        onDoubleClick={() => handleCellDoubleClick(company, "set_name")}
-                        title="Double click to edit"
+                          }
+                        }}
+                        className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                      <button
+                        onClick={handleInlineEditSave}
+                        className="text-emerald-600 hover:text-emerald-800"
+                        title="Save (Enter)"
                       >
-                        {company.set_name || "-"}
-                      </p>
-                    )}
-                  </div>
+                        ✓
+                      </button>
+                      <button
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setEditingCell(null);
+                        }}
+                        className="text-red-600 hover:text-red-800"
+                        title="Cancel (Esc)"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <p
+                      className="text-sm text-gray-900 cursor-pointer hover:bg-blue-50 -mx-1 px-1 rounded transition-colors"
+                      onDoubleClick={() => handleCellDoubleClick(company, "email")}
+                      title="Double click to edit"
+                    >
+                      -
+                    </p>
+                  )}
+                </DetailField>
+              ) : null}
 
-                  <div
-                    className={`border-l-4 pl-4 py-2 rounded-r ${
-                      classificationValue === "QUALIFIED"
-                        ? "bg-green-50 text-green-700 border-green-200"
-                        : classificationValue === "UNQUALIFIED" ||
-                          classificationValue === "NOT_QUALIFIED"
-                        ? "bg-red-50 text-red-700 border-red-200"
-                        : classificationValue === "EXPIRED"
-                        ? "bg-amber-50 text-amber-700 border-amber-200"
-                        : "bg-gray-50 border-gray-200"
-                    }`}
-                  >
-                    <p className="text-sm font-medium text-gray-700 mb-1">
+              <hr className="border-gray-200" />
+
+              {/* Pipeline (Set + Classification) */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pipeline</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
                       {columnLabels.classification || "Classification"}
-                    </p>
-
+                    </label>
                     <select
                       value={classificationValue}
                       onChange={(e) => handleClassificationChange(e.target.value)}
-                      className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
+                      className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
                         classificationValue === "QUALIFIED"
-                          ? "bg-green-50 text-green-700 border-green-300"
-                          : classificationValue === "UNQUALIFIED" ||
-                            classificationValue === "NOT_QUALIFIED"
-                          ? "bg-red-50 text-red-700 border-red-300"
+                          ? "bg-emerald-50 text-emerald-800 border-emerald-300 focus:ring-emerald-500"
+                          : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
+                          ? "bg-red-50 text-red-800 border-red-300 focus:ring-red-500"
                           : classificationValue === "EXPIRED"
-                          ? "bg-amber-50 text-amber-700 border-amber-300"
-                          : "bg-gray-50 border-gray-300"
-                      } font-semibold`}
+                          ? "bg-amber-50 text-amber-800 border-amber-300 focus:ring-amber-500"
+                          : "bg-white text-gray-900 border-gray-300 focus:ring-indigo-500"
+                      }`}
                     >
-                      <option value="">Select classification...</option>
-                      <option value="QUALIFIED">QUALIFIED</option>
-                      <option value="UNQUALIFIED">UNQUALIFIED</option>
-                      <option value="EXPIRED">EXPIRED</option>
+                      <option value="">— Select —</option>
+                      <option value="QUALIFIED">Qualified</option>
+                      <option value="UNQUALIFIED">Unqualified</option>
+                      <option value="EXPIRED">Expired</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      {columnLabels.set_name || "Set"}
+                    </label>
+                    {editingCell?.companyId === company.id && editingCell?.columnKey === "set_name" ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={editInputRef as React.RefObject<HTMLInputElement>}
+                          type="text"
+                          value={editingCell.value}
+                          onChange={(e) =>
+                            setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : prev))
+                          }
+                          onBlur={handleInlineEditSave}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleInlineEditSave();
+                            } else if (e.key === "Escape") {
+                              setEditingCell(null);
+                            }
+                          }}
+                          className="flex-1 block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 border-indigo-500 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        />
+                        <button
+                          onClick={handleInlineEditSave}
+                          className="text-emerald-600 hover:text-emerald-800"
+                          title="Save (Enter)"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleCellDoubleClick(company, "set_name")}
+                        className="block w-full px-3 py-2 text-left text-sm font-medium rounded-lg border-2 border-gray-300 bg-white text-gray-900 hover:bg-gray-50 transition-colors"
+                        title="Click to edit"
+                      >
+                        {company.set_name || <span className="text-gray-400">— Not set —</span>}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Notes Section */}
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">
-                    Notes
-                  </h3>
-                  {!isAddingNote && (
+              <hr className="border-gray-200" />
+
+              {/* Notes */}
+              <DetailSection
+                label="Notes"
+                icon={<FileText className="w-3.5 h-3.5 text-gray-400" />}
+                action={
+                  !isAddingNote ? (
                     <button
                       type="button"
                       onClick={(e) => {
@@ -1420,14 +1688,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       <Plus className="w-4 h-4 mr-1" />
                       Add Note
                     </button>
-                  )}
-                </div>
-
-                {isAddingNote ? (
-                  <div className="border border-indigo-200 rounded-lg p-4 bg-indigo-50/30 mb-4">
+                  ) : null
+                }
+              >
+                {isAddingNote && (
+                  <div className="border border-indigo-200 rounded-lg p-4 bg-indigo-50/30 mb-3">
                     <div className="space-y-3">
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                        <label className="block text-xs font-medium text-gray-600 mb-1">
                           Message
                         </label>
                         <div className="flex flex-wrap gap-2 mb-2">
@@ -1449,7 +1717,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                               e.stopPropagation();
                               setNewNoteMessage('Interested');
                             }}
-                            className="px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-300 rounded-md hover:bg-green-100 transition-colors"
+                            className="px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-300 rounded-md hover:bg-emerald-100 transition-colors"
                           >
                             Interested
                           </button>
@@ -1505,31 +1773,29 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       </div>
                     </div>
                   </div>
-                ) : null}
+                )}
 
                 {notes.length > 0 ? (
-                  <div className="space-y-3">
+                  <div className="space-y-2">
                     {notes.map((note, index) => (
                       <div
                         key={index}
-                        className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-md transition-shadow"
+                        className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm hover:bg-gray-50 transition-colors"
                       >
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-xs font-medium text-gray-500">
-                                {new Date(note.date).toLocaleDateString('en-US', {
-                                  year: 'numeric',
-                                  month: 'short',
-                                  day: 'numeric',
-                                })}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-900 whitespace-pre-wrap">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mb-1">
+                              {new Date(note.date).toLocaleDateString('en-US', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })}
+                            </p>
+                            <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">
                               {note.message}
                             </p>
                           </div>
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-shrink-0">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -1537,7 +1803,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                                 e.stopPropagation();
                                 handleEditNote(index);
                               }}
-                              className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              className="p-1.5 rounded text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
                               title="Edit note"
                             >
                               <Edit2 className="w-4 h-4" />
@@ -1549,7 +1815,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                                 e.stopPropagation();
                                 handleDeleteNoteClick(index);
                               }}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                              className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
                               title="Delete note"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -1561,427 +1827,157 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   </div>
                 ) : (
                   !isAddingNote && (
-                    <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
-                      <p className="text-sm text-gray-600">No notes yet. Click "Add Note" to track conversation details.</p>
-                    </div>
+                    <p className="text-sm text-gray-500 italic">
+                      No notes yet. Click &ldquo;Add Note&rdquo; to track conversation details.
+                    </p>
                   )
                 )}
-              </div>
+              </DetailSection>
 
               {/* Summary Data */}
-              {summaryColumnKeys.length > 0 && (
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Summary Data
-                  </h3>
+              {summaryColumnKeys.length > 0 && (() => {
+                const visibleKeys = summaryColumnKeys.filter((k) => {
+                  const v = getCellValue(company, k);
+                  return v && v !== "-";
+                });
+                if (visibleKeys.length === 0) return null;
+                return (
+                  <>
+                    <hr className="border-gray-200" />
+                    <div className="space-y-3">
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Details
+                      </h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                        {visibleKeys.map((columnKey) => {
+                          const value = getCellValue(company, columnKey);
+                          const label = columnLabels[columnKey] || columnKey;
+                          const isLong = value.length > 80;
 
-                  <div className="space-y-3">
-                    {summaryColumnKeys.map((columnKey) => {
-                        const value = getCellValue(company, columnKey);
-                        const isClassification = columnKey === "classification";
-
-                        // Always show classification field (even if empty) so users can set it
-                        // For other fields, hide if empty
-                        if (!isClassification && (value === "-" || !value))
-                          return null;
-
-                        const label = columnLabels[columnKey] || columnKey;
-                        const isLongText = value.length > 100;
-                        const classificationValueLocal = isClassification
-                          ? value.toUpperCase()
-                          : "";
-
-                        const getClassificationColorClasses = () => {
-                          if (isClassification) {
-                            if (classificationValueLocal === "QUALIFIED") {
-                              return "bg-green-50 text-green-700 border-green-200";
-                            } else if (classificationValueLocal === "NOT_QUALIFIED") {
-                              return "bg-red-50 text-red-700 border-red-200";
-                            } else if (classificationValueLocal === "EXPIRED") {
-                              return "bg-amber-50 text-amber-700 border-amber-200";
-                            }
-                          }
-                          return "bg-gray-50 border-gray-200";
-                        };
-
-                        const isEditing =
-                          editingCell?.companyId === company.id &&
-                          editingCell?.columnKey === columnKey;
-
-                        const isEditable =
-                          !columnKey.startsWith("template_") &&
-                          columnKey !== "domain" &&
-                          columnKey !== "instagram";
-
-                        const cellValue = getCellValue(company, columnKey);
-                        const isTextareaField = cellValue.length > 60;
-
-                        // Special handling for classification field - use dropdown
-                        if (isClassification) {
                           return (
                             <div
                               key={columnKey}
-                              className={`border-l-4 pl-4 py-2 rounded-r ${getClassificationColorClasses()}`}
+                              className={isLong ? "sm:col-span-2" : undefined}
                             >
-                              <p className="text-sm font-medium text-gray-700 mb-1">
-                                {label}
-                              </p>
-
-                              <select
-                                value={classificationValue}
-                                onChange={(e) =>
-                                  handleClassificationChange(e.target.value)
-                                }
-                                className={`w-full px-3 py-2 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                                  classificationValue === "QUALIFIED"
-                                    ? "bg-green-50 text-green-700 border-green-300"
-                                    : classificationValue === "UNQUALIFIED" ||
-                                      classificationValue === "NOT_QUALIFIED"
-                                    ? "bg-red-50 text-red-700 border-red-300"
-                                    : classificationValue === "EXPIRED"
-                                    ? "bg-amber-50 text-amber-700 border-amber-300"
-                                    : "bg-gray-50 border-gray-300"
-                                } font-semibold`}
-                              >
-                                <option value="">Select classification...</option>
-                                <option value="QUALIFIED">QUALIFIED</option>
-                                <option value="UNQUALIFIED">UNQUALIFIED</option>
-                                <option value="EXPIRED">EXPIRED</option>
-                              </select>
+                              <DetailField label={label}>
+                                {renderEditableValue(columnKey, value)}
+                              </DetailField>
                             </div>
                           );
-                        }
-
-                        return (
-                          <div
-                            key={columnKey}
-                            className={`border-l-4 pl-4 py-2 rounded-r ${getClassificationColorClasses()}`}
-                          >
-                            <p className="text-sm font-medium text-gray-700 mb-1">
-                              {label}
-                            </p>
-
-                            {isEditing ? (
-                              <div className="flex items-start gap-2">
-                                {isTextareaField ? (
-                                  <textarea
-                                    ref={
-                                      editInputRef as React.RefObject<HTMLTextAreaElement>
-                                    }
-                                    value={editingCell.value}
-                                    onChange={(e) =>
-                                      setEditingCell((prev) =>
-                                        prev
-                                          ? { ...prev, value: e.target.value }
-                                          : prev
-                                      )
-                                    }
-                                    onBlur={handleInlineEditSave}
-                                    onKeyDown={(e) => {
-                                      if (
-                                        e.key === "Enter" &&
-                                        (e.metaKey || e.ctrlKey)
-                                      ) {
-                                        handleInlineEditSave();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    rows={3}
-                                  />
-                                ) : (
-                                  <input
-                                    ref={
-                                      editInputRef as React.RefObject<HTMLInputElement>
-                                    }
-                                    type="text"
-                                    value={editingCell.value}
-                                    onChange={(e) =>
-                                      setEditingCell((prev) =>
-                                        prev
-                                          ? { ...prev, value: e.target.value }
-                                          : prev
-                                      )
-                                    }
-                                    onBlur={handleInlineEditSave}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        handleInlineEditSave();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                  />
-                                )}
-
-                                <div className="flex flex-col gap-1">
-                                  <button
-                                    onClick={handleInlineEditSave}
-                                    className="text-green-600 hover:text-green-800"
-                                    title="Save (Enter)"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      setEditingCell(null);
-                                    }}
-                                    className="text-red-600 hover:text-red-800"
-                                    title="Cancel (Esc)"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <p
-                                className={`text-sm ${
-                                  isClassification
-                                    ? classificationValueLocal === "QUALIFIED" ||
-                                      classificationValueLocal === "NOT_QUALIFIED" ||
-                                      classificationValueLocal === "EXPIRED"
-                                      ? "font-semibold"
-                                      : ""
-                                    : "text-gray-900"
-                                } ${isLongText ? "whitespace-pre-wrap break-words" : ""} ${
-                                  isEditable
-                                    ? "cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
-                                    : ""
-                                }`}
-                                onDoubleClick={
-                                  isEditable
-                                    ? () =>
-                                        handleCellDoubleClick(company, columnKey)
-                                    : undefined
-                                }
-                                title={isEditable ? "Double click to edit" : undefined}
-                              >
-                                {value}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-              )}
+                        })}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
 
               {/* Metadata */}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              <hr className="border-gray-200" />
+              <div className="space-y-3">
+                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Metadata
                 </h3>
-                <div className="space-y-3">
-                  <div className="border-l-4 border-indigo-500 pl-4">
-                    <p className="text-sm font-medium text-gray-500">ID</p>
-                    <p className="text-sm text-gray-900 font-mono">
-                      {company.id}
-                    </p>
-                  </div>
-
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                  <DetailField label="ID">
+                    <p className="text-sm text-gray-900 font-mono break-all">{company.id}</p>
+                  </DetailField>
                   {company.created_at && (
-                    <div className="border-l-4 border-indigo-500 pl-4">
-                      <p className="text-sm font-medium text-gray-500">
-                        Created At
-                      </p>
+                    <DetailField label="Created At">
                       <p className="text-sm text-gray-900">
                         {new Date(company.created_at).toLocaleString()}
                       </p>
-                    </div>
+                    </DetailField>
                   )}
                 </div>
               </div>
             </div>
-            ) : activeTab === "outreach" ? (
-              /* Outreach Tab */
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Outreach
-                  </h3>
+          ) : activeTab === "outreach" ? (
+            <div className="space-y-4">
+              <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Outreach Messages
+              </h3>
+              {(() => {
+                const outreachKeys = columnOrder
+                  .filter((c) => isOutreachColumn(c) && !shouldHideDrawerField(c))
+                  .filter((c) => {
+                    const v = getCellValue(company, c);
+                    return v && v !== "-";
+                  });
+
+                if (outreachKeys.length === 0) {
+                  return (
+                    <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50">
+                      <Mail className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                      <p className="text-sm text-gray-500">
+                        No outreach messages available for this company.
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
                   <div className="space-y-3">
-                    {columnOrder
-                      .filter((column) => isOutreachColumn(column) && !shouldHideDrawerField(column))
-                      .map((columnKey) => {
-                        const value = getCellValue(company, columnKey);
-                        if (value === "-" || !value) return null;
-
-                        const label = columnLabels[columnKey] || columnKey;
-                        const isLongText = value.length > 100;
-                        const isEditing =
-                          editingCell?.companyId === company.id &&
-                          editingCell?.columnKey === columnKey;
-                        const isEditable = !columnKey.startsWith("template_");
-                        const isTextareaField = value.length > 60;
-
-                        return (
-                          <div
-                            key={columnKey}
-                            className="border-l-4 border-indigo-500 pl-4 py-2 rounded-r bg-gray-50 border-gray-200"
-                          >
-                            <p className="text-sm font-medium text-gray-700 mb-1">
-                              {label}
-                            </p>
-
-                            {isEditing ? (
-                              <div className="flex items-start gap-2">
-                                {isTextareaField ? (
-                                  <textarea
-                                    ref={
-                                      editInputRef as React.RefObject<HTMLTextAreaElement>
-                                    }
-                                    value={editingCell.value}
-                                    onChange={(e) =>
-                                      setEditingCell((prev) =>
-                                        prev
-                                          ? { ...prev, value: e.target.value }
-                                          : prev
-                                      )
-                                    }
-                                    onBlur={handleInlineEditSave}
-                                    onKeyDown={(e) => {
-                                      if (
-                                        e.key === "Enter" &&
-                                        (e.metaKey || e.ctrlKey)
-                                      ) {
-                                        handleInlineEditSave();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                    rows={3}
-                                  />
-                                ) : (
-                                  <input
-                                    ref={
-                                      editInputRef as React.RefObject<HTMLInputElement>
-                                    }
-                                    type="text"
-                                    value={editingCell.value}
-                                    onChange={(e) =>
-                                      setEditingCell((prev) =>
-                                        prev
-                                          ? { ...prev, value: e.target.value }
-                                          : prev
-                                      )
-                                    }
-                                    onBlur={handleInlineEditSave}
-                                    onKeyDown={(e) => {
-                                      if (e.key === "Enter") {
-                                        handleInlineEditSave();
-                                      } else if (e.key === "Escape") {
-                                        setEditingCell(null);
-                                      }
-                                    }}
-                                    className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                                  />
-                                )}
-
-                                <div className="flex flex-col gap-1">
-                                  <button
-                                    onClick={handleInlineEditSave}
-                                    className="text-green-600 hover:text-green-800"
-                                    title="Save (Enter)"
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    onMouseDown={(e) => {
-                                      e.preventDefault();
-                                      setEditingCell(null);
-                                    }}
-                                    className="text-red-600 hover:text-red-800"
-                                    title="Cancel (Esc)"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <p
-                                className={`text-sm text-gray-900 ${isLongText ? "whitespace-pre-wrap break-words" : ""} ${
-                                  isEditable
-                                    ? "cursor-pointer hover:bg-blue-50 p-1 rounded transition-colors"
-                                    : ""
-                                }`}
-                                onDoubleClick={
-                                  isEditable
-                                    ? () => handleCellDoubleClick(company, columnKey)
-                                    : undefined
-                                }
-                                title={isEditable ? "Double click to edit" : undefined}
-                              >
-                                {value}
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
+                    {outreachKeys.map((columnKey) => {
+                      const value = getCellValue(company, columnKey);
+                      const label = columnLabels[columnKey] || columnKey;
+                      return (
+                        <div
+                          key={columnKey}
+                          className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
+                        >
+                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                            {label}
+                          </p>
+                          {renderEditableValue(columnKey, value)}
+                        </div>
+                      );
+                    })}
                   </div>
-                  {columnOrder.filter((column) => isOutreachColumn(column)).every((columnKey) => {
-                    const value = getCellValue(company, columnKey);
-                    return value === "-" || !value;
-                  }) && (
-                    <div className="text-center py-8 border border-gray-200 rounded-lg bg-gray-50">
-                      <p className="text-sm text-gray-600">No outreach messages available for this company.</p>
-                    </div>
+                );
+              })()}
+            </div>
+          ) : (
+            /* Contacts Tab */
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-gray-400" />
+                  Contacts {contacts && contacts.length > 0 && (
+                    <span className="ml-1 text-gray-400 normal-case">({contacts.length})</span>
                   )}
-                </div>
+                </h3>
               </div>
-            ) : (
-              /* Contacts Tab */
-              <div className="space-y-6">
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                    Contacts
-                  </h3>
-                  {contactsLoading ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="w-6 h-6 animate-spin text-indigo-600" />
-                      <span className="ml-2 text-gray-600">Loading contacts...</span>
-                    </div>
-                  ) : contacts && contacts.length > 0 ? (
-                    <div className="grid gap-4">
-                      {contacts.map((contact, index) => (
-                        <ContactCard 
-                          key={contact.person_id || index} 
-                          contact={contact} 
-                          index={index}
-                          onToggle={handleContactToggle}
-                          onRemove={handleContactRemoveClick}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-12">
-                      <User className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-                      <p className="text-gray-600">No contacts found for this company.</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
 
-          {/* Footer */}
-          <div className="p-6 border-t border-gray-200">
-            <button
-              onClick={onClose}
-              className="w-full px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
-            >
-              Close
-            </button>
-          </div>
+              {contactsLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                </div>
+              ) : contacts && contacts.length > 0 ? (
+                <div className="space-y-3">
+                  {contacts.map((contact, index) => (
+                    <ContactCard
+                      key={contact.person_id || index}
+                      contact={contact}
+                      index={index}
+                      onToggle={handleContactToggle}
+                      onRemove={handleContactRemoveClick}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50">
+                  <User className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm text-gray-500">No contacts found for this company.</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Toast Notification */}
       {toastVisible && (
-        <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded-md shadow-lg z-50 transition-opacity duration-300">
+        <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-2 rounded-md shadow-lg z-[80] transition-opacity duration-300">
           {toastMessage}
         </div>
       )}
@@ -1989,13 +1985,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       {/* Remove Contact Confirmation Modal */}
       {contactToRemove && (
         <>
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
             onClick={handleContactRemoveCancel}
           />
-          
-          {/* Modal */}
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
             <div
               className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all"
@@ -2005,9 +1998,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 Remove Contact
               </h3>
               <p className="text-sm text-gray-600 mb-6">
-                Are you sure you want to remove <span className="font-semibold text-gray-900">{contactToRemove.contactName}</span> from the contacts list? This action cannot be undone.
+                Are you sure you want to remove{' '}
+                <span className="font-semibold text-gray-900">{contactToRemove.contactName}</span>{' '}
+                from the contacts list? This action cannot be undone.
               </p>
-              
+
               <div className="flex gap-3 justify-end">
                 <button
                   onClick={handleContactRemoveCancel}
@@ -2027,16 +2022,74 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         </>
       )}
 
+      {/* JSON Import Modal */}
+      {isJsonImportOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
+            onClick={jsonImporting ? undefined : handleCloseJsonImport}
+          />
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <div
+              className="bg-white rounded-lg shadow-xl max-w-lg w-full p-6 transform transition-all"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Import JSON
+              </h3>
+              <p className="text-sm text-gray-600 mb-3">
+                Paste a JSON object with <code className="text-xs bg-gray-100 px-1 rounded">emails</code>,{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">phones</code>,{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">instagram</code>,{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">linkedin</code>, or{' '}
+                <code className="text-xs bg-gray-100 px-1 rounded">facebook</code> arrays. Empty arrays are ignored.
+              </p>
+              <textarea
+                value={jsonInput}
+                onChange={(e) => {
+                  setJsonInput(e.target.value);
+                  if (jsonError) setJsonError(null);
+                }}
+                placeholder={`{\n  "emails": [],\n  "linkedin": [],\n  "facebook": [],\n  "instagram": [],\n  "phones": []\n}`}
+                rows={10}
+                className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                disabled={jsonImporting}
+              />
+              {jsonError && (
+                <p className="mt-2 text-sm text-red-600">{jsonError}</p>
+              )}
+
+              <div className="flex gap-3 justify-end mt-4">
+                <button
+                  type="button"
+                  onClick={handleCloseJsonImport}
+                  disabled={jsonImporting}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyJsonImport}
+                  disabled={jsonImporting || !jsonInput.trim()}
+                  className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {jsonImporting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Delete Note Confirmation Modal */}
       {noteToDelete !== null && (
         <>
-          {/* Backdrop */}
           <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
             onClick={handleDeleteNoteCancel}
           />
-          
-          {/* Modal */}
           <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
             <div
               className="bg-white rounded-lg shadow-xl max-w-md w-full p-6 transform transition-all"
@@ -2045,8 +2098,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               <h3 className="text-lg font-semibold text-gray-900 mb-2">
                 Delete Note
               </h3>
-              <p className="text-sm text-gray-600 mb-6">
-                Are you sure you want to delete this note? This action cannot be undone.
+              <div className="text-sm text-gray-600 mb-6">
+                <p>Are you sure you want to delete this note? This action cannot be undone.</p>
                 {notes[noteToDelete] && (
                   <div className="mt-3 p-3 bg-gray-50 rounded border border-gray-200">
                     <p className="text-xs text-gray-500 mb-1">
@@ -2061,8 +2114,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     </p>
                   </div>
                 )}
-              </p>
-              
+              </div>
+
               <div className="flex gap-3 justify-end">
                 <button
                   type="button"
