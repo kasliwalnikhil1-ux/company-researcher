@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 import Toast from '@/components/ui/Toast';
@@ -19,6 +20,8 @@ import {
   DEFAULT_INVESTOR_SYSTEM_PROMPT,
   DEFAULT_INVESTOR_USER_MESSAGE_TEMPLATE,
   DEFAULT_INVESTOR_TWITTER_PROMPT,
+  DEFAULT_INVESTOR_NEWS_PROMPT,
+  DEFAULT_B2B_NEWS_PROMPT,
 } from './investorAnalyzeDefault';
 
 const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
@@ -71,11 +74,21 @@ interface PersonalizationData {
   investorTwitter: {
     prompt: string;
   };
+  investorNews: {
+    prompt: string;
+  };
+  b2bNews: {
+    prompt: string;
+  };
 }
 
 function PersonalizationContent() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter'>('linkedinConversations');
+  const { onboarding } = useOnboarding();
+  const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising';
+  const isB2B = primaryUse === 'b2b';
+  const isFundraising = primaryUse === 'fundraising';
+  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter' | 'investorNews' | 'b2bNews'>('linkedinConversations');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -105,6 +118,8 @@ function PersonalizationContent() {
   const investorSystemRef = useRef<HTMLTextAreaElement | null>(null);
   const investorUserRef = useRef<HTMLTextAreaElement | null>(null);
   const investorTwitterRef = useRef<HTMLTextAreaElement | null>(null);
+  const investorNewsRef = useRef<HTMLTextAreaElement | null>(null);
+  const b2bNewsRef = useRef<HTMLTextAreaElement | null>(null);
   const testReplyRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
 
   const autoGrow = (el: HTMLTextAreaElement | null) => {
@@ -164,6 +179,12 @@ function PersonalizationContent() {
     investorTwitter: {
       prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
     },
+    investorNews: {
+      prompt: DEFAULT_INVESTOR_NEWS_PROMPT,
+    },
+    b2bNews: {
+      prompt: DEFAULT_B2B_NEWS_PROMPT,
+    },
   });
   const [initialFormData, setInitialFormData] = useState<PersonalizationData | null>(null);
   const isDirty = initialFormData ? JSON.stringify(formData) !== JSON.stringify(initialFormData) : false;
@@ -171,13 +192,15 @@ function PersonalizationContent() {
 
   useEffect(() => {
     if (loading) return;
-    if (!['linkedinConversations', 'investorAnalyze', 'investorTwitter'].includes(activeTab)) return;
+    if (!['linkedinConversations', 'investorAnalyze', 'investorTwitter', 'investorNews', 'b2bNews'].includes(activeTab)) return;
     autoGrow(linkedinIntroRef.current);
     autoGrow(linkedinContextRef.current);
     autoGrow(linkedinHandoverRulesRef.current);
     autoGrow(investorSystemRef.current);
     autoGrow(investorUserRef.current);
     autoGrow(investorTwitterRef.current);
+    autoGrow(investorNewsRef.current);
+    autoGrow(b2bNewsRef.current);
   }, [activeTab, loading]);
 
   // Default values
@@ -368,6 +391,12 @@ Return the assessment in the exact JSON schema format.`;
             investorTwitter: {
               prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
             },
+            investorNews: {
+              prompt: DEFAULT_INVESTOR_NEWS_PROMPT,
+            },
+            b2bNews: {
+              prompt: DEFAULT_B2B_NEWS_PROMPT,
+            },
           };
           setFormData(defaultData);
           setInitialFormData(defaultData);
@@ -400,6 +429,12 @@ Return the assessment in the exact JSON schema format.`;
             investorTwitter: {
               prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
             },
+            investorNews: {
+              prompt: DEFAULT_INVESTOR_NEWS_PROMPT,
+            },
+            b2bNews: {
+              prompt: DEFAULT_B2B_NEWS_PROMPT,
+            },
           };
           setFormData(fallbackData);
           setInitialFormData(fallbackData);
@@ -430,6 +465,12 @@ Return the assessment in the exact JSON schema format.`;
             },
             investorTwitter: {
               prompt: parsed.investorTwitter?.prompt || DEFAULT_INVESTOR_TWITTER_PROMPT,
+            },
+            investorNews: {
+              prompt: parsed.investorNews?.prompt || DEFAULT_INVESTOR_NEWS_PROMPT,
+            },
+            b2bNews: {
+              prompt: parsed.b2bNews?.prompt || DEFAULT_B2B_NEWS_PROMPT,
             },
           };
 
@@ -463,6 +504,12 @@ Return the assessment in the exact JSON schema format.`;
             investorTwitter: {
               prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
             },
+            investorNews: {
+              prompt: DEFAULT_INVESTOR_NEWS_PROMPT,
+            },
+            b2bNews: {
+              prompt: DEFAULT_B2B_NEWS_PROMPT,
+            },
           };
           setFormData(defaults);
           setInitialFormData(defaults);
@@ -490,6 +537,12 @@ Return the assessment in the exact JSON schema format.`;
           },
           investorTwitter: {
             prompt: DEFAULT_INVESTOR_TWITTER_PROMPT,
+          },
+          investorNews: {
+            prompt: DEFAULT_INVESTOR_NEWS_PROMPT,
+          },
+          b2bNews: {
+            prompt: DEFAULT_B2B_NEWS_PROMPT,
           },
         };
         setFormData(errorDefaults);
@@ -556,6 +609,12 @@ Return the assessment in the exact JSON schema format.`;
         },
         investorTwitter: {
           prompt: formData.investorTwitter?.prompt ?? DEFAULT_INVESTOR_TWITTER_PROMPT,
+        },
+        investorNews: {
+          prompt: formData.investorNews?.prompt ?? DEFAULT_INVESTOR_NEWS_PROMPT,
+        },
+        b2bNews: {
+          prompt: formData.b2bNews?.prompt ?? DEFAULT_B2B_NEWS_PROMPT,
         },
       };
 
@@ -820,64 +879,102 @@ Return the assessment in the exact JSON schema format.`;
             >
               LinkedIn Conversations
             </button>
-            <button
-              onClick={() => {
-                setActiveTab('direct');
-                // Validate schema when switching to direct tab
-                if (formData.direct.schema.trim()) {
-                  validateSchema(formData.direct.schema);
-                } else {
+            {isB2B && (
+              <button
+                onClick={() => {
+                  setActiveTab('direct');
+                  // Validate schema when switching to direct tab
+                  if (formData.direct.schema.trim()) {
+                    validateSchema(formData.direct.schema);
+                  } else {
+                    setSchemaError(null);
+                  }
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'direct'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Direct
+              </button>
+            )}
+            {isB2B && (
+              <button
+                onClick={() => {
+                  setActiveTab('instagram');
+                  // Clear schema error when switching away from direct tab
                   setSchemaError(null);
-                }
-              }}
-              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'direct'
-                  ? 'border-indigo-500 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Direct
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('instagram');
-                // Clear schema error when switching away from direct tab
-                setSchemaError(null);
-              }}
-              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'instagram'
-                  ? 'border-indigo-500 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Instagram
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('investorAnalyze');
-                setSchemaError(null);
-              }}
-              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'investorAnalyze'
-                  ? 'border-indigo-500 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Investor Analyze
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab('investorTwitter');
-                setSchemaError(null);
-              }}
-              className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
-                activeTab === 'investorTwitter'
-                  ? 'border-indigo-500 text-indigo-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Investor Twitter
-            </button>
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'instagram'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Instagram
+              </button>
+            )}
+            {isB2B && (
+              <button
+                onClick={() => {
+                  setActiveTab('b2bNews');
+                  setSchemaError(null);
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'b2bNews'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                B2B News
+              </button>
+            )}
+            {isFundraising && (
+              <button
+                onClick={() => {
+                  setActiveTab('investorAnalyze');
+                  setSchemaError(null);
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'investorAnalyze'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Investor Analyze
+              </button>
+            )}
+            {isFundraising && (
+              <button
+                onClick={() => {
+                  setActiveTab('investorTwitter');
+                  setSchemaError(null);
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'investorTwitter'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Investor Twitter
+              </button>
+            )}
+            {isFundraising && (
+              <button
+                onClick={() => {
+                  setActiveTab('investorNews');
+                  setSchemaError(null);
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'investorNews'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Investor News
+              </button>
+            )}
 
             {/* Spacer to ensure last tab isn't clipped by fade on mobile */}
             <div className="flex-shrink-0 w-4 sm:hidden" aria-hidden="true" />
@@ -1289,6 +1386,82 @@ Return the assessment in the exact JSON schema format.`;
                 />
                 <p className="mt-2 text-xs text-gray-500">
                   Use placeholders: {"{"}name{"}"}, {"{"}first_name{"}"}, {"{"}allValidTweets{"}"}, {"{"}dateString{"}"}.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Investor News Tab */}
+      {activeTab === 'investorNews' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Investor News</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Edit the system prompt used to fetch the latest news, updates, and activity for an investor.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">News System Prompt</h3>
+                <textarea
+                  ref={investorNewsRef}
+                  value={formData.investorNews?.prompt ?? ''}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData((prev) => ({
+                      ...prev,
+                      investorNews: {
+                        ...(prev?.investorNews ?? { prompt: DEFAULT_INVESTOR_NEWS_PROMPT }),
+                        prompt: e.target.value,
+                      },
+                    }));
+                  }}
+                  rows={6}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_INVESTOR_NEWS_PROMPT}
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  This system prompt instructs the model how to summarize investor news. The query (investor name, firm, type) is generated automatically.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* B2B News Tab */}
+      {activeTab === 'b2bNews' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">B2B News Email Opener</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Edit the system prompt used to generate a first line and subject line from a piece of company news.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">News Email Opener System Prompt</h3>
+                <textarea
+                  ref={b2bNewsRef}
+                  value={formData.b2bNews?.prompt ?? ''}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData((prev) => ({
+                      ...prev,
+                      b2bNews: {
+                        ...(prev?.b2bNews ?? { prompt: DEFAULT_B2B_NEWS_PROMPT }),
+                        prompt: e.target.value,
+                      },
+                    }));
+                  }}
+                  rows={6}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_B2B_NEWS_PROMPT}
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  This prompt must instruct the model to reply as JSON with keys {"{"}first_line_to_start_email{"}"} and {"{"}subject_line{"}"}.
                 </p>
               </div>
             </div>

@@ -43,7 +43,54 @@ export const DEFAULT_INVESTOR_TWITTER_PROMPT = `{name} posted these on Twitter:{
 Write a one-line friendly icebreaker after just reading any one of {first_name}'s tweets. Don't use hashtags. Keep it less than 120 characters. You don't know {first_name} or {first_name}'s skills personally. Do not ask question. Today is {dateString}. No questions. Don't use / (slash), Em Dashes (—), En Dashes (–) , and Hyphens (-)
 
 Reply as a JSON with key:
-{ 
+{
   "twitter_line": "I just read your tweet..."
 }`;
+
+export const DEFAULT_B2B_NEWS_PROMPT = `You are a top-performing SDR writing a cold outbound email.
+
+Generate:
+First line to start the email
+Must sound like a natural email opener
+Do not sell, do not ask a question.
+If more than 1 news is provided, pick just one.
+
+- be natural
+- be concise
+- be human sounding
+- Do not use em dashes
+- Never invent facts.
+- Only use known information.
+
+First line to start email: (Start with a congratulatory or observational tone like "Congrats on...", less than 60 characters)
+Subject line: (Written as if congratulatory or observational like "Congrats on...!", less than 60 characters)
+
+Reply as a JSON:
+{
+  "first_line_to_start_email": "str",
+  "subject_line": "str"
+}`;
+
+export const DEFAULT_INVESTOR_NEWS_PROMPT = `You are an investment intelligence engine operating inside a professional investor platform.
+
+The user already knows the firm is a venture capital fund.
+DO NOT:
+- explain what the firm is
+- summarize its mission
+- describe its investment thesis
+- restate public boilerplate
+
+ONLY return:
+- concrete recent events (last 6–12 months)
+- investments, exits, or capital activity
+- partner or leadership actions
+- media appearances, interviews, or quotes
+- fund launches, closes, or strategy shifts
+
+If no meaningful updates exist:
+- explicitly say "No material public updates found"
+- explain what sources were checked
+- do NOT fabricate or infer activity
+
+Output must be factual, time-bound, and specific.`;
 

@@ -273,9 +273,14 @@ export const fetchCompanyNewsEmailOpener = async (
   news: string
 ): Promise<NewsEmailOpener | null> => {
   try {
+    const token = await getValidAccessToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const res = await fetchWithTimeout('/api/company-news-email-opener', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ news }),
     }, 120_000);
     const data = await res.json();

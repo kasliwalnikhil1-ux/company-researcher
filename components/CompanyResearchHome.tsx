@@ -14,6 +14,7 @@ import ConfirmationModal from './ui/ConfirmationModal';
 import ResumeDialog from './ui/ResumeDialog';
 import Toast from './ui/Toast';
 import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvRow } from "../lib/csvImport";
+import { parseMarkdownTable, parseJsonArrayDetailed, detectDomainColumnIndex, moveColumnToFront, removeColumnAt, removeRowAt, buildRowNews, isLikelyDomain, TableData } from "../lib/tableImport";
 import { downloadCsv } from "../lib/csvExport";
 import { writeSummaryToCsvRow } from "../lib/summaryUtils";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
@@ -170,6 +171,20 @@ export default function CompanyResearcher() {
   const [newsInput, setNewsInput] = useState('');
   const newsDraftCacheRef = useRef<{ news: string; draft: NewsEmailOpener | null } | null>(null);
   
+  // Input mode: link textarea, CSV upload, or markdown table paste
+  const [inputMode, setInputMode] = useState<'link' | 'csv' | 'table'>('link');
+
+  // Per-row news override used when processing a pasted table
+  const newsOverrideRef = useRef<string | null>(null);
+
+  // Table import state
+  const [tableInput, setTableInput] = useState('');
+  const [tableData, setTableData] = useState<TableData | null>(null);
+  const [tableParseError, setTableParseError] = useState<string | null>(null);
+  const [isProcessingTable, setIsProcessingTable] = useState(false);
+  const [tableProcessingProgress, setTableProcessingProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
+  const [pendingTableDelete, setPendingTableDelete] = useState<{ kind: 'row' | 'col'; index: number } | null>(null);
+
   // Company input and state
   const [rawCompanyInput, setRawCompanyInput] = useState('');
   const [submittedCompanies, setSubmittedCompanies] = useState<string[]>([]);
@@ -405,16 +420,17 @@ export default function CompanyResearcher() {
   }, [researchMode]);
 
   const shouldGenerateNewsOpener = useMemo(
-    () => isB2B && researchMode !== 'investor' && newsInput.trim().length > 0,
+    () => isB2B && researchMode !== 'investor' && (newsInput.trim().length > 0 || newsOverrideRef.current !== null),
     [isB2B, researchMode, newsInput]
   );
 
   const getNewsEmailOpener = useCallback(async (): Promise<NewsEmailOpener | null> => {
-    if (!shouldGenerateNewsOpener) {
+    if (!isB2B || researchMode === 'investor') {
       return null;
     }
 
-    const trimmedNews = newsInput.trim();
+    const sourceText = newsOverrideRef.current ?? newsInput;
+    const trimmedNews = (sourceText || '').trim();
     if (!trimmedNews) {
       return null;
     }
@@ -427,7 +443,7 @@ export default function CompanyResearcher() {
     const draft = await fetchCompanyNewsEmailOpener(trimmedNews);
     newsDraftCacheRef.current = { news: trimmedNews, draft };
     return draft;
-  }, [newsInput, shouldGenerateNewsOpener]);
+  }, [newsInput, isB2B, researchMode]);
 
   const mergeNewsDraftIntoSummary = useCallback(
     <T extends Record<string, any> | null | undefined>(summary: T, draft: NewsEmailOpener | null): T => {
@@ -2829,6 +2845,35 @@ export default function CompanyResearcher() {
     );
   }, [csvData, selectedUrlColumn, selectedColumns, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary]);
 
+  // Switch between Link, CSV, and Table input modes; clears entries from the other tabs
+  const handleSwitchInputMode = useCallback((mode: 'link' | 'csv' | 'table') => {
+    setInputMode(prev => {
+      if (prev === mode) return prev;
+      // Always clear the link textarea + news (only Link tab uses these)
+      if (mode !== 'link') {
+        setRawCompanyInput('');
+        setNewsInput('');
+        newsDraftCacheRef.current = null;
+      }
+      // Clear CSV state unless going to CSV
+      if (mode !== 'csv') {
+        setCsvData(null);
+        setSelectedUrlColumn(null);
+        setSelectedColumns({ domain: null, instagram: null });
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      }
+      // Clear table state unless going to Table
+      if (mode !== 'table') {
+        setTableInput('');
+        setTableData(null);
+        setTableParseError(null);
+      }
+      return mode;
+    });
+  }, []);
+
   // Clear all data function
   const handleClearAll = useCallback(() => {
     // Stop any in-flight batch processing (text-input or CSV)
@@ -2849,10 +2894,134 @@ export default function CompanyResearcher() {
     setSetName('');
     setNewsInput('');
     newsDraftCacheRef.current = null;
+    newsOverrideRef.current = null;
+    setTableInput('');
+    setTableData(null);
+    setTableParseError(null);
+    setIsProcessingTable(false);
+    setTableProcessingProgress({ current: 0, total: 0 });
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   }, []);
+
+  // Parse the table input (markdown table or JSON array of objects) and
+  // auto-detect/move the domain column to the front.
+  const handleParseTable = useCallback(() => {
+    const trimmed = tableInput.trim();
+    const looksLikeJson = trimmed.startsWith('[') || trimmed.startsWith('{');
+    let parsed: TableData | null = null;
+    if (looksLikeJson) {
+      const jsonResult = parseJsonArrayDetailed(tableInput);
+      if (!jsonResult.ok) {
+        setTableData(null);
+        setTableParseError(jsonResult.error);
+        return;
+      }
+      parsed = jsonResult.table;
+    } else {
+      parsed = parseMarkdownTable(tableInput);
+    }
+    if (!parsed) {
+      setTableData(null);
+      setTableParseError('Could not parse input. Provide a markdown table (header row + dashes separator + data rows) or a JSON array of objects.');
+      return;
+    }
+    const domainIdx = detectDomainColumnIndex(parsed.headers, parsed.rows);
+    const reordered = moveColumnToFront(parsed, domainIdx);
+    // Normalize each row's domain cell (strip protocol/www/path, lowercase) and
+    // drop rows whose domain is empty or invalid. Dedupe by normalized domain.
+    const seenDomains = new Set<string>();
+    const normalizedRows: string[][] = [];
+    let droppedInvalid = 0;
+    let droppedDuplicate = 0;
+    for (const row of reordered.rows) {
+      const raw = (row[0] || '').trim();
+      const normalized = (extractDomain(raw) || '').toLowerCase();
+      if (!normalized || !isLikelyDomain(normalized)) {
+        droppedInvalid++;
+        continue;
+      }
+      if (seenDomains.has(normalized)) {
+        droppedDuplicate++;
+        continue;
+      }
+      seenDomains.add(normalized);
+      normalizedRows.push([normalized, ...row.slice(1)]);
+    }
+    if (normalizedRows.length === 0) {
+      setTableData(null);
+      setTableParseError('No rows have a valid domain in the detected domain column.');
+      return;
+    }
+    setTableData({ headers: reordered.headers, rows: normalizedRows });
+    const notes: string[] = [];
+    if (droppedInvalid > 0) notes.push(`skipped ${droppedInvalid} row${droppedInvalid === 1 ? '' : 's'} with no valid domain`);
+    if (droppedDuplicate > 0) notes.push(`removed ${droppedDuplicate} duplicate domain${droppedDuplicate === 1 ? '' : 's'}`);
+    setTableParseError(notes.length > 0 ? `${notes.join('; ')}.` : null);
+  }, [tableInput]);
+
+  const handleRemoveTableColumn = useCallback((colIndex: number) => {
+    setTableData(prev => (prev ? removeColumnAt(prev, colIndex) : prev));
+  }, []);
+
+  const handleRemoveTableRow = useCallback((rowIndex: number) => {
+    setTableData(prev => (prev ? removeRowAt(prev, rowIndex) : prev));
+  }, []);
+
+  // Process table rows: domain column = company URL, other columns = per-row news context
+  const processTableRows = useCallback(async () => {
+    if (!tableData || tableData.rows.length === 0) return;
+
+    const domainColIndex = 0;
+    const validRows = tableData.rows
+      .map((row, originalIndex) => ({ row, originalIndex }))
+      .filter(({ row }) => isLikelyDomain(row[domainColIndex]));
+
+    if (validRows.length === 0) {
+      setTableParseError('No rows have a valid domain in the domain column.');
+      return;
+    }
+
+    setTableParseError(null);
+    setIsProcessingTable(true);
+    shouldStopProcessingRef.current = false;
+    setTableProcessingProgress({ current: 0, total: validRows.length });
+
+    const companies = validRows.map(({ row }) => (row[domainColIndex] || '').trim());
+    setErrorsByCompany({});
+    setSubmittedCompanies(companies);
+    setActiveCompany(companies[0]);
+
+    // Sequential processing because the per-row news override is shared via a ref
+    for (let i = 0; i < validRows.length; i++) {
+      if (shouldStopProcessingRef.current) break;
+      const { originalIndex } = validRows[i];
+      const company = companies[i];
+      const rowNews = buildRowNews(tableData, originalIndex, domainColIndex);
+
+      newsOverrideRef.current = rowNews || null;
+      newsDraftCacheRef.current = null;
+
+      try {
+        await researchCompany(company);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[CompanyResearchHome] Unexpected error researching ${company} from table:`, error);
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { general: `Unexpected error: ${msg}` }
+        }));
+      }
+
+      setTableProcessingProgress({ current: i + 1, total: validRows.length });
+    }
+
+    newsOverrideRef.current = null;
+    newsDraftCacheRef.current = null;
+    setIsProcessingTable(false);
+    setTableProcessingProgress({ current: 0, total: 0 });
+  }, [tableData, researchCompany]);
 
   // Download partial progress
   const handleDownloadPartialProgress = useCallback(() => {
@@ -3165,36 +3334,63 @@ export default function CompanyResearcher() {
         </div>
       )}
 
-      {isB2B && researchMode !== 'investor' && (
-        <div className="mb-6 opacity-0 animate-fade-up [animation-delay:400ms]">
-          <label htmlFor="research-news" className="block text-sm font-medium text-gray-700 mb-2">
-            News (Optional)
-          </label>
-          <textarea
-            id="research-news"
-            value={newsInput}
-            onChange={(e) => {
-              setNewsInput(e.target.value);
-              newsDraftCacheRef.current = null;
-            }}
-            placeholder="Paste one or more news items. We will use one to generate an opener and subject line."
-            rows={4}
-            className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
-          />
-        </div>
+      {/* Input mode tabs: Via Link / Via Table / Via CSV */}
+      <div className="mb-6 border-b border-gray-200 opacity-0 animate-fade-up [animation-delay:400ms]">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            type="button"
+            onClick={() => handleSwitchInputMode('link')}
+            disabled={isProcessingCsv || isSearching || isProcessingTable}
+            className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              inputMode === 'link'
+                ? 'border-brand-default text-brand-default'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Via Link
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSwitchInputMode('table')}
+            disabled={isProcessingCsv || isSearching || isProcessingTable}
+            className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              inputMode === 'table'
+                ? 'border-brand-default text-brand-default'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Via Table
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSwitchInputMode('csv')}
+            disabled={isProcessingCsv || isSearching || isProcessingTable}
+            className={`whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              inputMode === 'csv'
+                ? 'border-brand-default text-brand-default'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            Via CSV
+          </button>
+        </nav>
+      </div>
+
+      {inputMode === 'link' && (
+        <p className="block text-sm font-medium text-gray-700 mb-2 opacity-0 animate-fade-up [animation-delay:400ms]">
+          {researchMode === 'investor'
+            ? 'Enter domains (e.g. boldcap.com) or LinkedIn URLs (comma or newline separated) for investor research.'
+            : researchMode === 'instagram'
+            ? 'Enter Instagram URLs (comma or newline separated) for profile research.'
+            : researchMode === 'jobs'
+            ? 'Enter job posting URLs from LinkedIn, Naukri, Shine, Indeed, etc. (comma or newline separated) to extract company info and B2B fit.'
+            : 'Enter company URLs (comma or newline separated) for qualification assessment.'}
+        </p>
       )}
 
-      <p className="text-black mb-12 opacity-0 animate-fade-up [animation-delay:400ms]">
-        {researchMode === 'investor'
-          ? 'Enter domains (e.g. boldcap.com) or LinkedIn URLs (comma or newline separated) for investor research, or upload a CSV file.'
-          : researchMode === 'instagram'
-          ? 'Enter Instagram URLs (comma or newline separated) for profile research, or upload a CSV file with Instagram columns.'
-          : researchMode === 'jobs'
-          ? 'Enter job posting URLs from LinkedIn, Naukri, Shine, Indeed, etc. (comma or newline separated) to extract company info and B2B fit.'
-          : 'Enter company URLs (comma or newline separated) for qualification assessment, or upload a CSV file.'}
-      </p>
-
       {/* CSV Import Section */}
+      {inputMode === 'csv' && (
+      <>
       <div className="mb-8 opacity-0 animate-fade-up [animation-delay:500ms]">
         <div className="border-2 border-dashed border-gray-300 rounded-sm p-6 bg-gray-50">
           <div className="flex items-center justify-between mb-4">
@@ -3283,10 +3479,262 @@ export default function CompanyResearcher() {
               </div>
             </div>
           )}
+          {csvData && !isProcessingCsv && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) && (
+            <div className="mt-4 flex items-center justify-between gap-4 p-3 bg-white border border-gray-200 rounded-sm">
+              <div className="text-sm text-gray-700">
+                <span className="font-medium">{csvData.rows.length}</span> row{csvData.rows.length === 1 ? '' : 's'} loaded
+                {selectedUrlColumn && (
+                  <span className="text-gray-500"> · column: <span className="font-medium text-gray-700">{selectedUrlColumn}</span></span>
+                )}
+                {!selectedUrlColumn && (selectedColumns.domain || selectedColumns.instagram) && (
+                  <span className="text-gray-500">
+                    {selectedColumns.domain && <> · domain: <span className="font-medium text-gray-700">{selectedColumns.domain}</span></>}
+                    {selectedColumns.instagram && <> · instagram: <span className="font-medium text-gray-700">{selectedColumns.instagram}</span></>}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowColumnSelector(true)}
+                className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-sm hover:bg-gray-300 transition-colors"
+              >
+                Change column
+              </button>
+            </div>
+          )}
         </div>
       </div>
+      {csvData && !isProcessingCsv && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) && (
+        <button
+          type="button"
+          onClick={() => {
+            if (hasSavedProgress) {
+              setShowResumeDialog(true);
+            } else {
+              processCsvRows(false);
+            }
+          }}
+          className="w-full text-white font-semibold px-2 py-2 rounded-sm transition-opacity opacity-0 animate-fade-up [animation-delay:600ms] min-h-[50px] bg-brand-default ring-2 ring-brand-default transition-colors mb-8"
+        >
+          {researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : 'Analyze Companies'}
+        </button>
+      )}
+      </>
+      )}
 
-      {!isProcessingCsv && (
+      {/* Table Import Section */}
+      {inputMode === 'table' && (
+      <>
+      <div className="mb-6 opacity-0 animate-fade-up [animation-delay:500ms]">
+        <label htmlFor="table-input" className="block text-sm font-medium text-gray-700 mb-2">
+          Paste Table (Markdown or JSON)
+        </label>
+        <textarea
+          id="table-input"
+          value={tableInput}
+          onChange={(e) => setTableInput(e.target.value)}
+          placeholder={'| Domain | Headline | What happened |\n| --- | --- | --- |\n| brand.com | ... | ... |\n\nor a JSON array:\n[{"domain": "brand.com", "title": "..."}]'}
+          rows={8}
+          className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors font-mono text-xs"
+          disabled={isProcessingTable}
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleParseTable}
+            disabled={isProcessingTable || tableInput.trim().length === 0}
+            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-sm hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+          >
+            Parse Table
+          </button>
+          <p className="text-xs text-gray-500">
+            The domain/website column will be auto-detected and moved to the first position. Other columns will be concatenated as per-row news context.
+          </p>
+        </div>
+        {tableParseError && (
+          <p className="mt-2 text-sm text-red-600">{tableParseError}</p>
+        )}
+      </div>
+
+      {tableData && (
+        <div className="mb-6 opacity-0 animate-fade-up [animation-delay:600ms]">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm text-gray-700">
+              <span className="font-medium">{tableData.rows.length}</span> row{tableData.rows.length === 1 ? '' : 's'} ·{' '}
+              <span className="font-medium">{tableData.headers.length}</span> column{tableData.headers.length === 1 ? '' : 's'}
+              {tableData.headers[0] && (
+                <> · domain column: <span className="font-medium">{tableData.headers[0]}</span></>
+              )}
+            </p>
+          </div>
+          <div className="overflow-x-auto border border-gray-200 rounded-sm">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-2 py-2 w-8"></th>
+                  {tableData.headers.map((header, ci) => (
+                    <th key={ci} className="px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap border-l border-gray-200">
+                      <div className="flex items-center gap-2">
+                        <span>
+                          {header}
+                          {ci === 0 && <span className="ml-1 text-[10px] uppercase text-brand-default">domain</span>}
+                        </span>
+                        {ci > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setPendingTableDelete({ kind: 'col', index: ci })}
+                            disabled={isProcessingTable}
+                            title="Remove column"
+                            className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {tableData.rows.map((row, ri) => (
+                  <tr key={ri} className="border-t border-gray-200 hover:bg-gray-50">
+                    <td className="px-2 py-2 align-top">
+                      <button
+                        type="button"
+                        onClick={() => setPendingTableDelete({ kind: 'row', index: ri })}
+                        disabled={isProcessingTable}
+                        title="Remove row"
+                        className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                      >
+                        ×
+                      </button>
+                    </td>
+                    {row.map((cell, ci) => (
+                      <td key={ci} className="px-3 py-2 align-top text-gray-700 border-l border-gray-200 min-w-[16rem] max-w-md" title={cell}>
+                        {ci === 0 && cell ? (
+                          <div className="flex items-center gap-2">
+                            <img
+                              src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(cell)}&sz=32`}
+                              alt=""
+                              width={16}
+                              height={16}
+                              className="flex-shrink-0 rounded-sm"
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                            />
+                            <a
+                              href={`https://${cell.replace(/^https?:\/\//, '')}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-brand-default hover:underline break-all"
+                            >
+                              {cell}
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="line-clamp-3 break-words whitespace-pre-wrap">{cell}</div>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tableData && tableData.rows.length > 0 && (
+        <button
+          type="button"
+          onClick={processTableRows}
+          disabled={isProcessingTable}
+          className="w-full text-white font-semibold px-2 py-2 rounded-sm transition-opacity opacity-0 animate-fade-up [animation-delay:700ms] min-h-[50px] bg-brand-default ring-2 ring-brand-default transition-colors mb-8 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isProcessingTable
+            ? `Analyzing… ${tableProcessingProgress.current} / ${tableProcessingProgress.total}`
+            : (researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : 'Analyze Companies')}
+        </button>
+      )}
+
+      {isProcessingTable && (
+        <div className="mb-6 p-3 bg-blue-50 text-blue-700 rounded-sm">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-700"></div>
+              <span>Processing table: {tableProcessingProgress.current} / {tableProcessingProgress.total}</span>
+            </div>
+            <button
+              onClick={() => { shouldStopProcessingRef.current = true; }}
+              className="px-3 py-1.5 text-xs bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors"
+            >
+              Stop Processing
+            </button>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all"
+              style={{ width: `${tableProcessingProgress.total > 0 ? (tableProcessingProgress.current / tableProcessingProgress.total) * 100 : 0}%` }}
+            ></div>
+          </div>
+        </div>
+      )}
+
+      {pendingTableDelete && tableData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center justify-center mb-4">
+              <div className="flex-shrink-0 w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                </svg>
+              </div>
+            </div>
+            <h2 className="text-xl font-semibold text-center mb-2">
+              {pendingTableDelete.kind === 'row' ? 'Remove this row?' : 'Remove this column?'}
+            </h2>
+            <p className="text-gray-600 text-center mb-6 text-sm">
+              {pendingTableDelete.kind === 'row' ? (
+                <>
+                  Domain: <span className="font-medium text-gray-800">{(tableData.rows[pendingTableDelete.index]?.[0] || '—').slice(0, 60)}</span>
+                </>
+              ) : (
+                <>
+                  Column: <span className="font-medium text-gray-800">{tableData.headers[pendingTableDelete.index]}</span>
+                </>
+              )}
+              <br />
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingTableDelete(null)}
+                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-sm hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (pendingTableDelete.kind === 'row') {
+                    handleRemoveTableRow(pendingTableDelete.index);
+                  } else {
+                    handleRemoveTableColumn(pendingTableDelete.index);
+                  }
+                  setPendingTableDelete(null);
+                }}
+                className="px-6 py-2 bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      </>
+      )}
+
+      {inputMode === 'link' && !isProcessingCsv && (
         <form onSubmit={handleResearch} className="space-y-6 mb-8">
           <textarea
             value={rawCompanyInput}
@@ -3334,6 +3782,24 @@ export default function CompanyResearcher() {
             rows={4}
             className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-brand-default resize-none opacity-0 animate-fade-up [animation-delay:600ms]"
           />
+          {isB2B && researchMode !== 'investor' && (
+            <div className="opacity-0 animate-fade-up [animation-delay:700ms]">
+              <label htmlFor="research-news" className="block text-sm font-medium text-gray-700 mb-2">
+                News (Optional)
+              </label>
+              <textarea
+                id="research-news"
+                value={newsInput}
+                onChange={(e) => {
+                  setNewsInput(e.target.value);
+                  newsDraftCacheRef.current = null;
+                }}
+                placeholder="Paste one or more news items. We will use one to generate an opener and subject line."
+                rows={4}
+                className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
+              />
+            </div>
+          )}
           <button
             type="submit"
             className={`w-full text-white font-semibold px-2 py-2 rounded-sm transition-opacity opacity-0 animate-fade-up [animation-delay:800ms] min-h-[50px] ${
@@ -3341,13 +3807,13 @@ export default function CompanyResearcher() {
             } transition-colors`}
             disabled={isSearching}
           >
-            {isSearching 
-              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : researchMode === 'jobs' ? 'Researching job posting...' : 'Analyzing...') 
+            {isSearching
+              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : researchMode === 'jobs' ? 'Researching job posting...' : 'Analyzing...')
               : (researchMode === 'investor' ? 'Research Investor' : researchMode === 'instagram' ? 'Research Instagram Profiles' : researchMode === 'jobs' ? 'Research Job Postings' : 'Analyze Companies')}
           </button>
         </form>
       )}
-      
+
       {/* Global loading indicator with progress for large batches */}
       {isSearching && (
         <div className="mb-6 p-3 bg-blue-50 text-blue-700 rounded-sm">
@@ -3697,11 +4163,6 @@ export default function CompanyResearcher() {
         onConfirm={() => {
           if (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) {
             setShowColumnSelector(false);
-            if (hasSavedProgress) {
-              setShowResumeDialog(true);
-            } else {
-              processCsvRows(false);
-            }
           }
         }}
         onClose={() => {

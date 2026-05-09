@@ -4,6 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { DEFAULT_INVESTOR_NEWS_PROMPT } from '@/app/personalization/investorAnalyzeDefault';
 
 const EXA_API_KEYS = process.env.EXA_API_KEYS
   ? process.env.EXA_API_KEYS.split(',').map((k) => k.trim()).filter((k) => k.length > 0)
@@ -165,6 +166,30 @@ export async function POST(req: NextRequest) {
       query = `Latest news, videos, articles, and updates on ${parts.join(' ')}. Be comprehensive and accurate.`.trim();
     }
 
+    let systemPrompt: string = DEFAULT_INVESTOR_NEWS_PROMPT;
+    try {
+      const { data: userSettings } = await supabase
+        .from('user_settings')
+        .select('personalization')
+        .eq('id', user.id)
+        .single();
+
+      let personalization: any = userSettings?.personalization ?? null;
+      if (typeof personalization === 'string') {
+        try {
+          personalization = JSON.parse(personalization);
+        } catch {
+          personalization = null;
+        }
+      }
+      const customPrompt = personalization?.investorNews?.prompt;
+      if (typeof customPrompt === 'string' && customPrompt.trim().length > 0) {
+        systemPrompt = customPrompt;
+      }
+    } catch (e) {
+      // Fall back to default prompt on any lookup error
+    }
+
     const exaKey = EXA_API_KEYS[Math.floor(Math.random() * EXA_API_KEYS.length)];
     const exaRes = await fetch('https://api.exa.ai/chat/completions', {
       method: 'POST',
@@ -175,11 +200,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         model: 'exa',
         messages: [
-          {
-            role: 'system',
-            content:
-              'You are an investment intelligence engine operating inside a professional investor platform.\n\nThe user already knows the firm is a venture capital fund.\nDO NOT:\n- explain what the firm is\n- summarize its mission\n- describe its investment thesis\n- restate public boilerplate\n\nONLY return:\n- concrete recent events (last 6–12 months)\n- investments, exits, or capital activity\n- partner or leadership actions\n- media appearances, interviews, or quotes\n- fund launches, closes, or strategy shifts\n\nIf no meaningful updates exist:\n- explicitly say "No material public updates found"\n- explain what sources were checked\n- do NOT fabricate or infer activity\n\nOutput must be factual, time-bound, and specific.',
-          },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: query },
         ],
       }),
