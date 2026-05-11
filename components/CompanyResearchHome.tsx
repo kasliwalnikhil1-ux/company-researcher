@@ -158,6 +158,77 @@ const JOB_URL_PATTERNS = [
   /\/jobs\//i,
 ];
 
+// Validate a job posting URL. Returns { valid: true, url } on success, or
+// { valid: false, reason } with a user-friendly message. Detects LinkedIn
+// search/collection URLs and suggests the canonical /jobs/view/<id> form
+// when a currentJobId is available in the query string.
+const validateJobUrl = (input: string): { valid: true; url: string } | { valid: false; reason: string } => {
+  if (!input || !input.trim()) {
+    return { valid: false, reason: 'Empty job URL.' };
+  }
+  let raw = input.trim();
+  if (!raw.startsWith('http://') && !raw.startsWith('https://')) {
+    raw = 'https://' + raw;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return { valid: false, reason: `Not a valid URL: ${input}` };
+  }
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname;
+
+  if (host.endsWith('linkedin.com')) {
+    // Canonical job posting URL: /jobs/view/<id>
+    if (/^\/jobs\/view\/\d+/i.test(path)) {
+      return { valid: true, url: raw };
+    }
+    // Search/collection URLs are not crawlable per-job — suggest the view URL
+    // when we can extract a currentJobId from the query string.
+    if (/^\/jobs\//i.test(path)) {
+      const jobId = parsed.searchParams.get('currentJobId');
+      if (jobId && /^\d+$/.test(jobId)) {
+        const suggested = `https://www.linkedin.com/jobs/view/${jobId}`;
+        return {
+          valid: false,
+          reason: `Invalid LinkedIn job URL: ${input}. This is a search URL — use the canonical job posting URL instead: ${suggested}`,
+        };
+      }
+      return {
+        valid: false,
+        reason: `Invalid LinkedIn job URL: ${input}. Expected format: https://www.linkedin.com/jobs/view/<jobId>`,
+      };
+    }
+    return {
+      valid: false,
+      reason: `Invalid LinkedIn job URL: ${input}. Expected format: https://www.linkedin.com/jobs/view/<jobId>`,
+    };
+  }
+
+  return { valid: true, url: raw };
+};
+
+// Extract a clean company domain from a `company_website` value returned by
+// the model. Returns null when the value is missing, unparseable, or points
+// at a social/aggregator site (linkedin.com, facebook.com, etc.) — common
+// when the model can't find the real company site and falls back to the
+// LinkedIn company page.
+const extractValidCompanyDomain = (companyWebsite: string | null | undefined): string | null => {
+  if (!companyWebsite || typeof companyWebsite !== 'string') return null;
+  const cleaned = companyWebsite
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .split(/[\/:?]/)[0]
+    .toLowerCase();
+  if (!cleaned || !cleaned.includes('.')) return null;
+  if (INVALID_DOMAINS.some(invalid => cleaned === invalid.toLowerCase() || cleaned.endsWith('.' + invalid.toLowerCase()))) {
+    return null;
+  }
+  return cleaned;
+};
+
 export default function CompanyResearcher() {
   // Companies context for saving summaries (but don't fetch companies list on mount)
   const { createCompany, updateCompany } = useCompanies();
@@ -746,6 +817,15 @@ export default function CompanyResearcher() {
       // Jobs research mode
       console.log('[CompanyResearchHome] researchCompany (jobs) starting:', company);
 
+      const jobCheck = validateJobUrl(company);
+      if (!jobCheck.valid) {
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { form: jobCheck.reason }
+        }));
+        return;
+      }
+
       setResultsByCompany(prev => ({
         ...prev,
         [company]: {
@@ -799,9 +879,10 @@ export default function CompanyResearcher() {
               return;
             }
 
-            const companyDomain = summary.company_website
-              ? summary.company_website.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?]/)[0]
-              : null;
+            const companyDomain = extractValidCompanyDomain(summary.company_website);
+            if (summary.company_website && !companyDomain) {
+              console.warn('[CompanyResearchHome] Dropping invalid company_website for', company, '→', summary.company_website);
+            }
 
             const qualificationSummary: Record<string, any> = {
               company_name: summary.company_name,
@@ -810,10 +891,11 @@ export default function CompanyResearcher() {
               job_title: summary.job_title || '',
               compensation_type: summary.compensation_type || '',
               compensation_amount: summary.compensation_amount || '',
-              job_application_fit_for_B2B_GTM_ABM_expert: summary.job_application_fit_for_B2B_GTM_ABM_expert ?? null,
+              job_application_fit: summary.job_application_fit ?? null,
               first_line_to_start_email: summary.first_line_to_start_email || '',
               subject_line: summary.subject_line || '',
               source_job_url: data?.url || company,
+              company_website: companyDomain || '',
             };
 
             if (companyDomain) {
@@ -1418,12 +1500,12 @@ export default function CompanyResearcher() {
                 const s = jobData.summary || {};
                 updatedRow['Job Title'] = s.job_title || '';
                 updatedRow['Company Name'] = s.company_name || '';
-                updatedRow['Company Website'] = s.company_website || '';
+                updatedRow['Company Website'] = extractValidCompanyDomain(s.company_website) || '';
                 updatedRow['Company Description'] = s.company_description || '';
                 updatedRow['Company Customers'] = s.company_customers || '';
                 updatedRow['Compensation Type'] = s.compensation_type || '';
                 updatedRow['Compensation Amount'] = s.compensation_amount || '';
-                updatedRow['B2B GTM/ABM Fit'] = s.job_application_fit_for_B2B_GTM_ABM_expert === true ? 'Yes' : s.job_application_fit_for_B2B_GTM_ABM_expert === false ? 'No' : '';
+                updatedRow['Job Application Fit'] = s.job_application_fit === true ? 'Yes' : s.job_application_fit === false ? 'No' : '';
                 updatedRow['First Line To Start Email'] = s.first_line_to_start_email || '';
                 updatedRow['Subject Line'] = s.subject_line || '';
               } else if (jobError) {
@@ -2486,6 +2568,10 @@ export default function CompanyResearcher() {
         async (jobUrl, batchIndex) => {
           const actualIndex = startFromIndex + batchIndex;
           try {
+            const jobCheck = validateJobUrl(jobUrl);
+            if (!jobCheck.valid) {
+              errorMap.set(jobUrl, jobCheck.reason);
+            } else {
             const data = await fetchJobsResearch(jobUrl);
             if (data?.error) {
               errorMap.set(jobUrl, data.error + (data.details ? `: ${data.details}` : ''));
@@ -2499,9 +2585,10 @@ export default function CompanyResearcher() {
               const summary = mergedJobData?.summary;
               if (summary?.company_name && user) {
                 try {
-                  const companyDomain = summary.company_website
-                    ? summary.company_website.replace(/^https?:\/\//, '').replace(/^www\./, '').split(/[\/:?]/)[0]
-                    : null;
+                  const companyDomain = extractValidCompanyDomain(summary.company_website);
+                  if (summary.company_website && !companyDomain) {
+                    console.warn('[CompanyResearchHome] Dropping invalid company_website for', jobUrl, '→', summary.company_website);
+                  }
 
                   const qualificationSummary: Record<string, any> = {
                     company_name: summary.company_name,
@@ -2510,9 +2597,10 @@ export default function CompanyResearcher() {
                     job_title: summary.job_title || '',
                     compensation_type: summary.compensation_type || '',
                     compensation_amount: summary.compensation_amount || '',
-                    job_application_fit_for_B2B_GTM_ABM_expert: summary.job_application_fit_for_B2B_GTM_ABM_expert ?? null,
+                    job_application_fit: summary.job_application_fit ?? null,
                     first_line_to_start_email: summary.first_line_to_start_email || '',
                     subject_line: summary.subject_line || '',
+                    company_website: companyDomain || '',
                     source_job_url: mergedJobData?.url || jobUrl,
                   };
 
@@ -2557,6 +2645,7 @@ export default function CompanyResearcher() {
                   console.error('Error saving company from job CSV processing:', saveError);
                 }
               }
+            }
             }
           } catch (error) {
             const msg = error instanceof Error ? error.message : 'Unknown error';
@@ -2950,12 +3039,12 @@ export default function CompanyResearcher() {
           const s = jobData.summary || {};
           updatedRow['Job Title'] = s.job_title || '';
           updatedRow['Company Name'] = s.company_name || '';
-          updatedRow['Company Website'] = s.company_website || '';
+          updatedRow['Company Website'] = extractValidCompanyDomain(s.company_website) || '';
           updatedRow['Company Description'] = s.company_description || '';
           updatedRow['Company Customers'] = s.company_customers || '';
           updatedRow['Compensation Type'] = s.compensation_type || '';
           updatedRow['Compensation Amount'] = s.compensation_amount || '';
-          updatedRow['B2B GTM/ABM Fit'] = s.job_application_fit_for_B2B_GTM_ABM_expert === true ? 'Yes' : s.job_application_fit_for_B2B_GTM_ABM_expert === false ? 'No' : '';
+          updatedRow['Job Application Fit'] = s.job_application_fit === true ? 'Yes' : s.job_application_fit === false ? 'No' : '';
           updatedRow['First Line To Start Email'] = s.first_line_to_start_email || '';
           updatedRow['Subject Line'] = s.subject_line || '';
         } else if (jobError) {
@@ -4333,11 +4422,14 @@ export default function CompanyResearcher() {
                       <div>
                         <span className="text-sm font-medium text-gray-500">Company Website</span>
                         <p className="text-base">
-                          {jobsResearchData.summary.company_website ? (
-                            <a href={jobsResearchData.summary.company_website.startsWith('http') ? jobsResearchData.summary.company_website : `https://${jobsResearchData.summary.company_website}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                              {jobsResearchData.summary.company_website}
-                            </a>
-                          ) : '-'}
+                          {(() => {
+                            const validDomain = extractValidCompanyDomain(jobsResearchData.summary.company_website);
+                            return validDomain ? (
+                              <a href={`https://${validDomain}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                                {validDomain}
+                              </a>
+                            ) : '-';
+                          })()}
                         </p>
                       </div>
                       <div>
@@ -4357,11 +4449,11 @@ export default function CompanyResearcher() {
                         <p className="text-base">{jobsResearchData.summary.compensation_amount || '-'}</p>
                       </div>
                       <div className="col-span-2">
-                        <span className="text-sm font-medium text-gray-500">B2B GTM/ABM Fit</span>
+                        <span className="text-sm font-medium text-gray-500">Job Application Fit</span>
                         <p className="text-base">
-                          {jobsResearchData.summary.job_application_fit_for_B2B_GTM_ABM_expert === true ? (
+                          {jobsResearchData.summary.job_application_fit === true ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Good Fit</span>
-                          ) : jobsResearchData.summary.job_application_fit_for_B2B_GTM_ABM_expert === false ? (
+                          ) : jobsResearchData.summary.job_application_fit === false ? (
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Not a Fit</span>
                           ) : '-'}
                         </p>

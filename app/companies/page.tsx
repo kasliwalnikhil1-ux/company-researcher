@@ -2955,6 +2955,7 @@ function CompaniesContent() {
         }}
         emailSettings={emailSettings}
         availableSetNames={availableSetNames}
+        onDelete={deleteCompany}
       />
     </div>
   );

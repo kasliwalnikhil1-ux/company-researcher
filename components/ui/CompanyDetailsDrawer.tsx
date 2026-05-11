@@ -41,6 +41,7 @@ import { supabase } from "@/utils/supabase/client";
 import { getValidAccessToken, fetchCompanyNewsCurrent, fetchCompanyNews, fetchCompanyNewsEmailOpener, type CompanyNews } from "@/lib/api";
 import { reanalyzeCompany } from "@/lib/reanalyzeCompany";
 import ReactMarkdown from 'react-markdown';
+import DeleteConfirmationModal from "@/components/ui/DeleteConfirmationModal";
 
 interface CompanyDetailsDrawerProps {
   isOpen: boolean;
@@ -58,6 +59,7 @@ interface CompanyDetailsDrawerProps {
   onPageChange?: (page: number) => void;
   emailSettings?: EmailSettings | null;
   availableSetNames?: string[];
+  onDelete?: (id: string) => Promise<void>;
 }
 
 /* ---------- Shared layout helpers (mirrors InvestorDetailsDrawer) ---------- */
@@ -138,6 +140,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   onPageChange,
   emailSettings = null,
   availableSetNames = [],
+  onDelete,
 }) => {
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{
@@ -214,6 +217,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [newsFieldDraft, setNewsFieldDraft] = useState('');
   const [copiedNewsField, setCopiedNewsField] = useState<NewsField | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const { user } = useAuth();
   const { templates: messageTemplates } = useMessageTemplates();
@@ -1414,6 +1419,53 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [currentIndex, companies, hasNextPage, onPageChange, currentPage, onCompanyChange, company]);
 
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!company || !onDelete) return;
+    const deletedId = company.id;
+
+    // Choose the best next selection BEFORE deletion so the parent's sync effect
+    // lands on a sensible target instead of defaulting to the first row.
+    const inPageNext = hasNextInPage ? companies[currentIndex + 1] : null;
+    const inPagePrev = hasPreviousInPage ? companies[currentIndex - 1] : null;
+    const inPageTarget = inPageNext || inPagePrev;
+
+    setDeleting(true);
+    try {
+      if (inPageTarget && onCompanyChange) {
+        onCompanyChange(inPageTarget);
+        await onDelete(deletedId);
+      } else if (hasNextPage && onPageChange) {
+        onPageChange(currentPage + 1);
+        await onDelete(deletedId);
+      } else if (hasPreviousPage && onPageChange) {
+        onPageChange(currentPage - 1);
+        await onDelete(deletedId);
+      } else {
+        await onDelete(deletedId);
+        onClose();
+      }
+      setDeleteConfirmOpen(false);
+    } catch (error: any) {
+      alert(`Error deleting company: ${error?.message || error}`);
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  }, [
+    company,
+    onDelete,
+    hasNextInPage,
+    hasPreviousInPage,
+    companies,
+    currentIndex,
+    onCompanyChange,
+    hasNextPage,
+    hasPreviousPage,
+    onPageChange,
+    currentPage,
+    onClose,
+  ]);
+
   useEffect(() => {
     if (!isOpen || !company) return;
 
@@ -1931,8 +1983,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   if (!isOpen || !company) return null;
 
   /* ---------- Display values ---------- */
+  const summaryCompanyName = (summaryData?.company_name ?? "").toString().trim();
+  const hasDomain = !!company.domain?.trim();
   const displayName =
     company.domain?.trim() ||
+    summaryCompanyName ||
     company.instagram?.trim() ||
     company.email?.trim() ||
     "Company Details";
@@ -2206,6 +2261,21 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="text-xl font-semibold text-gray-900 break-all">{displayName}</h2>
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    {!hasDomain && summaryCompanyName && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const query = `${summaryCompanyName} official website`;
+                          const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                          window.open(url, '_blank', 'noopener,noreferrer');
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-50 rounded-md hover:bg-amber-100 transition-colors"
+                        title={`Search Google for ${summaryCompanyName}'s website`}
+                      >
+                        <Search className="w-3.5 h-3.5" />
+                        Find Website
+                      </button>
+                    )}
                     {company.domain?.trim() && !isPersonProfile && (
                       <button
                         type="button"
@@ -2865,6 +2935,20 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     </DetailField>
                   )}
                 </div>
+                {onDelete && (
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmOpen(true)}
+                      disabled={deleting}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 border border-red-200 text-sm font-medium rounded-md text-red-700 bg-white hover:bg-red-50 hover:border-red-300 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Delete this company"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      {deleting ? "Deleting…" : "Delete company"}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ) : activeTab === "outreach" ? (
@@ -3834,6 +3918,19 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
           </div>
         </>
       )}
+
+      <DeleteConfirmationModal
+        isOpen={deleteConfirmOpen}
+        title="Delete Company"
+        message="Are you sure you want to delete this company? This action cannot be undone."
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          if (!deleting) setDeleteConfirmOpen(false);
+        }}
+        confirmText={deleting ? "Deleting…" : "Delete"}
+        cancelText="Cancel"
+        confirmDisabled={deleting}
+      />
     </>
   );
 };

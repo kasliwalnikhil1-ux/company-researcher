@@ -22,6 +22,8 @@ import {
   DEFAULT_INVESTOR_TWITTER_PROMPT,
   DEFAULT_INVESTOR_NEWS_PROMPT,
   DEFAULT_B2B_NEWS_PROMPT,
+  DEFAULT_JOBS_RESEARCH_QUERY,
+  DEFAULT_JOBS_RESEARCH_SCHEMA,
 } from './investorAnalyzeDefault';
 
 const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
@@ -80,6 +82,10 @@ interface PersonalizationData {
   b2bNews: {
     prompt: string;
   };
+  jobsResearch: {
+    query: string;
+    schema: string; // JSON string
+  };
 }
 
 function PersonalizationContent() {
@@ -88,7 +94,7 @@ function PersonalizationContent() {
   const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising';
   const isB2B = primaryUse === 'b2b';
   const isFundraising = primaryUse === 'fundraising';
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter' | 'investorNews' | 'b2bNews'>('linkedinConversations');
+  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter' | 'investorNews' | 'b2bNews' | 'jobsResearch'>('linkedinConversations');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -185,10 +191,14 @@ function PersonalizationContent() {
     b2bNews: {
       prompt: DEFAULT_B2B_NEWS_PROMPT,
     },
+    jobsResearch: {
+      query: DEFAULT_JOBS_RESEARCH_QUERY,
+      schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
+    },
   });
   const [initialFormData, setInitialFormData] = useState<PersonalizationData | null>(null);
   const isDirty = initialFormData ? JSON.stringify(formData) !== JSON.stringify(initialFormData) : false;
-  const saveDisabled = saving || !isDirty || (activeTab === 'direct' && schemaError !== null);
+  const saveDisabled = saving || !isDirty || ((activeTab === 'direct' || activeTab === 'jobsResearch') && schemaError !== null);
 
   useEffect(() => {
     if (loading) return;
@@ -397,6 +407,10 @@ Return the assessment in the exact JSON schema format.`;
             b2bNews: {
               prompt: DEFAULT_B2B_NEWS_PROMPT,
             },
+            jobsResearch: {
+              query: DEFAULT_JOBS_RESEARCH_QUERY,
+              schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
+            },
           };
           setFormData(defaultData);
           setInitialFormData(defaultData);
@@ -435,6 +449,10 @@ Return the assessment in the exact JSON schema format.`;
             b2bNews: {
               prompt: DEFAULT_B2B_NEWS_PROMPT,
             },
+            jobsResearch: {
+              query: DEFAULT_JOBS_RESEARCH_QUERY,
+              schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
+            },
           };
           setFormData(fallbackData);
           setInitialFormData(fallbackData);
@@ -471,6 +489,10 @@ Return the assessment in the exact JSON schema format.`;
             },
             b2bNews: {
               prompt: parsed.b2bNews?.prompt || DEFAULT_B2B_NEWS_PROMPT,
+            },
+            jobsResearch: {
+              query: parsed.jobsResearch?.query || DEFAULT_JOBS_RESEARCH_QUERY,
+              schema: parsed.jobsResearch?.schema || DEFAULT_JOBS_RESEARCH_SCHEMA,
             },
           };
 
@@ -510,6 +532,10 @@ Return the assessment in the exact JSON schema format.`;
             b2bNews: {
               prompt: DEFAULT_B2B_NEWS_PROMPT,
             },
+            jobsResearch: {
+              query: DEFAULT_JOBS_RESEARCH_QUERY,
+              schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
+            },
           };
           setFormData(defaults);
           setInitialFormData(defaults);
@@ -544,6 +570,10 @@ Return the assessment in the exact JSON schema format.`;
           b2bNews: {
             prompt: DEFAULT_B2B_NEWS_PROMPT,
           },
+          jobsResearch: {
+            query: DEFAULT_JOBS_RESEARCH_QUERY,
+            schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
+          },
         };
         setFormData(errorDefaults);
         setInitialFormData(errorDefaults);
@@ -568,6 +598,16 @@ Return the assessment in the exact JSON schema format.`;
       // Validate JSON schema for direct tab
       if (activeTab === 'direct') {
         if (!validateSchema(formData.direct.schema)) {
+          setToastMessage('Invalid JSON schema. Please fix the errors before saving.');
+          setShowToast(true);
+          setSaving(false);
+          return;
+        }
+      }
+
+      // Validate JSON schema for jobs research tab
+      if (activeTab === 'jobsResearch') {
+        if (!validateSchema(formData.jobsResearch.schema)) {
           setToastMessage('Invalid JSON schema. Please fix the errors before saving.');
           setShowToast(true);
           setSaving(false);
@@ -615,6 +655,10 @@ Return the assessment in the exact JSON schema format.`;
         },
         b2bNews: {
           prompt: formData.b2bNews?.prompt ?? DEFAULT_B2B_NEWS_PROMPT,
+        },
+        jobsResearch: {
+          query: formData.jobsResearch?.query ?? DEFAULT_JOBS_RESEARCH_QUERY,
+          schema: formData.jobsResearch?.schema ?? DEFAULT_JOBS_RESEARCH_SCHEMA,
         },
       };
 
@@ -877,7 +921,7 @@ Return the assessment in the exact JSON schema format.`;
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              LinkedIn Conversations
+              Conversations
             </button>
             {isB2B && (
               <button
@@ -927,7 +971,26 @@ Return the assessment in the exact JSON schema format.`;
                     : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                 }`}
               >
-                B2B News
+                News
+              </button>
+            )}
+            {isB2B && (
+              <button
+                onClick={() => {
+                  setActiveTab('jobsResearch');
+                  if (formData.jobsResearch.schema.trim()) {
+                    validateSchema(formData.jobsResearch.schema);
+                  } else {
+                    setSchemaError(null);
+                  }
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'jobsResearch'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Jobs
               </button>
             )}
             {isFundraising && (
@@ -1465,6 +1528,70 @@ Return the assessment in the exact JSON schema format.`;
                 </p>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Jobs Research Tab */}
+      {activeTab === 'jobsResearch' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Jobs Research Query</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Instruction sent to Exa to evaluate a job posting URL. Used by the Jobs Research mode on the home page.
+            </p>
+            <textarea
+              value={formData.jobsResearch.query}
+              onChange={(e) => setFormData({
+                ...formData,
+                jobsResearch: { ...formData.jobsResearch, query: e.target.value },
+              })}
+              rows={6}
+              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
+              placeholder={DEFAULT_JOBS_RESEARCH_QUERY}
+            />
+          </div>
+
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Schema (JSON)</h2>
+            <textarea
+              value={formData.jobsResearch.schema}
+              onChange={(e) => {
+                const newSchema = e.target.value;
+                setFormData({
+                  ...formData,
+                  jobsResearch: { ...formData.jobsResearch, schema: newSchema },
+                });
+                if (newSchema.trim()) {
+                  validateSchema(newSchema);
+                } else {
+                  setSchemaError(null);
+                }
+              }}
+              onBlur={() => {
+                if (formData.jobsResearch.schema.trim()) {
+                  validateSchema(formData.jobsResearch.schema);
+                }
+              }}
+              rows={30}
+              className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm ${
+                schemaError ? 'border-red-300 focus:border-red-500 focus:ring-red-500' : 'border-gray-300'
+              }`}
+              placeholder="Enter your JSON schema..."
+            />
+            {schemaError && (
+              <p className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded">
+                {schemaError}
+              </p>
+            )}
+            {!schemaError && formData.jobsResearch.schema.trim() && (
+              <p className="mt-2 text-sm text-green-600 bg-green-50 p-2 rounded">
+                ✓ Valid JSON schema
+              </p>
+            )}
+            <p className="mt-2 text-xs text-gray-500">
+              The schema must be valid JSON. Defines the structured fields Exa will extract from the job posting.
+            </p>
           </div>
         </div>
       )}

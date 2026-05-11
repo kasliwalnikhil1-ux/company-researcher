@@ -1,6 +1,90 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import {
+  DEFAULT_JOBS_RESEARCH_QUERY,
+  DEFAULT_JOBS_RESEARCH_SCHEMA,
+} from '@/app/personalization/investorAnalyzeDefault';
 
 export const maxDuration = 60;
+
+const DEFAULT_JOBS_RESEARCH_SCHEMA_OBJ = JSON.parse(DEFAULT_JOBS_RESEARCH_SCHEMA);
+
+function getSupabaseAuthClient(accessToken: string) {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+  if (!url || !key) return null;
+  return createClient(url, key, {
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
+}
+
+function getSupabaseServiceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
+async function loadUserJobsResearchSettings(
+  req: NextRequest,
+): Promise<{ query: string; schema: object }> {
+  const fallback = { query: DEFAULT_JOBS_RESEARCH_QUERY, schema: DEFAULT_JOBS_RESEARCH_SCHEMA_OBJ };
+  try {
+    const authHeader = req.headers.get('Authorization');
+    const token = authHeader?.replace(/^Bearer\s+/i, '');
+    if (!token) return fallback;
+
+    const authClient = getSupabaseAuthClient(token);
+    if (!authClient) return fallback;
+
+    const { data: { user } } = await authClient.auth.getUser(token);
+    if (!user) return fallback;
+
+    const supabase = getSupabaseServiceClient();
+    if (!supabase) return fallback;
+
+    const { data: userSettings } = await supabase
+      .from('user_settings')
+      .select('personalization')
+      .eq('id', user.id)
+      .single();
+
+    let personalization: any = userSettings?.personalization ?? null;
+    if (typeof personalization === 'string') {
+      try {
+        personalization = JSON.parse(personalization);
+      } catch {
+        personalization = null;
+      }
+    }
+
+    const customQuery = personalization?.jobsResearch?.query;
+    const customSchemaRaw = personalization?.jobsResearch?.schema;
+
+    let schema: object = DEFAULT_JOBS_RESEARCH_SCHEMA_OBJ;
+    if (typeof customSchemaRaw === 'string' && customSchemaRaw.trim().length > 0) {
+      try {
+        const parsed = JSON.parse(customSchemaRaw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          schema = parsed;
+        }
+      } catch {
+        // ignore bad schema, fall back to default
+      }
+    } else if (customSchemaRaw && typeof customSchemaRaw === 'object' && !Array.isArray(customSchemaRaw)) {
+      schema = customSchemaRaw;
+    }
+
+    const query =
+      typeof customQuery === 'string' && customQuery.trim().length > 0
+        ? customQuery
+        : DEFAULT_JOBS_RESEARCH_QUERY;
+
+    return { query, schema };
+  } catch {
+    return fallback;
+  }
+}
 
 const EXA_API_KEYS = process.env.EXA_API_KEYS
   ? process.env.EXA_API_KEYS.split(',').map((k) => k.trim()).filter((k) => k.length > 0)
@@ -82,6 +166,8 @@ export async function POST(req: NextRequest) {
 
     console.log('[jobs-research] POST received:', { url: normalizedUrl });
 
+    const { query: summaryQuery, schema: summarySchema } = await loadUserJobsResearchSettings(req);
+
     const initialKeyIndex = Math.floor(Math.random() * EXA_API_KEYS.length);
     const exaUrl = 'https://api.exa.ai/contents';
 
@@ -89,57 +175,8 @@ export async function POST(req: NextRequest) {
       ids: [normalizedUrl],
       livecrawlTimeout: 30000,
       summary: {
-        query:
-          'Your goal is to determine whether the job application is a good fit for a B2B GTM or ABM expert, and capture the key signals in a strict JSON output.',
-        schema: {
-          description: 'Schema for extracting job posting information',
-          type: 'object',
-          required: [
-            'job_title',
-            'company_name',
-            'company_website',
-            'company_description',
-            'company_customers',
-            'compensation_type',
-            'compensation_amount',
-            'job_application_fit_for_B2B_GTM_ABM_expert',
-          ],
-          additionalProperties: false,
-          properties: {
-            job_title: {
-              type: 'string',
-              description: 'Title of the job posting',
-            },
-            company_name: {
-              type: 'string',
-              description: 'Name of the hiring company without Inc, Pvt Limited, trademark, etc.',
-            },
-            company_website: {
-              type: 'string',
-              description: 'Official domain of the company, not LinkedIn company url',
-            },
-            company_description: {
-              type: 'string',
-              description: 'Description of the company of what it does',
-            },
-            company_customers: {
-              type: 'string',
-              description: 'Type of customers the company serves',
-            },
-            compensation_type: {
-              type: 'string',
-              enum: ['fixed', 'commission_only', 'both'],
-              description: 'Type of compensation offered',
-            },
-            compensation_amount: {
-              type: 'string',
-              description: 'Compensation details as written in the job posting',
-            },
-            job_application_fit_for_B2B_GTM_ABM_expert: {
-              type: 'boolean',
-            },
-          },
-        },
+        query: summaryQuery,
+        schema: summarySchema,
       },
     };
 
@@ -175,7 +212,7 @@ export async function POST(req: NextRequest) {
       company_customers?: string;
       compensation_type?: string;
       compensation_amount?: string;
-      job_application_fit_for_B2B_GTM_ABM_expert?: boolean;
+      job_application_fit?: boolean;
     } | null = null;
 
     if (first?.summary) {
@@ -194,7 +231,7 @@ export async function POST(req: NextRequest) {
       job_title: summary.job_title,
       company_name: summary.company_name,
       company_website: summary.company_website,
-      fit: summary.job_application_fit_for_B2B_GTM_ABM_expert,
+      fit: summary.job_application_fit,
     });
 
     return NextResponse.json({

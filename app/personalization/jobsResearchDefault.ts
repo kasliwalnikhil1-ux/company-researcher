@@ -18,7 +18,7 @@ export const DEFAULT_JOBS_RESEARCH_SCHEMA = {
     'company_customers',
     'compensation_type',
     'compensation_amount',
-    'job_application_fit_for_B2B_GTM_ABM_expert',
+    'job_application_fit',
   ],
   additionalProperties: false,
   properties: {
@@ -51,7 +51,7 @@ export const DEFAULT_JOBS_RESEARCH_SCHEMA = {
       type: 'string',
       description: 'Compensation details as written in the job posting',
     },
-    job_application_fit_for_B2B_GTM_ABM_expert: {
+    job_application_fit: {
       type: 'boolean',
     },
   },

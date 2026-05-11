@@ -259,7 +259,7 @@ export type JobsResearchSummary = {
   company_customers?: string;
   compensation_type?: string;
   compensation_amount?: string;
-  job_application_fit_for_B2B_GTM_ABM_expert?: boolean;
+  job_application_fit?: boolean;
   first_line_to_start_email?: string;
   subject_line?: string;
 };
@@ -388,9 +388,13 @@ export const fetchJobsResearch = async (
 } | null> => {
   try {
     console.log('[fetchJobsResearch] Calling API:', { url });
+    const token = await getValidAccessToken();
     const res = await fetchWithTimeout('/api/jobs-research', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ url }),
     }, 120_000);
     const data = await res.json();
