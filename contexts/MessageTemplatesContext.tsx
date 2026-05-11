@@ -15,6 +15,13 @@ export interface MessageTemplate {
   category?: string;
 }
 
+export interface PreviewCompany {
+  id: string;
+  domain: string | null;
+  instagram: string | null;
+  summary: Record<string, any> | null;
+}
+
 export const CHANNEL_LABELS: Record<TemplateChannel, string> = {
   direct: 'Direct',
   instagram: 'Instagram',
@@ -29,6 +36,8 @@ interface MessageTemplatesContextType {
   createTemplate: (template: Omit<MessageTemplate, 'id' | 'user_id'>) => Promise<void>;
   updateTemplate: (id: string, template: Partial<Omit<MessageTemplate, 'id' | 'user_id'>>) => Promise<void>;
   deleteTemplate: (id: string) => Promise<void>;
+  previewCompanies: PreviewCompany[];
+  previewCompaniesLoading: boolean;
 }
 
 const MessageTemplatesContext = createContext<MessageTemplatesContextType | undefined>(undefined);
@@ -37,6 +46,9 @@ export const MessageTemplatesProvider = ({ children }: { children: ReactNode }) 
   const { user } = useAuth();
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewCompanies, setPreviewCompanies] = useState<PreviewCompany[]>([]);
+  const [previewCompaniesLoading, setPreviewCompaniesLoading] = useState(false);
+  const [previewCompaniesFetched, setPreviewCompaniesFetched] = useState(false);
 
   const fetchTemplates = async () => {
     if (!user) {
@@ -147,12 +159,49 @@ export const MessageTemplatesProvider = ({ children }: { children: ReactNode }) 
     await fetchTemplates();
   };
 
+  const fetchPreviewCompanies = async () => {
+    if (!user) {
+      setPreviewCompanies([]);
+      setPreviewCompaniesFetched(false);
+      return;
+    }
+
+    try {
+      setPreviewCompaniesLoading(true);
+      const { data, error } = await supabase
+        .from('companies')
+        .select('id, domain, instagram, summary')
+        .eq('user_id', user.id)
+        .not('summary', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (error) {
+        console.error('Error fetching preview companies:', error);
+        setPreviewCompanies([]);
+      } else {
+        setPreviewCompanies((data || []) as PreviewCompany[]);
+      }
+      setPreviewCompaniesFetched(true);
+    } catch (error) {
+      console.error('Error in fetchPreviewCompanies:', error);
+      setPreviewCompanies([]);
+    } finally {
+      setPreviewCompaniesLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (user) {
       fetchTemplates();
+      if (!previewCompaniesFetched) {
+        fetchPreviewCompanies();
+      }
     } else {
       setTemplates([]);
       setLoading(false);
+      setPreviewCompanies([]);
+      setPreviewCompaniesFetched(false);
     }
   }, [user]);
 
@@ -163,6 +212,8 @@ export const MessageTemplatesProvider = ({ children }: { children: ReactNode }) 
     createTemplate,
     updateTemplate,
     deleteTemplate,
+    previewCompanies,
+    previewCompaniesLoading,
   };
 
   return (

@@ -209,6 +209,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [companyNewsFetchCooldown, setCompanyNewsFetchCooldown] = useState(false);
   const [generatingEmailOpener, setGeneratingEmailOpener] = useState(false);
   const [emailOpenerError, setEmailOpenerError] = useState<string | null>(null);
+  type NewsField = 'answer' | 'first_line_to_start_email' | 'subject_line';
+  const [editingNewsField, setEditingNewsField] = useState<NewsField | null>(null);
+  const [newsFieldDraft, setNewsFieldDraft] = useState('');
+  const [copiedNewsField, setCopiedNewsField] = useState<NewsField | null>(null);
   const [reanalyzing, setReanalyzing] = useState(false);
 
   const { user } = useAuth();
@@ -631,6 +635,60 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [company, companyNews, generatingEmailOpener, getSummaryData, updateCompany, onCompanyChange]);
 
+  const handleCopyNewsField = useCallback(async (field: NewsField, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedNewsField(field);
+      setTimeout(() => setCopiedNewsField(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  }, []);
+
+  const handleStartEditNewsField = useCallback((field: NewsField, currentValue: string) => {
+    setEditingNewsField(field);
+    setNewsFieldDraft(currentValue || '');
+  }, []);
+
+  const handleCancelEditNewsField = useCallback(() => {
+    setEditingNewsField(null);
+    setNewsFieldDraft('');
+  }, []);
+
+  const handleSaveNewsField = useCallback(async () => {
+    if (!company || !companyNews || !editingNewsField) return;
+    const trimmed = newsFieldDraft.trim();
+    const updatedNews: CompanyNews = { ...companyNews, [editingNewsField]: trimmed };
+    setCompanyNews(updatedNews);
+    try {
+      localStorage.setItem(COMPANY_NEWS_STORAGE_KEY(company.id), JSON.stringify(updatedNews));
+    } catch {
+      // ignore
+    }
+    try {
+      const updates: Partial<Company> = { news: updatedNews };
+      // Mirror first_line_to_start_email + subject_line into summary as well
+      if (editingNewsField === 'first_line_to_start_email' || editingNewsField === 'subject_line') {
+        updates.summary = { ...getSummaryData(company), [editingNewsField]: trimmed };
+      }
+      await updateCompany(company.id, updates);
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, ...updates });
+      }
+      setToastMessage('Updated');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 2000);
+    } catch (err: any) {
+      console.error('Error saving news field:', err);
+      setToastMessage(`Error: ${err?.message || 'Failed to save'}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } finally {
+      setEditingNewsField(null);
+      setNewsFieldDraft('');
+    }
+  }, [company, companyNews, editingNewsField, newsFieldDraft, getSummaryData, updateCompany, onCompanyChange]);
+
   const handleReanalyze = useCallback(async () => {
     if (!company || reanalyzing) return;
     if (!company.domain?.trim()) {
@@ -708,6 +766,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       setCompanyNewsFetchCooldown(false);
       setGeneratingEmailOpener(false);
       setEmailOpenerError(null);
+      setEditingNewsField(null);
+      setNewsFieldDraft('');
+      setCopiedNewsField(null);
       setSetNameCreating(false);
       setNewSetNameValue("");
       prevTabRef.current = "overview";
@@ -3010,25 +3071,167 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 <div className="space-y-4">
                   {companyNews.answer && (
                     <div>
-                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
-                        <Newspaper className="w-3.5 h-3.5 text-gray-400" />
-                        Summary
-                      </h3>
-                      <div className="prose prose-sm max-w-none prose-p:text-gray-700 prose-p:leading-relaxed prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
-                        <ReactMarkdown>{companyNews.answer}</ReactMarkdown>
+                      <div className="flex items-center justify-between mb-2 gap-2">
+                        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                          <Newspaper className="w-3.5 h-3.5 text-gray-400" />
+                          Summary
+                        </h3>
+                        {editingNewsField !== 'answer' && (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => handleCopyNewsField('answer', companyNews.answer)}
+                              className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              title="Copy summary"
+                            >
+                              {copiedNewsField === 'answer' ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleStartEditNewsField('answer', companyNews.answer)}
+                              className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              title="Edit summary"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </div>
+                      {editingNewsField === 'answer' ? (
+                        <div className="space-y-2">
+                          <textarea
+                            value={newsFieldDraft}
+                            onChange={(e) => setNewsFieldDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSaveNewsField();
+                              else if (e.key === 'Escape') handleCancelEditNewsField();
+                            }}
+                            rows={8}
+                            className="w-full px-3 py-2 text-sm border border-indigo-500 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            autoFocus
+                          />
+                          <div className="flex items-center gap-2 justify-end">
+                            <button
+                              onClick={handleCancelEditNewsField}
+                              className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50"
+                            >
+                              Cancel
+                            </button>
+                            <button
+                              onClick={handleSaveNewsField}
+                              className="px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700"
+                            >
+                              Save
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="prose prose-sm max-w-none prose-p:text-gray-700 prose-p:leading-relaxed prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
+                          <ReactMarkdown>{companyNews.answer}</ReactMarkdown>
+                        </div>
+                      )}
                     </div>
                   )}
-                  {companyNews.first_line_to_start_email && (
+                  {(companyNews.first_line_to_start_email || editingNewsField === 'first_line_to_start_email') && (
                     <div>
-                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Email Opener</h3>
-                      <p className="text-sm text-gray-700">{companyNews.first_line_to_start_email}</p>
+                      <div className="flex items-center justify-between mb-1 gap-2">
+                        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Email Opener</h3>
+                        {editingNewsField !== 'first_line_to_start_email' && (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {companyNews.first_line_to_start_email && (
+                              <button
+                                onClick={() => handleCopyNewsField('first_line_to_start_email', companyNews.first_line_to_start_email!)}
+                                className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                title="Copy email opener"
+                              >
+                                {copiedNewsField === 'first_line_to_start_email' ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleStartEditNewsField('first_line_to_start_email', companyNews.first_line_to_start_email || '')}
+                              className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              title="Edit email opener"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {editingNewsField === 'first_line_to_start_email' ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={newsFieldDraft}
+                            onChange={(e) => setNewsFieldDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveNewsField();
+                              else if (e.key === 'Escape') handleCancelEditNewsField();
+                            }}
+                            className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            autoFocus
+                          />
+                          <button onClick={handleSaveNewsField} className="text-emerald-600 hover:text-emerald-800" title="Save">✓</button>
+                          <button onClick={handleCancelEditNewsField} className="text-red-600 hover:text-red-800" title="Cancel">✕</button>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-700">{companyNews.first_line_to_start_email}</p>
+                      )}
                     </div>
                   )}
-                  {companyNews.subject_line && (
+                  {(companyNews.subject_line || editingNewsField === 'subject_line') && (
                     <div>
-                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Subject Line</h3>
-                      <p className="text-sm text-gray-700">{companyNews.subject_line}</p>
+                      <div className="flex items-center justify-between mb-1 gap-2">
+                        <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Subject Line</h3>
+                        {editingNewsField !== 'subject_line' && (
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            {companyNews.subject_line && (
+                              <button
+                                onClick={() => handleCopyNewsField('subject_line', companyNews.subject_line!)}
+                                className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                title="Copy subject line"
+                              >
+                                {copiedNewsField === 'subject_line' ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleStartEditNewsField('subject_line', companyNews.subject_line || '')}
+                              className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                              title="Edit subject line"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      {editingNewsField === 'subject_line' ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={newsFieldDraft}
+                            onChange={(e) => setNewsFieldDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSaveNewsField();
+                              else if (e.key === 'Escape') handleCancelEditNewsField();
+                            }}
+                            className="flex-1 px-2 py-1 text-sm border border-indigo-500 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                            autoFocus
+                          />
+                          <button onClick={handleSaveNewsField} className="text-emerald-600 hover:text-emerald-800" title="Save">✓</button>
+                          <button onClick={handleCancelEditNewsField} className="text-red-600 hover:text-red-800" title="Cancel">✕</button>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-700">{companyNews.subject_line}</p>
+                      )}
                     </div>
                   )}
                   {Array.isArray(companyNews.citations) && companyNews.citations.length > 0 && (

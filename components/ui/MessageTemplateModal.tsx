@@ -1,7 +1,23 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
-import { MessageTemplate, TemplateChannel, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { MessageTemplate, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
+import { generateMessageTemplates } from '@/lib/messageTemplates';
+
+function getCompanyLabel(company: PreviewCompany): string {
+  const summary = company.summary || {};
+  const candidates = [
+    summary.brand_name,
+    summary.company_name,
+    summary.name,
+    company.domain,
+    company.instagram,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return 'Untitled';
+}
 
 // Chips by primaryUse
 const FUNDRAISING_CHIPS: { variable: string; sampleLabel: string }[] = [
@@ -46,6 +62,8 @@ interface MessageTemplateModalProps {
   defaultChannel: TemplateChannel;
   channelOptions: TemplateChannel[];
   primaryUse?: 'fundraising' | 'b2b';
+  previewCompanies?: PreviewCompany[];
+  previewCompaniesLoading?: boolean;
   onClose: () => void;
   onCreate: (data: { title: string; channel: TemplateChannel; template: string; category?: string }) => Promise<void>;
   onUpdate: (id: string, data: { title: string; channel: TemplateChannel; template: string; category?: string }) => Promise<void>;
@@ -58,6 +76,8 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
   defaultChannel,
   channelOptions,
   primaryUse = 'fundraising',
+  previewCompanies = [],
+  previewCompaniesLoading = false,
   onClose,
   onCreate,
   onUpdate,
@@ -75,6 +95,16 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const renderedPreviews = useMemo(() => {
+    const tmpl = formData.template.trim();
+    if (!tmpl) return [];
+    return previewCompanies.map((company) => ({
+      company,
+      rendered:
+        generateMessageTemplates(company.summary, false, [tmpl])[0] || tmpl,
+    }));
+  }, [formData.template, previewCompanies]);
 
   const handleChipClick = (variable: string) => {
     const textarea = textareaRef.current;
@@ -169,7 +199,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-lg shadow-xl max-w-5xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold text-gray-900">
             {isCreating ? 'Create New Template' : 'Edit Template'}
@@ -195,6 +225,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
           </button>
         </div>
 
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -310,6 +341,54 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
               Cancel
             </button>
           </div>
+        </div>
+
+        {/* Live Preview Pane */}
+        <aside className="border border-gray-200 rounded-lg bg-gray-50 overflow-hidden flex flex-col">
+          <div className="px-4 py-3 border-b border-gray-200 bg-white">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900">Live Preview</h3>
+              <span className="text-xs text-gray-500">
+                {previewCompaniesLoading
+                  ? 'Loading…'
+                  : `${previewCompanies.length} compan${previewCompanies.length === 1 ? 'y' : 'ies'}`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              How this template renders with real data.
+            </p>
+          </div>
+
+          {previewCompanies.length === 0 ? (
+            <div className="p-6 text-center text-sm text-gray-500">
+              {previewCompaniesLoading
+                ? 'Fetching companies…'
+                : 'No companies with summary data yet.'}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3 max-h-[70vh]">
+              {!formData.template.trim() ? (
+                <div className="text-sm text-gray-400 text-center py-12">
+                  Start typing to see previews…
+                </div>
+              ) : (
+                renderedPreviews.map(({ company, rendered }) => (
+                  <div
+                    key={company.id}
+                    className="bg-white rounded-md border border-gray-200 overflow-hidden"
+                  >
+                    <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 text-[11px] font-medium text-gray-700 truncate">
+                      {getCompanyLabel(company)}
+                    </div>
+                    <pre className="text-xs text-gray-800 whitespace-pre-wrap font-sans p-3">
+                      {rendered}
+                    </pre>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </aside>
         </div>
       </div>
     </div>

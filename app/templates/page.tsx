@@ -3,11 +3,12 @@
 import { useState, useMemo, useEffect } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
-import { useMessageTemplates, MessageTemplate, TemplateChannel, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
+import { useMessageTemplates, MessageTemplate, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
 import { fetchGenerateMessages } from '@/lib/api';
+import { generateMessageTemplates } from '@/lib/messageTemplates';
 
 const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
@@ -26,8 +27,31 @@ export default function TemplatesPage() {
   );
 }
 
+function getCompanyLabel(company: PreviewCompany): string {
+  const summary = company.summary || {};
+  const candidates = [
+    summary.brand_name,
+    summary.company_name,
+    summary.name,
+    company.domain,
+    company.instagram,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return 'Untitled';
+}
+
 function TemplatesContent() {
-  const { templates, loading, createTemplate, updateTemplate, deleteTemplate } = useMessageTemplates();
+  const {
+    templates,
+    loading,
+    createTemplate,
+    updateTemplate,
+    deleteTemplate,
+    previewCompanies,
+    previewCompaniesLoading,
+  } = useMessageTemplates();
   const { onboarding } = useOnboarding();
   const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising';
   const channelOptions = primaryUse === 'b2b' ? B2B_CHANNELS : FUNDRAISING_CHANNELS;
@@ -54,6 +78,15 @@ function TemplatesContent() {
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
+
+  useEffect(() => {
+    if (selectedPreviewIndex >= previewCompanies.length && previewCompanies.length > 0) {
+      setSelectedPreviewIndex(0);
+    }
+  }, [previewCompanies, selectedPreviewIndex]);
+
+  const selectedPreviewCompany = previewCompanies[selectedPreviewIndex] || null;
 
   const handleGenerateMessages = async () => {
     setGenerating(true);
@@ -199,7 +232,7 @@ function TemplatesContent() {
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-8 max-w-[1400px] mx-auto">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Message Templates</h1>
         <button
@@ -210,8 +243,8 @@ function TemplatesContent() {
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="mb-6 border-b border-gray-200">
+      {/* Tabs + Preview Company Selector */}
+      <div className="mb-6 border-b border-gray-200 flex items-end justify-between gap-4">
         <nav className="-mb-px flex space-x-8">
           {tabOptions.map((tab) => (
             <button
@@ -227,6 +260,22 @@ function TemplatesContent() {
             </button>
           ))}
         </nav>
+        {previewCompanies.length > 0 && (
+          <div className="pb-3 flex items-center gap-2">
+            <span className="text-xs text-gray-500">Preview with</span>
+            <select
+              value={selectedPreviewIndex}
+              onChange={(e) => setSelectedPreviewIndex(parseInt(e.target.value, 10))}
+              className="px-2 py-1 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+            >
+              {previewCompanies.map((c, idx) => (
+                <option key={c.id} value={idx}>
+                  {getCompanyLabel(c)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Templates List */}
@@ -255,54 +304,89 @@ function TemplatesContent() {
         </div>
       ) : (
         <div className="space-y-4">
-          {sortedTemplates.map((template) => (
-            <div
-              key={template.id}
-              className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm"
-            >
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {template.title || `${CHANNEL_LABELS[template.channel]} Template`}
-                    </h3>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                      {CHANNEL_LABELS[template.channel]}
-                    </span>
-                    {template.category && (
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
-                        {template.category}
+          {sortedTemplates.map((template) => {
+            const rendered = selectedPreviewCompany && template.template
+              ? generateMessageTemplates(selectedPreviewCompany.summary, false, [template.template])[0] || ''
+              : '';
+            return (
+              <div
+                key={template.id}
+                className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm"
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {template.title || `${CHANNEL_LABELS[template.channel]} Template`}
+                      </h3>
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
+                        {CHANNEL_LABELS[template.channel]}
                       </span>
-                    )}
+                      {template.category && (
+                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                          {template.category}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleEditClick(template)}
+                      className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDeleteClick(template.id)}
+                      className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleEditClick(template)}
-                    className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteClick(template.id)}
-                    className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
-                  >
-                    Delete
-                  </button>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+                  <div className="flex flex-col min-w-0">
+                    <div className="text-xs font-medium text-gray-500 mb-1.5">Template</div>
+                    <div className="bg-gray-50 rounded-md p-4 flex-1">
+                      {template.template ? (
+                        <pre className="text-sm text-gray-800 whitespace-pre-wrap font-mono overflow-x-auto">
+                          {template.template}
+                        </pre>
+                      ) : (
+                        <p className="text-sm text-gray-500">No template defined</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col min-w-0">
+                    <div className="text-xs font-medium text-gray-500 mb-1.5 flex items-center justify-between">
+                      <span>Preview</span>
+                      {selectedPreviewCompany && (
+                        <span className="text-[11px] text-gray-400 truncate ml-2">
+                          {getCompanyLabel(selectedPreviewCompany)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="bg-indigo-50/40 border border-indigo-100 rounded-md p-4 flex-1">
+                      {!template.template ? (
+                        <p className="text-sm text-gray-400">No template defined</p>
+                      ) : !selectedPreviewCompany ? (
+                        <p className="text-sm text-gray-400">
+                          {previewCompaniesLoading
+                            ? 'Loading companies…'
+                            : 'No companies with summary data yet.'}
+                        </p>
+                      ) : (
+                        <pre className="text-sm text-gray-800 whitespace-pre-wrap font-sans overflow-x-auto">
+                          {rendered || template.template}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
-
-              <div className="bg-gray-50 rounded-md p-4">
-                {template.template ? (
-                  <pre className="text-sm text-gray-800 whitespace-pre-wrap font-mono overflow-x-auto">
-                    {template.template}
-                  </pre>
-                ) : (
-                  <p className="text-sm text-gray-500">No template defined</p>
-                )}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -314,6 +398,8 @@ function TemplatesContent() {
         defaultChannel={activeTab === 'all' ? channelOptions[0] : activeTab}
         channelOptions={channelOptions}
         primaryUse={primaryUse}
+        previewCompanies={previewCompanies}
+        previewCompaniesLoading={previewCompaniesLoading}
         onClose={handleModalClose}
         onCreate={handleCreate}
         onUpdate={handleUpdate}
