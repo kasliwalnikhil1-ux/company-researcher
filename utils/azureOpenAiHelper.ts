@@ -5,15 +5,15 @@
  * Google Gemini (API key), and Vertex AI (service account) API calls.
  * Keys must be set via environment variables (no hardcoded fallbacks).
  *
- * Default: Vertex AI first, fallback to Gemini (API key), then Azure on failure.
+ * Default: Azure OpenAI first, fallback to Gemini (API key), then Vertex AI on failure.
  *
  * Usage:
- *   const response = await callAzureOpenAI(payload);  // Vertex default, Gemini fallback, Azure fallback
- *   const response = await callAzureOpenAI(payload, { provider: "azure" });  // Azure only
+ *   const response = await callAzureOpenAI(payload);  // Azure default, Gemini fallback, Vertex fallback
+ *   const response = await callAzureOpenAI(payload, { provider: "azure" });  // Azure default chain
  *   const response = await callAzureOpenAI(payload, { provider: "gemini" });  // Gemini (API key) only
  *   const response = await callAzureOpenAI(payload, { provider: "vertex" });  // Vertex AI only
- *   const result = await getCompletion(messages);  // Vertex default, Gemini fallback, Azure fallback
- *   const result = await getJsonCompletion(messages, { provider: "azure" });  // Azure only
+ *   const result = await getCompletion(messages);  // Azure default, Gemini fallback, Vertex fallback
+ *   const result = await getJsonCompletion(messages, { provider: "gemini" });  // Gemini only
  */
 
 import 'server-only';
@@ -808,23 +808,13 @@ async function callVertexApi(
 
 /**
  * Make a call to Azure OpenAI API, Gemini API, or Vertex AI using the SDK.
- * Default: try Vertex AI first, fallback to Gemini (API key), then Azure on failure.
+ * Default: try Azure OpenAI first, fallback to Gemini (API key), then Vertex AI on failure.
  */
 export async function callAzureOpenAI(
   payload: AzureOpenAIPayload,
   options: CallOptions = {}
 ): Promise<AzureOpenAIResponse> {
-  const { provider = "vertex" } = options;
-
-  // If explicitly Azure, use Azure only
-  if (provider.toLowerCase() === "azure") {
-    if (!API_KEY) {
-      throw new Error("Azure OpenAI API key is not set. Please set AZURE_OPENAI_API_KEY.");
-    }
-    const result = await callAzureOpenAIInternal(payload, options);
-    console.log(`[azureOpenAiHelper] Used: Azure OpenAI (${result.model})`);
-    return result;
-  }
+  const { provider = "azure" } = options;
 
   // If explicitly Gemini (API key), use Gemini only
   if (provider.toLowerCase() === "gemini") {
@@ -836,33 +826,39 @@ export async function callAzureOpenAI(
     return result;
   }
 
-  // Default / Vertex: try Vertex AI first (if enabled), fallback to Gemini (API key), then Azure
-  
-  // Try Vertex AI first (only if USE_VERTEX is enabled)
-  if (USE_VERTEX) {
-    try {
-      if (GCP_SERVICE_ACCOUNT_KEY) {
-        const result = await callVertexApi(payload);
-        console.log(`[azureOpenAiHelper] Used: Vertex AI (${result.model})`);
-        return result;
-      }
-    } catch (vertexError) {
-      const errorStr =
-        vertexError instanceof Error
-          ? `${vertexError.name}: ${vertexError.message}\n${vertexError.stack ?? ""}`
-          : String(vertexError);
-      console.error("[azureOpenAiHelper] Vertex AI error:", errorStr);
-      console.warn("[azureOpenAiHelper] Vertex AI failed, falling back to Gemini (API key)");
+  // If explicitly Vertex, use Vertex only
+  if (provider.toLowerCase() === "vertex") {
+    if (!GCP_SERVICE_ACCOUNT_KEY) {
+      throw new Error("Vertex AI is not configured. Please set GCP_SERVICE_ACCOUNT_KEY.");
     }
-  } else {
-    console.log("[azureOpenAiHelper] Vertex AI skipped (USE_VERTEX not enabled)");
+    const result = await callVertexApi(payload);
+    console.log(`[azureOpenAiHelper] Used: Vertex AI (${result.model})`);
+    return result;
+  }
+
+  // Default / Azure: try Azure OpenAI first, fallback to Gemini (API key), then Vertex AI
+
+  // Try Azure OpenAI first
+  try {
+    if (API_KEY) {
+      const result = await callAzureOpenAIInternal(payload, options);
+      console.log(`[azureOpenAiHelper] Used: Azure OpenAI (${result.model})`);
+      return result;
+    }
+  } catch (azureError) {
+    const errorStr =
+      azureError instanceof Error
+        ? `${azureError.name}: ${azureError.message}\n${azureError.stack ?? ""}`
+        : String(azureError);
+    console.error("[azureOpenAiHelper] Azure OpenAI error:", errorStr);
+    console.warn("[azureOpenAiHelper] Azure OpenAI failed, falling back to Gemini (API key)");
   }
 
   // Try Gemini (API key) as first fallback
   try {
     if (GEMINI_API_KEY) {
       const result = await callGeminiApi(payload);
-      console.log(`[azureOpenAiHelper] Used: Gemini (${result.model}) [fallback from Vertex]`);
+      console.log(`[azureOpenAiHelper] Used: Gemini (${result.model}) [fallback from Azure]`);
       return result;
     }
   } catch (geminiError) {
@@ -871,18 +867,19 @@ export async function callAzureOpenAI(
         ? `${geminiError.name}: ${geminiError.message}\n${geminiError.stack ?? ""}`
         : String(geminiError);
     console.error("[azureOpenAiHelper] Gemini error:", errorStr);
-    console.warn("[azureOpenAiHelper] Gemini failed, falling back to Azure");
+    console.warn("[azureOpenAiHelper] Gemini failed, falling back to Vertex AI");
   }
 
-  // Fallback to Azure
-  if (!API_KEY) {
-    throw new Error(
-      "No provider configured. Set GCP_SERVICE_ACCOUNT_KEY, GEMINI_API_KEY, or AZURE_OPENAI_API_KEY."
-    );
+  // Fallback to Vertex AI (only if USE_VERTEX is enabled and credentials present)
+  if (USE_VERTEX && GCP_SERVICE_ACCOUNT_KEY) {
+    const result = await callVertexApi(payload);
+    console.log(`[azureOpenAiHelper] Used: Vertex AI (${result.model}) [fallback]`);
+    return result;
   }
-  const result = await callAzureOpenAIInternal(payload, options);
-  console.log(`[azureOpenAiHelper] Used: Azure OpenAI (${result.model}) [fallback]`);
-  return result;
+
+  throw new Error(
+    "All providers failed or unconfigured. Set AZURE_OPENAI_API_KEY, GEMINI_API_KEY, or GCP_SERVICE_ACCOUNT_KEY (with USE_VERTEX=true)."
+  );
 }
 
 /**
@@ -1009,8 +1006,8 @@ export interface GetCompletionOptions {
 }
 
 /**
- * Get a completion from Vertex AI, Gemini, or Azure OpenAI with simplified parameters and robust JSON handling.
- * Default: Vertex AI first, fallback to Gemini (API key), then Azure.
+ * Get a completion from Azure OpenAI, Gemini, or Vertex AI with simplified parameters and robust JSON handling.
+ * Default: Azure OpenAI first, fallback to Gemini (API key), then Vertex AI.
  */
 export async function getCompletion(
   messages: Message[],
@@ -1022,13 +1019,13 @@ export async function getCompletion(
     max_tokens,
     response_format = "json_object",
     endpoint,
-    provider = "vertex",
+    provider = "azure",
   } = options;
 
-  const providerName = 
-    provider.toLowerCase() === "azure" ? "Azure OpenAI" : 
+  const providerName =
     provider.toLowerCase() === "gemini" ? "Gemini (API key)" :
-    "Vertex AI (fallback: Gemini, Azure)";
+    provider.toLowerCase() === "vertex" ? "Vertex AI" :
+    "Azure OpenAI (fallback: Gemini, Vertex)";
   console.log(
     `🚀 Making request to ${providerName} with ${messages.length} messages, format: ${response_format}`
   );
@@ -1065,25 +1062,25 @@ export async function getCompletion(
   };
 
   try {
-    // First attempt with configured provider (default: vertex)
+    // First attempt with configured provider (default: azure)
     let result = await callAndParse(provider);
     if (!result.ok && result.raw_content) {
       console.warn("[azureOpenAiHelper] JSON parse failed, retrying once with same provider");
       result = await callAndParse(provider);
     }
-    // If vertex failed, try gemini
-    if (!result.ok && result.raw_content && provider === "vertex") {
+    // If azure failed, try gemini
+    if (!result.ok && result.raw_content && provider === "azure") {
       console.warn("[azureOpenAiHelper] Retry failed, switching to Gemini (API key)");
       result = await callAndParse("gemini");
     }
-    // If still failed (vertex or gemini), try azure
-    if (!result.ok && result.raw_content && provider !== "azure") {
-      console.warn("[azureOpenAiHelper] Retry failed, switching to Azure OpenAI");
-      result = await callAndParse("azure");
+    // If still failed (azure or gemini), try vertex
+    if (!result.ok && result.raw_content && provider !== "vertex") {
+      console.warn("[azureOpenAiHelper] Retry failed, switching to Vertex AI");
+      result = await callAndParse("vertex");
     }
     if (!result.ok && result.raw_content) {
-      console.warn("[azureOpenAiHelper] Azure JSON parse failed, retrying Azure once");
-      result = await callAndParse("azure");
+      console.warn("[azureOpenAiHelper] Vertex JSON parse failed, retrying Vertex once");
+      result = await callAndParse("vertex");
     }
     if (result.ok) return result.data;
     return {
@@ -1098,9 +1095,9 @@ export async function getCompletion(
 }
 
 /**
- * Get a JSON completion from Vertex AI, Gemini, or Azure OpenAI with robust error handling.
+ * Get a JSON completion from Azure OpenAI, Gemini, or Vertex AI with robust error handling.
  * This is a convenience function for scripts that expect JSON responses.
- * Default: Vertex AI first, fallback to Gemini (API key), then Azure.
+ * Default: Azure OpenAI first, fallback to Gemini (API key), then Vertex AI.
  */
 export async function getJsonCompletion(
   messages: Message[],

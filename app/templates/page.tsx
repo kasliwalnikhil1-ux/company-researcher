@@ -8,7 +8,7 @@ import { useOnboarding } from '@/contexts/OnboardingContext';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
 import { fetchGenerateMessages } from '@/lib/api';
-import { generateMessageTemplates } from '@/lib/messageTemplates';
+import { renderCompanyTemplate } from '@/lib/messageTemplates';
 
 const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
@@ -134,14 +134,14 @@ function TemplatesContent() {
     setEditingTemplate(null);
   };
 
-  const handleCreate = async (data: { title: string; channel: TemplateChannel; template: string; category?: string }) => {
+  const handleCreate = async (data: Parameters<typeof createTemplate>[0]) => {
     await createTemplate(data);
     setActiveTab(data.channel);
   };
 
-  const handleUpdate = async (id: string, data: { title: string; channel: TemplateChannel; template: string; category?: string }) => {
+  const handleUpdate = async (id: string, data: Parameters<typeof updateTemplate>[1]) => {
     await updateTemplate(id, data);
-    setActiveTab(data.channel);
+    if (data.channel) setActiveTab(data.channel);
   };
 
   const handleDeleteClick = (id: string) => {
@@ -306,7 +306,7 @@ function TemplatesContent() {
         <div className="space-y-4">
           {sortedTemplates.map((template) => {
             const rendered = selectedPreviewCompany && template.template
-              ? generateMessageTemplates(selectedPreviewCompany.summary, false, [template.template])[0] || ''
+              ? renderCompanyTemplate(template, selectedPreviewCompany.summary, templates) || ''
               : '';
             return (
               <div
@@ -400,6 +400,7 @@ function TemplatesContent() {
         primaryUse={primaryUse}
         previewCompanies={previewCompanies}
         previewCompaniesLoading={previewCompaniesLoading}
+        allTemplates={templates}
         onClose={handleModalClose}
         onCreate={handleCreate}
         onUpdate={handleUpdate}

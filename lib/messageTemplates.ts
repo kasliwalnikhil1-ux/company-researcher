@@ -3,6 +3,7 @@
 
 import { substituteVariables } from './utils';
 import { summaryKeyToLabel, formatArrayNatural } from './summaryUtils';
+import type { MessageTemplateSettings } from '@/contexts/MessageTemplatesContext';
 
 /**
  * Get common US holidays for a given year
@@ -98,6 +99,142 @@ export function getFollowUpDate(baseDate = new Date(), holidays: string[] = []) 
 
 // Re-export substituteVariables from utils for backwards compatibility
 export { substituteVariables } from './utils';
+
+/** Extracts the unique set of `${var}` placeholder names from a template string. */
+export function extractTemplateVariables(template: string): string[] {
+  if (!template) return [];
+  const regex = /\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
+  const set = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(template)) !== null) {
+    set.add(m[1]);
+  }
+  return Array.from(set);
+}
+
+/** Build the variable map used to render a company-channel template. */
+export function buildCompanyTemplateVariables(
+  summaryData: Record<string, any> | null | undefined,
+  holidays: string[] = []
+): Record<string, string> {
+  const followUpDate = getFollowUpDate(new Date(), holidays);
+  const variables: Record<string, string> = {
+    followUpFullDate: followUpDate.fullDate,
+    followUpWeekdayDate: followUpDate.weekdayDate,
+    followUpShortDay: followUpDate.shortDay,
+    followUpRelativeDay: followUpDate.relativeDay,
+    followUpRelativeShortDay: followUpDate.relativeShortDay,
+    followUpDateOnly: followUpDate.dateOnly,
+  };
+
+  if (summaryData) {
+    for (const [key, value] of Object.entries(summaryData)) {
+      if (value === null || value === undefined) continue;
+      let strValue: string;
+      if (Array.isArray(value)) {
+        const filtered = value.filter((v: any) => v != null && typeof v === 'string' && v.trim());
+        strValue = formatArrayNatural(filtered);
+      } else {
+        strValue = String(value);
+      }
+      variables[key] = strValue;
+      const camelKey = key.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+      if (camelKey !== key) variables[camelKey] = strValue;
+    }
+
+    const productTypes = Array.isArray(summaryData.product_types)
+      ? summaryData.product_types.filter((v: any) => v != null && typeof v === 'string' && v.trim())
+      : [];
+    if (productTypes.length > 0) {
+      variables['PRODUCT1'] = productTypes[0] || '';
+      variables['PRODUCT2'] = productTypes[1] || productTypes[0] || '';
+    }
+  }
+
+  return variables;
+}
+
+/** A template object with just the fields needed by the renderer. */
+export interface RenderableTemplate {
+  id: string;
+  template: string;
+  settings?: MessageTemplateSettings | null;
+}
+
+/**
+ * Core fallback-aware renderer.
+ *
+ * Resolution order per `${var}`:
+ *   1. Value from `variables` (company/investor data + built-ins)
+ *   2. `template.settings.variable_defaults[var]`
+ *   3. Marked missing → substituted as ''
+ *
+ * If any variable is still missing after applying defaults and the template
+ * has `settings.fallback_template_id` set, the fallback template is rendered
+ * instead (recursively, with the same rules — its own settings drive its own
+ * fallback decision). Cycles are guarded via the `visited` set.
+ */
+export function renderTemplateWithFallback(
+  template: RenderableTemplate,
+  variables: Record<string, string>,
+  allTemplates: RenderableTemplate[],
+  sentenceFields?: string[],
+  visited: Set<string> = new Set()
+): string {
+  const tmplString = (template.template || '').trim();
+  if (!tmplString) return '';
+
+  // Cycle guard: render as-is without further fallback.
+  if (visited.has(template.id)) {
+    const defaults = template.settings?.variable_defaults || {};
+    const resolved: Record<string, string> = { ...variables };
+    for (const v of extractTemplateVariables(tmplString)) {
+      if (!resolved[v]) resolved[v] = defaults[v] ?? '';
+    }
+    return substituteVariables(tmplString, resolved, sentenceFields);
+  }
+  visited.add(template.id);
+
+  const usedVars = extractTemplateVariables(tmplString);
+  const defaults = template.settings?.variable_defaults || {};
+  const resolved: Record<string, string> = { ...variables };
+  let anyMissing = false;
+
+  for (const v of usedVars) {
+    const existing = resolved[v];
+    const hasValue = existing !== undefined && existing !== null && existing !== '';
+    if (!hasValue) {
+      const def = defaults[v];
+      if (def !== undefined && def !== null && def !== '') {
+        resolved[v] = def;
+      } else {
+        anyMissing = true;
+        resolved[v] = '';
+      }
+    }
+  }
+
+  const fallbackId = template.settings?.fallback_template_id;
+  if (anyMissing && fallbackId) {
+    const fallback = allTemplates.find((t) => t.id === fallbackId);
+    if (fallback && !visited.has(fallback.id)) {
+      return renderTemplateWithFallback(fallback, variables, allTemplates, sentenceFields, visited);
+    }
+  }
+
+  return substituteVariables(tmplString, resolved, sentenceFields);
+}
+
+/** Render a single template against company summary data with fallback support. */
+export function renderCompanyTemplate(
+  template: RenderableTemplate,
+  summaryData: Record<string, any> | null | undefined,
+  allTemplates: RenderableTemplate[],
+  holidays: string[] = []
+): string {
+  const variables = buildCompanyTemplateVariables(summaryData, holidays);
+  return renderTemplateWithFallback(template, variables, allTemplates);
+}
 
 /**
  * Generate message templates based on qualification/summary data and research mode.
@@ -255,3 +392,67 @@ export const generateInvestorMessageTemplates = (
     .filter((t) => t && t.length > 0)
     .map((t) => substituteVariables(t!, variables, sentenceFields));
 };
+
+const INVESTOR_SENTENCE_FIELDS = [
+  'line1',
+  'line2',
+  'additional_line',
+  'additionalLine',
+  'twitter_line',
+  'twitterLine',
+];
+
+/** Build the variable map used to render an investor-channel template. */
+export function buildInvestorTemplateVariables(
+  investorData: InvestorTemplateData | null | undefined,
+  holidays: string[] = []
+): Record<string, string> {
+  const aiMeta = investorData?.ai_metadata ?? {};
+  const line1 = typeof aiMeta.line1 === 'string' ? aiMeta.line1 : '';
+  const line2 = typeof aiMeta.line2 === 'string' ? aiMeta.line2 : '';
+  const additionalLine = typeof aiMeta.additional_line === 'string' ? aiMeta.additional_line : '';
+  const reason = typeof aiMeta.reason === 'string' ? aiMeta.reason : '';
+  const twitterLine = typeof aiMeta.twitter_line === 'string' ? aiMeta.twitter_line : '';
+  const investorFit = aiMeta.investor_fit;
+  const fitLabel =
+    investorFit === true ? 'Strong Fit' : investorFit === false ? 'Weak Fit' : investorFit === null ? 'Unclear Fit' : '';
+  const name = investorData?.name?.trim() ?? '';
+  const investmentThesis = investorData?.investment_thesis?.trim() ?? '';
+  const cleanedName = name ? name.split(/\s+/)[0] || name : '';
+
+  const followUpDate = getFollowUpDate(new Date(), holidays);
+
+  return {
+    line1,
+    line2,
+    additional_line: additionalLine,
+    additionalLine,
+    reason,
+    twitter_line: twitterLine,
+    twitterLine,
+    investor_fit: fitLabel,
+    investorFit: fitLabel,
+    name,
+    cleaned_name: cleanedName,
+    cleanedName,
+    investment_thesis: investmentThesis,
+    investmentThesis,
+    followUpFullDate: followUpDate.fullDate,
+    followUpWeekdayDate: followUpDate.weekdayDate,
+    followUpShortDay: followUpDate.shortDay,
+    followUpRelativeDay: followUpDate.relativeDay,
+    followUpRelativeShortDay: followUpDate.relativeShortDay,
+    followUpDateOnly: followUpDate.dateOnly,
+  };
+}
+
+/** Render a single template against investor data with fallback support. */
+export function renderInvestorTemplate(
+  template: RenderableTemplate,
+  investorData: InvestorTemplateData | null | undefined,
+  allTemplates: RenderableTemplate[],
+  holidays: string[] = []
+): string {
+  const variables = buildInvestorTemplateVariables(investorData, holidays);
+  return renderTemplateWithFallback(template, variables, allTemplates, INVESTOR_SENTENCE_FIELDS);
+}

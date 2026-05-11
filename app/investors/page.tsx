@@ -47,7 +47,7 @@ import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { getValidAccessToken } from '@/lib/api';
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from '@/lib/emailCompose';
-import { generateInvestorMessageTemplates } from '@/lib/messageTemplates';
+import { renderInvestorTemplate } from '@/lib/messageTemplates';
 import { copyToClipboard, extractPhoneNumber, columnKeyToStoredForTemplateSelection, storedToColumnKeyForTemplateSelection, parseNameUrlListToSearchParams, normalizeLinkedInUrl, cleanSearchInput } from '@/lib/utils';
 import { downloadCsv } from '@/lib/csvExport';
 
@@ -1445,8 +1445,7 @@ function InvestorsContent() {
           investor_fit: pendingAnalyze?.investor_fit !== undefined ? pendingAnalyze.investor_fit : (typeof aiMeta.investor_fit === 'boolean' || aiMeta.investor_fit === null ? aiMeta.investor_fit : undefined),
         },
       };
-      const messages = generateInvestorMessageTemplates(investorData, [template.template]);
-      return messages.length > 0 ? messages[0] : '';
+      return renderInvestorTemplate(template, investorData, templates);
     },
     [templates]
   );

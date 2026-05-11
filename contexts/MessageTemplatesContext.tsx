@@ -6,6 +6,20 @@ import { useAuth } from './AuthContext';
 
 export type TemplateChannel = 'direct' | 'instagram' | 'email' | 'linkedin';
 
+/**
+ * Per-template configuration stored in the `settings` jsonb column.
+ *
+ * - `variable_defaults`: fallback values for `${var}` placeholders when the
+ *   company/investor data does not provide a value for that variable.
+ * - `fallback_template_id`: id of another `message_templates` row to render
+ *   instead when, after applying defaults, one or more variables are still
+ *   missing. Fallback chains are followed recursively (cycles are guarded).
+ */
+export interface MessageTemplateSettings {
+  variable_defaults?: Record<string, string>;
+  fallback_template_id?: string | null;
+}
+
 export interface MessageTemplate {
   id: string;
   user_id: string;
@@ -13,6 +27,7 @@ export interface MessageTemplate {
   template: string; // Single template string with ${variable} syntax
   channel: TemplateChannel;
   category?: string;
+  settings?: MessageTemplateSettings | null;
 }
 
 export interface PreviewCompany {
@@ -85,12 +100,14 @@ export const MessageTemplatesProvider = ({ children }: { children: ReactNode }) 
   const createTemplate = async (template: Omit<MessageTemplate, 'id' | 'user_id'>) => {
     if (!user) throw new Error('User must be logged in');
 
-    const payload = {
+    const payload: Record<string, any> = {
       user_id: user.id,
       title: template.title,
       template: template.template,
       channel: template.channel,
     };
+    if (template.category !== undefined) payload.category = template.category;
+    if (template.settings !== undefined) payload.settings = template.settings;
 
     const { data, error } = await supabase
       .from('message_templates')

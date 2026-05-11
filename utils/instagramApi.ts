@@ -89,7 +89,7 @@ export type InstagramQualificationResult = Record<string, any>;
  */
 export async function qualifyInstagramProfile(
   profileData: InstagramProfileResponse,
-  provider: 'azure' | 'gemini' = 'gemini',
+  provider: 'azure' | 'gemini' = 'azure',
   personalizedPrompts?: { systemPrompt?: string; userMessage?: string }
 ): Promise<InstagramQualificationResult> {
   const profile = profileData.result;

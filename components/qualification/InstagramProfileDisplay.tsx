@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { generateMessageTemplates } from '../../lib/messageTemplates';
+import { renderCompanyTemplate } from '../../lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { copyToClipboard } from '@/lib/utils';
 import { summaryKeyToLabel, formatSummaryValue } from '@/lib/summaryUtils';
@@ -246,13 +246,13 @@ const InstagramProfileDisplay: React.FC<InstagramProfileDisplayProps> = ({ data,
 
             {/* Message Templates */}
             {(() => {
-              const dbTemplates = templates
-                .filter(t => t.channel === 'instagram')
-                .map(t => t.template)
-                .filter(t => t && t.trim().length > 0);
-              const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
-              const messages = generateMessageTemplates(qualificationData, true, templateStrings);
-              
+              const igTemplates = templates.filter(
+                (t) => t.channel === 'instagram' && t.template && t.template.trim().length > 0
+              );
+              const messages: string[] = igTemplates
+                .map((t) => renderCompanyTemplate(t, qualificationData as Record<string, any>, templates))
+                .filter((s) => s && s.length > 0);
+
               if (messages.length === 0) return null;
 
               return (

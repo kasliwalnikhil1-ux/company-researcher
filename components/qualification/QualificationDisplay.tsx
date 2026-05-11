@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { generateMessageTemplates } from '../../lib/messageTemplates';
+import { renderCompanyTemplate } from '../../lib/messageTemplates';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { copyToClipboard } from '@/lib/utils';
 import { summaryKeyToLabel, formatSummaryValue } from '@/lib/summaryUtils';
@@ -184,13 +184,13 @@ const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => 
 
         {/* Message Templates - generate if there are product_types and classification is QUALIFIED */}
         {data.classification === 'QUALIFIED' && data.product_types && Array.isArray(data.product_types) && data.product_types.length > 0 && (() => {
-          const dbTemplates = templates
-            .filter(t => t.channel === 'direct')
-            .map(t => t.template)
-            .filter(t => t && t.trim().length > 0);
-          const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
-          const messages = generateMessageTemplates(data, false, templateStrings);
-          
+          const directTemplates = templates.filter(
+            (t) => t.channel === 'direct' && t.template && t.template.trim().length > 0
+          );
+          const messages = directTemplates
+            .map((t) => renderCompanyTemplate(t, data, templates))
+            .filter((s) => s && s.length > 0);
+
           if (messages.length === 0) return null;
           
           return (

@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { MessageTemplate, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
-import { generateMessageTemplates } from '@/lib/messageTemplates';
+import { MessageTemplate, MessageTemplateSettings, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
+import { extractTemplateVariables, renderCompanyTemplate } from '@/lib/messageTemplates';
 
 function getCompanyLabel(company: PreviewCompany): string {
   const summary = company.summary || {};
@@ -55,6 +55,40 @@ function getVariableChips(primaryUse: 'fundraising' | 'b2b') {
   return primaryUse === 'b2b' ? B2B_CHIPS : FUNDRAISING_CHIPS;
 }
 
+// Built-in variables that are always computed at render time (follow-up dates).
+// These are NOT company-dependent so they should never appear in the
+// per-template `variable_defaults` editor.
+const BUILTIN_NON_COMPANY_VARIABLES = new Set([
+  'followUpFullDate',
+  'followUpWeekdayDate',
+  'followUpShortDay',
+  'followUpRelativeDay',
+  'followUpRelativeShortDay',
+  'followUpDateOnly',
+]);
+
+// Build a short multi-line snippet from a template body for previewing it
+// inside the fallback dropdown.
+function previewSnippet(template: string, maxLines = 3, maxChars = 160): string {
+  if (!template) return '';
+  const collapsed = template
+    .replace(/\\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .slice(0, maxLines)
+    .join(' · ');
+  return collapsed.length > maxChars ? `${collapsed.slice(0, maxChars).trimEnd()}…` : collapsed;
+}
+
+export interface MessageTemplateFormData {
+  title: string;
+  channel: TemplateChannel;
+  template: string;
+  category?: string;
+  settings?: MessageTemplateSettings | null;
+}
+
 interface MessageTemplateModalProps {
   isOpen: boolean;
   isCreating: boolean;
@@ -64,9 +98,11 @@ interface MessageTemplateModalProps {
   primaryUse?: 'fundraising' | 'b2b';
   previewCompanies?: PreviewCompany[];
   previewCompaniesLoading?: boolean;
+  /** All templates, used to list fallback options and to resolve preview rendering. */
+  allTemplates?: MessageTemplate[];
   onClose: () => void;
-  onCreate: (data: { title: string; channel: TemplateChannel; template: string; category?: string }) => Promise<void>;
-  onUpdate: (id: string, data: { title: string; channel: TemplateChannel; template: string; category?: string }) => Promise<void>;
+  onCreate: (data: MessageTemplateFormData) => Promise<void>;
+  onUpdate: (id: string, data: MessageTemplateFormData) => Promise<void>;
 }
 
 const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
@@ -78,6 +114,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
   primaryUse = 'fundraising',
   previewCompanies = [],
   previewCompaniesLoading = false,
+  allTemplates = [],
   onClose,
   onCreate,
   onUpdate,
@@ -87,14 +124,49 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     channel: TemplateChannel;
     template: string;
     category: string;
+    variableDefaults: Record<string, string>;
+    fallbackTemplateId: string;
   }>({
     title: '',
     channel: 'direct',
     template: '',
     category: '',
+    variableDefaults: {},
+    fallbackTemplateId: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Variables referenced by the current template body (unique, in insertion order),
+  // excluding built-in computed variables (follow-up dates) which always have a value.
+  const usedVariables = useMemo(
+    () =>
+      extractTemplateVariables(formData.template).filter(
+        (v) => !BUILTIN_NON_COMPANY_VARIABLES.has(v)
+      ),
+    [formData.template]
+  );
+
+  // Build a stand-in template object that combines unsaved form state with the
+  // saved row, so the live preview reflects edits to defaults and fallback.
+  const previewTemplate = useMemo(
+    () => ({
+      id: editingTemplate?.id ?? '__draft__',
+      template: formData.template.trim(),
+      settings: {
+        variable_defaults: formData.variableDefaults,
+        fallback_template_id: formData.fallbackTemplateId || null,
+      } as MessageTemplateSettings,
+    }),
+    [editingTemplate?.id, formData.template, formData.variableDefaults, formData.fallbackTemplateId]
+  );
+
+  // Patch the in-edit template into the template list so the renderer sees the
+  // latest body/settings rather than the stale stored copy.
+  const previewTemplateList = useMemo(() => {
+    const others = allTemplates.filter((t) => t.id !== previewTemplate.id);
+    return [...others, previewTemplate];
+  }, [allTemplates, previewTemplate]);
 
   const renderedPreviews = useMemo(() => {
     const tmpl = formData.template.trim();
@@ -102,9 +174,27 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     return previewCompanies.map((company) => ({
       company,
       rendered:
-        generateMessageTemplates(company.summary, false, [tmpl])[0] || tmpl,
+        renderCompanyTemplate(previewTemplate, company.summary, previewTemplateList) || tmpl,
     }));
-  }, [formData.template, previewCompanies]);
+  }, [formData.template, previewCompanies, previewTemplate, previewTemplateList]);
+
+  // Estimate length by expanding ${variables}. Start from the rendered preview
+  // (so company-specific fields get real values), then substitute any leftover
+  // chip variables with their sample labels, then replace anything still
+  // unresolved with a generic short placeholder so the count is realistic.
+  const estimateText = useMemo(() => {
+    const tmpl = formData.template.trim();
+    if (!tmpl) return '';
+    const base = renderedPreviews[0]?.rendered || tmpl;
+    const chips = [...FUNDRAISING_CHIPS, ...B2B_CHIPS];
+    const seen = new Set<string>();
+    const expanded = chips.reduce((acc, { variable, sampleLabel }) => {
+      if (seen.has(variable)) return acc;
+      seen.add(variable);
+      return acc.split(variable).join(sampleLabel);
+    }, base);
+    return expanded.replace(/\$\{[^}]+\}/g, 'sample');
+  }, [formData.template, renderedPreviews]);
 
   const handleChipClick = (variable: string) => {
     const textarea = textareaRef.current;
@@ -134,11 +224,14 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         const channel = channelOptions.includes(editingTemplate.channel)
           ? editingTemplate.channel
           : channelOptions[0];
+        const settings = editingTemplate.settings || {};
         setFormData({
           title: (editingTemplate.title || '').trim(),
           channel,
           template: (editingTemplate.template || '').trim(),
           category: (editingTemplate.category || '').trim(),
+          variableDefaults: { ...(settings.variable_defaults || {}) },
+          fallbackTemplateId: settings.fallback_template_id || '',
         });
       } else {
         setFormData({
@@ -146,6 +239,8 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
           channel: channelOptions.includes(defaultChannel) ? defaultChannel : channelOptions[0],
           template: '',
           category: '',
+          variableDefaults: {},
+          fallbackTemplateId: '',
         });
       }
     }
@@ -165,12 +260,24 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     setIsSubmitting(true);
     try {
       const categoryVal = formData.category.trim() || undefined;
+      // Only keep defaults for variables that the current template still uses,
+      // and drop entries with an empty value so the JSON stays clean.
+      const trimmedDefaults: Record<string, string> = {};
+      for (const v of usedVariables) {
+        const val = (formData.variableDefaults[v] ?? '').toString();
+        if (val.trim().length > 0) trimmedDefaults[v] = val;
+      }
+      const settings: MessageTemplateSettings = {
+        variable_defaults: trimmedDefaults,
+        fallback_template_id: formData.fallbackTemplateId || null,
+      };
       if (isCreating && editingTemplate === null) {
         await onCreate({
           title: formData.title.trim(),
           channel: formData.channel,
           template: formData.template.trim(),
           category: categoryVal,
+          settings,
         });
       } else if (editingTemplate) {
         await onUpdate(editingTemplate.id, {
@@ -178,6 +285,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
           channel: formData.channel,
           template: formData.template.trim(),
           category: categoryVal,
+          settings,
         });
       }
       onClose();
@@ -190,10 +298,43 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
 
   const handleClose = () => {
     if (!isSubmitting) {
-      setFormData({ title: '', channel: 'direct', template: '', category: '' });
+      setFormData({
+        title: '',
+        channel: 'direct',
+        template: '',
+        category: '',
+        variableDefaults: {},
+        fallbackTemplateId: '',
+      });
       onClose();
     }
   };
+
+  // Other templates the user can choose as a fallback (excluding self).
+  const fallbackChoices = useMemo(
+    () => allTemplates.filter((t) => t.id !== editingTemplate?.id),
+    [allTemplates, editingTemplate?.id]
+  );
+
+  const selectedFallback = useMemo(
+    () => fallbackChoices.find((t) => t.id === formData.fallbackTemplateId) || null,
+    [fallbackChoices, formData.fallbackTemplateId]
+  );
+
+  // Custom dropdown state + outside-click handling for the fallback picker.
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+  const fallbackContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!fallbackOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!fallbackContainerRef.current) return;
+      if (!fallbackContainerRef.current.contains(e.target as Node)) {
+        setFallbackOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [fallbackOpen]);
 
   if (!isOpen) return null;
 
@@ -282,13 +423,12 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
             <label className="flex items-center justify-between gap-2 text-sm font-medium text-gray-700 mb-2">
               <span>Template</span>
               <span className="text-gray-400 font-normal text-xs shrink-0">
-                {formData.template.trim()
+                {estimateText
                   ? (() => {
-                      const text = formData.template.trim();
-                      const words = text.split(/\s+/).filter(Boolean).length;
-                      const chars = text.length;
-                      const sec = Math.ceil(words / 2.5);
-                      return `${words} word${words !== 1 ? 's' : ''} · ${chars} char${chars !== 1 ? 's' : ''} · ~${sec < 60 ? `${sec}s` : `${Math.ceil(sec / 60)}m`} reading time`;
+                      const words = estimateText.split(/\s+/).filter(Boolean).length;
+                      const chars = estimateText.length;
+                      const sec = Math.ceil(words / 3.5);
+                      return `~${words} word${words !== 1 ? 's' : ''} · ~${chars} char${chars !== 1 ? 's' : ''} · ~${sec < 60 ? `${sec}s` : `${Math.ceil(sec / 60)}m`} reading time`;
                     })()
                   : '—'}
               </span>
@@ -322,6 +462,139 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
             </div>
             <p className="mt-1.5 text-xs text-gray-400">
               Follow-up dates skip weekends and holidays.
+            </p>
+          </div>
+
+          {/* Defaults for variables this template uses */}
+          {usedVariables.length > 0 && (
+            <div className="border-t border-gray-200 pt-4">
+              <div className="flex items-baseline justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700">
+                  Variable defaults
+                </label>
+                <span className="text-xs text-gray-400">
+                  Used when a company is missing a value.
+                </span>
+              </div>
+              <div className="space-y-2">
+                {usedVariables.map((variable) => (
+                  <div key={variable} className="flex items-center gap-2">
+                    <span className="font-mono text-xs text-gray-600 w-44 shrink-0 truncate" title={variable}>
+                      {'${' + variable + '}'}
+                    </span>
+                    <input
+                      type="text"
+                      value={formData.variableDefaults[variable] ?? ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          variableDefaults: {
+                            ...formData.variableDefaults,
+                            [variable]: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="(no default)"
+                      disabled={isSubmitting}
+                      className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Fallback template */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Fallback template <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            <div ref={fallbackContainerRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setFallbackOpen((v) => !v)}
+                disabled={isSubmitting}
+                className="w-full text-left px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {selectedFallback ? (
+                  <div className="flex flex-col">
+                    <span className="text-sm text-gray-900 truncate">
+                      {(selectedFallback.title || 'Untitled')}{' '}
+                      <span className="text-xs text-gray-500 font-normal">
+                        — {CHANNEL_LABELS[selectedFallback.channel]}
+                      </span>
+                    </span>
+                    <span className="text-xs text-gray-500 mt-0.5 line-clamp-2">
+                      {previewSnippet(selectedFallback.template)}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-sm text-gray-500">None</span>
+                )}
+                <svg
+                  className="absolute right-2 top-3 w-4 h-4 text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {fallbackOpen && (
+                <div className="absolute z-20 bottom-full mb-1 w-full max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormData({ ...formData, fallbackTemplateId: '' });
+                      setFallbackOpen(false);
+                    }}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 border-b border-gray-100 ${
+                      formData.fallbackTemplateId === '' ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700'
+                    }`}
+                  >
+                    None
+                  </button>
+                  {fallbackChoices.length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-gray-400">
+                      No other templates available. Create another template first.
+                    </div>
+                  ) : (
+                    fallbackChoices.map((t) => {
+                      const isSelected = formData.fallbackTemplateId === t.id;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            setFormData({ ...formData, fallbackTemplateId: t.id });
+                            setFallbackOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-gray-100 last:border-b-0 ${
+                            isSelected ? 'bg-indigo-50' : ''
+                          }`}
+                        >
+                          <div className="flex items-baseline gap-2">
+                            <span className={`text-sm font-medium truncate ${isSelected ? 'text-indigo-700' : 'text-gray-900'}`}>
+                              {t.title || 'Untitled'}
+                            </span>
+                            <span className="text-[11px] text-gray-500 shrink-0">
+                              {CHANNEL_LABELS[t.channel]}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5 whitespace-pre-line line-clamp-3">
+                            {previewSnippet(t.template)}
+                          </p>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              Rendered instead of this template if a company-fetched variable above has no
+              value and no default. Built-in fields (follow-up dates) are always available
+              and never trigger the fallback.
             </p>
           </div>
 

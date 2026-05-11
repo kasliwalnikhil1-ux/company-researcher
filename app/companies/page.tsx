@@ -13,7 +13,7 @@ import CompanyDetailsDrawer from '@/components/ui/CompanyDetailsDrawer';
 import WhatsAppTemplateModal from '@/components/ui/WhatsAppTemplateModal';
 import ManageColumnsDrawer from '@/components/ui/ManageColumnsDrawer';
 import CompanyFormModal from '@/components/ui/CompanyFormModal';
-import { generateMessageTemplates } from '@/lib/messageTemplates';
+import { renderCompanyTemplate } from '@/lib/messageTemplates';
 import { useMessageTemplates, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
 import { summaryKeyToLabel, formatSummaryValue, discoverSummaryKeys } from '@/lib/summaryUtils';
 import { Building2, Edit2, Trash2, Plus, X, Filter, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
@@ -702,17 +702,13 @@ function CompaniesContent() {
     return company.summary as SummaryData;
   }, []);
 
-  // Get message for a specific template
+  // Get message for a specific template (with variable_defaults + fallback chain)
   const getMessageForTemplate = useCallback((company: Company, templateId: string): string => {
     const template = templates.find(t => t.id === templateId);
     if (!template) return '';
 
     const summaryData = getSummaryData(company);
-
-    const isInstagram = template.channel === 'instagram';
-    const messages = generateMessageTemplates(summaryData, isInstagram, [template.template]);
-    
-    return messages.length > 0 ? messages[0] : '';
+    return renderCompanyTemplate(template, summaryData, templates);
   }, [getSummaryData, templates]);
   
   // Get cell display value
@@ -751,20 +747,16 @@ function CompaniesContent() {
     return formatSummaryValue(summaryData[columnKey]);
   }, [getSummaryData, getMessageForTemplate]);
   
-  // Generate messages for a company
+  // Generate messages for a company (per-template, honoring settings.variable_defaults
+  // and settings.fallback_template_id on each).
   const getMessages = useCallback((company: Company, channel: 'direct' | 'instagram'): string[] => {
     const summaryData = getSummaryData(company);
-    
-    // Get templates from database
-    const dbTemplates = templates
-      .filter(t => t.channel === channel)
-      .map(t => t.template)
-      .filter(t => t && t.trim().length > 0);
-    
-    const templateStrings = dbTemplates.length > 0 ? dbTemplates : undefined;
-    const isInstagram = channel === 'instagram';
-    
-    return generateMessageTemplates(summaryData, isInstagram, templateStrings);
+    const channelTemplates = templates.filter(
+      (t) => t.channel === channel && t.template && t.template.trim().length > 0
+    );
+    return channelTemplates
+      .map((t) => renderCompanyTemplate(t, summaryData, templates))
+      .filter((s) => s && s.length > 0);
   }, [getSummaryData, templates]);
   
   // Handle cell click (copy to clipboard)
