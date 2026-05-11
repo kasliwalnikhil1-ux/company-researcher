@@ -401,6 +401,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
                 <option value="Consumer">Consumer</option>
                 <option value="Entertainment">Entertainment</option>
                 <option value="Software">Software</option>
+                <option value="Partner">Partner</option>
               </select>
             </div>
           </div>

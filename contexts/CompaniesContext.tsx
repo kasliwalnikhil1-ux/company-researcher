@@ -39,8 +39,9 @@ export interface Company {
 
 type SortOrder = 'newest' | 'oldest';
 type DateFilter = 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom';
-type ClassificationFilter = 'all' | 'QUALIFIED' | 'NOT_QUALIFIED' | 'EXPIRED' | 'empty';
-type DomainInstagramFilter = 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email';
+export type ClassificationValue = 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty';
+type ClassificationFilter = ClassificationValue[];
+type DomainInstagramFilter = 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url';
 type AnalyticsPeriod = 'today' | 'yesterday' | 'week' | 'month';
 
 export interface CompanyCountByOwner {
@@ -128,7 +129,7 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
     start: null,
     end: null,
   });
-  const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>('all');
+  const [classificationFilter, setClassificationFilter] = useState<ClassificationFilter>([]);
   const [setNameFilter, setSetNameFilter] = useState<string | null>(null);
   const [ownerFilter, setOwnerFilter] = useState<string | null>(null);
   const [domainInstagramFilter, setDomainInstagramFilter] = useState<DomainInstagramFilter>('any');
@@ -217,12 +218,17 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         if (end) countQuery = countQuery.lt('created_at', end.toISOString());
       }
 
-      // Apply classification filter
-      if (classificationFilter !== 'all') {
-        if (classificationFilter === 'empty') {
-          countQuery = countQuery.or('summary.is.null,summary->>classification.is.null,summary->>classification.eq.');
+      // Apply classification filter (multi-select; empty array means "all")
+      if (classificationFilter.length > 0) {
+        const hasEmpty = classificationFilter.includes('empty');
+        const nonEmpty = classificationFilter.filter((c) => c !== 'empty');
+        const emptyClause = 'summary.is.null,summary->>classification.is.null,summary->>classification.eq.';
+        if (hasEmpty && nonEmpty.length > 0) {
+          countQuery = countQuery.or(`summary->>classification.in.(${nonEmpty.join(',')}),${emptyClause}`);
+        } else if (hasEmpty) {
+          countQuery = countQuery.or(emptyClause);
         } else {
-          countQuery = countQuery.eq('summary->>classification', classificationFilter);
+          countQuery = countQuery.in('summary->>classification', nonEmpty);
         }
       }
 
@@ -253,6 +259,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         countQuery = countQuery.not('phone', 'is', null).neq('phone', '').neq('phone', '-');
       } else if (domainInstagramFilter === 'has_valid_email') {
         countQuery = countQuery.not('email', 'is', null).neq('email', '').neq('email', '-');
+      } else if (domainInstagramFilter === 'has_source_job_url') {
+        countQuery = countQuery.not('summary->>source_job_url', 'is', null).neq('summary->>source_job_url', '').neq('summary->>source_job_url', '-');
       }
 
       const { count, error: countError } = await countQuery;
@@ -286,12 +294,17 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         if (end) query = query.lt('created_at', end.toISOString());
       }
 
-      // Apply classification filter
-      if (classificationFilter !== 'all') {
-        if (classificationFilter === 'empty') {
-          query = query.or('summary.is.null,summary->>classification.is.null,summary->>classification.eq.');
+      // Apply classification filter (multi-select; empty array means "all")
+      if (classificationFilter.length > 0) {
+        const hasEmpty = classificationFilter.includes('empty');
+        const nonEmpty = classificationFilter.filter((c) => c !== 'empty');
+        const emptyClause = 'summary.is.null,summary->>classification.is.null,summary->>classification.eq.';
+        if (hasEmpty && nonEmpty.length > 0) {
+          query = query.or(`summary->>classification.in.(${nonEmpty.join(',')}),${emptyClause}`);
+        } else if (hasEmpty) {
+          query = query.or(emptyClause);
         } else {
-          query = query.eq('summary->>classification', classificationFilter);
+          query = query.in('summary->>classification', nonEmpty);
         }
       }
 
@@ -322,6 +335,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         query = query.not('phone', 'is', null).neq('phone', '').neq('phone', '-');
       } else if (domainInstagramFilter === 'has_valid_email') {
         query = query.not('email', 'is', null).neq('email', '').neq('email', '-');
+      } else if (domainInstagramFilter === 'has_source_job_url') {
+        query = query.not('summary->>source_job_url', 'is', null).neq('summary->>source_job_url', '').neq('summary->>source_job_url', '-');
       }
 
       // Sorting

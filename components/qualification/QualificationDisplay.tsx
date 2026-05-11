@@ -148,6 +148,24 @@ const QualificationDisplay: React.FC<QualificationDisplayProps> = ({ data }) => 
       );
     }
 
+    if (key === 'company_website' && typeof value === 'string' && value.trim()) {
+      const trimmed = value.trim();
+      const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+      return (
+        <div key={key} className="space-y-2">
+          <h4 className="text-sm font-medium text-gray-700 uppercase tracking-wide">{label}</h4>
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 hover:underline break-all"
+          >
+            {trimmed}
+          </a>
+        </div>
+      );
+    }
+
     // Default: string or number
     const displayValue = formatSummaryValue(value);
     if (displayValue === '-') return null;

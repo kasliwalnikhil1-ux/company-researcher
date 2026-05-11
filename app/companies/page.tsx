@@ -213,6 +213,19 @@ function CompaniesContent() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [companyToView, setCompanyToView] = useState<Company | null>(null);
   const [pendingPageDirection, setPendingPageDirection] = useState<'next' | 'prev' | null>(null);
+  const [classificationDropdownOpen, setClassificationDropdownOpen] = useState(false);
+  const classificationDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!classificationDropdownOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (classificationDropdownRef.current && !classificationDropdownRef.current.contains(e.target as Node)) {
+        setClassificationDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [classificationDropdownOpen]);
 
   // URL <-> drawer sync: keep /companies/{id} in the address bar while the drawer is open
   const pathname = usePathname();
@@ -810,12 +823,22 @@ function CompaniesContent() {
   }, [templates, dynamicSummaryKeys]);
   
   
-  // Extract summary data from company summary JSON
+  // Extract summary data from company summary JSON.
+  // Legacy job-researched companies stored `job_application_fit` (boolean);
+  // newer rows store `classification` ('QUALIFIED' | 'NOT_QUALIFIED'). Normalize
+  // here so classification-driven styling works for both shapes.
   const getSummaryData = useCallback((company: Company): SummaryData => {
     if (!company.summary || typeof company.summary !== 'object') {
       return {};
     }
-    return company.summary as SummaryData;
+    const raw = company.summary as Record<string, any>;
+    if (raw.classification === undefined && typeof raw.job_application_fit === 'boolean') {
+      return {
+        ...raw,
+        classification: raw.job_application_fit ? 'QUALIFIED' : 'NOT_QUALIFIED',
+      } as SummaryData;
+    }
+    return raw as SummaryData;
   }, []);
 
   // Get message for a specific template (with variable_defaults + fallback chain)
@@ -1632,7 +1655,7 @@ function CompaniesContent() {
 
   if (loading) {
     return (
-      <div className="p-8 flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-[calc(100vh-3.5rem)] md:min-h-screen">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
       </div>
     );
@@ -1859,18 +1882,70 @@ function CompaniesContent() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
-          <select
-            value={classificationFilter}
-            onChange={(e) => setClassificationFilter(e.target.value as 'all' | 'QUALIFIED' | 'NOT_QUALIFIED' | 'EXPIRED' | 'empty')}
-            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="all">All Classifications</option>
-            <option value="QUALIFIED">QUALIFIED</option>
-            <option value="NOT_QUALIFIED">NOT QUALIFIED</option>
-            <option value="EXPIRED">EXPIRED</option>
-            <option value="empty">Empty/Null Summary</option>
-          </select>
+        <div className="flex items-center gap-2 flex-1 sm:flex-initial relative" ref={classificationDropdownRef}>
+          {(() => {
+            const options: { value: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty'; label: string }[] = [
+              { value: 'QUALIFIED', label: 'QUALIFIED' },
+              { value: 'NOT_QUALIFIED', label: 'NOT QUALIFIED' },
+              { value: 'MAYBE', label: 'MAYBE' },
+              { value: 'EXPIRED', label: 'EXPIRED' },
+              { value: 'empty', label: 'Empty/Null Summary' },
+            ];
+            const selected = classificationFilter;
+            const buttonLabel =
+              selected.length === 0
+                ? 'All Classifications'
+                : selected.length === 1
+                ? (options.find((o) => o.value === selected[0])?.label ?? selected[0])
+                : `${selected.length} selected`;
+            const toggle = (val: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty') => {
+              setClassificationFilter(
+                selected.includes(val) ? selected.filter((v) => v !== val) : [...selected, val]
+              );
+            };
+            return (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setClassificationDropdownOpen((v) => !v)}
+                  className="flex-1 sm:flex-initial flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[180px]"
+                >
+                  <span className="truncate">{buttonLabel}</span>
+                  <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                </button>
+                {classificationDropdownOpen && (
+                  <div className="absolute z-30 top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-md shadow-lg py-1">
+                    {selected.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setClassificationFilter([])}
+                        className="w-full text-left px-3 py-2 text-xs text-indigo-600 hover:bg-gray-50 border-b border-gray-100"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                    {options.map((opt) => {
+                      const checked = selected.includes(opt.value);
+                      return (
+                        <label
+                          key={opt.value}
+                          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => toggle(opt.value)}
+                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span>{opt.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
         <div className="flex items-center gap-2 flex-1 sm:flex-initial">
           <select
@@ -1905,7 +1980,7 @@ function CompaniesContent() {
         <div className="flex items-center gap-2 flex-1 sm:flex-initial">
           <select
             value={domainInstagramFilter}
-            onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email')}
+            onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url')}
             className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
           >
             <option value="any">Any</option>
@@ -1913,6 +1988,7 @@ function CompaniesContent() {
             <option value="has_valid_instagram">Has Valid Instagram</option>
             <option value="has_valid_phone">Has Valid Phone</option>
             <option value="has_valid_email">Has Valid Email</option>
+            <option value="has_source_job_url">Has Source Job URL</option>
           </select>
         </div>
       </div>

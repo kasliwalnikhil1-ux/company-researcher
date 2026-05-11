@@ -885,17 +885,9 @@ export default function CompanyResearcher() {
             }
 
             const qualificationSummary: Record<string, any> = {
-              company_name: summary.company_name,
-              company_description: summary.company_description || '',
-              company_customers: summary.company_customers || '',
-              job_title: summary.job_title || '',
-              compensation_type: summary.compensation_type || '',
-              compensation_amount: summary.compensation_amount || '',
-              job_application_fit: summary.job_application_fit ?? null,
-              first_line_to_start_email: summary.first_line_to_start_email || '',
-              subject_line: summary.subject_line || '',
-              source_job_url: data?.url || company,
+              ...summary,
               company_website: companyDomain || '',
+              source_job_url: data?.url || company,
             };
 
             if (companyDomain) {
@@ -1498,16 +1490,10 @@ export default function CompanyResearcher() {
               if (jobData && !jobData.error) {
                 updatedRow['Research Status'] = 'completed';
                 const s = jobData.summary || {};
-                updatedRow['Job Title'] = s.job_title || '';
-                updatedRow['Company Name'] = s.company_name || '';
-                updatedRow['Company Website'] = extractValidCompanyDomain(s.company_website) || '';
-                updatedRow['Company Description'] = s.company_description || '';
-                updatedRow['Company Customers'] = s.company_customers || '';
-                updatedRow['Compensation Type'] = s.compensation_type || '';
-                updatedRow['Compensation Amount'] = s.compensation_amount || '';
-                updatedRow['Job Application Fit'] = s.job_application_fit === true ? 'Yes' : s.job_application_fit === false ? 'No' : '';
-                updatedRow['First Line To Start Email'] = s.first_line_to_start_email || '';
-                updatedRow['Subject Line'] = s.subject_line || '';
+                writeSummaryToCsvRow(s, updatedRow);
+                if (s.company_website) {
+                  updatedRow['Company Website'] = extractValidCompanyDomain(s.company_website) || '';
+                }
               } else if (jobError) {
                 updatedRow['Research Status'] = jobError;
               } else {
@@ -2591,15 +2577,7 @@ export default function CompanyResearcher() {
                   }
 
                   const qualificationSummary: Record<string, any> = {
-                    company_name: summary.company_name,
-                    company_description: summary.company_description || '',
-                    company_customers: summary.company_customers || '',
-                    job_title: summary.job_title || '',
-                    compensation_type: summary.compensation_type || '',
-                    compensation_amount: summary.compensation_amount || '',
-                    job_application_fit: summary.job_application_fit ?? null,
-                    first_line_to_start_email: summary.first_line_to_start_email || '',
-                    subject_line: summary.subject_line || '',
+                    ...summary,
                     company_website: companyDomain || '',
                     source_job_url: mergedJobData?.url || jobUrl,
                   };
@@ -3037,16 +3015,10 @@ export default function CompanyResearcher() {
         if (jobData && !jobData.error) {
           updatedRow['Research Status'] = 'completed';
           const s = jobData.summary || {};
-          updatedRow['Job Title'] = s.job_title || '';
-          updatedRow['Company Name'] = s.company_name || '';
-          updatedRow['Company Website'] = extractValidCompanyDomain(s.company_website) || '';
-          updatedRow['Company Description'] = s.company_description || '';
-          updatedRow['Company Customers'] = s.company_customers || '';
-          updatedRow['Compensation Type'] = s.compensation_type || '';
-          updatedRow['Compensation Amount'] = s.compensation_amount || '';
-          updatedRow['Job Application Fit'] = s.job_application_fit === true ? 'Yes' : s.job_application_fit === false ? 'No' : '';
-          updatedRow['First Line To Start Email'] = s.first_line_to_start_email || '';
-          updatedRow['Subject Line'] = s.subject_line || '';
+          writeSummaryToCsvRow(s, updatedRow);
+          if (s.company_website) {
+            updatedRow['Company Website'] = extractValidCompanyDomain(s.company_website) || '';
+          }
         } else if (jobError) {
           updatedRow['Research Status'] = jobError;
         } else {
@@ -4403,62 +4375,14 @@ export default function CompanyResearcher() {
                     </div>
                   </div>
                 ) : jobsResearchData?.summary ? (
-                  <div className="bg-white border border-gray-200 rounded-lg p-6 space-y-4">
-                    <div className="text-sm text-gray-600 break-all">
+                  <div className="space-y-4">
+                    <div className="bg-white border border-gray-200 rounded-lg p-4 text-sm text-gray-600 break-all">
                       <span className="font-medium">Source URL:</span>{' '}
                       <a href={jobsResearchData.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
                         {jobsResearchData.url}
                       </a>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <span className="text-sm font-medium text-gray-500">Job Title</span>
-                        <p className="text-base">{jobsResearchData.summary.job_title || '-'}</p>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-500">Company</span>
-                        <p className="text-base">{jobsResearchData.summary.company_name || '-'}</p>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-500">Company Website</span>
-                        <p className="text-base">
-                          {(() => {
-                            const validDomain = extractValidCompanyDomain(jobsResearchData.summary.company_website);
-                            return validDomain ? (
-                              <a href={`https://${validDomain}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
-                                {validDomain}
-                              </a>
-                            ) : '-';
-                          })()}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-500">Company Customers</span>
-                        <p className="text-base">{jobsResearchData.summary.company_customers || '-'}</p>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="text-sm font-medium text-gray-500">Company Description</span>
-                        <p className="text-base">{jobsResearchData.summary.company_description || '-'}</p>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-500">Compensation Type</span>
-                        <p className="text-base capitalize">{jobsResearchData.summary.compensation_type?.replace(/_/g, ' ') || '-'}</p>
-                      </div>
-                      <div>
-                        <span className="text-sm font-medium text-gray-500">Compensation Amount</span>
-                        <p className="text-base">{jobsResearchData.summary.compensation_amount || '-'}</p>
-                      </div>
-                      <div className="col-span-2">
-                        <span className="text-sm font-medium text-gray-500">Job Application Fit</span>
-                        <p className="text-base">
-                          {jobsResearchData.summary.job_application_fit === true ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Good Fit</span>
-                          ) : jobsResearchData.summary.job_application_fit === false ? (
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Not a Fit</span>
-                          ) : '-'}
-                        </p>
-                      </div>
-                    </div>
+                    <QualificationDisplay data={jobsResearchData.summary} />
                     <p className="text-sm text-green-600">Company saved to database.</p>
                   </div>
                 ) : (

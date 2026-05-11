@@ -251,18 +251,7 @@ export const fetchInvestorResearch = async (
   }
 };
 
-export type JobsResearchSummary = {
-  job_title?: string;
-  company_name?: string;
-  company_website?: string;
-  company_description?: string;
-  company_customers?: string;
-  compensation_type?: string;
-  compensation_amount?: string;
-  job_application_fit?: boolean;
-  first_line_to_start_email?: string;
-  subject_line?: string;
-};
+export type JobsResearchSummary = Record<string, any>;
 
 /**
  * Result of `/api/company-news-email-opener`.
@@ -402,6 +391,15 @@ export const fetchJobsResearch = async (
     if (!res.ok) {
       return { error: data.error || 'Failed', details: data.details };
     }
+
+    if (data?.summary && typeof data.summary === 'object') {
+      const { job_application_fit, ...rest } = data.summary as Record<string, any>;
+      const normalized: Record<string, any> = { ...rest };
+      if (job_application_fit === true) normalized.classification = 'QUALIFIED';
+      else if (job_application_fit === false) normalized.classification = 'NOT_QUALIFIED';
+      data.summary = normalized;
+    }
+
     return data;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
