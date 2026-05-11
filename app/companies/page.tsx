@@ -14,7 +14,7 @@ import WhatsAppTemplateModal from '@/components/ui/WhatsAppTemplateModal';
 import ManageColumnsDrawer from '@/components/ui/ManageColumnsDrawer';
 import CompanyFormModal from '@/components/ui/CompanyFormModal';
 import { generateMessageTemplates } from '@/lib/messageTemplates';
-import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
+import { useMessageTemplates, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
 import { summaryKeyToLabel, formatSummaryValue, discoverSummaryKeys } from '@/lib/summaryUtils';
 import { Building2, Edit2, Trash2, Plus, X, Filter, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
 import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
@@ -278,22 +278,17 @@ function CompaniesContent() {
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
   const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
-  const [assignSetName, setAssignSetName] = useState('');
+  const [assignSetSelected, setAssignSetSelected] = useState('');
+  const [assignSetNewName, setAssignSetNewName] = useState('');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   
   // WhatsApp template modal state
   const [whatsappTemplateModalOpen, setWhatsappTemplateModalOpen] = useState(false);
   const [selectedCompanyForWhatsApp, setSelectedCompanyForWhatsApp] = useState<Company | null>(null);
   
-  // Generate template-based column keys
+  // Generate template-based column keys (across all channels)
   const getTemplateColumnKeys = useCallback(() => {
-    const directTemplates = templates.filter(t => t.channel === 'direct');
-    const instagramTemplates = templates.filter(t => t.channel === 'instagram');
-    
-    const directColumns = directTemplates.map(t => `template_${t.id}`);
-    const instagramColumns = instagramTemplates.map(t => `template_${t.id}`);
-    
-    return [...directColumns, ...instagramColumns];
+    return templates.map(t => `template_${t.id}`);
   }, [templates]);
 
   // Discover dynamic summary keys from loaded companies
@@ -691,7 +686,7 @@ function CompaniesContent() {
 
     // Add template-based labels
     templates.forEach(template => {
-      const channelLabel = template.channel === 'direct' ? 'Direct Message' : 'Instagram Message';
+      const channelLabel = `${CHANNEL_LABELS[template.channel] ?? template.channel} Message`;
       baseLabels[`template_${template.id}`] = `${template.title} - ${channelLabel}`;
     });
 
@@ -891,16 +886,22 @@ function CompaniesContent() {
   // Handle 'o' key to open drawer when a cell is hovered
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Don't trigger if user is typing in an input/textarea
       const activeElement = document.activeElement;
-      if (
-        activeElement &&
-        (activeElement.tagName === 'INPUT' ||
-          activeElement.tagName === 'TEXTAREA' ||
-          (activeElement instanceof HTMLElement && activeElement.isContentEditable))
-      ) {
+      const inputTag = activeElement?.tagName;
+      const isTextInput =
+        (inputTag === 'INPUT' && (activeElement as HTMLInputElement).type !== 'checkbox' && (activeElement as HTMLInputElement).type !== 'radio') ||
+        inputTag === 'TEXTAREA' ||
+        (activeElement instanceof HTMLElement && activeElement.isContentEditable);
+
+      // Esc clears row selection — works even when a checkbox has focus
+      if (event.key === 'Escape' && selectedCompanyIds.size > 0 && !isTextInput) {
+        setSelectedCompanyIds(new Set());
+        if (activeElement instanceof HTMLElement) activeElement.blur();
         return;
       }
+
+      // Don't trigger letter shortcuts if user is typing
+      if (isTextInput) return;
 
       // Check if 'o' key is pressed and a cell is hovered
       if (event.key === 'o' && hoveredCell) {
@@ -916,7 +917,7 @@ function CompaniesContent() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [hoveredCell, companies]);
+  }, [hoveredCell, companies, selectedCompanyIds]);
 
   // Sync local search input with context searchQuery when it changes externally
   useEffect(() => {
@@ -1206,15 +1207,25 @@ function CompaniesContent() {
 
     try {
       const count = selectedCompanyIds.size;
-      const setName = assignSetName.trim() || null;
-      
+      const setName =
+        assignSetSelected === '__create_new_set__'
+          ? (assignSetNewName.trim() || null)
+          : (assignSetSelected ? assignSetSelected : null);
+
+      if (assignSetSelected === '__create_new_set__' && !assignSetNewName.trim()) {
+        setToastMessage('Please enter a set name');
+        setToastVisible(true);
+        return;
+      }
+
       // Update set_name for all selected companies
       await bulkUpdateSetName(Array.from(selectedCompanyIds), setName);
 
       // Clear selection and close modal
       setSelectedCompanyIds(new Set());
       setAssignSetModalOpen(false);
-      setAssignSetName('');
+      setAssignSetSelected('');
+      setAssignSetNewName('');
       setToastMessage(`Successfully assigned set "${setName || 'empty'}" to ${count} ${count === 1 ? 'company' : 'companies'}`);
       setToastVisible(true);
     } catch (error: any) {
@@ -1549,6 +1560,9 @@ function CompaniesContent() {
                 <Trash2 className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Delete Selected </span>({selectedCompanyIds.size})
               </button>
+              <span className="hidden md:inline-flex items-center text-xs text-gray-500 ml-1">
+                Press <kbd className="mx-1 px-1.5 py-0.5 border border-gray-300 rounded bg-gray-50 font-mono text-[10px]">Esc</kbd> to clear
+              </span>
             </>
           ) : (
             <>
@@ -2750,26 +2764,44 @@ function CompaniesContent() {
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-4 md:p-6 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-semibold text-gray-900 mb-4">Assign Set</h2>
             <p className="text-gray-600 mb-4">
-              Assign a set name to {selectedCompanyIds.size} selected {selectedCompanyIds.size === 1 ? 'company' : 'companies'}. Leave empty to clear the set name.
+              Assign a set name to {selectedCompanyIds.size} selected {selectedCompanyIds.size === 1 ? 'company' : 'companies'}. Select from existing sets or create a new one. Leave empty to clear the set name.
             </p>
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Set Name
-              </label>
-              <textarea
-                value={assignSetName}
-                onChange={(e) => setAssignSetName(e.target.value)}
-                placeholder="Enter set name (leave empty to clear)"
-                rows={3}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+              <label className="block text-sm font-medium text-gray-700 mb-2">Set Name</label>
+              <select
+                value={assignSetSelected}
+                onChange={(e) => setAssignSetSelected(e.target.value)}
+                className={`block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                  availableSetNames.length === 0
+                    ? 'border-gray-200 bg-gray-50 text-gray-700 focus:ring-gray-200'
+                    : 'border-gray-300 bg-white text-gray-900 focus:ring-indigo-500 focus:border-indigo-500'
+                }`}
                 autoFocus
-              />
+              >
+                <option value="">— Select —</option>
+                {availableSetNames.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+                <option value="__create_new_set__" className="text-indigo-600 font-medium">+ Add new set</option>
+              </select>
+              {assignSetSelected === '__create_new_set__' && (
+                <input
+                  type="text"
+                  value={assignSetNewName}
+                  onChange={(e) => setAssignSetNewName(e.target.value)}
+                  placeholder="Enter new set name"
+                  className="mt-3 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                />
+              )}
             </div>
             <div className="flex justify-end gap-3">
               <button
                 onClick={() => {
                   setAssignSetModalOpen(false);
-                  setAssignSetName('');
+                  setAssignSetSelected('');
+                  setAssignSetNewName('');
                 }}
                 className="px-6 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
@@ -2777,7 +2809,8 @@ function CompaniesContent() {
               </button>
               <button
                 onClick={handleAssignSet}
-                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                disabled={assignSetSelected === '__create_new_set__' && !assignSetNewName.trim()}
+                className="px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Assign
               </button>
@@ -2813,6 +2846,7 @@ function CompaniesContent() {
           // The companies will update after the page loads, and useEffect will handle selection
         }}
         emailSettings={emailSettings}
+        availableSetNames={availableSetNames}
       />
     </div>
   );

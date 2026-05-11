@@ -47,8 +47,8 @@ interface MessageTemplateModalProps {
   channelOptions: TemplateChannel[];
   primaryUse?: 'fundraising' | 'b2b';
   onClose: () => void;
-  onCreate: (data: { title: string; channel: TemplateChannel; template: string }) => Promise<void>;
-  onUpdate: (id: string, data: { title: string; channel: TemplateChannel; template: string }) => Promise<void>;
+  onCreate: (data: { title: string; channel: TemplateChannel; template: string; category?: string }) => Promise<void>;
+  onUpdate: (id: string, data: { title: string; channel: TemplateChannel; template: string; category?: string }) => Promise<void>;
 }
 
 const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
@@ -66,10 +66,12 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     title: string;
     channel: TemplateChannel;
     template: string;
+    category: string;
   }>({
     title: '',
     channel: 'direct',
     template: '',
+    category: '',
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -106,12 +108,14 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
           title: (editingTemplate.title || '').trim(),
           channel,
           template: (editingTemplate.template || '').trim(),
+          category: (editingTemplate.category || '').trim(),
         });
       } else {
         setFormData({
           title: '',
           channel: channelOptions.includes(defaultChannel) ? defaultChannel : channelOptions[0],
           template: '',
+          category: '',
         });
       }
     }
@@ -130,17 +134,20 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
 
     setIsSubmitting(true);
     try {
+      const categoryVal = formData.category.trim() || undefined;
       if (isCreating && editingTemplate === null) {
         await onCreate({
           title: formData.title.trim(),
           channel: formData.channel,
           template: formData.template.trim(),
+          category: categoryVal,
         });
       } else if (editingTemplate) {
         await onUpdate(editingTemplate.id, {
           title: formData.title.trim(),
           channel: formData.channel,
           template: formData.template.trim(),
+          category: categoryVal,
         });
       }
       onClose();
@@ -153,7 +160,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
 
   const handleClose = () => {
     if (!isSubmitting) {
-      setFormData({ title: '', channel: 'direct', template: '' });
+      setFormData({ title: '', channel: 'direct', template: '', category: '' });
       onClose();
     }
   };
@@ -189,22 +196,41 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         </div>
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Channel
-            </label>
-            <select
-              value={formData.channel}
-              onChange={(e) => setFormData({ ...formData, channel: e.target.value as TemplateChannel })}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-              disabled={isSubmitting}
-            >
-              {channelOptions.map((ch) => (
-                <option key={ch} value={ch}>
-                  {CHANNEL_LABELS[ch]}
-                </option>
-              ))}
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Channel
+              </label>
+              <select
+                value={formData.channel}
+                onChange={(e) => setFormData({ ...formData, channel: e.target.value as TemplateChannel })}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                disabled={isSubmitting}
+              >
+                {channelOptions.map((ch) => (
+                  <option key={ch} value={ch}>
+                    {CHANNEL_LABELS[ch]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Category <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                disabled={isSubmitting}
+              >
+                <option value="">None</option>
+                <option value="Consumer">Consumer</option>
+                <option value="Entertainment">Entertainment</option>
+                <option value="Software">Software</option>
+              </select>
+            </div>
           </div>
 
           <div>

@@ -12,6 +12,8 @@ import { fetchGenerateMessages } from '@/lib/api';
 const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 
+type TemplateTab = 'all' | TemplateChannel;
+
 export default function TemplatesPage() {
   return (
     <ProtectedRoute>
@@ -29,14 +31,22 @@ function TemplatesContent() {
   const { onboarding } = useOnboarding();
   const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising';
   const channelOptions = primaryUse === 'b2b' ? B2B_CHANNELS : FUNDRAISING_CHANNELS;
-  const [activeTab, setActiveTab] = useState<TemplateChannel>(channelOptions[0]);
+  const visibleChannelOptions = useMemo(
+    () => channelOptions.filter((ch) => templates.some((t) => t.channel === ch)),
+    [channelOptions, templates]
+  );
+  const tabOptions = useMemo<TemplateTab[]>(
+    () => ['all', ...visibleChannelOptions],
+    [visibleChannelOptions]
+  );
+  const [activeTab, setActiveTab] = useState<TemplateTab>('all');
 
-  // Sync activeTab when channelOptions change (e.g. onboarding loads or primaryUse changes)
+  // If the active channel tab no longer has any templates, fall back to "All".
   useEffect(() => {
-    if (!channelOptions.includes(activeTab)) {
-      setActiveTab(channelOptions[0]);
+    if (activeTab !== 'all' && !visibleChannelOptions.includes(activeTab)) {
+      setActiveTab('all');
     }
-  }, [channelOptions, activeTab]);
+  }, [visibleChannelOptions, activeTab]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -91,12 +101,12 @@ function TemplatesContent() {
     setEditingTemplate(null);
   };
 
-  const handleCreate = async (data: { title: string; channel: TemplateChannel; template: string }) => {
+  const handleCreate = async (data: { title: string; channel: TemplateChannel; template: string; category?: string }) => {
     await createTemplate(data);
     setActiveTab(data.channel);
   };
 
-  const handleUpdate = async (id: string, data: { title: string; channel: TemplateChannel; template: string }) => {
+  const handleUpdate = async (id: string, data: { title: string; channel: TemplateChannel; template: string; category?: string }) => {
     await updateTemplate(id, data);
     setActiveTab(data.channel);
   };
@@ -127,16 +137,27 @@ function TemplatesContent() {
 
   // Filter and sort templates by channel and number in title (e.g., "Message 1", "Message 2")
   const sortedTemplates = useMemo(() => {
-    // First filter by active tab channel
-    const filteredTemplates = templates.filter(t => t.channel === activeTab);
-    
+    // First filter by active tab channel (or show all)
+    const filteredTemplates = activeTab === 'all'
+      ? templates
+      : templates.filter(t => t.channel === activeTab);
+
     // Then sort by number in title
     return [...filteredTemplates].sort((a, b) => {
       const titleA = a.title || '';
       const titleB = b.title || '';
-      
-      // For email channel, put Subject first (case insensitive, subject anywhere in title)
-      if (activeTab === 'email') {
+
+      // When viewing All, group by channel first (using channelOptions order)
+      if (activeTab === 'all' && a.channel !== b.channel) {
+        const idxA = channelOptions.indexOf(a.channel);
+        const idxB = channelOptions.indexOf(b.channel);
+        const safeA = idxA === -1 ? Number.MAX_SAFE_INTEGER : idxA;
+        const safeB = idxB === -1 ? Number.MAX_SAFE_INTEGER : idxB;
+        return safeA - safeB;
+      }
+
+      // For email channel (or email-grouped rows in All), put Subject first
+      if (activeTab === 'email' || (activeTab === 'all' && a.channel === 'email')) {
         const aIsSubject = /\bsubject\b/i.test(titleA);
         const bIsSubject = /\bsubject\b/i.test(titleB);
         if (aIsSubject && !bIsSubject) return -1;
@@ -167,7 +188,7 @@ function TemplatesContent() {
       // If neither has a number, sort alphabetically
       return titleA.localeCompare(titleB);
     });
-  }, [templates, activeTab]);
+  }, [templates, activeTab, channelOptions]);
 
   if (loading) {
     return (
@@ -192,17 +213,17 @@ function TemplatesContent() {
       {/* Tabs */}
       <div className="mb-6 border-b border-gray-200">
         <nav className="-mb-px flex space-x-8">
-          {channelOptions.map((ch) => (
+          {tabOptions.map((tab) => (
             <button
-              key={ch}
-              onClick={() => setActiveTab(ch)}
+              key={tab}
+              onClick={() => setActiveTab(tab)}
               className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                activeTab === ch
+                activeTab === tab
                   ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              {CHANNEL_LABELS[ch]}
+              {tab === 'all' ? 'All' : CHANNEL_LABELS[tab]}
             </button>
           ))}
         </nav>
@@ -212,7 +233,7 @@ function TemplatesContent() {
       {sortedTemplates.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
           <p className="text-gray-500 mb-4">
-            No {activeTab} templates found. Create your first template to get started.
+            No {activeTab === 'all' ? '' : `${activeTab} `}templates found. Create your first template to get started.
           </p>
           <button
             onClick={handleGenerateMessages}
@@ -248,6 +269,11 @@ function TemplatesContent() {
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                       {CHANNEL_LABELS[template.channel]}
                     </span>
+                    {template.category && (
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+                        {template.category}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -285,7 +311,7 @@ function TemplatesContent() {
         isOpen={isModalOpen}
         isCreating={isCreating}
         editingTemplate={editingTemplate}
-        defaultChannel={activeTab}
+        defaultChannel={activeTab === 'all' ? channelOptions[0] : activeTab}
         channelOptions={channelOptions}
         primaryUse={primaryUse}
         onClose={handleModalClose}

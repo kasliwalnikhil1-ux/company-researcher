@@ -311,6 +311,68 @@ export const fetchCompanyNewsEmailOpener = async (
   }
 };
 
+export interface CompanyNews {
+  answer: string;
+  citations: string[];
+  date: string;
+  first_line_to_start_email?: string;
+  subject_line?: string;
+}
+
+export interface CompanyNewsContext {
+  companyId: string;
+  domain?: string | null;
+  name?: string | null;
+}
+
+export const fetchCompanyNewsCurrent = async (companyId: string): Promise<{
+  news: CompanyNews | null;
+  error?: string;
+} | null> => {
+  try {
+    const token = await getValidAccessToken();
+    if (!token) return { news: null, error: 'You need to be signed in.' };
+
+    const res = await fetch(`/api/company-news?companyId=${encodeURIComponent(companyId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    if (!res.ok) return { news: null, error: data.error || 'Failed to load news' };
+    return { news: data.news ?? null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[fetchCompanyNewsCurrent] error:', msg);
+    return { news: null, error: 'Failed to load' };
+  }
+};
+
+export const fetchCompanyNews = async (context: CompanyNewsContext): Promise<{
+  news: CompanyNews | null;
+  error?: string;
+} | null> => {
+  try {
+    const token = await getValidAccessToken();
+    if (!token) return { news: null, error: 'You need to be signed in.' };
+
+    const res = await fetch('/api/company-news', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        companyId: context.companyId,
+        domain: context.domain ?? undefined,
+        name: context.name ?? undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { news: null, error: data.error || 'Failed to fetch news' };
+    return { news: data.news ?? null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[fetchCompanyNews] error:', msg);
+    return { news: null, error: 'Failed to fetch' };
+  }
+};
+
 export const fetchJobsResearch = async (
   url: string
 ): Promise<{

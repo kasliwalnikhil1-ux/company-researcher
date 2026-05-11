@@ -12,6 +12,7 @@ export interface MessageTemplate {
   title: string;
   template: string; // Single template string with ${variable} syntax
   channel: TemplateChannel;
+  category?: string;
 }
 
 export const CHANNEL_LABELS: Record<TemplateChannel, string> = {

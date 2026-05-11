@@ -13,6 +13,14 @@ import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
 import { useCountry } from './CountryContext';
 
+export interface CompanyNews {
+  answer: string;
+  citations: string[];
+  date: string;
+  first_line_to_start_email?: string;
+  subject_line?: string;
+}
+
 export interface Company {
   id: string;
   user_id: string;
@@ -23,6 +31,7 @@ export interface Company {
   summary: any; // jsonb
   contacts?: any; // jsonb - array of contact objects
   notes?: any; // jsonb - array of note objects: [{ message: string, date: string }]
+  news?: CompanyNews | null;
   set_name: string | null;
   owner: string | null;
   created_at?: string;

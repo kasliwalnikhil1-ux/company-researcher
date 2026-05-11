@@ -16,7 +16,7 @@ interface ColumnSelectorDialogProps {
   onSelectColumns?: (columns: { domain: string | null; instagram: string | null }) => void;
   onConfirm: () => void;
   onClose: () => void;
-  mode?: 'domain' | 'instagram' | 'investor' | 'jobs';
+  mode?: 'domain' | 'instagram' | 'investor' | 'jobs' | 'person';
   allowBoth?: boolean;
 }
 
@@ -119,6 +119,11 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
       } else if (mode === 'investor') {
         // In investor mode, accept domain or LinkedIn URLs
         if (value.includes('.') && (value.toLowerCase().includes('linkedin.com') || !isExcludedDomain(value))) {
+          validUrls.push(value);
+        }
+      } else if (mode === 'person') {
+        // In person mode, only LinkedIn person profile URLs
+        if (/linkedin\.com\/in\//i.test(value)) {
           validUrls.push(value);
         }
       } else {

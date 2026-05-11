@@ -27,13 +27,20 @@ import {
   Instagram,
   Sparkles,
   Search,
+  Newspaper,
+  Link2,
+  RefreshCw,
 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { useMessageTemplates, CHANNEL_LABELS, TemplateChannel } from "@/contexts/MessageTemplatesContext";
 import { extractPhoneNumber } from "@/lib/utils";
 import PhoneInputField from "@/components/ui/PhoneInputField";
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from "@/lib/emailCompose";
 import { supabase } from "@/utils/supabase/client";
-import { getValidAccessToken } from "@/lib/api";
+import { getValidAccessToken, fetchCompanyNewsCurrent, fetchCompanyNews, fetchCompanyNewsEmailOpener, type CompanyNews } from "@/lib/api";
+import { reanalyzeCompany } from "@/lib/reanalyzeCompany";
+import ReactMarkdown from 'react-markdown';
 
 interface CompanyDetailsDrawerProps {
   isOpen: boolean;
@@ -50,6 +57,7 @@ interface CompanyDetailsDrawerProps {
   totalPages?: number;
   onPageChange?: (page: number) => void;
   emailSettings?: EmailSettings | null;
+  availableSetNames?: string[];
 }
 
 /* ---------- Shared layout helpers (mirrors InvestorDetailsDrawer) ---------- */
@@ -129,12 +137,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   totalPages = 1,
   onPageChange,
   emailSettings = null,
+  availableSetNames = [],
 }) => {
   // Inline editing state
   const [editingCell, setEditingCell] = useState<{
     companyId: string;
     columnKey: string;
     value: string;
+    originalValue: string;
   } | null>(null);
 
   const editInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
@@ -142,7 +152,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [toastMessage, setToastMessage] = useState("");
   const [toastVisible, setToastVisible] = useState(false);
   const [classificationValue, setClassificationValue] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"overview" | "outreach" | "contacts">("overview");
+  const [setNameCreating, setSetNameCreating] = useState(false);
+  const [newSetNameValue, setNewSetNameValue] = useState("");
+  const [activeTab, setActiveTab] = useState<"overview" | "outreach" | "latest-news" | "contacts">("overview");
   const [contacts, setContacts] = useState<any[] | null>(null);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactToRemove, setContactToRemove] = useState<{
@@ -184,7 +196,40 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [contactJsonInput, setContactJsonInput] = useState('');
   const [contactJsonError, setContactJsonError] = useState<string | null>(null);
 
+  const [copiedDetailKey, setCopiedDetailKey] = useState<string | null>(null);
   const [domainCopied, setDomainCopied] = useState(false);
+  const [copiedOutreachKey, setCopiedOutreachKey] = useState<string | null>(null);
+  const [copiedAllOutreach, setCopiedAllOutreach] = useState(false);
+  const [outreachChannelFilter, setOutreachChannelFilter] = useState<TemplateChannel | "all">("all");
+  const [outreachCategoryFilter, setOutreachCategoryFilter] = useState<string>("all");
+  const [outreachSearch, setOutreachSearch] = useState("");
+  const [companyNews, setCompanyNews] = useState<CompanyNews | null>(null);
+  const [companyNewsLoading, setCompanyNewsLoading] = useState(false);
+  const [companyNewsError, setCompanyNewsError] = useState<string | null>(null);
+  const [companyNewsFetchCooldown, setCompanyNewsFetchCooldown] = useState(false);
+  const [generatingEmailOpener, setGeneratingEmailOpener] = useState(false);
+  const [emailOpenerError, setEmailOpenerError] = useState<string | null>(null);
+  const [reanalyzing, setReanalyzing] = useState(false);
+
+  const { user } = useAuth();
+  const { templates: messageTemplates } = useMessageTemplates();
+
+  const templateById = useMemo(() => {
+    const map = new Map<string, { id: string; title: string; channel: TemplateChannel; category?: string }>();
+    for (const t of messageTemplates) {
+      map.set(t.id, { id: t.id, title: t.title, channel: t.channel, category: t.category });
+    }
+    return map;
+  }, [messageTemplates]);
+
+  const getTemplateForColumn = useCallback(
+    (columnKey: string) => {
+      if (!columnKey.startsWith("template_")) return null;
+      const id = columnKey.replace("template_", "");
+      return templateById.get(id) || null;
+    },
+    [templateById]
+  );
 
   // Handle cell double click (edit)
   const handleCellDoubleClick = useCallback(
@@ -195,10 +240,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       if (columnKey === "notes") return;
 
       const currentValue = getCellValue(company, columnKey);
+      const normalized = currentValue === "-" ? "" : currentValue;
       setEditingCell({
         companyId: company.id,
         columnKey,
-        value: currentValue === "-" ? "" : currentValue,
+        value: normalized,
+        originalValue: normalized,
       });
     },
     [getCellValue]
@@ -208,7 +255,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const handleInlineEditSave = useCallback(async () => {
     if (!editingCell || !company) return;
 
-    const { companyId, columnKey, value } = editingCell;
+    const { companyId, columnKey, originalValue } = editingCell;
+    const value = editingCell.value.trim();
+
+    if (value === originalValue.trim()) {
+      setEditingCell(null);
+      return;
+    }
 
     try {
       if (columnKey === "phone") {
@@ -222,7 +275,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       }
 
       if (columnKey === "email") {
-        await updateCompany(companyId, { [columnKey]: value.trim() });
+        await updateCompany(companyId, { [columnKey]: value });
         setEditingCell(null);
         setToastMessage(`${columnLabels[columnKey]} updated successfully`);
         setToastVisible(true);
@@ -231,7 +284,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       }
 
       if (columnKey === "set_name") {
-        await updateCompany(companyId, { [columnKey]: value.trim() || null });
+        await updateCompany(companyId, { [columnKey]: value || null });
         setEditingCell(null);
         setToastMessage(`${columnLabels[columnKey]} updated successfully`);
         setToastVisible(true);
@@ -347,8 +400,32 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     [company, getSummaryData, updateCompany]
   );
 
+  const handleSetNameSave = useCallback(
+    async (rawValue: string) => {
+      if (!company) return;
+      const trimmed = rawValue.trim();
+      try {
+        await updateCompany(company.id, { set_name: trimmed || null });
+        setToastMessage(
+          trimmed
+            ? `Set updated to "${trimmed}"`
+            : "Set cleared"
+        );
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+      } catch (error: any) {
+        console.error("Error updating set name:", error);
+        setToastMessage(`Error updating set: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+      }
+    },
+    [company, updateCompany]
+  );
+
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchedDomainsRef = useRef<Set<string>>(new Set());
-  const prevTabRef = useRef<"overview" | "outreach" | "contacts">("overview");
+  const prevTabRef = useRef<"overview" | "outreach" | "latest-news" | "contacts">("overview");
 
   const fetchContacts = useCallback(async () => {
     if (!company?.domain) return;
@@ -448,6 +525,159 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [company?.domain]);
 
+  const COMPANY_NEWS_STORAGE_KEY = (id: string) => `company-news-${id}`;
+
+  const newsFetchedWithin7Days =
+    companyNews?.date &&
+    Date.now() - new Date(companyNews.date).getTime() < 7 * 24 * 60 * 60 * 1000;
+
+  const loadCompanyNews = useCallback(async (companyId: string) => {
+    if (typeof window === 'undefined') return;
+    const cached = localStorage.getItem(COMPANY_NEWS_STORAGE_KEY(companyId));
+    if (cached !== null) {
+      try {
+        const parsed = JSON.parse(cached) as CompanyNews;
+        if (parsed?.answer != null || (Array.isArray(parsed?.citations) && parsed.citations.length > 0)) {
+          setCompanyNews(parsed);
+          return;
+        }
+      } catch {
+        // invalid cache
+      }
+    }
+    if (company?.news && company.id === companyId) {
+      setCompanyNews(company.news);
+      return;
+    }
+    setCompanyNewsLoading(true);
+    setCompanyNewsError(null);
+    const result = await fetchCompanyNewsCurrent(companyId);
+    setCompanyNewsLoading(false);
+    if (result?.news) {
+      setCompanyNews(result.news);
+    } else if (result?.error) {
+      setCompanyNewsError(result.error);
+    } else {
+      setCompanyNews(null);
+    }
+  }, [company?.id, company?.news]);
+
+  const handleFetchCompanyNews = useCallback(async () => {
+    if (!company || companyNewsFetchCooldown || !!newsFetchedWithin7Days) return;
+    setCompanyNewsLoading(true);
+    setCompanyNewsError(null);
+    const domainClean = company.domain
+      ? company.domain.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '')
+      : null;
+    const result = await fetchCompanyNews({
+      companyId: company.id,
+      domain: domainClean,
+      name: domainClean ? domainClean.split('.')[0] : null,
+    });
+    setCompanyNewsLoading(false);
+    if (result?.news) {
+      setCompanyNews(result.news);
+      try {
+        localStorage.setItem(COMPANY_NEWS_STORAGE_KEY(company.id), JSON.stringify(result.news));
+      } catch {
+        // ignore quota errors
+      }
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, news: result.news });
+      }
+      setCompanyNewsFetchCooldown(true);
+      setTimeout(() => setCompanyNewsFetchCooldown(false), 10000);
+    } else if (result?.error) {
+      setCompanyNewsError(result.error);
+    }
+  }, [company, companyNewsFetchCooldown, newsFetchedWithin7Days, onCompanyChange]);
+
+  const handleGenerateEmailOpener = useCallback(async () => {
+    if (!company || !companyNews?.answer || generatingEmailOpener) return;
+    setGeneratingEmailOpener(true);
+    setEmailOpenerError(null);
+    try {
+      const result = await fetchCompanyNewsEmailOpener(companyNews.answer);
+      if (!result) {
+        setEmailOpenerError('Could not generate email opener.');
+        return;
+      }
+      const updatedNews: CompanyNews = {
+        ...companyNews,
+        first_line_to_start_email: result.first_line_to_start_email,
+        subject_line: result.subject_line,
+      };
+      setCompanyNews(updatedNews);
+      try {
+        localStorage.setItem(COMPANY_NEWS_STORAGE_KEY(company.id), JSON.stringify(updatedNews));
+      } catch {
+        // ignore quota errors
+      }
+      // Merge into summary (mirrors mergeNewsDraftIntoSummary in CompanyResearchHome)
+      const updatedSummary = {
+        ...getSummaryData(company),
+        first_line_to_start_email: result.first_line_to_start_email,
+        subject_line: result.subject_line,
+      };
+      await updateCompany(company.id, { summary: updatedSummary, news: updatedNews });
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, summary: updatedSummary, news: updatedNews });
+      }
+    } catch (err) {
+      console.error('[CompanyDetailsDrawer] Email opener generation failed:', err);
+      setEmailOpenerError('Something went wrong. Please try again.');
+    } finally {
+      setGeneratingEmailOpener(false);
+    }
+  }, [company, companyNews, generatingEmailOpener, getSummaryData, updateCompany, onCompanyChange]);
+
+  const handleReanalyze = useCallback(async () => {
+    if (!company || reanalyzing) return;
+    if (!company.domain?.trim()) {
+      setToastMessage('No domain to reanalyze.');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+      return;
+    }
+
+    setReanalyzing(true);
+    try {
+      const result = await reanalyzeCompany({
+        company,
+        userId: user?.id ?? null,
+        updateCompany,
+      });
+
+      if (!result.ok) {
+        setToastMessage(result.error || 'Reanalysis failed.');
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 4000);
+        return;
+      }
+
+      if (onCompanyChange && result.updates) {
+        onCompanyChange({ ...company, ...result.updates });
+      }
+
+      setToastMessage('Company reanalyzed successfully');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } catch (err: any) {
+      console.error('[CompanyDetailsDrawer] Reanalyze failed:', err);
+      setToastMessage(`Reanalysis failed: ${err?.message || 'Unknown error'}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 4000);
+    } finally {
+      setReanalyzing(false);
+    }
+  }, [company, reanalyzing, user?.id, updateCompany, onCompanyChange]);
+
+  useEffect(() => {
+    if (company && activeTab === 'latest-news') {
+      loadCompanyNews(company.id);
+    }
+  }, [company?.id, activeTab, loadCompanyNews]);
+
   useEffect(() => {
     if (
       activeTab === "contacts" &&
@@ -473,6 +703,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
       setActiveTab("overview");
       setContacts(null);
+      setCompanyNews(null);
+      setCompanyNewsError(null);
+      setCompanyNewsFetchCooldown(false);
+      setGeneratingEmailOpener(false);
+      setEmailOpenerError(null);
+      setSetNameCreating(false);
+      setNewSetNameValue("");
       prevTabRef.current = "overview";
 
       if (!notesChangedLocallyRef.current) {
@@ -1616,6 +1853,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     company.email?.trim() ||
     "Company Details";
 
+  // Person profile entries (created by Person Research) store a LinkedIn handle
+  // in `domain` like "linkedin.com/in/abhishekraniwala". Hide contacts UI for these.
+  const isPersonProfile = /linkedin\.com\/in\//i.test(company.domain || "");
+
   const classificationLabel =
     classificationValue === "QUALIFIED"
       ? "Qualified"
@@ -1735,13 +1976,35 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       );
     }
 
+    const isCopied = copiedDetailKey === columnKey;
     return (
       <p
-        className={`text-sm text-gray-900 ${isLongText ? "whitespace-pre-wrap break-words" : ""} ${
-          isEditable ? "cursor-pointer hover:bg-blue-50 -mx-1 px-1 rounded transition-colors" : ""
+        className={`text-sm ${isCopied ? "text-emerald-700 bg-emerald-50" : "text-gray-900"} ${isLongText ? "whitespace-pre-wrap break-words" : ""} cursor-pointer ${
+          isEditable ? "hover:bg-blue-50 -mx-1 px-1 rounded transition-colors" : "hover:bg-gray-50 -mx-1 px-1 rounded transition-colors"
         }`}
-        onDoubleClick={isEditable ? () => handleCellDoubleClick(company, columnKey) : undefined}
-        title={isEditable ? "Double click to edit" : undefined}
+        onClick={() => {
+          if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
+          clickTimerRef.current = setTimeout(async () => {
+            try {
+              await navigator.clipboard.writeText(value);
+              setCopiedDetailKey(columnKey);
+              setTimeout(() => setCopiedDetailKey(null), 2000);
+            } catch {}
+          }, 250);
+        }}
+        onDoubleClick={isEditable ? () => {
+          if (clickTimerRef.current) {
+            clearTimeout(clickTimerRef.current);
+            clickTimerRef.current = null;
+          }
+          handleCellDoubleClick(company, columnKey);
+        } : () => {
+          if (clickTimerRef.current) {
+            clearTimeout(clickTimerRef.current);
+            clickTimerRef.current = null;
+          }
+        }}
+        title={isEditable ? "Click to copy · Double click to edit" : "Click to copy"}
       >
         {value}
       </p>
@@ -1824,15 +2087,27 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               Outreach
             </button>
             <button
-              onClick={() => setActiveTab("contacts")}
+              onClick={() => setActiveTab("latest-news")}
               className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
-                activeTab === "contacts"
+                activeTab === "latest-news"
                   ? "border-indigo-600 text-indigo-600"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
-              Contacts
+              Latest News
             </button>
+            {!isPersonProfile && (
+              <button
+                onClick={() => setActiveTab("contacts")}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === "contacts"
+                    ? "border-indigo-600 text-indigo-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                }`}
+              >
+                Contacts
+              </button>
+            )}
             <div className="flex-shrink-0 w-4 sm:hidden" aria-hidden="true" />
           </div>
           <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none sm:hidden" />
@@ -1847,7 +2122,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="text-xl font-semibold text-gray-900 break-all">{displayName}</h2>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    {company.domain?.trim() && (
+                    {company.domain?.trim() && !isPersonProfile && (
                       <button
                         type="button"
                         onClick={() => {
@@ -1863,6 +2138,22 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       >
                         <Users className="w-3.5 h-3.5" />
                         Find People
+                      </button>
+                    )}
+                    {company.domain?.trim() && !isPersonProfile && (
+                      <button
+                        type="button"
+                        onClick={handleReanalyze}
+                        disabled={reanalyzing}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+                        title="Re-run domain analysis and update fields"
+                      >
+                        {reanalyzing ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        )}
+                        {reanalyzing ? 'Reanalyzing...' : 'Reanalyze'}
                       </button>
                     )}
                     <button
@@ -2173,43 +2464,98 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     <label className="block text-xs font-medium text-gray-500 mb-1">
                       {columnLabels.set_name || "Set"}
                     </label>
-                    {editingCell?.companyId === company.id && editingCell?.columnKey === "set_name" ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          ref={editInputRef as React.RefObject<HTMLInputElement>}
-                          type="text"
-                          value={editingCell.value}
-                          onChange={(e) =>
-                            setEditingCell((prev) => (prev ? { ...prev, value: e.target.value } : prev))
-                          }
-                          onBlur={handleInlineEditSave}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              handleInlineEditSave();
-                            } else if (e.key === "Escape") {
-                              setEditingCell(null);
-                            }
-                          }}
-                          className="flex-1 block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 border-indigo-500 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
-                        <button
-                          onClick={handleInlineEditSave}
-                          className="text-emerald-600 hover:text-emerald-800"
-                          title="Save (Enter)"
-                        >
-                          ✓
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleCellDoubleClick(company, "set_name")}
-                        className="block w-full px-3 py-2 text-left text-sm font-medium rounded-lg border-2 border-gray-300 bg-white text-gray-900 hover:bg-gray-50 transition-colors"
-                        title="Click to edit"
-                      >
-                        {company.set_name || <span className="text-gray-400">— Not set —</span>}
-                      </button>
-                    )}
+                    {(() => {
+                      const currentSet = company.set_name || "";
+                      const optionSet = new Set<string>(availableSetNames);
+                      if (currentSet) optionSet.add(currentSet);
+                      const options = Array.from(optionSet).sort((a, b) =>
+                        a.localeCompare(b)
+                      );
+                      const selectValue = setNameCreating ? "__create_new_set__" : currentSet;
+                      return (
+                        <>
+                          <select
+                            value={selectValue}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val === "__create_new_set__") {
+                                setSetNameCreating(true);
+                                setNewSetNameValue("");
+                                return;
+                              }
+                              setSetNameCreating(false);
+                              setNewSetNameValue("");
+                              if (val !== currentSet) {
+                                handleSetNameSave(val);
+                              }
+                            }}
+                            className="block w-full px-3 py-2 text-sm font-medium rounded-lg border-2 border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                          >
+                            <option value="">— Not set —</option>
+                            {options.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                            <option value="__create_new_set__" className="text-indigo-600 font-medium">
+                              + Add new set
+                            </option>
+                          </select>
+                          {setNameCreating && (
+                            <div className="mt-2 flex items-center gap-2">
+                              <input
+                                autoFocus
+                                type="text"
+                                value={newSetNameValue}
+                                onChange={(e) => setNewSetNameValue(e.target.value)}
+                                placeholder="Enter new set name"
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    const trimmed = newSetNameValue.trim();
+                                    if (trimmed) {
+                                      handleSetNameSave(trimmed);
+                                      setSetNameCreating(false);
+                                      setNewSetNameValue("");
+                                    }
+                                  } else if (e.key === "Escape") {
+                                    setSetNameCreating(false);
+                                    setNewSetNameValue("");
+                                  }
+                                }}
+                                className="flex-1 block w-full px-3 py-2 text-sm rounded-lg border-2 border-indigo-500 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const trimmed = newSetNameValue.trim();
+                                  if (trimmed) {
+                                    handleSetNameSave(trimmed);
+                                    setSetNameCreating(false);
+                                    setNewSetNameValue("");
+                                  }
+                                }}
+                                disabled={!newSetNameValue.trim()}
+                                className="text-emerald-600 hover:text-emerald-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                                title="Save"
+                              >
+                                ✓
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSetNameCreating(false);
+                                  setNewSetNameValue("");
+                                }}
+                                className="text-gray-500 hover:text-gray-700"
+                                title="Cancel"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -2439,48 +2785,333 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
             </div>
           ) : activeTab === "outreach" ? (
             <div className="space-y-4">
-              <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Outreach Messages
-              </h3>
               {(() => {
-                const outreachKeys = columnOrder
+                const filtersActive =
+                  outreachChannelFilter !== "all" ||
+                  outreachCategoryFilter !== "all" ||
+                  outreachSearch.trim().length > 0;
+                const searchLower = outreachSearch.trim().toLowerCase();
+
+                const populatedOutreachKeys = columnOrder
                   .filter((c) => isOutreachColumn(c) && !shouldHideDrawerField(c))
                   .filter((c) => {
                     const v = getCellValue(company, c);
                     return v && v !== "-";
                   });
 
+                const availableChannels = new Set<TemplateChannel>();
+                const availableCategories = new Set<string>();
+                for (const key of populatedOutreachKeys) {
+                  const tpl = getTemplateForColumn(key);
+                  if (!tpl) continue;
+                  availableChannels.add(tpl.channel);
+                  const cat = (tpl.category || "").trim();
+                  if (cat) availableCategories.add(cat);
+                }
+                const visibleChannelOptionsForFilter = (
+                  ["email", "linkedin", "direct", "instagram"] as TemplateChannel[]
+                ).filter((ch) => availableChannels.has(ch));
+                const visibleCategoryOptionsForFilter = Array.from(availableCategories).sort(
+                  (a, b) => a.localeCompare(b)
+                );
+
+                const outreachKeys = populatedOutreachKeys.filter((c) => {
+                  if (!filtersActive) return true;
+                  const tpl = getTemplateForColumn(c);
+                  // Non-template outreach columns lack channel/category metadata.
+                  if (!tpl) return false;
+                  if (outreachChannelFilter !== "all" && tpl.channel !== outreachChannelFilter) {
+                    return false;
+                  }
+                  if (
+                    outreachCategoryFilter !== "all" &&
+                    (tpl.category || "").trim() !== outreachCategoryFilter
+                  ) {
+                    return false;
+                  }
+                  if (searchLower && !(tpl.title || "").toLowerCase().includes(searchLower)) {
+                    return false;
+                  }
+                  return true;
+                });
+
+                const handleCopyMessage = async (key: string, text: string) => {
+                  try {
+                    await navigator.clipboard.writeText(text);
+                    setCopiedOutreachKey(key);
+                    setTimeout(() => setCopiedOutreachKey(null), 2000);
+                  } catch (err) {
+                    console.error("Failed to copy:", err);
+                  }
+                };
+
+                const handleCopyAll = async () => {
+                  try {
+                    const combined = outreachKeys
+                      .map((k) => {
+                        const label = columnLabels[k] || k;
+                        const value = getCellValue(company, k);
+                        return `${label}\n${value}`;
+                      })
+                      .join("\n\n");
+                    await navigator.clipboard.writeText(combined);
+                    setCopiedAllOutreach(true);
+                    setTimeout(() => setCopiedAllOutreach(false), 2000);
+                  } catch (err) {
+                    console.error("Failed to copy all:", err);
+                  }
+                };
+
+                const filterControls = (
+                  <div className="space-y-2">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={outreachSearch}
+                        onChange={(e) => setOutreachSearch(e.target.value)}
+                        placeholder="Search by title..."
+                        className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {visibleChannelOptionsForFilter.length > 0 && (
+                        <select
+                          value={outreachChannelFilter}
+                          onChange={(e) =>
+                            setOutreachChannelFilter(e.target.value as TemplateChannel | "all")
+                          }
+                          className="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="all">All channels</option>
+                          {visibleChannelOptionsForFilter.map((ch) => (
+                            <option key={ch} value={ch}>
+                              {CHANNEL_LABELS[ch]}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {visibleCategoryOptionsForFilter.length > 0 && (
+                        <select
+                          value={outreachCategoryFilter}
+                          onChange={(e) => setOutreachCategoryFilter(e.target.value)}
+                          className="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="all">All categories</option>
+                          {visibleCategoryOptionsForFilter.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {filtersActive && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOutreachChannelFilter("all");
+                            setOutreachCategoryFilter("all");
+                            setOutreachSearch("");
+                          }}
+                          className="px-3 py-2 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+
                 if (outreachKeys.length === 0) {
                   return (
-                    <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50">
-                      <Mail className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                      <p className="text-sm text-gray-500">
-                        No outreach messages available for this company.
-                      </p>
-                    </div>
+                    <>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Outreach Messages
+                      </h3>
+                      {filterControls}
+                      <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50">
+                        <Mail className="w-10 h-10 text-gray-300 mx-auto mb-2" />
+                        <p className="text-sm text-gray-500">
+                          {filtersActive
+                            ? "No outreach messages match the current filters."
+                            : "No outreach messages available for this company."}
+                        </p>
+                      </div>
+                    </>
                   );
                 }
 
                 return (
-                  <div className="space-y-3">
-                    {outreachKeys.map((columnKey) => {
-                      const value = getCellValue(company, columnKey);
-                      const label = columnLabels[columnKey] || columnKey;
-                      return (
-                        <div
-                          key={columnKey}
-                          className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
-                        >
-                          <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
-                            {label}
-                          </p>
-                          {renderEditableValue(columnKey, value)}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  <>
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Outreach Messages
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={handleCopyAll}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 transition-colors"
+                        title="Copy all messages with labels"
+                      >
+                        {copiedAllOutreach ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                        {copiedAllOutreach ? "Copied!" : "Copy All"}
+                      </button>
+                    </div>
+                    {filterControls}
+                    <div className="space-y-3">
+                      {outreachKeys.map((columnKey) => {
+                        const value = getCellValue(company, columnKey);
+                        const label = columnLabels[columnKey] || columnKey;
+                        return (
+                          <div
+                            key={columnKey}
+                            className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm"
+                          >
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                {label}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyMessage(columnKey, value)}
+                                className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
+                                title={`Copy ${label}`}
+                              >
+                                {copiedOutreachKey === columnKey ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </div>
+                            {renderEditableValue(columnKey, value)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
                 );
               })()}
+            </div>
+          ) : activeTab === "latest-news" ? (
+            /* Latest News Tab */
+            <div className="space-y-4">
+              {companyNewsLoading && !companyNews ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                </div>
+              ) : companyNewsError ? (
+                <p className="text-red-600 text-sm">{companyNewsError}</p>
+              ) : companyNews ? (
+                <div className="space-y-4">
+                  {companyNews.answer && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                        <Newspaper className="w-3.5 h-3.5 text-gray-400" />
+                        Summary
+                      </h3>
+                      <div className="prose prose-sm max-w-none prose-p:text-gray-700 prose-p:leading-relaxed prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
+                        <ReactMarkdown>{companyNews.answer}</ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
+                  {companyNews.first_line_to_start_email && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Email Opener</h3>
+                      <p className="text-sm text-gray-700">{companyNews.first_line_to_start_email}</p>
+                    </div>
+                  )}
+                  {companyNews.subject_line && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Subject Line</h3>
+                      <p className="text-sm text-gray-700">{companyNews.subject_line}</p>
+                    </div>
+                  )}
+                  {Array.isArray(companyNews.citations) && companyNews.citations.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1">
+                        <Link2 className="w-3.5 h-3.5 text-gray-400" />
+                        Sources
+                      </h3>
+                      <ul className="list-disc list-inside space-y-1.5">
+                        {companyNews.citations.map((item, idx) => {
+                          const match = item.match(/\[([^\]]+)\]\(([^)]+)\)/);
+                          const label = match ? match[1] : item;
+                          const href = match ? match[2] : null;
+                          return (
+                            <li key={idx} className="text-sm text-gray-700">
+                              {href ? (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                >
+                                  {label}
+                                </a>
+                              ) : (
+                                label
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                  {companyNews.date && (
+                    <p className="text-xs text-gray-500">
+                      Last fetched:{' '}
+                      {new Date(companyNews.date).toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </p>
+                  )}
+                </div>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2 pt-2">
+                {!companyNews && !companyNewsLoading && !companyNewsError && (
+                  <p className="text-sm text-gray-500 w-full">No news fetched yet. Click to fetch latest.</p>
+                )}
+                {companyNews?.answer && (
+                  <button
+                    onClick={handleGenerateEmailOpener}
+                    disabled={generatingEmailOpener}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                  >
+                    {generatingEmailOpener ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Sparkles className="w-4 h-4" />
+                    )}
+                    {generatingEmailOpener ? 'Generating...' : 'Generate Email Opener'}
+                  </button>
+                )}
+                <button
+                  onClick={handleFetchCompanyNews}
+                  disabled={companyNewsLoading || companyNewsFetchCooldown || !!newsFetchedWithin7Days}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                >
+                  {companyNewsLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Newspaper className="w-4 h-4" />
+                  )}
+                  {companyNewsLoading
+                    ? 'Fetching...'
+                    : newsFetchedWithin7Days
+                      ? 'News fetched recently (try again in 7 days)'
+                      : `Fetch Latest News on ${company?.domain?.replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'this company'}`}
+                </button>
+                {emailOpenerError && (
+                  <p className="text-sm text-red-600 w-full">{emailOpenerError}</p>
+                )}
+              </div>
             </div>
           ) : (
             /* Contacts Tab */
@@ -2494,7 +3125,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 </h3>
                 {!isAddingContact && (
                   <div className="flex items-center gap-2">
-                    {company.domain?.trim() && (
+                    {company.domain?.trim() && !isPersonProfile && (
                       <button
                         type="button"
                         onClick={() => {

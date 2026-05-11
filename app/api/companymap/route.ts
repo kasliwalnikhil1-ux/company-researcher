@@ -360,21 +360,28 @@ export async function POST(req: NextRequest) {
     }
 
     // Clean URLs to base domain (remove paths, query params, etc.)
+    // Exception: LinkedIn person URLs (linkedin.com/in/<handle>) keep their path
+    // so Exa crawls the actual person profile rather than the LinkedIn homepage.
     const cleanUrl = (url: string): string => {
       try {
         // Remove any whitespace
         url = url.trim();
-        
+
         // Add protocol if missing
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
           url = 'https://' + url;
         }
-        
-        // Parse URL to extract just the origin (protocol + hostname)
+
         const urlObj = new URL(url);
         const hostname = urlObj.hostname;
-        
-        // Return base URL with protocol
+
+        // Preserve path for LinkedIn person profile URLs
+        if (hostname.includes('linkedin.com') && /^\/in\//i.test(urlObj.pathname)) {
+          const path = urlObj.pathname.replace(/\/+$/, '');
+          return `${urlObj.protocol}//${hostname}${path}`;
+        }
+
+        // Default: return base URL with protocol (origin only)
         return `${urlObj.protocol}//${hostname}`;
       } catch (e) {
         // If parsing fails, just ensure protocol exists

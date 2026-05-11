@@ -8,6 +8,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, fetchJobsResearch, fetchCompanyNewsEmailOpener, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
 import type { JobsResearchSummary, NewsEmailOpener } from "../lib/api";
+import { mergeNewsDraftIntoSummary as mergeNewsDraftIntoSummaryHelper } from "../lib/reanalyzeCompany";
 import ExportCsvButton from './ui/ExportCsvButton';
 import ColumnSelectorDialog from './ui/ColumnSelectorDialog';
 import ConfirmationModal from './ui/ConfirmationModal';
@@ -43,8 +44,9 @@ const extractDomain = (url: string): string | null => {
 
 // Clean URL to base domain with protocol (remove paths, query params, etc.)
 // For Instagram mode, preserves the full URL including username path
+// For person mode, preserves the full URL including the LinkedIn /in/handle path
 // For investor mode, uses cleanInvestorInput (domain or LinkedIn)
-const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' | 'jobs' = 'domain'): string | null => {
+const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' | 'jobs' | 'person' = 'domain'): string | null => {
   if (mode === 'jobs') {
     if (!url) return null;
     let u = url.trim();
@@ -61,21 +63,27 @@ const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' | 'jobs
   try {
     // Remove any whitespace
     url = url.trim();
-    
+
     // Add protocol if missing
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'https://' + url;
     }
-    
+
     // Parse URL
     const urlObj = new URL(url);
-    
+
     // For Instagram mode, preserve the full URL including username path
     if (mode === 'instagram' && urlObj.hostname.includes('instagram.com')) {
       // Return the full URL with pathname (username), but remove query params and hash
       return `${urlObj.protocol}//${urlObj.hostname}${urlObj.pathname}`;
     }
-    
+
+    // For person mode, preserve the full URL including the LinkedIn /in/handle path
+    if (mode === 'person' && urlObj.hostname.includes('linkedin.com')) {
+      const path = urlObj.pathname.replace(/\/+$/, '');
+      return `${urlObj.protocol}//${urlObj.hostname}${path}`;
+    }
+
     // For domain mode, extract just the origin (protocol + hostname)
     const hostname = urlObj.hostname;
     return `${urlObj.protocol}//${hostname}`;
@@ -84,6 +92,30 @@ const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' | 'jobs
     return null;
   }
 };
+
+// Extract a stable key from a LinkedIn person URL — e.g. "linkedin.com/in/abhishekraniwala"
+// Used as the unique identifier in the companies table (stored in `domain` column).
+const extractPersonKey = (url: string): string | null => {
+  if (!url) return null;
+  try {
+    let u = url.trim();
+    if (!u.startsWith('http://') && !u.startsWith('https://')) {
+      u = 'https://' + u;
+    }
+    const obj = new URL(u);
+    if (!obj.hostname.includes('linkedin.com')) return null;
+    // Drop country subdomain (in., uk., etc.) and any www. prefix so keys are consistent
+    const host = obj.hostname.replace(/^www\./, '').replace(/^[a-z]{2}\./i, '');
+    const path = obj.pathname.replace(/\/+$/, '');
+    if (!path) return null;
+    return `${host}${path}`.toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+// LinkedIn person URL pattern (e.g. linkedin.com/in/abhishekraniwala, in.linkedin.com/in/...)
+const LINKEDIN_PERSON_PATTERN = /(?:^|[^\w])(?:[a-z]{2}\.)?linkedin\.com\/in\/[\w\-%.]+/i;
 
 // Invalid domains that should be blocked
 const INVALID_DOMAINS = [
@@ -148,8 +180,8 @@ export default function CompanyResearcher() {
     instagram?: { systemPrompt?: string; userMessage?: string };
   } | null>(null);
   
-  // Research mode: 'domain', 'instagram', 'investor', or 'jobs'
-  const [researchMode, setResearchMode] = useState<'domain' | 'instagram' | 'investor' | 'jobs'>('domain');
+  // Research mode: 'domain', 'instagram', 'investor', 'jobs', or 'person'
+  const [researchMode, setResearchMode] = useState<'domain' | 'instagram' | 'investor' | 'jobs' | 'person'>('domain');
 
   // Sync researchMode when primaryUse changes
   useEffect(() => {
@@ -164,6 +196,11 @@ export default function CompanyResearcher() {
     if (!text || typeof text !== 'string') return false;
     const lines = text.split(/[,\n]+/).map(l => l.trim()).filter(Boolean);
     return lines.some(line => JOB_URL_PATTERNS.some(pattern => pattern.test(line)));
+  }, []);
+
+  const containsLinkedInPersonUrl = useCallback((text: string): boolean => {
+    if (!text || typeof text !== 'string') return false;
+    return LINKEDIN_PERSON_PATTERN.test(text);
   }, []);
 
   // Set name for batch processing
@@ -340,8 +377,8 @@ export default function CompanyResearcher() {
 
   // Function to filter out invalid domains from input
   const filterInvalidDomains = useCallback((input: string): { filteredInput: string; removedDomains: string[] } => {
-    // Investor and jobs modes accept various URLs - no filtering
-    if (researchMode === 'investor' || researchMode === 'jobs') {
+    // Investor, jobs, and person modes accept various URLs - no filtering
+    if (researchMode === 'investor' || researchMode === 'jobs' || researchMode === 'person') {
       return { filteredInput: input, removedDomains: [] };
     }
     const lines = input.split(/[,\n]/).map(line => line.trim()).filter(line => line.length > 0);
@@ -351,6 +388,11 @@ export default function CompanyResearcher() {
     lines.forEach(line => {
       // Never filter out job URLs — they should auto-switch to jobs mode
       if (JOB_URL_PATTERNS.some(pattern => pattern.test(line))) {
+        validLines.push(line);
+        return;
+      }
+      // Never filter out LinkedIn person URLs — they should auto-switch to person mode
+      if (LINKEDIN_PERSON_PATTERN.test(line)) {
         validLines.push(line);
         return;
       }
@@ -412,6 +454,13 @@ export default function CompanyResearcher() {
       return result;
     }
 
+    if (researchMode === 'person') {
+      const cleaned = lines.map(line => cleanUrl(line, 'person') || line);
+      const result = dedupe(cleaned);
+      console.log('[CompanyResearchHome] parseCompanyInput (person):', { lines: lines.length, result: result.length });
+      return result;
+    }
+
     const cleaned = lines.map(company => {
       const c = cleanUrl(company, researchMode);
       return c || company;
@@ -446,17 +495,8 @@ export default function CompanyResearcher() {
   }, [newsInput, isB2B, researchMode]);
 
   const mergeNewsDraftIntoSummary = useCallback(
-    <T extends Record<string, any> | null | undefined>(summary: T, draft: NewsEmailOpener | null): T => {
-      if (!summary || !draft) {
-        return summary;
-      }
-
-      return {
-        ...summary,
-        first_line_to_start_email: draft.first_line_to_start_email,
-        subject_line: draft.subject_line,
-      } as T;
-    },
+    <T extends Record<string, any> | null | undefined>(summary: T, draft: NewsEmailOpener | null): T =>
+      mergeNewsDraftIntoSummaryHelper(summary, draft),
     []
   );
 
@@ -491,6 +531,14 @@ export default function CompanyResearcher() {
 
       try {
         const newsDraft = await getNewsEmailOpener();
+        const _sourceNewsTextIg = (newsOverrideRef.current ?? newsInput).trim();
+        const newsToSaveIg = newsDraft && _sourceNewsTextIg ? {
+          answer: _sourceNewsTextIg,
+          citations: [] as string[],
+          first_line_to_start_email: newsDraft.first_line_to_start_email,
+          subject_line: newsDraft.subject_line,
+          date: new Date().toISOString(),
+        } : null;
         let instagramProfileData = null;
         
         try {
@@ -570,6 +618,7 @@ export default function CompanyResearcher() {
                   email: email || existingCompany.email || '',
                   phone: phone || existingCompany.phone || '',
                   owner: selectedOwner,
+                  ...(newsToSaveIg ? { news: newsToSaveIg } : {}),
                 });
               } else {
                 // Create new company
@@ -581,6 +630,7 @@ export default function CompanyResearcher() {
                   phone: phone || '',
                   set_name: setName || null,
                   owner: selectedOwner,
+                  ...(newsToSaveIg ? { news: newsToSaveIg } : {}),
                 });
               }
             }
@@ -711,6 +761,14 @@ export default function CompanyResearcher() {
 
       try {
         const newsDraft = await getNewsEmailOpener();
+        const _sourceNewsTextJobs = (newsOverrideRef.current ?? newsInput).trim();
+        const newsToSaveJobs = newsDraft && _sourceNewsTextJobs ? {
+          answer: _sourceNewsTextJobs,
+          citations: [] as string[],
+          first_line_to_start_email: newsDraft.first_line_to_start_email,
+          subject_line: newsDraft.subject_line,
+          date: new Date().toISOString(),
+        } : null;
         const data = await fetchJobsResearch(company);
         console.log('[CompanyResearchHome] researchCompany (jobs) API result:', data);
         if (data?.error) {
@@ -772,6 +830,7 @@ export default function CompanyResearcher() {
                   email: existingCompanyData.email || '',
                   phone: existingCompanyData.phone || '',
                   owner: selectedOwner,
+                  ...(newsToSaveJobs ? { news: newsToSaveJobs } : {}),
                 });
               } else {
                 await createCompany({
@@ -782,6 +841,7 @@ export default function CompanyResearcher() {
                   phone: '',
                   set_name: setName || null,
                   owner: selectedOwner,
+                  ...(newsToSaveJobs ? { news: newsToSaveJobs } : {}),
                 });
               }
             } else {
@@ -793,6 +853,7 @@ export default function CompanyResearcher() {
                 phone: '',
                 set_name: setName || null,
                 owner: selectedOwner,
+                ...(newsToSaveJobs ? { news: newsToSaveJobs } : {}),
               });
             }
           } catch (saveError) {
@@ -805,6 +866,133 @@ export default function CompanyResearcher() {
           ...prev,
           [company]: { jobsResearch: msg }
         }));
+      }
+    } else if (researchMode === 'person') {
+      // Person research mode — uses the same fetchCompanyMap pipeline as company analysis
+      // but passes the full LinkedIn /in/<handle> URL so Exa crawls the person page.
+      console.log('[CompanyResearchHome] researchCompany (person) starting:', company);
+
+      const cleanedUrl = cleanUrl(company, 'person');
+      if (!cleanedUrl || !/linkedin\.com\/in\//i.test(cleanedUrl)) {
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { form: `Invalid LinkedIn person URL: ${company}. Expected format like https://in.linkedin.com/in/handle` }
+        }));
+        return;
+      }
+
+      const personKey = extractPersonKey(cleanedUrl) || cleanedUrl;
+
+      setResultsByCompany(prev => ({
+        ...prev,
+        [company]: {
+          qualificationData: null,
+          instagramProfileData: null,
+          instagramQualificationData: null,
+          investorResearchData: null,
+          jobsResearchData: null,
+        }
+      }));
+      setErrorsByCompany(prev => ({ ...prev, [company]: {} }));
+
+      try {
+        const newsDraft = await getNewsEmailOpener();
+        const _sourceNewsTextPerson = (newsOverrideRef.current ?? newsInput).trim();
+        const newsToSavePerson = newsDraft && _sourceNewsTextPerson ? {
+          answer: _sourceNewsTextPerson,
+          citations: [] as string[],
+          first_line_to_start_email: newsDraft.first_line_to_start_email,
+          subject_line: newsDraft.subject_line,
+          date: new Date().toISOString(),
+        } : null;
+        let qualificationData = null;
+
+        try {
+          const rawQualificationData = await fetchCompanyMap(cleanedUrl, user?.id, personalizationSettings?.direct || null);
+          qualificationData = mergeNewsDraftIntoSummary(rawQualificationData, newsDraft);
+          if (!qualificationData) {
+            setErrorsByCompany(prev => ({
+              ...prev,
+              [company]: {
+                ...prev[company],
+                qualificationData: 'Could not load qualification data.'
+              }
+            }));
+          }
+        } catch (error) {
+          console.error('Error fetching person qualification:', error);
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          setErrorsByCompany(prev => ({
+            ...prev,
+            [company]: {
+              ...prev[company],
+              qualificationData: 'Could not load qualification data.'
+            }
+          }));
+          sendSlackNotification(`❌ Unexpected error for ${company}\nError: ${errorMessage}`).catch(
+            (slackError) => console.error('Failed to send Slack notification:', slackError)
+          );
+        }
+
+        setResultsByCompany(prev => ({
+          ...prev,
+          [company]: {
+            ...prev[company],
+            ...(qualificationData && { qualificationData: qualificationData })
+          }
+        }));
+
+        // Save/update in companies table — keyed by the LinkedIn handle path stored in `domain`.
+        if (qualificationData) {
+          try {
+            if (!user) {
+              console.error('User not available, cannot save person');
+              return;
+            }
+            const email = qualificationData.email || null;
+            const phone = qualificationData.phone || null;
+
+            const { data: existingCompanyData } = await supabase
+              .from('companies')
+              .select('id, instagram, domain, email, phone')
+              .eq('user_id', user.id)
+              .eq('domain', personKey)
+              .maybeSingle();
+
+            if (existingCompanyData) {
+              await updateCompany(existingCompanyData.id, {
+                summary: qualificationData,
+                instagram: existingCompanyData.instagram || '',
+                email: email || existingCompanyData.email || '',
+                phone: phone || existingCompanyData.phone || '',
+                owner: selectedOwner,
+                ...(newsToSavePerson ? { news: newsToSavePerson } : {}),
+              });
+            } else {
+              await createCompany({
+                domain: personKey,
+                instagram: '',
+                summary: qualificationData,
+                email: email || '',
+                phone: phone || '',
+                set_name: setName || null,
+                owner: selectedOwner,
+                ...(newsToSavePerson ? { news: newsToSavePerson } : {}),
+              });
+            }
+          } catch (saveError) {
+            console.error('Error saving person to database:', saveError);
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        setErrorsByCompany(prev => ({
+          ...prev,
+          [company]: { ...prev[company], general: errorMessage }
+        }));
+        sendSlackNotification(`❌ General error for ${company}\nError: ${errorMessage}`).catch(
+          (slackError) => console.error('Failed to send Slack notification:', slackError)
+        );
       }
     } else {
       // Domain research mode (existing logic)
@@ -836,6 +1024,14 @@ export default function CompanyResearcher() {
 
       try {
         const newsDraft = await getNewsEmailOpener();
+        const _sourceNewsText = (newsOverrideRef.current ?? newsInput).trim();
+        const newsToSave = newsDraft && _sourceNewsText ? {
+          answer: _sourceNewsText,
+          citations: [] as string[],
+          first_line_to_start_email: newsDraft.first_line_to_start_email,
+          subject_line: newsDraft.subject_line,
+          date: new Date().toISOString(),
+        } : null;
         // Fetch company qualification data
         let qualificationData = null;
         
@@ -909,6 +1105,7 @@ export default function CompanyResearcher() {
                 email: email || existingCompany.email || '',
                 phone: phone || existingCompany.phone || '',
                 owner: selectedOwner,
+                ...(newsToSave ? { news: newsToSave } : {}),
               });
             } else {
               // Create new company
@@ -920,6 +1117,7 @@ export default function CompanyResearcher() {
                 phone: phone || '',
                 set_name: setName || null,
                 owner: selectedOwner,
+                ...(newsToSave ? { news: newsToSave } : {}),
               });
             }
           } catch (saveError) {
@@ -1040,7 +1238,7 @@ export default function CompanyResearcher() {
     useDualColumns: boolean,
     selectedColumns: { domain: string | null; instagram: string | null },
     selectedUrlColumn: string | null,
-    researchMode: 'domain' | 'instagram' | 'investor' | 'jobs'
+    researchMode: 'domain' | 'instagram' | 'investor' | 'jobs' | 'person'
   ) => {
     const isInstagramUrl = (url: string): boolean => {
       if (!url || typeof url !== 'string') return false;
@@ -1093,6 +1291,14 @@ export default function CompanyResearcher() {
         } else if (researchMode === 'jobs') {
           if (url && url.includes('.')) {
             const cleaned = cleanUrl(url, 'jobs');
+            if (cleaned) {
+              isProcessed = qualificationDataMap.has(cleaned) || errorMap.has(cleaned) ||
+                           !!(row['Research Status'] && row['Research Status'].trim() !== '');
+            }
+          }
+        } else if (researchMode === 'person') {
+          if (url && /linkedin\.com\/in\//i.test(url)) {
+            const cleaned = cleanUrl(url, 'person');
             if (cleaned) {
               isProcessed = qualificationDataMap.has(cleaned) || errorMap.has(cleaned) ||
                            !!(row['Research Status'] && row['Research Status'].trim() !== '');
@@ -1226,6 +1432,20 @@ export default function CompanyResearcher() {
                 updatedRow['Research Status'] = 'Failed to fetch job data';
               }
             }
+          } else if (researchMode === 'person') {
+            if (url && /linkedin\.com\/in\//i.test(url)) {
+              const cleaned = cleanUrl(url, 'person');
+              const personData = cleaned ? qualificationDataMap.get(cleaned) : null;
+              const personError = cleaned ? errorMap.get(cleaned) : null;
+              if (personData) {
+                updatedRow['Research Status'] = 'completed';
+                writeSummaryToCsvRow(personData, updatedRow);
+              } else if (personError) {
+                updatedRow['Research Status'] = personError;
+              } else {
+                updatedRow['Research Status'] = 'Failed to fetch person qualification data';
+              }
+            }
           } else {
             const cleanedUrl = cleanUrl(url, researchMode);
             const domainNameValue = cleanedUrl ? extractDomain(cleanedUrl) : extractDomain(url);
@@ -1240,7 +1460,7 @@ export default function CompanyResearcher() {
             }
           }
         }
-        
+
         processedRows.push(updatedRow);
       } else {
         pendingRows.push(row);
@@ -1303,7 +1523,7 @@ export default function CompanyResearcher() {
     const newsDraft = await getNewsEmailOpener();
 
     // Helper function to save progress after each row is processed
-    const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor' | 'jobs', identifier: string) => {
+    const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor' | 'jobs' | 'person', identifier: string) => {
       const processedCount = processedDomainIndices.length;
       if (shouldAutoSave(lastSavedAt, processedCount)) {
         // Merge data into rows for saving
@@ -1432,13 +1652,31 @@ export default function CompanyResearcher() {
                 updatedRow['Instagram Followers'] = String(profileData.edge_followed_by?.count || 0);
                 updatedRow['Instagram Following'] = String(profileData.edge_follow?.count || 0);
                 updatedRow['Instagram Private'] = profileData.is_private ? 'Yes' : 'No';
-                
+
                 if (profileData.qualificationData) {
                   writeSummaryToCsvRow(profileData.qualificationData, updatedRow);
                 }
               } else {
                 const error = errorMap.get(url);
                 updatedRow['Research Status'] = error || 'Failed to fetch Instagram profile data';
+              }
+            } else if (mode === 'person') {
+              if (!url || !/linkedin\.com\/in\//i.test(url)) {
+                if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+                  updatedRow['Research Status'] = 'skipped (not LinkedIn person URL)';
+                }
+                return updatedRow;
+              }
+              const cleaned = cleanUrl(url, 'person');
+              const personData = cleaned ? qualificationDataMap.get(cleaned) : null;
+              if (personData) {
+                updatedRow['Research Status'] = 'completed';
+                writeSummaryToCsvRow(personData, updatedRow);
+              } else if (cleaned) {
+                const error = errorMap.get(cleaned);
+                updatedRow['Research Status'] = error || 'Failed to fetch person qualification data';
+              } else {
+                updatedRow['Research Status'] = 'Invalid URL';
               }
             } else {
               // Domain mode
@@ -1687,6 +1925,11 @@ export default function CompanyResearcher() {
             const cleaned = cleanUrl(url, 'jobs');
             if (cleaned) allValidUrls.push(cleaned);
           }
+        } else if (researchMode === 'person') {
+          if (url && /linkedin\.com\/in\//i.test(url)) {
+            const cleaned = cleanUrl(url, 'person');
+            if (cleaned) allValidUrls.push(cleaned);
+          }
         } else {
           if (url && url.includes('.')) {
             const cleaned = cleanUrl(url, researchMode);
@@ -1745,21 +1988,28 @@ export default function CompanyResearcher() {
           if (!url || !url.includes('.')) {
             return false;
           }
+        } else if (researchMode === 'person') {
+          // Person mode: include only LinkedIn person URLs
+          if (!url || !/linkedin\.com\/in\//i.test(url)) {
+            return false;
+          }
+          const cleaned = cleanUrl(url, 'person');
+          if (!cleaned) return false;
         } else {
           // Domain mode: existing logic
           const classification = row['Classification']?.trim() || '';
-          
+
           // Skip if Classification is already filled
           if (classification) {
             return false;
           }
-          
+
           // Skip if no valid URL
           if (!url || !url.includes('.')) {
             return false;
           }
         }
-        
+
         return true;
       }
     });
@@ -2339,6 +2589,106 @@ export default function CompanyResearcher() {
         setShowConfirmationModal(true);
         return;
       }
+    } else if (researchMode === 'person') {
+      // Person mode: single column with LinkedIn person URLs, processed via fetchCompanyMap
+      console.log('[CompanyResearchHome] processCsvRows person mode:', { rowsToProcess: rowsToProcess.length, selectedUrlColumn });
+      if (!savedProgress) {
+        const uniqueUrls = new Set<string>();
+        rowsToProcess.forEach(row => {
+          const url = row[selectedUrlColumn!]?.trim() || '';
+          if (url && /linkedin\.com\/in\//i.test(url)) {
+            const cleaned = cleanUrl(url, 'person');
+            if (cleaned) uniqueUrls.add(cleaned);
+          }
+        });
+        uniqueDomainsArray = Array.from(uniqueUrls);
+        console.log('[CompanyResearchHome] processCsvRows person unique URLs:', uniqueDomainsArray.length);
+      }
+
+      const personUrlsToProcess = uniqueDomainsArray.slice(startFromIndex);
+
+      await processInBatches(
+        personUrlsToProcess,
+        async (personUrl, batchIndex) => {
+          const actualIndex = startFromIndex + batchIndex;
+          const personKey = extractPersonKey(personUrl) || personUrl;
+          try {
+            const rawData = await fetchCompanyMap(personUrl, user?.id, personalizationSettings?.direct || null);
+            const data = mergeNewsDraftIntoSummary(rawData, newsDraft);
+            if (data) {
+              qualificationDataMap.set(personUrl, data);
+
+              try {
+                if (!user) {
+                  console.error('User not available, cannot save person');
+                  return personUrl;
+                }
+                const email = data.email || null;
+                const phone = data.phone || null;
+
+                const { data: existingCompanyData } = await supabase
+                  .from('companies')
+                  .select('id, instagram, domain, email, phone')
+                  .eq('user_id', user.id)
+                  .eq('domain', personKey)
+                  .maybeSingle();
+
+                if (existingCompanyData) {
+                  await updateCompany(existingCompanyData.id, {
+                    summary: data,
+                    instagram: existingCompanyData.instagram || '',
+                    email: email || existingCompanyData.email || '',
+                    phone: phone || existingCompanyData.phone || '',
+                    owner: selectedOwner,
+                  });
+                } else {
+                  await createCompany({
+                    domain: personKey,
+                    instagram: '',
+                    summary: data,
+                    email: email || '',
+                    phone: phone || '',
+                    set_name: setName || null,
+                    owner: selectedOwner,
+                  });
+                }
+              } catch (saveError) {
+                console.error('Error saving person to database during CSV processing:', saveError);
+              }
+            } else {
+              errorMap.set(personUrl, 'Failed to fetch person qualification data');
+            }
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            errorMap.set(personUrl, msg);
+          }
+          processedDomainIndices.push(actualIndex);
+          saveProgressAfterRow('person', personUrl);
+          return personUrl;
+        },
+        CONCURRENCY_LIMIT,
+        (processed, total) => {
+          setCsvProcessingProgress({ current: startFromIndex + processed, total: uniqueDomainsArray.length });
+        }
+      );
+
+      if (shouldStopProcessingRef.current) {
+        const currentCsvData = csvDataRef.current || csvData;
+        generateProcessedAndPendingCsvs(
+          currentCsvData.rows,
+          currentCsvData.headers,
+          qualificationDataMap,
+          errorMap,
+          false,
+          { domain: null, instagram: null },
+          selectedUrlColumn || null,
+          researchMode
+        );
+        setIsProcessingCsv(false);
+        setConfirmationMessage('Processing stopped. Downloaded processed and pending CSVs.');
+        setShowConfirmationModal(true);
+        return;
+      }
     } else {
       // Domain mode processing (existing logic)
       // Extract unique domains from URLs (clean URLs first) - only if not resuming
@@ -2613,6 +2963,25 @@ export default function CompanyResearcher() {
         } else {
           updatedRow['Research Status'] = 'Failed to fetch job data';
         }
+      } else if (researchMode === 'person') {
+        // Person mode: update with company-style qualification data fetched from LinkedIn person URL
+        if (!url || !/linkedin\.com\/in\//i.test(url)) {
+          if (!updatedRow['Research Status'] || updatedRow['Research Status'].trim() === '') {
+            updatedRow['Research Status'] = 'skipped (not LinkedIn person URL)';
+          }
+          return updatedRow;
+        }
+        const cleaned = cleanUrl(url, 'person');
+        const personData = cleaned ? qualificationDataMap.get(cleaned) : null;
+        const personError = cleaned ? errorMap.get(cleaned) : null;
+        if (personData) {
+          updatedRow['Research Status'] = 'completed';
+          writeSummaryToCsvRow(personData, updatedRow);
+        } else if (personError) {
+          updatedRow['Research Status'] = personError;
+        } else {
+          updatedRow['Research Status'] = 'Failed to fetch person qualification data';
+        }
       } else {
         // Domain mode: existing logic
         const classification = row['Classification']?.trim() || '';
@@ -2805,6 +3174,18 @@ export default function CompanyResearcher() {
                   url: jobData.url || cleaned,
                   summary: jobData.summary,
                 },
+              };
+            }
+          } else if (researchMode === 'person') {
+            const cleaned = cleanUrl(url, 'person');
+            const personData = cleaned ? qualificationDataMap.get(cleaned) : null;
+            if (cleaned && personData) {
+              newResults[cleaned] = {
+                qualificationData: personData,
+                instagramProfileData: null,
+                instagramQualificationData: null,
+                investorResearchData: null,
+                jobsResearchData: null,
               };
             }
           } else {
@@ -3180,7 +3561,7 @@ export default function CompanyResearcher() {
     if (companies.length === 0) {
       setErrorsByCompany(prev => ({
         ...prev,
-        _form: { form: researchMode === 'investor' ? 'Please enter at least one domain or LinkedIn URL' : researchMode === 'jobs' ? 'Please enter at least one job URL' : 'Please enter at least one company URL' }
+        _form: { form: researchMode === 'investor' ? 'Please enter at least one domain or LinkedIn URL' : researchMode === 'jobs' ? 'Please enter at least one job URL' : researchMode === 'person' ? 'Please enter at least one LinkedIn person URL' : 'Please enter at least one company URL' }
       }));
       return;
     }
@@ -3309,6 +3690,19 @@ export default function CompanyResearcher() {
               >
                 Jobs Research
               </button>
+              <button
+                onClick={() => {
+                  setResearchMode('person');
+                  handleClearAll();
+                }}
+                className={`px-6 py-3 rounded-sm font-medium transition-colors ${
+                  researchMode === 'person'
+                    ? 'bg-brand-default text-white ring-2 ring-brand-default'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
+              >
+                Person Research
+              </button>
             </>
           )}
         </div>
@@ -3384,6 +3778,8 @@ export default function CompanyResearcher() {
             ? 'Enter Instagram URLs (comma or newline separated) for profile research.'
             : researchMode === 'jobs'
             ? 'Enter job posting URLs from LinkedIn, Naukri, Shine, Indeed, etc. (comma or newline separated) to extract company info and B2B fit.'
+            : researchMode === 'person'
+            ? 'Enter LinkedIn person URLs (e.g. https://in.linkedin.com/in/abhishekraniwala) for person research.'
             : 'Enter company URLs (comma or newline separated) for qualification assessment.'}
         </p>
       )}
@@ -3403,6 +3799,8 @@ export default function CompanyResearcher() {
                   ? 'Upload a CSV file to process multiple Instagram profiles. Select the column containing Instagram URLs.'
                   : researchMode === 'jobs'
                   ? 'Upload a CSV file to process multiple job postings. Select the column containing job URLs.'
+                  : researchMode === 'person'
+                  ? 'Upload a CSV file to process multiple people. Select the column containing LinkedIn person URLs.'
                   : 'Upload a CSV file to process multiple companies. Select the column containing website URLs.'}
               </p>
             </div>
@@ -3516,7 +3914,7 @@ export default function CompanyResearcher() {
           }}
           className="w-full text-white font-semibold px-2 py-2 rounded-sm transition-opacity opacity-0 animate-fade-up [animation-delay:600ms] min-h-[50px] bg-brand-default ring-2 ring-brand-default transition-colors mb-8"
         >
-          {researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : 'Analyze Companies'}
+          {researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : researchMode === 'person' ? 'Analyze People' : 'Analyze Companies'}
         </button>
       )}
       </>
@@ -3652,7 +4050,7 @@ export default function CompanyResearcher() {
         >
           {isProcessingTable
             ? `Analyzing… ${tableProcessingProgress.current} / ${tableProcessingProgress.total}`
-            : (researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : 'Analyze Companies')}
+            : (researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : researchMode === 'person' ? 'Analyze People' : 'Analyze Companies')}
         </button>
       )}
 
@@ -3763,21 +4161,27 @@ export default function CompanyResearcher() {
                   if (researchMode !== 'jobs') {
                     setResearchMode('jobs');
                   }
+                } else if (containsLinkedInPersonUrl(filteredInput)) {
+                  if (researchMode !== 'person') {
+                    setResearchMode('person');
+                  }
                 } else if (containsInstagramUrl(filteredInput)) {
                   if (researchMode !== 'instagram') {
                     setResearchMode('instagram');
                   }
-                } else if (filteredInput.trim().length > 0 && (researchMode === 'instagram' || researchMode === 'jobs')) {
+                } else if (filteredInput.trim().length > 0 && (researchMode === 'instagram' || researchMode === 'jobs' || researchMode === 'person')) {
                   setResearchMode('domain');
                 }
               }
             }}
             placeholder={researchMode === 'investor'
               ? "Enter domains or LinkedIn URLs (e.g., boldcap.com, linkedin.com/in/garrytan)"
-              : researchMode === 'instagram' 
+              : researchMode === 'instagram'
               ? "Enter Instagram URLs (e.g., instagram.com/username, instagram.com/another_username)"
               : researchMode === 'jobs'
               ? "Enter job URLs (e.g., linkedin.com/jobs/view/123456, shine.com/jobs/..., naukri.com/job-listings-...)"
+              : researchMode === 'person'
+              ? "Enter LinkedIn person URLs (e.g., https://in.linkedin.com/in/abhishekraniwala)"
               : "Enter company URLs (e.g., capitalxai.com, another-company.com)"}
             rows={4}
             className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-brand-default resize-none opacity-0 animate-fade-up [animation-delay:600ms]"
@@ -3808,8 +4212,8 @@ export default function CompanyResearcher() {
             disabled={isSearching}
           >
             {isSearching
-              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : researchMode === 'jobs' ? 'Researching job posting...' : 'Analyzing...')
-              : (researchMode === 'investor' ? 'Research Investor' : researchMode === 'instagram' ? 'Research Instagram Profiles' : researchMode === 'jobs' ? 'Research Job Postings' : 'Analyze Companies')}
+              ? (researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram...' : researchMode === 'jobs' ? 'Researching job posting...' : researchMode === 'person' ? 'Researching person...' : 'Analyzing...')
+              : (researchMode === 'investor' ? 'Research Investor' : researchMode === 'instagram' ? 'Research Instagram Profiles' : researchMode === 'jobs' ? 'Research Job Postings' : researchMode === 'person' ? 'Research Person' : 'Analyze Companies')}
           </button>
         </form>
       )}
@@ -3841,7 +4245,7 @@ export default function CompanyResearcher() {
           ) : (
             <div className="flex items-center gap-2">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-700"></div>
-              <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : researchMode === 'jobs' ? 'Researching job posting...' : 'Analyzing company qualification...'}</span>
+              <span>{researchMode === 'investor' ? 'Researching investor...' : researchMode === 'instagram' ? 'Researching Instagram profiles...' : researchMode === 'jobs' ? 'Researching job posting...' : researchMode === 'person' ? 'Researching person profile...' : 'Analyzing company qualification...'}</span>
             </div>
           )}
         </div>
@@ -3891,7 +4295,7 @@ export default function CompanyResearcher() {
           <div className="space-y-8">
             <div className="flex items-center">
               <h2 className="text-3xl font-medium">
-                {researchMode === 'investor' ? 'Investor Research' : researchMode === 'instagram' ? 'Instagram Profile' : researchMode === 'jobs' ? 'Jobs Research' : 'Qualification Assessment'}
+                {researchMode === 'investor' ? 'Investor Research' : researchMode === 'instagram' ? 'Instagram Profile' : researchMode === 'jobs' ? 'Jobs Research' : researchMode === 'person' ? 'Person Research' : 'Qualification Assessment'}
               </h2>
             </div>
 
