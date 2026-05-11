@@ -2201,7 +2201,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         Find People
                       </button>
                     )}
-                    {company.domain?.trim() && !isPersonProfile && (
+                    {company.domain?.trim() && (
                       <button
                         type="button"
                         onClick={handleReanalyze}
