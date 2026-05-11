@@ -386,15 +386,14 @@ function CompaniesContent() {
     const initialDefault = [...baseColumnOrder, ...initialTemplateColumns];
     
     if (typeof window !== 'undefined') {
-      const savedClipboardColumn = localStorage.getItem(CLIPBOARD_COLUMN_KEY);
       const saved = localStorage.getItem(COLUMN_ORDER_KEY);
       let order: string[] = initialDefault;
-      
+
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
           // Merge with current template columns to handle new templates
-          const savedBase = parsed.filter((col: string) => !col.startsWith('template_') && col !== savedClipboardColumn);
+          const savedBase = parsed.filter((col: string) => !col.startsWith('template_'));
 
           // Ensure all current base columns are included (add missing ones like phone/email)
           const missingBaseColumns = baseColumnOrder.filter(col => !savedBase.includes(col));
@@ -415,13 +414,7 @@ function CompaniesContent() {
           order = initialDefault;
         }
       }
-      
-      // Check for clipboard column and move it to first position
-      if (savedClipboardColumn && order.includes(savedClipboardColumn)) {
-        const filtered = order.filter(col => col !== savedClipboardColumn);
-        order = [savedClipboardColumn, ...filtered];
-      }
-      
+
       return order;
     }
     return initialDefault;
@@ -440,11 +433,8 @@ function CompaniesContent() {
     let trulyNewTemplateColumns: string[] = [];
 
     setColumnOrder(prev => {
-      // Preserve clipboard column if it exists and is first
-      const wasFirst = prev[0] === clipboardColumn && clipboardColumn;
-
       // Remove old template columns and add new ones
-      const baseColumns = prev.filter(col => !col.startsWith('template_') && col !== clipboardColumn);
+      const baseColumns = prev.filter(col => !col.startsWith('template_'));
       const existingTemplateColumns = prev.filter(col => col.startsWith('template_'));
       const newTemplateColumns = currentTemplateColumns.filter(
         tc => !existingTemplateColumns.includes(tc)
@@ -452,12 +442,6 @@ function CompaniesContent() {
       trulyNewTemplateColumns = newTemplateColumns;
 
       const newOrder = [...baseColumns, ...existingTemplateColumns.filter(tc => currentTemplateColumns.includes(tc)), ...newTemplateColumns];
-
-      // Put clipboard column first if it was first before or if it exists
-      if (clipboardColumn && (wasFirst || newOrder.includes(clipboardColumn))) {
-        const filtered = newOrder.filter(col => col !== clipboardColumn);
-        return [clipboardColumn, ...filtered];
-      }
 
       return newOrder;
     });
@@ -474,8 +458,7 @@ function CompaniesContent() {
       templateColumnsToRemove.forEach(col => newSet.delete(col));
       return newSet;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getTemplateColumnKeys, templatesLoading]); // clipboardColumn is accessed in closure - separate effect handles its changes
+  }, [getTemplateColumnKeys, templatesLoading]);
 
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
     const initialTemplateColumns = templates
@@ -579,7 +562,7 @@ function CompaniesContent() {
       const validBaseSet = new Set(baseColumnOrder);
 
       const previousBase = prev.filter(
-        col => !col.startsWith('template_') && col !== clipboardColumn
+        col => !col.startsWith('template_')
       );
       // Keep a base column from prev if it's currently known-valid, OR if it
       // looks like a dynamic summary key (not in the fixed list). On the first
@@ -603,11 +586,6 @@ function CompaniesContent() {
       const prevSet = new Set(prev);
       newlyDiscovered = merged.filter(col => !prevSet.has(col));
       validColumnsAfterMerge = new Set(merged);
-      if (clipboardColumn) validColumnsAfterMerge.add(clipboardColumn);
-
-      if (clipboardColumn && merged.includes(clipboardColumn)) {
-        return [clipboardColumn, ...merged.filter(col => col !== clipboardColumn)];
-      }
 
       return merged;
     });
@@ -628,7 +606,7 @@ function CompaniesContent() {
 
       return next;
     });
-  }, [baseColumnOrder, getTemplateColumnKeys, clipboardColumn, templatesLoading]);
+  }, [baseColumnOrder, getTemplateColumnKeys, templatesLoading]);
   
   // View mode state (table or list)
   const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {
@@ -690,31 +668,6 @@ function CompaniesContent() {
     }
   }, [phoneClickBehavior]);
   
-  // Reorder columns to put clipboard column first when it changes
-  // This change will automatically trigger the columnOrder save effect above
-  useEffect(() => {
-    if (clipboardColumn) {
-      setColumnOrder(prev => {
-        // Check if clipboard column exists in order
-        if (prev.includes(clipboardColumn)) {
-          // Always ensure clipboard column is first (even on refresh/mount)
-          if (prev[0] !== clipboardColumn) {
-            const filtered = prev.filter(col => col !== clipboardColumn);
-            // Moving clipboard column to first - this will trigger save via columnOrder effect
-            const newOrder = [clipboardColumn, ...filtered];
-            return newOrder;
-          }
-        } else {
-          // If clipboard column doesn't exist, add it at the beginning
-          // This will trigger save via columnOrder effect
-          return [clipboardColumn, ...prev];
-        }
-        return prev;
-      });
-    }
-    // If clipboard column is cleared, keep the order as is (no need to move anything)
-  }, [clipboardColumn]);
-
   // Apply column_settings from API (merge with current base + template columns, then clear so we only apply once)
   useEffect(() => {
     if (!columnSettingsFromApi) return;
@@ -722,16 +675,11 @@ function CompaniesContent() {
     const currentTemplateColumns = getTemplateColumnKeys();
 
     if (Array.isArray(saved.columnOrder) && saved.columnOrder.length > 0) {
-      const savedClipboard = saved.clipboardColumn ?? null;
-      const savedBase = saved.columnOrder.filter((col: string) => !col.startsWith('template_') && col !== savedClipboard);
+      const savedBase = saved.columnOrder.filter((col: string) => !col.startsWith('template_'));
       const missingBase = baseColumnOrder.filter(col => !savedBase.includes(col));
       const mergedBase = [...savedBase, ...missingBase];
       const merged = [...mergedBase, ...currentTemplateColumns.filter(tc => saved.columnOrder!.includes(tc)), ...currentTemplateColumns.filter(tc => !saved.columnOrder!.includes(tc))];
-      let order = merged;
-      if (savedClipboard && order.includes(savedClipboard)) {
-        order = [savedClipboard, ...order.filter(col => col !== savedClipboard)];
-      }
-      setColumnOrder(order);
+      setColumnOrder(merged);
     }
 
     if (Array.isArray(saved.visibleColumns) && saved.visibleColumns.length > 0) {
