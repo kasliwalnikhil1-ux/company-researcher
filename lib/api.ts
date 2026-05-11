@@ -264,9 +264,18 @@ export type JobsResearchSummary = {
   subject_line?: string;
 };
 
+/**
+ * Result of `/api/company-news-email-opener`.
+ *
+ * The API returns `null` for both fields when the LLM's relevance check
+ * decides the news isn't a good fit for an opener. That is a valid outcome —
+ * callers should still attach the underlying news text, just without an
+ * opener. `null` from `fetchCompanyNewsEmailOpener` itself means the request
+ * failed (network/HTTP error).
+ */
 export type NewsEmailOpener = {
-  first_line_to_start_email: string;
-  subject_line: string;
+  first_line_to_start_email: string | null;
+  subject_line: string | null;
 };
 
 export const fetchCompanyNewsEmailOpener = async (
@@ -290,16 +299,12 @@ export const fetchCompanyNewsEmailOpener = async (
 
     const firstLine =
       typeof data?.first_line_to_start_email === 'string'
-        ? data.first_line_to_start_email.trim()
-        : '';
+        ? data.first_line_to_start_email.trim() || null
+        : null;
     const subjectLine =
       typeof data?.subject_line === 'string'
-        ? data.subject_line.trim()
-        : '';
-
-    if (!firstLine || !subjectLine) {
-      return null;
-    }
+        ? data.subject_line.trim() || null
+        : null;
 
     return {
       first_line_to_start_email: firstLine,

@@ -64,7 +64,7 @@ async function loadUserNewsPrompt(req: NextRequest): Promise<string> {
 
 function normalizeLine(value: unknown): string {
   if (typeof value !== 'string') return '';
-  return value.replace(/\s+/g, ' ').trim().slice(0, 60);
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
           content: `I will paste a news item below.\n\nNews:\n${news}`,
         },
       ],
-      { max_tokens: 300 }
+      { max_tokens: 2000 }
     );
 
     if (extracted?.error) {
@@ -97,11 +97,15 @@ export async function POST(req: NextRequest) {
     const firstLine = normalizeLine(extracted?.first_line_to_start_email);
     const subjectLine = normalizeLine(extracted?.subject_line);
 
+    // If either field is missing, the model has signaled the news isn't
+    // relevant enough to draft an opener. That's a legitimate outcome — return
+    // 200 with null fields so callers can attach the news without an opener
+    // rather than treating it as a server error.
     if (!firstLine || !subjectLine) {
-      return NextResponse.json(
-        { error: 'AI did not return valid first line and subject line.' },
-        { status: 500 }
-      );
+      return NextResponse.json({
+        first_line_to_start_email: null,
+        subject_line: null,
+      });
     }
 
     return NextResponse.json({

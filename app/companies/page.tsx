@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
@@ -203,7 +204,7 @@ function CompaniesContent() {
     const [year, month, day] = value.split('-').map(Number);
     return new Date(year, month - 1, day, 0, 0, 0, 0);
   };
-  const { templates } = useMessageTemplates();
+  const { templates, loading: templatesLoading } = useMessageTemplates();
   const [companyFormModalOpen, setCompanyFormModalOpen] = useState(false);
   const [companyFormMode, setCompanyFormMode] = useState<'create' | 'edit'>('create');
   const [companyToEdit, setCompanyToEdit] = useState<Company | null>(null);
@@ -212,7 +213,60 @@ function CompaniesContent() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [companyToView, setCompanyToView] = useState<Company | null>(null);
   const [pendingPageDirection, setPendingPageDirection] = useState<'next' | 'prev' | null>(null);
-  
+
+  // URL <-> drawer sync: keep /companies/{id} in the address bar while the drawer is open
+  const pathname = usePathname();
+  const initialCompanyIdFromUrl = useMemo(() => {
+    const match = pathname?.match(/^\/companies\/([^/?#]+)$/);
+    return match ? match[1] : null;
+  }, [pathname]);
+  const hasAutoOpenedFromUrlRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const target = drawerOpen && companyToView ? `/companies/${companyToView.id}` : '/companies';
+    if (window.location.pathname !== target) {
+      window.history.replaceState(window.history.state, '', target);
+    }
+  }, [drawerOpen, companyToView?.id]);
+
+  // Auto-open drawer if the URL points at a specific company id on first load
+  useEffect(() => {
+    if (hasAutoOpenedFromUrlRef.current) return;
+    if (!initialCompanyIdFromUrl) return;
+    if (loading) return;
+
+    const fromList = companies.find(c => c.id === initialCompanyIdFromUrl);
+    if (fromList) {
+      hasAutoOpenedFromUrlRef.current = true;
+      setCompanyToView(fromList);
+      setDrawerOpen(true);
+      return;
+    }
+
+    // Company not on the current page — fetch it directly so a bookmarked/shared URL still works
+    let cancelled = false;
+    hasAutoOpenedFromUrlRef.current = true;
+    (async () => {
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', initialCompanyIdFromUrl)
+        .single();
+      if (cancelled) return;
+      if (data && !error) {
+        setCompanyToView(data as Company);
+        setDrawerOpen(true);
+      } else {
+        // Invalid id in URL — clean it up so the user isn't stuck on a broken path
+        if (typeof window !== 'undefined' && window.location.pathname !== '/companies') {
+          window.history.replaceState(window.history.state, '', '/companies');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [initialCompanyIdFromUrl, loading, companies]);
+
   // Sync companyToView with updated companies array when drawer is open
   useEffect(() => {
     if (companyToView && drawerOpen) {
@@ -328,16 +382,22 @@ function CompaniesContent() {
           const parsed = JSON.parse(saved);
           // Merge with current template columns to handle new templates
           const savedBase = parsed.filter((col: string) => !col.startsWith('template_') && col !== savedClipboardColumn);
-          
+
           // Ensure all current base columns are included (add missing ones like phone/email)
           const missingBaseColumns = baseColumnOrder.filter(col => !savedBase.includes(col));
           const mergedBase = [...savedBase, ...missingBaseColumns];
-          
+
           const currentTemplates = initialTemplateColumns;
-          const merged = [...mergedBase, ...currentTemplates.filter(t => parsed.includes(t))];
-          // Add any new template columns that weren't in saved
+          const savedTemplates = parsed.filter((col: string) => col.startsWith('template_'));
+          // If templates haven't loaded yet (currentTemplates is empty),
+          // preserve every saved template column so subsequent effects can see
+          // they were "already known" rather than treating them as new and
+          // defaulting them to visible.
+          const templatesInOrder = currentTemplates.length === 0
+            ? savedTemplates
+            : currentTemplates.filter(t => parsed.includes(t));
           const newTemplates = currentTemplates.filter(t => !parsed.includes(t));
-          order = [...merged, ...newTemplates];
+          order = [...mergedBase, ...templatesInOrder, ...newTemplates];
         } catch {
           order = initialDefault;
         }
@@ -356,37 +416,44 @@ function CompaniesContent() {
 
   // Update column order and visible columns when templates change
   useEffect(() => {
+    // Wait until the templates fetch has resolved. Running this effect while
+    // `templates` is still the initial empty array would strip saved template
+    // columns from the order, and then re-add them as "new" (defaulting them
+    // to visible) once the fetch finishes — clobbering user-hide choices.
+    if (templatesLoading) return;
     const currentTemplateColumns = getTemplateColumnKeys();
+    // Track template columns that didn't exist in the previous order so we
+    // can default *only those* to visible (without un-hiding user-hidden ones).
+    let trulyNewTemplateColumns: string[] = [];
+
     setColumnOrder(prev => {
       // Preserve clipboard column if it exists and is first
       const wasFirst = prev[0] === clipboardColumn && clipboardColumn;
-      
+
       // Remove old template columns and add new ones
       const baseColumns = prev.filter(col => !col.startsWith('template_') && col !== clipboardColumn);
       const existingTemplateColumns = prev.filter(col => col.startsWith('template_'));
       const newTemplateColumns = currentTemplateColumns.filter(
         tc => !existingTemplateColumns.includes(tc)
       );
-      
+      trulyNewTemplateColumns = newTemplateColumns;
+
       const newOrder = [...baseColumns, ...existingTemplateColumns.filter(tc => currentTemplateColumns.includes(tc)), ...newTemplateColumns];
-      
+
       // Put clipboard column first if it was first before or if it exists
       if (clipboardColumn && (wasFirst || newOrder.includes(clipboardColumn))) {
         const filtered = newOrder.filter(col => col !== clipboardColumn);
         return [clipboardColumn, ...filtered];
       }
-      
+
       return newOrder;
     });
-    
-    // Also update visible columns to include new template columns
+
     setVisibleColumns(prev => {
       const newSet = new Set(prev);
-      currentTemplateColumns.forEach(col => {
-        if (!newSet.has(col)) {
-          newSet.add(col); // Add new template columns by default
-        }
-      });
+      // Default ONLY genuinely new template columns to visible — never re-add
+      // ones the user explicitly hid.
+      trulyNewTemplateColumns.forEach(col => newSet.add(col));
       // Remove template columns that no longer exist
       const templateColumnsToRemove = Array.from(prev).filter(
         col => col.startsWith('template_') && !currentTemplateColumns.includes(col)
@@ -395,32 +462,50 @@ function CompaniesContent() {
       return newSet;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getTemplateColumnKeys]); // clipboardColumn is accessed in closure - separate effect handles its changes
+  }, [getTemplateColumnKeys, templatesLoading]); // clipboardColumn is accessed in closure - separate effect handles its changes
 
   const [visibleColumns, setVisibleColumns] = useState<Set<string>>(() => {
     const initialTemplateColumns = templates
       .map(t => `template_${t.id}`);
     const initialDefault = [...baseColumnOrder, ...initialTemplateColumns];
-    
+
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(COLUMN_VISIBILITY_KEY);
       if (saved) {
         try {
           const parsed = JSON.parse(saved) as string[];
-          const savedSet = new Set<string>(parsed);
-          // Ensure all base columns are visible by default (add missing ones like phone/email)
-          const visibleSet = new Set<string>(savedSet);
-          baseColumnOrder.forEach(col => {
-            if (!visibleSet.has(col)) {
-              visibleSet.add(col);
+          const visibleSet = new Set<string>(parsed);
+
+          // "Previously seen" = columns present in the saved column order. Any
+          // column NOT previously seen is genuinely new since the last save and
+          // should default to visible. Columns previously seen but absent from
+          // saved visibility were intentionally hidden by the user — leave them
+          // hidden.
+          const savedOrderRaw = localStorage.getItem(COLUMN_ORDER_KEY);
+          let seenColumns: Set<string> | null = null;
+          if (savedOrderRaw) {
+            try {
+              seenColumns = new Set<string>(JSON.parse(savedOrderRaw) as string[]);
+            } catch {
+              seenColumns = null;
             }
-          });
-          // Also ensure template columns are visible
-          initialTemplateColumns.forEach(col => {
-            if (!visibleSet.has(col)) {
-              visibleSet.add(col);
-            }
-          });
+          }
+
+          if (seenColumns) {
+            baseColumnOrder.forEach(col => {
+              if (!seenColumns!.has(col) && !visibleSet.has(col)) {
+                visibleSet.add(col);
+              }
+            });
+            initialTemplateColumns.forEach(col => {
+              if (!seenColumns!.has(col) && !visibleSet.has(col)) {
+                visibleSet.add(col);
+              }
+            });
+          }
+          // If we have no saved column order at all, trust the saved visibility
+          // verbatim — we can't tell what's "new", and respecting the user's
+          // explicit hide list is the priority.
           return visibleSet;
         } catch {
           return new Set(initialDefault);
@@ -462,15 +547,37 @@ function CompaniesContent() {
   // Keep column order/visibility synced with dynamic summary keys.
   // This ensures newly added/removed keys in summary JSON are reflected in the UI.
   useEffect(() => {
+    // Same rationale as the templates effect above — bail until templates have
+    // loaded so we don't churn template columns in/out of the order while the
+    // fetch is in flight.
+    if (templatesLoading) return;
     const currentTemplateColumns = getTemplateColumnKeys();
+    // Captured inside the order updater so the visibility updater can default
+    // ONLY genuinely-new columns to visible without un-hiding user-hidden ones.
+    let newlyDiscovered: string[] = [];
+    // Final set of valid columns AFTER the order merge, used to drop stale
+    // entries from visibleColumns. Built from `merged` rather than the raw
+    // baseColumnOrder so that dynamic summary keys preserved across the merge
+    // (e.g. while companies are still loading) aren't incorrectly removed.
+    let validColumnsAfterMerge: Set<string> = new Set();
 
     setColumnOrder(prev => {
+      const fixedColumnsSet = new Set(fixedColumns);
       const validBaseSet = new Set(baseColumnOrder);
 
       const previousBase = prev.filter(
         col => !col.startsWith('template_') && col !== clipboardColumn
       );
-      const keptBase = previousBase.filter(col => validBaseSet.has(col));
+      // Keep a base column from prev if it's currently known-valid, OR if it
+      // looks like a dynamic summary key (not in the fixed list). On the first
+      // mount-time run `companies` may be empty, so `dynamicSummaryKeys` is []
+      // and `baseColumnOrder` only contains fixed columns. We MUST NOT drop
+      // dynamic keys from `prev` in that window — otherwise when companies
+      // finish loading they'll be reintroduced as "new" and default to visible,
+      // wiping the user's hide choices.
+      const keptBase = previousBase.filter(
+        col => validBaseSet.has(col) || !fixedColumnsSet.has(col)
+      );
       const missingBase = baseColumnOrder.filter(col => !keptBase.includes(col));
       const mergedBase = [...keptBase, ...missingBase];
 
@@ -479,6 +586,11 @@ function CompaniesContent() {
       const newTemplates = currentTemplateColumns.filter(col => !keptTemplates.includes(col));
 
       const merged = [...mergedBase, ...keptTemplates, ...newTemplates];
+
+      const prevSet = new Set(prev);
+      newlyDiscovered = merged.filter(col => !prevSet.has(col));
+      validColumnsAfterMerge = new Set(merged);
+      if (clipboardColumn) validColumnsAfterMerge.add(clipboardColumn);
 
       if (clipboardColumn && merged.includes(clipboardColumn)) {
         return [clipboardColumn, ...merged.filter(col => col !== clipboardColumn)];
@@ -489,25 +601,21 @@ function CompaniesContent() {
 
     setVisibleColumns(prev => {
       const next = new Set(prev);
-      const validColumns = new Set<string>([...baseColumnOrder, ...currentTemplateColumns]);
 
-      // Add newly discovered dynamic/base/template columns by default
-      validColumns.forEach(col => {
-        if (!next.has(col)) {
-          next.add(col);
-        }
-      });
+      // Default ONLY newly-discovered columns to visible. Do not re-add columns
+      // that existed before — those are absent because the user hid them.
+      newlyDiscovered.forEach(col => next.add(col));
 
-      // Remove stale dynamic/template columns that no longer exist
+      // Remove stale entries that aren't in the post-merge column set.
       Array.from(next).forEach(col => {
-        if (!validColumns.has(col)) {
+        if (!validColumnsAfterMerge.has(col)) {
           next.delete(col);
         }
       });
 
       return next;
     });
-  }, [baseColumnOrder, getTemplateColumnKeys, clipboardColumn]);
+  }, [baseColumnOrder, getTemplateColumnKeys, clipboardColumn, templatesLoading]);
   
   // View mode state (table or list)
   const [viewMode, setViewMode] = useState<'table' | 'list'>(() => {
@@ -615,8 +723,16 @@ function CompaniesContent() {
 
     if (Array.isArray(saved.visibleColumns) && saved.visibleColumns.length > 0) {
       const visibleSet = new Set<string>(saved.visibleColumns);
-      baseColumnOrder.forEach(col => { if (!visibleSet.has(col)) visibleSet.add(col); });
-      currentTemplateColumns.forEach(col => { if (!visibleSet.has(col)) visibleSet.add(col); });
+      // Only default columns that didn't exist at save time (i.e., NEW since the
+      // last save) to visible. Columns in saved.columnOrder but missing from
+      // saved.visibleColumns were intentionally hidden by the user.
+      const savedOrderSet = new Set<string>(Array.isArray(saved.columnOrder) ? saved.columnOrder : []);
+      baseColumnOrder.forEach(col => {
+        if (!savedOrderSet.has(col) && !visibleSet.has(col)) visibleSet.add(col);
+      });
+      currentTemplateColumns.forEach(col => {
+        if (!savedOrderSet.has(col) && !visibleSet.has(col)) visibleSet.add(col);
+      });
       setVisibleColumns(visibleSet);
     }
 
@@ -2140,7 +2256,7 @@ function CompaniesContent() {
                     } else if (classification === 'NOT_QUALIFIED') {
                       return 'bg-red-200 hover:bg-red-300';
                     } else if (classification === 'EXPIRED') {
-                      return 'bg-amber-100 hover:bg-amber-200';
+                      return 'bg-gray-200 hover:bg-gray-300';
                     }
                     return 'hover:bg-gray-50';
                   };
@@ -2233,7 +2349,7 @@ function CompaniesContent() {
                             } else if (classificationValue === 'NOT_QUALIFIED') {
                               return 'bg-red-50 text-red-700';
                             } else if (classificationValue === 'EXPIRED') {
-                              return 'bg-amber-50 text-amber-700';
+                              return 'bg-gray-100 text-gray-700';
                             }
                           }
                           return '';

@@ -591,8 +591,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       }
       setCompanyNewsFetchCooldown(true);
       setTimeout(() => setCompanyNewsFetchCooldown(false), 10000);
+      setToastMessage('Company news fetched successfully');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
     } else if (result?.error) {
       setCompanyNewsError(result.error);
+      setToastMessage(`Failed to fetch company news: ${result.error}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 4000);
     }
   }, [company, companyNewsFetchCooldown, newsFetchedWithin7Days, onCompanyChange]);
 
@@ -604,6 +610,17 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       const result = await fetchCompanyNewsEmailOpener(companyNews.answer);
       if (!result) {
         setEmailOpenerError('Could not generate email opener.');
+        setToastMessage('Could not generate email opener.');
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 4000);
+        return;
+      }
+      if (result.first_line_to_start_email === null && result.subject_line === null) {
+        const msg = 'News not a good fit for an email opener — nothing generated.';
+        setEmailOpenerError(msg);
+        setToastMessage(msg);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 4000);
         return;
       }
       const updatedNews: CompanyNews = {
@@ -627,9 +644,15 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       if (onCompanyChange) {
         onCompanyChange({ ...company, summary: updatedSummary, news: updatedNews });
       }
+      setToastMessage('Email opener generated successfully');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
     } catch (err) {
       console.error('[CompanyDetailsDrawer] Email opener generation failed:', err);
       setEmailOpenerError('Something went wrong. Please try again.');
+      setToastMessage('Failed to generate email opener. Please try again.');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 4000);
     } finally {
       setGeneratingEmailOpener(false);
     }
@@ -1933,7 +1956,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
       ? "bg-red-100 text-red-800"
       : classificationValue === "EXPIRED"
-      ? "bg-amber-100 text-amber-800"
+      ? "bg-gray-200 text-gray-700"
       : "bg-gray-100 text-gray-800";
 
   const phones = (company.phone || "").split(',').map((s) => s.trim()).filter((s) => s && s !== '-');
@@ -2511,7 +2534,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                           : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
                           ? "bg-red-50 text-red-800 border-red-300 focus:ring-red-500"
                           : classificationValue === "EXPIRED"
-                          ? "bg-amber-50 text-amber-800 border-amber-300 focus:ring-amber-500"
+                          ? "bg-gray-100 text-gray-800 border-gray-300 focus:ring-gray-400"
                           : "bg-white text-gray-900 border-gray-300 focus:ring-indigo-500"
                       }`}
                     >

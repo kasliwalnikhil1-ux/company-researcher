@@ -535,8 +535,8 @@ export default function CompanyResearcher() {
         const newsToSaveIg = newsDraft && _sourceNewsTextIg ? {
           answer: _sourceNewsTextIg,
           citations: [] as string[],
-          first_line_to_start_email: newsDraft.first_line_to_start_email,
-          subject_line: newsDraft.subject_line,
+          first_line_to_start_email: newsDraft.first_line_to_start_email ?? undefined,
+          subject_line: newsDraft.subject_line ?? undefined,
           date: new Date().toISOString(),
         } : null;
         let instagramProfileData = null;
@@ -765,8 +765,8 @@ export default function CompanyResearcher() {
         const newsToSaveJobs = newsDraft && _sourceNewsTextJobs ? {
           answer: _sourceNewsTextJobs,
           citations: [] as string[],
-          first_line_to_start_email: newsDraft.first_line_to_start_email,
-          subject_line: newsDraft.subject_line,
+          first_line_to_start_email: newsDraft.first_line_to_start_email ?? undefined,
+          subject_line: newsDraft.subject_line ?? undefined,
           date: new Date().toISOString(),
         } : null;
         const data = await fetchJobsResearch(company);
@@ -901,8 +901,8 @@ export default function CompanyResearcher() {
         const newsToSavePerson = newsDraft && _sourceNewsTextPerson ? {
           answer: _sourceNewsTextPerson,
           citations: [] as string[],
-          first_line_to_start_email: newsDraft.first_line_to_start_email,
-          subject_line: newsDraft.subject_line,
+          first_line_to_start_email: newsDraft.first_line_to_start_email ?? undefined,
+          subject_line: newsDraft.subject_line ?? undefined,
           date: new Date().toISOString(),
         } : null;
         let qualificationData = null;
@@ -1028,8 +1028,8 @@ export default function CompanyResearcher() {
         const newsToSave = newsDraft && _sourceNewsText ? {
           answer: _sourceNewsText,
           citations: [] as string[],
-          first_line_to_start_email: newsDraft.first_line_to_start_email,
-          subject_line: newsDraft.subject_line,
+          first_line_to_start_email: newsDraft.first_line_to_start_email ?? undefined,
+          subject_line: newsDraft.subject_line ?? undefined,
           date: new Date().toISOString(),
         } : null;
         // Fetch company qualification data

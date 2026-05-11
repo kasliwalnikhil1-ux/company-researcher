@@ -39,17 +39,22 @@ export const fetchPersonalizationDirect = async (
   }
 };
 
-// Merge a news-draft email opener into a summary blob without mutating the input.
+// Merge a news-draft email opener into a summary blob without mutating the
+// input. Only fields with a non-empty value overwrite — when the relevance
+// check returns null fields, we keep whatever the previous summary had.
 export const mergeNewsDraftIntoSummary = <T extends Record<string, any> | null | undefined>(
   summary: T,
   draft: NewsEmailOpener | null | undefined
 ): T => {
   if (!summary || !draft) return summary;
-  return {
-    ...summary,
-    first_line_to_start_email: draft.first_line_to_start_email,
-    subject_line: draft.subject_line,
-  } as T;
+  const merged: Record<string, any> = { ...summary };
+  if (draft.first_line_to_start_email) {
+    merged.first_line_to_start_email = draft.first_line_to_start_email;
+  }
+  if (draft.subject_line) {
+    merged.subject_line = draft.subject_line;
+  }
+  return merged as T;
 };
 
 export interface AnalyzeCompanyArgs {
