@@ -21,6 +21,7 @@ function getCompanyLabel(company: PreviewCompany): string {
 
 // Chips by primaryUse
 const FUNDRAISING_CHIPS: { variable: string; sampleLabel: string }[] = [
+  { variable: '${first_name}', sampleLabel: 'Alex (from contact)' },
   { variable: '${twitter_line}', sampleLabel: 'I just read your tweet about...' },
   { variable: '${line1}', sampleLabel: 'I saw ..., which is why I\'m reaching out to your company.' },
   { variable: '${line2}', sampleLabel: 'I believe ... could greatly benefit us at my company.' },
@@ -35,6 +36,7 @@ const FUNDRAISING_CHIPS: { variable: string; sampleLabel: string }[] = [
 ];
 
 const B2B_CHIPS: { variable: string; sampleLabel: string }[] = [
+  { variable: '${first_name}', sampleLabel: 'Alex (from contact)' },
   { variable: '${PRODUCT1}', sampleLabel: 'jewelry' },
   { variable: '${PRODUCT2}', sampleLabel: 'accessories' },
   { variable: '${salesOpenerSentence}', sampleLabel: 'Loved your latest collection.' },
@@ -50,6 +52,10 @@ const B2B_CHIPS: { variable: string; sampleLabel: string }[] = [
   { variable: '${followUpRelativeShortDay}', sampleLabel: 'this Tue' },
   { variable: '${followUpDateOnly}', sampleLabel: 'Jan 15' },
 ];
+
+// Sample contact used to demo `${first_name}` in the live preview. The real
+// value comes from the selected contact in the company drawer at send time.
+const PREVIEW_SAMPLE_CONTACT = { first_name: 'Alex', last_name: 'Morgan', full_name: 'Alex Morgan' };
 
 function getVariableChips(primaryUse: 'fundraising' | 'b2b') {
   return primaryUse === 'b2b' ? B2B_CHIPS : FUNDRAISING_CHIPS;
@@ -174,7 +180,13 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     return previewCompanies.map((company) => ({
       company,
       rendered:
-        renderCompanyTemplate(previewTemplate, company.summary, previewTemplateList) || tmpl,
+        renderCompanyTemplate(
+          previewTemplate,
+          company.summary,
+          previewTemplateList,
+          [],
+          PREVIEW_SAMPLE_CONTACT
+        ) || tmpl,
     }));
   }, [formData.template, previewCompanies, previewTemplate, previewTemplateList]);
 

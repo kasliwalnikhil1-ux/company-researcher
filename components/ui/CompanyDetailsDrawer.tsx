@@ -15,6 +15,7 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Plus,
   Edit2,
   FileText,
@@ -34,6 +35,7 @@ import {
 import { Company } from "@/contexts/CompaniesContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMessageTemplates, CHANNEL_LABELS, TemplateChannel } from "@/contexts/MessageTemplatesContext";
+import { renderCompanyTemplate, type TemplateContact } from "@/lib/messageTemplates";
 import { extractPhoneNumber } from "@/lib/utils";
 import PhoneInputField from "@/components/ui/PhoneInputField";
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from "@/lib/emailCompose";
@@ -206,6 +208,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [outreachChannelFilter, setOutreachChannelFilter] = useState<TemplateChannel | "all">("all");
   const [outreachCategoryFilter, setOutreachCategoryFilter] = useState<string>("all");
   const [outreachSearch, setOutreachSearch] = useState("");
+  // Identifier of the contact whose name fields (e.g. ${first_name}) should be
+  // injected when rendering outreach template values. "" = no contact selected.
+  const [outreachContactId, setOutreachContactId] = useState<string>("");
   const [companyNews, setCompanyNews] = useState<CompanyNews | null>(null);
   const [companyNewsLoading, setCompanyNewsLoading] = useState(false);
   const [companyNewsError, setCompanyNewsError] = useState<string | null>(null);
@@ -241,6 +246,51 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       return templateById.get(id) || null;
     },
     [templateById]
+  );
+
+  // Stable identifier for a contact row (mirrors the lookup logic used by
+  // handleContactToggle / handleContactStatusChange).
+  const getContactIdentifier = useCallback((contact: any): string => {
+    return String(contact?.person_id || contact?.email || contact?.full_name || "");
+  }, []);
+
+  const selectedOutreachContact = useMemo<TemplateContact | null>(() => {
+    if (!outreachContactId || !contacts) return null;
+    const match = contacts.find((c) => getContactIdentifier(c) === outreachContactId);
+    return (match as TemplateContact) || null;
+  }, [outreachContactId, contacts, getContactIdentifier]);
+
+  // Contact-aware variant of getCellValue: for template columns, re-render the
+  // template with the given contact so ${first_name} resolves to that
+  // recipient. For all other columns, fall back to the prop-supplied getter.
+  const renderOutreachForContact = useCallback(
+    (columnKey: string, contact: TemplateContact | null): string => {
+      if (!company) return "";
+      if (columnKey.startsWith("template_") && contact) {
+        const templateId = columnKey.replace("template_", "");
+        const fullTemplate = messageTemplates.find((t) => t.id === templateId);
+        if (fullTemplate && fullTemplate.template) {
+          const summary = (company.summary as Record<string, any> | null | undefined) ?? null;
+          const rendered = renderCompanyTemplate(
+            fullTemplate,
+            summary,
+            messageTemplates,
+            [],
+            contact
+          );
+          return rendered || "";
+        }
+      }
+      return getCellValue(company, columnKey);
+    },
+    [company, messageTemplates, getCellValue]
+  );
+
+  // Shorthand bound to the outreach-tab's contact selector.
+  const getOutreachValue = useCallback(
+    (columnKey: string): string =>
+      renderOutreachForContact(columnKey, selectedOutreachContact),
+    [renderOutreachForContact, selectedOutreachContact]
   );
 
   // Handle cell double click (edit)
@@ -813,8 +863,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
   useEffect(() => {
     if (
-      activeTab === "contacts" &&
-      prevTabRef.current !== "contacts" &&
+      (activeTab === "contacts" || activeTab === "outreach") &&
+      prevTabRef.current !== activeTab &&
       company?.domain
     ) {
       fetchContacts();
@@ -836,6 +886,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
       setActiveTab("overview");
       setContacts(null);
+      setOutreachContactId("");
       setCompanyNews(null);
       setCompanyNewsError(null);
       setCompanyNewsFetchCooldown(false);
@@ -1595,6 +1646,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     const [copiedItem, setCopiedItem] = useState<string | null>(null);
     const [editingEmail, setEditingEmail] = useState(false);
     const [emailDraft, setEmailDraft] = useState("");
+    const [messagesExpanded, setMessagesExpanded] = useState(false);
+    const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
+    const [cardChannelFilter, setCardChannelFilter] = useState<TemplateChannel | "all">("all");
+    const [cardCategoryFilter, setCardCategoryFilter] = useState<string>("all");
+    const [cardSearch, setCardSearch] = useState("");
     const showPlaceholder = !contact.photo_url || imageError;
 
     const contactId = contact.person_id || contact.email || contact.full_name || index;
@@ -1870,17 +1926,16 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     >
                       {contact.email}
                     </a>
-                    {contact.email_status && (
-                      <span
-                        className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                          contact.email_status === "verified"
-                            ? "bg-green-100 text-green-700"
-                            : "bg-gray-100 text-gray-700"
-                        }`}
-                      >
+                    {contact.email_status === "verified" ? (
+                      <CheckCircle
+                        className="w-3.5 h-3.5 text-green-600 flex-shrink-0"
+                        aria-label="Verified email"
+                      />
+                    ) : contact.email_status ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-gray-100 text-gray-700">
                         {contact.email_status}
                       </span>
-                    )}
+                    ) : null}
                     <button
                       onClick={() => handleCopy(contact.email, `email-${index}`)}
                       className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
@@ -1929,14 +1984,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               )}
               {contact.linkedin_url && (
                 <div className="flex items-center gap-1.5 text-sm">
-                  <Linkedin className="w-4 h-4 text-gray-400 flex-shrink-0" />
                   <a
                     href={contact.linkedin_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                    className="text-gray-400 hover:text-indigo-600 transition-colors"
+                    title="Open LinkedIn profile"
                   >
-                    LinkedIn
+                    <Linkedin className="w-4 h-4" />
                   </a>
                   <button
                     onClick={() => handleCopy(contact.linkedin_url, `linkedin-${index}`)}
@@ -1983,9 +2038,319 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     : "Get details with email"}
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setMessagesExpanded((v) => !v)}
+                className={`ml-auto inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded border transition-colors ${
+                  messagesExpanded
+                    ? "border-indigo-300 bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                    : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                }`}
+                title={messagesExpanded ? "Hide outreach messages" : "Show outreach messages"}
+                aria-expanded={messagesExpanded}
+              >
+                {messagesExpanded ? (
+                  <ChevronUp className="w-3.5 h-3.5" />
+                ) : (
+                  <Mail className="w-3.5 h-3.5" />
+                )}
+                {messagesExpanded ? "Hide messages" : "Show messages"}
+              </button>
             </div>
           </div>
         </div>
+        {messagesExpanded && (
+          <div className="mt-3 pt-3 border-t border-gray-200">
+            {(() => {
+              const populatedKeys = columnOrder
+                .filter((c) => isOutreachColumn(c) && !shouldHideDrawerField(c))
+                .filter((c) => {
+                  const v = renderOutreachForContact(c, contact);
+                  return v && v !== "-";
+                });
+
+              if (populatedKeys.length === 0) {
+                return (
+                  <p className="text-xs text-gray-400 italic">
+                    No outreach messages available for this company yet.
+                  </p>
+                );
+              }
+
+              // Filter option discovery (channels and categories present in
+              // populated template-backed columns).
+              const cardAvailableChannels = new Set<TemplateChannel>();
+              const cardAvailableCategories = new Set<string>();
+              for (const key of populatedKeys) {
+                const tpl = getTemplateForColumn(key);
+                if (!tpl) continue;
+                cardAvailableChannels.add(tpl.channel);
+                const cat = (tpl.category || "").trim();
+                if (cat) cardAvailableCategories.add(cat);
+              }
+              const cardVisibleChannels = (
+                ["email", "linkedin", "direct", "instagram"] as TemplateChannel[]
+              ).filter((ch) => cardAvailableChannels.has(ch));
+              const cardVisibleCategories = Array.from(cardAvailableCategories).sort(
+                (a, b) => a.localeCompare(b)
+              );
+
+              const cardFiltersActive =
+                cardChannelFilter !== "all" ||
+                cardCategoryFilter !== "all" ||
+                cardSearch.trim().length > 0;
+              const cardSearchLower = cardSearch.trim().toLowerCase();
+
+              const filteredKeys = populatedKeys.filter((c) => {
+                if (!cardFiltersActive) return true;
+                const tpl = getTemplateForColumn(c);
+                if (!tpl) return false;
+                if (cardChannelFilter !== "all" && tpl.channel !== cardChannelFilter) {
+                  return false;
+                }
+                if (
+                  cardCategoryFilter !== "all" &&
+                  (tpl.category || "").trim() !== cardCategoryFilter
+                ) {
+                  return false;
+                }
+                if (
+                  cardSearchLower &&
+                  !(tpl.title || "").toLowerCase().includes(cardSearchLower)
+                ) {
+                  return false;
+                }
+                return true;
+              });
+
+              const subjectColumn =
+                typeof window !== "undefined"
+                  ? localStorage.getItem("companies-subject-column")
+                  : null;
+
+              const getSubjectForContact = (): string | undefined => {
+                if (!subjectColumn) return undefined;
+                try {
+                  const v = renderOutreachForContact(subjectColumn, contact);
+                  return v && v !== "-" ? v : undefined;
+                } catch (_) {
+                  return undefined;
+                }
+              };
+
+              const getGreeting = (): string => {
+                let firstName = "";
+                if (contact.first_name) {
+                  firstName = contact.first_name;
+                } else if (contact.full_name) {
+                  const parts = contact.full_name.trim().split(/\s+/);
+                  firstName = parts[0] || "";
+                }
+                return firstName ? `Hi ${firstName},` : "Hi,";
+              };
+
+              const handleCopyMsg = async (key: string, text: string) => {
+                try {
+                  await navigator.clipboard.writeText(text);
+                  setCopiedMessageKey(key);
+                  setTimeout(() => setCopiedMessageKey(null), 2000);
+                } catch (err) {
+                  console.error("Failed to copy:", err);
+                }
+              };
+
+              const handleSendEmail = (messageText: string) => {
+                if (!contact.email) return;
+                const subject = getSubjectForContact();
+                const body = buildEmailBody(messageText, getGreeting(), emailSettings);
+                const url = buildEmailComposeUrl(contact.email, {
+                  subject,
+                  body,
+                  emailSettings,
+                });
+                window.open(url, "_blank", "noopener,noreferrer");
+              };
+
+              const handleSendLinkedIn = async (key: string, messageText: string) => {
+                if (!contact.linkedin_url) return;
+                try {
+                  await navigator.clipboard.writeText(messageText);
+                  setCopiedMessageKey(`linkedin-${key}`);
+                  setTimeout(() => setCopiedMessageKey(null), 2000);
+                } catch (err) {
+                  console.error("Failed to copy:", err);
+                }
+                window.open(contact.linkedin_url, "_blank", "noopener,noreferrer");
+              };
+
+              const handleCopyAllForContact = async () => {
+                try {
+                  const combined = filteredKeys
+                    .map((k) => {
+                      const label = columnLabels[k] || k;
+                      const value = renderOutreachForContact(k, contact);
+                      return `${label}\n${value}`;
+                    })
+                    .join("\n\n");
+                  await navigator.clipboard.writeText(combined);
+                  setCopiedMessageKey("__all__");
+                  setTimeout(() => setCopiedMessageKey(null), 2000);
+                } catch (err) {
+                  console.error("Failed to copy all:", err);
+                }
+              };
+
+              return (
+                <>
+                  <div className="flex items-center justify-between mb-2 gap-2">
+                    <p className="text-[11px] font-medium text-gray-500 uppercase tracking-wider truncate">
+                      Outreach for {contactName}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleCopyAllForContact}
+                      disabled={filteredKeys.length === 0}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100 transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Copy all messages with labels"
+                    >
+                      {copiedMessageKey === "__all__" ? (
+                        <Check className="w-3 h-3 text-emerald-500" />
+                      ) : (
+                        <Copy className="w-3 h-3" />
+                      )}
+                      {copiedMessageKey === "__all__" ? "Copied!" : "Copy All"}
+                    </button>
+                  </div>
+
+                  {/* Filters: search + channel + category */}
+                  <div className="space-y-2 mb-2">
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={cardSearch}
+                        onChange={(e) => setCardSearch(e.target.value)}
+                        placeholder="Search by title..."
+                        className="w-full pl-7 pr-2 py-1.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {cardVisibleChannels.length > 0 && (
+                        <select
+                          value={cardChannelFilter}
+                          onChange={(e) =>
+                            setCardChannelFilter(e.target.value as TemplateChannel | "all")
+                          }
+                          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="all">All channels</option>
+                          {cardVisibleChannels.map((ch) => (
+                            <option key={ch} value={ch}>
+                              {CHANNEL_LABELS[ch]}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {cardVisibleCategories.length > 0 && (
+                        <select
+                          value={cardCategoryFilter}
+                          onChange={(e) => setCardCategoryFilter(e.target.value)}
+                          className="px-2 py-1 text-xs border border-gray-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          <option value="all">All categories</option>
+                          {cardVisibleCategories.map((cat) => (
+                            <option key={cat} value={cat}>
+                              {cat}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {cardFiltersActive && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCardChannelFilter("all");
+                            setCardCategoryFilter("all");
+                            setCardSearch("");
+                          }}
+                          className="px-2 py-1 text-[11px] font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {filteredKeys.length === 0 ? (
+                    <p className="text-xs text-gray-400 italic">
+                      No messages match the current filters.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredKeys.map((columnKey) => {
+                        const value = renderOutreachForContact(columnKey, contact);
+                        const label = columnLabels[columnKey] || columnKey;
+                        return (
+                          <div
+                            key={columnKey}
+                            className="bg-gray-50 border border-gray-200 rounded p-2.5"
+                          >
+                            <div className="flex items-center justify-between mb-1.5 gap-2">
+                              <p className="text-[10px] font-medium text-gray-500 uppercase tracking-wider truncate">
+                                {label}
+                              </p>
+                              <div className="flex items-center gap-0.5 flex-shrink-0">
+                                {contact.email && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendEmail(value)}
+                                    className="p-0.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                    title={`Open in email to ${contact.email}`}
+                                  >
+                                    <Mail className="w-3 h-3" />
+                                  </button>
+                                )}
+                                {contact.linkedin_url && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendLinkedIn(columnKey, value)}
+                                    className="p-0.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                    title="Copy message & open LinkedIn"
+                                  >
+                                    {copiedMessageKey === `linkedin-${columnKey}` ? (
+                                      <Check className="w-3 h-3 text-emerald-500" />
+                                    ) : (
+                                      <Linkedin className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyMsg(columnKey, value)}
+                                  className="p-0.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                  title={`Copy ${label}`}
+                                >
+                                  {copiedMessageKey === columnKey ? (
+                                    <Check className="w-3 h-3 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="w-3 h-3" />
+                                  )}
+                                </button>
+                              </div>
+                            </div>
+                            <pre className="text-xs text-gray-800 whitespace-pre-wrap font-sans break-words">
+                              {value}
+                            </pre>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
       </div>
     );
   };
@@ -3013,7 +3378,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 const populatedOutreachKeys = columnOrder
                   .filter((c) => isOutreachColumn(c) && !shouldHideDrawerField(c))
                   .filter((c) => {
-                    const v = getCellValue(company, c);
+                    const v = getOutreachValue(c);
                     return v && v !== "-";
                   });
 
@@ -3068,7 +3433,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     const combined = outreachKeys
                       .map((k) => {
                         const label = columnLabels[k] || k;
-                        const value = getCellValue(company, k);
+                        const value = getOutreachValue(k);
                         return `${label}\n${value}`;
                       })
                       .join("\n\n");
@@ -3080,8 +3445,50 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   }
                 };
 
+                const contactOptions = (contacts || [])
+                  .map((c: any) => {
+                    const id = getContactIdentifier(c);
+                    const fullName =
+                      (c?.full_name || `${c?.first_name || ""} ${c?.last_name || ""}`.trim()).trim();
+                    return id && fullName ? { id, label: fullName, title: c?.title || c?.headline || "" } : null;
+                  })
+                  .filter((opt): opt is { id: string; label: string; title: string } => !!opt);
+
+                const personalizeControl = (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Users className="w-4 h-4 text-gray-400" />
+                    <span className="text-xs font-medium text-gray-600">Personalize for</span>
+                    {contactsLoading && !contactOptions.length ? (
+                      <span className="text-xs text-gray-400 inline-flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Loading contacts…
+                      </span>
+                    ) : contactOptions.length === 0 ? (
+                      <span className="text-xs text-gray-400">
+                        No contacts yet — add one from the Contacts tab to use{" "}
+                        <code className="font-mono">${"{first_name}"}</code>.
+                      </span>
+                    ) : (
+                      <select
+                        value={outreachContactId}
+                        onChange={(e) => setOutreachContactId(e.target.value)}
+                        className="px-2 py-1 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                      >
+                        <option value="">No contact (use defaults)</option>
+                        {contactOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>
+                            {opt.label}
+                            {opt.title ? ` — ${opt.title}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                );
+
                 const filterControls = (
                   <div className="space-y-2">
+                    {personalizeControl}
                     <div className="relative">
                       <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
@@ -3182,7 +3589,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     {filterControls}
                     <div className="space-y-3">
                       {outreachKeys.map((columnKey) => {
-                        const value = getCellValue(company, columnKey);
+                        const value = getOutreachValue(columnKey);
                         const label = columnLabels[columnKey] || columnKey;
                         return (
                           <div
@@ -3540,39 +3947,46 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     <span className="ml-1 text-gray-400 normal-case">({contacts.length})</span>
                   )}
                 </h3>
-                {!isAddingContact && (
-                  <div className="flex items-center gap-2">
-                    {company.domain?.trim() && !isPersonProfile && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const domain = company.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '');
-                          const name = domain.split('.')[0];
-                          const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-                          const query = `site:linkedin.com/in ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing") ("${capitalized}" OR "${domain}")`;
-                          const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-                          window.open(url, '_blank', 'noopener,noreferrer');
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded transition-colors"
-                        title="Find people on LinkedIn via Google search"
-                      >
-                        <Users className="w-3.5 h-3.5" />
-                        Find People
-                      </button>
-                    )}
+                <div className="flex items-center gap-2">
+                  {company.domain?.trim() && !isPersonProfile && (
                     <button
-                      onClick={() => setIsAddingContact(true)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded transition-colors"
+                      type="button"
+                      onClick={() => {
+                        const domain = company.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '');
+                        const name = domain.split('.')[0];
+                        const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
+                        const query = `site:linkedin.com/in ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing") ("${capitalized}" OR "${domain}")`;
+                        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded transition-colors"
+                      title="Find people on LinkedIn via Google search"
                     >
-                      <Plus className="w-3.5 h-3.5" />
-                      Add contact
+                      <Users className="w-3.5 h-3.5" />
+                      Find People
                     </button>
-                  </div>
-                )}
+                  )}
+                  <button
+                    onClick={() => setIsAddingContact(true)}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add contact
+                  </button>
+                </div>
               </div>
 
               {isAddingContact && (
-                <div className="bg-white border border-indigo-200 rounded-lg p-4 shadow-sm space-y-3">
+                <>
+                  <div
+                    className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] transition-opacity duration-300"
+                    onClick={savingNewContact ? undefined : handleAddContactCancel}
+                  />
+                  <div className="fixed inset-0 z-[70] flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+                    <div
+                      className="bg-white rounded-lg shadow-xl max-w-2xl w-full my-8 p-5 space-y-3 transform transition-all"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                   <div className="flex items-center justify-between gap-2">
                     <h4 className="text-sm font-semibold text-gray-900">
                       {editingContactId !== null ? "Edit contact" : "New contact"}
@@ -3814,7 +4228,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       {editingContactId !== null ? "Update contact" : "Save contact"}
                     </button>
                   </div>
-                </div>
+                    </div>
+                  </div>
+                </>
               )}
 
               {contactsLoading ? (

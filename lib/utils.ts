@@ -99,6 +99,16 @@ export function substituteVariables(
   }
 
   Object.entries(processedVariables).forEach(([key, value]) => {
+    // Empty / missing value: swallow the placeholder along with one trailing
+    // punctuation char (.,!?;:) and following horizontal whitespace so that
+    // "${first_name}, I was" becomes "I was" rather than ", I was". Newlines
+    // are preserved so paragraph structure stays intact.
+    if (value === undefined || value === null || value === '') {
+      const emptyRegex = new RegExp(`\\$\\{${key}\\}[,.!?;:]?[ \\t]*`, 'g');
+      result = result.replace(emptyRegex, '');
+      return;
+    }
+
     // Match ${variable} followed by optional punctuation (`,`, `!`, `.`) or end of string/whitespace
     // Use capturing groups to check what follows the placeholder
     const regex = new RegExp(`\\$\\{${key}\\}([,\\!.])?(\\s*$)?`, 'g');
@@ -128,6 +138,18 @@ export function substituteVariables(
       return substitutedValue;
     });
   });
+
+  // Clean up artifacts from removed placeholders: collapse interior runs of
+  // horizontal whitespace produced mid-line (e.g. "Hi ${x} how" → "Hi  how"
+  // → "Hi how") while preserving any leading indentation, and strip trailing
+  // whitespace on each line so a placeholder at end-of-line doesn't leave a
+  // dangling space.
+  result = result
+    .split('\n')
+    .map((line) =>
+      line.replace(/(\S)[ \t]{2,}/g, '$1 ').replace(/[ \t]+$/g, '')
+    )
+    .join('\n');
 
   return result;
 }

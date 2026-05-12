@@ -112,10 +112,49 @@ export function extractTemplateVariables(template: string): string[] {
   return Array.from(set);
 }
 
+/** A contact whose name fields can be substituted into a template. */
+export interface TemplateContact {
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
+  [key: string]: any;
+}
+
+/** Derive {first_name, last_name, full_name} (snake + camel) from a contact. */
+export function deriveContactNameVariables(
+  contact: TemplateContact | null | undefined
+): Record<string, string> {
+  if (!contact) return {};
+  const fullNameRaw = (contact.full_name || '').toString().trim();
+  let firstName = (contact.first_name || '').toString().trim();
+  let lastName = (contact.last_name || '').toString().trim();
+  if ((!firstName || !lastName) && fullNameRaw) {
+    const parts = fullNameRaw.split(/\s+/);
+    if (!firstName) firstName = parts[0] || '';
+    if (!lastName) lastName = parts.slice(1).join(' ');
+  }
+  const fullName = fullNameRaw || [firstName, lastName].filter(Boolean).join(' ');
+  const vars: Record<string, string> = {};
+  if (firstName) {
+    vars.first_name = firstName;
+    vars.firstName = firstName;
+  }
+  if (lastName) {
+    vars.last_name = lastName;
+    vars.lastName = lastName;
+  }
+  if (fullName) {
+    vars.full_name = fullName;
+    vars.fullName = fullName;
+  }
+  return vars;
+}
+
 /** Build the variable map used to render a company-channel template. */
 export function buildCompanyTemplateVariables(
   summaryData: Record<string, any> | null | undefined,
-  holidays: string[] = []
+  holidays: string[] = [],
+  contact?: TemplateContact | null
 ): Record<string, string> {
   const followUpDate = getFollowUpDate(new Date(), holidays);
   const variables: Record<string, string> = {
@@ -150,6 +189,10 @@ export function buildCompanyTemplateVariables(
       variables['PRODUCT2'] = productTypes[1] || productTypes[0] || '';
     }
   }
+
+  // Contact name fields take precedence over any matching summary keys so that
+  // ${first_name} always reflects the chosen recipient when one is provided.
+  Object.assign(variables, deriveContactNameVariables(contact));
 
   return variables;
 }
@@ -230,9 +273,10 @@ export function renderCompanyTemplate(
   template: RenderableTemplate,
   summaryData: Record<string, any> | null | undefined,
   allTemplates: RenderableTemplate[],
-  holidays: string[] = []
+  holidays: string[] = [],
+  contact?: TemplateContact | null
 ): string {
-  const variables = buildCompanyTemplateVariables(summaryData, holidays);
+  const variables = buildCompanyTemplateVariables(summaryData, holidays, contact);
   return renderTemplateWithFallback(template, variables, allTemplates);
 }
 

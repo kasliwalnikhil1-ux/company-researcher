@@ -13,6 +13,10 @@ import { renderCompanyTemplate } from '@/lib/messageTemplates';
 const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram', 'ads', 'jobs'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 
+// Sample contact used for the preview column so `${first_name}` shows a value
+// even before a real recipient is selected in the company drawer.
+const PREVIEW_SAMPLE_CONTACT = { first_name: 'Alex', last_name: 'Morgan', full_name: 'Alex Morgan' };
+
 type TemplateTab = 'all' | TemplateChannel;
 
 export default function TemplatesPage() {
@@ -79,6 +83,8 @@ function TemplatesContent() {
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [selectedPreviewIndex, setSelectedPreviewIndex] = useState(0);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   useEffect(() => {
     if (selectedPreviewIndex >= previewCompanies.length && previewCompanies.length > 0) {
@@ -168,6 +174,51 @@ function TemplatesContent() {
     setTemplateToDelete(null);
   };
 
+  const formatTemplateForCopy = (template: MessageTemplate, index?: number): string => {
+    const header = [
+      template.title || `${CHANNEL_LABELS[template.channel]} Template`,
+      CHANNEL_LABELS[template.channel],
+      template.category || '—',
+    ].join(' - ');
+    const prefix = typeof index === 'number' ? `${index + 1}: ` : '';
+    const body = template.template || '(No template defined)';
+    const filled = selectedPreviewCompany && template.template
+      ? renderCompanyTemplate(template, selectedPreviewCompany.summary, templates, [], PREVIEW_SAMPLE_CONTACT) || body
+      : '(No preview company selected)';
+    const sampleLabel = selectedPreviewCompany
+      ? `Filled Template on sample (${getCompanyLabel(selectedPreviewCompany)}):`
+      : 'Filled Template on sample:';
+    return `${prefix}${header}\n${body}\n\n${sampleLabel}\n${filled}`;
+  };
+
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleCopyTemplate = async (template: MessageTemplate) => {
+    const ok = await copyToClipboard(formatTemplateForCopy(template));
+    if (ok) {
+      setCopiedId(template.id);
+      setTimeout(() => setCopiedId((prev) => (prev === template.id ? null : prev)), 1500);
+    }
+  };
+
   // Filter and sort templates by channel and number in title (e.g., "Message 1", "Message 2")
   const sortedTemplates = useMemo(() => {
     // First filter by active tab channel (or show all)
@@ -223,6 +274,18 @@ function TemplatesContent() {
     });
   }, [templates, activeTab, channelOptions]);
 
+  const handleCopyAll = async () => {
+    if (sortedTemplates.length === 0) return;
+    const text = sortedTemplates
+      .map((t, idx) => formatTemplateForCopy(t, idx))
+      .join('\n\n---\n\n');
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedAll(true);
+      setTimeout(() => setCopiedAll(false), 1500);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-3.5rem)] md:min-h-screen">
@@ -235,12 +298,21 @@ function TemplatesContent() {
     <div className="p-8 max-w-[1400px] mx-auto">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900">Message Templates</h1>
-        <button
-          onClick={handleCreateClick}
-          className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-        >
-          Create Template
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleCopyAll}
+            disabled={sortedTemplates.length === 0}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {copiedAll ? 'Copied!' : 'Copy All'}
+          </button>
+          <button
+            onClick={handleCreateClick}
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+          >
+            Create Template
+          </button>
+        </div>
       </div>
 
       {/* Tabs + Preview Company Selector */}
@@ -306,7 +378,7 @@ function TemplatesContent() {
         <div className="space-y-4">
           {sortedTemplates.map((template) => {
             const rendered = selectedPreviewCompany && template.template
-              ? renderCompanyTemplate(template, selectedPreviewCompany.summary, templates) || ''
+              ? renderCompanyTemplate(template, selectedPreviewCompany.summary, templates, [], PREVIEW_SAMPLE_CONTACT) || ''
               : '';
             return (
               <div
@@ -330,6 +402,12 @@ function TemplatesContent() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleCopyTemplate(template)}
+                      className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      {copiedId === template.id ? 'Copied!' : 'Copy'}
+                    </button>
                     <button
                       onClick={() => handleEditClick(template)}
                       className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
