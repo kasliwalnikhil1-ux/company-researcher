@@ -284,7 +284,7 @@ function FundraisingAnalytics() {
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
               <XAxis type="number" tick={{ fill: '#6b7280' }} />
               <YAxis type="category" dataKey="name" tick={{ fill: '#6b7280' }} width={70} />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v: number | undefined) => [v ?? 0, 'Count']} />
+              <Tooltip contentStyle={tooltipStyle} formatter={(v) => [typeof v === 'number' ? v : 0, 'Count']} />
               <Bar dataKey="value" name="Count" radius={[0, 4, 4, 0]}>
                 {funnelSteps.map((entry, index) => (
                   <Cell key={`cell-${index}`} fill={entry.fill} />
@@ -366,7 +366,7 @@ function FundraisingAnalytics() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 11 }} angle={-45} textAnchor="end" height={60} />
                 <YAxis tick={{ fill: '#6b7280' }} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v: number | undefined) => [v ?? 0, 'Investors']} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [typeof v === 'number' ? v : 0, 'Investors']} />
                 <Bar dataKey="count" name="Investors" fill="#6366f1" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -387,7 +387,7 @@ function FundraisingAnalytics() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 11 }} angle={-45} textAnchor="end" height={60} />
                 <YAxis tick={{ fill: '#6b7280' }} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v: number | undefined) => [v ?? 0, 'Investors']} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [typeof v === 'number' ? v : 0, 'Investors']} />
                 <Bar dataKey="count" name="Investors" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -408,7 +408,7 @@ function FundraisingAnalytics() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 11 }} angle={-45} textAnchor="end" height={60} />
                 <YAxis tick={{ fill: '#6b7280' }} />
-                <Tooltip contentStyle={tooltipStyle} formatter={(v: number | undefined) => [v ?? 0, 'Investors']} />
+                <Tooltip contentStyle={tooltipStyle} formatter={(v) => [typeof v === 'number' ? v : 0, 'Investors']} />
                 <Bar dataKey="count" name="Investors" fill="#06b6d4" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

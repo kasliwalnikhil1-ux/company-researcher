@@ -633,8 +633,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       }
       const updatedNews: CompanyNews = {
         ...companyNews,
-        first_line_to_start_email: result.first_line_to_start_email,
-        subject_line: result.subject_line,
+        first_line_to_start_email: result.first_line_to_start_email ?? undefined,
+        subject_line: result.subject_line ?? undefined,
       };
       setCompanyNews(updatedNews);
       try {
