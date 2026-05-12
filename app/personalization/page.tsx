@@ -22,6 +22,7 @@ import {
   DEFAULT_INVESTOR_TWITTER_PROMPT,
   DEFAULT_INVESTOR_NEWS_PROMPT,
   DEFAULT_B2B_NEWS_PROMPT,
+  DEFAULT_B2B_ADS_PROMPT,
   DEFAULT_JOBS_RESEARCH_QUERY,
   DEFAULT_JOBS_RESEARCH_SCHEMA,
 } from './investorAnalyzeDefault';
@@ -82,6 +83,9 @@ interface PersonalizationData {
   b2bNews: {
     prompt: string;
   };
+  b2bAds: {
+    prompt: string;
+  };
   jobsResearch: {
     query: string;
     schema: string; // JSON string
@@ -94,7 +98,7 @@ function PersonalizationContent() {
   const primaryUse = onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising';
   const isB2B = primaryUse === 'b2b';
   const isFundraising = primaryUse === 'fundraising';
-  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter' | 'investorNews' | 'b2bNews' | 'jobsResearch'>('linkedinConversations');
+  const [activeTab, setActiveTab] = useState<'direct' | 'instagram' | 'linkedinConversations' | 'investorAnalyze' | 'investorTwitter' | 'investorNews' | 'b2bNews' | 'b2bAds' | 'jobsResearch'>('linkedinConversations');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [schemaError, setSchemaError] = useState<string | null>(null);
@@ -126,6 +130,7 @@ function PersonalizationContent() {
   const investorTwitterRef = useRef<HTMLTextAreaElement | null>(null);
   const investorNewsRef = useRef<HTMLTextAreaElement | null>(null);
   const b2bNewsRef = useRef<HTMLTextAreaElement | null>(null);
+  const b2bAdsRef = useRef<HTMLTextAreaElement | null>(null);
   const testReplyRefs = useRef<Array<HTMLTextAreaElement | null>>([]);
 
   const autoGrow = (el: HTMLTextAreaElement | null) => {
@@ -191,6 +196,9 @@ function PersonalizationContent() {
     b2bNews: {
       prompt: DEFAULT_B2B_NEWS_PROMPT,
     },
+    b2bAds: {
+      prompt: DEFAULT_B2B_ADS_PROMPT,
+    },
     jobsResearch: {
       query: DEFAULT_JOBS_RESEARCH_QUERY,
       schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
@@ -202,7 +210,7 @@ function PersonalizationContent() {
 
   useEffect(() => {
     if (loading) return;
-    if (!['linkedinConversations', 'investorAnalyze', 'investorTwitter', 'investorNews', 'b2bNews'].includes(activeTab)) return;
+    if (!['linkedinConversations', 'investorAnalyze', 'investorTwitter', 'investorNews', 'b2bNews', 'b2bAds'].includes(activeTab)) return;
     autoGrow(linkedinIntroRef.current);
     autoGrow(linkedinContextRef.current);
     autoGrow(linkedinHandoverRulesRef.current);
@@ -211,6 +219,7 @@ function PersonalizationContent() {
     autoGrow(investorTwitterRef.current);
     autoGrow(investorNewsRef.current);
     autoGrow(b2bNewsRef.current);
+    autoGrow(b2bAdsRef.current);
   }, [activeTab, loading]);
 
   // Default values
@@ -407,6 +416,9 @@ Return the assessment in the exact JSON schema format.`;
             b2bNews: {
               prompt: DEFAULT_B2B_NEWS_PROMPT,
             },
+            b2bAds: {
+              prompt: DEFAULT_B2B_ADS_PROMPT,
+            },
             jobsResearch: {
               query: DEFAULT_JOBS_RESEARCH_QUERY,
               schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
@@ -449,6 +461,9 @@ Return the assessment in the exact JSON schema format.`;
             b2bNews: {
               prompt: DEFAULT_B2B_NEWS_PROMPT,
             },
+            b2bAds: {
+              prompt: DEFAULT_B2B_ADS_PROMPT,
+            },
             jobsResearch: {
               query: DEFAULT_JOBS_RESEARCH_QUERY,
               schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
@@ -489,6 +504,9 @@ Return the assessment in the exact JSON schema format.`;
             },
             b2bNews: {
               prompt: parsed.b2bNews?.prompt || DEFAULT_B2B_NEWS_PROMPT,
+            },
+            b2bAds: {
+              prompt: parsed.b2bAds?.prompt || DEFAULT_B2B_ADS_PROMPT,
             },
             jobsResearch: {
               query: parsed.jobsResearch?.query || DEFAULT_JOBS_RESEARCH_QUERY,
@@ -532,6 +550,9 @@ Return the assessment in the exact JSON schema format.`;
             b2bNews: {
               prompt: DEFAULT_B2B_NEWS_PROMPT,
             },
+            b2bAds: {
+              prompt: DEFAULT_B2B_ADS_PROMPT,
+            },
             jobsResearch: {
               query: DEFAULT_JOBS_RESEARCH_QUERY,
               schema: DEFAULT_JOBS_RESEARCH_SCHEMA,
@@ -569,6 +590,9 @@ Return the assessment in the exact JSON schema format.`;
           },
           b2bNews: {
             prompt: DEFAULT_B2B_NEWS_PROMPT,
+          },
+          b2bAds: {
+            prompt: DEFAULT_B2B_ADS_PROMPT,
           },
           jobsResearch: {
             query: DEFAULT_JOBS_RESEARCH_QUERY,
@@ -655,6 +679,9 @@ Return the assessment in the exact JSON schema format.`;
         },
         b2bNews: {
           prompt: formData.b2bNews?.prompt ?? DEFAULT_B2B_NEWS_PROMPT,
+        },
+        b2bAds: {
+          prompt: formData.b2bAds?.prompt ?? DEFAULT_B2B_ADS_PROMPT,
         },
         jobsResearch: {
           query: formData.jobsResearch?.query ?? DEFAULT_JOBS_RESEARCH_QUERY,
@@ -972,6 +999,21 @@ Return the assessment in the exact JSON schema format.`;
                 }`}
               >
                 News
+              </button>
+            )}
+            {isB2B && (
+              <button
+                onClick={() => {
+                  setActiveTab('b2bAds');
+                  setSchemaError(null);
+                }}
+                className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
+                  activeTab === 'b2bAds'
+                    ? 'border-indigo-500 text-indigo-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                }`}
+              >
+                Ads
               </button>
             )}
             {isB2B && (
@@ -1525,6 +1567,46 @@ Return the assessment in the exact JSON schema format.`;
                 />
                 <p className="mt-2 text-xs text-gray-500">
                   This prompt must instruct the model to reply as JSON with keys {"{"}first_line_to_start_email{"}"} and {"{"}subject_line{"}"}.
+                  Available variables: {"{{"}Company{"}}"}, {"{{"}CompanyName{"}}"}, {"{{"}Url{"}}"}, {"{{"}Domain{"}}"}.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* B2B Ads Tab */}
+      {activeTab === 'b2bAds' && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">B2B Ads Email Opener</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              Edit the system prompt used to generate a first line and subject line from a company&apos;s ad copy or campaign.
+            </p>
+
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-semibold text-gray-800 mb-2">Ads Email Opener System Prompt</h3>
+                <textarea
+                  ref={b2bAdsRef}
+                  value={formData.b2bAds?.prompt ?? ''}
+                  onChange={(e) => {
+                    autoGrow(e.currentTarget);
+                    setFormData((prev) => ({
+                      ...prev,
+                      b2bAds: {
+                        ...(prev?.b2bAds ?? { prompt: DEFAULT_B2B_ADS_PROMPT }),
+                        prompt: e.target.value,
+                      },
+                    }));
+                  }}
+                  rows={6}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm resize-none overflow-hidden"
+                  placeholder={DEFAULT_B2B_ADS_PROMPT}
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  This prompt must instruct the model to reply as JSON with keys {"{"}first_line_to_start_email{"}"} and {"{"}subject_line{"}"}.
+                  Available variables: {"{{"}Company{"}}"}, {"{{"}CompanyName{"}}"}, {"{{"}Url{"}}"}, {"{{"}Domain{"}}"}.
                 </p>
               </div>
             </div>

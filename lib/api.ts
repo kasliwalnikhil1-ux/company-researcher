@@ -268,7 +268,9 @@ export type NewsEmailOpener = {
 };
 
 export const fetchCompanyNewsEmailOpener = async (
-  news: string
+  news: string,
+  mode: 'news' | 'ads' = 'news',
+  company?: { name?: string | null; url?: string | null }
 ): Promise<NewsEmailOpener | null> => {
   try {
     const token = await getValidAccessToken();
@@ -279,7 +281,12 @@ export const fetchCompanyNewsEmailOpener = async (
     const res = await fetchWithTimeout('/api/company-news-email-opener', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ news }),
+      body: JSON.stringify({
+        news,
+        mode,
+        companyName: company?.name ?? '',
+        companyUrl: company?.url ?? '',
+      }),
     }, 120_000);
     const data = await res.json();
     if (!res.ok) {

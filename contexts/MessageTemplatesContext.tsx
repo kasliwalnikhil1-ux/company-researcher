@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
 
-export type TemplateChannel = 'direct' | 'instagram' | 'email' | 'linkedin';
+export type TemplateChannel = 'direct' | 'instagram' | 'email' | 'linkedin' | 'ads' | 'jobs';
 
 /**
  * Per-template configuration stored in the `settings` jsonb column.
@@ -42,6 +42,8 @@ export const CHANNEL_LABELS: Record<TemplateChannel, string> = {
   instagram: 'Instagram',
   email: 'Email',
   linkedin: 'LinkedIn',
+  ads: 'Ads',
+  jobs: 'Jobs',
 };
 
 interface MessageTemplatesContextType {

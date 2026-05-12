@@ -10,7 +10,7 @@ import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
 import { fetchGenerateMessages } from '@/lib/api';
 import { renderCompanyTemplate } from '@/lib/messageTemplates';
 
-const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
+const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram', 'ads', 'jobs'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 
 type TemplateTab = 'all' | TemplateChannel;

@@ -15,7 +15,7 @@ import ConfirmationModal from './ui/ConfirmationModal';
 import ResumeDialog from './ui/ResumeDialog';
 import Toast from './ui/Toast';
 import { parseCsv, csvToString, mergeQualificationData, ensureColumnsExist, CsvRow } from "../lib/csvImport";
-import { parseMarkdownTable, parseJsonArrayDetailed, detectDomainColumnIndex, moveColumnToFront, removeColumnAt, removeRowAt, buildRowNews, isLikelyDomain, TableData } from "../lib/tableImport";
+import { parseMarkdownTable, parseJsonArrayDetailed, detectDomainColumnIndex, moveColumnToFront, removeColumnAt, removeRowAt, buildRowNews, isLikelyDomain, findAdContentColumnIndex, looksLikeMarkdownTableOrJson, TableData } from "../lib/tableImport";
 import { downloadCsv } from "../lib/csvExport";
 import { writeSummaryToCsvRow } from "../lib/summaryUtils";
 import { saveCsvProgress, loadCsvProgress, clearCsvProgress, hasCsvProgress, serializeQualificationDataMap, deserializeQualificationDataMap, shouldAutoSave, CsvProgressState } from "../lib/csvProgress";
@@ -277,13 +277,17 @@ export default function CompanyResearcher() {
   // Set name for batch processing
   const [setName, setSetName] = useState('');
   const [newsInput, setNewsInput] = useState('');
-  const newsDraftCacheRef = useRef<{ news: string; draft: NewsEmailOpener | null } | null>(null);
+  const [newsMode, setNewsMode] = useState<'news' | 'ads'>('news');
+  const newsDraftCacheRef = useRef<{ news: string; mode: 'news' | 'ads'; companyKey: string; draft: NewsEmailOpener | null } | null>(null);
   
   // Input mode: link textarea, CSV upload, or markdown table paste
   const [inputMode, setInputMode] = useState<'link' | 'csv' | 'table'>('link');
 
   // Per-row news override used when processing a pasted table
   const newsOverrideRef = useRef<string | null>(null);
+  // Forces the opener mode to 'ads' for the duration of a CSV/Table batch
+  // when the input has a column literally named "Ad Content".
+  const newsModeOverrideRef = useRef<'news' | 'ads' | null>(null);
 
   // Table import state
   const [tableInput, setTableInput] = useState('');
@@ -544,7 +548,10 @@ export default function CompanyResearcher() {
     [isB2B, researchMode, newsInput]
   );
 
-  const getNewsEmailOpener = useCallback(async (): Promise<NewsEmailOpener | null> => {
+  const getNewsEmailOpener = useCallback(async (
+    companyInput?: string,
+    companyNameOverride?: string,
+  ): Promise<NewsEmailOpener | null> => {
     if (!isB2B || researchMode === 'investor') {
       return null;
     }
@@ -555,15 +562,38 @@ export default function CompanyResearcher() {
       return null;
     }
 
+    const rawCompany = (companyInput || '').trim();
+    const cleanedCompanyUrl = rawCompany ? (cleanUrl(rawCompany, researchMode) || rawCompany) : '';
+    const derivedName = (() => {
+      if (companyNameOverride && companyNameOverride.trim()) return companyNameOverride.trim();
+      if (!rawCompany) return '';
+      const domain = extractDomain(rawCompany);
+      if (domain) {
+        const root = domain.split('.')[0] || '';
+        return root;
+      }
+      return '';
+    })();
+    const companyKey = `${cleanedCompanyUrl}|${derivedName}`;
+    const effectiveMode = newsModeOverrideRef.current ?? newsMode;
+
     const cached = newsDraftCacheRef.current;
-    if (cached && cached.news === trimmedNews) {
+    if (
+      cached &&
+      cached.news === trimmedNews &&
+      cached.mode === effectiveMode &&
+      cached.companyKey === companyKey
+    ) {
       return cached.draft;
     }
 
-    const draft = await fetchCompanyNewsEmailOpener(trimmedNews);
-    newsDraftCacheRef.current = { news: trimmedNews, draft };
+    const draft = await fetchCompanyNewsEmailOpener(trimmedNews, effectiveMode, {
+      name: derivedName,
+      url: cleanedCompanyUrl,
+    });
+    newsDraftCacheRef.current = { news: trimmedNews, mode: effectiveMode, companyKey, draft };
     return draft;
-  }, [newsInput, isB2B, researchMode]);
+  }, [newsInput, newsMode, isB2B, researchMode]);
 
   const mergeNewsDraftIntoSummary = useCallback(
     <T extends Record<string, any> | null | undefined>(summary: T, draft: NewsEmailOpener | null): T =>
@@ -601,7 +631,7 @@ export default function CompanyResearcher() {
       }));
 
       try {
-        const newsDraft = await getNewsEmailOpener();
+        const newsDraft = await getNewsEmailOpener(company);
         const _sourceNewsTextIg = (newsOverrideRef.current ?? newsInput).trim();
         const newsToSaveIg = newsDraft && _sourceNewsTextIg ? {
           answer: _sourceNewsTextIg,
@@ -840,7 +870,7 @@ export default function CompanyResearcher() {
       setErrorsByCompany(prev => ({ ...prev, [company]: {} }));
 
       try {
-        const newsDraft = await getNewsEmailOpener();
+        const newsDraft = await getNewsEmailOpener(company);
         const _sourceNewsTextJobs = (newsOverrideRef.current ?? newsInput).trim();
         const newsToSaveJobs = newsDraft && _sourceNewsTextJobs ? {
           answer: _sourceNewsTextJobs,
@@ -970,7 +1000,7 @@ export default function CompanyResearcher() {
       setErrorsByCompany(prev => ({ ...prev, [company]: {} }));
 
       try {
-        const newsDraft = await getNewsEmailOpener();
+        const newsDraft = await getNewsEmailOpener(company);
         const _sourceNewsTextPerson = (newsOverrideRef.current ?? newsInput).trim();
         const newsToSavePerson = newsDraft && _sourceNewsTextPerson ? {
           answer: _sourceNewsTextPerson,
@@ -1097,7 +1127,7 @@ export default function CompanyResearcher() {
       }));
 
       try {
-        const newsDraft = await getNewsEmailOpener();
+        const newsDraft = await getNewsEmailOpener(company);
         const _sourceNewsText = (newsOverrideRef.current ?? newsInput).trim();
         const newsToSave = newsDraft && _sourceNewsText ? {
           answer: _sourceNewsText,
@@ -1586,9 +1616,20 @@ export default function CompanyResearcher() {
       return url.toLowerCase().includes('instagram.com');
     };
     
+    const adContentColIndex = findAdContentColumnIndex(csvData.headers);
+    const adContentHeader = adContentColIndex >= 0 ? csvData.headers[adContentColIndex] : null;
+    const useAdContentPerRow = adContentHeader !== null;
+
+    newsModeOverrideRef.current = useAdContentPerRow ? 'ads' : null;
+    newsDraftCacheRef.current = null;
+
     // Concurrency limit for parallel processing (adjust based on API rate limits)
     const CONCURRENCY_LIMIT = 30;
-    const newsDraft = await getNewsEmailOpener();
+    // In dual-columns + Ad Content mode we skip the global merge so the per-row
+    // opener fetch in saveCompanyForRow can apply each row's Ad Content cell.
+    // Other modes still use the global textarea (the mode override above means
+    // it'll be sent to the ads prompt).
+    const newsDraft = useAdContentPerRow && useDualColumns ? null : await getNewsEmailOpener();
 
     // Helper function to save progress after each row is processed
     const saveProgressAfterRow = (mode: 'domain' | 'instagram' | 'investor' | 'jobs' | 'person', identifier: string) => {
@@ -2116,24 +2157,39 @@ export default function CompanyResearcher() {
       // Helper function to save company for a row immediately after API response
       const saveCompanyForRow = async (row: CsvRow, qualificationData: any, source: 'domain' | 'instagram', identifier: string) => {
         if (!user) return;
-        
+
         const domainUrl = selectedColumns.domain ? row[selectedColumns.domain]?.trim() || '' : '';
         const instagramUrl = selectedColumns.instagram ? row[selectedColumns.instagram]?.trim() || '' : '';
-        
+
         let domainName: string | null = null;
         let instagramUsername: string | null = null;
-        
+
         if (domainUrl) {
           const cleanedUrl = cleanUrl(domainUrl, 'domain');
           domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
         }
-        
+
         if (instagramUrl && isInstagramUrl(instagramUrl)) {
           instagramUsername = extractUsernameFromUrl(instagramUrl);
         }
-        
+
         if (!domainName && !instagramUsername) return;
-        
+
+        if (useAdContentPerRow && adContentHeader) {
+          const adContent = (row[adContentHeader] || '').trim();
+          if (adContent && qualificationData) {
+            try {
+              const opener = await fetchCompanyNewsEmailOpener(adContent, 'ads', {
+                name: domainName || instagramUsername || '',
+                url: domainUrl || instagramUrl || '',
+              });
+              qualificationData = mergeNewsDraftIntoSummaryHelper(qualificationData, opener);
+            } catch (err) {
+              console.error('Per-row ads opener failed:', err);
+            }
+          }
+        }
+
         try {
           const email = qualificationData?.email || null;
           const phone = qualificationData?.phone || null;
@@ -3269,7 +3325,10 @@ export default function CompanyResearcher() {
       }
     });
     setResultsByCompany(prev => ({ ...prev, ...newResults }));
-    
+
+    newsModeOverrideRef.current = null;
+    newsDraftCacheRef.current = null;
+
     setIsProcessingCsv(false);
     setCsvData(null);
     setShowColumnSelector(false);
@@ -3337,6 +3396,7 @@ export default function CompanyResearcher() {
     setNewsInput('');
     newsDraftCacheRef.current = null;
     newsOverrideRef.current = null;
+    newsModeOverrideRef.current = null;
     setTableInput('');
     setTableData(null);
     setTableParseError(null);
@@ -3349,12 +3409,12 @@ export default function CompanyResearcher() {
 
   // Parse the table input (markdown table or JSON array of objects) and
   // auto-detect/move the domain column to the front.
-  const handleParseTable = useCallback(() => {
-    const trimmed = tableInput.trim();
+  const parseTableFromText = useCallback((text: string) => {
+    const trimmed = text.trim();
     const looksLikeJson = trimmed.startsWith('[') || trimmed.startsWith('{');
     let parsed: TableData | null = null;
     if (looksLikeJson) {
-      const jsonResult = parseJsonArrayDetailed(tableInput);
+      const jsonResult = parseJsonArrayDetailed(text);
       if (!jsonResult.ok) {
         setTableData(null);
         setTableParseError(jsonResult.error);
@@ -3362,7 +3422,7 @@ export default function CompanyResearcher() {
       }
       parsed = jsonResult.table;
     } else {
-      parsed = parseMarkdownTable(tableInput);
+      parsed = parseMarkdownTable(text);
     }
     if (!parsed) {
       setTableData(null);
@@ -3371,8 +3431,6 @@ export default function CompanyResearcher() {
     }
     const domainIdx = detectDomainColumnIndex(parsed.headers, parsed.rows);
     const reordered = moveColumnToFront(parsed, domainIdx);
-    // Normalize each row's domain cell (strip protocol/www/path, lowercase) and
-    // drop rows whose domain is empty or invalid. Dedupe by normalized domain.
     const seenDomains = new Set<string>();
     const normalizedRows: string[][] = [];
     let droppedInvalid = 0;
@@ -3401,7 +3459,11 @@ export default function CompanyResearcher() {
     if (droppedInvalid > 0) notes.push(`skipped ${droppedInvalid} row${droppedInvalid === 1 ? '' : 's'} with no valid domain`);
     if (droppedDuplicate > 0) notes.push(`removed ${droppedDuplicate} duplicate domain${droppedDuplicate === 1 ? '' : 's'}`);
     setTableParseError(notes.length > 0 ? `${notes.join('; ')}.` : null);
-  }, [tableInput]);
+  }, []);
+
+  const handleParseTable = useCallback(() => {
+    parseTableFromText(tableInput);
+  }, [tableInput, parseTableFromText]);
 
   const handleRemoveTableColumn = useCallback((colIndex: number) => {
     setTableData(prev => (prev ? removeColumnAt(prev, colIndex) : prev));
@@ -3435,6 +3497,10 @@ export default function CompanyResearcher() {
     setSubmittedCompanies(companies);
     setActiveCompany(companies[0]);
 
+    // Flip opener mode to 'ads' when the pasted table has an "Ad Content" column
+    newsModeOverrideRef.current = findAdContentColumnIndex(tableData.headers) >= 0 ? 'ads' : null;
+    newsDraftCacheRef.current = null;
+
     // Sequential processing because the per-row news override is shared via a ref
     for (let i = 0; i < validRows.length; i++) {
       if (shouldStopProcessingRef.current) break;
@@ -3460,6 +3526,7 @@ export default function CompanyResearcher() {
     }
 
     newsOverrideRef.current = null;
+    newsModeOverrideRef.current = null;
     newsDraftCacheRef.current = null;
     setIsProcessingTable(false);
     setTableProcessingProgress({ current: 0, total: 0 });
@@ -3992,6 +4059,14 @@ export default function CompanyResearcher() {
           id="table-input"
           value={tableInput}
           onChange={(e) => setTableInput(e.target.value)}
+          onPaste={(e) => {
+            const pasted = e.clipboardData.getData('text');
+            if (pasted && looksLikeMarkdownTableOrJson(pasted)) {
+              e.preventDefault();
+              setTableInput(pasted);
+              parseTableFromText(pasted);
+            }
+          }}
           placeholder={'| Domain | Headline | What happened |\n| --- | --- | --- |\n| brand.com | ... | ... |\n\nor a JSON array:\n[{"domain": "brand.com", "title": "..."}]'}
           rows={8}
           className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors font-mono text-xs"
@@ -4197,6 +4272,15 @@ export default function CompanyResearcher() {
         <form onSubmit={handleResearch} className="space-y-6 mb-8">
           <textarea
             value={rawCompanyInput}
+            onPaste={(e) => {
+              const pasted = e.clipboardData.getData('text');
+              if (pasted && looksLikeMarkdownTableOrJson(pasted)) {
+                e.preventDefault();
+                handleSwitchInputMode('table');
+                setTableInput(pasted);
+                parseTableFromText(pasted);
+              }
+            }}
             onChange={(e) => {
               const newValue = e.target.value;
 
@@ -4249,9 +4333,42 @@ export default function CompanyResearcher() {
           />
           {isB2B && researchMode !== 'investor' && (
             <div className="opacity-0 animate-fade-up [animation-delay:700ms]">
-              <label htmlFor="research-news" className="block text-sm font-medium text-gray-700 mb-2">
-                News (Optional)
-              </label>
+              <div className="mb-2">
+                <div className="inline-flex rounded-sm border border-gray-300 overflow-hidden text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newsMode !== 'news') {
+                        setNewsMode('news');
+                        newsDraftCacheRef.current = null;
+                      }
+                    }}
+                    className={`px-3 py-1 transition-colors ${
+                      newsMode === 'news'
+                        ? 'bg-brand-default text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    News
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newsMode !== 'ads') {
+                        setNewsMode('ads');
+                        newsDraftCacheRef.current = null;
+                      }
+                    }}
+                    className={`px-3 py-1 transition-colors border-l border-gray-300 ${
+                      newsMode === 'ads'
+                        ? 'bg-brand-default text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Ads
+                  </button>
+                </div>
+              </div>
               <textarea
                 id="research-news"
                 value={newsInput}
@@ -4259,7 +4376,11 @@ export default function CompanyResearcher() {
                   setNewsInput(e.target.value);
                   newsDraftCacheRef.current = null;
                 }}
-                placeholder="Paste one or more news items. We will use one to generate an opener and subject line."
+                placeholder={
+                  newsMode === 'ads'
+                    ? 'Paste one or more ad copies. We will use one to generate an opener and subject line.'
+                    : 'Paste one or more news items. We will use one to generate an opener and subject line.'
+                }
                 rows={4}
                 className="w-full bg-white p-3 border box-border outline-none rounded-sm ring-2 ring-gray-300 focus:ring-brand-default transition-colors"
               />

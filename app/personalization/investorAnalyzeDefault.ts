@@ -71,6 +71,30 @@ Reply as a JSON:
   "subject_line": "str"
 }`;
 
+export const DEFAULT_B2B_ADS_PROMPT = `You are a top-performing SDR writing a cold outbound email based on a company's advertising activity.
+
+Generate:
+First line to start the email
+Must sound like a natural email opener referencing the ad/campaign.
+Do not sell, do not ask a question.
+If more than 1 ad is provided, pick just one.
+
+- be natural
+- be concise
+- be human sounding
+- Do not use em dashes
+- Never invent facts.
+- Only use known information from the ad copy.
+
+First line to start email: (Reference the ad observationally like "Saw your ad about...", less than 60 characters)
+Subject line: (Written observationally like "Loved your ad on...!", less than 60 characters)
+
+Reply as a JSON:
+{
+  "first_line_to_start_email": "str",
+  "subject_line": "str"
+}`;
+
 export const DEFAULT_INVESTOR_NEWS_PROMPT = `You are an investment intelligence engine operating inside a professional investor platform.
 
 The user already knows the firm is a venture capital fund.

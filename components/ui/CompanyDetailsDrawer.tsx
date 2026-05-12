@@ -216,6 +216,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [editingNewsField, setEditingNewsField] = useState<NewsField | null>(null);
   const [newsFieldDraft, setNewsFieldDraft] = useState('');
   const [copiedNewsField, setCopiedNewsField] = useState<NewsField | null>(null);
+  const [manualNewsOpen, setManualNewsOpen] = useState(false);
+  const [manualNewsDraft, setManualNewsDraft] = useState('');
+  const [savingManualNews, setSavingManualNews] = useState(false);
   const [reanalyzing, setReanalyzing] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -717,6 +720,50 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     }
   }, [company, companyNews, editingNewsField, newsFieldDraft, getSummaryData, updateCompany, onCompanyChange]);
 
+  const handleSaveManualNews = useCallback(async () => {
+    if (!company) return;
+    const trimmed = manualNewsDraft.trim();
+    if (!trimmed) {
+      setToastMessage('Please enter news text to save.');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+      return;
+    }
+    setSavingManualNews(true);
+    const updatedNews: CompanyNews = {
+      answer: trimmed,
+      citations: companyNews?.citations ?? [],
+      date: new Date().toISOString(),
+      first_line_to_start_email: companyNews?.first_line_to_start_email,
+      subject_line: companyNews?.subject_line,
+    };
+    setCompanyNews(updatedNews);
+    try {
+      localStorage.setItem(COMPANY_NEWS_STORAGE_KEY(company.id), JSON.stringify(updatedNews));
+    } catch {
+      // ignore quota errors
+    }
+    try {
+      await updateCompany(company.id, { news: updatedNews });
+      if (onCompanyChange) {
+        onCompanyChange({ ...company, news: updatedNews });
+      }
+      setManualNewsOpen(false);
+      setManualNewsDraft('');
+      setCompanyNewsError(null);
+      setToastMessage('News added. You can now generate an email opener.');
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } catch (err: any) {
+      console.error('Error saving manual news:', err);
+      setToastMessage(`Error: ${err?.message || 'Failed to save news'}`);
+      setToastVisible(true);
+      setTimeout(() => setToastVisible(false), 3000);
+    } finally {
+      setSavingManualNews(false);
+    }
+  }, [company, manualNewsDraft, companyNews, updateCompany, onCompanyChange]);
+
   const handleReanalyze = useCallback(async () => {
     if (!company || reanalyzing) return;
     if (!company.domain?.trim()) {
@@ -797,6 +844,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       setEditingNewsField(null);
       setNewsFieldDraft('');
       setCopiedNewsField(null);
+      setManualNewsOpen(false);
+      setManualNewsDraft('');
+      setSavingManualNews(false);
       setSetNameCreating(false);
       setNewSetNameValue("");
       prevTabRef.current = "overview";
@@ -3384,9 +3434,52 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   )}
                 </div>
               ) : null}
+              {manualNewsOpen && (
+                <div className="bg-white border border-indigo-200 rounded-lg p-3 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-sm font-semibold text-gray-900">Paste news text</h4>
+                    <span className="text-xs text-gray-500">Saved as the news summary</span>
+                  </div>
+                  <textarea
+                    value={manualNewsDraft}
+                    onChange={(e) => setManualNewsDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleSaveManualNews();
+                      else if (e.key === 'Escape') {
+                        setManualNewsOpen(false);
+                        setManualNewsDraft('');
+                      }
+                    }}
+                    rows={8}
+                    placeholder="Paste an article, announcement, or any news text about this company..."
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    autoFocus
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => {
+                        setManualNewsOpen(false);
+                        setManualNewsDraft('');
+                      }}
+                      disabled={savingManualNews}
+                      className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleSaveManualNews}
+                      disabled={savingManualNews || !manualNewsDraft.trim()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {savingManualNews && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {savingManualNews ? 'Saving...' : 'Save news'}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-2 pt-2">
-                {!companyNews && !companyNewsLoading && !companyNewsError && (
-                  <p className="text-sm text-gray-500 w-full">No news fetched yet. Click to fetch latest.</p>
+                {!companyNews && !companyNewsLoading && !companyNewsError && !manualNewsOpen && (
+                  <p className="text-sm text-gray-500 w-full">No news fetched yet. Click to fetch latest, or paste your own news text below.</p>
                 )}
                 {companyNews?.answer && (
                   <button
@@ -3400,6 +3493,20 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       <Sparkles className="w-4 h-4" />
                     )}
                     {generatingEmailOpener ? 'Generating...' : 'Generate Email Opener'}
+                  </button>
+                )}
+                {!manualNewsOpen && (
+                  <button
+                    onClick={() => {
+                      setManualNewsDraft(companyNews?.answer || '');
+                      setManualNewsOpen(true);
+                    }}
+                    disabled={companyNewsLoading}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-white text-gray-700 hover:bg-gray-50 border border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                    title={companyNews?.answer ? 'Replace the current news with your own text' : 'Paste your own news text to process'}
+                  >
+                    <FileText className="w-4 h-4" />
+                    {companyNews?.answer ? 'Edit / replace with manual text' : 'Add news manually'}
                   </button>
                 )}
                 <button

@@ -149,6 +149,33 @@ export function removeRowAt(table: TableData, rowIndex: number): TableData {
   };
 }
 
+export function findAdContentColumnIndex(headers: string[]): number {
+  const normalized = headers.map(h => (h || '').trim().toLowerCase());
+  return normalized.indexOf('ad content');
+}
+
+export function looksLikeMarkdownTableOrJson(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed.some(item => item && typeof item === 'object' && !Array.isArray(item));
+      }
+      if (parsed && typeof parsed === 'object') return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+  const lines = trimmed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) return false;
+  const linesWithPipes = lines.filter(l => l.includes('|')).length;
+  if (linesWithPipes < 2) return false;
+  return linesWithPipes / lines.length >= 0.8;
+}
+
 export function buildRowNews(table: TableData, rowIndex: number, domainColIndex: number = 0): string {
   const row = table.rows[rowIndex];
   if (!row) return '';

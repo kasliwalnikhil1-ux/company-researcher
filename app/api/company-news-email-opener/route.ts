@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 import { createClient } from '@supabase/supabase-js';
-import { DEFAULT_B2B_NEWS_PROMPT } from '@/app/personalization/investorAnalyzeDefault';
+import { DEFAULT_B2B_NEWS_PROMPT, DEFAULT_B2B_ADS_PROMPT } from '@/app/personalization/investorAnalyzeDefault';
 
 export const maxDuration = 60;
 
-const SYSTEM_MESSAGE = DEFAULT_B2B_NEWS_PROMPT;
+type OpenerMode = 'news' | 'ads';
+
+const DEFAULT_PROMPT_BY_MODE: Record<OpenerMode, string> = {
+  news: DEFAULT_B2B_NEWS_PROMPT,
+  ads: DEFAULT_B2B_ADS_PROMPT,
+};
 
 function getSupabaseAuthClient(accessToken: string) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -23,20 +28,22 @@ function getSupabaseServiceClient() {
   return createClient(url, key);
 }
 
-async function loadUserNewsPrompt(req: NextRequest): Promise<string> {
+async function loadUserNewsPrompt(req: NextRequest, mode: OpenerMode): Promise<string> {
+  const fallback = DEFAULT_PROMPT_BY_MODE[mode];
+  const settingsKey = mode === 'ads' ? 'b2bAds' : 'b2bNews';
   try {
     const authHeader = req.headers.get('Authorization');
     const token = authHeader?.replace(/^Bearer\s+/i, '');
-    if (!token) return SYSTEM_MESSAGE;
+    if (!token) return fallback;
 
     const authClient = getSupabaseAuthClient(token);
-    if (!authClient) return SYSTEM_MESSAGE;
+    if (!authClient) return fallback;
 
     const { data: { user } } = await authClient.auth.getUser(token);
-    if (!user) return SYSTEM_MESSAGE;
+    if (!user) return fallback;
 
     const supabase = getSupabaseServiceClient();
-    if (!supabase) return SYSTEM_MESSAGE;
+    if (!supabase) return fallback;
 
     const { data: userSettings } = await supabase
       .from('user_settings')
@@ -52,14 +59,14 @@ async function loadUserNewsPrompt(req: NextRequest): Promise<string> {
         personalization = null;
       }
     }
-    const customPrompt = personalization?.b2bNews?.prompt;
+    const customPrompt = personalization?.[settingsKey]?.prompt;
     if (typeof customPrompt === 'string' && customPrompt.trim().length > 0) {
       return customPrompt;
     }
   } catch {
     // fall through to default
   }
-  return SYSTEM_MESSAGE;
+  return fallback;
 }
 
 function normalizeLine(value: unknown): string {
@@ -67,23 +74,56 @@ function normalizeLine(value: unknown): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function applyVariables(
+  template: string,
+  vars: { companyName: string; companyUrl: string }
+): string {
+  const map: Record<string, string> = {
+    Company: vars.companyName || vars.companyUrl,
+    CompanyName: vars.companyName,
+    Url: vars.companyUrl,
+    URL: vars.companyUrl,
+    CompanyUrl: vars.companyUrl,
+    Domain: vars.companyUrl,
+  };
+  return template.replace(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, (full, key: string) => {
+    if (Object.prototype.hasOwnProperty.call(map, key)) {
+      return map[key];
+    }
+    return full;
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const news = typeof body?.news === 'string' ? body.news.trim() : '';
+    const mode: OpenerMode = body?.mode === 'ads' ? 'ads' : 'news';
+    const companyName = typeof body?.companyName === 'string' ? body.companyName.trim() : '';
+    const companyUrl = typeof body?.companyUrl === 'string' ? body.companyUrl.trim() : '';
 
     if (!news) {
-      return NextResponse.json({ error: 'News text is required' }, { status: 400 });
+      return NextResponse.json(
+        { error: `${mode === 'ads' ? 'Ad' : 'News'} text is required` },
+        { status: 400 }
+      );
     }
 
-    const systemPrompt = await loadUserNewsPrompt(req);
+    const rawSystemPrompt = await loadUserNewsPrompt(req, mode);
+    const systemPrompt = applyVariables(rawSystemPrompt, { companyName, companyUrl });
+    const userLabel = mode === 'ads' ? 'ad' : 'news item';
+
+    const companyHeader =
+      companyName || companyUrl
+        ? `Company: ${companyName || companyUrl}${companyUrl ? ` (${companyUrl})` : ''}\n\n`
+        : '';
 
     const extracted = await getJsonCompletion(
       [
         { role: 'system', content: systemPrompt },
         {
           role: 'user',
-          content: `I will paste a news item below.\n\nNews:\n${news}`,
+          content: `${companyHeader}I will paste ${mode === 'ads' ? 'an' : 'a'} ${userLabel} below.\n\n${mode === 'ads' ? 'Ad' : 'News'}:\n${news}`,
         },
       ],
       { max_tokens: 2000 }
