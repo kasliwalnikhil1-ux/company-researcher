@@ -17,8 +17,9 @@ import CompanyFormModal from '@/components/ui/CompanyFormModal';
 import { renderCompanyTemplate } from '@/lib/messageTemplates';
 import { useMessageTemplates, CHANNEL_LABELS } from '@/contexts/MessageTemplatesContext';
 import { summaryKeyToLabel, formatSummaryValue, discoverSummaryKeys } from '@/lib/summaryUtils';
-import { Building2, Edit2, Trash2, Plus, X, Filter, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List } from 'lucide-react';
+import { Building2, Edit2, Trash2, Plus, X, Filter, ArrowUpDown, ChevronLeft, ChevronRight, ChevronDown, Eye, GitMerge, Phone, MessageCircle, Mail, Table, List, Download, Loader2, Users } from 'lucide-react';
 import { extractPhoneNumber, copyToClipboard } from '@/lib/utils';
+import { downloadCsv } from '@/lib/csvExport';
 import PhoneInputField from '@/components/ui/PhoneInputField';
 import {
   DndContext,
@@ -143,7 +144,9 @@ function CompaniesContent() {
     setSearchQuery,
     availableSetNames,
     availableOwners,
-    initializeCompanies
+    initializeCompanies,
+    fetchAllFilteredCompanies,
+    fetchCompaniesByIds,
   } = useCompanies();
 
   // Email settings and column_settings from user_settings (for compose links and Manage Columns)
@@ -347,8 +350,36 @@ function CompaniesContent() {
   const [assignSetModalOpen, setAssignSetModalOpen] = useState(false);
   const [assignSetSelected, setAssignSetSelected] = useState('');
   const [assignSetNewName, setAssignSetNewName] = useState('');
-  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+
+  // Export menu state
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [exportMenuOpen]);
+  // Separate dropdown anchored to the bulk-action bar (shown only when rows are selected).
+  const [bulkExportMenuOpen, setBulkExportMenuOpen] = useState(false);
+  const bulkExportMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!bulkExportMenuOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (bulkExportMenuRef.current && !bulkExportMenuRef.current.contains(e.target as Node)) {
+        setBulkExportMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [bulkExportMenuOpen]);
+
   // WhatsApp template modal state
   const [whatsappTemplateModalOpen, setWhatsappTemplateModalOpen] = useState(false);
   const [selectedCompanyForWhatsApp, setSelectedCompanyForWhatsApp] = useState<Company | null>(null);
@@ -1071,6 +1102,238 @@ function CompaniesContent() {
     performSearch('');
   }, [performSearch]);
 
+  const csvEscape = useCallback((value: unknown): string => {
+    if (value == null) return '';
+    const str = String(value);
+    return `"${str.replace(/"/g, '""')}"`;
+  }, []);
+
+  const flattenSummaryForCsv = useCallback((summary: any): Record<string, string> => {
+    const out: Record<string, string> = {};
+    if (!summary || typeof summary !== 'object') return out;
+    for (const [key, value] of Object.entries(summary as Record<string, unknown>)) {
+      if (value == null) continue;
+      const label = summaryKeyToLabel(key);
+      if (Array.isArray(value)) {
+        out[label] = value
+          .map((v) => (v == null ? '' : String(v)))
+          .filter(Boolean)
+          .join(', ');
+      } else if (typeof value === 'object') {
+        try {
+          out[label] = JSON.stringify(value);
+        } catch {
+          out[label] = '';
+        }
+      } else {
+        out[label] = String(value);
+      }
+    }
+    return out;
+  }, []);
+
+  const buildCompaniesCsv = useCallback(
+    (all: Company[]): string => {
+      const flattened = all.map((c) => ({ company: c, summary: flattenSummaryForCsv(c.summary) }));
+      const summaryLabelSet = new Set<string>();
+      for (const entry of flattened) {
+        for (const k of Object.keys(entry.summary)) summaryLabelSet.add(k);
+      }
+      const summaryLabels = Array.from(summaryLabelSet);
+
+      const baseHeaders = [
+        'Company',
+        'Domain',
+        'Instagram',
+        'Email',
+        'Phone',
+        'Classification',
+        'Set',
+        'Owner',
+        'Created At',
+        'Updated At',
+        'Contacts Count',
+        'Notes',
+      ];
+      const headers = [...baseHeaders, ...summaryLabels];
+
+      const rows = flattened.map(({ company, summary }) => {
+        const classification =
+          company.summary && typeof company.summary === 'object'
+            ? (company.summary as Record<string, any>).classification ?? ''
+            : '';
+        const notesStr =
+          Array.isArray(company.notes) && company.notes.length > 0
+            ? company.notes.map((n: any) => (n?.message ?? '').trim()).filter(Boolean).join('; ')
+            : '';
+        const contactsCount = Array.isArray(company.contacts) ? company.contacts.length : 0;
+        const companyName =
+          (company.summary && typeof company.summary === 'object'
+            ? (company.summary as Record<string, any>).company_name
+            : null) ||
+          company.domain ||
+          company.instagram ||
+          '';
+
+        const row: string[] = [
+          String(companyName),
+          company.domain ?? '',
+          company.instagram ?? '',
+          company.email ?? '',
+          company.phone ?? '',
+          String(classification),
+          company.set_name ?? '',
+          company.owner ?? '',
+          company.created_at ?? '',
+          company.updated_at ?? '',
+          String(contactsCount),
+          notesStr,
+          ...summaryLabels.map((label) => summary[label] ?? ''),
+        ];
+        return row.map(csvEscape).join(',');
+      });
+
+      return [headers.map(csvEscape).join(','), ...rows].join('\n');
+    },
+    [flattenSummaryForCsv, csvEscape]
+  );
+
+  const buildContactsCsv = useCallback(
+    (all: Company[]): { csv: string; contactCount: number } => {
+      const headers = [
+        'Company',
+        'Company Domain',
+        'Company Instagram',
+        'Company Set',
+        'Company Owner',
+        'Full Name',
+        'First Name',
+        'Last Name',
+        'Title',
+        'Headline',
+        'Email',
+        'Phone',
+        'LinkedIn URL',
+        'Photo URL',
+        'Status',
+        'Checked',
+      ];
+
+      const rows: string[] = [];
+      let contactCount = 0;
+      for (const company of all) {
+        const contacts = Array.isArray(company.contacts) ? company.contacts : [];
+        if (contacts.length === 0) continue;
+        const companyName =
+          (company.summary && typeof company.summary === 'object'
+            ? (company.summary as Record<string, any>).company_name
+            : null) ||
+          company.domain ||
+          company.instagram ||
+          '';
+
+        for (const contact of contacts as any[]) {
+          if (!contact || typeof contact !== 'object') continue;
+          contactCount += 1;
+          const fullName =
+            contact.full_name ||
+            `${contact.first_name || ''} ${contact.last_name || ''}`.trim() ||
+            '';
+          const rawLinkedin = contact.linkedin_url ?? '';
+          const fullLinkedin = rawLinkedin
+            ? rawLinkedin.startsWith('http')
+              ? rawLinkedin
+              : `https://www.linkedin.com/${String(rawLinkedin).replace(/^\/+/, '')}`
+            : '';
+          const row: string[] = [
+            String(companyName),
+            company.domain ?? '',
+            company.instagram ?? '',
+            company.set_name ?? '',
+            company.owner ?? '',
+            fullName,
+            contact.first_name ?? '',
+            contact.last_name ?? '',
+            contact.title ?? '',
+            contact.headline ?? '',
+            contact.email ?? '',
+            contact.phone ?? '',
+            fullLinkedin,
+            contact.photo_url ?? '',
+            contact.status ?? '',
+            contact.checked === true ? 'true' : contact.checked === false ? 'false' : '',
+          ];
+          rows.push(row.map(csvEscape).join(','));
+        }
+      }
+
+      const csv = [headers.map(csvEscape).join(','), ...rows].join('\n');
+      return { csv, contactCount };
+    },
+    [csvEscape]
+  );
+
+  type ExportSource = 'filtered' | 'selected';
+  const runExport = useCallback(
+    async (kind: 'companies' | 'contacts', source: ExportSource) => {
+      setExportMenuOpen(false);
+      setBulkExportMenuOpen(false);
+      setExportLoading(true);
+      try {
+        const all =
+          source === 'selected'
+            ? await fetchCompaniesByIds(Array.from(selectedCompanyIds))
+            : await fetchAllFilteredCompanies();
+
+        if (all.length === 0) {
+          setToastMessage(
+            source === 'selected'
+              ? 'No selected companies to export.'
+              : 'No companies match the current filters.'
+          );
+          setToastVisible(true);
+          return;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        const suffix = source === 'selected' ? 'selected' : 'export';
+
+        if (kind === 'companies') {
+          const csv = buildCompaniesCsv(all);
+          downloadCsv(csv, `companies-${suffix}-${today}.csv`);
+          setToastMessage(`Exported ${all.length} companies to CSV`);
+          setToastVisible(true);
+        } else {
+          const { csv, contactCount } = buildContactsCsv(all);
+          if (contactCount === 0) {
+            setToastMessage(
+              source === 'selected'
+                ? 'No contacts found across the selected companies.'
+                : 'No contacts found across the filtered companies.'
+            );
+            setToastVisible(true);
+            return;
+          }
+          downloadCsv(csv, `contacts-${suffix}-${today}.csv`);
+          setToastMessage(`Exported ${contactCount} contacts from ${all.length} companies to CSV`);
+          setToastVisible(true);
+        }
+      } catch (e) {
+        console.error('Export failed', e);
+        setToastMessage(e instanceof Error ? e.message : 'Failed to export CSV');
+        setToastVisible(true);
+      } finally {
+        setExportLoading(false);
+      }
+    },
+    [fetchAllFilteredCompanies, fetchCompaniesByIds, selectedCompanyIds, buildCompaniesCsv, buildContactsCsv]
+  );
+
+  const handleExportCompaniesCsv = useCallback(() => runExport('companies', 'filtered'), [runExport]);
+  const handleExportContactsCsv = useCallback(() => runExport('contacts', 'filtered'), [runExport]);
+  const handleExportSelectedCompaniesCsv = useCallback(() => runExport('companies', 'selected'), [runExport]);
+  const handleExportSelectedContactsCsv = useCallback(() => runExport('contacts', 'selected'), [runExport]);
+
   // Cleanup timeouts and abort controllers on unmount
   useEffect(() => {
     return () => {
@@ -1632,6 +1895,47 @@ function CompaniesContent() {
                 <GitMerge className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Merge Selected </span>({selectedCompanyIds.size})
               </button>
+              <div className="relative" ref={bulkExportMenuRef}>
+                <button
+                  onClick={() => setBulkExportMenuOpen((v) => !v)}
+                  disabled={exportLoading}
+                  className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {exportLoading ? (
+                    <Loader2 className="w-4 h-4 sm:mr-2 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4 sm:mr-2" />
+                  )}
+                  <span className="hidden sm:inline">Export Selected </span>({selectedCompanyIds.size})
+                  <ChevronDown className={`w-4 h-4 ml-1 transition-transform ${bulkExportMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {bulkExportMenuOpen && (
+                  <div className="absolute z-30 top-full right-0 mt-1 w-72 bg-white border border-gray-200 rounded-md shadow-lg py-1">
+                    <button
+                      type="button"
+                      onClick={handleExportSelectedCompaniesCsv}
+                      className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50"
+                    >
+                      <Building2 className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-900">Selected companies as CSV</span>
+                        <span className="text-xs text-gray-500">{selectedCompanyIds.size} selected rows</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportSelectedContactsCsv}
+                      className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50 border-t border-gray-100"
+                    >
+                      <Users className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-900">Selected contacts as CSV</span>
+                        <span className="text-xs text-gray-500">Contacts from the {selectedCompanyIds.size} selected companies</span>
+                      </span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <button
                 onClick={() => setBulkDeleteModalOpen(true)}
                 className="inline-flex items-center px-3 md:px-4 py-2 border border-transparent text-xs md:text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700"
@@ -1720,225 +2024,346 @@ function CompaniesContent() {
         }}
       />
 
-      {/* Search and Filter & Sort Button (Mobile) */}
-      <div className="mb-4 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-        <div className="relative flex-1 max-w-full sm:max-w-md">
-          <input
-            type="text"
-            placeholder="Search companies..."
-            value={localSearchInput}
-            onChange={handleSearchChange}
-            onKeyDown={handleSearchKeyDown}
-            className="block w-full px-4 py-2 pr-10 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-          />
-          {localSearchInput && (
-            <button
-              onClick={handleClearSearch}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
-              aria-label="Clear search"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-        {/* Mobile Filter & Sort Button */}
-        <button
-          onClick={() => setMobileFiltersOpen(!mobileFiltersOpen)}
-          className="sm:hidden flex items-center justify-center gap-2 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-        >
-          <Filter className="w-4 h-4" />
-          <span>Filter & Sort</span>
-          <ChevronDown className={`w-4 h-4 transition-transform ${mobileFiltersOpen ? 'rotate-180' : ''}`} />
-        </button>
-        {/* Desktop Sort */}
-        <div className="hidden sm:flex items-center gap-2 flex-shrink-0">
-          <ArrowUpDown className="w-4 h-4 text-gray-500" />
-          <select
-            value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-            className="flex-none px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="newest">Newest First</option>
-            <option value="oldest">Oldest First</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Mobile Sort and Filters - Collapsible */}
-      <div className={`sm:hidden mb-4 ${mobileFiltersOpen ? 'block' : 'hidden'}`}>
-        <div className="flex flex-col gap-3">
-          {/* Mobile Sort */}
-          <div className="flex items-center gap-2">
-            <ArrowUpDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
-            <select
-              value={sortOrder}
-              onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest')}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              <option value="newest">Newest First</option>
-              <option value="oldest">Oldest First</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className={`mb-4 flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center gap-3 sm:gap-4 ${mobileFiltersOpen ? 'sm:flex' : 'hidden sm:flex'}`}>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 sm:flex-initial">
-          <div className="flex items-center gap-2">
-            <Filter className="w-4 h-4 text-gray-500 flex-shrink-0" />
-            <select
-              value={dateFilter}
-              onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'custom')}
-              className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-            >
-              <option value="all">All Dates</option>
-              <option value="today">Created Today</option>
-              <option value="yesterday">Created Yesterday</option>
-              <option value="last_week">Created Last Week</option>
-              <option value="last_month">Created Last Month</option>
-              <option value="custom">Custom Range</option>
-            </select>
-          </div>
-          {dateFilter === 'custom' && (
-            <div className="flex items-center gap-2 sm:ml-0">
+      {/* Search + Sort + Filters toggle */}
+      <div className="mb-6 space-y-4">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row flex-1 gap-2">
+            {/* Search input */}
+            <div className="relative flex-1">
+              <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
               <input
-                type="date"
-                value={formatDateForInput(customDateRange.start)}
-                onChange={(e) => {
-                  setCustomDateRange({ 
-                    ...customDateRange, 
-                    start: parseDateFromInput(e.target.value) 
-                  });
-                }}
-                className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="Start date"
+                type="text"
+                placeholder="Search companies by name, domain, or Instagram..."
+                value={localSearchInput}
+                onChange={handleSearchChange}
+                onKeyDown={handleSearchKeyDown}
+                className="block w-full pl-10 pr-10 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 text-sm"
               />
-              <span className="text-gray-500 text-sm flex-shrink-0">to</span>
-              <input
-                type="date"
-                value={formatDateForInput(customDateRange.end)}
-                onChange={(e) => {
-                  setCustomDateRange({ 
-                    ...customDateRange, 
-                    end: parseDateFromInput(e.target.value) 
-                  });
-                }}
-                className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-                placeholder="End date"
-              />
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-1 sm:flex-initial relative" ref={classificationDropdownRef}>
-          {(() => {
-            const options: { value: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty'; label: string }[] = [
-              { value: 'QUALIFIED', label: 'QUALIFIED' },
-              { value: 'NOT_QUALIFIED', label: 'NOT QUALIFIED' },
-              { value: 'MAYBE', label: 'MAYBE' },
-              { value: 'EXPIRED', label: 'EXPIRED' },
-              { value: 'empty', label: 'Empty/Null Summary' },
-            ];
-            const selected = classificationFilter;
-            const buttonLabel =
-              selected.length === 0
-                ? 'All Classifications'
-                : selected.length === 1
-                ? (options.find((o) => o.value === selected[0])?.label ?? selected[0])
-                : `${selected.length} selected`;
-            const toggle = (val: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty') => {
-              setClassificationFilter(
-                selected.includes(val) ? selected.filter((v) => v !== val) : [...selected, val]
-              );
-            };
-            return (
-              <>
+              {localSearchInput && (
                 <button
-                  type="button"
-                  onClick={() => setClassificationDropdownOpen((v) => !v)}
-                  className="flex-1 sm:flex-initial flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[180px]"
+                  onClick={handleClearSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
+                  aria-label="Clear search"
                 >
-                  <span className="truncate">{buttonLabel}</span>
-                  <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                  <X className="w-4 h-4" />
                 </button>
-                {classificationDropdownOpen && (
-                  <div className="absolute z-30 top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-md shadow-lg py-1">
-                    {selected.length > 0 && (
+              )}
+            </div>
+            {/* Sort */}
+            <div className="relative">
+              <ArrowUpDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+              <select
+                value={sortOrder}
+                onChange={(e) => setSortOrder(e.target.value as 'newest' | 'oldest' | 'recently_updated' | 'least_recently_updated')}
+                className="pl-9 pr-9 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 min-w-[180px] appearance-none w-full sm:w-auto"
+              >
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="recently_updated">Recently Updated</option>
+                <option value="least_recently_updated">Least Recently Updated</option>
+              </select>
+              <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+            </div>
+          </div>
+          <button
+            onClick={() => setFiltersExpanded(!filtersExpanded)}
+            className={`inline-flex items-center justify-between gap-2 px-4 py-2 border rounded-md text-sm font-medium min-w-[120px] ${
+              filtersExpanded
+                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+            }`}
+          >
+            <span className="inline-flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Filters
+              {(() => {
+                const count =
+                  (dateFilter !== 'all' ? 1 : 0) +
+                  (classificationFilter.length > 0 ? 1 : 0) +
+                  (setNameFilter !== null ? 1 : 0) +
+                  (ownerFilter !== null ? 1 : 0) +
+                  (domainInstagramFilter !== 'any' ? 1 : 0);
+                return count > 0 ? (
+                  <span className={`inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-xs font-semibold ${
+                    filtersExpanded ? 'bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-700'
+                  }`}>
+                    {count}
+                  </span>
+                ) : null;
+              })()}
+            </span>
+            <ChevronDown className={`w-4 h-4 transition-transform ${filtersExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+
+        {/* Expanded filters */}
+        {filtersExpanded && (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Date</label>
+                <select
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value as 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'updated_today' | 'updated_last_week' | 'custom')}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="all">All Dates</option>
+                  <option value="today">Created Today</option>
+                  <option value="yesterday">Created Yesterday</option>
+                  <option value="last_week">Created Last Week</option>
+                  <option value="last_month">Created Last Month</option>
+                  <option value="updated_today">Updated Today</option>
+                  <option value="updated_last_week">Updated Last Week</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+              </div>
+              <div className="relative" ref={classificationDropdownRef}>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Classification</label>
+                {(() => {
+                  const options: { value: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty'; label: string }[] = [
+                    { value: 'QUALIFIED', label: 'QUALIFIED' },
+                    { value: 'NOT_QUALIFIED', label: 'NOT QUALIFIED' },
+                    { value: 'MAYBE', label: 'MAYBE' },
+                    { value: 'EXPIRED', label: 'EXPIRED' },
+                    { value: 'empty', label: 'Empty/Null Summary' },
+                  ];
+                  const selected = classificationFilter;
+                  const buttonLabel =
+                    selected.length === 0
+                      ? 'All Classifications'
+                      : selected.length === 1
+                      ? (options.find((o) => o.value === selected[0])?.label ?? selected[0])
+                      : `${selected.length} selected`;
+                  const toggle = (val: 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty') => {
+                    setClassificationFilter(
+                      selected.includes(val) ? selected.filter((v) => v !== val) : [...selected, val]
+                    );
+                  };
+                  return (
+                    <>
                       <button
                         type="button"
-                        onClick={() => setClassificationFilter([])}
-                        className="w-full text-left px-3 py-2 text-xs text-indigo-600 hover:bg-gray-50 border-b border-gray-100"
+                        onClick={() => setClassificationDropdownOpen((v) => !v)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                       >
-                        Clear all
+                        <span className="truncate">{buttonLabel}</span>
+                        <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />
                       </button>
-                    )}
-                    {options.map((opt) => {
-                      const checked = selected.includes(opt.value);
-                      return (
-                        <label
-                          key={opt.value}
-                          className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+                      {classificationDropdownOpen && (
+                        <div className="absolute z-30 top-full left-0 mt-1 w-full bg-white border border-gray-200 rounded-md shadow-lg py-1">
+                          {selected.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setClassificationFilter([])}
+                              className="w-full text-left px-3 py-2 text-xs text-indigo-600 hover:bg-gray-50 border-b border-gray-100"
+                            >
+                              Clear all
+                            </button>
+                          )}
+                          {options.map((opt) => {
+                            const checked = selected.includes(opt.value);
+                            return (
+                              <label
+                                key={opt.value}
+                                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggle(opt.value)}
+                                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                />
+                                <span>{opt.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Set</label>
+                <select
+                  value={setNameFilter || 'all'}
+                  onChange={(e) => setSetNameFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="all">All Sets</option>
+                  <option value="">No Set (null/empty)</option>
+                  {availableSetNames.map((setName) => (
+                    <option key={setName} value={setName}>
+                      {setName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Owner</label>
+                <select
+                  value={ownerFilter || 'all'}
+                  onChange={(e) => setOwnerFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="all">All Owners</option>
+                  <option value="">No Owner (null/empty)</option>
+                  {availableOwners.map((owner) => (
+                    <option key={owner} value={owner}>
+                      {owner}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Has Field</label>
+                <select
+                  value={domainInstagramFilter}
+                  onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url')}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="any">Any</option>
+                  <option value="has_valid_domain">Has Valid Domain</option>
+                  <option value="has_valid_instagram">Has Valid Instagram</option>
+                  <option value="has_valid_phone">Has Valid Phone</option>
+                  <option value="has_valid_email">Has Valid Email</option>
+                  <option value="has_source_job_url">Has Source Job URL</option>
+                </select>
+              </div>
+            </div>
+
+            {dateFilter === 'custom' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Start date</label>
+                  <input
+                    type="date"
+                    value={formatDateForInput(customDateRange.start)}
+                    onChange={(e) => {
+                      setCustomDateRange({
+                        ...customDateRange,
+                        start: parseDateFromInput(e.target.value)
+                      });
+                    }}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">End date</label>
+                  <input
+                    type="date"
+                    value={formatDateForInput(customDateRange.end)}
+                    onChange={(e) => {
+                      setCustomDateRange({
+                        ...customDateRange,
+                        end: parseDateFromInput(e.target.value)
+                      });
+                    }}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-200">
+              <div className="relative" ref={exportMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setExportMenuOpen((v) => !v)}
+                  disabled={exportLoading}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  {exportLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Download className="w-4 h-4" />
+                  )}
+                  Export
+                  <ChevronDown className={`w-4 h-4 transition-transform ${exportMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                {exportMenuOpen && (
+                  <div className="absolute z-30 top-full left-0 mt-1 w-80 bg-white border border-gray-200 rounded-md shadow-lg py-1">
+                    {selectedCompanyIds.size > 0 && (
+                      <>
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-100">
+                          Selected ({selectedCompanyIds.size})
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleExportSelectedCompaniesCsv}
+                          className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50"
                         >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggle(opt.value)}
-                            className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                          />
-                          <span>{opt.label}</span>
-                        </label>
-                      );
-                    })}
+                          <Building2 className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
+                          <span className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-900">Selected companies as CSV</span>
+                            <span className="text-xs text-gray-500">{selectedCompanyIds.size} selected rows</span>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleExportSelectedContactsCsv}
+                          className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50 border-t border-gray-100"
+                        >
+                          <Users className="w-4 h-4 text-indigo-500 mt-0.5 flex-shrink-0" />
+                          <span className="flex flex-col">
+                            <span className="text-sm font-medium text-gray-900">Selected contacts as CSV</span>
+                            <span className="text-xs text-gray-500">Contacts from the {selectedCompanyIds.size} selected companies</span>
+                          </span>
+                        </button>
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider bg-gray-50 border-y border-gray-100">
+                          All filtered
+                        </div>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleExportCompaniesCsv}
+                      className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50"
+                    >
+                      <Building2 className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-900">Companies as CSV</span>
+                        <span className="text-xs text-gray-500">One row per company with summary fields</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleExportContactsCsv}
+                      className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-gray-50 border-t border-gray-100"
+                    >
+                      <Users className="w-4 h-4 text-gray-500 mt-0.5 flex-shrink-0" />
+                      <span className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-900">Contacts as CSV</span>
+                        <span className="text-xs text-gray-500">One row per contact across all companies</span>
+                      </span>
+                    </button>
                   </div>
                 )}
-              </>
-            );
-          })()}
-        </div>
-        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
-          <select
-            value={setNameFilter || 'all'}
-            onChange={(e) => setSetNameFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
-            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="all">All Sets</option>
-            <option value="">No Set (null/empty)</option>
-            {availableSetNames.map((setName) => (
-              <option key={setName} value={setName}>
-                {setName}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
-          <select
-            value={ownerFilter || 'all'}
-            onChange={(e) => setOwnerFilter(e.target.value === 'all' ? null : (e.target.value === '' ? '' : e.target.value))}
-            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="all">All Owners</option>
-            <option value="">No Owner (null/empty)</option>
-            {availableOwners.map((owner) => (
-              <option key={owner} value={owner}>
-                {owner}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex items-center gap-2 flex-1 sm:flex-initial">
-          <select
-            value={domainInstagramFilter}
-            onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url')}
-            className="flex-1 sm:flex-initial px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
-          >
-            <option value="any">Any</option>
-            <option value="has_valid_domain">Has Valid Domain</option>
-            <option value="has_valid_instagram">Has Valid Instagram</option>
-            <option value="has_valid_phone">Has Valid Phone</option>
-            <option value="has_valid_email">Has Valid Email</option>
-            <option value="has_source_job_url">Has Source Job URL</option>
-          </select>
-        </div>
+              </div>
+              <button
+                onClick={() => {
+                  setDateFilter('all');
+                  setCustomDateRange({ start: null, end: null });
+                  setClassificationFilter([]);
+                  setSetNameFilter(null);
+                  setOwnerFilter(null);
+                  setDomainInstagramFilter('any');
+                }}
+                disabled={
+                  dateFilter === 'all' &&
+                  classificationFilter.length === 0 &&
+                  setNameFilter === null &&
+                  ownerFilter === null &&
+                  domainInstagramFilter === 'any'
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+              >
+                <X className="w-4 h-4" />
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Company Form Modal */}

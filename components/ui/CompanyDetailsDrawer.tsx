@@ -176,6 +176,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     linkedin_url: "",
     photo_url: "",
     status: "",
+    isActionProfile: "",
   };
   const [newContact, setNewContact] = useState<Record<string, string>>(emptyNewContact);
   const [savingNewContact, setSavingNewContact] = useState(false);
@@ -535,6 +536,11 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         throw new Error("Not authenticated");
       }
 
+      const category =
+        company?.summary && typeof company.summary === "object"
+          ? (company.summary as Record<string, any>).category
+          : undefined;
+
       const response = await fetch(
         "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/people_search",
         {
@@ -543,7 +549,10 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
             "Content-Type": "application/json",
             Authorization: `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({ domain }),
+          body: JSON.stringify({
+            domain,
+            ...(category ? { category } : {}),
+          }),
         }
       );
 
@@ -585,7 +594,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     } finally {
       setContactsLoading(false);
     }
-  }, [company?.domain]);
+  }, [company?.domain, company?.summary]);
 
   const COMPANY_NEWS_STORAGE_KEY = (id: string) => `company-news-${id}`;
 
@@ -1056,11 +1065,14 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     async () => {
       if (!company) return;
 
-      const trimmed: Record<string, string> = {};
+      const trimmed: Record<string, any> = {};
       Object.entries(newContact).forEach(([k, v]) => {
         const val = (v || "").trim();
         if (val) trimmed[k] = val;
       });
+      if (trimmed.isActionProfile === "true") trimmed.isActionProfile = true;
+      else if (trimmed.isActionProfile === "false") trimmed.isActionProfile = false;
+      else delete trimmed.isActionProfile;
 
       if (!trimmed.full_name && !trimmed.email && !trimmed.linkedin_url && !trimmed.phone) {
         setToastMessage("Add at least a name, email, phone, or LinkedIn URL");
@@ -1086,7 +1098,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
             const merged: Record<string, any> = { ...contact };
             Object.keys(emptyNewContact).forEach((field) => {
-              if (trimmed[field]) {
+              if (Object.prototype.hasOwnProperty.call(trimmed, field)) {
                 merged[field] = trimmed[field];
               } else {
                 delete merged[field];
@@ -1160,6 +1172,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         linkedin_url: target.linkedin_url || "",
         photo_url: target.photo_url || "",
         status: target.status || "",
+        isActionProfile:
+          target.isActionProfile === true
+            ? "true"
+            : target.isActionProfile === false
+            ? "false"
+            : "",
       });
       setEditingContactId(contactId);
       setIsAddingContact(true);
@@ -1715,11 +1733,18 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       return buildEmailComposeUrl(trimmedEmail, { subject, body, emailSettings });
     };
 
+    const actionProfileClass =
+      contact.isActionProfile === true
+        ? "bg-green-50 border-green-300 hover:bg-green-100"
+        : contact.isActionProfile === false
+        ? "bg-gray-100 border-gray-300 hover:bg-gray-200"
+        : isChecked
+        ? "border-indigo-300 bg-indigo-50/30 hover:bg-indigo-50/50"
+        : "bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300";
+
     return (
       <div
-        className={`bg-white border rounded-lg p-4 shadow-sm hover:bg-gray-50 hover:border-gray-300 transition-colors ${
-          isChecked ? "border-indigo-300 bg-indigo-50/30 hover:bg-indigo-50/50" : "border-gray-200"
-        }`}
+        className={`border rounded-lg p-4 shadow-sm transition-colors ${actionProfileClass}`}
       >
         <div className="flex items-start gap-3">
           <input
@@ -2674,7 +2699,27 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               {/* Title + status pills */}
               <div>
                 <div className="flex items-start justify-between gap-3">
-                  <h2 className="text-xl font-semibold text-gray-900 break-all">{displayName}</h2>
+                  <div className="flex items-center gap-2 min-w-0">
+                    {hasDomain && (() => {
+                      const cleanDomain = company.domain!
+                        .replace(/^https?:\/\//i, '')
+                        .replace(/^www\./, '')
+                        .replace(/\/.*$/, '')
+                        .trim();
+                      if (!cleanDomain) return null;
+                      return (
+                        <img
+                          src={`https://www.google.com/s2/favicons?domain=${cleanDomain}&sz=64`}
+                          alt=""
+                          className="w-6 h-6 rounded flex-shrink-0"
+                          onError={(e) => {
+                            (e.currentTarget as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      );
+                    })()}
+                    <h2 className="text-xl font-semibold text-gray-900 break-all">{displayName}</h2>
+                  </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {!hasDomain && summaryCompanyName && (
                       <button
@@ -2698,7 +2743,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                           const domain = company.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '');
                           const name = domain.split('.')[0];
                           const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-                          const query = `site:linkedin.com/in ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing") ("${capitalized}" OR "${domain}")`;
+                          const query = `site:linkedin.com/in ("${capitalized}" OR "${domain}") ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing" OR "Head of Growth" OR "Head of Communications" OR "Head of Brand" OR "Creative Director" OR "Head of Content")`;
                           const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
                           window.open(url, '_blank', 'noopener,noreferrer');
                         }}
@@ -3349,6 +3394,13 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       </p>
                     </DetailField>
                   )}
+                  {company.updated_at && (
+                    <DetailField label="Updated At">
+                      <p className="text-sm text-gray-900">
+                        {new Date(company.updated_at).toLocaleString()}
+                      </p>
+                    </DetailField>
+                  )}
                 </div>
                 {onDelete && (
                   <div className="pt-2">
@@ -3955,7 +4007,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         const domain = company.domain!.replace(/^https?:\/\//i, '').replace(/^www\./, '').replace(/\/$/, '');
                         const name = domain.split('.')[0];
                         const capitalized = name.charAt(0).toUpperCase() + name.slice(1);
-                        const query = `site:linkedin.com/in ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing") ("${capitalized}" OR "${domain}")`;
+                        const query = `site:linkedin.com/in ("${capitalized}" OR "${domain}") ("Founder" OR "Co-Founder" OR "CEO" OR "Head of Marketing" OR "CMO" OR "VP Marketing" OR "Director Marketing" OR "Head of Growth" OR "Head of Communications" OR "Head of Brand" OR "Creative Director" OR "Head of Content")`;
                         const url = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
                         window.open(url, '_blank', 'noopener,noreferrer');
                       }}
@@ -4010,7 +4062,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       <p className="text-xs text-gray-600">
                         Paste LinkedIn profile JSON (with fields like <code>accountName</code>,{" "}
                         <code>url</code>, <code>profilePhoto</code>, <code>connectionsText</code>,{" "}
-                        <code>aboutEmail</code>, <code>aboutPhoneNumber</code>) to autofill below.
+                        <code>aboutEmail</code>, <code>aboutPhoneNumber</code>,{" "}
+                        <code>isActionProfile</code>) to autofill below.
                       </p>
                       <textarea
                         value={contactJsonInput}
@@ -4078,6 +4131,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                               }
                               headline = txt;
                             }
+                            const actionProfileVal =
+                              data.isActionProfile === true
+                                ? "true"
+                                : data.isActionProfile === false
+                                ? "false"
+                                : "";
                             setNewContact((prev) => ({
                               ...prev,
                               full_name: fullName || prev.full_name,
@@ -4086,6 +4145,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                               email: email || prev.email,
                               phone: phone || prev.phone,
                               headline: headline || prev.headline,
+                              isActionProfile: actionProfileVal || prev.isActionProfile,
                             }));
                             setContactJsonError(null);
                             setContactJsonOpen(false);
@@ -4202,6 +4262,22 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                             {s}
                           </option>
                         ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">
+                        Active profile
+                      </label>
+                      <select
+                        value={newContact.isActionProfile}
+                        onChange={(e) =>
+                          setNewContact({ ...newContact, isActionProfile: e.target.value })
+                        }
+                        className="w-full px-2.5 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
+                      >
+                        <option value="">Not set</option>
+                        <option value="true">Yes (active profile)</option>
+                        <option value="false">No (not active profile)</option>
                       </select>
                     </div>
                   </div>
