@@ -42,7 +42,7 @@ type SortOrder = 'newest' | 'oldest' | 'recently_updated' | 'least_recently_upda
 type DateFilter = 'all' | 'today' | 'yesterday' | 'last_week' | 'last_month' | 'updated_today' | 'updated_last_week' | 'custom';
 export type ClassificationValue = 'QUALIFIED' | 'NOT_QUALIFIED' | 'MAYBE' | 'EXPIRED' | 'empty';
 type ClassificationFilter = ClassificationValue[];
-type DomainInstagramFilter = 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url';
+type DomainInstagramFilter = 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url' | 'is_person';
 type AnalyticsPeriod = 'today' | 'yesterday' | 'week' | 'month';
 
 export interface CompanyCountByOwner {
@@ -271,6 +271,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         countQuery = countQuery.not('email', 'is', null).neq('email', '').neq('email', '-');
       } else if (domainInstagramFilter === 'has_source_job_url') {
         countQuery = countQuery.not('summary->>source_job_url', 'is', null).neq('summary->>source_job_url', '').neq('summary->>source_job_url', '-');
+      } else if (domainInstagramFilter === 'is_person') {
+        countQuery = countQuery.ilike('domain', 'linkedin.com/in%');
       }
 
       const { count, error: countError } = await countQuery;
@@ -347,6 +349,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         query = query.not('email', 'is', null).neq('email', '').neq('email', '-');
       } else if (domainInstagramFilter === 'has_source_job_url') {
         query = query.not('summary->>source_job_url', 'is', null).neq('summary->>source_job_url', '').neq('summary->>source_job_url', '-');
+      } else if (domainInstagramFilter === 'is_person') {
+        query = query.ilike('domain', 'linkedin.com/in%');
       }
 
       // Sorting
@@ -457,6 +461,8 @@ export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
         q = q.not('email', 'is', null).neq('email', '').neq('email', '-');
       } else if (domainInstagramFilter === 'has_source_job_url') {
         q = q.not('summary->>source_job_url', 'is', null).neq('summary->>source_job_url', '').neq('summary->>source_job_url', '-');
+      } else if (domainInstagramFilter === 'is_person') {
+        q = q.ilike('domain', 'linkedin.com/in%');
       }
 
       switch (sortOrder) {

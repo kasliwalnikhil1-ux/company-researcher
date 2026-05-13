@@ -14,7 +14,14 @@ export interface CsvProgressState {
   totalDomains: number;
   currentDomainIndex: number;
   // Additional metadata for reconstruction
-  selectedColumns?: { domain: string | null; instagram: string | null };
+  selectedColumns?: {
+    domain: string | null;
+    instagram: string | null;
+    email?: string | null;
+    name?: string | null;
+    title?: string | null;
+    linkedin?: string | null;
+  };
   researchMode?: 'domain' | 'instagram' | 'investor' | 'jobs' | 'person';
 }
 

@@ -66,6 +66,20 @@ const extractDomainFromUrl = (url: string): string => {
   }
 };
 
+// Build a short multi-line snippet from a template body for previewing it
+// inside the export template picker (mirrors MessageTemplateModal).
+const previewSnippet = (template: string, maxLines = 3, maxChars = 160): string => {
+  if (!template) return '';
+  const collapsed = template
+    .replace(/\\n/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .slice(0, maxLines)
+    .join(' · ');
+  return collapsed.length > maxChars ? `${collapsed.slice(0, maxChars).trimEnd()}…` : collapsed;
+};
+
 // Helper function to clean Instagram username
 const cleanInstagramUsernameForSearch = (instagram: string): string => {
   if (!instagram) return instagram;
@@ -355,6 +369,26 @@ function CompaniesContent() {
   // Export menu state
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  // Modal for picking which outreach-message templates to include as columns
+  // when exporting companies as CSV. Selection is persisted in localStorage
+  // under EXPORT_TEMPLATES_STORAGE_KEY across reloads.
+  const EXPORT_TEMPLATES_STORAGE_KEY = 'companies-export-template-ids';
+  const [exportTemplatesModalOpen, setExportTemplatesModalOpen] = useState(false);
+  const [pendingExport, setPendingExport] = useState<
+    { kind: 'companies' | 'contacts'; source: 'filtered' | 'selected' } | null
+  >(null);
+  const [exportTemplateIds, setExportTemplateIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = window.localStorage.getItem('companies-export-template-ids');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((v: unknown) => typeof v === 'string') : [];
+    } catch {
+      return [];
+    }
+  });
+  const [exportTemplateSearch, setExportTemplateSearch] = useState('');
   const exportMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!exportMenuOpen) return;
@@ -1133,13 +1167,23 @@ function CompaniesContent() {
   }, []);
 
   const buildCompaniesCsv = useCallback(
-    (all: Company[]): string => {
+    (all: Company[], templateIds: string[] = []): string => {
       const flattened = all.map((c) => ({ company: c, summary: flattenSummaryForCsv(c.summary) }));
       const summaryLabelSet = new Set<string>();
       for (const entry of flattened) {
         for (const k of Object.keys(entry.summary)) summaryLabelSet.add(k);
       }
       const summaryLabels = Array.from(summaryLabelSet);
+
+      // Resolve requested template IDs to actual templates, preserving the
+      // user's chosen order and dropping any IDs that no longer exist.
+      const selectedTemplates = templateIds
+        .map((id) => templates.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => !!t);
+      const templateHeaders = selectedTemplates.map((t) => {
+        const channelLabel = CHANNEL_LABELS[t.channel] || t.channel;
+        return `${t.title} - ${channelLabel}`;
+      });
 
       const baseHeaders = [
         'Company',
@@ -1155,7 +1199,7 @@ function CompaniesContent() {
         'Contacts Count',
         'Notes',
       ];
-      const headers = [...baseHeaders, ...summaryLabels];
+      const headers = [...baseHeaders, ...summaryLabels, ...templateHeaders];
 
       const rows = flattened.map(({ company, summary }) => {
         const classification =
@@ -1175,6 +1219,11 @@ function CompaniesContent() {
           company.instagram ||
           '';
 
+        const summaryDataForTemplates = getSummaryData(company);
+        const templateValues = selectedTemplates.map((t) =>
+          renderCompanyTemplate(t, summaryDataForTemplates, templates)
+        );
+
         const row: string[] = [
           String(companyName),
           company.domain ?? '',
@@ -1189,17 +1238,27 @@ function CompaniesContent() {
           String(contactsCount),
           notesStr,
           ...summaryLabels.map((label) => summary[label] ?? ''),
+          ...templateValues,
         ];
         return row.map(csvEscape).join(',');
       });
 
       return [headers.map(csvEscape).join(','), ...rows].join('\n');
     },
-    [flattenSummaryForCsv, csvEscape]
+    [flattenSummaryForCsv, csvEscape, templates, getSummaryData]
   );
 
   const buildContactsCsv = useCallback(
-    (all: Company[]): { csv: string; contactCount: number } => {
+    (all: Company[], templateIds: string[] = []): { csv: string; contactCount: number } => {
+      // Resolve template IDs in the order the user selected them.
+      const selectedTemplates = templateIds
+        .map((id) => templates.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => !!t);
+      const templateHeaders = selectedTemplates.map((t) => {
+        const channelLabel = CHANNEL_LABELS[t.channel] || t.channel;
+        return `${t.title} - ${channelLabel}`;
+      });
+
       const headers = [
         'Company',
         'Company Domain',
@@ -1217,6 +1276,7 @@ function CompaniesContent() {
         'Photo URL',
         'Status',
         'Checked',
+        ...templateHeaders,
       ];
 
       const rows: string[] = [];
@@ -1231,6 +1291,7 @@ function CompaniesContent() {
           company.domain ||
           company.instagram ||
           '';
+        const summaryDataForTemplates = getSummaryData(company);
 
         for (const contact of contacts as any[]) {
           if (!contact || typeof contact !== 'object') continue;
@@ -1245,6 +1306,11 @@ function CompaniesContent() {
               ? rawLinkedin
               : `https://www.linkedin.com/${String(rawLinkedin).replace(/^\/+/, '')}`
             : '';
+          // Personalize each template for this specific contact so ${first_name}
+          // and friends resolve to the recipient — matches the drawer behavior.
+          const templateValues = selectedTemplates.map((t) =>
+            renderCompanyTemplate(t, summaryDataForTemplates, templates, [], contact)
+          );
           const row: string[] = [
             String(companyName),
             company.domain ?? '',
@@ -1262,6 +1328,7 @@ function CompaniesContent() {
             contact.photo_url ?? '',
             contact.status ?? '',
             contact.checked === true ? 'true' : contact.checked === false ? 'false' : '',
+            ...templateValues,
           ];
           rows.push(row.map(csvEscape).join(','));
         }
@@ -1270,12 +1337,16 @@ function CompaniesContent() {
       const csv = [headers.map(csvEscape).join(','), ...rows].join('\n');
       return { csv, contactCount };
     },
-    [csvEscape]
+    [csvEscape, templates, getSummaryData]
   );
 
   type ExportSource = 'filtered' | 'selected';
   const runExport = useCallback(
-    async (kind: 'companies' | 'contacts', source: ExportSource) => {
+    async (
+      kind: 'companies' | 'contacts',
+      source: ExportSource,
+      templateIds: string[] = []
+    ) => {
       setExportMenuOpen(false);
       setBulkExportMenuOpen(false);
       setExportLoading(true);
@@ -1299,12 +1370,12 @@ function CompaniesContent() {
         const suffix = source === 'selected' ? 'selected' : 'export';
 
         if (kind === 'companies') {
-          const csv = buildCompaniesCsv(all);
+          const csv = buildCompaniesCsv(all, templateIds);
           downloadCsv(csv, `companies-${suffix}-${today}.csv`);
           setToastMessage(`Exported ${all.length} companies to CSV`);
           setToastVisible(true);
         } else {
-          const { csv, contactCount } = buildContactsCsv(all);
+          const { csv, contactCount } = buildContactsCsv(all, templateIds);
           if (contactCount === 0) {
             setToastMessage(
               source === 'selected'
@@ -1329,10 +1400,44 @@ function CompaniesContent() {
     [fetchAllFilteredCompanies, fetchCompaniesByIds, selectedCompanyIds, buildCompaniesCsv, buildContactsCsv]
   );
 
-  const handleExportCompaniesCsv = useCallback(() => runExport('companies', 'filtered'), [runExport]);
-  const handleExportContactsCsv = useCallback(() => runExport('contacts', 'filtered'), [runExport]);
-  const handleExportSelectedCompaniesCsv = useCallback(() => runExport('companies', 'selected'), [runExport]);
-  const handleExportSelectedContactsCsv = useCallback(() => runExport('contacts', 'selected'), [runExport]);
+  const openExportTemplatesModal = useCallback(
+    (kind: 'companies' | 'contacts', source: ExportSource) => {
+      setExportMenuOpen(false);
+      setBulkExportMenuOpen(false);
+      setPendingExport({ kind, source });
+      setExportTemplateSearch('');
+      // Drop any saved IDs that point to deleted templates so the modal opens
+      // with an accurate, current picture of the user's saved selection.
+      setExportTemplateIds((prev) => {
+        const validIds = new Set(templates.map((t) => t.id));
+        const cleaned = prev.filter((id) => validIds.has(id));
+        return cleaned.length === prev.length ? prev : cleaned;
+      });
+      setExportTemplatesModalOpen(true);
+    },
+    [templates]
+  );
+
+  const handleConfirmExportWithTemplates = useCallback(() => {
+    if (!pendingExport) return;
+    const { kind, source } = pendingExport;
+    const ids = exportTemplateIds;
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(EXPORT_TEMPLATES_STORAGE_KEY, JSON.stringify(ids));
+      }
+    } catch {
+      // ignore storage failures
+    }
+    setExportTemplatesModalOpen(false);
+    setPendingExport(null);
+    void runExport(kind, source, ids);
+  }, [pendingExport, exportTemplateIds, runExport]);
+
+  const handleExportCompaniesCsv = useCallback(() => openExportTemplatesModal('companies', 'filtered'), [openExportTemplatesModal]);
+  const handleExportContactsCsv = useCallback(() => openExportTemplatesModal('contacts', 'filtered'), [openExportTemplatesModal]);
+  const handleExportSelectedCompaniesCsv = useCallback(() => openExportTemplatesModal('companies', 'selected'), [openExportTemplatesModal]);
+  const handleExportSelectedContactsCsv = useCallback(() => openExportTemplatesModal('contacts', 'selected'), [openExportTemplatesModal]);
 
   // Cleanup timeouts and abort controllers on unmount
   useEffect(() => {
@@ -2219,7 +2324,7 @@ function CompaniesContent() {
                 <label className="block text-xs font-medium text-gray-500 mb-1">Has Field</label>
                 <select
                   value={domainInstagramFilter}
-                  onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url')}
+                  onChange={(e) => setDomainInstagramFilter(e.target.value as 'any' | 'has_valid_domain' | 'has_valid_instagram' | 'has_valid_phone' | 'has_valid_email' | 'has_source_job_url' | 'is_person')}
                   className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm text-gray-700 bg-white focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                 >
                   <option value="any">Any</option>
@@ -2228,6 +2333,7 @@ function CompaniesContent() {
                   <option value="has_valid_phone">Has Valid Phone</option>
                   <option value="has_valid_email">Has Valid Email</option>
                   <option value="has_source_job_url">Has Source Job URL</option>
+                  <option value="is_person">Is Person (LinkedIn profile)</option>
                 </select>
               </div>
             </div>
@@ -3199,6 +3305,179 @@ function CompaniesContent() {
         isVisible={toastVisible}
         onClose={() => setToastVisible(false)}
       />
+
+      {/* Export Template Selection Modal */}
+      {exportTemplatesModalOpen && (() => {
+        const searchLower = exportTemplateSearch.trim().toLowerCase();
+        const filteredTemplates = templates.filter((t) =>
+          !searchLower
+            ? true
+            : (t.title || '').toLowerCase().includes(searchLower) ||
+              (t.category || '').toLowerCase().includes(searchLower) ||
+              (CHANNEL_LABELS[t.channel] || t.channel).toLowerCase().includes(searchLower)
+        );
+        const grouped = new Map<string, typeof templates>();
+        for (const t of filteredTemplates) {
+          const key = CHANNEL_LABELS[t.channel] || t.channel;
+          const arr = grouped.get(key) || [];
+          arr.push(t);
+          grouped.set(key, arr);
+        }
+        const selectedSet = new Set(exportTemplateIds);
+        const filteredIds = filteredTemplates.map((t) => t.id);
+        const allFilteredSelected =
+          filteredIds.length > 0 && filteredIds.every((id) => selectedSet.has(id));
+
+        return (
+          <>
+            <div
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60]"
+              onClick={() => setExportTemplatesModalOpen(false)}
+            />
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+              <div
+                className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900">
+                    Include outreach messages
+                  </h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Pick which message templates to add as columns to the CSV export. Your selection is remembered for next time.
+                  </p>
+                </div>
+                <div className="px-6 py-3 border-b border-gray-200 flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={exportTemplateSearch}
+                    onChange={(e) => setExportTemplateSearch(e.target.value)}
+                    placeholder="Search templates by title, channel, or category..."
+                    className="flex-1 min-w-[200px] px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (allFilteredSelected) {
+                        setExportTemplateIds((prev) => prev.filter((id) => !filteredIds.includes(id)));
+                      } else {
+                        setExportTemplateIds((prev) => {
+                          const next = new Set(prev);
+                          for (const id of filteredIds) next.add(id);
+                          return Array.from(next);
+                        });
+                      }
+                    }}
+                    disabled={filteredIds.length === 0}
+                    className="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-md hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {allFilteredSelected ? 'Clear shown' : 'Select shown'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExportTemplateIds([])}
+                    disabled={exportTemplateIds.length === 0}
+                    className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Clear all
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto px-6 py-3">
+                  {templatesLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                    </div>
+                  ) : templates.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic text-center py-8">
+                      No message templates available. Add templates first to include them in exports.
+                    </p>
+                  ) : filteredTemplates.length === 0 ? (
+                    <p className="text-sm text-gray-500 italic text-center py-8">
+                      No templates match the search.
+                    </p>
+                  ) : (
+                    <div className="space-y-4">
+                      {Array.from(grouped.entries()).map(([channelLabel, items]) => (
+                        <div key={channelLabel}>
+                          <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                            {channelLabel}
+                          </h4>
+                          <div className="space-y-1">
+                            {items.map((t) => {
+                              const checked = selectedSet.has(t.id);
+                              return (
+                                <label
+                                  key={t.id}
+                                  className="flex items-start gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={(e) => {
+                                      const isOn = e.target.checked;
+                                      setExportTemplateIds((prev) => {
+                                        if (isOn) {
+                                          return prev.includes(t.id) ? prev : [...prev, t.id];
+                                        }
+                                        return prev.filter((id) => id !== t.id);
+                                      });
+                                    }}
+                                    className="mt-0.5 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                  />
+                                  <span className="flex-1 min-w-0">
+                                    <span className="block text-sm text-gray-900 truncate">{t.title}</span>
+                                    {t.category && (
+                                      <span className="block text-xs text-gray-500 truncate">{t.category}</span>
+                                    )}
+                                    {t.template && (
+                                      <span className="block text-xs text-gray-500 mt-0.5 whitespace-pre-line line-clamp-3">
+                                        {previewSnippet(t.template)}
+                                      </span>
+                                    )}
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-500">
+                    {exportTemplateIds.length} template{exportTemplateIds.length === 1 ? '' : 's'} selected
+                    {' · '}
+                    {pendingExport?.kind === 'contacts' ? 'Contacts CSV' : 'Companies CSV'}
+                    {' · '}
+                    {pendingExport?.source === 'selected'
+                      ? `${selectedCompanyIds.size} selected`
+                      : 'all filtered'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setExportTemplatesModalOpen(false)}
+                      className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleConfirmExportWithTemplates}
+                      disabled={exportLoading}
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {exportLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                      Export CSV
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        );
+      })()}
 
       {/* WhatsApp Template Modal */}
       <WhatsAppTemplateModal

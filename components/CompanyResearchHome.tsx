@@ -6,7 +6,7 @@ import QualificationDisplay from './qualification/QualificationDisplay';
 import InstagramProfileDisplay from './qualification/InstagramProfileDisplay';
 import Image from "next/image";
 import Link from "next/link";
-import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, fetchJobsResearch, fetchCompanyNewsEmailOpener, processContactsPending, cleanInvestorInput, sendSlackNotification } from "../lib/api";
+import { fetchCompanyMap, fetchInstagramProfile, fetchInvestorResearch, fetchJobsResearch, fetchCompanyNewsEmailOpener, processContactsPending, cleanInvestorInput, sendSlackNotification, getValidAccessToken } from "../lib/api";
 import type { JobsResearchSummary, NewsEmailOpener } from "../lib/api";
 import { mergeNewsDraftIntoSummary as mergeNewsDraftIntoSummaryHelper } from "../lib/reanalyzeCompany";
 import ExportCsvButton from './ui/ExportCsvButton';
@@ -276,6 +276,27 @@ export default function CompanyResearcher() {
 
   // Set name for batch processing
   const [setName, setSetName] = useState('');
+
+  // Auto-add contacts toggle (B2B only). Persisted to localStorage so it
+  // survives reloads. When enabled, after a company is saved with classification
+  // QUALIFIED or MAYBE we call people_search and store the results on the
+  // company row — same flow as CompanyDetailsDrawer's manual fetch.
+  const AUTO_ADD_CONTACTS_KEY = 'company-research-auto-add-contacts';
+  const [autoAddContacts, setAutoAddContacts] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = localStorage.getItem(AUTO_ADD_CONTACTS_KEY);
+      if (stored === 'true') setAutoAddContacts(true);
+    } catch (_) {}
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem(AUTO_ADD_CONTACTS_KEY, autoAddContacts ? 'true' : 'false');
+    } catch (_) {}
+  }, [autoAddContacts]);
+
   const [newsInput, setNewsInput] = useState('');
   const [newsMode, setNewsMode] = useState<'news' | 'ads'>('news');
   const newsDraftCacheRef = useRef<{ news: string; mode: 'news' | 'ads'; companyKey: string; draft: NewsEmailOpener | null } | null>(null);
@@ -296,6 +317,12 @@ export default function CompanyResearcher() {
   const [isProcessingTable, setIsProcessingTable] = useState(false);
   const [tableProcessingProgress, setTableProcessingProgress] = useState<{ current: number; total: number }>({ current: 0, total: 0 });
   const [pendingTableDelete, setPendingTableDelete] = useState<{ kind: 'row' | 'col'; index: number } | null>(null);
+  const [pendingCsvDelete, setPendingCsvDelete] = useState<{ kind: 'row' | 'col'; index: number; key?: string } | null>(null);
+  // When the user clicks Analyze on a CSV that has only a LinkedIn URL column
+  // selected (no domain/instagram), we switch researchMode to 'person' and
+  // selectedUrlColumn to the LinkedIn column. Because those state updates are
+  // async, we defer the actual processing trigger until they've flushed.
+  const [pendingPersonResearchFromCsv, setPendingPersonResearchFromCsv] = useState(false);
 
   // Company input and state
   const [rawCompanyInput, setRawCompanyInput] = useState('');
@@ -331,7 +358,14 @@ export default function CompanyResearcher() {
   const [csvData, setCsvData] = useState<{ headers: string[]; rows: CsvRow[] } | null>(null);
   const [showColumnSelector, setShowColumnSelector] = useState(false);
   const [selectedUrlColumn, setSelectedUrlColumn] = useState<string | null>(null);
-  const [selectedColumns, setSelectedColumns] = useState<{ domain: string | null; instagram: string | null }>({ domain: null, instagram: null });
+  const [selectedColumns, setSelectedColumns] = useState<{
+    domain: string | null;
+    instagram: string | null;
+    email: string | null;
+    name: string | null;
+    title: string | null;
+    linkedin: string | null;
+  }>({ domain: null, instagram: null, email: null, name: null, title: null, linkedin: null });
   const [isProcessingCsv, setIsProcessingCsv] = useState(false);
   const [csvProcessingProgress, setCsvProcessingProgress] = useState<{ current: number; total: number; contactsLabel?: string }>({ current: 0, total: 0 });
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
@@ -599,6 +633,165 @@ export default function CompanyResearcher() {
     <T extends Record<string, any> | null | undefined>(summary: T, draft: NewsEmailOpener | null): T =>
       mergeNewsDraftIntoSummaryHelper(summary, draft),
     []
+  );
+
+  // Auto-add contacts for B2B companies whose classification is QUALIFIED or
+  // MAYBE. Mirrors the manual fetch flow in CompanyDetailsDrawer: calls the
+  // people_search edge function with the domain (and category, if known) and
+  // stores the merged results on the company row, preserving any existing
+  // `checked` flags. Silent best-effort — failures only log, they never break
+  // the surrounding save.
+  // Build a contact object from a CSV row using the user-selected contact
+  // columns. Returns null when there's nothing meaningful to add.
+  const buildContactFromCsvRow = useCallback(
+    (row: CsvRow): Record<string, any> | null => {
+      const fullName = selectedColumns.name ? (row[selectedColumns.name] || '').trim() : '';
+      const title = selectedColumns.title ? (row[selectedColumns.title] || '').trim() : '';
+      const emailRaw = selectedColumns.email ? (row[selectedColumns.email] || '').trim() : '';
+      const linkedinRaw = selectedColumns.linkedin ? (row[selectedColumns.linkedin] || '').trim() : '';
+      const email = /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailRaw) ? emailRaw : '';
+      const linkedin = /linkedin\.com\/in\//i.test(linkedinRaw) ? linkedinRaw : '';
+      if (!fullName && !email && !linkedin && !title) return null;
+      const id = email || linkedin || fullName || `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      return {
+        person_id: `manual_${id}`,
+        full_name: fullName || undefined,
+        title: title || undefined,
+        email: email || undefined,
+        linkedin_url: linkedin || undefined,
+        checked: false,
+      };
+    },
+    [selectedColumns]
+  );
+
+  // Add (and dedupe) a row-derived contact into a company's contacts array.
+  const addCsvRowContactToCompany = useCallback(
+    async (companyId: string, row: CsvRow, domainName: string | null) => {
+      if (!user) return;
+      const contact = buildContactFromCsvRow(row);
+      if (!contact) return;
+      try {
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('id, contacts')
+          .eq('id', companyId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (!companyData?.id) return;
+
+        const existing: any[] = Array.isArray(companyData.contacts) ? companyData.contacts : [];
+        const keyOf = (c: any): string =>
+          String(
+            (c?.email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c.email) ? c.email.toLowerCase() : '') ||
+            (c?.linkedin_url || '').toLowerCase() ||
+            (c?.full_name || '').trim().toLowerCase() ||
+            c?.person_id || ''
+          );
+        const newKey = keyOf(contact);
+        let merged: any[];
+        const matchIdx = newKey ? existing.findIndex((c) => keyOf(c) === newKey) : -1;
+        if (matchIdx >= 0) {
+          merged = existing.map((c, i) =>
+            i === matchIdx
+              ? {
+                  ...c,
+                  full_name: c.full_name || contact.full_name,
+                  title: c.title || contact.title,
+                  email: c.email || contact.email,
+                  linkedin_url: c.linkedin_url || contact.linkedin_url,
+                }
+              : c
+          );
+        } else {
+          merged = [contact, ...existing];
+        }
+
+        await updateCompany(companyData.id, { contacts: merged });
+        if (domainName) {
+          try {
+            localStorage.setItem(`contacts_${domainName}`, JSON.stringify(merged));
+          } catch (_) {}
+        }
+      } catch (err) {
+        console.error('[addCsvRowContactToCompany] failed:', err);
+      }
+    },
+    [buildContactFromCsvRow, updateCompany, user]
+  );
+
+  const autoAddContactsForDomain = useCallback(
+    async (domainName: string, summary: any, isNewCompany: boolean) => {
+      if (!isB2B || !autoAddContacts) return;
+      if (!isNewCompany) return;
+      if (!domainName || !user?.id) return;
+      const cls = String(summary?.classification || '').toUpperCase();
+      if (cls !== 'QUALIFIED' && cls !== 'MAYBE') return;
+
+      try {
+        const accessToken = await getValidAccessToken();
+        if (!accessToken) return;
+
+        const category = summary && typeof summary === 'object' ? summary.category : undefined;
+        const response = await fetch(
+          'https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/people_search',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              domain: domainName,
+              ...(category ? { category } : {}),
+            }),
+          }
+        );
+        if (!response.ok) {
+          console.error('[autoAddContacts] people_search failed:', response.statusText);
+          return;
+        }
+        const data = await response.json();
+        const contactsList = Array.isArray(data?.results) ? data.results : [];
+        if (contactsList.length === 0) return;
+
+        const { data: companyData } = await supabase
+          .from('companies')
+          .select('id, contacts')
+          .eq('user_id', user.id)
+          .eq('domain', domainName)
+          .maybeSingle();
+        if (!companyData?.id) return;
+
+        const existing = Array.isArray(companyData.contacts) ? companyData.contacts : [];
+        let merged: any[];
+        if (existing.length > 0) {
+          const existingMap = new Map<string, any>();
+          existing.forEach((c: any) => {
+            const id = c?.person_id || c?.email || c?.full_name;
+            if (id) existingMap.set(String(id), c);
+          });
+          merged = contactsList.map((nc: any) => {
+            const id = nc?.person_id || nc?.email || nc?.full_name;
+            const ex = id ? existingMap.get(String(id)) : null;
+            return ex ? { ...nc, checked: ex.checked } : nc;
+          });
+        } else {
+          merged = contactsList;
+        }
+
+        await updateCompany(companyData.id, { contacts: merged });
+
+        // Cache the contacts in the same localStorage key the drawer uses so
+        // the Contacts tab won't refetch them next time it opens.
+        try {
+          localStorage.setItem(`contacts_${domainName}`, JSON.stringify(merged));
+        } catch (_) {}
+      } catch (err) {
+        console.error('[autoAddContacts] failed:', err);
+      }
+    },
+    [isB2B, autoAddContacts, user?.id, updateCompany]
   );
 
   // Research a single company
@@ -948,6 +1141,8 @@ export default function CompanyResearcher() {
                   ...(newsToSaveJobs ? { news: newsToSaveJobs } : {}),
                 });
               }
+
+              await autoAddContactsForDomain(companyDomain, qualificationSummary, !existingCompanyData);
             } else {
               await createCompany({
                 domain: '',
@@ -1224,6 +1419,8 @@ export default function CompanyResearcher() {
                 ...(newsToSave ? { news: newsToSave } : {}),
               });
             }
+
+            await autoAddContactsForDomain(domainName, qualificationData, !existingCompany);
           } catch (saveError) {
             console.error('Error saving company to database:', saveError);
             // Don't fail the whole operation if save fails
@@ -1246,7 +1443,7 @@ export default function CompanyResearcher() {
         );
       }
     }
-  }, [researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary]);
+  }, [researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary, autoAddContactsForDomain]);
 
   // Handle CSV file upload
   const handleCsvUpload = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1265,7 +1462,7 @@ export default function CompanyResearcher() {
       setCsvData(parsed);
       setShowColumnSelector(true);
       setSelectedUrlColumn(null);
-      setSelectedColumns({ domain: null, instagram: null });
+      setSelectedColumns({ domain: null, instagram: null, email: null, name: null, title: null, linkedin: null });
     } catch (error) {
       console.error('Error parsing CSV:', error);
       alert('Failed to parse CSV file. Please check the file format.');
@@ -1279,7 +1476,7 @@ export default function CompanyResearcher() {
 
   // Check for saved progress on mount and when CSV data changes
   useEffect(() => {
-    if (csvData && (selectedUrlColumn || (selectedColumns.domain || selectedColumns.instagram))) {
+    if (csvData && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram || selectedColumns.linkedin)) {
       const saved = hasCsvProgress();
       setHasSavedProgress(saved);
     } else {
@@ -1604,11 +1801,21 @@ export default function CompanyResearcher() {
   // Process CSV rows with progress saving
   const processCsvRows = useCallback(async (resumeFromSaved: boolean = false) => {
     // Check if we have either the old single column selection or the new dual column selection
-    const hasColumnSelection = selectedUrlColumn || (selectedColumns.domain || selectedColumns.instagram);
+    const hasColumnSelection = selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram || selectedColumns.linkedin;
     if (!csvData || !hasColumnSelection) return;
     
     // Determine if we're using dual column mode
     const useDualColumns: boolean = !!(selectedColumns.domain || selectedColumns.instagram);
+
+    // If the user mapped any contact column (email/name/title/linkedin), they
+    // are supplying contacts themselves per-row — skip the people-search auto
+    // contacts fetch to avoid clobbering / paying for unnecessary lookups.
+    const userSuppliedContacts: boolean = !!(
+      selectedColumns.email ||
+      selectedColumns.name ||
+      selectedColumns.title ||
+      selectedColumns.linkedin
+    );
 
     // Helper function to check if URL is Instagram URL
     const isInstagramUrl = (url: string): boolean => {
@@ -2208,6 +2415,7 @@ export default function CompanyResearcher() {
           
           const existingCompany = existingCompanyData;
           
+          let savedCompanyId: string | null = null;
           if (existingCompany) {
             // Update existing company, combining both fields from CSV
             await updateCompany(existingCompany.id, {
@@ -2219,6 +2427,7 @@ export default function CompanyResearcher() {
               phone: phone || existingCompany.phone || '',
               owner: selectedOwner,
             });
+            savedCompanyId = existingCompany.id;
           } else {
             // Create new company with both fields from CSV
             await createCompany({
@@ -2230,6 +2439,26 @@ export default function CompanyResearcher() {
               set_name: setName || null,
               owner: selectedOwner,
             });
+            // Look up the row we just inserted so we can attach the contact below.
+            try {
+              const { data: justSaved } = await supabase
+                .from('companies')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq(isDomain ? 'domain' : 'instagram', primaryIdentifier)
+                .maybeSingle();
+              savedCompanyId = justSaved?.id ?? null;
+            } catch (_) {}
+          }
+
+          if (domainName && !userSuppliedContacts) {
+            await autoAddContactsForDomain(domainName, qualificationData, !existingCompany);
+          }
+
+          // If the user mapped any per-row contact columns, merge a contact
+          // built from this row onto the saved company.
+          if (savedCompanyId && (selectedColumns.email || selectedColumns.name || selectedColumns.title || selectedColumns.linkedin)) {
+            await addCsvRowContactToCompany(savedCompanyId, row, domainName);
           }
         } catch (saveError) {
           console.error('Error saving company to database during CSV processing:', saveError);
@@ -2664,6 +2893,10 @@ export default function CompanyResearcher() {
                         owner: selectedOwner,
                       });
                     }
+
+                    if (!userSuppliedContacts) {
+                      await autoAddContactsForDomain(companyDomain, qualificationSummary, !existingCompanyData);
+                    }
                   } else {
                     await createCompany({
                       domain: '',
@@ -2892,6 +3125,10 @@ export default function CompanyResearcher() {
                     set_name: setName || null,
                     owner: selectedOwner,
                   });
+                }
+
+                if (!userSuppliedContacts) {
+                  await autoAddContactsForDomain(domainName, data, !existingCompany);
                 }
               } catch (saveError) {
                 console.error('Error saving company to database during CSV processing:', saveError);
@@ -3208,16 +3445,17 @@ export default function CompanyResearcher() {
         let domainQualificationData: any = null;
         let instagramData: any = null;
         let instagramQualificationData: any = null;
-        
+        let cleanedDomainUrl: string | null = null;
+
         // Get domain data
         if (domainUrl) {
-          const cleanedUrl = cleanUrl(domainUrl, 'domain');
-          domainName = cleanedUrl ? extractDomain(cleanedUrl) : null;
+          cleanedDomainUrl = cleanUrl(domainUrl, 'domain');
+          domainName = cleanedDomainUrl ? extractDomain(cleanedDomainUrl) : null;
           if (domainName) {
             domainQualificationData = qualificationDataMap.get(domainName);
           }
         }
-        
+
         // Get Instagram data
         if (instagramUrl && isInstagramUrl(instagramUrl)) {
           instagramData = qualificationDataMap.get(instagramUrl);
@@ -3225,9 +3463,12 @@ export default function CompanyResearcher() {
             instagramQualificationData = instagramData.qualificationData;
           }
         }
-        
-        // Store results - prefer domain URL for key, fallback to Instagram
-        const displayUrl = domainUrl || instagramUrl;
+
+        // Store results under the same key that's used in `submittedCompanies`
+        // (which is the cleaned domain URL pushed into allValidUrls earlier).
+        // Falling back to raw Instagram handle, which is what allValidUrls
+        // pushes for the Instagram column.
+        const displayUrl = cleanedDomainUrl || instagramUrl;
         if (displayUrl && (domainQualificationData || instagramData)) {
           const { qualificationData: _, ...profileDataWithoutQualification } = instagramData || {};
           
@@ -3333,7 +3574,7 @@ export default function CompanyResearcher() {
     setCsvData(null);
     setShowColumnSelector(false);
     setSelectedUrlColumn(null);
-    setSelectedColumns({ domain: null, instagram: null });
+    setSelectedColumns({ domain: null, instagram: null, email: null, name: null, title: null, linkedin: null });
     
     // Show confirmation modal
     const message = `CSV processing complete! Processed ${rowsToProcess.length} rows.`;
@@ -3344,7 +3585,21 @@ export default function CompanyResearcher() {
     sendSlackNotification(`✅ CSV Processing Complete: Processed ${rowsToProcess.length} rows.`).catch(
       (error) => console.error('Failed to send Slack notification:', error)
     );
-  }, [csvData, selectedUrlColumn, selectedColumns, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary]);
+  }, [csvData, selectedUrlColumn, selectedColumns, rawCompanyInput, activeCompany, parseCompanyInput, researchMode, createCompany, updateCompany, selectedOwner, user, personalizationSettings, getNewsEmailOpener, mergeNewsDraftIntoSummary, autoAddContactsForDomain]);
+
+  // Fire the deferred person-research-via-LinkedIn-column CSV run once state
+  // (researchMode + selectedUrlColumn) has flushed.
+  useEffect(() => {
+    if (!pendingPersonResearchFromCsv) return;
+    if (researchMode !== 'person') return;
+    if (!selectedUrlColumn || selectedUrlColumn !== selectedColumns.linkedin) return;
+    setPendingPersonResearchFromCsv(false);
+    if (hasSavedProgress) {
+      setShowResumeDialog(true);
+    } else {
+      processCsvRows(false);
+    }
+  }, [pendingPersonResearchFromCsv, researchMode, selectedUrlColumn, selectedColumns.linkedin, hasSavedProgress, processCsvRows]);
 
   // Switch between Link, CSV, and Table input modes; clears entries from the other tabs
   const handleSwitchInputMode = useCallback((mode: 'link' | 'csv' | 'table') => {
@@ -3360,7 +3615,7 @@ export default function CompanyResearcher() {
       if (mode !== 'csv') {
         setCsvData(null);
         setSelectedUrlColumn(null);
-        setSelectedColumns({ domain: null, instagram: null });
+        setSelectedColumns({ domain: null, instagram: null, email: null, name: null, title: null, linkedin: null });
         if (fileInputRef.current) {
           fileInputRef.current.value = '';
         }
@@ -3471,6 +3726,87 @@ export default function CompanyResearcher() {
 
   const handleRemoveTableRow = useCallback((rowIndex: number) => {
     setTableData(prev => (prev ? removeRowAt(prev, rowIndex) : prev));
+  }, []);
+
+  const handleRemoveCsvColumn = useCallback((header: string) => {
+    setCsvData(prev => {
+      if (!prev) return prev;
+      const newHeaders = prev.headers.filter(h => h !== header);
+      const newRows = prev.rows.map(row => {
+        const next: CsvRow = {};
+        for (const h of newHeaders) next[h] = row[h] ?? '';
+        return next;
+      });
+      return { headers: newHeaders, rows: newRows };
+    });
+    if (selectedUrlColumn === header) setSelectedUrlColumn(null);
+    setSelectedColumns(prev => ({
+      ...prev,
+      domain: prev.domain === header ? null : prev.domain,
+      instagram: prev.instagram === header ? null : prev.instagram,
+      email: prev.email === header ? null : prev.email,
+      name: prev.name === header ? null : prev.name,
+      title: prev.title === header ? null : prev.title,
+      linkedin: prev.linkedin === header ? null : prev.linkedin,
+    }));
+  }, [selectedUrlColumn]);
+
+  const handleRemoveCsvRow = useCallback((rowIndex: number) => {
+    setCsvData(prev => {
+      if (!prev) return prev;
+      return { headers: prev.headers, rows: prev.rows.filter((_, i) => i !== rowIndex) };
+    });
+  }, []);
+
+  const handleRenameCsvColumn = useCallback((oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+    setCsvData(prev => {
+      if (!prev) return prev;
+      if (prev.headers.includes(trimmed)) return prev; // collision — dialog already guards
+      const newHeaders = prev.headers.map(h => (h === oldName ? trimmed : h));
+      const newRows = prev.rows.map(row => {
+        const next: CsvRow = {};
+        for (const h of newHeaders) {
+          const sourceKey = h === trimmed ? oldName : h;
+          next[h] = row[sourceKey] ?? '';
+        }
+        return next;
+      });
+      return { headers: newHeaders, rows: newRows };
+    });
+    setSelectedUrlColumn(prev => (prev === oldName ? trimmed : prev));
+    setSelectedColumns(prev => ({
+      ...prev,
+      domain: prev.domain === oldName ? trimmed : prev.domain,
+      instagram: prev.instagram === oldName ? trimmed : prev.instagram,
+      email: prev.email === oldName ? trimmed : prev.email,
+      name: prev.name === oldName ? trimmed : prev.name,
+      title: prev.title === oldName ? trimmed : prev.title,
+      linkedin: prev.linkedin === oldName ? trimmed : prev.linkedin,
+    }));
+  }, []);
+
+  const handleCreateDomainFromEmailColumn = useCallback((emailColumn: string) => {
+    setCsvData(prev => {
+      if (!prev) return prev;
+      let domainHeader = 'Domain';
+      let i = 2;
+      while (prev.headers.includes(domainHeader)) {
+        domainHeader = `Domain ${i++}`;
+      }
+      const newHeaders = [...prev.headers, domainHeader];
+      const newRows = prev.rows.map(row => {
+        const email = (row[emailColumn] || '').trim();
+        const at = email.indexOf('@');
+        const domain = at >= 0 ? email.slice(at + 1).trim().toLowerCase() : '';
+        return { ...row, [domainHeader]: domain };
+      });
+      // Pick the new column as the active domain selection.
+      setSelectedUrlColumn(domainHeader);
+      setSelectedColumns(prevSel => ({ ...prevSel, domain: domainHeader }));
+      return { headers: newHeaders, rows: newRows };
+    });
   }, []);
 
   // Process table rows: domain column = company URL, other columns = per-row news context
@@ -3757,14 +4093,6 @@ export default function CompanyResearcher() {
             {' Researcher'}
           </h1>
         </div>
-        {(submittedCompanies.length > 0 || rawCompanyInput.trim().length > 0) && (
-          <button
-            onClick={handleClearAll}
-            className="px-4 py-2 bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors font-medium text-sm whitespace-nowrap"
-          >
-            CLEAR ALL
-          </button>
-        )}
       </div>
 
       {/* Mode Selector */}
@@ -3856,8 +4184,31 @@ export default function CompanyResearcher() {
         </div>
       )}
 
+      {/* Auto-add contacts toggle — only for B2B flows (skipped in investor mode) */}
+      {isB2B && researchMode !== 'investor' && (
+        <div className="mb-6 opacity-0 animate-fade-up [animation-delay:400ms]">
+          <label className="flex items-start gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={autoAddContacts}
+              onChange={(e) => setAutoAddContacts(e.target.checked)}
+              className="mt-0.5 w-4 h-4 text-brand-default border-gray-300 rounded focus:ring-brand-default cursor-pointer"
+            />
+            <span className="flex-1">
+              <span className="block text-sm font-medium text-gray-700">
+                Auto-add contacts for Qualified / Maybe companies
+              </span>
+              <span className="block text-xs text-gray-500 mt-0.5">
+                After each B2B research run, automatically run people search on the company&apos;s
+                domain and save the contacts. Skipped for Unqualified and Expired classifications.
+              </span>
+            </span>
+          </label>
+        </div>
+      )}
+
       {/* Input mode tabs: Via Link / Via Table / Via CSV */}
-      <div className="mb-6 border-b border-gray-200 opacity-0 animate-fade-up [animation-delay:400ms]">
+      <div className="mb-6 border-b border-gray-200 opacity-0 animate-fade-up [animation-delay:400ms] flex items-center justify-between gap-4">
         <nav className="-mb-px flex space-x-8">
           <button
             type="button"
@@ -3896,6 +4247,19 @@ export default function CompanyResearcher() {
             Via CSV
           </button>
         </nav>
+        {(submittedCompanies.length > 0 ||
+          rawCompanyInput.trim().length > 0 ||
+          csvData !== null ||
+          tableInput.trim().length > 0 ||
+          tableData !== null) && (
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="mb-2 px-4 py-2 bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors font-medium text-sm whitespace-nowrap"
+          >
+            CLEAR ALL
+          </button>
+        )}
       </div>
 
       {inputMode === 'link' && (
@@ -4005,7 +4369,7 @@ export default function CompanyResearcher() {
               </div>
             </div>
           )}
-          {csvData && !isProcessingCsv && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) && (
+          {csvData && !isProcessingCsv && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram || selectedColumns.linkedin) && (
             <div className="mt-4 flex items-center justify-between gap-4 p-3 bg-white border border-gray-200 rounded-sm">
               <div className="text-sm text-gray-700">
                 <span className="font-medium">{csvData.rows.length}</span> row{csvData.rows.length === 1 ? '' : 's'} loaded
@@ -4030,20 +4394,227 @@ export default function CompanyResearcher() {
           )}
         </div>
       </div>
-      {csvData && !isProcessingCsv && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) && (
-        <button
-          type="button"
-          onClick={() => {
-            if (hasSavedProgress) {
-              setShowResumeDialog(true);
-            } else {
-              processCsvRows(false);
-            }
-          }}
-          className="w-full text-white font-semibold px-2 py-2 rounded-sm transition-opacity opacity-0 animate-fade-up [animation-delay:600ms] min-h-[50px] bg-brand-default ring-2 ring-brand-default transition-colors mb-8"
-        >
-          {researchMode === 'investor' ? 'Analyze Investors' : researchMode === 'instagram' ? 'Analyze Instagram Profiles' : researchMode === 'jobs' ? 'Analyze Job Postings' : researchMode === 'person' ? 'Analyze People' : 'Analyze Companies'}
-        </button>
+      {csvData && !isProcessingCsv && (() => {
+        // Reorder headers so labeled columns (URL/domain/instagram/email/name/
+        // title/linkedin) come first, then the rest in original CSV order.
+        const labelPriority: string[] = [
+          selectedUrlColumn || '',
+          selectedColumns.domain || '',
+          selectedColumns.instagram || '',
+          selectedColumns.email || '',
+          selectedColumns.name || '',
+          selectedColumns.title || '',
+          selectedColumns.linkedin || '',
+        ].filter(Boolean);
+        const seen = new Set<string>();
+        const orderedCsvHeaders: string[] = [];
+        for (const h of labelPriority) {
+          if (csvData.headers.includes(h) && !seen.has(h)) {
+            orderedCsvHeaders.push(h);
+            seen.add(h);
+          }
+        }
+        for (const h of csvData.headers) {
+          if (!seen.has(h)) {
+            orderedCsvHeaders.push(h);
+            seen.add(h);
+          }
+        }
+        return (
+        <div className="mb-6 opacity-0 animate-fade-up [animation-delay:550ms]">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-sm text-gray-700">
+              <span className="font-medium">{csvData.rows.length}</span> row{csvData.rows.length === 1 ? '' : 's'} ·{' '}
+              <span className="font-medium">{csvData.headers.length}</span> column{csvData.headers.length === 1 ? '' : 's'}
+              <span className="text-gray-500"> · click × to remove rows or columns before analyzing</span>
+            </p>
+          </div>
+          <div className="overflow-auto border border-gray-200 rounded-sm max-h-[480px]">
+            <table className="min-w-full text-xs">
+              <thead className="bg-gray-50 sticky top-0 z-10">
+                <tr>
+                  <th className="px-2 py-2 w-8 bg-gray-50"></th>
+                  {orderedCsvHeaders.map((header, ci) => {
+                    const isUrl = selectedUrlColumn === header;
+                    const isDomain = selectedColumns.domain === header;
+                    const isInstagram = selectedColumns.instagram === header;
+                    const isEmail = selectedColumns.email === header;
+                    const isName = selectedColumns.name === header;
+                    const isTitle = selectedColumns.title === header;
+                    const isLinkedin = selectedColumns.linkedin === header;
+                    const tag =
+                      isUrl ? 'url' :
+                      isDomain ? 'domain' :
+                      isInstagram ? 'instagram' :
+                      isEmail ? 'email' :
+                      isName ? 'name' :
+                      isTitle ? 'title' :
+                      isLinkedin ? 'linkedin' :
+                      null;
+                    return (
+                      <th key={ci} className="px-3 py-2 text-left font-semibold text-gray-700 whitespace-nowrap border-l border-gray-200 bg-gray-50">
+                        <div className="flex items-center gap-2">
+                          <span>
+                            {header}
+                            {tag && <span className="ml-1 text-[10px] uppercase text-brand-default">{tag}</span>}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setPendingCsvDelete({ kind: 'col', index: ci, key: header })}
+                            disabled={isProcessingCsv}
+                            title="Remove column"
+                            className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </th>
+                    );
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {csvData.rows.map((row, ri) => (
+                  <tr key={ri} className="border-t border-gray-200 hover:bg-gray-50">
+                    <td className="px-2 py-2 align-top">
+                      <button
+                        type="button"
+                        onClick={() => setPendingCsvDelete({ kind: 'row', index: ri })}
+                        disabled={isProcessingCsv}
+                        title="Remove row"
+                        className="text-gray-400 hover:text-red-600 disabled:opacity-50"
+                      >
+                        ×
+                      </button>
+                    </td>
+                    {orderedCsvHeaders.map((header, ci) => {
+                      const cell = row[header] ?? '';
+                      const isUrlCol =
+                        selectedUrlColumn === header ||
+                        selectedColumns.domain === header ||
+                        selectedColumns.instagram === header ||
+                        selectedColumns.linkedin === header;
+                      return (
+                        <td key={ci} className="px-3 py-2 align-top text-gray-700 border-l border-gray-200 min-w-[12rem] max-w-md" title={cell}>
+                          {isUrlCol && cell ? (
+                            <div className="flex items-center gap-2">
+                              <img
+                                src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(cell)}&sz=32`}
+                                alt=""
+                                width={16}
+                                height={16}
+                                className="flex-shrink-0 rounded-sm"
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                              />
+                              <a
+                                href={/^https?:\/\//i.test(cell) ? cell : `https://${cell.replace(/^https?:\/\//i, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-brand-default hover:underline break-all"
+                              >
+                                {cell}
+                              </a>
+                            </div>
+                          ) : (
+                            <div className="line-clamp-3 break-words whitespace-pre-wrap">{cell}</div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        );
+      })()}
+      {csvData && !isProcessingCsv && (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram || selectedColumns.linkedin) && (() => {
+        const willAutoRoutePersonResearch =
+          !selectedUrlColumn &&
+          !selectedColumns.domain &&
+          !selectedColumns.instagram &&
+          !!selectedColumns.linkedin;
+        const effectiveMode = willAutoRoutePersonResearch ? 'person' : researchMode;
+        const label =
+          effectiveMode === 'investor' ? 'Analyze Investors' :
+          effectiveMode === 'instagram' ? 'Analyze Instagram Profiles' :
+          effectiveMode === 'jobs' ? 'Analyze Job Postings' :
+          effectiveMode === 'person' ? 'Analyze People' : 'Analyze Companies';
+        return (
+          <button
+            type="button"
+            onClick={() => {
+              if (willAutoRoutePersonResearch) {
+                // No domain/instagram selected; treat the LinkedIn URL column
+                // as the URL source and run Person Research.
+                setResearchMode('person');
+                setSelectedUrlColumn(selectedColumns.linkedin);
+                setPendingPersonResearchFromCsv(true);
+                return;
+              }
+              if (hasSavedProgress) {
+                setShowResumeDialog(true);
+              } else {
+                processCsvRows(false);
+              }
+            }}
+            className="w-full text-white font-semibold px-2 py-2 rounded-sm transition-opacity opacity-0 animate-fade-up [animation-delay:600ms] min-h-[50px] bg-brand-default ring-2 ring-brand-default transition-colors mb-8"
+          >
+            {label}
+          </button>
+        );
+      })()}
+      {pendingCsvDelete && csvData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-center justify-center mb-4">
+              <div className="flex-shrink-0 w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                <svg className="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3" />
+                </svg>
+              </div>
+            </div>
+            <h2 className="text-xl font-semibold text-center mb-2">
+              {pendingCsvDelete.kind === 'row' ? 'Remove this row?' : 'Remove this column?'}
+            </h2>
+            <p className="text-gray-600 text-center mb-6 text-sm">
+              {pendingCsvDelete.kind === 'row' ? (() => {
+                const row = csvData.rows[pendingCsvDelete.index];
+                const previewKey = selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram || csvData.headers[0];
+                const preview = (row?.[previewKey] || '—').toString().slice(0, 60);
+                return (<>Row preview: <span className="font-medium text-gray-800">{preview}</span></>);
+              })() : (
+                <>Column: <span className="font-medium text-gray-800">{pendingCsvDelete.key}</span></>
+              )}
+              <br />
+              This action cannot be undone.
+            </p>
+            <div className="flex justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingCsvDelete(null)}
+                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-sm hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (pendingCsvDelete.kind === 'row') {
+                    handleRemoveCsvRow(pendingCsvDelete.index);
+                  } else if (pendingCsvDelete.key) {
+                    handleRemoveCsvColumn(pendingCsvDelete.key);
+                  }
+                  setPendingCsvDelete(null);
+                }}
+                className="px-6 py-2 bg-red-600 text-white rounded-sm hover:bg-red-700 transition-colors"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       </>
       )}
@@ -4702,7 +5273,7 @@ export default function CompanyResearcher() {
           setSelectedColumns(columns);
         }}
         onConfirm={() => {
-          if (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram) {
+          if (selectedUrlColumn || selectedColumns.domain || selectedColumns.instagram || selectedColumns.linkedin) {
             setShowColumnSelector(false);
           }
         }}
@@ -4710,8 +5281,10 @@ export default function CompanyResearcher() {
           setShowColumnSelector(false);
           setCsvData(null);
           setSelectedUrlColumn(null);
-          setSelectedColumns({ domain: null, instagram: null });
+          setSelectedColumns({ domain: null, instagram: null, email: null, name: null, title: null, linkedin: null });
         }}
+        onRenameColumn={handleRenameCsvColumn}
+        onCreateDomainFromEmail={handleCreateDomainFromEmailColumn}
       />
 
       {/* Confirmation Modal */}

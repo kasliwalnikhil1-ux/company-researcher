@@ -21,6 +21,7 @@ import {
   FileText,
   CheckCircle,
   XCircle,
+  HelpCircle,
   Minus,
   Eye,
   ExternalLink,
@@ -425,7 +426,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
         const dbValue = newValue === "UNQUALIFIED" ? "NOT_QUALIFIED" : newValue;
 
-        if (["QUALIFIED", "NOT_QUALIFIED", "EXPIRED"].includes(dbValue.toUpperCase())) {
+        if (["QUALIFIED", "NOT_QUALIFIED", "MAYBE", "EXPIRED"].includes(dbValue.toUpperCase())) {
           updatedSummary.classification = dbValue.toUpperCase() as
             | "QUALIFIED"
             | "NOT_QUALIFIED"
@@ -490,11 +491,44 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const fetchedDomainsRef = useRef<Set<string>>(new Set());
   const prevTabRef = useRef<"overview" | "outreach" | "latest-news" | "contacts">("overview");
 
-  const fetchContacts = useCallback(async () => {
+  const fetchContacts = useCallback(async (force: boolean = false) => {
     if (!company?.domain) return;
 
     const domain = company.domain;
     const storageKey = `contacts_${domain}`;
+
+    // Force refresh = pull the latest contacts straight from Supabase so
+    // edits made elsewhere (other devices, other tabs) show up.
+    if (force) {
+      setContactsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("companies")
+          .select("contacts")
+          .eq("id", company.id)
+          .maybeSingle();
+        if (error) throw error;
+
+        const remoteContacts: any[] = Array.isArray(data?.contacts) ? data.contacts : [];
+        localStorage.setItem(storageKey, JSON.stringify(remoteContacts));
+        fetchedDomainsRef.current.add(domain);
+        setContacts(remoteContacts);
+        if (onCompanyChange) {
+          onCompanyChange({ ...company, contacts: remoteContacts });
+        }
+        setToastMessage("Contacts refreshed from server");
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 2000);
+      } catch (error: any) {
+        console.error("Error refreshing contacts from backend:", error);
+        setToastMessage(`Error refreshing contacts: ${error.message}`);
+        setToastVisible(true);
+        setTimeout(() => setToastVisible(false), 3000);
+      } finally {
+        setContactsLoading(false);
+      }
+      return;
+    }
 
     if (fetchedDomainsRef.current.has(domain)) {
       const cachedContacts = localStorage.getItem(storageKey);
@@ -594,7 +628,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
     } finally {
       setContactsLoading(false);
     }
-  }, [company?.domain, company?.summary]);
+  }, [company?.id, company?.domain, company?.summary, company?.contacts, onCompanyChange]);
 
   const COMPANY_NEWS_STORAGE_KEY = (id: string) => `company-news-${id}`;
 
@@ -2441,6 +2475,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       ? "Qualified"
       : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
       ? "Unqualified"
+      : classificationValue === "MAYBE"
+      ? "Maybe"
       : classificationValue === "EXPIRED"
       ? "Expired"
       : null;
@@ -2450,6 +2486,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
       ? "bg-emerald-100 text-emerald-800"
       : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
       ? "bg-red-100 text-red-800"
+      : classificationValue === "MAYBE"
+      ? "bg-amber-100 text-amber-800"
       : classificationValue === "EXPIRED"
       ? "bg-gray-200 text-gray-700"
       : "bg-gray-100 text-gray-800";
@@ -2790,6 +2828,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         <CheckCircle className="w-3 h-3" />
                       ) : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED" ? (
                         <XCircle className="w-3 h-3" />
+                      ) : classificationValue === "MAYBE" ? (
+                        <HelpCircle className="w-3 h-3" />
                       ) : (
                         <Minus className="w-3 h-3" />
                       )}
@@ -3063,6 +3103,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                           ? "bg-emerald-50 text-emerald-800 border-emerald-300 focus:ring-emerald-500"
                           : classificationValue === "UNQUALIFIED" || classificationValue === "NOT_QUALIFIED"
                           ? "bg-red-50 text-red-800 border-red-300 focus:ring-red-500"
+                          : classificationValue === "MAYBE"
+                          ? "bg-amber-50 text-amber-800 border-amber-300 focus:ring-amber-500"
                           : classificationValue === "EXPIRED"
                           ? "bg-gray-100 text-gray-800 border-gray-300 focus:ring-gray-400"
                           : "bg-white text-gray-900 border-gray-300 focus:ring-indigo-500"
@@ -3070,6 +3112,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     >
                       <option value="">— Select —</option>
                       <option value="QUALIFIED">Qualified</option>
+                      <option value="MAYBE">Maybe</option>
                       <option value="UNQUALIFIED">Unqualified</option>
                       <option value="EXPIRED">Expired</option>
                     </select>
@@ -4016,6 +4059,22 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                     >
                       <Users className="w-3.5 h-3.5" />
                       Find People
+                    </button>
+                  )}
+                  {company.domain?.trim() && !isPersonProfile && (
+                    <button
+                      type="button"
+                      onClick={() => fetchContacts(true)}
+                      disabled={contactsLoading}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Refetch contacts from people search (cached locally)"
+                    >
+                      {contactsLoading ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      )}
+                      Refresh
                     </button>
                   )}
                   <button
