@@ -464,6 +464,10 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
   //   - fills any slot that is currently null AND the user hasn't touched
   //   - reruns whenever detection results change
   //   - respects user clears via `touchedSlotsRef`
+  // Base `next` on the `selectedColumns` prop (the fresh source-of-truth) rather
+  // than the closure-captured `localSelectedColumns`. On a second CSV upload,
+  // the prop-sync effect queues a reset to all-nulls but it isn't committed
+  // before this effect reads its closure — using the prop avoids that staleness.
   useEffect(() => {
     if (!isOpen) return;
 
@@ -476,7 +480,10 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
         { kind: 'title', value: detectedTitleColumn },
         { kind: 'linkedin', value: detectedLinkedinColumn },
       ];
-      const next: SelectedColumnsState = { ...localSelectedColumns };
+      const base: SelectedColumnsState = selectedColumns
+        ? { ...EMPTY_SELECTED_COLUMNS, ...selectedColumns }
+        : { ...EMPTY_SELECTED_COLUMNS };
+      const next: SelectedColumnsState = { ...base };
       let changed = false;
       for (const { kind, value } of detections) {
         if (!value) continue;
@@ -505,6 +512,9 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isOpen, columns, rows, allowBoth, mode,
+    // selectedColumns prop — needed so a parent-side reset (e.g. on a new CSV
+    // upload) re-runs auto-fill against the cleared baseline.
+    selectedColumns,
     // Detection results — re-run auto-fill whenever any of them appear or change
     domainColumns, instagramColumns,
     detectedEmailColumn, detectedNameColumn, detectedTitleColumn, detectedLinkedinColumn,
