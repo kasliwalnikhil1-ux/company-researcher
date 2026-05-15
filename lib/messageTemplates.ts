@@ -16,13 +16,33 @@ const COMPANY_LOWERCASE_FIELDS: readonly string[] = [
   'company_industry', 'companyIndustry',
 ];
 
-function applyValueLowercasing(
-  variables: Record<string, string>,
-  fields: readonly string[]
-): void {
-  for (const field of fields) {
+/**
+ * Trailing words to drop from a multi-word industry value so it reads as a
+ * common noun in template phrasing — e.g. "Jewelry Industry" → "Jewelry",
+ * "Fashion Brands" → "Fashion". Single-word values are never stripped (so
+ * "Industry" stays "Industry").
+ */
+const INDUSTRY_REDUNDANT_SUFFIXES = new Set([
+  'industry', 'industries', 'brand', 'brands', 'product', 'products',
+]);
+
+function stripIndustrySuffix(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  const tokens = trimmed.split(/\s+/);
+  if (tokens.length < 2) return value;
+  const last = tokens[tokens.length - 1].replace(/[.,;:!?]+$/, '');
+  if (INDUSTRY_REDUNDANT_SUFFIXES.has(last.toLowerCase())) {
+    return tokens.slice(0, -1).join(' ');
+  }
+  return value;
+}
+
+function applyCompanyIndustryNormalization(variables: Record<string, string>): void {
+  for (const field of COMPANY_LOWERCASE_FIELDS) {
     const v = variables[field];
-    if (v) variables[field] = lowercaseValueMidSentence(v);
+    if (!v) continue;
+    variables[field] = lowercaseValueMidSentence(stripIndustrySuffix(v));
   }
 }
 
@@ -215,7 +235,7 @@ export function buildCompanyTemplateVariables(
   // ${first_name} always reflects the chosen recipient when one is provided.
   Object.assign(variables, deriveContactNameVariables(contact));
 
-  applyValueLowercasing(variables, COMPANY_LOWERCASE_FIELDS);
+  applyCompanyIndustryNormalization(variables);
 
   return variables;
 }
@@ -411,7 +431,7 @@ export const generateMessageTemplates = (
       variables['PRODUCT2'] = productTypes[1] || productTypes[0] || '';
     }
 
-    applyValueLowercasing(variables, COMPANY_LOWERCASE_FIELDS);
+    applyCompanyIndustryNormalization(variables);
 
     return dbTemplates
       .map(template => template?.trim())
