@@ -173,6 +173,15 @@ export function looksLikeMarkdownTableOrJson(text: string): boolean {
   if (lines.length < 2) return false;
   const linesWithPipes = lines.filter(l => l.includes('|')).length;
   if (linesWithPipes < 2) return false;
+  // Strong signal: a markdown header separator row like `| --- | :---: |` immediately
+  // following a header row means this is a markdown table regardless of trailing
+  // non-pipe content (e.g. reference footnotes `[1]: https://...`).
+  const SEPARATOR_RE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i].includes('|') && SEPARATOR_RE.test(lines[i]) && lines[i - 1].includes('|')) {
+      return true;
+    }
+  }
   return linesWithPipes / lines.length >= 0.8;
 }
 

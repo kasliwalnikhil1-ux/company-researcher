@@ -87,8 +87,7 @@ const cleanUrl = (url: string, mode: 'domain' | 'instagram' | 'investor' | 'jobs
     // For domain mode, extract just the origin (protocol + hostname)
     const hostname = urlObj.hostname;
     return `${urlObj.protocol}//${hostname}`;
-  } catch (e) {
-    console.error('Error cleaning URL:', e);
+  } catch {
     return null;
   }
 };

@@ -311,6 +311,44 @@ function TemplatesContent() {
     });
   }, [templates, activeTab, channelOptions]);
 
+  // Count `${var}` occurrences across the templates currently shown under the
+  // active tab, and collect the distinct per-template defaults for each var
+  // from `template.settings.variable_defaults`.
+  const variableUsage = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const defaults: Record<string, Set<string>> = {};
+    const regex = /\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g;
+    for (const t of sortedTemplates) {
+      if (!t.template) continue;
+      const tplDefaults = t.settings?.variable_defaults || {};
+      const seenInThisTemplate = new Set<string>();
+      regex.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = regex.exec(t.template)) !== null) {
+        const name = m[1];
+        counts[name] = (counts[name] || 0) + 1;
+        if (!seenInThisTemplate.has(name)) {
+          seenInThisTemplate.add(name);
+          const def = tplDefaults[name];
+          if (typeof def === 'string' && def.trim()) {
+            if (!defaults[name]) defaults[name] = new Set();
+            defaults[name].add(def);
+          }
+        }
+      }
+    }
+    return Object.entries(counts)
+      .map(([name, count]) => ({
+        name,
+        count,
+        defaults: defaults[name] ? Array.from(defaults[name]) : [],
+      }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.name.localeCompare(b.name);
+      });
+  }, [sortedTemplates]);
+
   const handleCopyAll = async () => {
     if (sortedTemplates.length === 0) return;
     const text = sortedTemplates
@@ -429,6 +467,44 @@ function TemplatesContent() {
           </div>
         )}
       </div>
+
+      {/* Variable Usage Summary */}
+      {variableUsage.length > 0 && (
+        <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
+          <div className="text-xs font-medium text-gray-500 mb-3">
+            Variables used in {activeTab === 'all' ? 'all templates' : `${CHANNEL_LABELS[activeTab]} templates`}
+            <span className="ml-2 text-gray-400">
+              ({variableUsage.length} unique, {variableUsage.reduce((sum, v) => sum + v.count, 0)} total)
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {variableUsage.map(({ name, count, defaults }) => (
+              <div
+                key={name}
+                className="flex items-start gap-2 px-3 py-2 rounded-md bg-gray-50 border border-gray-200"
+              >
+                <span className="inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-semibold flex-shrink-0 mt-0.5">
+                  {count}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-mono text-gray-800 truncate">
+                    ${'{'}{name}{'}'}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-0.5 truncate" title={defaults.join(' | ')}>
+                    {defaults.length === 0 ? (
+                      <span className="italic text-gray-400">no default</span>
+                    ) : defaults.length === 1 ? (
+                      <>default: <span className="text-gray-700">{defaults[0]}</span></>
+                    ) : (
+                      <>defaults ({defaults.length}): <span className="text-gray-700">{defaults.join(' | ')}</span></>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Templates List */}
       {sortedTemplates.length === 0 ? (
