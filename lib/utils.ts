@@ -16,12 +16,76 @@ export function unescapeString(str: string): string {
 }
 
 /**
+ * Words that should remain capitalized even when they appear mid-sentence
+ * (e.g. after a comma following a substituted placeholder, or inside a value
+ * that's being lowercased via `lowercaseValueMidSentence`).
+ *
+ * You only need to list words here when their *shape* would otherwise pass
+ * the lowercase check (i.e. plain Title Case like "Jewelry"). Words detected
+ * by shape don't need to be listed:
+ *   - Acronyms (AI, USA, NASA, B2B) — fail the trailing [a-z]+ requirement
+ *   - Mixed-case brands (iPhone, eBay, iOS, SaaS, MacBook) — same reason
+ *   - Single-letter "I" — fails the +1 length requirement
+ *   - Contractions ("I'm", "I've") — apostrophe breaks the letter-only run
+ *
+ * Add proper nouns / brands the algorithm would otherwise mistake for plain
+ * words (e.g. "Anthropic", "Google", "Stripe").
+ */
+export const ALWAYS_CAPITALIZED_WORDS = new Set<string>([
+  // Days of the week
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+  // Months
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+  // Tech brands & terms (mostly already shape-safe — listed for discoverability)
+  'SaaS', 'iOS', 'iPhone', 'iPad', 'MacBook', 'macOS', 'eBay', 'GitHub',
+  'YouTube', 'LinkedIn', 'TikTok', 'WhatsApp', 'PayPal', 'OpenAI', 'Anthropic',
+]);
+
+/** True if `word` is a plain Title Case word safe to lowercase mid-sentence. */
+export function shouldLowercaseMidSentence(word: string): boolean {
+  if (!/^[A-Z][a-z]+$/.test(word)) return false;
+  return !ALWAYS_CAPITALIZED_WORDS.has(word);
+}
+
+/**
+ * Lowercase a value word-by-word for mid-sentence use, preserving acronyms,
+ * brand names, and known proper nouns (see {@link ALWAYS_CAPITALIZED_WORDS}).
+ *
+ * Use when a variable's value is conceptually a noun phrase that reads as
+ * lowercase mid-sentence — e.g. company_industry: "Jewelry" → "jewelry" so
+ * `"talking to ${company_industry} companies"` renders as
+ * `"talking to jewelry companies"`. "SaaS" stays "SaaS" by shape; multi-word
+ * proper nouns like "Real Estate" lowercase per word — extend
+ * {@link ALWAYS_CAPITALIZED_WORDS} for any words you want preserved.
+ *
+ * @example
+ * lowercaseValueMidSentence("Jewelry")        // "jewelry"
+ * lowercaseValueMidSentence("SaaS")           // "SaaS"
+ * lowercaseValueMidSentence("AI Tools")       // "AI tools"
+ * lowercaseValueMidSentence("Real Estate")    // "real estate"
+ */
+export function lowercaseValueMidSentence(value: string): string {
+  if (!value) return value;
+  return value.replace(/[A-Za-z][A-Za-z0-9'']*/g, (word) =>
+    shouldLowercaseMidSentence(word)
+      ? word.charAt(0).toLowerCase() + word.slice(1)
+      : word
+  );
+}
+
+/**
  * Template substitution helper function
  * Replaces ${variable} syntax with actual values and unescapes escape sequences
  *
  * If a placeholder is immediately followed by punctuation (`,`, `!`, `.`), and the variable
  * value ends with any punctuation, the trailing punctuation is removed from the value
  * to avoid duplication (regardless of whether it matches the following punctuation).
+ *
+ * When a placeholder is substituted (non-empty) and is followed by a comma + a Title Case
+ * word (e.g. `${first_name}, Hello`), the next word is lowercased so the sentence reads
+ * naturally as `John, hello`. Acronyms, "I"/"I'm", mixed-case words, and known proper
+ * nouns (days/months) are preserved.
  *
  * If a placeholder is at the end of the template (or followed only by whitespace) and the
  * variable value doesn't end with punctuation, a period is automatically added to complete
@@ -103,20 +167,50 @@ export function substituteVariables(
     // punctuation char (.,!?;:) and following horizontal whitespace so that
     // "${first_name}, I was" becomes "I was" rather than ", I was". Newlines
     // are preserved so paragraph structure stays intact.
+    //
+    // We also peek at the next word: if the surviving text ends with `, `
+    // (i.e. the empty placeholder sat between a comma and a Title Case word
+    // like in `${first_name}, ${empty}. Quick`) we lowercase that word so the
+    // result reads as a single mid-sentence phrase ("Alex, quick question…").
     if (value === undefined || value === null || value === '') {
-      const emptyRegex = new RegExp(`\\$\\{${key}\\}[,.!?;:]?[ \\t]*`, 'g');
-      result = result.replace(emptyRegex, '');
+      const emptyRegex = new RegExp(
+        `\\$\\{${key}\\}[,.!?;:]?[ \\t]*([A-Za-z][A-Za-z0-9'']*)?`,
+        'g'
+      );
+      result = result.replace(emptyRegex, (_match, nextWord, offset, fullStr) => {
+        if (!nextWord) return '';
+        const before = fullStr.substring(0, offset);
+        const afterComma = /,[ \t]*$/.test(before);
+        if (afterComma && shouldLowercaseMidSentence(nextWord)) {
+          return nextWord.charAt(0).toLowerCase() + nextWord.slice(1);
+        }
+        return nextWord;
+      });
       return;
     }
 
-    // Match ${variable} followed by optional punctuation (`,`, `!`, `.`) or end of string/whitespace
-    // Use capturing groups to check what follows the placeholder
-    const regex = new RegExp(`\\$\\{${key}\\}([,\\!.])?(\\s*$)?`, 'g');
+    // Match ${variable} followed by:
+    //   1. optional punctuation (`,`, `!`, `.`)
+    //   2. an optional ([ \t]+ + word) unit — captured atomically so we never
+    //      consume trailing whitespace unless a word actually follows it
+    //      (otherwise end-of-template period detection would break)
+    //   3. optional trailing whitespace at end of string
+    const regex = new RegExp(
+      `\\$\\{${key}\\}([,\\!.])?(?:([ \\t]+)([A-Za-z][A-Za-z0-9'']*))?(\\s*$)?`,
+      'g'
+    );
 
-    result = result.replace(regex, (match, followingPunctuation, atEnd) => {
+    result = result.replace(regex, (
+      _match,
+      followingPunctuation,
+      gap,
+      nextWord,
+      atEnd
+    ) => {
       let substitutedValue = value;
       const lastChar = substitutedValue.slice(-1);
       const endsWithPunctuation = [',', '.', '!', '?'].includes(lastChar);
+      const trailing = (gap || '') + (nextWord || '');
 
       // If placeholder is followed by punctuation, remove any trailing punctuation from value
       // This prevents "sentence.," situations by removing punctuation from value when followed by punctuation
@@ -124,18 +218,25 @@ export function substituteVariables(
         if (endsWithPunctuation) {
           substitutedValue = substitutedValue.slice(0, -1);
         }
-        // Return substituted value with the following punctuation
-        return substitutedValue + followingPunctuation;
+        // After a comma the next word is mid-sentence, so lowercase it when safe
+        // (e.g. "${first_name}, Hello" → "John, hello"). Acronyms, "I", "I'm",
+        // iPhone-style words, and known proper nouns are left alone.
+        let trailingOut = trailing;
+        if (followingPunctuation === ',' && nextWord && shouldLowercaseMidSentence(nextWord)) {
+          trailingOut = (gap || '') + nextWord.charAt(0).toLowerCase() + nextWord.slice(1);
+        }
+        return substitutedValue + followingPunctuation + trailingOut;
       }
 
       // If placeholder is at end of template (or followed only by whitespace) and value doesn't end with punctuation,
-      // add a period to complete the sentence
-      if (atEnd !== undefined && !endsWithPunctuation && substitutedValue.trim().length > 0) {
-        return substitutedValue + '.' + (atEnd || '');
+      // add a period to complete the sentence. Only treat as "at end" when no word
+      // was consumed — otherwise atEnd would match the position after the word.
+      if (atEnd !== undefined && !nextWord && !endsWithPunctuation && substitutedValue.trim().length > 0) {
+        return substitutedValue + '.' + (atEnd || '') + trailing;
       }
 
-      // Return substituted value as-is
-      return substitutedValue;
+      // Return substituted value as-is (re-emit any captured trailing word/whitespace)
+      return substitutedValue + trailing;
     });
   });
 

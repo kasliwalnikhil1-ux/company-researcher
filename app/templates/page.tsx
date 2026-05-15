@@ -10,7 +10,7 @@ import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
 import { fetchGenerateMessages } from '@/lib/api';
 import { renderCompanyTemplate } from '@/lib/messageTemplates';
 
-const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram', 'ads', 'jobs'];
+const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram', 'ads', 'jobs', 'news', 'replies'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
 
 // Sample contact used for the preview column so `${first_name}` shows a value

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MessageTemplate, MessageTemplateSettings, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
 import { extractTemplateVariables, renderCompanyTemplate } from '@/lib/messageTemplates';
+import Toast from '@/components/ui/Toast';
 
 function getCompanyLabel(company: PreviewCompany): string {
   const summary = company.summary || {};
@@ -43,8 +44,8 @@ const B2B_CHIPS: { variable: string; sampleLabel: string }[] = [
   { variable: '${first_line_to_start_email}', sampleLabel: 'Congrats on your recent launch.' },
   { variable: '${subject_line}', sampleLabel: 'Congrats on the launch!' },
   { variable: '${product_types}', sampleLabel: 'jewelry and accessories' },
+  { variable: '${company_name}', sampleLabel: 'Acme Co' },
   { variable: '${company_industry}', sampleLabel: 'fashion' },
-  { variable: '${profile_industry}', sampleLabel: 'fashion' },
   { variable: '${followUpFullDate}', sampleLabel: 'Tuesday, Jan 15' },
   { variable: '${followUpWeekdayDate}', sampleLabel: 'Tuesday Jan 15' },
   { variable: '${followUpShortDay}', sampleLabel: 'Tue' },
@@ -142,6 +143,28 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastType, setToastType] = useState<'success' | 'error'>('error');
+
+  const showToast = (message: string, type: 'success' | 'error' = 'error') => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastVisible(true);
+  };
+
+  const focusAndScrollTo = (el: HTMLElement | null) => {
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => {
+      try {
+        el.focus({ preventScroll: true });
+      } catch {
+        el.focus();
+      }
+    }, 250);
+  };
 
   // Variables referenced by the current template body (unique, in insertion order),
   // excluding built-in computed variables (follow-up dates) which always have a value.
@@ -260,12 +283,14 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) {
-      alert('Please enter a title for the template.');
+      showToast('Please enter a title for the template.');
+      focusAndScrollTo(titleInputRef.current);
       return;
     }
 
     if (!formData.template.trim()) {
-      alert('Please enter a template message.');
+      showToast('Please enter a template message.');
+      focusAndScrollTo(textareaRef.current);
       return;
     }
 
@@ -302,7 +327,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
       }
       onClose();
     } catch (error: any) {
-      alert(`Error ${isCreating ? 'creating' : 'updating'} template: ${error.message}`);
+      showToast(`Error ${isCreating ? 'creating' : 'updating'} template: ${error.message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -423,6 +448,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
               Title
             </label>
             <input
+              ref={titleInputRef}
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
@@ -486,7 +512,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
                   Variable defaults
                 </label>
                 <span className="text-xs text-gray-400">
-                  Used when a company is missing a value.
+                  Used when a company is missing a value. Can reference other ${'${variables}'}.
                 </span>
               </div>
               <div className="space-y-2">
@@ -507,7 +533,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
                           },
                         })
                       }
-                      placeholder="(no default)"
+                      placeholder="(no default, e.g. ${brand_name} or hello there)"
                       disabled={isSubmitting}
                       className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
                     />
@@ -677,6 +703,13 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         </aside>
         </div>
       </div>
+      <Toast
+        message={toastMessage}
+        isVisible={toastVisible}
+        type={toastType}
+        onClose={() => setToastVisible(false)}
+        duration={2500}
+      />
     </div>
   );
 };

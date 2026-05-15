@@ -1,9 +1,30 @@
 // Shared message template generator
 // This is the single source of truth for all message templates
 
-import { substituteVariables } from './utils';
+import { substituteVariables, lowercaseValueMidSentence } from './utils';
 import { summaryKeyToLabel, formatArrayNatural } from './summaryUtils';
 import type { MessageTemplateSettings } from '@/contexts/MessageTemplatesContext';
+
+/**
+ * Variable values that should be lowercased before substitution because they
+ * almost always read as common nouns mid-sentence (e.g. "talking to jewelry
+ * companies"). Brand-name values like "SaaS" are preserved by
+ * {@link lowercaseValueMidSentence} — extend ALWAYS_CAPITALIZED_WORDS in
+ * lib/utils.ts to add more.
+ */
+const COMPANY_LOWERCASE_FIELDS: readonly string[] = [
+  'company_industry', 'companyIndustry',
+];
+
+function applyValueLowercasing(
+  variables: Record<string, string>,
+  fields: readonly string[]
+): void {
+  for (const field of fields) {
+    const v = variables[field];
+    if (v) variables[field] = lowercaseValueMidSentence(v);
+  }
+}
 
 /**
  * Get common US holidays for a given year
@@ -194,6 +215,8 @@ export function buildCompanyTemplateVariables(
   // ${first_name} always reflects the chosen recipient when one is provided.
   Object.assign(variables, deriveContactNameVariables(contact));
 
+  applyValueLowercasing(variables, COMPANY_LOWERCASE_FIELDS);
+
   return variables;
 }
 
@@ -205,11 +228,55 @@ export interface RenderableTemplate {
 }
 
 /**
+ * Resolve a default value that may itself contain `${var}` placeholders.
+ *
+ * Resolution rules:
+ *   - `${var}` inside the default is filled from `variables` when available.
+ *   - Otherwise the chain recurses into `defaults[var]`, guarded against cycles
+ *     via `visited` (each variable name is visited at most once per chain).
+ *   - If any inner reference cannot be resolved to a non-empty value, the
+ *     whole default is considered unusable and `null` is returned so the
+ *     caller can treat the outer variable as missing (and trigger fallback).
+ */
+function resolveDefaultValue(
+  variableName: string,
+  defaults: Record<string, string>,
+  variables: Record<string, string>,
+  visited: Set<string>
+): string | null {
+  if (visited.has(variableName)) return null;
+  visited.add(variableName);
+
+  const def = defaults[variableName];
+  if (def === undefined || def === null || def === '') return null;
+
+  const innerVars = extractTemplateVariables(def);
+  if (innerVars.length === 0) return def;
+
+  const innerResolved: Record<string, string> = {};
+  for (const v of innerVars) {
+    const existing = variables[v];
+    if (existing !== undefined && existing !== null && existing !== '') {
+      innerResolved[v] = existing;
+      continue;
+    }
+    const recurse = resolveDefaultValue(v, defaults, variables, visited);
+    if (recurse === null || recurse === '') return null;
+    innerResolved[v] = recurse;
+  }
+
+  return substituteVariables(def, { ...variables, ...innerResolved });
+}
+
+/**
  * Core fallback-aware renderer.
  *
  * Resolution order per `${var}`:
  *   1. Value from `variables` (company/investor data + built-ins)
- *   2. `template.settings.variable_defaults[var]`
+ *   2. `template.settings.variable_defaults[var]` — the default value may
+ *      itself contain `${var}` placeholders, which are resolved against
+ *      `variables` and (recursively) other defaults. If any reference inside
+ *      the default cannot be filled, the default is treated as unusable.
  *   3. Marked missing → substituted as ''
  *
  * If any variable is still missing after applying defaults and the template
@@ -232,7 +299,10 @@ export function renderTemplateWithFallback(
     const defaults = template.settings?.variable_defaults || {};
     const resolved: Record<string, string> = { ...variables };
     for (const v of extractTemplateVariables(tmplString)) {
-      if (!resolved[v]) resolved[v] = defaults[v] ?? '';
+      const existing = resolved[v];
+      if (existing !== undefined && existing !== null && existing !== '') continue;
+      const def = resolveDefaultValue(v, defaults, variables, new Set());
+      resolved[v] = def ?? '';
     }
     return substituteVariables(tmplString, resolved, sentenceFields);
   }
@@ -247,8 +317,8 @@ export function renderTemplateWithFallback(
     const existing = resolved[v];
     const hasValue = existing !== undefined && existing !== null && existing !== '';
     if (!hasValue) {
-      const def = defaults[v];
-      if (def !== undefined && def !== null && def !== '') {
+      const def = resolveDefaultValue(v, defaults, variables, new Set());
+      if (def !== null && def !== '') {
         resolved[v] = def;
       } else {
         anyMissing = true;
@@ -340,6 +410,8 @@ export const generateMessageTemplates = (
       variables['PRODUCT1'] = productTypes[0] || '';
       variables['PRODUCT2'] = productTypes[1] || productTypes[0] || '';
     }
+
+    applyValueLowercasing(variables, COMPANY_LOWERCASE_FIELDS);
 
     return dbTemplates
       .map(template => template?.trim())
