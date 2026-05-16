@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MessageTemplate, MessageTemplateSettings, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
 import { extractTemplateVariables, renderCompanyTemplate } from '@/lib/messageTemplates';
+import { toPlainText } from '@/lib/textNormalization';
 import Toast from '@/components/ui/Toast';
 
 function getCompanyLabel(company: PreviewCompany): string {
@@ -451,7 +452,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
               ref={titleInputRef}
               type="text"
               value={formData.title}
-              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              onChange={(e) => setFormData({ ...formData, title: toPlainText(e.target.value) })}
               className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="e.g., Sequence 1"
               disabled={isSubmitting}
@@ -475,7 +476,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
             <textarea
               ref={textareaRef}
               value={formData.template}
-              onChange={(e) => setFormData({ ...formData, template: e.target.value })}
+              onChange={(e) => setFormData({ ...formData, template: toPlainText(e.target.value) })}
               rows={12}
               className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 font-mono text-sm"
               placeholder={`Just visited your page - \${salesOpenerSentence} We can create KILLER product photos/videos for your \${PRODUCT1} products using AI, and have worked with top brands like Polki Stories, Onya, and Armuse. Worth a chat?`}
@@ -529,7 +530,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
                           ...formData,
                           variableDefaults: {
                             ...formData.variableDefaults,
-                            [variable]: e.target.value,
+                            [variable]: toPlainText(e.target.value),
                           },
                         })
                       }
