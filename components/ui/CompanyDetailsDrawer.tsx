@@ -36,7 +36,7 @@ import {
 import { Company } from "@/contexts/CompaniesContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMessageTemplates, CHANNEL_LABELS, TemplateChannel } from "@/contexts/MessageTemplatesContext";
-import { renderCompanyTemplate, type TemplateContact } from "@/lib/messageTemplates";
+import { renderCompanyTemplate, OFFER_OPTIONS, getOfferLabel, type TemplateContact } from "@/lib/messageTemplates";
 import { extractPhoneNumber } from "@/lib/utils";
 import PhoneInputField from "@/components/ui/PhoneInputField";
 import { buildEmailComposeUrl, buildEmailBody, type EmailSettings } from "@/lib/emailCompose";
@@ -209,6 +209,27 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [copiedAllOutreach, setCopiedAllOutreach] = useState(false);
   const [outreachChannelFilter, setOutreachChannelFilter] = useState<TemplateChannel | "all">("all");
   const [outreachCategoryFilter, setOutreachCategoryFilter] = useState<string>("all");
+  // Offer filter. Default 'saas_photoshoots' (matches Templates page default);
+  // restored from / persisted to the shared 'templates.activeOffer' key.
+  const OUTREACH_OFFER_STORAGE_KEY = "templates.activeOffer";
+  const [outreachOfferFilter, setOutreachOfferFilter] = useState<string>("saas_photoshoots");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem(OUTREACH_OFFER_STORAGE_KEY);
+      if (stored) setOutreachOfferFilter(stored);
+    } catch {
+      // Ignore storage errors (private mode, etc.)
+    }
+  }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(OUTREACH_OFFER_STORAGE_KEY, outreachOfferFilter);
+    } catch {
+      // Ignore storage errors
+    }
+  }, [outreachOfferFilter]);
   const [outreachSearch, setOutreachSearch] = useState("");
   // Identifier of the contact whose name fields (e.g. ${first_name}) should be
   // injected when rendering outreach template values. "" = no contact selected.
@@ -3467,6 +3488,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                 const filtersActive =
                   outreachChannelFilter !== "all" ||
                   outreachCategoryFilter !== "all" ||
+                  outreachOfferFilter !== "all" ||
                   outreachSearch.trim().length > 0;
                 const searchLower = outreachSearch.trim().toLowerCase();
 
@@ -3479,18 +3501,26 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
                 const availableChannels = new Set<TemplateChannel>();
                 const availableCategories = new Set<string>();
+                const availableOffers = new Set<string>();
                 for (const key of populatedOutreachKeys) {
                   const tpl = getTemplateForColumn(key);
                   if (!tpl) continue;
                   availableChannels.add(tpl.channel);
                   const cat = (tpl.category || "").trim();
                   if (cat) availableCategories.add(cat);
+                  const offer = (tpl.offer || "").trim();
+                  if (offer && (OFFER_OPTIONS as Record<string, string>)[offer]) {
+                    availableOffers.add(offer);
+                  }
                 }
                 const visibleChannelOptionsForFilter = (
                   ["email", "linkedin", "direct", "instagram"] as TemplateChannel[]
                 ).filter((ch) => availableChannels.has(ch));
                 const visibleCategoryOptionsForFilter = Array.from(availableCategories).sort(
                   (a, b) => a.localeCompare(b)
+                );
+                const visibleOfferOptionsForFilter = Object.keys(OFFER_OPTIONS).filter((k) =>
+                  availableOffers.has(k)
                 );
 
                 const outreachKeys = populatedOutreachKeys.filter((c) => {
@@ -3504,6 +3534,12 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   if (
                     outreachCategoryFilter !== "all" &&
                     (tpl.category || "").trim() !== outreachCategoryFilter
+                  ) {
+                    return false;
+                  }
+                  if (
+                    outreachOfferFilter !== "all" &&
+                    (tpl.offer || "").trim() !== outreachOfferFilter
                   ) {
                     return false;
                   }
@@ -3625,12 +3661,27 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                           ))}
                         </select>
                       )}
+                      {visibleOfferOptionsForFilter.length > 0 && (
+                        <select
+                          value={outreachOfferFilter}
+                          onChange={(e) => setOutreachOfferFilter(e.target.value)}
+                          className="px-3 py-2 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        >
+                          {visibleOfferOptionsForFilter.map((k) => (
+                            <option key={k} value={k}>
+                              {getOfferLabel(k)}
+                            </option>
+                          ))}
+                          <option value="all">All offers</option>
+                        </select>
+                      )}
                       {filtersActive && (
                         <button
                           type="button"
                           onClick={() => {
                             setOutreachChannelFilter("all");
                             setOutreachCategoryFilter("all");
+                            setOutreachOfferFilter("all");
                             setOutreachSearch("");
                           }}
                           className="px-3 py-2 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"

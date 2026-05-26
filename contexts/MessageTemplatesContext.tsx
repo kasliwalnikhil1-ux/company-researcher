@@ -28,6 +28,8 @@ export interface MessageTemplate {
   channel: TemplateChannel;
   category?: string;
   settings?: MessageTemplateSettings | null;
+  /** B2B offer key — see OFFER_OPTIONS in lib/messageTemplates.ts. */
+  offer?: string | null;
 }
 
 export interface PreviewCompany {
@@ -112,6 +114,7 @@ export const MessageTemplatesProvider = ({ children }: { children: ReactNode }) 
     };
     if (template.category !== undefined) payload.category = template.category;
     if (template.settings !== undefined) payload.settings = template.settings;
+    if (template.offer !== undefined) payload.offer = template.offer;
 
     const { data, error } = await supabase
       .from('message_templates')

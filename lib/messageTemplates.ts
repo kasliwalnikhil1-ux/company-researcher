@@ -240,11 +240,30 @@ export function buildCompanyTemplateVariables(
   return variables;
 }
 
+/**
+ * B2B offer options. The key is stored in the `offer` column of
+ * `message_templates`; the value is the human-readable label substituted into
+ * `${offer}` placeholders. Extend this map to add more offers.
+ */
+export const OFFER_OPTIONS = {
+  saas_photoshoots: 'SaaS Photoshoots',
+  video_agency: 'Video Agency',
+} as const;
+
+export type OfferKey = keyof typeof OFFER_OPTIONS;
+
+/** Map an offer key to its display label. Unknown keys return ''. */
+export function getOfferLabel(key: string | null | undefined): string {
+  if (!key) return '';
+  return (OFFER_OPTIONS as Record<string, string>)[key] ?? '';
+}
+
 /** A template object with just the fields needed by the renderer. */
 export interface RenderableTemplate {
   id: string;
   template: string;
   settings?: MessageTemplateSettings | null;
+  offer?: string | null;
 }
 
 /**
@@ -367,6 +386,8 @@ export function renderCompanyTemplate(
   contact?: TemplateContact | null
 ): string {
   const variables = buildCompanyTemplateVariables(summaryData, holidays, contact);
+  const offerLabel = getOfferLabel(template.offer);
+  if (offerLabel) variables.offer = offerLabel;
   return renderTemplateWithFallback(template, variables, allTemplates);
 }
 

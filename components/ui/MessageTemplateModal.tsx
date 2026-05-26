@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { MessageTemplate, MessageTemplateSettings, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
-import { extractTemplateVariables, renderCompanyTemplate } from '@/lib/messageTemplates';
+import { extractTemplateVariables, renderCompanyTemplate, OFFER_OPTIONS } from '@/lib/messageTemplates';
 import { toPlainText } from '@/lib/textNormalization';
 import Toast from '@/components/ui/Toast';
 
@@ -39,6 +39,7 @@ const FUNDRAISING_CHIPS: { variable: string; sampleLabel: string }[] = [
 
 const B2B_CHIPS: { variable: string; sampleLabel: string }[] = [
   { variable: '${first_name}', sampleLabel: 'Alex (from contact)' },
+  { variable: '${offer}', sampleLabel: 'SaaS Photoshoots (from template)' },
   { variable: '${PRODUCT1}', sampleLabel: 'jewelry' },
   { variable: '${PRODUCT2}', sampleLabel: 'accessories' },
   { variable: '${salesOpenerSentence}', sampleLabel: 'Loved your latest collection.' },
@@ -95,12 +96,19 @@ export interface MessageTemplateFormData {
   template: string;
   category?: string;
   settings?: MessageTemplateSettings | null;
+  offer?: string | null;
 }
 
 interface MessageTemplateModalProps {
   isOpen: boolean;
   isCreating: boolean;
   editingTemplate: MessageTemplate | null;
+  /**
+   * When set together with `isCreating`, the form is opened in create mode but
+   * pre-populated from this template (used by the Duplicate action). Ignored
+   * when editing or when null.
+   */
+  prefillTemplate?: MessageTemplate | null;
   defaultChannel: TemplateChannel;
   channelOptions: TemplateChannel[];
   primaryUse?: 'fundraising' | 'b2b';
@@ -117,6 +125,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
   isOpen,
   isCreating,
   editingTemplate,
+  prefillTemplate = null,
   defaultChannel,
   channelOptions,
   primaryUse = 'fundraising',
@@ -132,6 +141,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     channel: TemplateChannel;
     template: string;
     category: string;
+    offer: string;
     variableDefaults: Record<string, string>;
     fallbackTemplateId: string;
   }>({
@@ -139,6 +149,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     channel: 'direct',
     template: '',
     category: '',
+    offer: '',
     variableDefaults: {},
     fallbackTemplateId: '',
   });
@@ -187,8 +198,9 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         variable_defaults: formData.variableDefaults,
         fallback_template_id: formData.fallbackTemplateId || null,
       } as MessageTemplateSettings,
+      offer: primaryUse === 'b2b' ? (formData.offer || null) : null,
     }),
-    [editingTemplate?.id, formData.template, formData.variableDefaults, formData.fallbackTemplateId]
+    [editingTemplate?.id, formData.template, formData.variableDefaults, formData.fallbackTemplateId, formData.offer, primaryUse]
   );
 
   // Patch the in-edit template into the template list so the renderer sees the
@@ -253,34 +265,38 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
     }, 0);
   };
 
-  // Initialize form data when modal opens or editing template changes
+  // Initialize form data when modal opens or editing/prefill template changes.
+  // Prefill is used by the Duplicate action: same starting values as the source
+  // template, but submission goes through onCreate (no id is bound).
   useEffect(() => {
-    if (isOpen) {
-      if (editingTemplate) {
-        const channel = channelOptions.includes(editingTemplate.channel)
-          ? editingTemplate.channel
-          : channelOptions[0];
-        const settings = editingTemplate.settings || {};
-        setFormData({
-          title: (editingTemplate.title || '').trim(),
-          channel,
-          template: (editingTemplate.template || '').trim(),
-          category: (editingTemplate.category || '').trim(),
-          variableDefaults: { ...(settings.variable_defaults || {}) },
-          fallbackTemplateId: settings.fallback_template_id || '',
-        });
-      } else {
-        setFormData({
-          title: '',
-          channel: channelOptions.includes(defaultChannel) ? defaultChannel : channelOptions[0],
-          template: '',
-          category: '',
-          variableDefaults: {},
-          fallbackTemplateId: '',
-        });
-      }
+    if (!isOpen) return;
+    const source = editingTemplate ?? (isCreating ? prefillTemplate : null);
+    if (source) {
+      const channel = channelOptions.includes(source.channel)
+        ? source.channel
+        : channelOptions[0];
+      const settings = source.settings || {};
+      setFormData({
+        title: (source.title || '').trim(),
+        channel,
+        template: (source.template || '').trim(),
+        category: (source.category || '').trim(),
+        offer: (source.offer || '').trim(),
+        variableDefaults: { ...(settings.variable_defaults || {}) },
+        fallbackTemplateId: settings.fallback_template_id || '',
+      });
+    } else {
+      setFormData({
+        title: '',
+        channel: channelOptions.includes(defaultChannel) ? defaultChannel : channelOptions[0],
+        template: '',
+        category: '',
+        offer: '',
+        variableDefaults: {},
+        fallbackTemplateId: '',
+      });
     }
-  }, [isOpen, editingTemplate, defaultChannel, channelOptions]);
+  }, [isOpen, editingTemplate, prefillTemplate, isCreating, defaultChannel, channelOptions]);
 
   const handleSubmit = async () => {
     if (!formData.title.trim()) {
@@ -309,6 +325,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         variable_defaults: trimmedDefaults,
         fallback_template_id: formData.fallbackTemplateId || null,
       };
+      const offerVal = primaryUse === 'b2b' ? (formData.offer || null) : null;
       if (isCreating && editingTemplate === null) {
         await onCreate({
           title: formData.title.trim(),
@@ -316,6 +333,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
           template: formData.template.trim(),
           category: categoryVal,
           settings,
+          offer: offerVal,
         });
       } else if (editingTemplate) {
         await onUpdate(editingTemplate.id, {
@@ -324,6 +342,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
           template: formData.template.trim(),
           category: categoryVal,
           settings,
+          offer: offerVal,
         });
       }
       onClose();
@@ -341,6 +360,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
         channel: 'direct',
         template: '',
         category: '',
+        offer: '',
         variableDefaults: {},
         fallbackTemplateId: '',
       });
@@ -406,7 +426,7 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
 
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className={`grid gap-4 ${primaryUse === 'b2b' ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Channel
@@ -442,6 +462,27 @@ const MessageTemplateModal: React.FC<MessageTemplateModalProps> = ({
                 <option value="Partner">Partner</option>
               </select>
             </div>
+
+            {primaryUse === 'b2b' && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Offer <span className="text-gray-400 font-normal">(optional)</span>
+                </label>
+                <select
+                  value={formData.offer}
+                  onChange={(e) => setFormData({ ...formData, offer: e.target.value })}
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"
+                  disabled={isSubmitting}
+                >
+                  <option value="">None</option>
+                  {Object.entries(OFFER_OPTIONS).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div>

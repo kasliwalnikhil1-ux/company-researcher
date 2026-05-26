@@ -8,7 +8,18 @@ import { useOnboarding } from '@/contexts/OnboardingContext';
 import DeleteConfirmationModal from '@/components/ui/DeleteConfirmationModal';
 import MessageTemplateModal from '@/components/ui/MessageTemplateModal';
 import { fetchGenerateMessages } from '@/lib/api';
-import { renderCompanyTemplate } from '@/lib/messageTemplates';
+import { renderCompanyTemplate, OFFER_OPTIONS, getOfferLabel } from '@/lib/messageTemplates';
+
+// Color classes per offer key. Extend when new offers are added to OFFER_OPTIONS.
+const OFFER_BADGE_CLASSES: Record<string, string> = {
+  saas_photoshoots: 'bg-emerald-100 text-emerald-800',
+  video_agency: 'bg-amber-100 text-amber-800',
+};
+const OFFER_PILL_ACTIVE_CLASSES: Record<string, string> = {
+  saas_photoshoots: 'bg-emerald-600 text-white border-emerald-600',
+  video_agency: 'bg-amber-600 text-white border-amber-600',
+};
+const OFFER_PILL_FALLBACK_ACTIVE = 'bg-indigo-600 text-white border-indigo-600';
 
 const B2B_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram', 'ads', 'jobs', 'news', 'replies'];
 const FUNDRAISING_CHANNELS: TemplateChannel[] = ['email', 'linkedin', 'direct', 'instagram'];
@@ -68,6 +79,32 @@ function TemplatesContent() {
     [visibleChannelOptions]
   );
   const [activeTab, setActiveTab] = useState<TemplateTab>('all');
+  // 'all' | offer key (e.g. 'saas_photoshoots'). Only meaningful when b2b.
+  // Defaults to 'saas_photoshoots'; restored from localStorage on mount.
+  const ACTIVE_OFFER_STORAGE_KEY = 'templates.activeOffer';
+  const [activeOffer, setActiveOffer] = useState<string>('saas_photoshoots');
+
+  // Restore last-selected offer from localStorage on mount.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const stored = window.localStorage.getItem(ACTIVE_OFFER_STORAGE_KEY);
+      if (stored) setActiveOffer(stored);
+    } catch {
+      // Ignore storage access errors (private mode, etc.)
+    }
+  }, []);
+
+  // Persist offer selection whenever it changes (b2b only — fundraising forces 'all' below).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (primaryUse !== 'b2b') return;
+    try {
+      window.localStorage.setItem(ACTIVE_OFFER_STORAGE_KEY, activeOffer);
+    } catch {
+      // Ignore storage access errors
+    }
+  }, [activeOffer, primaryUse]);
 
   // If the active channel tab no longer has any templates, fall back to "All".
   useEffect(() => {
@@ -76,9 +113,26 @@ function TemplatesContent() {
     }
   }, [visibleChannelOptions, activeTab]);
 
+  // Reset offer filter when the user is no longer on b2b.
+  useEffect(() => {
+    if (primaryUse !== 'b2b' && activeOffer !== 'all') {
+      setActiveOffer('all');
+    }
+  }, [primaryUse, activeOffer]);
+
+  // All defined offers (b2b only). Shown even when no templates use them yet so
+  // the user can always switch back to the default selection.
+  const visibleOffers = useMemo(() => {
+    if (primaryUse !== 'b2b') return [] as string[];
+    return Object.keys(OFFER_OPTIONS);
+  }, [primaryUse]);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<MessageTemplate | null>(null);
+  // Set when the user clicks Duplicate on a template card — opens the modal in
+  // create mode but pre-filled from this source.
+  const [prefillTemplate, setPrefillTemplate] = useState<MessageTemplate | null>(null);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [templateToDelete, setTemplateToDelete] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
@@ -138,12 +192,25 @@ function TemplatesContent() {
   const handleCreateClick = () => {
     setIsCreating(true);
     setEditingTemplate(null);
+    setPrefillTemplate(null);
     setIsModalOpen(true);
   };
 
   const handleEditClick = (template: MessageTemplate) => {
     setIsCreating(false);
     setEditingTemplate(template);
+    setPrefillTemplate(null);
+    setIsModalOpen(true);
+  };
+
+  const handleDuplicateClick = (template: MessageTemplate) => {
+    setIsCreating(true);
+    setEditingTemplate(null);
+    // Suffix the title so the user sees this is a fresh copy, not an edit.
+    const suffixed = /\(Copy\)\s*$/i.test(template.title || '')
+      ? template
+      : { ...template, title: `${template.title || 'Untitled'} (Copy)` };
+    setPrefillTemplate(suffixed);
     setIsModalOpen(true);
   };
 
@@ -151,6 +218,7 @@ function TemplatesContent() {
     setIsModalOpen(false);
     setIsCreating(false);
     setEditingTemplate(null);
+    setPrefillTemplate(null);
   };
 
   const handleCreate = async (data: Parameters<typeof createTemplate>[0]) => {
@@ -259,9 +327,14 @@ function TemplatesContent() {
   // Filter and sort templates by channel and number in title (e.g., "Message 1", "Message 2")
   const sortedTemplates = useMemo(() => {
     // First filter by active tab channel (or show all)
-    const filteredTemplates = activeTab === 'all'
+    let filteredTemplates = activeTab === 'all'
       ? templates
       : templates.filter(t => t.channel === activeTab);
+
+    // Then filter by selected offer (b2b only).
+    if (primaryUse === 'b2b' && activeOffer !== 'all') {
+      filteredTemplates = filteredTemplates.filter(t => (t.offer || '') === activeOffer);
+    }
 
     // Then sort by number in title
     return [...filteredTemplates].sort((a, b) => {
@@ -309,7 +382,7 @@ function TemplatesContent() {
       // If neither has a number, sort alphabetically
       return titleA.localeCompare(titleB);
     });
-  }, [templates, activeTab, channelOptions]);
+  }, [templates, activeTab, channelOptions, primaryUse, activeOffer]);
 
   // Count `${var}` occurrences across the templates currently shown under the
   // active tab, and collect the distinct per-template defaults for each var
@@ -468,6 +541,34 @@ function TemplatesContent() {
         )}
       </div>
 
+      {/* Offer filter (b2b only) */}
+      {primaryUse === 'b2b' && visibleOffers.length > 0 && (
+        <div className="mb-6 flex items-center flex-wrap gap-2">
+          <span className="text-xs font-medium text-gray-500 mr-1">Offer:</span>
+          {([...visibleOffers, 'all'] as string[]).map((key) => {
+            const label = key === 'all' ? 'All' : getOfferLabel(key);
+            const isActive = activeOffer === key;
+            const activeClass =
+              key === 'all'
+                ? OFFER_PILL_FALLBACK_ACTIVE
+                : OFFER_PILL_ACTIVE_CLASSES[key] ?? OFFER_PILL_FALLBACK_ACTIVE;
+            return (
+              <button
+                key={key}
+                onClick={() => setActiveOffer(key)}
+                className={`px-3 py-1 text-xs font-medium rounded-full border transition-colors ${
+                  isActive
+                    ? activeClass
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Variable Usage Summary */}
       {variableUsage.length > 0 && (
         <div className="mb-6 bg-white border border-gray-200 rounded-lg p-4">
@@ -555,6 +656,15 @@ function TemplatesContent() {
                           {template.category}
                         </span>
                       )}
+                      {primaryUse === 'b2b' && template.offer && getOfferLabel(template.offer) && (
+                        <span
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            OFFER_BADGE_CLASSES[template.offer] ?? 'bg-gray-100 text-gray-700'
+                          }`}
+                        >
+                          {getOfferLabel(template.offer)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -598,6 +708,12 @@ function TemplatesContent() {
                       className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
                     >
                       Edit
+                    </button>
+                    <button
+                      onClick={() => handleDuplicateClick(template)}
+                      className="inline-flex items-center px-3 py-1.5 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                      Duplicate
                     </button>
                     <button
                       onClick={() => handleDeleteClick(template.id)}
@@ -658,6 +774,7 @@ function TemplatesContent() {
         isOpen={isModalOpen}
         isCreating={isCreating}
         editingTemplate={editingTemplate}
+        prefillTemplate={prefillTemplate}
         defaultChannel={activeTab === 'all' ? channelOptions[0] : activeTab}
         channelOptions={channelOptions}
         primaryUse={primaryUse}
