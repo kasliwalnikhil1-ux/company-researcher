@@ -1434,6 +1434,213 @@ function CompaniesContent() {
     void runExport(kind, source, ids);
   }, [pendingExport, exportTemplateIds, runExport]);
 
+  const buildOutreachPrompt = useCallback(
+    (
+      kind: 'companies' | 'contacts',
+      all: Company[],
+      templateIds: string[]
+    ): { text: string; itemCount: number } => {
+      const selectedTemplates = templateIds
+        .map((id) => templates.find((t) => t.id === id))
+        .filter((t): t is NonNullable<typeof t> => !!t);
+
+      const labelFor = (t: (typeof selectedTemplates)[number]) => {
+        const channelLabel = CHANNEL_LABELS[t.channel] || t.channel;
+        return `${t.title} — ${channelLabel}`;
+      };
+
+      const sections: string[] = [];
+
+      if (kind === 'contacts') {
+        let personIdx = 0;
+        for (const company of all) {
+          const contacts = Array.isArray(company.contacts) ? company.contacts : [];
+          if (contacts.length === 0) continue;
+          const companyName =
+            (company.summary && typeof company.summary === 'object'
+              ? (company.summary as Record<string, any>).company_name
+              : null) ||
+            company.domain ||
+            company.instagram ||
+            '';
+          const summaryDataForTemplates = getSummaryData(company);
+
+          for (const contact of contacts as any[]) {
+            if (!contact || typeof contact !== 'object') continue;
+            personIdx += 1;
+            const fullName =
+              contact.full_name ||
+              `${contact.first_name || ''} ${contact.last_name || ''}`.trim() ||
+              '(no name)';
+            const rawLinkedin = contact.linkedin_url ?? '';
+            const linkedinUrl = rawLinkedin
+              ? rawLinkedin.startsWith('http')
+                ? rawLinkedin
+                : `https://www.linkedin.com/${String(rawLinkedin).replace(/^\/+/, '')}`
+              : '';
+
+            const lines: string[] = [];
+            lines.push(`Person ${personIdx}: ${fullName}`);
+            lines.push(`LinkedIn URL: ${linkedinUrl || '(none)'}`);
+            if (companyName) lines.push(`Company: ${companyName}`);
+            if (contact.title) lines.push(`Title: ${contact.title}`);
+
+            for (const t of selectedTemplates) {
+              const message = renderCompanyTemplate(
+                t,
+                summaryDataForTemplates,
+                templates,
+                [],
+                contact
+              );
+              lines.push('');
+              lines.push(`${labelFor(t)}:`);
+              lines.push(message || '(no message generated)');
+            }
+
+            sections.push(lines.join('\n'));
+          }
+        }
+
+        const header = selectedTemplates.length
+          ? 'Use LinkedIn to send messages to the following:'
+          : 'Reach out to the following people on LinkedIn:';
+        const text = personIdx === 0
+          ? ''
+          : `${header}\n\n${sections.join('\n\n---\n\n')}`;
+        return { text, itemCount: personIdx };
+      }
+
+      // kind === 'companies'
+      let companyIdx = 0;
+      for (const company of all) {
+        companyIdx += 1;
+        const companyName =
+          (company.summary && typeof company.summary === 'object'
+            ? (company.summary as Record<string, any>).company_name
+            : null) ||
+          company.domain ||
+          company.instagram ||
+          '(unnamed)';
+        const summaryDataForTemplates = getSummaryData(company);
+
+        const lines: string[] = [];
+        lines.push(`Company ${companyIdx}: ${companyName}`);
+        if (company.domain) lines.push(`Domain: ${company.domain}`);
+        if (company.instagram) lines.push(`Instagram: ${company.instagram}`);
+        if (company.email) lines.push(`Email: ${company.email}`);
+
+        for (const t of selectedTemplates) {
+          const message = renderCompanyTemplate(t, summaryDataForTemplates, templates);
+          lines.push('');
+          lines.push(`${labelFor(t)}:`);
+          lines.push(message || '(no message generated)');
+        }
+
+        sections.push(lines.join('\n'));
+      }
+
+      const header = selectedTemplates.length
+        ? 'Send outreach messages to the following companies:'
+        : 'Reach out to the following companies:';
+      const text = companyIdx === 0
+        ? ''
+        : `${header}\n\n${sections.join('\n\n---\n\n')}`;
+      return { text, itemCount: companyIdx };
+    },
+    [templates, getSummaryData]
+  );
+
+  const handleCopyOutreachPrompt = useCallback(async () => {
+    if (!pendingExport) return;
+    const { kind, source } = pendingExport;
+    const ids = exportTemplateIds;
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(EXPORT_TEMPLATES_STORAGE_KEY, JSON.stringify(ids));
+      }
+    } catch {
+      // ignore storage failures
+    }
+
+    setExportLoading(true);
+    try {
+      const all =
+        source === 'selected'
+          ? await fetchCompaniesByIds(Array.from(selectedCompanyIds))
+          : await fetchAllFilteredCompanies();
+
+      if (all.length === 0) {
+        setToastMessage(
+          source === 'selected'
+            ? 'No selected companies to build a prompt from.'
+            : 'No companies match the current filters.'
+        );
+        setToastVisible(true);
+        return;
+      }
+
+      const { text, itemCount } = buildOutreachPrompt(kind, all, ids);
+      if (itemCount === 0 || !text) {
+        setToastMessage(
+          kind === 'contacts'
+            ? 'No contacts found to build an outreach prompt.'
+            : 'No companies found to build an outreach prompt.'
+        );
+        setToastVisible(true);
+        return;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const suffix = source === 'selected' ? 'selected' : 'export';
+      const filename = `outreach-prompt-${kind}-${suffix}-${today}.txt`;
+
+      let copied = true;
+      try {
+        await copyToClipboard(text);
+      } catch (copyErr) {
+        copied = false;
+        console.warn('Clipboard copy failed; download will still proceed', copyErr);
+      }
+
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      const noun = kind === 'contacts'
+        ? `${itemCount} contact${itemCount === 1 ? '' : 's'}`
+        : `${itemCount} compan${itemCount === 1 ? 'y' : 'ies'}`;
+      setToastMessage(
+        copied
+          ? `Copied and downloaded outreach prompt for ${noun}`
+          : `Downloaded outreach prompt for ${noun} (clipboard copy failed)`
+      );
+      setToastVisible(true);
+      setExportTemplatesModalOpen(false);
+      setPendingExport(null);
+    } catch (e) {
+      console.error('Outreach prompt build failed', e);
+      setToastMessage(e instanceof Error ? e.message : 'Failed to build outreach prompt');
+      setToastVisible(true);
+    } finally {
+      setExportLoading(false);
+    }
+  }, [
+    pendingExport,
+    exportTemplateIds,
+    fetchAllFilteredCompanies,
+    fetchCompaniesByIds,
+    selectedCompanyIds,
+    buildOutreachPrompt,
+  ]);
+
   const handleExportCompaniesCsv = useCallback(() => openExportTemplatesModal('companies', 'filtered'), [openExportTemplatesModal]);
   const handleExportContactsCsv = useCallback(() => openExportTemplatesModal('contacts', 'filtered'), [openExportTemplatesModal]);
   const handleExportSelectedCompaniesCsv = useCallback(() => openExportTemplatesModal('companies', 'selected'), [openExportTemplatesModal]);
@@ -3444,16 +3651,7 @@ function CompaniesContent() {
                     </div>
                   )}
                 </div>
-                <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between gap-3">
-                  <span className="text-xs text-gray-500">
-                    {exportTemplateIds.length} template{exportTemplateIds.length === 1 ? '' : 's'} selected
-                    {' · '}
-                    {pendingExport?.kind === 'contacts' ? 'Contacts CSV' : 'Companies CSV'}
-                    {' · '}
-                    {pendingExport?.source === 'selected'
-                      ? `${selectedCompanyIds.size} selected`
-                      : 'all filtered'}
-                  </span>
+                <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -3461,6 +3659,16 @@ function CompaniesContent() {
                       className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                     >
                       Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyOutreachPrompt()}
+                      disabled={exportLoading}
+                      title="Copy a plain-text outreach prompt (people, LinkedIn URLs, and selected message templates) to the clipboard"
+                      className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-700 bg-white border border-indigo-300 rounded-md hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {exportLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                      Copy Outreach Prompt
                     </button>
                     <button
                       type="button"

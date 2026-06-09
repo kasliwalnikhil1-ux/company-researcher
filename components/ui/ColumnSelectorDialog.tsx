@@ -96,7 +96,7 @@ const looksLikeTitle = (value: string): boolean => {
 
 const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
   isOpen,
-  columns,
+  columns: rawColumns,
   rows = [],
   selectedColumn,
   selectedColumns,
@@ -121,6 +121,23 @@ const ColumnSelectorDialog: React.FC<ColumnSelectorDialogProps> = ({
   // so auto-detection doesn't overwrite their choice — including an explicit
   // "— None —". Reset when the dialog closes.
   const touchedSlotsRef = useRef<Set<keyof SelectedColumnsState>>(new Set());
+
+  // CSV files can ship duplicate header names (e.g. two columns both titled
+  // "LinkedIn URL"). Row objects are keyed by header, so duplicates already
+  // collapse to a single usable column at parse time — and rendering both
+  // produced React "duplicate key" warnings in the column <select>s. Dedupe
+  // once here so every downstream list (detection pools, "Other columns", the
+  // option lists) sees each header exactly once.
+  const columns = useMemo(() => {
+    const seen = new Set<string>();
+    const unique: string[] = [];
+    for (const c of rawColumns) {
+      if (seen.has(c)) continue;
+      seen.add(c);
+      unique.push(c);
+    }
+    return unique;
+  }, [rawColumns]);
 
   // Excluded domains (social media and platforms)
   const excludedDomains = [

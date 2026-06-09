@@ -32,6 +32,7 @@ import {
   Newspaper,
   Link2,
   RefreshCw,
+  Star,
 } from "lucide-react";
 import { Company } from "@/contexts/CompaniesContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -45,6 +46,8 @@ import { getValidAccessToken, fetchCompanyNewsCurrent, fetchCompanyNews, fetchCo
 import { reanalyzeCompany } from "@/lib/reanalyzeCompany";
 import ReactMarkdown from 'react-markdown';
 import DeleteConfirmationModal from "@/components/ui/DeleteConfirmationModal";
+
+type DrawerTab = "overview" | "outreach" | "latest-news" | "contacts";
 
 interface CompanyDetailsDrawerProps {
   isOpen: boolean;
@@ -160,7 +163,20 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [classificationValue, setClassificationValue] = useState<string>("");
   const [setNameCreating, setSetNameCreating] = useState(false);
   const [newSetNameValue, setNewSetNameValue] = useState("");
-  const [activeTab, setActiveTab] = useState<"overview" | "outreach" | "latest-news" | "contacts">("overview");
+  // Persist the last-visited drawer tab so opening the next company restores it
+  // (when that tab exists for the company — person profiles have no Contacts tab).
+  const ACTIVE_TAB_STORAGE_KEY = "companyDrawer.lastTab";
+  const [activeTab, setActiveTab] = useState<DrawerTab>("overview");
+  // Only persist on an explicit user click; programmatic resets (on company
+  // change) must not overwrite the stored preference when a tab is unavailable.
+  const handleSelectTab = useCallback((tab: DrawerTab) => {
+    setActiveTab(tab);
+    try {
+      window.localStorage.setItem(ACTIVE_TAB_STORAGE_KEY, tab);
+    } catch {
+      // Ignore storage errors (private mode, etc.)
+    }
+  }, []);
   const [contacts, setContacts] = useState<any[] | null>(null);
   const [contactsLoading, setContactsLoading] = useState(false);
   const [contactToRemove, setContactToRemove] = useState<{
@@ -209,28 +225,48 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const [copiedAllOutreach, setCopiedAllOutreach] = useState(false);
   const [outreachChannelFilter, setOutreachChannelFilter] = useState<TemplateChannel | "all">("all");
   const [outreachCategoryFilter, setOutreachCategoryFilter] = useState<string>("all");
-  // Offer filter. Default 'saas_photoshoots' (matches Templates page default);
-  // restored from / persisted to the shared 'templates.activeOffer' key.
-  const OUTREACH_OFFER_STORAGE_KEY = "templates.activeOffer";
-  const [outreachOfferFilter, setOutreachOfferFilter] = useState<string>("saas_photoshoots");
+  // Offer filter. Defaults to 'all' so every outreach message shows on open
+  // until the user explicitly picks an offer. Intentionally NOT coupled to the
+  // Templates page's persisted offer — that default used to silently hide all
+  // messages here ("No outreach messages match the current filters.").
+  const [outreachOfferFilter, setOutreachOfferFilter] = useState<string>("all");
+  const [outreachSearch, setOutreachSearch] = useState("");
+  // Starred outreach templates. Keyed by outreach column key (e.g. "template_<id>")
+  // so a star follows the template across every company. Persisted locally; not
+  // tied to a company record. `outreachStarredOnly` filters the list to favourites.
+  const STARRED_OUTREACH_STORAGE_KEY = "outreach.starredTemplates";
+  const [starredOutreachKeys, setStarredOutreachKeys] = useState<Set<string>>(new Set());
+  const [outreachStarredOnly, setOutreachStarredOnly] = useState(false);
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const stored = window.localStorage.getItem(OUTREACH_OFFER_STORAGE_KEY);
-      if (stored) setOutreachOfferFilter(stored);
+      const raw = window.localStorage.getItem(STARRED_OUTREACH_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setStarredOutreachKeys(new Set(parsed.filter((x): x is string => typeof x === "string")));
+        }
+      }
     } catch {
-      // Ignore storage errors (private mode, etc.)
+      // Ignore storage errors (private mode, malformed value, etc.)
     }
   }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(OUTREACH_OFFER_STORAGE_KEY, outreachOfferFilter);
-    } catch {
-      // Ignore storage errors
-    }
-  }, [outreachOfferFilter]);
-  const [outreachSearch, setOutreachSearch] = useState("");
+  const toggleStarredOutreach = useCallback((columnKey: string) => {
+    setStarredOutreachKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(columnKey)) next.delete(columnKey);
+      else next.add(columnKey);
+      try {
+        window.localStorage.setItem(
+          STARRED_OUTREACH_STORAGE_KEY,
+          JSON.stringify(Array.from(next))
+        );
+      } catch {
+        // Ignore storage errors
+      }
+      return next;
+    });
+  }, []);
   // Identifier of the contact whose name fields (e.g. ${first_name}) should be
   // injected when rendering outreach template values. "" = no contact selected.
   const [outreachContactId, setOutreachContactId] = useState<string>("");
@@ -255,9 +291,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
   const { templates: messageTemplates } = useMessageTemplates();
 
   const templateById = useMemo(() => {
-    const map = new Map<string, { id: string; title: string; channel: TemplateChannel; category?: string }>();
+    const map = new Map<string, { id: string; title: string; channel: TemplateChannel; category?: string; offer?: string | null }>();
     for (const t of messageTemplates) {
-      map.set(t.id, { id: t.id, title: t.title, channel: t.channel, category: t.category });
+      map.set(t.id, { id: t.id, title: t.title, channel: t.channel, category: t.category, offer: t.offer });
     }
     return map;
   }, [messageTemplates]);
@@ -510,7 +546,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fetchedDomainsRef = useRef<Set<string>>(new Set());
-  const prevTabRef = useRef<"overview" | "outreach" | "latest-news" | "contacts">("overview");
+  const prevTabRef = useRef<DrawerTab>("overview");
 
   const fetchContacts = useCallback(async (force: boolean = false) => {
     if (!company?.domain) return;
@@ -927,7 +963,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
 
   useEffect(() => {
     if (
-      (activeTab === "contacts" || activeTab === "outreach") &&
+      activeTab === "contacts" &&
       prevTabRef.current !== activeTab &&
       company?.domain
     ) {
@@ -948,7 +984,23 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         prevCompanyIdRef.current = company.id;
       }
 
-      setActiveTab("overview");
+      // Restore the user's last-visited tab if it's available for this company.
+      // The Contacts tab only exists for non-person profiles, so fall back to
+      // Overview when the stored tab can't be shown.
+      let restoredTab: DrawerTab = "overview";
+      try {
+        const stored = window.localStorage.getItem(ACTIVE_TAB_STORAGE_KEY) as DrawerTab | null;
+        const isPerson = /linkedin\.com\/in\//i.test(company.domain || "");
+        const availableTabs: DrawerTab[] = isPerson
+          ? ["overview", "outreach", "latest-news"]
+          : ["overview", "outreach", "latest-news", "contacts"];
+        if (stored && availableTabs.includes(stored)) {
+          restoredTab = stored;
+        }
+      } catch {
+        // Ignore storage errors — default to Overview.
+      }
+      setActiveTab(restoredTab);
       setContacts(null);
       setOutreachContactId("");
       setCompanyNews(null);
@@ -2705,7 +2757,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
         <div className="relative border-b border-gray-200 flex-shrink-0">
           <div className="flex gap-0.5 sm:gap-1 px-2 sm:px-4 pt-2 overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
             <button
-              onClick={() => setActiveTab("overview")}
+              onClick={() => handleSelectTab("overview")}
               className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === "overview"
                   ? "border-indigo-600 text-indigo-600"
@@ -2715,7 +2767,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               Overview
             </button>
             <button
-              onClick={() => setActiveTab("outreach")}
+              onClick={() => handleSelectTab("outreach")}
               className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === "outreach"
                   ? "border-indigo-600 text-indigo-600"
@@ -2725,7 +2777,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
               Outreach
             </button>
             <button
-              onClick={() => setActiveTab("latest-news")}
+              onClick={() => handleSelectTab("latest-news")}
               className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                 activeTab === "latest-news"
                   ? "border-indigo-600 text-indigo-600"
@@ -2736,7 +2788,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
             </button>
             {!isPersonProfile && (
               <button
-                onClick={() => setActiveTab("contacts")}
+                onClick={() => handleSelectTab("contacts")}
                 className={`px-2.5 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex-shrink-0 ${
                   activeTab === "contacts"
                     ? "border-indigo-600 text-indigo-600"
@@ -3490,6 +3542,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   outreachCategoryFilter !== "all" ||
                   outreachOfferFilter !== "all" ||
                   outreachSearch.trim().length > 0;
+                // Includes the "starred only" view toggle — used for the empty
+                // state copy and the Clear-filters affordance.
+                const anyFilterActive = filtersActive || outreachStarredOnly;
                 const searchLower = outreachSearch.trim().toLowerCase();
 
                 const populatedOutreachKeys = columnOrder
@@ -3523,31 +3578,39 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   availableOffers.has(k)
                 );
 
-                const outreachKeys = populatedOutreachKeys.filter((c) => {
-                  if (!filtersActive) return true;
-                  const tpl = getTemplateForColumn(c);
-                  // Non-template outreach columns lack channel/category metadata.
-                  if (!tpl) return false;
-                  if (outreachChannelFilter !== "all" && tpl.channel !== outreachChannelFilter) {
-                    return false;
-                  }
-                  if (
-                    outreachCategoryFilter !== "all" &&
-                    (tpl.category || "").trim() !== outreachCategoryFilter
-                  ) {
-                    return false;
-                  }
-                  if (
-                    outreachOfferFilter !== "all" &&
-                    (tpl.offer || "").trim() !== outreachOfferFilter
-                  ) {
-                    return false;
-                  }
-                  if (searchLower && !(tpl.title || "").toLowerCase().includes(searchLower)) {
-                    return false;
-                  }
-                  return true;
-                });
+                const outreachKeys = populatedOutreachKeys
+                  .filter((c) => {
+                    if (outreachStarredOnly && !starredOutreachKeys.has(c)) return false;
+                    if (!filtersActive) return true;
+                    const tpl = getTemplateForColumn(c);
+                    // Non-template outreach columns lack channel/category metadata.
+                    if (!tpl) return false;
+                    if (outreachChannelFilter !== "all" && tpl.channel !== outreachChannelFilter) {
+                      return false;
+                    }
+                    if (
+                      outreachCategoryFilter !== "all" &&
+                      (tpl.category || "").trim() !== outreachCategoryFilter
+                    ) {
+                      return false;
+                    }
+                    if (
+                      outreachOfferFilter !== "all" &&
+                      (tpl.offer || "").trim() !== outreachOfferFilter
+                    ) {
+                      return false;
+                    }
+                    if (searchLower && !(tpl.title || "").toLowerCase().includes(searchLower)) {
+                      return false;
+                    }
+                    return true;
+                  })
+                  // Surface starred templates first; Array.sort is stable, so the
+                  // original column order is preserved within each group.
+                  .sort(
+                    (a, b) =>
+                      (starredOutreachKeys.has(b) ? 1 : 0) - (starredOutreachKeys.has(a) ? 1 : 0)
+                  );
 
                 const handleCopyMessage = async (key: string, text: string) => {
                   try {
@@ -3576,50 +3639,8 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                   }
                 };
 
-                const contactOptions = (contacts || [])
-                  .map((c: any) => {
-                    const id = getContactIdentifier(c);
-                    const fullName =
-                      (c?.full_name || `${c?.first_name || ""} ${c?.last_name || ""}`.trim()).trim();
-                    return id && fullName ? { id, label: fullName, title: c?.title || c?.headline || "" } : null;
-                  })
-                  .filter((opt): opt is { id: string; label: string; title: string } => !!opt);
-
-                const personalizeControl = (
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Users className="w-4 h-4 text-gray-400" />
-                    <span className="text-xs font-medium text-gray-600">Personalize for</span>
-                    {contactsLoading && !contactOptions.length ? (
-                      <span className="text-xs text-gray-400 inline-flex items-center gap-1">
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                        Loading contacts…
-                      </span>
-                    ) : contactOptions.length === 0 ? (
-                      <span className="text-xs text-gray-400">
-                        No contacts yet — add one from the Contacts tab to use{" "}
-                        <code className="font-mono">${"{first_name}"}</code>.
-                      </span>
-                    ) : (
-                      <select
-                        value={outreachContactId}
-                        onChange={(e) => setOutreachContactId(e.target.value)}
-                        className="px-2 py-1 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                      >
-                        <option value="">No contact (use defaults)</option>
-                        {contactOptions.map((opt) => (
-                          <option key={opt.id} value={opt.id}>
-                            {opt.label}
-                            {opt.title ? ` — ${opt.title}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </div>
-                );
-
                 const filterControls = (
                   <div className="space-y-2">
-                    {personalizeControl}
                     <div className="relative">
                       <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                       <input
@@ -3675,7 +3696,29 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                           <option value="all">All offers</option>
                         </select>
                       )}
-                      {filtersActive && (
+                      <button
+                        type="button"
+                        onClick={() => setOutreachStarredOnly((v) => !v)}
+                        aria-pressed={outreachStarredOnly}
+                        className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm border rounded-md transition-colors ${
+                          outreachStarredOnly
+                            ? "border-amber-300 bg-amber-50 text-amber-700"
+                            : "border-gray-300 bg-white text-gray-600 hover:bg-gray-50"
+                        }`}
+                        title={
+                          outreachStarredOnly
+                            ? "Showing starred only — click to show all"
+                            : "Show starred messages only"
+                        }
+                      >
+                        <Star
+                          className={`w-3.5 h-3.5 ${
+                            outreachStarredOnly ? "fill-amber-400 text-amber-400" : ""
+                          }`}
+                        />
+                        Starred
+                      </button>
+                      {anyFilterActive && (
                         <button
                           type="button"
                           onClick={() => {
@@ -3683,6 +3726,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                             setOutreachCategoryFilter("all");
                             setOutreachOfferFilter("all");
                             setOutreachSearch("");
+                            setOutreachStarredOnly(false);
                           }}
                           className="px-3 py-2 text-xs font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
                         >
@@ -3703,7 +3747,9 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                       <div className="text-center py-12 border border-dashed border-gray-200 rounded-lg bg-gray-50">
                         <Mail className="w-10 h-10 text-gray-300 mx-auto mb-2" />
                         <p className="text-sm text-gray-500">
-                          {filtersActive
+                          {outreachStarredOnly
+                            ? "No starred outreach messages yet — tap the star on a message to save it here."
+                            : anyFilterActive
                             ? "No outreach messages match the current filters."
                             : "No outreach messages available for this company."}
                         </p>
@@ -3746,18 +3792,39 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                               <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
                                 {label}
                               </p>
-                              <button
-                                type="button"
-                                onClick={() => handleCopyMessage(columnKey, value)}
-                                className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors flex-shrink-0"
-                                title={`Copy ${label}`}
-                              >
-                                {copiedOutreachKey === columnKey ? (
-                                  <Check className="w-3.5 h-3.5 text-emerald-500" />
-                                ) : (
-                                  <Copy className="w-3.5 h-3.5" />
-                                )}
-                              </button>
+                              <div className="flex items-center gap-1 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleStarredOutreach(columnKey)}
+                                  className="p-1 text-gray-400 hover:text-amber-500 hover:bg-amber-50 rounded transition-colors"
+                                  title={
+                                    starredOutreachKeys.has(columnKey)
+                                      ? "Unstar this message"
+                                      : "Star this message"
+                                  }
+                                  aria-pressed={starredOutreachKeys.has(columnKey)}
+                                >
+                                  <Star
+                                    className={`w-3.5 h-3.5 ${
+                                      starredOutreachKeys.has(columnKey)
+                                        ? "fill-amber-400 text-amber-400"
+                                        : ""
+                                    }`}
+                                  />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyMessage(columnKey, value)}
+                                  className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                                  title={`Copy ${label}`}
+                                >
+                                  {copiedOutreachKey === columnKey ? (
+                                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </div>
                             </div>
                             {renderEditableValue(columnKey, value)}
                           </div>

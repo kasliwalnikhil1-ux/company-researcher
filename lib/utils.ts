@@ -180,6 +180,14 @@ export function substituteVariables(
       result = result.replace(emptyRegex, (_match, nextWord, offset, fullStr) => {
         if (!nextWord) return '';
         const before = fullStr.substring(0, offset);
+        // With the placeholder gone, the surviving next word now leads the
+        // sentence whenever it sits at the start of the string, the start of a
+        // line, or right after sentence-ending punctuation — so capitalize it.
+        // e.g. "${first_name}, we help" with no name becomes "We help".
+        const atSentenceStart = /^\s*$/.test(before) || /[.!?\n][ \t]*$/.test(before);
+        if (atSentenceStart) {
+          return nextWord.charAt(0).toUpperCase() + nextWord.slice(1);
+        }
         const afterComma = /,[ \t]*$/.test(before);
         if (afterComma && shouldLowercaseMidSentence(nextWord)) {
           return nextWord.charAt(0).toLowerCase() + nextWord.slice(1);
