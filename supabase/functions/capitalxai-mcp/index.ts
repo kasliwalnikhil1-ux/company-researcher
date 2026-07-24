@@ -309,7 +309,8 @@ function buildServer(auth: AuthedUser): McpServer {
     {
       title: "Find investors",
       description:
-        "Search the investors database (firms and people). Look up by name, by firm domain, or by LinkedIn URL. " +
+        "Search the investors database (firms and people). Look up by name, by firm domain, or by LinkedIn URL, " +
+        "or list the people linked to a firm with at_firm_domain. " +
         "Returns matches with their ids — use the id (or domain / linkedin_url) with update_investor.",
       inputSchema: {
         query: z.string().optional().describe("Name search (case-insensitive substring), e.g. 'accel' or 'Naval'."),
@@ -318,12 +319,52 @@ function buildServer(auth: AuthedUser): McpServer {
           .string()
           .optional()
           .describe("LinkedIn URL or path, e.g. linkedin.com/in/namankas or in/namankas."),
+        at_firm_domain: z
+          .string()
+          .optional()
+          .describe("List the people affiliated with this firm (firm's domain, e.g. accel.com)."),
         type: z.enum(["firm", "person"]).optional().describe("Only firms or only people."),
         limit: z.number().int().min(1).max(50).optional().describe("Max results. Defaults to 10."),
       },
     },
-    async ({ query, domain, linkedin_url, type, limit }) => {
+    async ({ query, domain, linkedin_url, at_firm_domain, type, limit }) => {
       try {
+        // Roster mode: list people linked to a firm via investor_affiliations.
+        if (at_firm_domain) {
+          const firm = await findFirmByDomain(at_firm_domain);
+          if (!firm) {
+            return textResult(
+              `No firm with domain ${cleanDomain(at_firm_domain) ?? at_firm_domain} in the database.` +
+                (auth.isAdmin ? " Add it with add_investor first." : ""),
+            );
+          }
+          const { data: affs, error: affErr } = await admin
+            .from("investor_affiliations")
+            .select("person_id")
+            .eq("firm_id", firm.id)
+            .limit(200);
+          if (affErr) return errorResult(`Could not load affiliations: ${affErr.message}`);
+          if (!affs || affs.length === 0) {
+            return textResult(
+              `Firm "${firm.name}" (id: ${firm.id}) has no people linked yet.` +
+                (auth.isAdmin
+                  ? " Add people with add_investor (type=person, firm_domain=" +
+                    `${cleanDomain(at_firm_domain)}) or link existing ones via update_investor.`
+                  : ""),
+            );
+          }
+          const { data: people, error: pplErr } = await admin
+            .from("investors")
+            .select("id, type, name, domain, linkedin_url, role, tier, investor_type, hq_country")
+            .in("id", affs.map((a) => a.person_id))
+            .limit(limit ?? 50);
+          if (pplErr) return errorResult(`Could not load people: ${pplErr.message}`);
+          return textResult(
+            `Firm "${firm.name}" (id: ${firm.id}) has ${affs.length} linked person(s):\n` +
+              (people ?? []).map(investorLine).join("\n"),
+          );
+        }
+
         const cleanedDomain = domain ? cleanDomain(domain) : null;
         if (domain && !cleanedDomain) return errorResult(`"${domain}" does not look like a valid domain.`);
         const linkedinPath = linkedin_url ? cleanLinkedinPath(linkedin_url) : null;

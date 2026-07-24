@@ -81,6 +81,18 @@ The server enforces the identity rules too (rejects LinkedIn paths as domains an
 
 Tell the user: added vs updated (with record id), firm/person and affiliation created, the key extracted fields (tier, stages, check sizes, thesis one-liner), which fields stayed empty for lack of sources, and the main source links.
 
+## Populating a firm's team (roster run)
+
+When a firm exists but has no (or few) people linked — or the user asks to "add the team/partners at X":
+
+1. **Check who's already linked**: `find_investors` with `at_firm_domain` set to the firm's domain. This lists the currently affiliated people so you never re-add them.
+2. **Build the roster in the browser**: open the firm's team/people page and its LinkedIn company page → People. Collect each member's name, LinkedIn URL, and title. Include the **investing team** — anyone whose title maps to the `role` enum in the schema file (Partner, Managing/General Partner, Principal, Venture/Operating Partner, Associate, Research Analyst, Scout, founders). Skip clearly non-investing staff (marketing, finance, EA, recruiting) unless the user asks for everyone.
+3. **Confirm the roster with the user** before adding (names + titles + count) — a firm can have dozens of people and each one gets a full research pass.
+4. **Process one person at a time** through the standard pipeline above, always passing `firm_domain` so the affiliation is created. If a person already exists in the DB but isn't linked, just call `update_investor` with their id and `firm_domain` — that creates the missing link without touching other fields.
+5. **Re-check** at the end with `find_investors` + `at_firm_domain` and report the final linked count.
+
+Depth note: for large rosters, agree a depth with the user — "link only" (name, LinkedIn, role, firm_domain — fast) vs "full profile" (complete research pass per person). Default to full profile for partners and link-only for associates/analysts if the user doesn't specify.
+
 ## Batch runs
 
 For a list of investors, confirm the list with the user first, then process **one investor at a time** through the full pipeline so failures are visible and each record gets a real research pass. Report a per-item summary (added / updated / skipped-exists / not-an-investor / failed) at the end.

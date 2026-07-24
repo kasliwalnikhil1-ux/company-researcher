@@ -13,7 +13,7 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 
 | Tool | What it does | Access |
 |---|---|---|
-| `find_investors` | Search investors by name, firm domain, or LinkedIn URL; returns ids | Any user |
+| `find_investors` | Search investors by name, firm domain, or LinkedIn URL; `at_firm_domain` lists the people linked to a firm | Any user |
 | `add_investor` | Add a firm (by domain) or person (by LinkedIn), with optional profile fields | Admin |
 | `update_investor` | Update fields on an existing investor; link a person to a firm | Admin |
 | `list_fundings` | Recent funding rounds, newest first, with search and paging | Any user |
