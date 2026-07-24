@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 import { isEmailAllowed } from '@/contexts/AuthContext';
+import { popPendingOAuthConsent } from '@/lib/oauthConsent';
 
 export default function AuthCallback() {
   const router = useRouter();
@@ -26,8 +27,9 @@ export default function AuthCallback() {
             router.push('/login?error=not_authorized');
             return;
           }
-          // Successfully authenticated, redirect to home
-          router.push('/');
+          // Successfully authenticated; finish a pending OAuth consent if one
+          // started this login, otherwise go home.
+          router.push(popPendingOAuthConsent() ?? '/');
         } catch (error) {
           console.error('Error in auth callback:', error);
           router.push('/login?error=auth_failed');
@@ -42,7 +44,7 @@ export default function AuthCallback() {
               router.push('/login?error=not_authorized');
               return;
             }
-            router.push('/');
+            router.push(popPendingOAuthConsent() ?? '/');
           } else {
             router.push('/login');
           }
