@@ -93,13 +93,15 @@ function unauthorized(): Response {
   );
 }
 
-/** Bare lowercase domain: no protocol, no www., no path (accel.com). */
+/** Bare lowercase domain: no protocol, no www., no path (accel.com).
+ *  LinkedIn URLs are never domains (mirrors the app's sanitizeInvestorFields Rule 1). */
 function cleanDomain(input: string): string | null {
   let s = (input ?? "").trim();
   if (!s) return null;
   if (!s.startsWith("http")) s = "https://" + s;
   try {
     const host = new URL(s).hostname.replace(/^www\./, "");
+    if (host.toLowerCase().includes("linkedin.com")) return null;
     return /[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(host) ? host.toLowerCase() : null;
   } catch {
     return null;
@@ -197,9 +199,14 @@ const investorProfileShape = {
     .describe('For people: schools/universities as "[Name](url)" strings.'),
   leads_round: z.boolean().optional().describe("Whether this investor leads rounds."),
   active: z.boolean().optional().describe("Whether the investor is actively investing."),
-  email: z.string().optional().describe("Contact email."),
+  email: z.string().optional().describe("Contact email(s); join multiple with ', '."),
+  phone: z.string().optional().describe("Contact phone number."),
+  apply_url: z
+    .string()
+    .optional()
+    .describe("Pitch/application submission URL. Omit if it is just the investor's homepage."),
   twitter_url: z.string().optional().describe("Twitter/X profile URL."),
-  links: z.array(z.string()).optional().describe("Other relevant links (website pages, Crunchbase, etc.)."),
+  links: z.array(z.string()).optional().describe('Relevant links as "[title](url)" strings (site subpages, Crunchbase, etc.).'),
 };
 
 const INVESTOR_PROFILE_KEYS = Object.keys(investorProfileShape) as Array<keyof typeof investorProfileShape>;
@@ -211,6 +218,24 @@ function pickProfileFields(input: Record<string, unknown>): Record<string, unkno
     if (input[key] !== undefined) row[key] = input[key];
   }
   return row;
+}
+
+/** Is this domain / LinkedIn path on the not_an_investor skip-list? */
+async function checkNotAnInvestor(domain: string | null, linkedinPath: string | null): Promise<boolean> {
+  if (domain) {
+    const { data } = await admin.from("not_an_investor").select("id").eq("domain", domain).limit(1).maybeSingle();
+    if (data?.id) return true;
+  }
+  if (linkedinPath) {
+    const { data } = await admin
+      .from("not_an_investor")
+      .select("id")
+      .eq("linkedin_url", linkedinPath)
+      .limit(1)
+      .maybeSingle();
+    if (data?.id) return true;
+  }
+  return false;
 }
 
 async function findFirmByDomain(domain: string): Promise<{ id: string; name: string } | null> {
@@ -299,29 +324,51 @@ function buildServer(auth: AuthedUser): McpServer {
     },
     async ({ query, domain, linkedin_url, type, limit }) => {
       try {
+        const cleanedDomain = domain ? cleanDomain(domain) : null;
+        if (domain && !cleanedDomain) return errorResult(`"${domain}" does not look like a valid domain.`);
+        const linkedinPath = linkedin_url ? cleanLinkedinPath(linkedin_url) : null;
+        if (linkedin_url && !linkedinPath) {
+          return errorResult(`"${linkedin_url}" does not look like a LinkedIn URL or path.`);
+        }
+
         let q = admin
           .from("investors")
           .select("id, type, name, domain, linkedin_url, role, tier, investor_type, hq_country")
           .limit(limit ?? 10);
 
-        if (domain) {
-          const clean = cleanDomain(domain);
-          if (!clean) return errorResult(`"${domain}" does not look like a valid domain.`);
-          q = q.eq("domain", clean);
-        } else if (linkedin_url) {
-          const path = cleanLinkedinPath(linkedin_url);
-          if (!path) return errorResult(`"${linkedin_url}" does not look like a LinkedIn URL or path.`);
-          q = q.eq("linkedin_url", path);
-        } else if (query?.trim()) {
-          q = q.ilike("name", `%${query.trim()}%`);
-        } else {
-          return errorResult("Provide at least one of: query, domain, or linkedin_url.");
-        }
+        if (cleanedDomain) q = q.eq("domain", cleanedDomain);
+        else if (linkedinPath) q = q.eq("linkedin_url", linkedinPath);
+        else if (query?.trim()) q = q.ilike("name", `%${query.trim()}%`);
+        else return errorResult("Provide at least one of: query, domain, or linkedin_url.");
         if (type) q = q.eq("type", type);
 
-        const { data, error } = await q;
+        let { data, error } = await q;
         if (error) return errorResult(`Search failed: ${error.message}`);
+
+        // LinkedIn person URLs often differ only by a trailing numeric suffix
+        // (in/anton-generalov vs in/anton-generalov-a2827281): fall back to a
+        // username-prefix match, mirroring the app's duplicate check.
+        if ((!data || data.length === 0) && linkedinPath?.startsWith("in/")) {
+          const username = linkedinPath.replace(/^in\//, "").replace(/-[a-z0-9]+$/i, "");
+          if (username) {
+            const { data: prefixData } = await admin
+              .from("investors")
+              .select("id, type, name, domain, linkedin_url, role, tier, investor_type, hq_country")
+              .like("linkedin_url", `in/${username}%`)
+              .eq("type", "person")
+              .limit(limit ?? 10);
+            if (prefixData && prefixData.length > 0) data = prefixData;
+          }
+        }
+
         if (!data || data.length === 0) {
+          // Not in investors — is it on the not-an-investor skip-list?
+          if (await checkNotAnInvestor(cleanedDomain, linkedinPath)) {
+            return textResult(
+              "No matching investor found, and this domain/LinkedIn is marked as NOT an investor " +
+                "(previously researched and rejected). Do not add it unless the user explicitly overrides.",
+            );
+          }
           return textResult(
             "No matching investors found." +
               (auth.isAdmin ? " You can add one with add_investor." : ""),
@@ -510,6 +557,14 @@ function buildServer(auth: AuthedUser): McpServer {
           if (cleanedDomain) notes.push(`domain: ${cleanedDomain}`);
           if (linkedinPath) notes.push(`linkedin: linkedin.com/${linkedinPath}`);
 
+          // The admin explicitly confirmed this is an investor — clear any stale
+          // not-an-investor marking so pipelines don't contradict the new row.
+          if (await checkNotAnInvestor(cleanedDomain, linkedinPath)) {
+            if (cleanedDomain) await admin.from("not_an_investor").delete().eq("domain", cleanedDomain);
+            if (linkedinPath) await admin.from("not_an_investor").delete().eq("linkedin_url", linkedinPath);
+            notes.push("note: this identifier was on the not-an-investor list; the stale marking was removed.");
+          }
+
           // Optional person → firm affiliation.
           if (type === "person" && firm_domain) {
             const firm = await findFirmByDomain(firm_domain);
@@ -620,6 +675,78 @@ function buildServer(auth: AuthedUser): McpServer {
           }
 
           return textResult(notes.join("\n"));
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      "mark_not_an_investor",
+      {
+        title: "Mark as not an investor (admin)",
+        description:
+          "Record that a researched domain/LinkedIn is NOT an investor, so future research skips it " +
+          "(mirrors the app's not_an_investor tracking). Use after research clearly shows the entity does not invest capital. " +
+          "Does not touch the investors table.",
+        inputSchema: {
+          domain: z.string().optional().describe("The non-investor's website domain, e.g. acme.com."),
+          linkedin_url: z.string().optional().describe("The non-investor's LinkedIn URL or path."),
+          reason: z.string().optional().describe("Optional short status note, e.g. 'consulting firm, no investments'."),
+        },
+      },
+      async ({ domain, linkedin_url, reason }) => {
+        try {
+          const cleanedDomain = domain ? cleanDomain(domain) : null;
+          if (domain && !cleanedDomain) return errorResult(`"${domain}" does not look like a valid domain.`);
+          const linkedinPath = linkedin_url ? cleanLinkedinPath(linkedin_url) : null;
+          if (linkedin_url && !linkedinPath) {
+            return errorResult(`"${linkedin_url}" does not look like a LinkedIn URL or path.`);
+          }
+          if (!cleanedDomain && !linkedinPath) return errorResult("Provide domain or linkedin_url.");
+
+          // Upsert semantics matching the app: find by domain, then linkedin.
+          let existingId: string | null = null;
+          if (cleanedDomain) {
+            const { data } = await admin
+              .from("not_an_investor")
+              .select("id")
+              .eq("domain", cleanedDomain)
+              .limit(1)
+              .maybeSingle();
+            existingId = data?.id ?? null;
+          }
+          if (!existingId && linkedinPath) {
+            const { data } = await admin
+              .from("not_an_investor")
+              .select("id")
+              .eq("linkedin_url", linkedinPath)
+              .limit(1)
+              .maybeSingle();
+            existingId = data?.id ?? null;
+          }
+
+          if (existingId) {
+            const patch: Record<string, unknown> = { status: reason ?? null };
+            if (cleanedDomain) patch.domain = cleanedDomain;
+            if (linkedinPath) patch.linkedin_url = linkedinPath;
+            const { error } = await admin.from("not_an_investor").update(patch).eq("id", existingId);
+            if (error) return errorResult(`Could not update the not-an-investor record: ${error.message}`);
+            return textResult(`Already on the not-an-investor list — record updated (id: ${existingId}).`);
+          }
+
+          const id = crypto.randomUUID();
+          const { error } = await admin.from("not_an_investor").insert({
+            id,
+            domain: cleanedDomain,
+            linkedin_url: linkedinPath,
+            status: reason ?? null,
+          });
+          if (error) return errorResult(`Could not record the non-investor: ${error.message}`);
+          return textResult(
+            `Marked ${cleanedDomain ?? `linkedin.com/${linkedinPath}`} as not an investor (id: ${id}). ` +
+              "Future research will skip it.",
+          );
         } catch (err) {
           return errorResult(err);
         }

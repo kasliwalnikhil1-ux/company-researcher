@@ -43,6 +43,14 @@ interface SupabaseOAuthApi {
 // crash ("Cannot read properties of undefined").
 const oauthApi = (supabase.auth as unknown as { oauth?: SupabaseOAuthApi }).oauth;
 
+// Accounts that get the connector's write tools (same allowlist as ME Data /
+// Data Pipelines / Add Funding). Everyone else gets read-only access, and the
+// consent copy must not reveal that admin-only capabilities exist.
+const ADMIN_USER_IDS = new Set([
+  '2793f3da-9340-44f4-b285-b7836bfb8591',
+  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
+]);
+
 function OAuthConsentInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -54,6 +62,7 @@ function OAuthConsentInner() {
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<AuthorizationDetails | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +96,7 @@ function OAuthConsentInner() {
 
       if (cancelled) return;
       setUserEmail(session.user.email ?? null);
+      setIsAdmin(ADMIN_USER_IDS.has(session.user.id));
 
       const { data, error: detailsError } = await oauthApi.getAuthorizationDetails(authorizationId);
 
@@ -178,8 +188,10 @@ function OAuthConsentInner() {
           <div className="space-y-6">
             <p className="text-sm text-center text-gray-600">
               <span className="font-medium text-gray-900">{clientName}</span> wants to access your{' '}
-              {whitelabel.pageTitle} account{userEmail ? ` (${userEmail})` : ''}. It will be able to read the
-              investor database and, for admin accounts, add and update investors and fundings on your behalf.
+              {whitelabel.pageTitle} account{userEmail ? ` (${userEmail})` : ''}.{' '}
+              {isAdmin
+                ? 'It will be able to read the investor database and add or update investors and fundings on your behalf.'
+                : 'It will be able to read the investor database on your behalf.'}
             </p>
 
             <div className="flex gap-3">
