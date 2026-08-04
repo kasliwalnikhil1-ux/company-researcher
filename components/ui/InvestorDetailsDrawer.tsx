@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw, RefreshCw } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, getValidAccessToken, type InvestorNews } from '@/lib/api';
 import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT, type ExcludeInvestorsOption } from '@/hooks/useInvestorSearch';
@@ -817,24 +817,37 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const INVESTOR_NEWS_STORAGE_KEY = (id: string) => `investor-news-${id}`;
   const contactsLimit = isFreePlan ? CONTACTS_FREE_LIMIT : 100;
   const CONTACTS_STORAGE_KEY = (id: string) => `investor-contacts-${id}-${contactsLimit}`;
+  const CONTACTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-  const loadContacts = useCallback(async (firmId: string, expectedCount?: number | null) => {
+  const loadContacts = useCallback(async (firmId: string, expectedCount?: number | null, forceRefresh = false) => {
     if (typeof window === 'undefined') return;
-    const cached = localStorage.getItem(CONTACTS_STORAGE_KEY(firmId));
-    if (cached !== null) {
-      try {
-        const parsed = JSON.parse(cached) as InvestorDetails[];
-        const list = Array.isArray(parsed) ? parsed : [];
-        // If the expected count (associated_people_count) differs from the
-        // number of locally stored contacts, skip the cache and re-fetch.
-        if (expectedCount != null && expectedCount > 0 && list.length !== expectedCount) {
-          // fall through to fetch fresh data
-        } else {
-          setContactsData(list);
-          return;
+    const storageKey = CONTACTS_STORAGE_KEY(firmId);
+    if (forceRefresh) {
+      localStorage.removeItem(storageKey);
+    } else {
+      const cached = localStorage.getItem(storageKey);
+      if (cached !== null) {
+        try {
+          const parsed = JSON.parse(cached) as { ts: number; list: InvestorDetails[] } | InvestorDetails[];
+          // Legacy cache entries were a plain array without a timestamp - treat them as expired
+          const ts = !Array.isArray(parsed) && typeof parsed?.ts === 'number' ? parsed.ts : 0;
+          const list = Array.isArray(parsed)
+            ? parsed
+            : Array.isArray(parsed?.list)
+              ? parsed.list
+              : [];
+          const isExpired = Date.now() - ts > CONTACTS_CACHE_TTL_MS;
+          // If the expected count (associated_people_count) differs from the
+          // number of locally stored contacts, skip the cache and re-fetch.
+          if (isExpired || (expectedCount != null && expectedCount > 0 && list.length !== expectedCount)) {
+            // fall through to fetch fresh data
+          } else {
+            setContactsData(list);
+            return;
+          }
+        } catch {
+          // Invalid cache, fetch fresh
         }
-      } catch {
-        // Invalid cache, fetch fresh
       }
     }
     setContactsLoading(true);
@@ -843,7 +856,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       const list = await fetchPeopleAtFirm(firmId, filtersMode, contactsLimit, excludeInvestors);
       setContactsData(list);
       try {
-        localStorage.setItem(CONTACTS_STORAGE_KEY(firmId), JSON.stringify(list));
+        localStorage.setItem(storageKey, JSON.stringify({ ts: Date.now(), list }));
       } catch {
         // Ignore quota errors
       }
@@ -1512,9 +1525,21 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                             formatLabel={formatKebabLabel}
                           />
                         </div>
-                        <p className="text-xs text-gray-500">
-                          {filteredContacts.length} of {contactsData.length} contacts
-                        </p>
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-gray-500">
+                            {filteredContacts.length} of {contactsData.length} contacts
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => loadContacts(investor.id, investor.associated_people_count, true)}
+                            disabled={contactsLoading}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                            title="Refresh contacts"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            Refresh
+                          </button>
+                        </div>
                       </div>
 
                       {/* Rerun Contacts — visible only to allowed users for firms */}
@@ -1748,7 +1773,19 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     </>
                   ) : (
                     <div className="space-y-4">
-                      <p className="text-gray-500 text-sm">No contacts found for this firm.</p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-gray-500 text-sm">No contacts found for this firm.</p>
+                        <button
+                          type="button"
+                          onClick={() => loadContacts(investor.id, investor.associated_people_count, true)}
+                          disabled={contactsLoading}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                          title="Refresh contacts"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          Refresh
+                        </button>
+                      </div>
                       {/* Rerun Contacts for firms with no existing contacts */}
                       {canRerunContacts && (
                         <div className="border border-orange-200 bg-orange-50 rounded-lg">

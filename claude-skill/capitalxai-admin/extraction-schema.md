@@ -30,7 +30,9 @@ The exact field formats and allowed values, copied from the app's investor-resea
 
 ## `role` (people only) — pick exactly one
 
-`CEO / Founder`, `Partner`, `Managing Partner`, `General Partner`, `Principal`, `Venture Partner`, `Operating Partner`, `Independent Investor / Angel`, `Associate`, `Research Analyst`, `Scout`
+`CEO / Founder`, `Founder`, `Founding Partner`, `Partner`, `Managing Partner`, `General Partner`, `Managing Director`, `Head of Investments`, `Principal`, `Venture Partner`, `Operating Partner`, `Independent Investor / Angel`, `Associate`, `Research Analyst`, `Scout`
+
+Use the person's actual title when it's in this list — never round "Founding Partner" up or down to a different title. (Note: the app's automated pipeline currently knows only the shorter original list; the four added values are valid in the database.)
 
 ## `investment_stages` — pick all that apply, exactly these slugs
 
@@ -66,6 +68,12 @@ Country ISO codes where possible (`US`, `GB`, `IN`); otherwise regions: `MENA`, 
 | `apply_url` | URL | only a real pitch/application/submission page — never the homepage |
 | `links` | `["[title](url)"]` | key site subpages visited (about, portfolio, team, contact, thesis, investments, apply) |
 | `deep_research` | string | the full research write-up: structured sections with citation links, like the app's deep-research text. Always include it on research runs |
+| `exits` | `["[Company](url)"]` | acquisitions/IPOs from this investor's portfolio; also feed the round itself to `add_funding` |
+| `sources` (write-time) | `{"field": "https://url"}` | provenance for load-bearing fields — stored as `field_sources` with `verified_at` stamps |
+| `firm_domains` (people, write-time) | `["fund1.com", "fund2.com"]` | ALL firms a multi-firm person belongs to; each gets an affiliation |
+| `clear_fields` (update-time) | `["twitter_url"]` | explicitly null out wrong values instead of overwriting with guesses |
+
+Server-managed identity fields (never set directly): `alt_domains` (old/redirecting domains kept as aliases; lookups match them) and `last_researched_at` (stamped when `deep_research` is written or `mark_researched: true`).
 | `firm_domain` (people, write-time) | `accel.com` | domain of their current firm — creates the person→firm affiliation |
 
 ## `tier` — A, B, or C

@@ -1,6 +1,6 @@
 ---
 name: capitalxai-admin
-description: Manage the CapitalxAI investor database via its MCP connector (admin accounts). Use when the user wants to add or update investor firms/people, link people to firms, record or update funding rounds, or research an investor (domain/LinkedIn/name) in the browser and add them end-to-end — and the CapitalxAI connector write tools (add_investor, update_investor, mark_not_an_investor, add_funding, update_funding) are available alongside the read tools.
+description: Manage the CapitalxAI investor database via its MCP connector (admin accounts). Use when the user wants to add or update investor firms/people, link people to firms, record or update funding rounds, research an investor (domain/LinkedIn/name) in the browser and add them end-to-end, or analyze investor fit / personalization ("Analyze accel.com for my company", "Analyze these domains for a user's email", "Find fit investors for...") — and the CapitalxAI connector write tools (add_investor, update_investor, mark_not_an_investor, add_funding, update_funding, save_investor_analysis) are available alongside the read tools.
 ---
 
 # CapitalxAI (admin)
@@ -13,9 +13,15 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 
 | Tool | What it does | Access |
 |---|---|---|
-| `find_investors` | Search investors by name, firm domain, or LinkedIn URL; `at_firm_domain` lists the people linked to a firm | Any user |
+| `find_investors` | Search by name/domain/LinkedIn; filters (stages, industries, geographies, tier, investor_type, has_deep_research); `at_firm_domain` lists a firm's people | Any user |
+| `get_investor` | One investor's full record incl. `deep_research` (fit-analysis input) | Any user |
+| `get_analysis_context` | Company data + exact prompt templates for fit analysis; admins pass `user_email` to target another account | Any user (self) / Admin (any account) |
+| `list_analyzed_investors` | Investors already analyzed for an account, with stored fit verdicts | Any user (self) / Admin (any account) |
+| `save_investor_analysis` | Save a fit result + outreach lines to an account's personalization; admins pass `user_email` | Any user (self) / Admin (any account) |
 | `add_investor` | Add a firm (by domain) or person (by LinkedIn), with optional profile fields | Admin |
-| `update_investor` | Update fields on an existing investor; link a person to a firm | Admin |
+| `update_investor` | Update fields on an existing investor; `clear_fields` to null wrong values; link a person to firm(s) | Admin |
+| `merge_investors` | Merge a duplicate into the canonical record (fields, aliases, affiliations, personalization), delete the duplicate | Admin |
+| `delete_investor` | Permanently delete a record + its links (destructive — prefer merge for duplicates) | Admin |
 | `list_fundings` | Recent funding rounds, newest first, with search and paging | Any user |
 | `get_funding` | Full record of one funding (complete founders/investors lists) | Any user |
 | `add_funding` | Record a funding round; upserts by company domain | Admin |
@@ -26,6 +32,10 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 ## Researching and adding an investor end-to-end
 
 When the user gives an investor to research and add (a domain, LinkedIn URL, or name) rather than ready-made data, read [research-pipeline.md](research-pipeline.md) and follow it exactly — it encodes the app's classify → deep-research → extract → write pipeline, including the not-an-investor rules and the person→firm recursive add. The exact field formats and allowed enum values for every write are in [extraction-schema.md](extraction-schema.md); read it before any `add_investor`/`update_investor` call that fills profile fields, even outside a research run.
+
+## Analyzing investor fit (the app's "Analyze with AI")
+
+When the user says "Analyze <domains/investors> for my company", "Analyze ... for <user email>" (admin: saves to that user's account), or "Find fit investors for ...", read [analysis-pipeline.md](analysis-pipeline.md) and follow it: `get_analysis_context` once, build the candidate set (explicit investors, or `find_investors` with fit filters + `has_deep_research: true`), then per investor analyze from `deep_research` using the account's exact prompt templates and save with `save_investor_analysis` as you go. You are the analysis AI — no external AI API is called.
 
 ## Discovering new fundings (scheduled or on demand)
 
@@ -50,7 +60,7 @@ When asked to "find new fundings", "add new fundings", "run the fundings sweep",
 ### Adding an investor person
 1. Check first with `find_investors` (LinkedIn URL or name).
 2. `add_investor` with `type: "person"`, `name`, and `linkedin_url`. Person-specific fields: `role` ("Partner at Accel"), `work_experience_orgs`, `education_orgs`.
-3. If the person belongs to a firm, pass `firm_domain` — it links them to that firm automatically. If the tool replies that the firm doesn't exist yet, add the firm first, then call `update_investor` on the person with `firm_domain` to create the link.
+3. If the person belongs to a firm, pass `firm_domain` — it links them to that firm automatically. People with **multiple firms** (e.g. Managing Partner at one fund, GP at another) get `firm_domains` with ALL of them — one affiliation each; a single firm link hides most of their reach from fit analysis. If a firm doesn't exist yet, add it first, then `update_investor` on the person to create the link.
 
 ### Updating an investor
 1. Locate with `find_investors` and prefer passing the returned `investor_id` to `update_investor` (domain/linkedin_url also work as locators).
