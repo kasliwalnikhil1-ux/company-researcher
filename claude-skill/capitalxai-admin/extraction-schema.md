@@ -65,6 +65,7 @@ Country ISO codes where possible (`US`, `GB`, `IN`); otherwise regions: `MENA`, 
 | `twitter_url` | URL | profile URL |
 | `apply_url` | URL | only a real pitch/application/submission page — never the homepage |
 | `links` | `["[title](url)"]` | key site subpages visited (about, portfolio, team, contact, thesis, investments, apply) |
+| `deep_research` | string | the full research write-up: structured sections with citation links, like the app's deep-research text. Always include it on research runs |
 | `firm_domain` (people, write-time) | `accel.com` | domain of their current firm — creates the person→firm affiliation |
 
 ## `tier` — A, B, or C

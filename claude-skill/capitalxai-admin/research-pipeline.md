@@ -38,7 +38,7 @@ Decide, based **only on visible page content — do not infer or assume**:
 
 ### 3. Deep research (mirrors the app's Step 2)
 
-Act as a research analyst. Open tabs across: the firm site, LinkedIn, a data source (Crunchbase/Dealroom/PitchBook public pages), recent news, interviews/podcasts. Cover this checklist — it is the app's research brief:
+Act as a research analyst. The app's version of this step is a search-grounded AI (Gemini with Google Search) — match that breadth: combine **web searches** ("<name> fund size", "<name> check size", "<name> interview") with **opening tabs** across the firm site, LinkedIn, a data source (Crunchbase/Dealroom/PitchBook public pages), recent news, interviews/podcasts. Cover this checklist — it is the app's research brief:
 
 - Background and career/professional history; for people: companies they worked at and schools attended
 - Contact details: verified emails, LinkedIn URL, Twitter/X URL
@@ -86,7 +86,10 @@ Tell the user: added vs updated (with record id), firm/person and affiliation cr
 When a firm exists but has no (or few) people linked — or the user asks to "add the team/partners at X":
 
 1. **Check who's already linked**: `find_investors` with `at_firm_domain` set to the firm's domain. This lists the currently affiliated people so you never re-add them.
-2. **Build the roster in the browser**: open the firm's team/people page and its LinkedIn company page → People. Collect each member's name, LinkedIn URL, and title. Include the **investing team** — anyone whose title maps to the `role` enum in the schema file (Partner, Managing/General Partner, Principal, Venture/Operating Partner, Associate, Research Analyst, Scout, founders). Skip clearly non-investing staff (marketing, finance, EA, recruiting) unless the user asks for everyone.
+2. **Build the roster in the browser**: open the firm's team/people page and its LinkedIn company page → People. Collect each member's name, LinkedIn URL, and title. Apply the **same inclusion rules as the app's contact fetcher** (the investor-search edge function):
+   - **Include** anyone whose title contains or is similar to: ceo, founder, co-founder, partner, managing partner, general partner, principal, venture partner, operating partner, independent investor, angel investor, associate, research analyst, scout, investment, investor — or whose seniority is founder/owner/C-suite/VP/head/director/partner. ("Head of Investments", "Investment Manager", "VP of Platform" qualify.)
+   - **Exclude** anyone whose title contains a deny keyword: data scientist, machine learning, ml engineer, graphic designer, video editor, product designer, illustrator, photographer, risk officer, growth marketing, account executive, recruiter, people ops/people operations, admin/administrative, assistant/executive assistant, office manager, econometrics, public policy, general counsel, software/frontend/backend/platform engineer, product/program/project/delivery manager, product management, scrum master, agile coach, art director, creative director, copywriter, social media, community manager, video producer, public relations, demand generation, performance marketing, customer success, customer support, support specialist, paralegal.
+   - When writing each person, their `role` field still takes the nearest value from the role enum in the schema file.
 3. **Confirm the roster with the user** before adding (names + titles + count) — a firm can have dozens of people and each one gets a full research pass.
 4. **Process one person at a time** through the standard pipeline above, always passing `firm_domain` so the affiliation is created. If a person already exists in the DB but isn't linked, just call `update_investor` with their id and `firm_domain` — that creates the missing link without touching other fields.
 5. **Re-check** at the end with `find_investors` + `at_firm_domain` and report the final linked count.

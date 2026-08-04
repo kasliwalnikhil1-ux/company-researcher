@@ -207,6 +207,10 @@ const investorProfileShape = {
     .describe("Pitch/application submission URL. Omit if it is just the investor's homepage."),
   twitter_url: z.string().optional().describe("Twitter/X profile URL."),
   links: z.array(z.string()).optional().describe('Relevant links as "[title](url)" strings (site subpages, Crunchbase, etc.).'),
+  deep_research: z
+    .string()
+    .optional()
+    .describe("Full research write-up (structured sections with source links); stored on the record like the app's deep research."),
 };
 
 const INVESTOR_PROFILE_KEYS = Object.keys(investorProfileShape) as Array<keyof typeof investorProfileShape>;
@@ -873,6 +877,82 @@ function buildServer(auth: AuthedUser): McpServer {
         } catch (err) {
           return errorResult(err);
         }
+      },
+    );
+
+    server.registerTool(
+      "add_fundings_bulk",
+      {
+        title: "Add fundings in bulk (admin)",
+        description:
+          "Record many funding rounds in ONE call — same fields and upsert-by-domain behavior as add_funding, applied per row. " +
+          "Use when multiple researched rows are ready to write (a prepared batch, or recovery after an auth failure), " +
+          "instead of many add_funding calls. Returns a per-row added/updated/error report.",
+        inputSchema: {
+          fundings: z
+            .array(
+              z.object({
+                name: z.string().min(1).describe("Company name without legal suffixes."),
+                domain: z.string().optional().describe("Company domain, e.g. acme.com (used for dedupe)."),
+                funding_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD").optional(),
+                how_much_funding: z.number().int().nonnegative().optional().describe("Round size in USD."),
+                founders: z.array(z.string()).optional().describe('"[Name](linkedin_url)" strings.'),
+                investors: z.array(z.string()).optional().describe('"[Name](url)" strings, earliest round first.'),
+                what_they_do: z.string().optional(),
+                usp: z.string().optional(),
+                founded_in_year: z.number().int().min(1800).max(2100).optional(),
+              }),
+            )
+            .min(1)
+            .max(50)
+            .describe("Up to 50 funding rows."),
+        },
+      },
+      async ({ fundings }) => {
+        const lines: string[] = [];
+        let added = 0, updated = 0, failed = 0;
+        for (const f of fundings) {
+          try {
+            const cleanedDomain = f.domain ? cleanDomain(f.domain) : null;
+            if (f.domain && !cleanedDomain) {
+              failed++;
+              lines.push(`- ERROR ${f.name}: "${f.domain}" is not a valid domain`);
+              continue;
+            }
+            const row: Record<string, unknown> = { name: f.name.trim() };
+            if (cleanedDomain) row.domain = cleanedDomain;
+            if (f.funding_date !== undefined) row.funding_date = f.funding_date;
+            if (f.how_much_funding !== undefined) row.how_much_funding = f.how_much_funding;
+            if (f.founders !== undefined) row.founders = f.founders.map(parseNameUrl);
+            if (f.investors !== undefined) row.investors = f.investors.map(parseNameUrl);
+            if (f.what_they_do !== undefined) row.what_they_do = f.what_they_do;
+            if (f.usp !== undefined) row.usp = f.usp;
+            if (f.founded_in_year !== undefined) row.founded_in_year = f.founded_in_year;
+
+            let existedBefore = false;
+            if (cleanedDomain) {
+              const { data: existing } = await admin
+                .from("new_fundings")
+                .select("id")
+                .eq("domain", cleanedDomain)
+                .maybeSingle();
+              existedBefore = !!existing?.id;
+              const { error } = await admin.from("new_fundings").upsert(row, { onConflict: "domain" });
+              if (error) throw new Error(error.message);
+            } else {
+              const { error } = await admin.from("new_fundings").insert(row);
+              if (error) throw new Error(error.message);
+            }
+            if (existedBefore) { updated++; lines.push(`- updated ${f.name} (${cleanedDomain})`); }
+            else { added++; lines.push(`- added ${f.name}${cleanedDomain ? ` (${cleanedDomain})` : ""}`); }
+          } catch (err) {
+            failed++;
+            lines.push(`- ERROR ${f.name}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        return textResult(
+          `Bulk write finished: ${added} added, ${updated} updated, ${failed} failed of ${fundings.length}.\n${lines.join("\n")}`,
+        );
       },
     );
 

@@ -19,12 +19,17 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 | `list_fundings` | Recent funding rounds, newest first, with search and paging | Any user |
 | `get_funding` | Full record of one funding (complete founders/investors lists) | Any user |
 | `add_funding` | Record a funding round; upserts by company domain | Admin |
+| `add_fundings_bulk` | Record up to 50 funding rounds in one call (per-row upsert + report) | Admin |
 | `update_funding` | Update fields of an existing funding row | Admin |
 | `mark_not_an_investor` | Record a researched entity as NOT an investor so future research skips it | Admin |
 
 ## Researching and adding an investor end-to-end
 
 When the user gives an investor to research and add (a domain, LinkedIn URL, or name) rather than ready-made data, read [research-pipeline.md](research-pipeline.md) and follow it exactly — it encodes the app's classify → deep-research → extract → write pipeline, including the not-an-investor rules and the person→firm recursive add. The exact field formats and allowed enum values for every write are in [extraction-schema.md](extraction-schema.md); read it before any `add_investor`/`update_investor` call that fills profile fields, even outside a research run.
+
+## Discovering new fundings (scheduled or on demand)
+
+When asked to "find new fundings", "add new fundings", "run the fundings sweep", or on a scheduled fundings task, read [fundings-pipeline.md](fundings-pipeline.md) and follow it: load the newest DB rows with `list_fundings` first, discover recent rounds from the web (all sectors), dedupe by domain, research each company into the app's exact format, upsert with `add_funding`, and report — including which referenced investors are missing from the investors database (report-only; don't auto-add them). Process everything found without asking the user to pick.
 
 ## Data conventions (important)
 
@@ -65,7 +70,8 @@ When the user gives an investor to research and add (a domain, LinkedIn URL, or 
 ## Conventions
 
 - Always confirm what was written by echoing the tool's reply (created vs updated, which fields changed, the record id).
-- Before bulk additions (more than ~5 records), show the user a short preview of the parsed records and get a confirmation, then proceed one call at a time so individual failures are visible.
+- Before bulk additions of user-supplied records (more than ~5), show the user a short preview of the parsed records and get a confirmation, then proceed one call at a time so individual failures are visible. **Exception: the new-fundings sweep is autonomous** — process every discovered round across all sectors without asking for a selection (see fundings-pipeline.md).
 - If a lookup finds nothing, say so and offer the add tool rather than silently creating records the user didn't ask for.
-- If a tool returns an authorization error, the connector needs to be reconnected: tell the user to re-connect CapitalxAI in their Claude connector settings.
+- If a tool returns an authorization error, the connector needs to be reconnected: tell the user to re-connect CapitalxAI in their Claude connector settings. Preserve any researched-but-unwritten records in your reply (ready-to-write form) so they can be written right after reconnecting without redoing research.
+- In every multi-record pipeline, interleave research and writes (research one → write one) rather than batching all writes at the end — connector sessions can expire mid-run.
 - Never fabricate investor data (fund sizes, theses, portfolio companies). Only write what the user supplied or what a source they provided states.
