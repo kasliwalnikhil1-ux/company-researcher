@@ -508,10 +508,10 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
                   ? 'bg-indigo-50 text-indigo-700'
                   : 'text-gray-700 hover:bg-gray-50'
               }`}
-              title="Usage"
+              title="Plan & billing"
             >
               <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Usage</span>}
+              {(!isCollapsed || isMobile) && <span>Plan & billing</span>}
             </Link>
 
             {routeAccess.showMeData && (
