@@ -97,6 +97,8 @@ export interface InvestorSearchResult {
   associated_firm_name?: string | null;
   /** For type='firm': number of people linked to the firm */
   associated_people_count?: number | null;
+  /** Row last-updated timestamp (ISO) - used to invalidate drawer caches. Requires search_investors RPC to return it. */
+  updated_at?: string | null;
 }
 
 export interface UseInvestorSearchOptions {

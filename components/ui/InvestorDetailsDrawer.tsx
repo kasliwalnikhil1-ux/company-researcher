@@ -141,6 +141,8 @@ export interface InvestorDetails {
   work_experience_orgs?: string[] | null;
   /** For type='person': education orgs in format [name](url) */
   education_orgs?: string[] | null;
+  /** Row last-updated timestamp (ISO) - used to invalidate contacts/deep-research caches */
+  updated_at?: string | null;
 }
 
 interface InvestorDetailsDrawerProps {
@@ -817,9 +819,11 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const INVESTOR_NEWS_STORAGE_KEY = (id: string) => `investor-news-${id}`;
   const contactsLimit = isFreePlan ? CONTACTS_FREE_LIMIT : 100;
   const CONTACTS_STORAGE_KEY = (id: string) => `investor-contacts-${id}-${contactsLimit}`;
-  const CONTACTS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  // When the investor row is newer than a cached entry, the cache is invalidated
+  const investorUpdatedAtMs = investor?.updated_at ? new Date(investor.updated_at).getTime() : null;
 
-  const loadContacts = useCallback(async (firmId: string, expectedCount?: number | null, forceRefresh = false) => {
+  const loadContacts = useCallback(async (firmId: string, expectedCount?: number | null, forceRefresh = false, updatedAtMs?: number | null) => {
     if (typeof window === 'undefined') return;
     const storageKey = CONTACTS_STORAGE_KEY(firmId);
     if (forceRefresh) {
@@ -836,7 +840,8 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
             : Array.isArray(parsed?.list)
               ? parsed.list
               : [];
-          const isExpired = Date.now() - ts > CONTACTS_CACHE_TTL_MS;
+          const isExpired =
+            Date.now() - ts > CACHE_TTL_MS || (updatedAtMs != null && ts < updatedAtMs);
           // If the expected count (associated_people_count) differs from the
           // number of locally stored contacts, skip the cache and re-fetch.
           if (isExpired || (expectedCount != null && expectedCount > 0 && list.length !== expectedCount)) {
@@ -868,12 +873,31 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     }
   }, [filtersMode, contactsLimit, excludeInvestors]);
 
-  const loadDeepResearch = useCallback(async (investorId: string) => {
+  const loadDeepResearch = useCallback(async (investorId: string, forceRefresh = false, updatedAtMs?: number | null) => {
     if (typeof window === 'undefined') return;
-    const cached = localStorage.getItem(DEEP_RESEARCH_STORAGE_KEY(investorId));
-    if (cached !== null) {
-      setDeepResearchContent(cached);
-      return;
+    const storageKey = DEEP_RESEARCH_STORAGE_KEY(investorId);
+    if (forceRefresh) {
+      localStorage.removeItem(storageKey);
+    } else {
+      const cached = localStorage.getItem(storageKey);
+      if (cached !== null) {
+        try {
+          const parsed = JSON.parse(cached) as { ts: number; content: string };
+          if (
+            parsed &&
+            typeof parsed === 'object' &&
+            typeof parsed.content === 'string' &&
+            typeof parsed.ts === 'number' &&
+            Date.now() - parsed.ts <= CACHE_TTL_MS &&
+            (updatedAtMs == null || parsed.ts >= updatedAtMs)
+          ) {
+            setDeepResearchContent(parsed.content);
+            return;
+          }
+        } catch {
+          // Legacy cache stored the raw markdown string (not JSON) - treat as expired
+        }
+      }
     }
     setDeepResearchLoading(true);
     setDeepResearchError(null);
@@ -885,7 +909,11 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     } else if (result?.deep_research != null) {
       const content = result.deep_research || '';
       setDeepResearchContent(content);
-      localStorage.setItem(DEEP_RESEARCH_STORAGE_KEY(investorId), content);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({ ts: Date.now(), content }));
+      } catch {
+        // Ignore quota errors
+      }
     } else {
       setDeepResearchContent(null);
     }
@@ -893,15 +921,15 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
 
   useEffect(() => {
     if (investor && activeTab === 'deep-research' && plan !== 'basic') {
-      loadDeepResearch(investor.id);
+      loadDeepResearch(investor.id, false, investorUpdatedAtMs);
     }
-  }, [investor?.id, activeTab, plan, loadDeepResearch]);
+  }, [investor?.id, activeTab, plan, loadDeepResearch, investorUpdatedAtMs]);
 
   useEffect(() => {
     if (investor?.type === 'firm' && investor.id && activeTab === 'contacts') {
-      loadContacts(investor.id, investor.associated_people_count);
+      loadContacts(investor.id, investor.associated_people_count, false, investorUpdatedAtMs);
     }
-  }, [investor?.id, investor?.type, activeTab, loadContacts, investor?.associated_people_count]);
+  }, [investor?.id, investor?.type, activeTab, loadContacts, investor?.associated_people_count, investorUpdatedAtMs]);
 
   const loadInvestorNews = useCallback(async (investorId: string) => {
     if (typeof window === 'undefined') return;
@@ -2540,27 +2568,43 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                     Upgrade to Pro to access Deep Research
                   </button>
                 </div>
-              ) : deepResearchLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-                </div>
-              ) : deepResearchError ? (
-                <p className="text-red-600 text-sm">{deepResearchError}</p>
-              ) : deepResearchContent ? (
-                <div className="prose prose-base max-w-none [&>*:first-child]:mt-0
-                  prose-headings:text-gray-900 prose-headings:font-semibold
-                  prose-h1:mt-0 prose-h1:mb-6 prose-h1:text-2xl
-                  prose-h2:mt-10 prose-h2:mb-4 prose-h2:text-xl prose-h2:border-b prose-h2:border-gray-200 prose-h2:pb-2
-                  prose-h3:mt-8 prose-h3:mb-3 prose-h3:text-lg
-                  prose-p:text-gray-700 prose-p:my-4 prose-p:leading-relaxed
-                  prose-strong:text-gray-900 prose-strong:font-semibold
-                  prose-hr:my-8 prose-hr:border-gray-300
-                  prose-ul:my-4 prose-ol:my-4 prose-li:my-2
-                  prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
-                  <ReactMarkdown>{deepResearchContent}</ReactMarkdown>
-                </div>
               ) : (
-                <p className="text-gray-500 text-sm">No deep research data available for this investor.</p>
+                <>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => loadDeepResearch(investor.id, true)}
+                      disabled={deepResearchLoading}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+                      title="Refresh deep research"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Refresh
+                    </button>
+                  </div>
+                  {deepResearchLoading ? (
+                    <div className="flex items-center justify-center py-12">
+                      <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+                    </div>
+                  ) : deepResearchError ? (
+                    <p className="text-red-600 text-sm">{deepResearchError}</p>
+                  ) : deepResearchContent ? (
+                    <div className="prose prose-base max-w-none [&>*:first-child]:mt-0
+                      prose-headings:text-gray-900 prose-headings:font-semibold
+                      prose-h1:mt-0 prose-h1:mb-6 prose-h1:text-2xl
+                      prose-h2:mt-10 prose-h2:mb-4 prose-h2:text-xl prose-h2:border-b prose-h2:border-gray-200 prose-h2:pb-2
+                      prose-h3:mt-8 prose-h3:mb-3 prose-h3:text-lg
+                      prose-p:text-gray-700 prose-p:my-4 prose-p:leading-relaxed
+                      prose-strong:text-gray-900 prose-strong:font-semibold
+                      prose-hr:my-8 prose-hr:border-gray-300
+                      prose-ul:my-4 prose-ol:my-4 prose-li:my-2
+                      prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
+                      <ReactMarkdown>{deepResearchContent}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <p className="text-gray-500 text-sm">No deep research data available for this investor.</p>
+                  )}
+                </>
               )}
             </div>
           ) : investor.has_personalization && activeTab === 'latest-news' ? (
