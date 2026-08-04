@@ -70,11 +70,11 @@ Country ISO codes where possible (`US`, `GB`, `IN`); otherwise regions: `MENA`, 
 | `deep_research` | string | the full research write-up: structured sections with citation links, like the app's deep-research text. Always include it on research runs |
 | `exits` | `["[Company](url)"]` | acquisitions/IPOs from this investor's portfolio; also feed the round itself to `add_funding` |
 | `sources` (write-time) | `{"field": "https://url"}` | provenance for load-bearing fields — stored as `field_sources` with `verified_at` stamps |
+| `firm_domain` (people, write-time) | `accel.com` | domain of their current firm — creates the person→firm affiliation |
 | `firm_domains` (people, write-time) | `["fund1.com", "fund2.com"]` | ALL firms a multi-firm person belongs to; each gets an affiliation |
 | `clear_fields` (update-time) | `["twitter_url"]` | explicitly null out wrong values instead of overwriting with guesses |
 
 Server-managed identity fields (never set directly): `alt_domains` (old/redirecting domains kept as aliases; lookups match them) and `last_researched_at` (stamped when `deep_research` is written or `mark_researched: true`).
-| `firm_domain` (people, write-time) | `accel.com` | domain of their current firm — creates the person→firm affiliation |
 
 ## `tier` — A, B, or C
 
