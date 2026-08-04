@@ -21,6 +21,8 @@ import {
   Handshake,
   Filter,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Eye,
   X,
   Check,
@@ -34,6 +36,7 @@ import {
   Download,
   Building2,
   User,
+  BadgeCheck,
 } from 'lucide-react';
 import { formatGeographyForDisplay, formatHqLocationShort, getCountryName, resolveCountryInput } from '@/lib/isoCodes';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -513,7 +516,6 @@ function InvestorsContent() {
     Record<string, { investor_fit: boolean | null; reason: string | null }>
   >({});
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
   // Table drag-to-pan state
   const [isDragging, setIsDragging] = useState(false);
@@ -629,7 +631,7 @@ function InvestorsContent() {
 
   const pageSize = isFreePlan ? 5 : 20;
   const excludeInvestors = onboarding?.excludeInvestors ?? undefined;
-  const { data, loading, error, hasMore, page, setPage, loadMore, refresh } =
+  const { data, loading, error, hasMore, page, setPage, refresh } =
     useInvestorSearch({ filters, pageSize, excludeInvestors });
 
   // Fetch investor sets (used in drawer pipeline and reviewed filters)
@@ -1820,6 +1822,11 @@ function InvestorsContent() {
     }
   }, [filters.mode, viewMode]);
 
+  // Selected rows live on the current page only — clear when the page changes
+  useEffect(() => {
+    setSelectedInvestorIds(new Set());
+  }, [page]);
+
   const buildReportContent = () => {
     const parts: string[] = [];
     if (coInvestorsChipLabel) parts.push(coInvestorsChipLabel);
@@ -1842,29 +1849,37 @@ function InvestorsContent() {
     return parts.length ? parts.join('\n') : 'No search terms or filters applied';
   };
 
-  // Infinite scroll observer
+  // Scroll back to the top when the page changes
   useEffect(() => {
-    if (!hasMore || loading) return;
-    const el = loadMoreRef.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting) loadMore();
-      },
-      { rootMargin: '100px', threshold: 0.1 }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [hasMore, loading, loadMore]);
+    tableScrollContainerRef.current?.scrollTo({ top: 0 });
+    document.querySelector('main')?.scrollTo({ top: 0 });
+    window.scrollTo({ top: 0 });
+  }, [page]);
 
+  // Drawer arrow-nav across page boundaries: flip the page, then select the
+  // first (next) or last (prev) investor once the new page's data arrives.
+  const pendingDrawerSelectRef = useRef<'first' | 'last' | null>(null);
   const handleDrawerPageChange = useCallback(
     (newPage: number) => {
-      if (newPage > page && hasMore && !loading) {
-        loadMore();
+      if (loading) return;
+      if (newPage > page && hasMore) {
+        pendingDrawerSelectRef.current = 'first';
+        setPage(page + 1);
+      } else if (newPage < page && page > 1) {
+        pendingDrawerSelectRef.current = 'last';
+        setPage(page - 1);
       }
     },
-    [page, hasMore, loading, loadMore]
+    [page, hasMore, loading, setPage]
   );
+
+  useEffect(() => {
+    if (!pendingDrawerSelectRef.current || loading || data.length === 0) return;
+    const pick =
+      pendingDrawerSelectRef.current === 'first' ? data[0] : data[data.length - 1];
+    pendingDrawerSelectRef.current = null;
+    setInvestorToView(pick);
+  }, [data, loading]);
 
   const handleCellDoubleClick = useCallback(
     (investor: InvestorSearchResult, columnKey: string) => {
@@ -2510,7 +2525,7 @@ function InvestorsContent() {
             <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
               <div
                 ref={tableScrollContainerRef}
-                className={`overflow-x-auto overflow-y-auto max-h-[calc(100vh-300px)] ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
+                className={`overflow-x-auto ${isDragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
                 onMouseDown={handleTableMouseDown}
                 onMouseMove={handleTableMouseMove}
                 onMouseUp={handleTableMouseUp}
@@ -2771,8 +2786,11 @@ function InvestorsContent() {
                                   className={`text-indigo-600 hover:underline block ${
                                     isRowHovered ? 'whitespace-normal break-words' : 'truncate'
                                   }`}
-                                  title={value}
+                                  title={isEmailColumn && investor.email_verified ? `${value} (verified)` : value}
                                 >
+                                  {isEmailColumn && value !== '-' && investor.email_verified && (
+                                    <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 inline-block mr-1 align-text-bottom" aria-label="Verified email" />
+                                  )}
                                   {value === '-' ? '' : value}
                                 </a>
                               ) : (
@@ -2794,9 +2812,20 @@ function InvestorsContent() {
                                         }`
                                       : 'block'
                                   }`}
-                                  title={value}
+                                  title={
+                                    isEmailColumn && value === '-' && investor.email_verified
+                                      ? 'Verified email available — analyze this investor to reveal it'
+                                      : value
+                                  }
                                 >
-                                  {value}
+                                  {isEmailColumn && value === '-' && investor.email_verified ? (
+                                    <span className="inline-flex items-center gap-1 text-emerald-700 font-medium">
+                                      <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
+                                      Verified
+                                    </span>
+                                  ) : (
+                                    value
+                                  )}
                                 </div>
                               )}
                             </td>
@@ -2857,17 +2886,13 @@ function InvestorsContent() {
               </div>
             </div>
           </div>
-          {!isFreePlan && hasMore && <div ref={loadMoreRef} className="h-4" />}
-          {!isFreePlan && hasMore && (
-            <div className="mt-4 flex justify-center sm:hidden">
-              <button
-                onClick={() => loadMore()}
-                disabled={loading}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                {loading ? 'Loading...' : 'Load more'}
-              </button>
-            </div>
+          {!isFreePlan && (
+            <PaginationControls
+              page={page}
+              hasMore={hasMore}
+              loading={loading}
+              onPageChange={setPage}
+            />
           )}
         </>
       ) : (
@@ -2952,20 +2977,14 @@ function InvestorsContent() {
             </div>
           </div>
 
-          {/* Infinite scroll sentinel - hide for free plan (no load more) */}
-          {!isFreePlan && hasMore && <div ref={loadMoreRef} className="h-4" />}
-
-          {/* Pagination fallback - show load more button on mobile (hide for free plan) */}
-          {!isFreePlan && hasMore && (
-            <div className="mt-4 flex justify-center sm:hidden">
-              <button
-                onClick={() => loadMore()}
-                disabled={loading}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-              >
-                {loading ? 'Loading...' : 'Load more'}
-              </button>
-            </div>
+          {/* Pagination - hide for free plan (locked to page 1) */}
+          {!isFreePlan && (
+            <PaginationControls
+              page={page}
+              hasMore={hasMore}
+              loading={loading}
+              onPageChange={setPage}
+            />
           )}
         </>
       )}
@@ -2995,8 +3014,8 @@ function InvestorsContent() {
           setBackToFirm(null);
         }}
         investors={data}
-        currentPage={1}
-        totalPages={isFreePlan ? 1 : hasMore ? 2 : 1}
+        currentPage={page}
+        totalPages={isFreePlan ? 1 : hasMore ? page + 1 : page}
         onPageChange={handleDrawerPageChange}
         onInvestorChange={(inv) => {
           setInvestorToView(inv as InvestorSearchResult);
@@ -3316,6 +3335,41 @@ function InvestorsContent() {
         isOpen={insufficientCreditsModalOpen}
         onClose={() => setInsufficientCreditsModalOpen(false)}
       />
+    </div>
+  );
+}
+
+function PaginationControls({
+  page,
+  hasMore,
+  loading,
+  onPageChange,
+}: {
+  page: number;
+  hasMore: boolean;
+  loading: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  if (page <= 1 && !hasMore) return null;
+  return (
+    <div className="mt-4 flex items-center justify-center gap-3">
+      <button
+        onClick={() => onPageChange(page - 1)}
+        disabled={page <= 1 || loading}
+        className="inline-flex items-center gap-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <ChevronLeft className="w-4 h-4" />
+        Previous
+      </button>
+      <span className="text-sm text-gray-600">Page {page}</span>
+      <button
+        onClick={() => onPageChange(page + 1)}
+        disabled={!hasMore || loading}
+        className="inline-flex items-center gap-1 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        Next
+        <ChevronRight className="w-4 h-4" />
+      </button>
     </div>
   );
 }
@@ -3731,6 +3785,22 @@ function InvestorResultCard({
               {formatKebabLabel(s)}
             </span>
           ))}
+        {investor.email_verified ? (
+          <span
+            className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
+            title="A verified email is available for this investor"
+          >
+            <BadgeCheck className="w-3 h-3" />
+            Verified email
+          </span>
+        ) : (
+          <span
+            className="ml-auto inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500"
+            title="No verified email on record for this investor"
+          >
+            No verified email
+          </span>
+        )}
       </div>
     </div>
   );

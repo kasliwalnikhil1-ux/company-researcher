@@ -29,7 +29,7 @@ export default function AccountPage() {
 function AccountContent() {
   const { user, signOutAll, changePassword } = useAuth();
   const { mergeOnboardingLocal } = useOnboarding();
-  const { refetchOwners } = useOwner();
+  const { refetchOwners, selectedOwner, setSelectedOwner } = useOwner();
   const router = useRouter();
 
   // Account section state
@@ -706,7 +706,7 @@ function AccountContent() {
       <section className="mb-10">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Owners</h2>
         <p className="text-sm text-gray-500 mb-4">
-          Manage owners used in the sidebar and on companies. Add, edit, or remove owners and their display colors.
+          Manage owners used on companies. Add, edit, or remove owners and their display colors, and choose which owner is currently active.
         </p>
 
         {ownersLoading ? (
@@ -848,7 +848,27 @@ function AccountContent() {
                               {owner.colors?.hex ?? '—'}
                             </span>
                           </div>
-                          <div className="flex gap-1">
+                          <div className="flex items-center gap-1">
+                            {selectedOwner === owner.name ? (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedOwner('')}
+                                className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border mr-2 ${owner.colors?.bg ?? 'bg-indigo-50'} ${owner.colors?.text ?? 'text-indigo-700'} ${owner.colors?.border ?? 'border-indigo-200'}`}
+                                title="This owner is active. Click to unset."
+                              >
+                                <Check className="w-3.5 h-3.5" />
+                                Active
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedOwner(owner.name)}
+                                className="text-xs font-medium px-2.5 py-1 rounded-full border border-gray-300 text-gray-600 hover:bg-gray-100 mr-2"
+                                title="Make this the active owner"
+                              >
+                                Set active
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => startEditOwner(index)}

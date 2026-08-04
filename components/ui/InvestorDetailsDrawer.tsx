@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw, RefreshCw } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw, RefreshCw, BadgeCheck } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, getValidAccessToken, type InvestorNews } from '@/lib/api';
 import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
 import { fetchPeopleAtFirm, CONTACTS_FREE_LIMIT, type ExcludeInvestorsOption } from '@/hooks/useInvestorSearch';
@@ -127,6 +127,9 @@ export interface InvestorDetails {
   apply_url?: string | null;
   /** Comma-separated list of emails */
   email?: string | null;
+  /** Whether the stored email was verified (Gmail-Compose pipeline). Unlike email,
+   *  present for ALL investors (not personalization-gated). */
+  email_verified?: boolean | null;
   /** Comma-separated list of phone numbers */
   phone?: string | null;
   /** Array of "[text](url)" formatted links */
@@ -576,6 +579,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
   const [aiMetadataSaving, setAiMetadataSaving] = useState(false);
   const [investorNews, setInvestorNews] = useState<InvestorNews | null>(null);
   const [investorNewsLoading, setInvestorNewsLoading] = useState(false);
+  const [investorNewsFetching, setInvestorNewsFetching] = useState(false);
   const [investorNewsError, setInvestorNewsError] = useState<string | null>(null);
   const [investorNewsFetchCooldown, setInvestorNewsFetchCooldown] = useState(false);
   const [warmIntrosByDomains, setWarmIntrosByDomains] = useState<WarmIntroByDomain[] | null>(null);
@@ -770,6 +774,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     setDeepResearchError(null);
     setInvestorNews(null);
     setInvestorNewsError(null);
+    setInvestorNewsFetching(false);
     setInvestorNewsFetchCooldown(false);
     setWarmIntrosByDomains(null);
     setFounderSearchResult(null);
@@ -1095,7 +1100,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
 
   const handleFetchInvestorNews = useCallback(async () => {
     if (!investor || plan === 'basic' || investorNewsFetchCooldown || newsFetchedWithin7Days) return;
-    setInvestorNewsLoading(true);
+    setInvestorNewsFetching(true);
     setInvestorNewsError(null);
     const result = await fetchInvestorNews({
       investorId: investor.id,
@@ -1105,7 +1110,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
       investor_type: investor.investor_type ?? undefined,
       associated_firm_name: investor.associated_firm_name ?? undefined,
     });
-    setInvestorNewsLoading(false);
+    setInvestorNewsFetching(false);
     if (result?.investor_news) {
       console.log('[InvestorDetailsDrawer] fetchInvestorNews result:', {
         answerLength: result.investor_news.answer?.length,
@@ -1333,7 +1338,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
     if (currentIndex >= 0 && currentIndex < investors.length - 1 && onInvestorChange) {
       onInvestorChange(investors[currentIndex + 1]);
     } else if (currentPage < totalPages) {
-      onPageChange(currentPage);
+      onPageChange(currentPage + 1);
     }
   };
 
@@ -2104,6 +2109,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                 {(investor.domain?.trim() ||
                     investor.linkedin_url?.trim() ||
                     investor.twitter_url?.trim() ||
+                    investor.email_verified ||
                     parseCommaList(investor.email).length > 0 ||
                     parseCommaList(investor.phone).length > 0) && (
                     <div>
@@ -2179,9 +2185,41 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       </div>
                       {(() => {
                         const emails = parseCommaList(investor.email);
-                        return emails.length > 0 ? (
+                        if (emails.length === 0) {
+                          // Email address hidden (not analyzed yet) but we know a verified
+                          // email exists — surface that so the user can decide to analyze.
+                          return investor.email_verified ? (
+                            <div className="flex items-center gap-2">
+                              <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 flex-shrink-0"
+                                title="A verified email is available — analyze this investor to reveal it"
+                              >
+                                <BadgeCheck className="w-3 h-3" />
+                                Verified email available
+                              </span>
+                            </div>
+                          ) : null;
+                        }
+                        return (
                           <div className="flex items-center gap-2">
                             <Mail className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                            {investor.email_verified ? (
+                              <span
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 flex-shrink-0"
+                                title="This email was verified"
+                              >
+                                <BadgeCheck className="w-3 h-3" />
+                                Verified
+                              </span>
+                            ) : (
+                              <span
+                                className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-500 flex-shrink-0"
+                                title="This email has not been verified"
+                              >
+                                Unverified
+                              </span>
+                            )}
                             <div className="flex flex-wrap gap-x-3 gap-y-0">
                               {emails.map((e, idx) => {
                                 let subject: string | undefined;
@@ -2211,7 +2249,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                               })}
                             </div>
                           </div>
-                        ) : null;
+                        );
                       })()}
                       {(() => {
                         const phones = parseCommaList(investor.phone);
@@ -2690,22 +2728,22 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                   )}
                 </div>
               ) : null}
-              {plan !== 'basic' && (
+              {plan !== 'basic' && !investorNewsLoading && (
                 <div className="flex flex-col gap-2 pt-2">
-                  {!investorNews && !investorNewsLoading && !investorNewsError && (
+                  {!investorNews && !investorNewsFetching && !investorNewsError && (
                     <p className="text-sm text-gray-500">No news fetched yet. Click to fetch latest.</p>
                   )}
                   <button
                     onClick={handleFetchInvestorNews}
-                    disabled={investorNewsLoading || investorNewsFetchCooldown || !!newsFetchedWithin7Days}
+                    disabled={investorNewsFetching || investorNewsFetchCooldown || !!newsFetchedWithin7Days}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 border border-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm w-fit"
                   >
-                    {investorNewsLoading ? (
+                    {investorNewsFetching ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <Newspaper className="w-4 h-4" />
                     )}
-                    {investorNewsLoading
+                    {investorNewsFetching
                       ? 'Fetching...'
                       : newsFetchedWithin7Days
                         ? 'News fetched recently (try again in 7 days)'
@@ -2762,6 +2800,26 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       </span>
                     ) : (
                       <span>-</span>
+                    )}
+                  </span>
+                  <span className="text-gray-300">•</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="font-medium text-gray-500">Email</span>
+                    {investor.email_verified ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
+                        title="A verified email is available for this investor"
+                      >
+                        <BadgeCheck className="w-3 h-3" />
+                        Verified
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500"
+                        title="No verified email on record for this investor"
+                      >
+                        Not verified
+                      </span>
                     )}
                   </span>
                   {investor.has_personalization && (

@@ -1450,6 +1450,154 @@ function buildServer(auth: AuthedUser): McpServer {
     );
 
     server.registerTool(
+      "get_email_candidates",
+      {
+        title: "Get email-search candidates (admin)",
+        description:
+          "Next people to run the Gmail-Compose email search on: persons with NO email and NO previous search " +
+          "(never-processed), who have an affiliated firm with a domain (the search needs 'First Last domain'). " +
+          "Returns name + firm domain + investor id per candidate. Already-searched people (found, not_found, or " +
+          "unknown) are excluded so nobody is searched twice; pass include_unknown to retry earlier 'unknown' results.",
+        inputSchema: {
+          limit: z.number().int().min(1).max(25).optional().describe("How many candidates. Defaults to 1."),
+          firm_domain: z.string().optional().describe("Only people at this firm."),
+          include_unknown: z
+            .boolean()
+            .optional()
+            .describe("Also include people whose previous search ended 'unknown' (Gmail failed to load etc.)."),
+          include_unknown_active: z
+            .boolean()
+            .optional()
+            .describe("Only ACTIVE investors are returned by default; true also includes people whose active status is not set yet."),
+        },
+      },
+      async ({ limit, firm_domain, include_unknown, include_unknown_active }) => {
+        try {
+          const want = limit ?? 1;
+          let q = admin
+            .from("investors")
+            .select("id, name, linkedin_url, email_search_status")
+            .eq("type", "person")
+            .is("email", null)
+            .order("id", { ascending: true })
+            .limit(200);
+          // Emails are for outreach — inactive investors are never worth a search.
+          q = include_unknown_active ? q.not("active", "is", false) : q.eq("active", true);
+          q = include_unknown
+            ? q.or("email_checked_at.is.null,email_search_status.eq.unknown")
+            : q.is("email_checked_at", null);
+          const { data: people, error } = await q;
+          if (error) return errorResult(`Could not load candidates: ${error.message}`);
+          if (!people?.length) {
+            return textResult(
+              "No unprocessed ACTIVE people without emails found." +
+                (include_unknown_active
+                  ? ""
+                  : " (Only active=true investors are returned by default — retry with include_unknown_active: true to also cover people whose active status isn't set.)"),
+            );
+          }
+
+          const wantedFirm = firm_domain ? cleanDomain(firm_domain) : null;
+          const { data: affs } = await admin
+            .from("investor_affiliations")
+            .select("person_id, firm_id")
+            .in("person_id", people.map((p) => p.id));
+          const firmIds = [...new Set((affs ?? []).map((a) => a.firm_id))];
+          const { data: firms } = firmIds.length
+            ? await admin.from("investors").select("id, name, domain").in("id", firmIds).not("domain", "is", null)
+            : { data: [] as Array<{ id: string; name: string; domain: string }> };
+          const firmById = new Map((firms ?? []).map((f) => [f.id, f]));
+
+          const out: string[] = [];
+          for (const p of people) {
+            if (out.length >= want) break;
+            const firm = (affs ?? [])
+              .filter((a) => a.person_id === p.id)
+              .map((a) => firmById.get(a.firm_id))
+              .find((f) => f?.domain && (!wantedFirm || f.domain === wantedFirm));
+            if (!firm) continue;
+            const retry = p.email_search_status === "unknown" ? " | previous result: unknown (retry)" : "";
+            out.push(`- ${p.name} | search: "${p.name} ${firm.domain}" | firm: ${firm.name} | investor_id: ${p.id}${retry}`);
+          }
+          if (!out.length) {
+            return textResult(
+              "No candidates matched: every unprocessed person either lacks a firm affiliation with a domain" +
+                (wantedFirm ? ` (or none at ${wantedFirm})` : "") +
+                ". Link people to firms first (update_investor with firm_domain).",
+            );
+          }
+          return textResult(
+            `${out.length} email-search candidate(s):\n${out.join("\n")}\n\n` +
+              "After each Gmail-Compose search, record the outcome with save_email_result (found / not_found / unknown) — never leave a searched person unrecorded.",
+          );
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      "save_email_result",
+      {
+        title: "Save email search result (admin)",
+        description:
+          "Record the outcome of a Gmail-Compose email search for a person. " +
+          "found: merges the address(es) into their email field and marks email_verified. " +
+          "not_found / unknown: stamps the search so the person is not searched again " +
+          "(unknown results can be retried via get_email_candidates include_unknown). " +
+          "Every searched person MUST get exactly one save_email_result call.",
+        inputSchema: {
+          investor_id: z.string().optional().describe("Person's investor id (preferred — from get_email_candidates)."),
+          linkedin_url: z.string().optional().describe("Or locate the person by LinkedIn URL/path."),
+          status: z.enum(["found", "not_found", "unknown"]).describe("What Gmail's autocomplete actually showed."),
+          emails: z
+            .array(z.string())
+            .optional()
+            .describe("REQUIRED when status=found: the address(es) Gmail showed that contain the person's firm domain."),
+        },
+      },
+      async ({ investor_id, linkedin_url, status, emails }) => {
+        try {
+          const { row, error } = await findInvestorRow(
+            "id, name, email, field_sources",
+            investor_id,
+            undefined,
+            linkedin_url,
+          );
+          if (error) return errorResult(error);
+          if (!row) return textResult("No matching investor found — check the id/LinkedIn.");
+
+          const patch: Record<string, unknown> = {
+            email_checked_at: new Date().toISOString(),
+            email_search_status: status,
+          };
+          if (status === "found") {
+            const clean = (emails ?? []).map((e) => e.trim().toLowerCase()).filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+            if (!clean.length) return errorResult("status=found requires at least one valid email in `emails`.");
+            const current = row.email ? String(row.email).split(/[,;]\s*/).filter(Boolean) : [];
+            patch.email = [...new Set([...current, ...clean])].join(", ");
+            patch.email_verified = true;
+            patch.field_sources = mergeFieldSources(row.field_sources, {
+              email: "gmail-autocomplete (Name2Email compose method)",
+            });
+          }
+
+          const { error: updErr } = await admin.from("investors").update(patch).eq("id", row.id);
+          if (updErr) return errorResult(`Could not save the result: ${updErr.message}`);
+
+          return textResult(
+            status === "found"
+              ? `Saved VERIFIED email(s) for ${row.name}: ${(patch.email as string)} (email_verified=true).`
+              : `Recorded ${status} for ${row.name} — they will not be searched again` +
+                  (status === "unknown" ? " (retryable via get_email_candidates include_unknown)." : "."),
+          );
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+
+    server.registerTool(
       "mark_not_an_investor",
       {
         title: "Mark as not an investor (admin)",

@@ -12,6 +12,15 @@ Normalize before every lookup or write:
 - Domain: bare lowercase, no protocol/www/path → `accel.com`. A LinkedIn URL is **never** a domain.
 - LinkedIn: path form, lowercase → `in/naval`, `company/accel`. A plain website domain is **never** a person's LinkedIn.
 
+## LinkedIn access — set up the browser first
+
+LinkedIn profiles and company People pages are behind a login wall: anonymous fetches (WebFetch, plain HTTP) return sign-in walls or stale snippets, not the profile. Reading them requires the **user's own browser session**, where they are logged into LinkedIn (Claude in Chrome / Cowork browser).
+
+- **Before any run that involves people** (researching a person, a roster run, verifying a person's identity), ask the user to select/authorize the browser to use — e.g. "I'll need to open LinkedIn profiles; which browser should I use / please grant browser access." Do this once at the start, then keep using that same browser for every LinkedIn open in the run.
+- If browser access is available already, just use it — don't re-ask.
+- If the user declines or no browser tool exists, say plainly what degrades: person research falls back to the firm's team page, search snippets, and other public sources; `role`, `work_experience_orgs`, and `education_orgs` will be lower-confidence, and profiles that can't be verified should be flagged in the report rather than guessed.
+- Never work around the wall by scraping third-party LinkedIn mirrors — they are stale and frequently wrong.
+
 ## Pipeline
 
 ### 1. Duplicate & skip-list check — always first
@@ -29,7 +38,7 @@ Then check for existing records **three ways**: `find_investors` by domain (also
 
 ### 2. Classification (mirrors the app's Step 1)
 
-Open the subject in the browser: for a firm, the website plus its about / portfolio / team / contact / thesis / investments / apply pages (the app samples exactly these subpages); for a person, their LinkedIn profile and personal site if any.
+Open the subject in the browser: for a firm, the website plus its about / portfolio / team / contact / thesis / investments / apply pages (the app samples exactly these subpages); for a person, their **LinkedIn profile opened in the user's browser** (see "LinkedIn access" above) and personal site if any.
 
 Decide, based **only on visible page content — do not infer or assume**:
 
@@ -111,7 +120,7 @@ A refresh is distinct from add/update: the record exists and the goal is bringin
 When a firm exists but has no (or few) people linked — or the user asks to "add the team/partners at X":
 
 1. **Check who's already linked**: `find_investors` with `at_firm_domain` set to the firm's domain. This lists the currently affiliated people so you never re-add them.
-2. **Build the roster in the browser**: open the firm's team/people page and its LinkedIn company page → People. Collect each member's name, LinkedIn URL, and title. Apply the **same inclusion rules as the app's contact fetcher** (the investor-search edge function):
+2. **Build the roster in the browser**: open the firm's team/people page and its LinkedIn company page → People — the LinkedIn side needs the user's browser session (see "LinkedIn access" above; ask them to select the browser before starting). Collect each member's name, LinkedIn URL, and title. Apply the **same inclusion rules as the app's contact fetcher** (the investor-search edge function):
    - **Include** anyone whose title contains or is similar to: ceo, founder, co-founder, partner, managing partner, general partner, principal, venture partner, operating partner, independent investor, angel investor, associate, research analyst, scout, investment, investor — or whose seniority is founder/owner/C-suite/VP/head/director/partner. ("Head of Investments", "Investment Manager", "VP of Platform" qualify.)
    - **Exclude** anyone whose title contains a deny keyword: data scientist, machine learning, ml engineer, graphic designer, video editor, product designer, illustrator, photographer, risk officer, growth marketing, account executive, recruiter, people ops/people operations, admin/administrative, assistant/executive assistant, office manager, econometrics, public policy, general counsel, software/frontend/backend/platform engineer, product/program/project/delivery manager, product management, scrum master, agile coach, art director, creative director, copywriter, social media, community manager, video producer, public relations, demand generation, performance marketing, customer success, customer support, support specialist, paralegal.
    - When writing each person, their `role` field still takes the nearest value from the role enum in the schema file.

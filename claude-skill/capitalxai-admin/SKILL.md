@@ -1,6 +1,6 @@
 ---
 name: capitalxai-admin
-description: Manage the CapitalxAI investor database via its MCP connector (admin accounts). Use when the user wants to add or update investor firms/people, link people to firms, record or update funding rounds, research an investor (domain/LinkedIn/name) in the browser and add them end-to-end, or analyze investor fit / personalization ("Analyze accel.com for my company", "Analyze these domains for a user's email", "Find fit investors for...") — and the CapitalxAI connector write tools (add_investor, update_investor, mark_not_an_investor, add_funding, update_funding, save_investor_analysis) are available alongside the read tools.
+description: Manage the CapitalxAI investor database via its MCP connector (admin accounts). Use when the user wants to add or update investor firms/people, link people to firms, record or update funding rounds, research an investor (domain/LinkedIn/name) in the browser and add them end-to-end, analyze investor fit / personalization ("Analyze accel.com for my company", "Analyze these domains for a user's email", "Find fit investors for..."), or find verified work emails via the Gmail-Compose method ("find emails for...", "fill missing emails") — and the CapitalxAI connector write tools (add_investor, update_investor, mark_not_an_investor, add_funding, update_funding, save_investor_analysis, save_email_result) are available alongside the read tools.
 ---
 
 # CapitalxAI (admin)
@@ -28,6 +28,8 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 | `add_fundings_bulk` | Record up to 50 funding rounds in one call (per-row upsert + report) | Admin |
 | `update_funding` | Update fields of an existing funding row | Admin |
 | `mark_not_an_investor` | Record a researched entity as NOT an investor so future research skips it | Admin |
+| `get_email_candidates` | Next people needing the Gmail-Compose email search (never-searched, with a firm domain) | Admin |
+| `save_email_result` | Record an email search outcome — found (verified, merged) / not_found / unknown | Admin |
 
 ## Researching and adding an investor end-to-end
 
@@ -36,6 +38,10 @@ When the user gives an investor to research and add (a domain, LinkedIn URL, or 
 ## Analyzing investor fit (the app's "Analyze with AI")
 
 When the user says "Analyze <domains/investors> for my company", "Analyze ... for <user email>" (admin: saves to that user's account), or "Find fit investors for ...", read [analysis-pipeline.md](analysis-pipeline.md) and follow it: `get_analysis_context` once, build the candidate set (explicit investors, or `find_investors` with fit filters + `has_deep_research: true`), then per investor analyze from `deep_research` using the account's exact prompt templates and save with `save_investor_analysis` as you go. You are the analysis AI — no external AI API is called.
+
+## Finding verified emails (Gmail Compose / Name2Email method)
+
+When the user asks to find work emails, "fill missing emails", or hands over a name+domain list/CSV, read [email-pipeline.md](email-pipeline.md) and follow it exactly: user's browser logged into Gmail, type "First Last domain" into a Compose To field, read the autocomplete, **never send**, and record every single outcome via `save_email_result` (found = verified email saved; not_found/unknown = stamped so nobody is searched twice). "Fill missing emails" runs off `get_email_candidates`.
 
 ## Discovering new fundings (scheduled or on demand)
 

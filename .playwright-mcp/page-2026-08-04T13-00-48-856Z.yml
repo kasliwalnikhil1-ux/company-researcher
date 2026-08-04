@@ -1,0 +1,49 @@
+- generic [active] [ref=e1]:
+  - button "Open Next.js Dev Tools" [ref=e7] [cursor=pointer]
+  - alert [ref=e11]
+  - generic [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e18]:
+        - img "CapitalxAI CRM" [ref=e19]
+        - generic [ref=e20]: CapitalxAI CRM
+      - generic [ref=e21]:
+        - heading [level=1] [ref=e59]:
+          - text: Research any
+          - generic [ref=e23]: invest
+          - text: inside out.
+        - paragraph [ref=e25]: Access all investors, expand your reach, and accelerate your fundraising.
+      - generic [ref=e26]: © ResourcePlan Solution Private Limited
+    - generic [ref=e28]:
+      - heading "Sign in to your account" [level=2] [ref=e29]
+      - paragraph [ref=e30]: Enter your credentials to continue.
+      - generic [ref=e31]:
+        - alert [ref=e61]: Invalid login credentials
+        - generic [ref=e32]:
+          - generic [ref=e33]: Email
+          - textbox "Email" [ref=e34]:
+            - /placeholder: you@company.com
+            - text: nkjaipur21@gmail.com
+        - generic [ref=e35]:
+          - generic [ref=e36]: Password
+          - textbox "Password" [ref=e38]:
+            - /placeholder: ••••••••
+            - text: probe-wrong-password
+          - button "Forgot password?" [ref=e39] [cursor=pointer]
+        - button "Sign in" [ref=e40] [cursor=pointer]
+      - generic [ref=e41]: Or continue with
+      - button "Sign in with Google" [ref=e46] [cursor=pointer]
+      - paragraph [ref=e52]:
+        - text: By clicking "Sign in" or "Sign in with Google", you agree to our
+        - link "Terms" [ref=e53] [cursor=pointer]:
+          - /url: https://capitalxai.com/terms
+        - text: ","
+        - link "Content Safety" [ref=e54] [cursor=pointer]:
+          - /url: https://capitalxai.com/content-safety
+        - text: ", and"
+        - link "Privacy Policy" [ref=e55] [cursor=pointer]:
+          - /url: https://capitalxai.com/privacy
+        - text: .
+      - paragraph [ref=e56]:
+        - text: Need an account?
+        - link "Sign up" [ref=e57] [cursor=pointer]:
+          - /url: /signup

@@ -4,7 +4,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { getValidAccessToken } from '@/lib/api';
-import { useOwner } from '@/contexts/OwnerContext';
 import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter, usePathname } from 'next/navigation';
@@ -44,9 +43,6 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
 export default function MainLayout({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const whitelabel = useWhitelabel();
-  const { selectedOwner, setSelectedOwner, availableOwners, ownerColors } = useOwner();
-  const defaultOwnerStyles = { bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200' };
-  const ownerStyle = ownerColors[selectedOwner] ?? defaultOwnerStyles;
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const { onboarding, loading: onboardingLoading, fetchOnboarding } = useOnboarding();
   const { refreshTemplates } = useMessageTemplates();
@@ -624,76 +620,35 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             </a>
           </nav>
 
-          {/* User info */}
-          {(!isCollapsed || isMobile) && (
-            <div className={`px-4 py-2 space-y-3 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
-              {/* Owner Dropdown */}
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Owner</p>
-                <select
-                  value={selectedOwner}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    if (val === '__add_owners__') {
-                      router.push('/account');
-                      return;
-                    }
-                    setSelectedOwner(val);
-                  }}
-                  className={`w-full px-3 py-2 text-sm font-medium rounded-lg border-2 transition-colors ${ownerStyle.bg} ${ownerStyle.text} ${ownerStyle.border} hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-offset-1 ${ownerStyle.border.replace('border-', 'focus:ring-')}`}
-                >
-                  {availableOwners.length === 0 ? (
-                    <>
-                      <option value="">— No owners in Account —</option>
-                      <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
-                    </>
-                  ) : (
-                    <>
-                      <option value="">— Select —</option>
-                      {availableOwners.map((owner) => (
-                        <option key={owner} value={owner} className="bg-white text-gray-900">
-                          {owner}
-                        </option>
-                      ))}
-                      <option value="__add_owners__" className="text-brand-default font-medium">Add new owners</option>
-                    </>
-                  )}
-                </select>
-              </div>
-
-              {/* Country Dropdown - hidden for fundraising, and Auto option excluded */}
-              {primaryUse !== 'fundraising' && (
-                <div>
-                  <p className="text-xs text-gray-500 mb-2">Country Code</p>
-                  <select
-                    value={selectedCountry === 'Auto' ? 'India' : selectedCountry}
-                    onChange={(e) => {
-                      setSelectedCountry(e.target.value as Country);
-                    }}
-                    className="w-full px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                  >
-                    {availableCountries.filter((c) => c !== 'Auto').map((country) => (
-                      <option key={country} value={country} className="bg-white text-gray-900">
-                        {COUNTRY_DATA[country].flag} {country} ({COUNTRY_DATA[country].code})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              
-              {/* User Email */}
-              {user && (
-                <div>
-                  <p className="text-xs text-gray-500 mb-1">Signed in as</p>
-                  <p className="text-sm font-medium text-gray-700 truncate">{user.email}</p>
-                </div>
-              )}
+          {/* Country Dropdown - hidden for fundraising, and Auto option excluded */}
+          {(!isCollapsed || isMobile) && primaryUse !== 'fundraising' && (
+            <div className={`px-4 py-2 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+              <p className="text-xs text-gray-500 mb-2">Country Code</p>
+              <select
+                value={selectedCountry === 'Auto' ? 'India' : selectedCountry}
+                onChange={(e) => {
+                  setSelectedCountry(e.target.value as Country);
+                }}
+                className="w-full px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-900 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              >
+                {availableCountries.filter((c) => c !== 'Auto').map((country) => (
+                  <option key={country} value={country} className="bg-white text-gray-900">
+                    {COUNTRY_DATA[country].flag} {country} ({COUNTRY_DATA[country].code})
+                  </option>
+                ))}
+              </select>
             </div>
           )}
         </div>
 
-        {/* Logout pinned at bottom */}
+        {/* User info + Logout pinned at bottom */}
         <div className={`shrink-0 p-4 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+          {user && (!isCollapsed || isMobile) && (
+            <div className="mb-3">
+              <p className="text-xs text-gray-500 mb-1">Signed in as</p>
+              <p className="text-sm font-medium text-gray-700 truncate">{user.email}</p>
+            </div>
+          )}
           <button
             onClick={handleSignOut}
             className={`w-full flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'justify-center px-4'} py-2.5 text-sm font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-lg transition-colors`}

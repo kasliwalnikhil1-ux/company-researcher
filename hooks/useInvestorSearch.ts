@@ -88,6 +88,9 @@ export interface InvestorSearchResult {
   /** Apply URL - only when has_personalization */
   apply_url?: string | null;
   email?: string | null;
+  /** Whether the stored email was verified (Gmail-Compose pipeline). Unlike email,
+   *  returned for ALL rows so users can decide to analyze an investor to reveal it. */
+  email_verified?: boolean | null;
   phone?: string | null;
   links?: string[] | null;
   /** Latest news: { answer, citations, date } - only when has_personalization */
@@ -120,6 +123,11 @@ export interface UseInvestorSearchReturn {
 }
 
 const PAGE_SIZE_DEFAULT = 10;
+
+/** search_investors clamps global-mode searches (no p_investor_id) to 10 rows per
+ *  request for every plan — an anti-scrape guard on the global database. Requesting
+ *  more than 10 makes the clamped response look like a final page and kills paging. */
+const GLOBAL_PAGE_SIZE_CAP = 10;
 
 function buildRpcParams(
   filters: InvestorSearchFilters,
@@ -235,6 +243,11 @@ export function useInvestorSearch({
   const [hasMore, setHasMore] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Page with the size the RPC will actually honor, so offsets and hasMore line
+  // up with what the server returns (see GLOBAL_PAGE_SIZE_CAP).
+  const effectivePageSize =
+    filters.mode === 'global' ? Math.min(pageSize, GLOBAL_PAGE_SIZE_CAP) : pageSize;
+
   const fetchPage = useCallback(
     async (pageNum: number, append = false) => {
       if (abortRef.current) {
@@ -245,8 +258,8 @@ export function useInvestorSearch({
       setLoading(true);
       setError(null);
 
-      const offset = (pageNum - 1) * pageSize;
-      const rpcParams = buildRpcParams(filters, offset, pageSize, excludeInvestors);
+      const offset = (pageNum - 1) * effectivePageSize;
+      const rpcParams = buildRpcParams(filters, offset, effectivePageSize, excludeInvestors);
 
       try {
         const { data: result, error: rpcError } = await supabase.rpc(
@@ -279,7 +292,9 @@ export function useInvestorSearch({
         } else {
           setData(list);
         }
-        setHasMore(list.length >= pageSize);
+        // Compare against the rows the server sent (raw), not the deduped list —
+        // a full server page means there may be more, even if dedupe shrank it.
+        setHasMore(raw.length >= effectivePageSize);
       } catch (err) {
         if (!abortRef.current?.signal.aborted) {
           setError(err instanceof Error ? err : new Error(String(err)));
@@ -293,7 +308,7 @@ export function useInvestorSearch({
         abortRef.current = null;
       }
     },
-    [filters, pageSize, excludeInvestors]
+    [filters, effectivePageSize, excludeInvestors]
   );
 
   useEffect(() => {
@@ -330,9 +345,9 @@ export function useInvestorSearch({
 
   const loadMore = useCallback(async () => {
     if (!hasMore || loading) return;
-    const nextPage = Math.floor(data.length / pageSize) + 1;
+    const nextPage = Math.floor(data.length / effectivePageSize) + 1;
     await fetchPage(nextPage, true);
-  }, [hasMore, loading, data.length, pageSize, fetchPage]);
+  }, [hasMore, loading, data.length, effectivePageSize, fetchPage]);
 
   const refresh = useCallback(async () => {
     await fetchPage(page, false);
@@ -404,6 +419,9 @@ export async function fetchPeopleAtFirm(
     p_type: 'person',
     p_mode: mode,
     p_investor_id: firmId,
+    // Contacts must be active investors only — inactive/unknown people are
+    // excluded from both this list and associated_people_count in the RPC.
+    p_active: true,
     p_limit: limit,
     p_offset: 0,
   };

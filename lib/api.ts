@@ -11,7 +11,7 @@ import type { OnboardingDataForSummary } from '@/lib/utils';
  *
  * Returns null if no session exists or the refresh token is also invalid.
  */
-export const getValidAccessToken = async (): Promise<string | null> => {
+export const getValidAccessToken = async (opts?: { forceRefresh?: boolean }): Promise<string | null> => {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -20,23 +20,55 @@ export const getValidAccessToken = async (): Promise<string | null> => {
 
   // Check if the token is expired or will expire within 60 seconds
   const expiresAt = session.expires_at; // Unix timestamp in seconds
-  if (expiresAt != null) {
-    const now = Math.floor(Date.now() / 1000);
-    if (expiresAt - now < 60) {
-      // Token is expired or about to expire — force a refresh
-      const {
-        data: { session: refreshed },
-        error,
-      } = await supabase.auth.refreshSession();
+  const now = Math.floor(Date.now() / 1000);
+  const nearExpiry = expiresAt != null && expiresAt - now < 60;
 
-      if (error || !refreshed) {
-        return null;
-      }
-      return refreshed.access_token;
+  if (opts?.forceRefresh || nearExpiry) {
+    const {
+      data: { session: refreshed },
+      error,
+    } = await supabase.auth.refreshSession();
+
+    if (error || !refreshed) {
+      return null;
     }
+    return refreshed.access_token;
   }
 
   return session.access_token;
+};
+
+/**
+ * Fetch an authenticated API route, retrying once with a force-refreshed
+ * token if the server answers 401. The server validates the JWT against its
+ * own clock and session state, so a token that looks valid locally (clock
+ * skew, session revoked by a sign-in elsewhere, stale session after sleep)
+ * can still be rejected with "Invalid or expired session".
+ *
+ * Returns null when there is no session at all (caller should prompt sign-in).
+ * If the retry also fails, the second 401 response is returned so callers can
+ * surface the server's error message.
+ */
+const fetchWithAuthRetry = async (
+  url: string,
+  options: RequestInit = {}
+): Promise<Response | null> => {
+  const token = await getValidAccessToken();
+  if (!token) return null;
+
+  const doFetch = (t: string) =>
+    fetch(url, {
+      ...options,
+      headers: { ...(options.headers || {}), Authorization: `Bearer ${t}` },
+    });
+
+  const res = await doFetch(token);
+  if (res.status !== 401) return res;
+
+  const refreshedToken = await getValidAccessToken({ forceRefresh: true });
+  if (!refreshedToken) return res;
+
+  return doFetch(refreshedToken);
 };
 
 // Fetch with timeout to prevent hung requests from blocking batch processing
@@ -492,15 +524,12 @@ export const fetchInvestorNewsCurrent = async (investorId: string): Promise<{
   error?: string;
 } | null> => {
   try {
-    const token = await getValidAccessToken();
+    const res = await fetchWithAuthRetry(`/api/investor-news?investorId=${encodeURIComponent(investorId)}`);
 
-    if (!token) {
+    if (!res) {
       return { investor_news: null, error: 'You need to be signed in.' };
     }
 
-    const res = await fetch(`/api/investor-news?investorId=${encodeURIComponent(investorId)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
     const data = await res.json();
     if (!res.ok) {
       return { investor_news: null, error: data.error || 'Failed to load news' };
@@ -529,17 +558,10 @@ export const fetchInvestorNews = async (context: InvestorNewsContext): Promise<{
   error?: string;
 } | null> => {
   try {
-    const token = await getValidAccessToken();
-
-    if (!token) {
-      return { investor_news: null, error: 'You need to be signed in.' };
-    }
-
-    const res = await fetch('/api/investor-news', {
+    const res = await fetchWithAuthRetry('/api/investor-news', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
         investorId: context.investorId,
@@ -550,6 +572,9 @@ export const fetchInvestorNews = async (context: InvestorNewsContext): Promise<{
         associated_firm_name: context.associated_firm_name ?? undefined,
       }),
     });
+    if (!res) {
+      return { investor_news: null, error: 'You need to be signed in.' };
+    }
     const data = await res.json();
     if (!res.ok) {
       return { investor_news: null, error: data.error || 'Failed to fetch news' };
@@ -569,20 +594,16 @@ export const fetchInvestorDeepResearch = async (investorId: string): Promise<{
   details?: string;
 } | null> => {
   try {
-    const token = await getValidAccessToken();
-
-    if (!token) {
-      return { deep_research: null, error: 'You need to be signed in.' };
-    }
-
-    const res = await fetch('/api/investor-deep-research', {
+    const res = await fetchWithAuthRetry('/api/investor-deep-research', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({ investorId }),
     });
+    if (!res) {
+      return { deep_research: null, error: 'You need to be signed in.' };
+    }
     const data = await res.json();
     if (!res.ok) {
       return {

@@ -554,19 +554,33 @@ export function extractDomain(input: string): string {
 
 /**
  * Cleans a search input by detecting LinkedIn URLs or domain URLs and extracting the relevant part.
+ * - Comma-separated inputs (e.g. "Leon Yao, Marguerite Colin") are cleaned per segment and
+ *   rejoined with commas; search_investors treats each comma-separated term as an OR match.
  * - For LinkedIn URLs: extracts just the path (e.g., "in/username") in lowercase
  * - For domain URLs: extracts just the domain (e.g., "accel.com") in lowercase
  * - For other inputs: returns trimmed lowercase input
- * 
+ *
  * @param input - User search input (could be a LinkedIn URL, domain URL, or plain text)
  * @returns Cleaned search term in lowercase
  */
 export function cleanSearchInput(input: string): string {
   if (!input || typeof input !== 'string') return '';
-  
+
+  if (input.includes(',')) {
+    return input
+      .split(',')
+      .map((part) => cleanSearchTerm(part))
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  return cleanSearchTerm(input);
+}
+
+function cleanSearchTerm(input: string): string {
   const trimmed = input.trim();
   if (!trimmed) return '';
-  
+
   // Check if it's a LinkedIn URL or path
   const linkedinMatch = trimmed.match(/(?:https?:\/\/)?(?:www\.)?linkedin\.com\/(in|company|school|showcase|groups)\/([^/?#\s]+)/i);
   if (linkedinMatch) {
