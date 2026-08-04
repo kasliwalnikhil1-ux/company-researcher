@@ -45,6 +45,7 @@ import { supabase } from "@/utils/supabase/client";
 import { getValidAccessToken, fetchCompanyNewsCurrent, fetchCompanyNews, fetchCompanyNewsEmailOpener, type CompanyNews } from "@/lib/api";
 import { reanalyzeCompany } from "@/lib/reanalyzeCompany";
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import DeleteConfirmationModal from "@/components/ui/DeleteConfirmationModal";
 
 type DrawerTab = "overview" | "outreach" | "latest-news" | "contacts";
@@ -3906,7 +3907,7 @@ const CompanyDetailsDrawer: React.FC<CompanyDetailsDrawerProps> = ({
                         </div>
                       ) : (
                         <div className="prose prose-sm max-w-none prose-p:text-gray-700 prose-p:leading-relaxed prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
-                          <ReactMarkdown>{companyNews.answer}</ReactMarkdown>
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{companyNews.answer}</ReactMarkdown>
                         </div>
                       )}
                     </div>

@@ -43,6 +43,7 @@
     "react-markdown": "^10.1.0",
     "react-tweet": "^3.2.1",
     "recharts": "^3.6.0",
+    "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",

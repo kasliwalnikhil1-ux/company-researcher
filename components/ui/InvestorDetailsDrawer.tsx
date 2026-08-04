@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { X, ChevronLeft, ChevronRight, ArrowLeft, MapPin, Briefcase, Target, Globe, ExternalLink, CheckCircle, XCircle, Minus, Sparkles, Loader2, Mail, Phone, Link2, User, Users, FileText, Copy, Check, Linkedin, Twitter, Plus, Edit2, Trash2, Eye, Search, ChevronDown, Newspaper, Handshake, RotateCcw, RefreshCw } from 'lucide-react';
 import { fetchInvestorDeepResearch, fetchInvestorNews, fetchInvestorNewsCurrent, getValidAccessToken, type InvestorNews } from '@/lib/api';
 import { formatGeographyForDisplay, formatHqLocation, formatHqLocationShort } from '@/lib/isoCodes';
@@ -2598,8 +2599,10 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                       prose-strong:text-gray-900 prose-strong:font-semibold
                       prose-hr:my-8 prose-hr:border-gray-300
                       prose-ul:my-4 prose-ol:my-4 prose-li:my-2
-                      prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
-                      <ReactMarkdown>{deepResearchContent}</ReactMarkdown>
+                      prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline
+                      prose-table:my-6 prose-table:w-full prose-th:text-left prose-th:text-gray-900 prose-th:font-semibold prose-th:border-b prose-th:border-gray-300 prose-th:px-3 prose-th:py-2
+                      prose-td:text-gray-700 prose-td:border-b prose-td:border-gray-200 prose-td:px-3 prose-td:py-2">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{deepResearchContent}</ReactMarkdown>
                     </div>
                   ) : (
                     <p className="text-gray-500 text-sm">No deep research data available for this investor.</p>
@@ -2638,7 +2641,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                         Summary
                       </h3>
                       <div className="prose prose-sm max-w-none prose-p:text-gray-700 prose-p:leading-relaxed prose-a:text-indigo-600 prose-a:no-underline hover:prose-a:underline">
-                        <ReactMarkdown>{investorNews.answer}</ReactMarkdown>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{investorNews.answer}</ReactMarkdown>
                       </div>
                     </div>
                   )}
