@@ -503,12 +503,18 @@ function buildServer(auth: AuthedUser): McpServer {
           .min(1)
           .optional()
           .describe("Filter: only investors last researched more than N days ago (or never) — for refresh sweeps."),
-        limit: z.number().int().min(1).max(50).optional().describe("Max results. Defaults to 10."),
+        limit: z.number().int().min(1).max(50).optional().describe("Max results. Defaults to 10 (50 in roster mode)."),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe("Paging offset — use with at_firm_domain to page through large firm rosters."),
       },
     },
-    async ({ query, domain, linkedin_url, at_firm_domain, type, investor_type, stages, industries, geographies, tier, has_deep_research, stale_older_than_days, limit }) => {
+    async ({ query, domain, linkedin_url, at_firm_domain, type, investor_type, stages, industries, geographies, tier, has_deep_research, stale_older_than_days, limit, offset }) => {
       try {
-        // Roster mode: list people linked to a firm via investor_affiliations.
+        // Roster mode: list people linked to a firm via investor_affiliations (paged).
         if (at_firm_domain) {
           const firm = await findFirmByDomain(at_firm_domain);
           if (!firm) {
@@ -521,7 +527,8 @@ function buildServer(auth: AuthedUser): McpServer {
             .from("investor_affiliations")
             .select("person_id")
             .eq("firm_id", firm.id)
-            .limit(200);
+            .order("id", { ascending: true })
+            .limit(2000);
           if (affErr) return errorResult(`Could not load affiliations: ${affErr.message}`);
           if (!affs || affs.length === 0) {
             return textResult(
@@ -532,15 +539,25 @@ function buildServer(auth: AuthedUser): McpServer {
                   : ""),
             );
           }
+          const total = affs.length;
+          const from = offset ?? 0;
+          const pageSize = limit ?? 50;
+          const pageIds = affs.slice(from, from + pageSize).map((a) => a.person_id);
+          if (pageIds.length === 0) {
+            return textResult(`Firm "${firm.name}" has ${total} linked person(s); offset ${from} is past the end.`);
+          }
           const { data: people, error: pplErr } = await admin
             .from("investors")
             .select(INVESTOR_LINE_SELECT)
-            .in("id", affs.map((a) => a.person_id))
-            .limit(limit ?? 50);
+            .in("id", pageIds);
           if (pplErr) return errorResult(`Could not load people: ${pplErr.message}`);
+          const shownTo = from + pageIds.length;
+          const pagingHint =
+            shownTo < total ? `\n\nMore: call again with offset=${shownTo} (same at_firm_domain).` : "";
           return textResult(
-            `Firm "${firm.name}" (id: ${firm.id}) has ${affs.length} linked person(s):\n` +
-              (people ?? []).map(investorLine).join("\n"),
+            `Firm "${firm.name}" (id: ${firm.id}) — ${total} linked person(s), showing ${from + 1}-${shownTo}:\n` +
+              (people ?? []).map(investorLine).join("\n") +
+              pagingHint,
           );
         }
 
@@ -1443,6 +1460,61 @@ function buildServer(auth: AuthedUser): McpServer {
             `Deleted ${inv.type} "${inv.name}" (${inv.domain ?? inv.linkedin_url ?? investor_id}) — ` +
               `removed ${affCount ?? 0} affiliation(s) and ${persCount ?? 0} personalization row(s).`,
           );
+        } catch (err) {
+          return errorResult(err);
+        }
+      },
+    );
+
+    server.registerTool(
+      "unlink_person_from_firm",
+      {
+        title: "Unlink person from firm (admin)",
+        description:
+          "Remove one person→firm affiliation (e.g. the person left the firm, or the link was wrong). " +
+          "Only the link is removed — both investor records stay untouched. Use after confirming a departure; " +
+          "for duplicates use merge_investors instead.",
+        inputSchema: {
+          person_id: z.string().optional().describe("Person's investor id."),
+          person_linkedin_url: z.string().optional().describe("Or the person's LinkedIn URL/path."),
+          firm_id: z.string().optional().describe("Firm's investor id."),
+          firm_domain: z.string().optional().describe("Or the firm's domain, e.g. accel.com."),
+        },
+      },
+      async ({ person_id, person_linkedin_url, firm_id, firm_domain }) => {
+        try {
+          const { row: person, error: pErr } = await findInvestorRow(
+            "id, name, type",
+            person_id,
+            undefined,
+            person_linkedin_url,
+          );
+          if (pErr) return errorResult(pErr);
+          if (!person) return textResult("No matching person found.");
+          if (person.type !== "person") return errorResult(`"${person.name}" is a firm, not a person.`);
+
+          let firm: { id: string; name: string } | null = null;
+          if (firm_id) {
+            const { data } = await admin.from("investors").select("id, name").eq("id", firm_id).maybeSingle();
+            firm = data ?? null;
+          } else if (firm_domain) {
+            firm = await findFirmByDomain(firm_domain);
+          } else {
+            return errorResult("Provide firm_id or firm_domain.");
+          }
+          if (!firm) return textResult("No matching firm found.");
+
+          const { data: deleted, error } = await admin
+            .from("investor_affiliations")
+            .delete()
+            .eq("person_id", person.id)
+            .eq("firm_id", firm.id)
+            .select("id");
+          if (error) return errorResult(`Could not remove the link: ${error.message}`);
+          if (!deleted?.length) {
+            return textResult(`No link existed between "${person.name}" and "${firm.name}" — nothing removed.`);
+          }
+          return textResult(`Unlinked "${person.name}" from "${firm.name}". Both records remain unchanged.`);
         } catch (err) {
           return errorResult(err);
         }

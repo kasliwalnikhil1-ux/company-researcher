@@ -104,6 +104,29 @@ The server enforces the identity rules too (rejects LinkedIn paths as domains an
 
 Tell the user: added vs updated (with record id), firm/person and affiliation created, the key extracted fields (tier, stages, check sizes, thesis one-liner), which fields stayed empty for lack of sources, and the main source links.
 
+## Firm runs and person runs — cascade rules
+
+"Find/research firm X" and "find/research person Y" are cascading runs with fixed scopes:
+
+**Firm run** (`find firm X`): research/refresh the firm itself, then reconcile its **team** as a three-way diff against `find_investors at_firm_domain`:
+1. On the team page but not in the DB → add via the person pipeline (with `firm_domain`).
+2. In the DB and on the team page → update missing/stale fields.
+3. Linked in the DB but **gone from the team page** → a likely departure: report it and, only after confirming (with the user, or a clear primary source like their LinkedIn showing a new firm), `unlink_person_from_firm`. Never silently delete links — the person keeps their record either way.
+
+**Person run** (`find person Y`): research the person, then their firm side:
+- Current firm **in the DB** → verify it's the right record (canonical domain, not a duplicate) and link with `firm_domain`.
+- Current firm **not in the DB** → run the full firm pipeline for it (classify → research → add), link the person, then **roster that firm's other people** (the firm-run team diff above).
+- Person at **multiple firms** → link ALL of them (`firm_domains`), but cascade the roster only for the primary/newly-added firm; ask before rostering the others.
+
+**Recursion cap — depth 1.** A person run may cascade into one firm and that firm's roster; roster members must **not** trigger their own firm cascades (a member's other firm gets linked only if it's already in the DB). Without this cap one person can pull in the whole industry graph. Going deeper is a new run the user asks for.
+
+**Angels and no-firm people** (edge cases, all valid):
+- An **angel with no firm** is a complete, correct record: person + LinkedIn + `investor_type: ["Angel Investor"]`, role `Independent Investor / Angel`, **no affiliation**. Never invent a firm for them.
+- An angel's **employer is not their firm**: "Angel investing while VP Engineering at Google" → Google goes in `work_experience_orgs`, never becomes a firm record. Only entities that themselves invest capital (pass the classification step) become firms.
+- An angel who **also runs a fund/syndicate** with a real entity and domain → both: person record + firm record + affiliation.
+- A **solo GP** whose fund is just their personal brand: if a fund entity with its own domain exists, create the firm; if there's genuinely no domain (stealth family office, AngelList-only syndicate), keep them as a person, note the fund name in `role`/`links`, and flag that no firm record could be keyed.
+- **Same name, different people**: identity is the LinkedIn URL, never the name — two "John Smith"s at different firms are two records.
+
 ## Refresh runs ("update the research for X")
 
 A refresh is distinct from add/update: the record exists and the goal is bringing it current. `find_investors` shows `researched: <date>` on every result, and `stale_older_than_days` finds records due for a sweep ("refresh everyone older than 90 days").
@@ -129,6 +152,17 @@ When a firm exists but has no (or few) people linked — or the user asks to "ad
 5. **Re-check** at the end with `find_investors` + `at_firm_domain` and report the final linked count.
 
 Depth note: for large rosters, agree a depth with the user — "link only" (name, LinkedIn, role, firm_domain — fast) vs "full profile" (complete research pass per person). Default to full profile for partners and link-only for associates/analysts if the user doesn't specify.
+
+### Large firms (50+ people, multi-geography — e.g. Accel)
+
+Big firms split their teams across offices and regional sites; a single team-page scrape misses whole geographies. Extra discipline:
+
+1. **Enumerate ALL team sources before adding anyone**: every regional/office team page on the firm's site (check the nav and footer — US, Europe, India etc. often have separate pages or even separate regional sites under the same brand), plus the LinkedIn company People tab **paged all the way through** (it lazy-loads; keep scrolling/paging until the count stops growing). State the expected total per region to the user before starting.
+2. **One firm or several?** Same domain = one firm record — Accel US and Accel India are both `accel.com`, one record, geography lives on the people. A regional arm with its **own domain and brand** (e.g. Sequoia → Peak XV after the split) is a **separate firm record** with its own roster; never mix their people.
+3. **Capture geography per person**: each person's office → `hq_state`/`hq_country`; regional partners get matching `investment_geographies`. The firm's own `investment_geographies` should cover all its regions.
+4. **Process region by region** (US → Europe → India ...), completing one region before the next, so an interrupted run has a clean boundary. Report per-region tallies.
+5. **Resumability**: before starting AND when resuming, page through `find_investors` `at_firm_domain` (use `offset` — the reply gives the total and paging hints) to build the full already-linked list; diff the scraped roster against it. An interrupted run resumes from the diff, never by re-adding.
+6. **Checkpoint discipline**: write each person immediately (as always); after each region, re-check the linked count matches the region tally before moving on.
 
 ## Batch runs
 

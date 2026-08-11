@@ -21,6 +21,7 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 | `add_investor` | Add a firm (by domain) or person (by LinkedIn), with optional profile fields | Admin |
 | `update_investor` | Update fields on an existing investor; `clear_fields` to null wrong values; link a person to firm(s) | Admin |
 | `merge_investors` | Merge a duplicate into the canonical record (fields, aliases, affiliations, personalization), delete the duplicate | Admin |
+| `unlink_person_from_firm` | Remove one person↔firm link (departure / wrong link); records untouched | Admin |
 | `delete_investor` | Permanently delete a record + its links (destructive — prefer merge for duplicates) | Admin |
 | `list_fundings` | Recent funding rounds, newest first, with search and paging | Any user |
 | `get_funding` | Full record of one funding (complete founders/investors lists) | Any user |
@@ -33,7 +34,7 @@ CapitalxAI is a fundraising intelligence app with a shared database of investors
 
 ## Researching and adding an investor end-to-end
 
-When the user gives an investor to research and add (a domain, LinkedIn URL, or name) rather than ready-made data, read [research-pipeline.md](research-pipeline.md) and follow it exactly — it encodes the app's classify → deep-research → extract → write pipeline, including the not-an-investor rules and the person→firm recursive add. The exact field formats and allowed enum values for every write are in [extraction-schema.md](extraction-schema.md); read it before any `add_investor`/`update_investor` call that fills profile fields, even outside a research run.
+When the user gives an investor to research and add (a domain, LinkedIn URL, or name) rather than ready-made data, read [research-pipeline.md](research-pipeline.md) and follow it exactly — it encodes the app's classify → deep-research → extract → write pipeline, including the not-an-investor rules and the cascade rules: a firm run reconciles the firm's whole team (add missing people, update stale ones, flag departures), a person run pulls in their firm — adding and rostering it when new — with a depth-1 recursion cap, and angels with no firm are a valid terminal state. The exact field formats and allowed enum values for every write are in [extraction-schema.md](extraction-schema.md); read it before any `add_investor`/`update_investor` call that fills profile fields, even outside a research run.
 
 ## Analyzing investor fit (the app's "Analyze with AI")
 
