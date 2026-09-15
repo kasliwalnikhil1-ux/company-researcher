@@ -34,3 +34,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# outreach platform secrets (see scripts/outreach-set-secrets.sh)
+.env.outreach

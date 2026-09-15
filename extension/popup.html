@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>CapitalxAI Outreach Session Sync</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; width: 340px; font: 13px/1.45 -apple-system, "Segoe UI", Inter, Roboto, sans-serif; color: #111827; background: #f9fafb; }
+    header { padding: 12px 14px; background: #4f46e5; color: #fff; font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+    header .dot { width: 8px; height: 8px; border-radius: 50%; background: #9ca3af; }
+    header .dot.ok { background: #22c55e; } header .dot.err { background: #f87171; } header .dot.out { background: #d1d5db; }
+    main { padding: 12px 14px 14px; }
+    label { display: block; font-size: 11px; font-weight: 600; color: #4b5563; text-transform: uppercase; letter-spacing: .03em; margin: 10px 0 4px; }
+    input { width: 100%; padding: 7px 9px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 13px; background: #fff; }
+    input:focus { outline: 2px solid #c7d2fe; border-color: #6366f1; }
+    .row { display: flex; gap: 8px; margin-top: 12px; }
+    button { flex: 1; padding: 8px 10px; border-radius: 8px; border: 1px solid #d1d5db; background: #fff; font-weight: 600; font-size: 13px; cursor: pointer; }
+    button.primary { background: #4f46e5; border-color: #4f46e5; color: #fff; }
+    button:disabled { opacity: .6; cursor: default; }
+    .status { margin-top: 12px; padding: 10px; border-radius: 8px; background: #fff; border: 1px solid #e5e7eb; }
+    .status dl { margin: 0; display: grid; grid-template-columns: 90px 1fr; row-gap: 4px; column-gap: 8px; }
+    .status dt { color: #6b7280; } .status dd { margin: 0; word-break: break-word; }
+    .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; background: #e5e7eb; color: #374151; }
+    .pill.ok { background: #dcfce7; color: #166534; } .pill.err { background: #fee2e2; color: #991b1b; } .pill.warn { background: #fef3c7; color: #92400e; }
+    .error { margin-top: 8px; color: #991b1b; font-size: 12px; }
+    details { margin-top: 10px; } summary { cursor: pointer; color: #4f46e5; font-size: 12px; }
+    .hint { color: #6b7280; font-size: 11px; margin-top: 6px; }
+    .msg { margin-top: 8px; font-size: 12px; color: #166534; min-height: 14px; }
+  </style>
+</head>
+<body>
+  <header><span class="dot" id="dot"></span> CapitalxAI Outreach Session Sync</header>
+  <main>
+    <label for="token">Pairing token</label>
+    <input id="token" type="password" placeholder="Paste the token from Sender → Extension tab" autocomplete="off" spellcheck="false" />
+    <div class="hint">Generated once per sender in CapitalxAI Outreach (Sender detail → Extension → Generate pairing token).</div>
+
+    <details id="advanced">
+      <summary>Advanced</summary>
+      <label for="base">Functions base URL</label>
+      <input id="base" type="url" placeholder="https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1" spellcheck="false" />
+      <div class="hint">Leave empty for the default CapitalxAI backend.</div>
+    </details>
+
+    <div class="row">
+      <button id="save">Save</button>
+      <button id="sync" class="primary">Sync now</button>
+    </div>
+    <div class="msg" id="msg"></div>
+
+    <div class="status">
+      <dl>
+        <dt>Status</dt><dd><span class="pill" id="status">—</span></dd>
+        <dt>Sender</dt><dd id="sender">—</dd>
+        <dt>Last sync</dt><dd id="last">never</dd>
+      </dl>
+      <div class="error" id="error"></div>
+    </div>
+    <div class="hint">Cookies are sent only to your workspace backend, stored encrypted, and revoked the moment you log out of LinkedIn.</div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

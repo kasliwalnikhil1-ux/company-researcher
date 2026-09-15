@@ -1,0 +1,97 @@
+'use client';
+
+import { Suspense, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
+import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
+import { useClients, useSender } from '@/lib/outreach/queries';
+import { Avatar, Badge, ErrorBox, HealthBar, Spinner, StatusPill, useToast } from '@/components/outreach/ui';
+import { PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
+import SenderOverview from '@/components/outreach/senders/SenderOverview';
+import ScheduleEditor from '@/components/outreach/senders/ScheduleEditor';
+import BudgetsPanel from '@/components/outreach/senders/BudgetsPanel';
+import EventsTimeline from '@/components/outreach/senders/EventsTimeline';
+import ExtensionSetup from '@/components/outreach/senders/ExtensionSetup';
+import DangerZone from '@/components/outreach/senders/DangerZone';
+import { cn } from '@/lib/utils';
+
+const TABS = ['Overview', 'Schedule', 'Budgets', 'Events', 'Extension', 'Danger'] as const;
+type Tab = (typeof TABS)[number];
+
+function SenderDetail() {
+  const params = useParams<{ id: string }>();
+  const id = params?.id;
+  const router = useRouter();
+  const search = useSearchParams();
+  const connected = search.get('connected');
+  const initialTab = (TABS as readonly string[]).includes(search.get('tab') ?? '') ? (search.get('tab') as Tab) : 'Overview';
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const { workspace, isManager, canWrite, role } = useWorkspace();
+  const sender = useSender(id);
+  const clients = useClients(workspace?.id);
+  const toast = useToast();
+
+  useEffect(() => {
+    // strip the one-shot ?connected flag after it has been shown so a refresh does not repeat the banner
+    if (connected != null && id) {
+      const t = setTimeout(() => router.replace(`/outreach/senders/${id}${tab !== 'Overview' ? `?tab=${tab}` : ''}`), 8000);
+      return () => clearTimeout(t);
+    }
+  }, [connected, id, router, tab]);
+
+  const selectTab = (t: Tab) => { setTab(t); router.replace(`/outreach/senders/${id}${t !== 'Overview' ? `?tab=${t}` : ''}`); };
+
+  if (role === 'client_viewer') return <ErrorBox message="Client viewers cannot open sender pages." />;
+  if (sender.isLoading) return <Spinner />;
+  if (sender.isError) return <ErrorBox message={(sender.error as Error).message} />;
+  const s = sender.data;
+  if (!s || s.workspace_id !== workspace?.id) return <div><ErrorBox message="Sender not found in this workspace." /><Link href="/outreach/senders" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Back to senders</Link></div>;
+
+  const visibleTabs = TABS.filter((t) => t !== 'Danger' || isManager);
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link href="/outreach/senders" className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100" aria-label="Back to senders"><ArrowLeft className="w-4 h-4" /></Link>
+          <Avatar src={s.picture_url} name={s.display_name} size={10} />
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</h1>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
+              <span>{PROVIDER_LABELS[s.provider]}</span>
+              {s.public_identifier && <span>· {s.public_identifier}</span>}
+              {s.client_id && clients.data && <span>· {clients.data.find((c) => c.id === s.client_id)?.name ?? 'client'}</span>}
+              <span>· {s.timezone}</span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <StatusPill status={s.status} reason={s.status_reason} />
+          <Badge tone="indigo">Level {s.warmup_level}</Badge>
+          <HealthBar score={s.health_score} />
+        </div>
+      </div>
+
+      <div className="border-b border-gray-200 mb-6 overflow-x-auto">
+        <nav className="flex gap-1 -mb-px" role="tablist">
+          {visibleTabs.map((t) => (
+            <button key={t} role="tab" aria-selected={tab === t} onClick={() => selectTab(t)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800', t === 'Danger' && tab !== t && 'text-red-500 hover:text-red-700')}>{t}</button>
+          ))}
+        </nav>
+      </div>
+
+      {tab === 'Overview' && <SenderOverview sender={s} clients={clients.data ?? []} isManager={isManager} canWrite={canWrite} connected={connected} notify={toast.show} />}
+      {tab === 'Schedule' && <ScheduleEditor sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {tab === 'Budgets' && <BudgetsPanel sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {tab === 'Events' && <EventsTimeline senderId={s.id} />}
+      {tab === 'Extension' && <ExtensionSetup sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {tab === 'Danger' && isManager && <DangerZone sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {toast.node}
+    </div>
+  );
+}
+
+export default function SenderDetailPage() {
+  return <Suspense fallback={<Spinner />}><SenderDetail /></Suspense>;
+}

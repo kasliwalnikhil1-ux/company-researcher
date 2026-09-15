@@ -1,0 +1,127 @@
+'use client';
+
+import { useMemo, useState } from 'react';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { Message, Provider } from '@/lib/outreach/types';
+import { Badge, Button, fmtDate } from '@/components/outreach/ui';
+import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
+
+function AttachmentChip({ messageId, att, mine }: { messageId: string; att: MessageAttachment; mine: boolean }) {
+  const { url, loading, error, load } = useAttachmentUrl(messageId, att.id);
+  const name = att.name ?? att.id.split('/').pop() ?? 'attachment';
+  const mime = att.type ?? att.mimetype ?? '';
+  const isImage = mime.startsWith('image/');
+  const onClick = async () => {
+    const u = url ?? (await load());
+    if (u) triggerDownload(u, name);
+  };
+  return (
+    <div className="max-w-full">
+      {isImage && url && <img src={url} alt={name} className="max-h-48 rounded-lg mb-1 border border-black/10" />}
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={loading}
+        title={error ?? `Download ${name}`}
+        className={cn('inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border max-w-full', mine ? 'bg-white/15 border-white/30 text-white hover:bg-white/25' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50', error && 'border-red-300')}
+      >
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : url ? <Download className="w-3 h-3" /> : <Paperclip className="w-3 h-3" />}
+        <span className="truncate max-w-[180px]">{name}</span>
+        {att.size ? <span className={mine ? 'text-white/70' : 'text-gray-400'}>{fmtBytes(att.size)}</span> : null}
+      </button>
+      {error && <div className="text-[11px] text-red-600 mt-0.5">{error}</div>}
+    </div>
+  );
+}
+
+export interface MessageBubbleProps {
+  m: Message;
+  provider: Provider;
+  now: number;
+  canEdit: boolean;          // permission-level gate (canReply, sender ok, etc.)
+  onEdit: (id: string, text: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
+}
+
+export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDelete }: MessageBubbleProps) {
+  const mine = m.direction === 'out';
+  const deleted = !!m.deleted_at;
+  const pending = m.id.startsWith('temp-');
+  const remaining = mine && provider === 'LINKEDIN' && !deleted && !pending ? editWindowRemainingMs(m.sent_at, now) : -1;
+  const editable = canEdit && remaining > 0;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(m.text ?? '');
+  const [busy, setBusy] = useState<'edit' | 'delete' | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const isEmail = provider !== 'LINKEDIN';
+  const safeHtml = useMemo(() => (isEmail && m.html && !m.text ? sanitizeHtml(m.html) : ''), [isEmail, m.html, m.text]);
+
+  const save = async () => {
+    if (!draft.trim() || draft === m.text) { setEditing(false); return; }
+    setBusy('edit');
+    try { await onEdit(m.id, draft.trim()); setEditing(false); } finally { setBusy(null); }
+  };
+  const remove = async () => {
+    setBusy('delete');
+    try { await onDelete(m.id); setConfirmDelete(false); } finally { setBusy(null); }
+  };
+
+  return (
+    <div className={cn('flex flex-col max-w-[85%] md:max-w-[70%]', mine ? 'ml-auto items-end' : 'mr-auto items-start')}>
+      <div className={cn('rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words shadow-sm', mine ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md', deleted && 'opacity-70', pending && 'opacity-60')}>
+        {m.is_invite_note && <div className="mb-1"><Badge tone={mine ? 'indigo' : 'blue'} className={mine ? 'bg-white/20 text-white' : ''}>Invitation note</Badge></div>}
+        {isEmail && m.html && !m.text ? (
+          <div className="max-w-none [&_a]:underline [&_p]:my-1 [&_img]:max-w-full overflow-x-auto" dangerouslySetInnerHTML={{ __html: safeHtml }} />
+        ) : editing ? (
+          <div className="min-w-[240px]">
+            <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} rows={Math.min(10, Math.max(2, draft.split('\n').length))} className="w-full text-sm text-gray-900 rounded-md border border-gray-300 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400" aria-label="Edit message" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }} />
+            <div className="flex justify-end gap-1.5 mt-1">
+              <Button size="sm" variant="secondary" onClick={() => { setEditing(false); setDraft(m.text ?? ''); }}>Cancel</Button>
+              <Button size="sm" variant="secondary" loading={busy === 'edit'} onClick={save}>Save</Button>
+            </div>
+          </div>
+        ) : (
+          <span className={cn(deleted && 'line-through')}>{m.text || (m.attachments?.length ? '' : <em className="opacity-70">(empty message)</em>)}</span>
+        )}
+        {!!m.attachments?.length && (
+          <div className="flex flex-wrap gap-1.5 mt-2">
+            {m.attachments.map((a) => <AttachmentChip key={a.id} messageId={m.id} att={a as MessageAttachment} mine={mine} />)}
+          </div>
+        )}
+      </div>
+      {!mine && m.summary && (
+        <div className="flex items-start gap-1 text-xs text-gray-500 mt-1 max-w-full">
+          <Sparkles className="w-3 h-3 mt-0.5 text-fuchsia-500 flex-shrink-0" />
+          <span className="italic">{m.summary}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
+        <span title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : fmtDate(m.sent_at)}</span>
+        {m.edited_at && !deleted && <span>· edited</span>}
+        {deleted && <span>· deleted</span>}
+        {isEmail && mine && (m.opens > 0 || m.clicks > 0) && (
+          <>
+            <span className="inline-flex items-center gap-0.5" title="Opens"><Eye className="w-3 h-3" />{m.opens}</span>
+            <span className="inline-flex items-center gap-0.5" title="Link clicks"><MousePointerClick className="w-3 h-3" />{m.clicks}</span>
+          </>
+        )}
+        {editable && !editing && (
+          <>
+            <span className="inline-flex items-center gap-0.5 text-amber-600" title="Edit/delete window"><Clock className="w-3 h-3" />{fmtRemaining(remaining)}</span>
+            <button type="button" onClick={() => { setDraft(m.text ?? ''); setEditing(true); }} className="inline-flex items-center gap-0.5 hover:text-gray-700" title="Edit message"><Pencil className="w-3 h-3" />Edit</button>
+            {confirmDelete ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="text-red-600">Delete?</span>
+                <button type="button" onClick={remove} disabled={busy === 'delete'} className="text-red-600 font-medium hover:underline">{busy === 'delete' ? 'Deleting…' : 'Yes'}</button>
+                <button type="button" onClick={() => setConfirmDelete(false)} className="hover:underline">No</button>
+              </span>
+            ) : (
+              <button type="button" onClick={() => setConfirmDelete(true)} className="inline-flex items-center gap-0.5 hover:text-red-600" title="Delete message"><Trash2 className="w-3 h-3" />Delete</button>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

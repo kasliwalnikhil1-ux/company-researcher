@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "supabase": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\nupur\\.supabase-mcp\\node_modules\\@supabase\\mcp-server-supabase\\dist\\transports\\stdio.js",
+        "--project-ref=ktwqkvjuzsunssudqnrt"
+      ],
+      "env": {
+        "SUPABASE_ACCESS_TOKEN": "${CAPITALXAI_SUPABASE_ACCESS_TOKEN}"
+      }
+    }
+  }
+}
