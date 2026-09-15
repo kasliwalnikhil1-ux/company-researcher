@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,24 +19,65 @@ import { formatGraphError, nodeCount, senderName, STATUS_TONE } from '@/componen
 
 const STATUSES: SequenceStatus[] = ['draft', 'active', 'paused', 'archived'];
 
+const MENU_ITEM = 'w-full text-left flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-gray-700';
+
 function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequence; canManage: boolean; onDuplicate: () => void; onArchive: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const deletable = s.status === 'draft' || s.status === 'archived';
+
+  // The table scrolls horizontally, so an absolutely positioned menu gets clipped by the
+  // card. Render it in a portal and anchor it to the button in viewport coordinates.
+  const place = useCallback(() => {
+    const anchor = btnRef.current?.getBoundingClientRect();
+    if (!anchor) return;
+    const menu = menuRef.current?.getBoundingClientRect();
+    const w = menu?.width || 176;
+    const h = menu?.height || 160;
+    const gap = 4;
+    const edge = 8;
+    const left = Math.min(Math.max(edge, anchor.right - w), window.innerWidth - w - edge);
+    const below = anchor.bottom + gap;
+    const top = below + h > window.innerHeight - edge ? Math.max(edge, anchor.top - h - gap) : below;
+    setPos({ top, left });
+  }, []);
+
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [open, place]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); btnRef.current?.focus(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
+
+  const close = () => setOpen(false);
+
   return (
-    <div className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500" aria-label="Actions" aria-haspopup="menu" aria-expanded={open}><MoreHorizontal className="w-4 h-4" /></button>
-      {open && (
+    <>
+      <button ref={btnRef} type="button" onClick={() => setOpen((o) => !o)} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500" aria-label="Actions" aria-haspopup="menu" aria-expanded={open}><MoreHorizontal className="w-4 h-4" /></button>
+      {open && typeof document !== 'undefined' && createPortal(
         <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-30 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm" role="menu">
-            <Link href={`/outreach/sequences/${s.id}`} className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-gray-700" role="menuitem"><ExternalLink className="w-4 h-4" /> Open</Link>
-            {canManage && <button type="button" onClick={() => { setOpen(false); onDuplicate(); }} className="w-full text-left flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-gray-700" role="menuitem"><Copy className="w-4 h-4" /> Duplicate</button>}
-            {canManage && s.status !== 'archived' && <button type="button" onClick={() => { setOpen(false); onArchive(); }} className="w-full text-left flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-gray-700" role="menuitem"><Archive className="w-4 h-4" /> Archive</button>}
-            {canManage && <button type="button" disabled={!deletable} title={deletable ? undefined : 'Only draft or archived sequences can be deleted'} onClick={() => { setOpen(false); onDelete(); }} className="w-full text-left flex items-center gap-2 px-3 py-1.5 hover:bg-red-50 text-red-600 disabled:opacity-40 disabled:hover:bg-transparent" role="menuitem"><Trash2 className="w-4 h-4" /> Delete</button>}
+          <div className="fixed inset-0 z-40" onClick={close} />
+          <div ref={menuRef} role="menu" style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
+            className="fixed z-50 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
+            <Link href={`/outreach/sequences/${s.id}`} className={MENU_ITEM} role="menuitem" onClick={close}><ExternalLink className="w-4 h-4 flex-shrink-0" /> Open</Link>
+            {canManage && <button type="button" onClick={() => { close(); onDuplicate(); }} className={MENU_ITEM} role="menuitem"><Copy className="w-4 h-4 flex-shrink-0" /> Duplicate</button>}
+            {canManage && s.status !== 'archived' && <button type="button" onClick={() => { close(); onArchive(); }} className={MENU_ITEM} role="menuitem"><Archive className="w-4 h-4 flex-shrink-0" /> Archive</button>}
+            {canManage && <button type="button" disabled={!deletable} title={deletable ? undefined : 'Only draft or archived sequences can be deleted'} onClick={() => { close(); onDelete(); }} className={cn(MENU_ITEM, 'hover:bg-red-50 text-red-600 disabled:opacity-40 disabled:hover:bg-transparent')} role="menuitem"><Trash2 className="w-4 h-4 flex-shrink-0" /> Delete</button>}
           </div>
-        </>
+        </>,
+        document.body,
       )}
-    </div>
+    </>
   );
 }
 
@@ -175,7 +217,7 @@ export default function SequencesPage() {
                   <Td className="text-right tabular-nums">{sm?.sent ?? 0}</Td>
                   <Td className="text-right tabular-nums">{sm?.queued ?? 0}</Td>
                   <Td className="text-gray-500 whitespace-nowrap" title={s.updated_at}>{timeAgo(s.updated_at)}</Td>
-                  <Td><RowMenu s={s} canManage={canManage} onDuplicate={() => duplicate(s)} onArchive={() => setConfirm({ kind: 'archive', s })} onDelete={() => setConfirm({ kind: 'delete', s })} /></Td>
+                  <Td className="text-right"><RowMenu s={s} canManage={canManage} onDuplicate={() => duplicate(s)} onArchive={() => setConfirm({ kind: 'archive', s })} onDelete={() => setConfirm({ kind: 'delete', s })} /></Td>
                 </tr>
               );
             })}

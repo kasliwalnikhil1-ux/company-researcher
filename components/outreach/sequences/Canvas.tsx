@@ -90,6 +90,11 @@ export function deriveEdges(graph: Graph, readOnly: boolean): Edge[] {
   return edges;
 }
 
+/** Edges are fully derived from the graph, so identity only has to change when the wiring does. */
+function sameEdges(a: Edge[], b: Edge[]): boolean {
+  return a.length === b.length && a.every((e, i) => e.id === b[i].id && e.deletable === b[i].deletable);
+}
+
 export function deriveNodes(graph: Graph, opts: { stats: Record<string, NodeStats>; issues: Record<string, IssueLevel>; selectedId: string | null; readOnly: boolean; lookup: Lookup }, prev: OutreachRFNode[]): OutreachRFNode[] {
   const prevMap = new Map(prev.map((n) => [n.id, n]));
   return Object.values(graph.nodes).map((gn) => {
@@ -108,6 +113,30 @@ export function deriveNodes(graph: Graph, opts: { stats: Record<string, NodeStat
       data: { node: gn, summary: nodeSummary(gn, opts.lookup, graph.nodes), stats: opts.stats[gn.id] ?? null, issue: opts.issues[gn.id] ?? null },
     };
   });
+}
+
+/*
+ * React Flow copies every prop it tracks into its zustand store from an effect whose deps are those
+ * props. Anything recreated during render (object/array literals, non-memoised callbacks) makes that
+ * effect fire on every render, and its store writes re-render the flow, which re-renders us — an
+ * update loop that trips React's "maximum update depth". So: constants live outside the component and
+ * every handler we hand to React Flow keeps a stable identity (latest logic via ref).
+ */
+const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
+const SNAP_GRID: [number, number] = [20, 20];
+const PRO_OPTIONS = { hideAttribution: true };
+const DELETE_KEYS = ['Backspace', 'Delete'];
+const MINIMAP_CLS = '!bg-white !border !border-gray-200 !rounded-lg hidden md:block';
+const minimapNodeColor = (n: { data?: unknown }) => {
+  const t = (n.data as OutreachNodeData | undefined)?.node?.type;
+  return t === 'start' ? '#1f2937' : t === 'end' ? '#6b7280' : '#a5b4fc';
+};
+
+/** Stable callback wrapper (always runs the latest closure). */
+function useEvent<T extends (...args: never[]) => unknown>(fn: T): T {
+  const ref = useRef(fn);
+  ref.current = fn;
+  return useCallback(((...args: Parameters<T>) => ref.current(...(args as never[]))) as T, []);
 }
 
 export interface CanvasHandle {
@@ -140,12 +169,15 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
   const [edges, setEdges] = useState<Edge[]>([]);
   const edgesRef = useRef<Edge[]>([]);
   edgesRef.current = edges;
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
 
   useEffect(() => { setNodes((prev) => deriveNodes(graph, { stats, issues, selectedId, readOnly, lookup }, prev)); }, [graph, stats, issues, selectedId, readOnly, lookup]);
-  useEffect(() => { setEdges(deriveEdges(graph, readOnly)); }, [graph, readOnly]);
+  useEffect(() => { setEdges((prev) => { const next = deriveEdges(graph, readOnly); return sameEdges(prev, next) ? prev : next; }); }, [graph, readOnly]);
 
+  const select = useEvent((id: string | null) => onSelect(id));
   useImperativeHandle(ref, () => ({
-    focusNode: (id) => { onSelect(id); rf.fitView({ nodes: [{ id }], duration: 300, maxZoom: 1.1, padding: 0.6 }); },
+    focusNode: (id) => { select(id); rf.fitView({ nodes: [{ id }], duration: 300, maxZoom: 1.1, padding: 0.6 }); },
     fitView: () => { rf.fitView({ duration: 300, padding: 0.2 }); },
     centerPosition: () => {
       const r = wrapper.current?.getBoundingClientRect();
@@ -153,16 +185,16 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
       const p = rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
       return { x: p.x - NODE_W / 2, y: p.y - 40 };
     },
-  }), [rf, onSelect]);
+  }), [rf, select]);
 
-  const onNodesChange = useCallback((changes: NodeChange<OutreachRFNode>[]) => {
+  const onNodesChange = useEvent((changes: NodeChange<OutreachRFNode>[]) => {
     const removes = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);
     const rest = changes.filter((c) => c.type !== 'remove');
     if (rest.length) setNodes((ns) => applyNodeChanges(rest, ns));
     if (removes.length && !readOnly) onRequestDelete(removes);
-  }, [onRequestDelete, readOnly]);
+  });
 
-  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => {
+  const onEdgesChange = useEvent((changes: EdgeChange<Edge>[]) => {
     const removes = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);
     const rest = changes.filter((c) => c.type !== 'remove');
     if (rest.length) setEdges((es) => applyEdgeChanges(rest, es));
@@ -171,43 +203,43 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
       const e = edgesRef.current.find((x) => x.id === id);
       if (e) onDisconnect(e.source, (e.data?.handle as string) ?? e.sourceHandle ?? 'next');
     }
-  }, [onDisconnect, readOnly]);
+  });
 
-  const handleConnect = useCallback((c: Connection) => {
+  const handleConnect = useEvent((c: Connection) => {
     if (readOnly || !c.source || !c.target || c.source === c.target) return;
     onConnect(c.source, c.sourceHandle ?? 'next', c.target);
-  }, [onConnect, readOnly]);
+  });
 
-  const isValidConnection = useCallback<IsValidConnection<Edge>>((c) => !!c.source && !!c.target && c.source !== c.target && c.target !== graph.start, [graph.start]);
+  const isValidConnection = useEvent<IsValidConnection<Edge>>((c) => !!c.source && !!c.target && c.source !== c.target && c.target !== graph.start);
 
   // Node deletion may need a confirmation (in-flight enrollments), so take it over from React Flow: returning false
   // stops the built-in removal (which would also drop the node's edges before the user has decided).
-  const onBeforeDelete = useCallback(async ({ nodes: delNodes }: { nodes: OutreachRFNode[]; edges: Edge[] }) => {
+  const onBeforeDelete = useEvent(async ({ nodes: delNodes }: { nodes: OutreachRFNode[]; edges: Edge[] }) => {
     if (readOnly) return false;
     if (delNodes.length > 0) { onRequestDelete(delNodes.map((n) => n.id)); return false; }
     return true; // pure edge deletion → handled by onEdgesChange remove
-  }, [onRequestDelete, readOnly]);
+  });
 
-  const onSelectionChange = useCallback(({ nodes: sel }: OnSelectionChangeParams<OutreachRFNode, Edge>) => {
+  const onSelectionChange = useEvent(({ nodes: sel }: OnSelectionChangeParams<OutreachRFNode, Edge>) => {
     const id = sel[0]?.id ?? null;
-    if (id !== selectedId) onSelect(id);
-  }, [onSelect, selectedId]);
+    if (id !== selectedIdRef.current) onSelect(id);
+  });
 
-  const onNodeDragStop = useCallback((_e: unknown, _node: OutreachRFNode, dragged: OutreachRFNode[]) => {
+  const onNodeDragStop = useEvent((_e: unknown, _node: OutreachRFNode, dragged: OutreachRFNode[]) => {
     const positions: Record<string, { x: number; y: number }> = {};
     for (const n of dragged.length ? dragged : [_node]) positions[n.id] = n.position;
     onMoveNodes(positions);
-  }, [onMoveNodes]);
+  });
 
-  const onDragOver = useCallback((e: DragEvent) => { if (readOnly) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }, [readOnly]);
-  const onDrop = useCallback((e: DragEvent) => {
+  const onDragOver = useEvent((e: DragEvent) => { if (readOnly) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+  const onDrop = useEvent((e: DragEvent) => {
     if (readOnly) return;
     e.preventDefault();
     const type = e.dataTransfer.getData('application/outreach-node') as NodeType;
     if (!type || !NODE_CATALOG[type]) return;
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
     onAddNode(type, { x: p.x - NODE_W / 2, y: p.y - 20 });
-  }, [onAddNode, readOnly, rf]);
+  });
 
   return (
     <div ref={wrapper} className={cn('h-full w-full', props.className)} onDragOver={onDragOver} onDrop={onDrop}>
@@ -223,25 +255,22 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
         onSelectionChange={onSelectionChange}
         onNodeDragStop={onNodeDragStop}
         fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 1 }}
+        fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.15}
         maxZoom={1.75}
         snapToGrid
-        snapGrid={[20, 20]}
-        deleteKeyCode={readOnly ? null : ['Backspace', 'Delete']}
+        snapGrid={SNAP_GRID}
+        deleteKeyCode={readOnly ? null : DELETE_KEYS}
         nodesDraggable={!readOnly}
         nodesConnectable={!readOnly}
         elementsSelectable
         selectNodesOnDrag={false}
-        proOptions={{ hideAttribution: true }}
+        proOptions={PRO_OPTIONS}
         className="bg-gray-50"
       >
         <Background gap={20} size={1} color="#e5e7eb" />
         <Controls showInteractive={false} position="bottom-left" />
-        <MiniMap pannable zoomable position="bottom-right" nodeStrokeWidth={2} className="!bg-white !border !border-gray-200 !rounded-lg hidden md:block" nodeColor={(n) => {
-          const t = (n.data as OutreachNodeData | undefined)?.node?.type;
-          return t === 'start' ? '#1f2937' : t === 'end' ? '#6b7280' : '#a5b4fc';
-        }} />
+        <MiniMap pannable zoomable position="bottom-right" nodeStrokeWidth={2} className={MINIMAP_CLS} nodeColor={minimapNodeColor} />
       </ReactFlow>
     </div>
   );
