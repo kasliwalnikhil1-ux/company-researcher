@@ -10,7 +10,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Send } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Send, Briefcase } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
 import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
@@ -95,7 +95,7 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
   // me-data, me-data-prospects, and data-pipelines are accessible irrespective of onboarding
-  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines' || pathname === '/admin-stats' || pathname === '/admin' || pathname === '/linkedin-conversations' || pathname === '/sender-profiles' || pathname.startsWith('/outreach');
+  const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines' || pathname === '/admin-stats' || pathname === '/admin' || pathname === '/linkedin-conversations' || pathname === '/sender-profiles' || pathname.startsWith('/outreach') || pathname.startsWith('/crm');
   const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute;
 
   // Detect mobile screen size
@@ -396,6 +396,19 @@ export default function MainLayout({ children }: { children: React.ReactNode }) 
             >
               <Send className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
               {(!isCollapsed || isMobile) && <span>Outreach</span>}
+            </Link>
+
+            <Link
+              href="/crm"
+              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                pathname.startsWith('/crm')
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-700 hover:bg-gray-50'
+              }`}
+              title="Sales CRM"
+            >
+              <Briefcase className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+              {(!isCollapsed || isMobile) && <span>Sales CRM</span>}
             </Link>
 
             {routeAccess.showLinkedInInbox && (

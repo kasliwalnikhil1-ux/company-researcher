@@ -1,0 +1,1205 @@
+-- =============================================================================
+-- Sales CRM — 002 helpers, triggers (the hard rules), views, RLS, RPCs
+-- Error convention (same as outreach): raise exception 'E_CODE: message'.
+-- Every RPC is security definer + crm_require_member() so the web app and the
+-- MCP connector go through exactly the same code path (no UI-only or MCP-only
+-- behaviour).
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- Helpers
+-- -----------------------------------------------------------------------------
+create or replace function crm_is_member() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from crm_members m where m.user_id = auth.uid() and m.is_active);
+$$;
+
+create or replace function crm_require_member() returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null then raise exception 'E_UNAUTHORIZED: sign in first'; end if;
+  if not crm_is_member() then raise exception 'E_FORBIDDEN: you are not on the sales CRM team (ask a member to add you in CRM → Settings → Team)'; end if;
+end $$;
+
+create or replace function crm_setting(p_key text, p_default jsonb default null) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce((select value from crm_settings where key = p_key), p_default);
+$$;
+
+create or replace function crm_tz() returns text
+language sql stable security definer set search_path = public as $$
+  select coalesce(crm_setting('default_timezone') #>> '{}', 'Asia/Kolkata');
+$$;
+
+create or replace function crm_stale_days() returns int
+language sql stable security definer set search_path = public as $$
+  select coalesce((crm_setting('stale_after_days') #>> '{}')::int, 14);
+$$;
+
+create or replace function crm_stage_rank(p crm_deal_stage_t) returns int
+language sql immutable as $$
+  select array_position(enum_range(null::crm_deal_stage_t), p);
+$$;
+
+create or replace function crm_slugify(p text) returns text
+language sql immutable as $$
+  select trim(both '_' from regexp_replace(lower(coalesce(p, '')), '[^a-z0-9]+', '_', 'g'));
+$$;
+
+create or replace function crm_domain_from_url(p text) returns text
+language plpgsql immutable as $$
+declare s text;
+begin
+  if p is null or trim(p) = '' then return null; end if;
+  s := lower(trim(p));
+  s := regexp_replace(s, '^[a-z]+://', '');
+  s := regexp_replace(s, '^www\.', '');
+  s := split_part(split_part(split_part(s, '/', 1), '?', 1), ':', 1);
+  if s !~ '^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$' then return null; end if;
+  return s;
+end $$;
+
+create or replace function crm_is_uuid(p text) returns boolean
+language sql immutable as $$
+  select p ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
+$$;
+
+create or replace function crm_set_updated_at() returns trigger language plpgsql as $$
+begin new.updated_at := now(); return new; end $$;
+
+/** Local-day window [from, to) for a date in a timezone. */
+create or replace function crm_day_window(p_date date, p_tz text default null, out w_from timestamptz, out w_to timestamptz)
+language plpgsql stable as $$
+declare tz text := coalesce(p_tz, crm_tz());
+begin
+  w_from := (p_date::timestamp) at time zone tz;
+  w_to := w_from + interval '1 day';
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Lookup / entity resolvers (accept uuid | slug | label so chat can say "LinkedIn")
+-- -----------------------------------------------------------------------------
+create or replace function crm_lookup_table(p_kind text) returns text
+language plpgsql immutable as $$
+begin
+  return case p_kind
+    when 'icp_segment' then 'crm_icp_segments'
+    when 'source_channel' then 'crm_source_channels'
+    when 'activity_type' then 'crm_activity_types'
+    else null end;
+end $$;
+
+create or replace function crm_resolve_lookup(p_kind text, p_ref text) returns uuid
+language plpgsql stable security definer set search_path = public as $$
+declare tbl text := crm_lookup_table(p_kind); r uuid;
+begin
+  if tbl is null then raise exception 'E_PAYLOAD_INVALID: unknown lookup kind %', p_kind; end if;
+  if p_ref is null or trim(p_ref) = '' then return null; end if;
+  if crm_is_uuid(p_ref) then
+    execute format('select id from %I where id = $1', tbl) into r using p_ref::uuid;
+    if r is not null then return r; end if;
+  end if;
+  execute format('select id from %I where slug = $1 or lower(label) = lower($1) or slug = crm_slugify($1) order by is_active desc limit 1', tbl) into r using trim(p_ref);
+  if r is null then
+    raise exception 'E_NOT_FOUND: unknown % "%" — add it in CRM → Settings (or with lookup_save) first', replace(p_kind, '_', ' '), p_ref;
+  end if;
+  return r;
+end $$;
+
+create or replace function crm_resolve_member(p_ref text) returns uuid
+language plpgsql stable security definer set search_path = public as $$
+declare r uuid;
+begin
+  if p_ref is null or trim(p_ref) = '' or lower(p_ref) = 'me' then return auth.uid(); end if;
+  if crm_is_uuid(p_ref) then
+    select user_id into r from crm_members where user_id = p_ref::uuid;
+    if r is not null then return r; end if;
+  end if;
+  select user_id into r from crm_members where lower(email) = lower(trim(p_ref)) or lower(display_name) = lower(trim(p_ref)) order by is_active desc limit 1;
+  if r is null then
+    select user_id into r from crm_members where display_name ilike '%' || trim(p_ref) || '%' and is_active order by display_name limit 1;
+  end if;
+  if r is null then raise exception 'E_NOT_FOUND: no team member matches "%"', p_ref; end if;
+  return r;
+end $$;
+
+/** company_id | company (domain, website, or name). */
+create or replace function crm_resolve_company(p jsonb, p_required boolean default true) returns uuid
+language plpgsql stable security definer set search_path = public as $$
+declare r uuid; ref text; d text;
+begin
+  if p ? 'company_id' and p->>'company_id' is not null then
+    select id into r from crm_companies where id = (p->>'company_id')::uuid;
+    if r is null then raise exception 'E_NOT_FOUND: company % not found', p->>'company_id'; end if;
+    return r;
+  end if;
+  ref := coalesce(p->>'company', p->>'company_name', p->>'company_domain');
+  if ref is null or trim(ref) = '' then
+    if p_required then raise exception 'E_PAYLOAD_INVALID: company_id or company (name/domain) is required'; end if;
+    return null;
+  end if;
+  if crm_is_uuid(ref) then select id into r from crm_companies where id = ref::uuid; if r is not null then return r; end if; end if;
+  d := crm_domain_from_url(ref);
+  if d is not null then select id into r from crm_companies where domain = d; if r is not null then return r; end if; end if;
+  select id into r from crm_companies where lower(name) = lower(trim(ref)) limit 1;
+  if r is null then select id into r from crm_companies where name ilike '%' || trim(ref) || '%' order by length(name) limit 1; end if;
+  if r is null and p_required then raise exception 'E_NOT_FOUND: no company matches "%" — create it with upsert_company first', ref; end if;
+  return r;
+end $$;
+
+/** contact_id | contact_email | (company + contact_name). */
+create or replace function crm_resolve_contact(p jsonb, p_required boolean default true) returns uuid
+language plpgsql stable security definer set search_path = public as $$
+declare r uuid; cid uuid; nm text;
+begin
+  if p ? 'contact_id' and p->>'contact_id' is not null then
+    select id into r from crm_contacts where id = (p->>'contact_id')::uuid;
+    if r is null then raise exception 'E_NOT_FOUND: contact % not found', p->>'contact_id'; end if;
+    return r;
+  end if;
+  if coalesce(p->>'contact_email', p->>'email') is not null then
+    select id into r from crm_contacts where lower(email) = lower(trim(coalesce(p->>'contact_email', p->>'email')));
+    if r is not null then return r; end if;
+  end if;
+  nm := coalesce(p->>'contact', p->>'contact_name');
+  if nm is not null then
+    cid := crm_resolve_company(p, false);
+    if cid is not null then
+      select id into r from crm_contacts where company_id = cid and lower(name) = lower(trim(nm)) limit 1;
+      if r is null then select id into r from crm_contacts where company_id = cid and name ilike '%' || trim(nm) || '%' limit 1; end if;
+    else
+      select id into r from crm_contacts where lower(name) = lower(trim(nm)) limit 1;
+    end if;
+  end if;
+  if r is null and p_required then raise exception 'E_NOT_FOUND: no contact matches % — add them with upsert_contact first', coalesce(nm, p->>'contact_email', '(none given)'); end if;
+  return r;
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Triggers: companies
+-- -----------------------------------------------------------------------------
+create or replace function crm_trg_company_biu() returns trigger language plpgsql as $$
+begin
+  if new.website is not null then new.domain := coalesce(crm_domain_from_url(new.website), new.domain); end if;
+  if tg_op = 'INSERT' then new.created_by := coalesce(new.created_by, auth.uid()); end if;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists crm_companies_biu on crm_companies;
+create trigger crm_companies_biu before insert or update on crm_companies for each row execute function crm_trg_company_biu();
+
+drop trigger if exists crm_contacts_bu on crm_contacts;
+create trigger crm_contacts_bu before update on crm_contacts for each row execute function crm_set_updated_at();
+
+-- -----------------------------------------------------------------------------
+-- Triggers: deals — currency, forward-only stages, stage history
+-- -----------------------------------------------------------------------------
+create or replace function crm_trg_deal_biu() returns trigger language plpgsql security definer set search_path = public as $$
+declare fx numeric; reason text;
+begin
+  new.currency := upper(coalesce(new.currency, 'USD'));
+  if new.value_monthly is null then
+    new.value_monthly_usd := null;
+  else
+    select usd_per_unit into fx from crm_fx_rates where currency = new.currency;
+    if fx is null then raise exception 'E_UNKNOWN_CURRENCY: no FX rate for % — add it in CRM → Settings → Currencies', new.currency; end if;
+    new.value_monthly_usd := round(new.value_monthly * fx, 2);
+  end if;
+  if new.source_channel_id is null then
+    select source_channel_id into new.source_channel_id from crm_companies where id = new.company_id;
+  end if;
+  if tg_op = 'INSERT' then
+    new.created_by := coalesce(new.created_by, auth.uid());
+    new.stage_entered_at := coalesce(new.stage_entered_at, now());
+    if new.stage in ('won','lost') then new.closed_at := coalesce(new.closed_at, now()); end if;
+  elsif new.stage <> old.stage then
+    -- Rule 4: forward or to lost; backwards needs an explicit reason (set by crm_update_deal)
+    reason := nullif(current_setting('crm.stage_reason', true), '');
+    if new.stage <> 'lost' and crm_stage_rank(new.stage) < crm_stage_rank(old.stage) and reason is null then
+      raise exception 'E_STAGE_BACKWARD: % → % moves the deal backwards; give a reason (update_deal … reason) so it is written to stage_history', old.stage, new.stage;
+    end if;
+    new.stage_entered_at := now();
+    new.closed_at := case when new.stage in ('won','lost') then now() else null end;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists crm_deals_biu on crm_deals;
+create trigger crm_deals_biu before insert or update on crm_deals for each row execute function crm_trg_deal_biu();
+
+create or replace function crm_trg_deal_history() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    insert into crm_stage_history(deal_id, from_stage, to_stage, changed_by, changed_at) values (new.id, null, new.stage, coalesce(new.created_by, auth.uid()), new.stage_entered_at);
+  elsif new.stage <> old.stage then
+    insert into crm_stage_history(deal_id, from_stage, to_stage, reason, changed_by) values (new.id, old.stage, new.stage, nullif(current_setting('crm.stage_reason', true), ''), auth.uid());
+  end if;
+  return new;
+end $$;
+drop trigger if exists crm_deals_history on crm_deals;
+create trigger crm_deals_history after insert or update of stage on crm_deals for each row execute function crm_trg_deal_history();
+
+-- -----------------------------------------------------------------------------
+-- Triggers: activities — fill company/deal/owner, bump deal.last_activity_at
+-- -----------------------------------------------------------------------------
+create or replace function crm_trg_activity_bi() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.company_id is null and new.contact_id is not null then select company_id into new.company_id from crm_contacts where id = new.contact_id; end if;
+  if new.company_id is null and new.deal_id is not null then select company_id into new.company_id from crm_deals where id = new.deal_id; end if;
+  if new.company_id is null then raise exception 'E_PAYLOAD_INVALID: activity needs a contact, deal or company'; end if;
+  if new.deal_id is null then
+    select id into new.deal_id from crm_deals where company_id = new.company_id and stage not in ('won','lost') order by created_at desc limit 1;
+  end if;
+  if new.source_channel_id is null then
+    select coalesce(d.source_channel_id, c.source_channel_id) into new.source_channel_id
+      from crm_companies c left join crm_deals d on d.id = new.deal_id where c.id = new.company_id;
+  end if;
+  new.owner_id := coalesce(new.owner_id, case when exists (select 1 from crm_members where user_id = auth.uid()) then auth.uid() end);
+  new.created_by := coalesce(new.created_by, auth.uid());
+  return new;
+end $$;
+drop trigger if exists crm_activities_bi on crm_activities;
+create trigger crm_activities_bi before insert on crm_activities for each row execute function crm_trg_activity_bi();
+
+create or replace function crm_trg_activity_ai() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.deal_id is not null then
+    update crm_deals set last_activity_at = greatest(coalesce(last_activity_at, '-infinity'), new.occurred_at) where id = new.deal_id;
+  end if;
+  return new;
+end $$;
+drop trigger if exists crm_activities_ai on crm_activities;
+create trigger crm_activities_ai after insert on crm_activities for each row execute function crm_trg_activity_ai();
+
+-- -----------------------------------------------------------------------------
+-- Triggers: meetings — RULE 1: no held/no_show without a matching capture
+-- -----------------------------------------------------------------------------
+create or replace function crm_trg_meeting_biu() returns trigger language plpgsql security definer set search_path = public as $$
+declare cap crm_capture_outcome_t;
+begin
+  if tg_op = 'INSERT' then
+    new.created_by := coalesce(new.created_by, auth.uid());
+    if new.status in ('held','no_show') then
+      raise exception 'E_CAPTURE_REQUIRED: a meeting cannot be created as % — schedule it, then call capture_meeting', new.status;
+    end if;
+  elsif new.status is distinct from old.status and new.status in ('held','no_show') then
+    select outcome into cap from crm_meeting_captures where meeting_id = new.id;
+    if cap is null then
+      raise exception 'E_CAPTURE_REQUIRED: meeting % cannot move to % without a meeting_capture row — use capture_meeting(meeting_id, outcome, …)', new.id, new.status;
+    end if;
+    if cap::text <> new.status::text then
+      raise exception 'E_CAPTURE_MISMATCH: the capture for meeting % says %, not %', new.id, cap, new.status;
+    end if;
+  end if;
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists crm_meetings_biu on crm_meetings;
+create trigger crm_meetings_biu before insert or update on crm_meetings for each row execute function crm_trg_meeting_biu();
+
+-- Booking a meeting moves the deal forward to meeting_booked (never backwards).
+create or replace function crm_trg_meeting_ai() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  update crm_deals set stage = 'meeting_booked'
+    where id = new.deal_id and stage <> 'lost' and crm_stage_rank(stage) < crm_stage_rank('meeting_booked');
+  update crm_deals set last_activity_at = greatest(coalesce(last_activity_at, '-infinity'), now()) where id = new.deal_id;
+  return new;
+end $$;
+drop trigger if exists crm_meetings_ai on crm_meetings;
+create trigger crm_meetings_ai after insert on crm_meetings for each row execute function crm_trg_meeting_ai();
+
+-- -----------------------------------------------------------------------------
+-- Triggers: meeting captures — completeness per outcome, repeat no-show,
+-- and the single write that flips the meeting + deal
+-- -----------------------------------------------------------------------------
+create or replace function crm_capture_missing(p_outcome crm_capture_outcome_t, p jsonb) returns text[]
+language plpgsql immutable as $$
+declare missing text[] := '{}'; pp jsonb := p->'pain_points'; dead boolean := coalesce((p->>'is_dead')::boolean, false);
+begin
+  if p_outcome = 'held' then
+    if pp is null or jsonb_typeof(pp) <> 'array' or jsonb_array_length(pp) = 0 then missing := array_append(missing, 'pain_points (in the prospect''s own words)'); end if;
+    if p->'commercials_discussed' is null or jsonb_typeof(p->'commercials_discussed') = 'null' then missing := array_append(missing, 'commercials_discussed ({price, volume, currency} or {none: true})'); end if;
+    if dead then
+      if nullif(trim(coalesce(p->>'dead_reason','')), '') is null then missing := array_append(missing, 'dead_reason (is_dead is true)'); end if;
+    else
+      if nullif(trim(coalesce(p->>'next_step','')), '') is null then missing := array_append(missing, 'next_step (or is_dead + dead_reason)'); end if;
+      if nullif(trim(coalesce(p->>'next_step_date','')), '') is null then missing := array_append(missing, 'next_step_date'); end if;
+    end if;
+  else
+    if nullif(trim(coalesce(p->>'no_show_reason','')), '') is null then missing := array_append(missing, 'no_show_reason'); end if;
+    if nullif(trim(coalesce(p->>'follow_up_action','')), '') is null then missing := array_append(missing, 'follow_up_action'); end if;
+    if nullif(trim(coalesce(p->>'follow_up_date','')), '') is null then missing := array_append(missing, 'follow_up_date'); end if;
+  end if;
+  return missing;
+end $$;
+
+create or replace function crm_trg_capture_biu() returns trigger language plpgsql security definer set search_path = public as $$
+declare m record; missing text[]; prior int;
+begin
+  select * into m from crm_meetings where id = new.meeting_id;
+  if m is null then raise exception 'E_NOT_FOUND: meeting % not found', new.meeting_id; end if;
+  if m.status = 'cancelled' then raise exception 'E_MEETING_CANCELLED: meeting % is cancelled; reschedule it before capturing', new.meeting_id; end if;
+  missing := crm_capture_missing(new.outcome, to_jsonb(new));
+  if array_length(missing, 1) > 0 then
+    raise exception 'E_CAPTURE_INCOMPLETE: % capture is missing: %', new.outcome, array_to_string(missing, '; ');
+  end if;
+  if new.outcome = 'no_show' then
+    select count(*) into prior from crm_meetings pm
+      where pm.id <> m.id and pm.status = 'no_show' and pm.scheduled_at < m.scheduled_at
+        and (pm.contact_id = m.contact_id or (m.contact_id is null and pm.deal_id = m.deal_id));
+    new.is_repeat_no_show := prior > 0;
+  else
+    new.is_repeat_no_show := false;
+  end if;
+  if tg_op = 'INSERT' then new.created_by := coalesce(new.created_by, auth.uid()); end if;
+  return new;
+end $$;
+drop trigger if exists crm_captures_biu on crm_meeting_captures;
+create trigger crm_captures_biu before insert or update on crm_meeting_captures for each row execute function crm_trg_capture_biu();
+
+create or replace function crm_trg_capture_ai() returns trigger language plpgsql security definer set search_path = public as $$
+declare m record;
+begin
+  select * into m from crm_meetings where id = new.meeting_id;
+  -- flip the meeting (the BEFORE UPDATE trigger on meetings now finds the capture)
+  update crm_meetings set status = new.outcome::text::crm_meeting_status_t where id = new.meeting_id and status is distinct from new.outcome::text::crm_meeting_status_t;
+  if new.outcome = 'held' then
+    if new.is_dead then
+      perform set_config('crm.stage_reason', 'dead after meeting: ' || coalesce(new.dead_reason, ''), true);
+      update crm_deals set stage = 'lost', lost_reason = coalesce(new.dead_reason, lost_reason), next_step = null, next_step_date = null where id = m.deal_id and stage <> 'lost';
+      perform set_config('crm.stage_reason', '', true);
+    else
+      update crm_deals set stage = 'meeting_held' where id = m.deal_id and stage <> 'lost' and crm_stage_rank(stage) < crm_stage_rank('meeting_held');
+      update crm_deals set next_step = new.next_step, next_step_date = new.next_step_date where id = m.deal_id and stage not in ('won','lost');
+    end if;
+  else
+    update crm_deals set next_step = new.follow_up_action, next_step_date = new.follow_up_date where id = m.deal_id and stage not in ('won','lost');
+  end if;
+  update crm_deals set last_activity_at = greatest(coalesce(last_activity_at, '-infinity'), now()) where id = m.deal_id;
+  return new;
+end $$;
+drop trigger if exists crm_captures_ai on crm_meeting_captures;
+create trigger crm_captures_ai after insert on crm_meeting_captures for each row execute function crm_trg_capture_ai();
+
+create or replace function crm_trg_capture_bd() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if exists (select 1 from crm_meetings where id = old.meeting_id and status in ('held','no_show')) then
+    raise exception 'E_CAPTURE_LOCKED: the meeting is already %; edit the capture instead of deleting it', (select status from crm_meetings where id = old.meeting_id);
+  end if;
+  return old;
+end $$;
+drop trigger if exists crm_captures_bd on crm_meeting_captures;
+create trigger crm_captures_bd before delete on crm_meeting_captures for each row execute function crm_trg_capture_bd();
+
+drop trigger if exists crm_commitments_bu on crm_commitments;
+create trigger crm_commitments_bu before update on crm_commitments for each row execute function crm_set_updated_at();
+
+-- -----------------------------------------------------------------------------
+-- Views (security_invoker → RLS of the caller applies)
+-- -----------------------------------------------------------------------------
+create or replace view crm_deals_v with (security_invoker = true) as
+select d.*,
+       c.name as company_name, c.domain as company_domain, c.country as company_country, c.timezone as company_timezone,
+       seg.id as icp_segment_id, seg.slug as icp_segment_slug, seg.label as icp_segment_label,
+       ch.slug as source_channel_slug, ch.label as source_channel_label,
+       m.display_name as owner_name,
+       (d.stage not in ('won','lost')) as is_active,
+       greatest(0, extract(day from now() - d.stage_entered_at))::int as days_in_stage,
+       greatest(0, extract(day from now() - coalesce(d.last_activity_at, d.created_at)))::int as days_since_activity,
+       (d.stage not in ('won','lost') and (d.next_step is null or d.next_step_date is null)) as is_stuck,
+       (d.stage not in ('won','lost') and coalesce(d.last_activity_at, d.created_at) < now() - make_interval(days => crm_stale_days())) as is_stale,
+       (d.stage not in ('won','lost') and d.next_step_date is not null and d.next_step_date < (now() at time zone crm_tz())::date) as is_slipping
+from crm_deals d
+join crm_companies c on c.id = d.company_id
+left join crm_icp_segments seg on seg.id = c.icp_segment_id
+left join crm_source_channels ch on ch.id = d.source_channel_id
+left join crm_members m on m.user_id = d.owner_id;
+
+create or replace view crm_meetings_v with (security_invoker = true) as
+select mt.*,
+       d.company_id, c.name as company_name, d.stage as deal_stage, d.value_monthly, d.currency, d.value_monthly_usd, d.owner_id,
+       ct.name as contact_name, ct.role as contact_role, ct.email as contact_email,
+       seg.label as icp_segment_label, ch.label as source_channel_label,
+       (cap.id is not null) as has_capture, cap.outcome as capture_outcome
+from crm_meetings mt
+join crm_deals d on d.id = mt.deal_id
+join crm_companies c on c.id = d.company_id
+left join crm_contacts ct on ct.id = mt.contact_id
+left join crm_icp_segments seg on seg.id = c.icp_segment_id
+left join crm_source_channels ch on ch.id = d.source_channel_id
+left join crm_meeting_captures cap on cap.meeting_id = mt.id;
+
+create or replace view crm_activities_v with (security_invoker = true) as
+select a.*, t.slug as activity_type_slug, t.label as activity_type_label, t.counts_as,
+       ch.slug as source_channel_slug, ch.label as source_channel_label,
+       ct.name as contact_name, ct.role as contact_role, c.name as company_name, m.display_name as owner_name
+from crm_activities a
+join crm_activity_types t on t.id = a.activity_type_id
+left join crm_source_channels ch on ch.id = a.source_channel_id
+left join crm_contacts ct on ct.id = a.contact_id
+join crm_companies c on c.id = a.company_id
+left join crm_members m on m.user_id = a.owner_id;
+
+-- -----------------------------------------------------------------------------
+-- RLS — every active team member sees and edits everything
+-- -----------------------------------------------------------------------------
+do $$
+declare t text;
+begin
+  for t in select unnest(array['crm_settings','crm_icp_segments','crm_source_channels','crm_activity_types','crm_fx_rates','crm_channel_costs',
+                               'crm_companies','crm_contacts','crm_deals','crm_stage_history','crm_activities','crm_meetings','crm_meeting_captures',
+                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments']) loop
+    execute format('alter table %I enable row level security', t);
+    execute format('drop policy if exists crm_member_all on %I', t);
+    execute format('create policy crm_member_all on %I for all to authenticated using (crm_is_member()) with check (crm_is_member())', t);
+  end loop;
+end $$;
+
+alter table crm_members enable row level security;
+drop policy if exists crm_members_read on crm_members;
+create policy crm_members_read on crm_members for select to authenticated using (crm_is_member() or user_id = auth.uid());
+-- writes to crm_members only via RPCs (security definer)
+
+alter table crm_agent_calls enable row level security;   -- no policies: service role only
+
+grant select on crm_deals_v, crm_meetings_v, crm_activities_v to authenticated;
+
+-- =============================================================================
+-- RPCs
+-- =============================================================================
+
+-- ------------------------------------------------------------------ context
+create or replace function crm_context() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare me record; is_m boolean := crm_is_member();
+begin
+  if auth.uid() is null then raise exception 'E_UNAUTHORIZED: sign in first'; end if;
+  select * into me from crm_members where user_id = auth.uid();
+  return jsonb_build_object(
+    'user_id', auth.uid(),
+    'is_member', is_m,
+    'me', case when me.user_id is null then null else jsonb_build_object('user_id', me.user_id, 'display_name', me.display_name, 'email', me.email, 'is_active', me.is_active) end,
+    'members', case when is_m then (select coalesce(jsonb_agg(jsonb_build_object('user_id', user_id, 'display_name', display_name, 'email', email, 'is_active', is_active) order by display_name), '[]') from crm_members) else '[]'::jsonb end,
+    'settings', case when is_m then (select coalesce(jsonb_object_agg(key, value), '{}') from crm_settings) else '{}'::jsonb end,
+    'timezone', crm_tz(),
+    'stale_after_days', crm_stale_days(),
+    'stages', (select jsonb_agg(s) from unnest(enum_range(null::crm_deal_stage_t)) s),
+    'icp_segments', case when is_m then (select coalesce(jsonb_agg(to_jsonb(x) order by x.sort_order, x.label), '[]') from crm_icp_segments x) else '[]'::jsonb end,
+    'source_channels', case when is_m then (select coalesce(jsonb_agg(to_jsonb(x) order by x.sort_order, x.label), '[]') from crm_source_channels x) else '[]'::jsonb end,
+    'activity_types', case when is_m then (select coalesce(jsonb_agg(to_jsonb(x) order by x.sort_order, x.label), '[]') from crm_activity_types x) else '[]'::jsonb end,
+    'fx_rates', case when is_m then (select coalesce(jsonb_object_agg(currency, usd_per_unit), '{}') from crm_fx_rates) else '{}'::jsonb end
+  );
+end $$;
+
+-- ------------------------------------------------------------------ team & settings
+create or replace function crm_add_member(p_email text, p_display_name text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid; r crm_members;
+begin
+  perform crm_require_member();
+  select id into uid from auth.users where lower(email) = lower(trim(p_email)) limit 1;
+  if uid is null then raise exception 'E_NOT_FOUND: no CapitalxAI account with email % — they must sign up first', p_email; end if;
+  insert into crm_members(user_id, display_name, email) values (uid, coalesce(nullif(trim(p_display_name), ''), split_part(p_email, '@', 1)), lower(trim(p_email)))
+  on conflict (user_id) do update set is_active = true, display_name = coalesce(nullif(trim(excluded.display_name), ''), crm_members.display_name), email = excluded.email
+  returning * into r;
+  return to_jsonb(r);
+end $$;
+
+create or replace function crm_set_member(p_user_id uuid, p_display_name text default null, p_is_active boolean default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r crm_members;
+begin
+  perform crm_require_member();
+  if p_is_active = false and p_user_id = auth.uid() and (select count(*) from crm_members where is_active) <= 1 then
+    raise exception 'E_LAST_MEMBER: you cannot deactivate the last active member';
+  end if;
+  update crm_members set display_name = coalesce(nullif(trim(p_display_name), ''), display_name), is_active = coalesce(p_is_active, is_active) where user_id = p_user_id returning * into r;
+  if r.user_id is null then raise exception 'E_NOT_FOUND: member not found'; end if;
+  return to_jsonb(r);
+end $$;
+
+create or replace function crm_set_setting(p_key text, p_value jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform crm_require_member();
+  if p_key not in ('default_timezone','stale_after_days','default_currency','studio_name') then raise exception 'E_PAYLOAD_INVALID: unknown setting %', p_key; end if;
+  insert into crm_settings(key, value) values (p_key, p_value) on conflict (key) do update set value = excluded.value, updated_at = now();
+  return (select coalesce(jsonb_object_agg(key, value), '{}') from crm_settings);
+end $$;
+
+/** Add or edit a lookup value (icp_segment | source_channel | activity_type). Never a migration. */
+create or replace function crm_lookup_save(p_kind text, p_label text, p_slug text default null, p_sort_order int default null, p_is_active boolean default null, p_notes text default null, p_counts_as text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare tbl text := crm_lookup_table(p_kind); slug text := coalesce(nullif(crm_slugify(p_slug), ''), crm_slugify(p_label)); r jsonb; mx int;
+begin
+  perform crm_require_member();
+  if tbl is null then raise exception 'E_PAYLOAD_INVALID: kind must be icp_segment | source_channel | activity_type'; end if;
+  if slug = '' then raise exception 'E_PAYLOAD_INVALID: label is required'; end if;
+  execute format('select coalesce(max(sort_order), 0) + 10 from %I', tbl) into mx;
+  if p_kind = 'activity_type' then
+    execute format($q$insert into %I(slug, label, sort_order, is_active, notes, counts_as) values ($1, $2, coalesce($3, %s), coalesce($4, true), $5, $6)
+      on conflict (slug) do update set label = coalesce($2, %I.label), sort_order = coalesce($3, %I.sort_order), is_active = coalesce($4, %I.is_active), notes = coalesce($5, %I.notes), counts_as = coalesce($6, %I.counts_as)
+      returning to_jsonb(%I.*)$q$, tbl, mx, tbl, tbl, tbl, tbl, tbl, tbl) into r using slug, trim(p_label), p_sort_order, p_is_active, p_notes, p_counts_as;
+  else
+    execute format($q$insert into %I(slug, label, sort_order, is_active, notes) values ($1, $2, coalesce($3, %s), coalesce($4, true), $5)
+      on conflict (slug) do update set label = coalesce($2, %I.label), sort_order = coalesce($3, %I.sort_order), is_active = coalesce($4, %I.is_active), notes = coalesce($5, %I.notes)
+      returning to_jsonb(%I.*)$q$, tbl, mx, tbl, tbl, tbl, tbl, tbl) into r using slug, trim(p_label), p_sort_order, p_is_active, p_notes;
+  end if;
+  return r;
+end $$;
+
+create or replace function crm_lookup_reorder(p_kind text, p_slugs text[]) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare tbl text := crm_lookup_table(p_kind); i int; r jsonb;
+begin
+  perform crm_require_member();
+  if tbl is null then raise exception 'E_PAYLOAD_INVALID: unknown lookup kind %', p_kind; end if;
+  for i in 1 .. coalesce(array_length(p_slugs, 1), 0) loop
+    execute format('update %I set sort_order = $1 where slug = $2', tbl) using i * 10, p_slugs[i];
+  end loop;
+  execute format('select coalesce(jsonb_agg(to_jsonb(x) order by x.sort_order, x.label), ''[]'') from %I x', tbl) into r;
+  return r;
+end $$;
+
+create or replace function crm_set_fx_rate(p_currency text, p_usd_per_unit numeric) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform crm_require_member();
+  insert into crm_fx_rates(currency, usd_per_unit) values (upper(trim(p_currency)), p_usd_per_unit)
+    on conflict (currency) do update set usd_per_unit = excluded.usd_per_unit, updated_at = now();
+  update crm_deals set value_monthly_usd = round(value_monthly * p_usd_per_unit, 2) where currency = upper(trim(p_currency)) and value_monthly is not null;
+  return (select coalesce(jsonb_object_agg(currency, usd_per_unit), '{}') from crm_fx_rates);
+end $$;
+
+create or replace function crm_set_channel_cost(p_source_channel text, p_month date, p_cost numeric, p_currency text default 'USD', p_notes text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare ch uuid := crm_resolve_lookup('source_channel', p_source_channel); r crm_channel_costs;
+begin
+  perform crm_require_member();
+  insert into crm_channel_costs(source_channel_id, month, cost, currency, notes) values (ch, date_trunc('month', p_month)::date, p_cost, upper(coalesce(p_currency, 'USD')), p_notes)
+    on conflict (source_channel_id, month) do update set cost = excluded.cost, currency = excluded.currency, notes = coalesce(excluded.notes, crm_channel_costs.notes)
+    returning * into r;
+  return to_jsonb(r);
+end $$;
+
+-- ------------------------------------------------------------------ companies / contacts / deals
+create or replace function crm_upsert_company(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare cid uuid; r crm_companies; d text;
+begin
+  perform crm_require_member();
+  cid := case when p ? 'id' and p->>'id' is not null then (p->>'id')::uuid else null end;
+  if cid is null then
+    d := crm_domain_from_url(coalesce(p->>'website', p->>'domain'));
+    if d is not null then select id into cid from crm_companies where domain = d; end if;
+    if cid is null and p->>'name' is not null then select id into cid from crm_companies where lower(name) = lower(trim(p->>'name')) limit 1; end if;
+  end if;
+  if cid is null then
+    if nullif(trim(coalesce(p->>'name', '')), '') is null then raise exception 'E_PAYLOAD_INVALID: name is required'; end if;
+    insert into crm_companies(name, website, domain, country, timezone, icp_segment_id, source_channel_id, notes)
+    values (trim(p->>'name'), p->>'website', d, p->>'country', p->>'timezone',
+            crm_resolve_lookup('icp_segment', coalesce(p->>'icp_segment', p->>'icp_segment_id')),
+            crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')), p->>'notes')
+    returning * into r;
+  else
+    update crm_companies set
+      name = coalesce(nullif(trim(p->>'name'), ''), name),
+      website = case when p ? 'website' then p->>'website' else website end,
+      country = case when p ? 'country' then p->>'country' else country end,
+      timezone = case when p ? 'timezone' then p->>'timezone' else timezone end,
+      icp_segment_id = case when p ? 'icp_segment' or p ? 'icp_segment_id' then crm_resolve_lookup('icp_segment', coalesce(p->>'icp_segment', p->>'icp_segment_id')) else icp_segment_id end,
+      source_channel_id = case when p ? 'source_channel' or p ? 'source_channel_id' then crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')) else source_channel_id end,
+      notes = case when p ? 'notes' then p->>'notes' when p ? 'append_notes' then concat_ws(E'\n', notes, p->>'append_notes') else notes end
+    where id = cid returning * into r;
+  end if;
+  return to_jsonb(r);
+end $$;
+
+create or replace function crm_upsert_contact(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare cid uuid; ctid uuid; r crm_contacts;
+begin
+  perform crm_require_member();
+  ctid := case when p ? 'id' and p->>'id' is not null then (p->>'id')::uuid else null end;
+  if ctid is null and p->>'email' is not null then select id into ctid from crm_contacts where lower(email) = lower(trim(p->>'email')); end if;
+  if ctid is null then
+    cid := crm_resolve_company(p, true);
+    if p->>'name' is not null then select id into ctid from crm_contacts where company_id = cid and lower(name) = lower(trim(p->>'name')) limit 1; end if;
+  end if;
+  if ctid is null then
+    if nullif(trim(coalesce(p->>'name', '')), '') is null then raise exception 'E_PAYLOAD_INVALID: name is required'; end if;
+    insert into crm_contacts(company_id, name, role, email, phone, linkedin_url, timezone, notes, is_primary)
+    values (cid, trim(p->>'name'), p->>'role', nullif(lower(trim(p->>'email')), ''), p->>'phone', p->>'linkedin_url', p->>'timezone', p->>'notes',
+            coalesce((p->>'is_primary')::boolean, not exists (select 1 from crm_contacts where company_id = cid)))
+    returning * into r;
+  else
+    update crm_contacts set
+      name = coalesce(nullif(trim(p->>'name'), ''), name),
+      role = case when p ? 'role' then p->>'role' else role end,
+      email = case when p ? 'email' then nullif(lower(trim(p->>'email')), '') else email end,
+      phone = case when p ? 'phone' then p->>'phone' else phone end,
+      linkedin_url = case when p ? 'linkedin_url' then p->>'linkedin_url' else linkedin_url end,
+      timezone = case when p ? 'timezone' then p->>'timezone' else timezone end,
+      notes = case when p ? 'notes' then p->>'notes' else notes end,
+      is_primary = coalesce((p->>'is_primary')::boolean, is_primary)
+    where id = ctid returning * into r;
+  end if;
+  if r.is_primary then update crm_contacts set is_primary = false where company_id = r.company_id and id <> r.id and is_primary; end if;
+  return to_jsonb(r);
+end $$;
+
+create or replace function crm_deal_json(p_deal_id uuid) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select to_jsonb(v) from crm_deals_v v where v.id = p_deal_id;
+$$;
+
+create or replace function crm_create_deal(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare cid uuid := crm_resolve_company(p, true); r crm_deals;
+begin
+  perform crm_require_member();
+  insert into crm_deals(company_id, title, stage, owner_id, value_monthly, currency, videos_per_month, expected_close_date, next_step, next_step_date, source_channel_id)
+  values (cid, p->>'title', coalesce((p->>'stage')::crm_deal_stage_t, 'new'), crm_resolve_member(coalesce(p->>'owner', p->>'owner_id')),
+          (p->>'value_monthly')::numeric, upper(coalesce(p->>'currency', crm_setting('default_currency', '"USD"') #>> '{}')), (p->>'videos_per_month')::int,
+          (p->>'expected_close_date')::date, p->>'next_step', (p->>'next_step_date')::date,
+          crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')))
+  returning * into r;
+  return crm_deal_json(r.id);
+end $$;
+
+/** Update stage / value / next step. Stage history is written by trigger; a backwards move needs p_reason. */
+create or replace function crm_update_deal(p_deal_id uuid, p jsonb, p_reason text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare before_stage crm_deal_stage_t; r crm_deals;
+begin
+  perform crm_require_member();
+  select stage into before_stage from crm_deals where id = p_deal_id;
+  if before_stage is null then raise exception 'E_NOT_FOUND: deal % not found', p_deal_id; end if;
+  perform set_config('crm.stage_reason', coalesce(p_reason, ''), true);
+  update crm_deals set
+    title = case when p ? 'title' then p->>'title' else title end,
+    stage = coalesce((p->>'stage')::crm_deal_stage_t, stage),
+    owner_id = case when p ? 'owner' or p ? 'owner_id' then crm_resolve_member(coalesce(p->>'owner', p->>'owner_id')) else owner_id end,
+    value_monthly = case when p ? 'value_monthly' then (p->>'value_monthly')::numeric else value_monthly end,
+    currency = case when p ? 'currency' then upper(p->>'currency') else currency end,
+    videos_per_month = case when p ? 'videos_per_month' then (p->>'videos_per_month')::int else videos_per_month end,
+    expected_close_date = case when p ? 'expected_close_date' then (p->>'expected_close_date')::date else expected_close_date end,
+    next_step = case when p ? 'next_step' then p->>'next_step' else next_step end,
+    next_step_date = case when p ? 'next_step_date' then (p->>'next_step_date')::date else next_step_date end,
+    lost_reason = case when p ? 'lost_reason' then p->>'lost_reason' else lost_reason end,
+    source_channel_id = case when p ? 'source_channel' or p ? 'source_channel_id' then crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')) else source_channel_id end,
+    delivery_project_id = case when p ? 'delivery_project_id' then (p->>'delivery_project_id')::uuid else delivery_project_id end
+  where id = p_deal_id returning * into r;
+  perform set_config('crm.stage_reason', '', true);
+  if r.stage = 'lost' and r.lost_reason is null then
+    update crm_deals set lost_reason = coalesce(p_reason, 'not given') where id = p_deal_id returning * into r;
+  end if;
+  return crm_deal_json(r.id) || jsonb_build_object('stage_changed', r.stage <> before_stage, 'from_stage', before_stage);
+end $$;
+
+-- ------------------------------------------------------------------ activities & meetings
+create or replace function crm_log_activity(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare ctid uuid; did uuid; r crm_activities;
+begin
+  perform crm_require_member();
+  ctid := crm_resolve_contact(p, false);
+  did := case when p->>'deal_id' is not null then (p->>'deal_id')::uuid else null end;
+  if ctid is null and did is null and crm_resolve_company(p, false) is null then
+    raise exception 'E_PAYLOAD_INVALID: give contact_id / contact_email / (company + contact_name), or deal_id, or company';
+  end if;
+  if coalesce(p->>'activity_type', p->>'type') is null then raise exception 'E_PAYLOAD_INVALID: activity_type is required (call, linkedin_message, linkedin_connect, email, meeting, …)'; end if;
+  insert into crm_activities(contact_id, company_id, deal_id, activity_type_id, direction, occurred_at, source_channel_id, body, outcome, owner_id, external_ref)
+  values (ctid, crm_resolve_company(p, false), did, crm_resolve_lookup('activity_type', coalesce(p->>'activity_type', p->>'type')),
+          coalesce((p->>'direction')::crm_direction_t, 'outbound'), coalesce((p->>'occurred_at')::timestamptz, now()),
+          crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')), p->>'body', p->>'outcome',
+          crm_resolve_member(coalesce(p->>'owner', p->>'owner_id')), p->>'external_ref')
+  on conflict (external_ref) where external_ref is not null do update set body = excluded.body, outcome = excluded.outcome
+  returning * into r;
+  return (select to_jsonb(v) from crm_activities_v v where v.id = r.id);
+end $$;
+
+create or replace function crm_schedule_meeting(p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare did uuid; ctid uuid; cid uuid; r crm_meetings;
+begin
+  perform crm_require_member();
+  if p->>'scheduled_at' is null then raise exception 'E_PAYLOAD_INVALID: scheduled_at (ISO timestamp) is required'; end if;
+  did := case when p->>'deal_id' is not null then (p->>'deal_id')::uuid else null end;
+  ctid := crm_resolve_contact(p, false);
+  if did is null then
+    cid := coalesce((select company_id from crm_contacts where id = ctid), crm_resolve_company(p, false));
+    if cid is null then raise exception 'E_PAYLOAD_INVALID: deal_id, or a contact/company with an open deal, is required'; end if;
+    select id into did from crm_deals where company_id = cid and stage not in ('won','lost') order by created_at desc limit 1;
+    if did is null then
+      insert into crm_deals(company_id, owner_id) values (cid, auth.uid()) returning id into did;
+    end if;
+  end if;
+  if ctid is null then select id into ctid from crm_contacts where company_id = (select company_id from crm_deals where id = did) order by is_primary desc, created_at limit 1; end if;
+  insert into crm_meetings(deal_id, contact_id, scheduled_at, timezone, duration_min, attendees, notes)
+  values (did, ctid, (p->>'scheduled_at')::timestamptz, coalesce(p->>'timezone', (select timezone from crm_contacts where id = ctid)),
+          coalesce((p->>'duration_min')::int, 30),
+          coalesce((select array_agg(x) from jsonb_array_elements_text(case when jsonb_typeof(p->'attendees') = 'array' then p->'attendees' else '[]'::jsonb end) x), '{}'),
+          p->>'notes')
+  returning * into r;
+  return (select to_jsonb(v) from crm_meetings_v v where v.id = r.id);
+end $$;
+
+create or replace function crm_update_meeting(p_meeting_id uuid, p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare r crm_meetings;
+begin
+  perform crm_require_member();
+  update crm_meetings set
+    scheduled_at = coalesce((p->>'scheduled_at')::timestamptz, scheduled_at),
+    timezone = case when p ? 'timezone' then p->>'timezone' else timezone end,
+    duration_min = coalesce((p->>'duration_min')::int, duration_min),
+    contact_id = case when p ? 'contact_id' then (p->>'contact_id')::uuid else contact_id end,
+    attendees = case when jsonb_typeof(p->'attendees') = 'array' then (select coalesce(array_agg(x), '{}') from jsonb_array_elements_text(p->'attendees') x) else attendees end,
+    notes = case when p ? 'notes' then p->>'notes' else notes end,
+    status = coalesce((p->>'status')::crm_meeting_status_t, status)   -- held/no_show are rejected by trigger without a capture
+  where id = p_meeting_id returning * into r;
+  if r.id is null then raise exception 'E_NOT_FOUND: meeting % not found', p_meeting_id; end if;
+  return (select to_jsonb(v) from crm_meetings_v v where v.id = r.id);
+end $$;
+
+/** THE main write. Rejects with the exact missing fields instead of writing a partial row. */
+create or replace function crm_capture_meeting(p_meeting_id uuid, p_outcome text, p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare oc crm_capture_outcome_t; missing text[]; cap crm_meeting_captures; m record; tags text[]; t text; tid uuid; pp text; i int;
+begin
+  perform crm_require_member();
+  if p_outcome not in ('held','no_show') then raise exception 'E_PAYLOAD_INVALID: outcome must be held or no_show (cancel a meeting with update_meeting status=cancelled)'; end if;
+  oc := p_outcome::crm_capture_outcome_t;
+  select * into m from crm_meetings where id = p_meeting_id;
+  if m is null then raise exception 'E_NOT_FOUND: meeting % not found', p_meeting_id; end if;
+  if exists (select 1 from crm_meeting_captures where meeting_id = p_meeting_id) then
+    raise exception 'E_ALREADY_CAPTURED: meeting % already has a capture; use update_capture to change it', p_meeting_id;
+  end if;
+  missing := crm_capture_missing(oc, p);
+  if array_length(missing, 1) > 0 then
+    raise exception 'E_CAPTURE_INCOMPLETE: cannot save a % capture — missing: %', oc, array_to_string(missing, '; ');
+  end if;
+  insert into crm_meeting_captures(meeting_id, outcome, pain_points, commercials_discussed, objections, next_step, next_step_date, is_dead, dead_reason,
+                                   no_show_reason, follow_up_action, follow_up_date, raw_notes)
+  values (p_meeting_id, oc,
+          coalesce((select array_agg(x) from jsonb_array_elements_text(case when jsonb_typeof(p->'pain_points') = 'array' then p->'pain_points' else '[]'::jsonb end) x where trim(x) <> ''), '{}'),
+          p->'commercials_discussed',
+          coalesce((select array_agg(x) from jsonb_array_elements_text(case when jsonb_typeof(p->'objections') = 'array' then p->'objections' else '[]'::jsonb end) x where trim(x) <> ''), '{}'),
+          p->>'next_step', (p->>'next_step_date')::date, coalesce((p->>'is_dead')::boolean, false), p->>'dead_reason',
+          p->>'no_show_reason', p->>'follow_up_action', (p->>'follow_up_date')::date, p->>'raw_notes')
+  returning * into cap;
+
+  -- Pain points tokenise into tags: explicit `tags` win, otherwise each pain point becomes a tag (slugified, ≤60 chars)
+  if jsonb_typeof(p->'tags') = 'array' then
+    select array_agg(x) into tags from jsonb_array_elements_text(p->'tags') x where trim(x) <> '';
+  end if;
+  if tags is null then tags := cap.pain_points; end if;
+  i := 0;
+  foreach t in array coalesce(tags, '{}') loop
+    i := i + 1;
+    if crm_slugify(left(t, 60)) = '' then continue; end if;
+    insert into crm_pain_point_tags(slug, label) values (crm_slugify(left(t, 60)), left(trim(t), 80))
+      on conflict (slug) do update set label = crm_pain_point_tags.label returning id into tid;
+    pp := case when jsonb_typeof(p->'tags') = 'array' then null else t end;
+    insert into crm_capture_pain_tags(capture_id, tag_id, verbatim) values (cap.id, tid, pp) on conflict do nothing;
+  end loop;
+
+  return jsonb_build_object(
+    'capture', to_jsonb(cap),
+    'meeting', (select to_jsonb(v) from crm_meetings_v v where v.id = p_meeting_id),
+    'deal', crm_deal_json(m.deal_id),
+    'tags', (select coalesce(jsonb_agg(jsonb_build_object('slug', pt.slug, 'label', pt.label)), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cap.id)
+  );
+end $$;
+
+create or replace function crm_update_capture(p_meeting_id uuid, p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare cap crm_meeting_captures;
+begin
+  perform crm_require_member();
+  update crm_meeting_captures set
+    pain_points = case when jsonb_typeof(p->'pain_points') = 'array' then (select coalesce(array_agg(x), '{}') from jsonb_array_elements_text(p->'pain_points') x) else pain_points end,
+    commercials_discussed = case when p ? 'commercials_discussed' then p->'commercials_discussed' else commercials_discussed end,
+    objections = case when jsonb_typeof(p->'objections') = 'array' then (select coalesce(array_agg(x), '{}') from jsonb_array_elements_text(p->'objections') x) else objections end,
+    next_step = case when p ? 'next_step' then p->>'next_step' else next_step end,
+    next_step_date = case when p ? 'next_step_date' then (p->>'next_step_date')::date else next_step_date end,
+    is_dead = coalesce((p->>'is_dead')::boolean, is_dead),
+    dead_reason = case when p ? 'dead_reason' then p->>'dead_reason' else dead_reason end,
+    no_show_reason = case when p ? 'no_show_reason' then p->>'no_show_reason' else no_show_reason end,
+    follow_up_action = case when p ? 'follow_up_action' then p->>'follow_up_action' else follow_up_action end,
+    follow_up_date = case when p ? 'follow_up_date' then (p->>'follow_up_date')::date else follow_up_date end,
+    raw_notes = case when p ? 'raw_notes' then p->>'raw_notes' else raw_notes end
+  where meeting_id = p_meeting_id returning * into cap;
+  if cap.id is null then raise exception 'E_NOT_FOUND: no capture for meeting %', p_meeting_id; end if;
+  return to_jsonb(cap);
+end $$;
+
+-- ------------------------------------------------------------------ morning brief
+create or replace function crm_whos_meeting_today(p_date date default null, p_tz text default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare tz text := coalesce(p_tz, crm_tz()); d date := coalesce(p_date, (now() at time zone coalesce(p_tz, crm_tz()))::date); w record;
+begin
+  perform crm_require_member();
+  select * into w from crm_day_window(d, tz);
+  return jsonb_build_object(
+    'date', d, 'timezone', tz,
+    'meetings', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+        'meeting_id', mv.id, 'scheduled_at', mv.scheduled_at, 'local_time', to_char(mv.scheduled_at at time zone tz, 'HH24:MI'),
+        'prospect_local_time', case when mv.timezone is not null then to_char(mv.scheduled_at at time zone mv.timezone, 'HH24:MI') || ' ' || mv.timezone end,
+        'status', mv.status, 'has_capture', mv.has_capture, 'attendees', mv.attendees, 'meeting_notes', mv.notes,
+        'company', jsonb_build_object('id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'notes', c.notes),
+        'contact', case when mv.contact_id is null then null else jsonb_build_object('id', mv.contact_id, 'name', mv.contact_name, 'role', mv.contact_role, 'email', mv.contact_email) end,
+        'icp_segment', mv.icp_segment_label, 'source_channel', mv.source_channel_label,
+        'deal', jsonb_build_object('id', dv.id, 'stage', dv.stage, 'value_monthly', dv.value_monthly, 'currency', dv.currency, 'value_monthly_usd', dv.value_monthly_usd,
+                                   'videos_per_month', dv.videos_per_month, 'owner', dv.owner_name, 'next_step', dv.next_step, 'next_step_date', dv.next_step_date, 'days_in_stage', dv.days_in_stage),
+        'prior_no_shows', (select count(*) from crm_meetings pm where pm.id <> mv.id and pm.status = 'no_show' and (pm.contact_id = mv.contact_id or pm.deal_id = mv.deal_id)),
+        'activity_history', (
+          select coalesce(jsonb_agg(jsonb_build_object('at', a.occurred_at, 'type', a.activity_type_label, 'direction', a.direction, 'channel', a.source_channel_label, 'outcome', a.outcome, 'body', a.body, 'by', a.owner_name) order by a.occurred_at desc), '[]')
+          from crm_activities_v a where (mv.contact_id is not null and a.contact_id = mv.contact_id) or (mv.contact_id is null and a.deal_id = mv.deal_id)),
+        'last_capture', (
+          select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('meeting_at', pm.scheduled_at)
+          from crm_meetings pm join crm_meeting_captures cp on cp.meeting_id = pm.id
+          where pm.deal_id = mv.deal_id and pm.id <> mv.id and pm.scheduled_at < mv.scheduled_at order by pm.scheduled_at desc limit 1)
+      ) order by mv.scheduled_at), '[]')
+      from crm_meetings_v mv join crm_companies c on c.id = mv.company_id join crm_deals_v dv on dv.id = mv.deal_id
+      where mv.scheduled_at >= w.w_from and mv.scheduled_at < w.w_to and mv.status <> 'cancelled')
+  );
+end $$;
+
+/** Per-channel metric counts inside a window. Channel rows come from crm_source_channels at query time. */
+create or replace function crm_numbers(p_from timestamptz, p_to timestamptz) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare res jsonb;
+begin
+  res := (with acts as (
+    select a.source_channel_id as ch, t.counts_as, a.direction, lower(coalesce(a.outcome, '')) as outcome
+    from crm_activities a join crm_activity_types t on t.id = a.activity_type_id
+    where a.occurred_at >= p_from and a.occurred_at < p_to
+  ),
+  mt as (
+    select d.source_channel_id as ch, m.status, m.created_at, m.scheduled_at
+    from crm_meetings m join crm_deals d on d.id = m.deal_id
+  ),
+  sh as (
+    select d.source_channel_id as ch, h.to_stage
+    from crm_stage_history h join crm_deals d on d.id = h.deal_id
+    where h.changed_at >= p_from and h.changed_at < p_to
+  ),
+  chans as (
+    select id, slug, label, sort_order, is_active from crm_source_channels
+    union all select null::uuid, 'unattributed', 'Unattributed', 9999, true
+  ),
+  nums as (
+    select c.id, c.slug, c.label, c.sort_order, c.is_active,
+      (select count(*) from acts a where a.ch is not distinct from c.id and a.counts_as = 'dial' and a.direction = 'outbound') as dials,
+      (select count(*) from acts a where a.ch is not distinct from c.id and a.counts_as = 'dial' and a.outcome in ('connected','connect','spoke','conversation')) as connects,
+      (select count(*) from acts a where a.ch is not distinct from c.id and a.counts_as = 'linkedin_connect' and (a.outcome = 'accepted' or a.direction = 'inbound')) as linkedin_accepts,
+      (select count(*) from acts a where a.ch is not distinct from c.id and a.direction = 'inbound' and coalesce(a.counts_as, '') not in ('meeting','linkedin_connect')) as replies,
+      (select count(*) from mt where mt.ch is not distinct from c.id and mt.created_at >= p_from and mt.created_at < p_to) as meetings_booked,
+      (select count(*) from mt where mt.ch is not distinct from c.id and mt.status = 'held' and mt.scheduled_at >= p_from and mt.scheduled_at < p_to) as meetings_held,
+      (select count(*) from mt where mt.ch is not distinct from c.id and mt.status = 'no_show' and mt.scheduled_at >= p_from and mt.scheduled_at < p_to) as no_shows,
+      (select count(*) from sh where sh.ch is not distinct from c.id and sh.to_stage = 'proposal_sent') as proposals_sent,
+      (select count(*) from sh where sh.ch is not distinct from c.id and sh.to_stage = 'won') as closes
+    from chans c
+  )
+  select jsonb_build_object(
+    'channels', coalesce((select jsonb_agg(to_jsonb(n) - 'sort_order' order by n.sort_order, n.label) from nums n
+                          where n.is_active or (n.dials + n.connects + n.linkedin_accepts + n.replies + n.meetings_booked + n.meetings_held + n.no_shows + n.proposals_sent + n.closes) > 0), '[]'),
+    'totals', (select jsonb_build_object('dials', sum(dials), 'connects', sum(connects), 'linkedin_accepts', sum(linkedin_accepts), 'replies', sum(replies),
+                                         'meetings_booked', sum(meetings_booked), 'meetings_held', sum(meetings_held), 'no_shows', sum(no_shows),
+                                         'proposals_sent', sum(proposals_sent), 'closes', sum(closes)) from nums)
+  ));
+  return res;
+end $$;
+
+create or replace function crm_daily_scoreboard(p_date date default null, p_tz text default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare tz text := coalesce(p_tz, crm_tz()); d date; w record; w7 record;
+begin
+  perform crm_require_member();
+  d := coalesce(p_date, (now() at time zone tz)::date - 1);   -- default: yesterday
+  select * into w from crm_day_window(d, tz);
+  select * into w7 from crm_day_window(d - 6, tz);
+  return jsonb_build_object(
+    'date', d, 'timezone', tz,
+    'day', crm_numbers(w.w_from, w.w_to),
+    'trailing_7d', jsonb_build_object('from', d - 6, 'to', d) || crm_numbers(w7.w_from, w.w_to),
+    'note', 'Counts are derived from activities, meetings and stage_history — nothing here is hand-entered. dials = outbound call activities; connects = calls with outcome connected; replies = inbound activities; proposals/closes = stage changes on that day.'
+  );
+end $$;
+
+create or replace function crm_deals_needing_attention() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare item_sql text;
+begin
+  perform crm_require_member();
+  return jsonb_build_object(
+    'stuck', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', id, 'company', company_name, 'stage', stage, 'owner', owner_name, 'value_monthly', value_monthly, 'currency', currency, 'days_in_stage', days_in_stage, 'missing', case when next_step is null then 'next_step' else 'next_step_date' end) order by days_in_stage desc), '[]') from crm_deals_v where is_stuck),
+    'stale', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', id, 'company', company_name, 'stage', stage, 'owner', owner_name, 'value_monthly', value_monthly, 'currency', currency, 'days_since_activity', days_since_activity, 'last_activity_at', last_activity_at) order by days_since_activity desc), '[]') from crm_deals_v where is_stale),
+    'slipping', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', id, 'company', company_name, 'stage', stage, 'owner', owner_name, 'value_monthly', value_monthly, 'currency', currency, 'next_step', next_step, 'next_step_date', next_step_date, 'days_late', ((now() at time zone crm_tz())::date - next_step_date)) order by next_step_date), '[]') from crm_deals_v where is_slipping),
+    'stale_after_days', crm_stale_days()
+  );
+end $$;
+
+-- ------------------------------------------------------------------ in the meeting
+create or replace function crm_log_commitment(p_owner text, p_date date, p_targets jsonb, p_notes text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := crm_resolve_member(p_owner); r crm_commitments;
+begin
+  perform crm_require_member();
+  if p_targets is null or jsonb_typeof(p_targets) <> 'object' or p_targets = '{}'::jsonb then raise exception 'E_PAYLOAD_INVALID: targets must be an object like {"dials": 30, "linkedin_connects": 20, "meetings_booked": 2}'; end if;
+  insert into crm_commitments(owner_id, commit_date, targets, notes, created_by) values (uid, coalesce(p_date, (now() at time zone crm_tz())::date), p_targets, p_notes, auth.uid())
+  on conflict (owner_id, commit_date) do update set targets = crm_commitments.targets || excluded.targets, notes = coalesce(excluded.notes, crm_commitments.notes)
+  returning * into r;
+  return to_jsonb(r) || jsonb_build_object('owner', (select display_name from crm_members where user_id = uid));
+end $$;
+
+/** Actual numbers a member produced on a local day (for commitment_vs_actual). */
+create or replace function crm_owner_actuals(p_owner uuid, p_from timestamptz, p_to timestamptz) returns jsonb
+language sql stable security definer set search_path = public as $$
+  select jsonb_build_object(
+    'dials', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'dial' and a.direction = 'outbound'),
+    'connects', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'dial' and lower(coalesce(a.outcome,'')) in ('connected','connect','spoke','conversation')),
+    'linkedin_connects', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'linkedin_connect' and a.direction = 'outbound'),
+    'linkedin_messages', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'linkedin_message' and a.direction = 'outbound'),
+    'emails', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'email' and a.direction = 'outbound'),
+    'touches', (select count(*) from crm_activities a where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and a.direction = 'outbound'),
+    'meetings_booked', (select count(*) from crm_meetings m where m.created_by = p_owner and m.created_at >= p_from and m.created_at < p_to),
+    'proposals_sent', (select count(*) from crm_stage_history h where h.changed_by = p_owner and h.to_stage = 'proposal_sent' and h.changed_at >= p_from and h.changed_at < p_to),
+    'closes', (select count(*) from crm_stage_history h where h.changed_by = p_owner and h.to_stage = 'won' and h.changed_at >= p_from and h.changed_at < p_to)
+  );
+$$;
+
+create or replace function crm_commitment_vs_actual(p_from date, p_to date default null, p_owner text default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare tz text := crm_tz(); d_to date := coalesce(p_to, (now() at time zone crm_tz())::date); uid uuid; rows jsonb := '[]'; r record; w record; act jsonb; k text; committed numeric; actual numeric; misses int; keys int;
+begin
+  perform crm_require_member();
+  uid := case when p_owner is null then null else crm_resolve_member(p_owner) end;
+  for r in select c.*, m.display_name from crm_commitments c join crm_members m on m.user_id = c.owner_id
+           where c.commit_date between p_from and d_to and (uid is null or c.owner_id = uid) order by c.commit_date, m.display_name loop
+    select * into w from crm_day_window(r.commit_date, tz);
+    act := crm_owner_actuals(r.owner_id, w.w_from, w.w_to);
+    misses := 0; keys := 0;
+    for k in select jsonb_object_keys(r.targets) loop
+      keys := keys + 1;
+      committed := nullif(r.targets->>k, '')::numeric; actual := nullif(act->>k, '')::numeric;
+      if actual is not null and committed is not null and actual < committed then misses := misses + 1; end if;
+    end loop;
+    rows := rows || jsonb_build_object('date', r.commit_date, 'owner', r.display_name, 'owner_id', r.owner_id, 'committed', r.targets, 'actual', act,
+                                       'metrics_missed', misses, 'metrics_committed', keys, 'all_met', misses = 0, 'notes', r.notes);
+  end loop;
+  return jsonb_build_object('from', p_from, 'to', d_to, 'timezone', tz, 'rows', rows,
+    'repeat_misses', (select coalesce(jsonb_agg(jsonb_build_object('owner', x.owner, 'days_missed', x.n) order by x.n desc), '[]')
+                      from (select x->>'owner' as owner, count(*) as n from jsonb_array_elements(rows) x where (x->>'metrics_missed')::int > 0 group by 1 having count(*) >= 2) x),
+    'note', 'actual keys: dials, connects, linkedin_connects, linkedin_messages, emails, touches, meetings_booked, proposals_sent, closes. Commit with the same keys so they compare.');
+end $$;
+
+-- ------------------------------------------------------------------ pipeline & analysis
+create or replace function crm_pipeline(p jsonb default '{}'::jsonb) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare owner uuid; seg uuid; ch uuid; stages crm_deal_stage_t[]; include_closed boolean := coalesce((p->>'include_closed')::boolean, false);
+begin
+  perform crm_require_member();
+  owner := case when p->>'owner' is not null then crm_resolve_member(p->>'owner') end;
+  seg := crm_resolve_lookup('icp_segment', coalesce(p->>'icp_segment', p->>'icp_segment_id'));
+  ch := crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id'));
+  if jsonb_typeof(p->'stages') = 'array' then select array_agg(x::crm_deal_stage_t) into stages from jsonb_array_elements_text(p->'stages') x; end if;
+  return jsonb_build_object(
+    'stages', (
+      select coalesce(jsonb_agg(jsonb_build_object('stage', s, 'count', (select count(*) from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)),
+        'value_monthly_usd', (select coalesce(sum(value_monthly_usd), 0) from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)),
+        'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'company', v.company_name, 'company_id', v.company_id, 'title', v.title, 'value_monthly', v.value_monthly, 'currency', v.currency, 'value_monthly_usd', v.value_monthly_usd,
+                    'videos_per_month', v.videos_per_month, 'owner', v.owner_name, 'days_in_stage', v.days_in_stage, 'next_step', v.next_step, 'next_step_date', v.next_step_date,
+                    'is_stale', v.is_stale, 'is_stuck', v.is_stuck, 'is_slipping', v.is_slipping, 'icp_segment', v.icp_segment_label, 'source_channel', v.source_channel_label, 'expected_close_date', v.expected_close_date, 'lost_reason', v.lost_reason) order by v.value_monthly_usd desc nulls last, v.days_in_stage desc), '[]')
+                  from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch))
+      ) order by crm_stage_rank(s)), '[]')
+      from unnest(enum_range(null::crm_deal_stage_t)) s
+      where (stages is null or s = any(stages)) and (include_closed or s not in ('won','lost'))),
+    'totals', (select jsonb_build_object('open_deals', count(*) filter (where is_active), 'open_value_monthly_usd', coalesce(sum(value_monthly_usd) filter (where is_active), 0),
+                                         'won_value_monthly_usd', coalesce(sum(value_monthly_usd) filter (where stage = 'won'), 0), 'stale', count(*) filter (where is_stale), 'stuck', count(*) filter (where is_stuck), 'slipping', count(*) filter (where is_slipping))
+               from crm_deals_v v where (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch))
+  );
+end $$;
+
+create or replace function crm_funnel(p_from date, p_to date default null, p_source_channel text default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare ch uuid; d_to date := coalesce(p_to, (now() at time zone crm_tz())::date); w record; t_to timestamptz;
+begin
+  perform crm_require_member();
+  ch := crm_resolve_lookup('source_channel', p_source_channel);
+  select * into w from crm_day_window(p_from, null);
+  t_to := (select w_to from crm_day_window(d_to, null));
+  return jsonb_build_object('from', p_from, 'to', d_to, 'source_channel', (select label from crm_source_channels where id = ch),
+    'channels', (
+      select coalesce(jsonb_agg(row_ || jsonb_build_object(
+        'conversion_pct', jsonb_build_object(
+          'contacted_of_leads', case when (row_->>'leads')::int > 0 then round(100.0 * (row_->>'contacted')::int / (row_->>'leads')::int, 1) end,
+          'replied_of_contacted', case when (row_->>'contacted')::int > 0 then round(100.0 * (row_->>'replied')::int / (row_->>'contacted')::int, 1) end,
+          'meeting_booked_of_replied', case when (row_->>'replied')::int > 0 then round(100.0 * (row_->>'meeting_booked')::int / (row_->>'replied')::int, 1) end,
+          'meeting_held_of_booked', case when (row_->>'meeting_booked')::int > 0 then round(100.0 * (row_->>'meeting_held')::int / (row_->>'meeting_booked')::int, 1) end,
+          'proposal_of_held', case when (row_->>'meeting_held')::int > 0 then round(100.0 * (row_->>'proposal_sent')::int / (row_->>'meeting_held')::int, 1) end,
+          'won_of_proposal', case when (row_->>'proposal_sent')::int > 0 then round(100.0 * (row_->>'won')::int / (row_->>'proposal_sent')::int, 1) end,
+          'won_of_leads', case when (row_->>'leads')::int > 0 then round(100.0 * (row_->>'won')::int / (row_->>'leads')::int, 1) end),
+        'cac_usd', case when (row_->>'cost_usd') is not null and (row_->>'won')::int > 0 then round((row_->>'cost_usd')::numeric / (row_->>'won')::int, 2) end,
+        'ltv_usd', null, 'ltv_note', 'manual entry — set when churn/retention is known'
+      ) order by row_->>'label'), '[]')
+      from (
+        select jsonb_build_object('source_channel_id', c.id, 'slug', c.slug, 'label', c.label,
+          'leads', (select count(*) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to),
+          'contacted', (select count(distinct d.id) from crm_deals d join crm_stage_history h on h.deal_id = d.id where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and crm_stage_rank(h.to_stage) >= crm_stage_rank('contacted') and h.to_stage <> 'lost'),
+          'replied', (select count(distinct d.id) from crm_deals d join crm_stage_history h on h.deal_id = d.id where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and crm_stage_rank(h.to_stage) >= crm_stage_rank('replied') and h.to_stage <> 'lost'),
+          'meeting_booked', (select count(distinct d.id) from crm_deals d join crm_stage_history h on h.deal_id = d.id where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and crm_stage_rank(h.to_stage) >= crm_stage_rank('meeting_booked') and h.to_stage <> 'lost'),
+          'meeting_held', (select count(distinct d.id) from crm_deals d join crm_stage_history h on h.deal_id = d.id where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and crm_stage_rank(h.to_stage) >= crm_stage_rank('meeting_held') and h.to_stage <> 'lost'),
+          'proposal_sent', (select count(distinct d.id) from crm_deals d join crm_stage_history h on h.deal_id = d.id where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and crm_stage_rank(h.to_stage) >= crm_stage_rank('proposal_sent') and h.to_stage <> 'lost'),
+          'negotiation', (select count(distinct d.id) from crm_deals d join crm_stage_history h on h.deal_id = d.id where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and crm_stage_rank(h.to_stage) >= crm_stage_rank('negotiation') and h.to_stage <> 'lost'),
+          'won', (select count(*) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'won'),
+          'lost', (select count(*) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'lost'),
+          'won_value_monthly_usd', (select coalesce(sum(value_monthly_usd), 0) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'won'),
+          'cost_usd', (select sum(cc.cost * coalesce(fx.usd_per_unit, 1)) from crm_channel_costs cc left join crm_fx_rates fx on fx.currency = cc.currency where cc.source_channel_id = c.id and cc.month >= date_trunc('month', p_from)::date and cc.month <= d_to)
+        ) as row_
+        from (select id, slug, label, sort_order from crm_source_channels where is_active and (ch is null or id = ch)
+              union all select null, 'unattributed', 'Unattributed', 9999 where ch is null) c
+      ) x
+      where (row_->>'leads')::int > 0 or (row_->>'cost_usd') is not null),
+    'note', 'Cohort funnel: deals CREATED in the range, counted at the furthest stage they reached (stage_history). cost/CAC only where channel cost was entered (set_channel_cost). LTV is left for manual entry.');
+end $$;
+
+create or replace function crm_top_pain_points(p_from date default null, p_to date default null, p_icp_segment text default null, p_limit int default 25) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare seg uuid; f timestamptz; t timestamptz;
+begin
+  perform crm_require_member();
+  seg := crm_resolve_lookup('icp_segment', p_icp_segment);
+  f := case when p_from is null then '-infinity'::timestamptz else (select w_from from crm_day_window(p_from, null)) end;
+  t := case when p_to is null then 'infinity'::timestamptz else (select w_to from crm_day_window(p_to, null)) end;
+  return jsonb_build_object('from', p_from, 'to', p_to, 'icp_segment', (select label from crm_icp_segments where id = seg),
+    'captures_considered', (select count(*) from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id join crm_companies c on c.id = d.company_id
+                             where cp.outcome = 'held' and m.scheduled_at >= f and m.scheduled_at < t and (seg is null or c.icp_segment_id = seg)),
+    'tags', (
+      select coalesce(jsonb_agg(jsonb_build_object('tag', x.label, 'slug', x.slug, 'mentions', x.mentions, 'deals', x.deals, 'won_deals', x.won,
+                                                   'segments', x.segments, 'verbatims', x.verbatims) order by x.mentions desc, x.deals desc), '[]')
+      from (
+        select pt.slug, pt.label, count(*) as mentions, count(distinct d.id) as deals, count(distinct d.id) filter (where d.stage = 'won') as won,
+               (select jsonb_object_agg(s.label, s.n) from (select coalesce(seg2.label, 'unsegmented') as label, count(*) as n from crm_capture_pain_tags cpt2 join crm_meeting_captures cp2 on cp2.id = cpt2.capture_id join crm_meetings m2 on m2.id = cp2.meeting_id join crm_deals d2 on d2.id = m2.deal_id join crm_companies c2 on c2.id = d2.company_id left join crm_icp_segments seg2 on seg2.id = c2.icp_segment_id where cpt2.tag_id = pt.id group by 1) s) as segments,
+               (select jsonb_agg(v) from (select distinct cpt3.verbatim as v from crm_capture_pain_tags cpt3 where cpt3.tag_id = pt.id and cpt3.verbatim is not null limit 3) q) as verbatims
+        from crm_capture_pain_tags cpt
+        join crm_pain_point_tags pt on pt.id = cpt.tag_id
+        join crm_meeting_captures cp on cp.id = cpt.capture_id
+        join crm_meetings m on m.id = cp.meeting_id
+        join crm_deals d on d.id = m.deal_id
+        join crm_companies c on c.id = d.company_id
+        where m.scheduled_at >= f and m.scheduled_at < t and (seg is null or c.icp_segment_id = seg)
+        group by pt.id, pt.slug, pt.label
+        order by mentions desc, deals desc
+        limit coalesce(p_limit, 25)
+      ) x),
+    'top_objections', (
+      select coalesce(jsonb_agg(jsonb_build_object('objection', o.ob, 'mentions', o.n) order by o.n desc), '[]')
+      from (select lower(trim(ob)) as ob, count(*) as n from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id join crm_companies c on c.id = d.company_id, unnest(cp.objections) ob
+            where m.scheduled_at >= f and m.scheduled_at < t and (seg is null or c.icp_segment_id = seg) group by 1 order by 2 desc limit 10) o));
+end $$;
+
+create or replace function crm_channel_quality(p_from date, p_to date default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare d_to date := coalesce(p_to, (now() at time zone crm_tz())::date); f timestamptz; t timestamptz;
+begin
+  perform crm_require_member();
+  f := (select w_from from crm_day_window(p_from, null));
+  t := (select w_to from crm_day_window(d_to, null));
+  return jsonb_build_object('from', p_from, 'to', d_to,
+    'channels', (
+      select coalesce(jsonb_agg(r || jsonb_build_object(
+        'no_show_rate_pct', case when (r->>'meetings_booked')::int > 0 then round(100.0 * (r->>'no_shows')::int / (r->>'meetings_booked')::int, 1) end,
+        'held_rate_pct', case when (r->>'meetings_booked')::int > 0 then round(100.0 * (r->>'meetings_held')::int / (r->>'meetings_booked')::int, 1) end,
+        'close_rate_pct', case when (r->>'deals_created')::int > 0 then round(100.0 * (r->>'won')::int / (r->>'deals_created')::int, 1) end,
+        'close_rate_of_held_pct', case when (r->>'meetings_held')::int > 0 then round(100.0 * (r->>'won')::int / (r->>'meetings_held')::int, 1) end
+      ) order by (r->>'no_show_rate_sort')::numeric nulls last, r->>'label'), '[]')
+      from (
+        select jsonb_build_object('source_channel_id', c.id, 'slug', c.slug, 'label', c.label, 'is_active', c.is_active,
+          'deals_created', (select count(*) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= f and d.created_at < t),
+          'meetings_booked', (select count(*) from crm_meetings m join crm_deals d on d.id = m.deal_id where d.source_channel_id is not distinct from c.id and m.created_at >= f and m.created_at < t),
+          'meetings_held', (select count(*) from crm_meetings m join crm_deals d on d.id = m.deal_id where d.source_channel_id is not distinct from c.id and m.status = 'held' and m.scheduled_at >= f and m.scheduled_at < t),
+          'no_shows', (select count(*) from crm_meetings m join crm_deals d on d.id = m.deal_id where d.source_channel_id is not distinct from c.id and m.status = 'no_show' and m.scheduled_at >= f and m.scheduled_at < t),
+          'won', (select count(*) from crm_stage_history h join crm_deals d on d.id = h.deal_id where d.source_channel_id is not distinct from c.id and h.to_stage = 'won' and h.changed_at >= f and h.changed_at < t),
+          'lost', (select count(*) from crm_stage_history h join crm_deals d on d.id = h.deal_id where d.source_channel_id is not distinct from c.id and h.to_stage = 'lost' and h.changed_at >= f and h.changed_at < t),
+          'avg_deal_value_monthly_usd', (select round(avg(d.value_monthly_usd), 2) from crm_deals d where d.source_channel_id is not distinct from c.id and d.stage = 'won' and d.closed_at >= f and d.closed_at < t),
+          'avg_open_value_monthly_usd', (select round(avg(d.value_monthly_usd), 2) from crm_deals d where d.source_channel_id is not distinct from c.id and d.stage not in ('won','lost')),
+          'no_show_rate_sort', (select case when count(*) filter (where m.created_at >= f and m.created_at < t) > 0 then -1.0 * count(*) filter (where m.status = 'no_show' and m.scheduled_at >= f and m.scheduled_at < t) / count(*) filter (where m.created_at >= f and m.created_at < t) end from crm_meetings m join crm_deals d on d.id = m.deal_id where d.source_channel_id is not distinct from c.id)
+        ) as r
+        from (select id, slug, label, is_active, sort_order from crm_source_channels union all select null, 'unattributed', 'Unattributed', true, 9999) c
+      ) x
+      where (r->>'deals_created')::int > 0 or (r->>'meetings_booked')::int > 0 or (r->>'is_active')::boolean),
+    'note', 'No-show rate by channel is the lead-quality signal: high no-show + low close = poor-fit leads from that channel. Channels are sorted worst no-show rate first.');
+end $$;
+
+create or replace function crm_company_brief(p_company text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare cid uuid := crm_resolve_company(jsonb_build_object('company', p_company), true);
+begin
+  perform crm_require_member();
+  return jsonb_build_object(
+    'company', (select to_jsonb(c) || jsonb_build_object('icp_segment', s.label, 'source_channel', ch.label, 'created_by_name', m.display_name)
+                from crm_companies c left join crm_icp_segments s on s.id = c.icp_segment_id left join crm_source_channels ch on ch.id = c.source_channel_id left join crm_members m on m.user_id = c.created_by where c.id = cid),
+    'contacts', (select coalesce(jsonb_agg(to_jsonb(ct) order by ct.is_primary desc, ct.created_at), '[]') from crm_contacts ct where ct.company_id = cid),
+    'deals', (select coalesce(jsonb_agg((to_jsonb(v) - 'company_name' - 'company_domain' - 'company_country' - 'company_timezone') || jsonb_build_object(
+                 'stage_history', (select coalesce(jsonb_agg(jsonb_build_object('from', h.from_stage, 'to', h.to_stage, 'at', h.changed_at, 'reason', h.reason, 'by', mm.display_name) order by h.changed_at), '[]') from crm_stage_history h left join crm_members mm on mm.user_id = h.changed_by where h.deal_id = v.id)
+               ) order by v.created_at desc), '[]') from crm_deals_v v where v.company_id = cid),
+    'meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'deal_id', mv.deal_id, 'scheduled_at', mv.scheduled_at, 'status', mv.status, 'contact', mv.contact_name, 'attendees', mv.attendees, 'notes', mv.notes,
+                   'capture', (select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('tags', (select coalesce(jsonb_agg(pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cp.id)) from crm_meeting_captures cp where cp.meeting_id = mv.id)
+                 ) order by mv.scheduled_at desc), '[]') from crm_meetings_v mv where mv.company_id = cid),
+    'activities', (select coalesce(jsonb_agg(jsonb_build_object('at', a.occurred_at, 'type', a.activity_type_label, 'direction', a.direction, 'channel', a.source_channel_label, 'contact', a.contact_name, 'outcome', a.outcome, 'body', a.body, 'by', a.owner_name, 'deal_id', a.deal_id) order by a.occurred_at desc), '[]') from crm_activities_v a where a.company_id = cid),
+    'pain_points', (select coalesce(jsonb_agg(distinct pp), '[]') from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id, unnest(cp.pain_points) pp where d.company_id = cid),
+    'pain_point_tags', (select coalesce(jsonb_agg(distinct pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id join crm_meeting_captures cp on cp.id = cpt.capture_id join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id where d.company_id = cid),
+    'objections', (select coalesce(jsonb_agg(distinct ob), '[]') from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id, unnest(cp.objections) ob where d.company_id = cid),
+    'commercials', (select coalesce(jsonb_agg(cp.commercials_discussed || jsonb_build_object('meeting_at', m.scheduled_at) order by m.scheduled_at desc), '[]') from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id where d.company_id = cid and cp.commercials_discussed is not null),
+    'open_next_steps', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'stage', v.stage, 'next_step', v.next_step, 'next_step_date', v.next_step_date, 'owner', v.owner_name)), '[]') from crm_deals_v v where v.company_id = cid and v.is_active),
+    'delivery_project_ids', (select coalesce(jsonb_agg(d.delivery_project_id), '[]') from crm_deals d where d.company_id = cid and d.delivery_project_id is not null)
+  );
+end $$;
+
+create or replace function crm_search(p_q text, p_limit int default 10) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare q text := '%' || trim(coalesce(p_q, '')) || '%';
+begin
+  perform crm_require_member();
+  return jsonb_build_object(
+    'companies', (select coalesce(jsonb_agg(jsonb_build_object('company_id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'icp_segment', s.label, 'open_deals', (select count(*) from crm_deals d where d.company_id = c.id and d.stage not in ('won','lost'))) order by c.name), '[]')
+                  from (select * from crm_companies where name ilike q or domain ilike q or website ilike q order by name limit coalesce(p_limit, 10)) c left join crm_icp_segments s on s.id = c.icp_segment_id),
+    'contacts', (select coalesce(jsonb_agg(jsonb_build_object('contact_id', ct.id, 'name', ct.name, 'role', ct.role, 'email', ct.email, 'company_id', ct.company_id, 'company', c.name) order by ct.name), '[]')
+                 from (select * from crm_contacts where name ilike q or email ilike q or role ilike q order by name limit coalesce(p_limit, 10)) ct join crm_companies c on c.id = ct.company_id),
+    'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'company', v.company_name, 'company_id', v.company_id, 'title', v.title, 'stage', v.stage, 'value_monthly', v.value_monthly, 'currency', v.currency, 'owner', v.owner_name) order by v.created_at desc), '[]')
+              from (select * from crm_deals_v where company_name ilike q or title ilike q or next_step ilike q order by created_at desc limit coalesce(p_limit, 10)) v));
+end $$;
+
+/** One call for the Standup screen. */
+create or replace function crm_standup(p_date date default null, p_tz text default null) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare tz text := coalesce(p_tz, crm_tz()); d date := coalesce(p_date, (now() at time zone coalesce(p_tz, crm_tz()))::date);
+begin
+  perform crm_require_member();
+  return jsonb_build_object(
+    'date', d, 'timezone', tz,
+    'scoreboard', crm_daily_scoreboard(d - 1, tz),
+    'meetings_today', crm_whos_meeting_today(d, tz) -> 'meetings',
+    'attention', crm_deals_needing_attention(),
+    'commitments_today', (select coalesce(jsonb_agg(jsonb_build_object('owner', m.display_name, 'owner_id', c.owner_id, 'targets', c.targets, 'notes', c.notes) order by m.display_name), '[]') from crm_commitments c join crm_members m on m.user_id = c.owner_id where c.commit_date = d),
+    'yesterday_commitments', crm_commitment_vs_actual(d - 1, d - 1) -> 'rows',
+    'uncaptured_meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'company', mv.company_name, 'contact', mv.contact_name, 'scheduled_at', mv.scheduled_at, 'deal_id', mv.deal_id) order by mv.scheduled_at), '[]')
+                            from crm_meetings_v mv where mv.status = 'scheduled' and mv.scheduled_at < (select w_from from crm_day_window(d, tz)))
+  );
+end $$;
+
+-- -----------------------------------------------------------------------------
+-- Grants: RPCs are for signed-in users only (RLS + crm_require_member inside)
+-- -----------------------------------------------------------------------------
+do $$
+declare f record;
+begin
+  for f in select p.oid::regprocedure as sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname like 'crm\_%' loop
+    execute format('revoke all on function %s from public, anon', f.sig);
+    execute format('grant execute on function %s to authenticated, service_role', f.sig);
+  end loop;
+end $$;
