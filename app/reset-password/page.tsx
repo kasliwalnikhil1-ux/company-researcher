@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
 import { Lock } from 'lucide-react';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 
 export default function ResetPassword() {
   const [password, setPassword] = useState('');
@@ -198,10 +199,9 @@ export default function ResetPassword() {
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 New Password
               </label>
-              <input
+              <PasswordInput
                 id="password"
                 name="password"
-                type="password"
                 autoComplete="new-password"
                 required
                 minLength={6}
@@ -217,10 +217,9 @@ export default function ResetPassword() {
               <label htmlFor="confirm-password" className="block text-sm font-medium text-gray-700">
                 Confirm Password
               </label>
-              <input
+              <PasswordInput
                 id="confirm-password"
                 name="confirm-password"
-                type="password"
                 autoComplete="new-password"
                 required
                 minLength={6}

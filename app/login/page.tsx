@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
 import { popPendingOAuthConsent } from '@/lib/oauthConsent';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 
 const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
 const CHAR_SPEED_MS = 45;
@@ -343,10 +344,9 @@ export default function Login() {
                       </span>
                     )}
                   </div>
-                  <input
+                  <PasswordInput
                     id="password"
                     name="password"
-                    type="password"
                     autoComplete={isLogin ? 'current-password' : 'new-password'}
                     required
                     className="block w-full px-3.5 py-2.5 rounded-lg border border-gray-300 bg-white text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-brand-fainter focus:border-brand-default transition-shadow"

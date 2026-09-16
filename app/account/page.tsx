@@ -13,6 +13,7 @@ import Toast from '@/components/ui/Toast';
 import { UserCircle, Lock, LogOut, X, Shield, Plus, Pencil, Trash2, Check, Mail, Twitter, UserX } from 'lucide-react';
 import type { EmailSettings } from '@/lib/emailCompose';
 import { normalizeExcludeDomain, normalizeExcludeLinkedinUrl } from '@/lib/utils';
+import { PasswordInput } from '@/components/ui/PasswordInput';
 
 export default function AccountPage() {
   return (
@@ -971,9 +972,9 @@ function AccountContent() {
                 <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">
                   New Password
                 </label>
-                <input
+                <PasswordInput
                   id="newPassword"
-                  type="password"
+                  autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -985,9 +986,9 @@ function AccountContent() {
                 <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
                   Confirm Password
                 </label>
-                <input
+                <PasswordInput
                   id="confirmPassword"
-                  type="password"
+                  autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
