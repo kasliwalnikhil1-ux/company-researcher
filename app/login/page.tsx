@@ -286,6 +286,7 @@ export default function Login() {
                   </button>
                   <button
                     type="submit"
+                    data-testid="reset-submit"
                     disabled={isLoading}
                     className="flex-1 py-2.5 px-4 rounded-lg text-sm font-medium text-white bg-brand-default hover:bg-brand-dark focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-brand-default transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -356,6 +357,7 @@ export default function Login() {
                   {isLogin && (
                     <button
                       type="button"
+                      data-testid="forgot-password-link"
                       onClick={() => {
                         setShowForgotPassword(true);
                         setError(null);

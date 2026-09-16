@@ -15,7 +15,7 @@ BASE_URL="https://${PROJECT_REF}.supabase.co/functions/v1/"
 
 FILES=("$@")
 if [ ${#FILES[@]} -eq 0 ]; then
-  FILES=(migrations/outreach/001_schema.sql migrations/outreach/002_functions.sql migrations/outreach/003_triggers_rls.sql migrations/outreach/004_seed_cron.sql migrations/outreach/005_patches.sql migrations/outreach/006_rpc_hardening.sql migrations/outreach/007_intent_override.sql)
+  FILES=(migrations/outreach/001_schema.sql migrations/outreach/002_functions.sql migrations/outreach/003_triggers_rls.sql migrations/outreach/004_seed_cron.sql migrations/outreach/005_patches.sql migrations/outreach/006_rpc_hardening.sql migrations/outreach/007_intent_override.sql migrations/outreach/008_agent_mcp.sql)
 fi
 
 for f in "${FILES[@]}"; do

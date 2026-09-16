@@ -2,7 +2,7 @@
 # Deploy the outreach platform edge functions (supabase/functions/outreach-*) to the CapitalxAI Supabase project.
 #
 # Usage:
-#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh            # all 28 functions
+#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh            # all 29 functions
 #   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh worker-tick outreach-process-inbound
 #
 # Names may be given with or without the `outreach-` prefix. Deploys one function at a time, continues on
@@ -79,6 +79,7 @@ USER_FUNCS=(
   outreach-exports-create
   outreach-invite-member
   outreach-unipile-setup
+  outreach-mcp               # remote MCP connector (OAuth bearer checked in code; .well-known must be public)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")
 

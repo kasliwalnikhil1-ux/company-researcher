@@ -38,10 +38,12 @@ PRD: `linkedin-outreach-platform-PRD.md` (repo root). Frontend conventions: `doc
 | `003_triggers_rls.sql` | triggers (reply → exit, relation → advance, enrollment exit → cancel actions, sender status transitions, suppression → exit, node stats, chat rollup), RLS enable on all tables + policies, storage policies |
 | `004_seed_cron.sql` | platform ceilings, warmup caps, flags, Vault secret `outreach_cron_secret`, realtime publication, pg_cron jobs. Placeholders `__FUNCTIONS_BASE_URL__` / `__CRON_SECRET__` are substituted by the apply script |
 | `005_patches.sql` | `outreach_consume_budget`, grant tightening, `outreach_lead_timeline`, `outreach_client_stats`, `outreach_sequence_summary` |
+| `006_rpc_hardening.sql` / `007_intent_override.sql` | membership checks on read RPCs (`outreach_effective_cap_checked`), `outreach_set_intent` |
+| `008_agent_mcp.sql` | MCP agent layer: `outreach_agent_confirmations` / `_previews` / `_drafts` / `_calls` (service-role only), `outreach_agent_gc`, and manager RPCs for in-flight edits `outreach_agent_node_queued_actions`, `outreach_agent_set_action_text`, `outreach_agent_reschedule_delay` |
 
 Internal/ops/secret tables (`outreach_sender_secrets`, `outreach_sender_tokens`, `outreach_inbound_events`, `outreach_plans`, `outreach_flags`, `outreach_rate_limits`, …) sit in `public` with RLS **enabled and no policies**, so only the service role (edge functions, SQL editor) can touch them.
 
-### 1.3 Edge functions (28, all deployed with `--no-verify-jwt`)
+### 1.3 Edge functions (29, all deployed with `--no-verify-jwt`)
 | Function | Trigger | Auth (in code) | Purpose |
 |---|---|---|---|
 | `outreach-unipile-webhook` | Unipile → HTTP | header `unipile-auth` == `UNIPILE_WEBHOOK_SECRET` | persist raw event to `outreach_inbound_events`, ack |
@@ -72,6 +74,7 @@ Internal/ops/secret tables (`outreach_sender_secrets`, `outreach_sender_tokens`,
 | `outreach-exports-create` | web | JWT, manager | CSV to `outreach-exports`, signed URL (1 h) |
 | `outreach-invite-member` | web | JWT, owner | create/resend invitation + email |
 | `outreach-unipile-setup` | web | JWT, owner | configuration status + register platform-level Unipile webhooks |
+| `outreach-mcp` | Claude / MCP clients (Streamable HTTP at `/outreach-mcp/mcp`) | Supabase OAuth 2.1 bearer (same flow as `capitalxai-mcp`; `.well-known/oauth-protected-resource` public) → RLS-scoped client per call | remote MCP connector: ~60 tools by role (senders, leads, sequences, enrolments, inbox draft→approve→send, tasks, reports, `why_not_sending`), resources (`outreach://safety/policy`, …) and prompts. Skill: `claude-skill/outreach/`. Spec: `outreach-mcp-PRD.md` |
 
 Shared modules (`supabase/functions/_shared/outreach/`): `supabase.ts` (client, CORS, `serve`, `requireUser`, `requireCron`, `rpc`, `rateLimit`, `flag`), `unipile.ts` (typed client), `errors.ts` (Unipile error → decision table), `execute.ts` (action execution), `planner.ts`, `health.ts`, `inbound.ts` (webhook handlers), `workers.ts` (reconnect / imports / withdraw / poll / webhooks / classify / billing), `drafts.ts`, `ai.ts` + `prompts.ts`, `notify.ts` (Resend), `crypto.ts` (AES-GCM cookies, HMAC), `render.ts` (templates).
 
@@ -92,6 +95,7 @@ Shared modules (`supabase/functions/_shared/outreach/`): `supabase.ts` (client, 
 | `outreach-billing` | `15 3 * * *` | `outreach-billing-sync` |
 | `outreach-sweep` | `*/5 * * * *` | `select outreach_sweep_stale_reservations()` (SQL only) |
 | `outreach-cleanup` | `0 4 * * *` | deletes processed inbound events > 30 d, delivered webhook rows > 30 d, expired rate-limit rows, audit > 90 d, `cron.job_run_details` > 7 d |
+| `outreach-agent-gc` | `10 4 * * *` | `select outreach_agent_gc()` — expired MCP confirmation/preview/draft tokens, agent call log > 90 d (from `008_agent_mcp.sql`) |
 
 ---
 

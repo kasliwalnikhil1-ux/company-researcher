@@ -2,7 +2,7 @@
 // Uses Google Gemini via the REST API, matching the conventions in utils/azureOpenAiHelper.ts
 // (system instruction separated, thinkingConfig MEDIUM + responseMimeType for JSON, thought parts skipped).
 import { admin, log, sha256Hex } from "./supabase.ts";
-import { CLASSIFY_SYSTEM, DRAFT_SYSTEM, SEQUENCE_QA_SYSTEM, WEEKLY_REPORT_SYSTEM, PROMPT_VERSION } from "./prompts.ts";
+import { CLASSIFY_SYSTEM, DRAFT_SYSTEM, SEQUENCE_QA_SYSTEM, WEEKLY_REPORT_SYSTEM, REPLY_DRAFT_SYSTEM, PROMPT_VERSION } from "./prompts.ts";
 
 const API_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
 export const AI_MODEL = Deno.env.get("OUTREACH_AI_MODEL") ?? Deno.env.get("GEMINI_MODEL_ID") ?? "gemini-3-flash-preview";
@@ -143,6 +143,29 @@ export async function sequenceQa(input: { workspaceId: string; graph: unknown; b
   const raw = await call({ purpose: "sequence_qa", workspaceId: input.workspaceId, system: SEQUENCE_QA_SYSTEM, user, maxTokens: 6144, temperature: 0, json: true });
   const j = parseJson<{ warnings?: any[]; errors?: any[] }>(raw);
   return { warnings: Array.isArray(j.warnings) ? j.warnings : [], errors: Array.isArray(j.errors) ? j.errors : [] };
+}
+
+/** Draft 1–3 reply variants for an inbound thread (used by outreach-mcp draft_reply). Never sends. */
+export async function draftReply(input: {
+  workspaceId: string; channel: string; variants: number;
+  thread: Array<{ direction: "in" | "out"; text: string; at: string }>;
+  lead: Record<string, unknown>; sender: Record<string, unknown>;
+  brief?: string | null; guidance?: string | null;
+}): Promise<Array<{ text: string; rationale: string }>> {
+  const n = Math.max(1, Math.min(3, input.variants || 1));
+  const user = [
+    `Channel: ${input.channel}. Variants requested: ${n}.`,
+    `Sender (write as this person): ${JSON.stringify({ name: input.sender.display_name, headline: input.sender.headline ?? null })}`,
+    `Prospect: ${JSON.stringify({ name: input.lead.full_name, headline: input.lead.headline, company: input.lead.company, title: input.lead.title, location: input.lead.location })}`,
+    input.brief ? `Campaign brief that produced the original outreach:\n${String(input.brief).slice(0, 1500)}` : "No campaign brief on record.",
+    input.guidance ? `Operator guidance for this reply:\n${String(input.guidance).slice(0, 1000)}` : "",
+    `Thread, oldest first (out = sender, in = prospect):\n${input.thread.slice(-20).map((m) => `[${m.direction === "in" ? "PROSPECT" : "SENDER"} ${m.at.slice(0, 16)}] ${m.text.slice(0, 1200)}`).join("\n")}`,
+  ].filter(Boolean).join("\n\n");
+  const raw = await call({ purpose: "draft_reply", workspaceId: input.workspaceId, system: REPLY_DRAFT_SYSTEM, user, maxTokens: 3072, temperature: 0.6, json: true, thinking: "LOW" });
+  const j = parseJson<{ variants?: Array<{ text?: string; rationale?: string }> }>(raw);
+  const variants = (Array.isArray(j.variants) ? j.variants : []).map((v) => ({ text: String(v.text ?? "").trim().slice(0, 8000), rationale: String(v.rationale ?? "").slice(0, 200) })).filter((v) => v.text);
+  if (!variants.length) throw new Error("AI returned no reply variants");
+  return variants.slice(0, n);
 }
 
 export async function weeklyReport(input: { workspaceId: string; senderName: string; stats: unknown }): Promise<string> {

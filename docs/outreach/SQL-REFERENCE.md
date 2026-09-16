@@ -122,5 +122,16 @@ Listed so operators can call them from the SQL editor; the browser cannot.
 | RLS helpers: `outreach_is_service()`, `outreach_workspace_ids()`, `outreach_role_in(ws)`, `outreach_client_visible(ws, cid)`, `outreach_plan_active(ws)`, `outreach_can_write(ws)`, `outreach_can_manage(ws)`, `outreach_require(ws, p_min)` | used by policies and API functions; safe to call from the client for UI hints (`select outreach_role_in('<ws>')`). |
 | Trigger functions: `outreach_set_updated_at`, `outreach_trg_reply_exit`, `outreach_trg_relation`, `outreach_trg_enrollment_exit`, `outreach_trg_sender_status`, `outreach_trg_lead_dnc`, `outreach_trg_action_stats`, `outreach_trg_message_rollup`; `outreach__policy(...)` | not callable directly. |
 
+## 8b. MCP agent layer (`008_agent_mcp.sql`, used by the `outreach-mcp` edge function)
+
+| Function | Who | What |
+|---|---|---|
+| `outreach_agent_node_queued_actions(p_sequence uuid, p_node_id text) → setof (action_id, lead_id, sender_id, payload, scheduled_for)` | manager+ | queued (not reserved/sent) actions of one node, for re-rendering copy after a `sequence_edit_copy`. |
+| `outreach_agent_set_action_text(p_action uuid, p_text text) → boolean` | manager+ | overwrite `payload.text` of a **queued** action; returns false (no change) once the action is reserved or sent. |
+| `outreach_agent_reschedule_delay(p_sequence uuid, p_node_id text) → setof (rescheduled int, due_now int)` | manager+ | after a delay node's config changed: `wait_until = node_entered_at + new delay` for enrollments waiting in it; audits `sequence.timing_edited`. |
+| `outreach_agent_gc() → void` | service only | deletes expired confirmation / preview / draft tokens and old call logs. |
+
+Tables `outreach_agent_confirmations`, `outreach_agent_previews`, `outreach_agent_drafts`, `outreach_agent_calls` are service-role only (RLS enabled, no policies) and hold the MCP's two-step confirmation tokens, enrolment previews, reply drafts (with the last inbound message id for the staleness check) and the per-call log.
+
 ## 9. Events emitted (for outbound webhooks / audit)
 `lead.created`, `lead.updated`, `enrollment.started`, `enrollment.completed`, `enrollment.exited`, `task.created`, `task.completed`, `sequence.activated`, `sequence.paused`, `sequence.webhook`, `sender.paused`, `sender.connected`, `sender.reconnected`, `sender.disconnected`, `sender.level_changed`, `sender.health`, `invite.sent`, `invite.accepted`, `invite.withdrawn`, `message.sent`, `message.received`, `message.classified`, `email.sent`, `email.opened`, `email.clicked`, `email.bounced`. Subscribe with `outreach_outbound_webhooks.events` (array; `'*'` for all).

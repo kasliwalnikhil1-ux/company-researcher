@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "text-to-speech": {
+      "source": "elevenlabs/skills",
+      "sourceType": "github",
+      "skillPath": "text-to-speech/SKILL.md",
+      "computedHash": "e6107324e231080566051ae6ca0a7a69c68ffaceff297e96d28d42d754e65b6b"
+    },
+    "ultrademo": {
+      "source": "new-xp/ultrademo",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/ultrademo/SKILL.md",
+      "computedHash": "525c166a6ce25e44ee3c760868752711d2ac027501ee57a03af200075fd99987"
+    },
+    "ultrademo-rerun": {
+      "source": "new-xp/ultrademo",
+      "sourceType": "github",
+      "skillPath": ".claude/skills/ultrademo-rerun/SKILL.md",
+      "computedHash": "67daf2fa53d5bf13e7872ddbd2d6068bc70f06f05423de9118c7bccf48bf6863"
+    }
+  }
+}
