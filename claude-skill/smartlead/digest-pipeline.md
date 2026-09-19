@@ -25,7 +25,7 @@ One line per thread, their words quoted briefly. If there are more than 20, say 
 Add `list_email_accounts(problems_only:true)` only when a connection failure is suspected (IMAP down = replies are not being captured, which also makes the digest look quiet).
 
 ## 4. Close with actions, apply none
-- Replies waiting for an answer, most valuable first → offer to start [reply triage](reply-pipeline.md) on #1.
+- Replies waiting for an answer, most valuable first → go straight into [reply triage](reply-pipeline.md) step 2–3: `get_reply` each and show the numbered table (who · their exact words · contact they shared · category · draft · next action) in the same message. Don't ask whether to draft; sending still needs a yes per thread.
 - Automated / unsubscribe threads → offer to categorise them (`update_lead_category`; Do Not Contact gets `pause_lead:true` and no reply).
 - Mailbox actions to confirm → offer the [burn check](burn-check-pipeline.md).
 

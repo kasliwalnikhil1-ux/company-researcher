@@ -1,6 +1,6 @@
 ---
 name: smartlead
-description: Run the team's cold-email operations on Smartlead via the CapitalxAI Smartlead MCP connector — morning reply digest ("what replies came in overnight?"), reply triage and approved sending ("draft an answer to Priya", "reply to the interested ones"), mailbox burn checks ("which mailboxes are burning?", "is anything over the bounce threshold?"), campaign performance and copy iteration ("step 2 is dead, rewrite it"), schedule/daily-cap/rotation changes, adding leads to a campaign, and a cross-channel view of one prospect across LinkedIn and email. Use when the CapitalxAI Smartlead connector tools (smartlead_whoami, list_replies, get_reply, reply_to_thread, list_email_accounts, get_account_deliverability, get_campaign_sequences, update_campaign_sequences, prospect_cross_channel …) are available.
+description: Run the team's cold-email operations on Smartlead via the CapitalxAI Smartlead MCP connector — morning reply digest ("what replies came in overnight?", "any pending replies?"), reply triage and approved sending ("draft an answer to Priya", "reply to the interested ones"), mailbox burn checks ("which mailboxes are burning?", "is anything over the bounce threshold?"), campaign performance and copy iteration ("step 2 is dead, rewrite it"), schedule/daily-cap/rotation changes, adding leads to a campaign, and a cross-channel view of one prospect across LinkedIn and email. Use when the CapitalxAI Smartlead connector tools (smartlead_whoami, list_replies, get_reply, reply_to_thread, list_email_accounts, get_account_deliverability, get_campaign_sequences, update_campaign_sequences, prospect_cross_channel …) are available.
 ---
 
 # CapitalxAI Smartlead (internal email ops)
@@ -34,7 +34,7 @@ Resources: `smartlead://rules` (read once per session), `smartlead://send-budget
 ## The guardrails (the connector enforces them; you work with them)
 
 1. **Approve the exact text.** The body on the wire is the body shown in chat, verbatim. After approval do not tighten, re-personalise or fix a typo — any change invalidates the token (`E_CONFIRMATION_MISMATCH`). Changed your mind → new draft → new approval.
-2. **One approval, one send.** Never batch. "Looks good, do the rest" approves nothing else — each remaining draft still needs its own yes.
+2. **One approval, one send.** Never batch sends. "Looks good, do the rest" approves nothing else — each remaining draft still needs its own yes to its own summary. (Accepting drafts in the table is not send approval; it just queues them for their summaries.)
 3. **Reply only into existing threads.** `E_NO_INBOUND` = the lead never wrote back; that is a cold send and not yours to make.
 4. **No campaign START.** New campaigns are DRAFTED. `resume_campaign` only resumes something PAUSED, with confirmation.
 5. **Adding leads to a live campaign is a send.** DRAFTED/PAUSED: routine. ACTIVE: state the count and the campaign name and get an explicit yes (the tool gates it). Block / unsubscribe / bounce lists can never be overridden — do not try.
@@ -47,7 +47,9 @@ Resources: `smartlead://rules` (read once per session), `smartlead://send-budget
 ## Workflows
 
 ### Reply triage and send (primary) — read [reply-pipeline.md](reply-pipeline.md)
-`list_replies` → `get_reply` → category call + draft **in one message** → human edits in chat → `update_lead_category(pause_lead:true)` → `reply_to_thread(body)` → show `effect_summary` verbatim → yes → same call + `confirmation_token`. Reading a reply and having a good draft waiting should take one message.
+`list_replies` → `get_reply` per human reply → **one numbered table in one message**: Who (with their email) · Their exact words (verbatim) · Contact they shared (the email/number they wrote, e.g. "contact my colleague X at …", with whose it is from the `context`) · Category call · Draft reply · Next action, plus a ready email draft to any referred person → human accepts / edits / skips per number → for each accepted draft, one at a time: `update_lead_category(pause_lead:true)` → `reply_to_thread(body)` → show `effect_summary` verbatim → yes → same call + `confirmation_token`.
+
+**"Any pending replies?" always ends with drafts in the same turn** — never a summary plus "want me to draft these?". Drafting many at once is fine; sending stays one summary + one yes per thread.
 
 ### Morning digest — read [digest-pipeline.md](digest-pipeline.md)
 `count_replies(since: yesterday 00:00)` → `list_replies(since)` positive first → `get_account_deliverability(only_flagged:true)` → what needs an answer, what needs categorising, which mailbox moved.

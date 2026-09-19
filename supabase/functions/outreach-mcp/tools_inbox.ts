@@ -36,15 +36,24 @@ function contactsFor(chat: Row, thread: Row[]): Row {
   const l = chat.outreach_leads ?? {};
   const custom = (l.custom ?? {}) as Record<string, unknown>;
   const customPhones = Object.entries(custom).filter(([k, v]) => /phone|mobile|whatsapp/i.test(k) && v).map(([, v]) => String(v));
-  const inbound = thread.filter((m) => m.direction === "in" && !m.deleted_at).map((m) => m.text ?? "").join("\n");
-  const phones = (inbound.match(PHONE_RE) ?? []).map((p) => p.trim()).filter((p) => { const d = p.replace(/\D/g, "").length; return d >= 8 && d <= 15; });
+  const own = new Set([...[l.email_work, l.email_personal].filter(Boolean).map((e: string) => e.toLowerCase()), ...customPhones.map((p) => p.replace(/[^\da-z@.+]/gi, ""))]);
+  // what the prospect wrote: "please contact my colleague Aastha on +91 …", "write to karin@…", each with the sentence around it
+  const mentioned: Row[] = [], seen = new Set<string>();
+  for (const m of thread.filter((m) => m.direction === "in" && !m.deleted_at)) {
+    const text = m.text ?? "";
+    const hits: Array<{ type: string; value: string; at: number }> = [];
+    for (const x of text.matchAll(EMAIL_RE)) hits.push({ type: "email", value: x[0].toLowerCase(), at: x.index ?? 0 });
+    for (const x of text.matchAll(PHONE_RE)) { const d = x[0].replace(/\D/g, "").length; if (d >= 8 && d <= 15) hits.push({ type: "phone", value: x[0].trim(), at: x.index ?? 0 }); }
+    for (const h of hits) {
+      const key = h.value.replace(/[^\da-z@.+]/gi, "");
+      if (own.has(h.value) || own.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      mentioned.push({ type: h.type, value: h.value, at: m.sent_at, context: untrusted("linkedin_message", text.slice(Math.max(0, h.at - 140), h.at + h.value.length + 40).replace(/\s+/g, " ").trim(), 220) });
+    }
+  }
   const linkedin = l.profile_url ?? (l.public_identifier || chat.attendee_public_identifier ? `https://www.linkedin.com/in/${l.public_identifier ?? chat.attendee_public_identifier}` : undefined);
-  const out: Row = {
-    linkedin, email: uniq([l.email_work, l.email_personal].filter(Boolean)), phone: customPhones,
-    mentioned_in_thread: { emails: uniq(inbound.match(EMAIL_RE) ?? []), phones: uniq(phones) },
-  };
-  for (const k of ["email", "phone"]) if (!out[k].length) delete out[k];
-  if (!out.mentioned_in_thread.emails.length && !out.mentioned_in_thread.phones.length) delete out.mentioned_in_thread;
+  const out: Row = { linkedin, email: uniq([l.email_work, l.email_personal].filter(Boolean)), phone: customPhones, mentioned_in_thread: mentioned.slice(0, 10) };
+  for (const k of ["email", "phone", "mentioned_in_thread"]) if (!out[k].length) delete out[k];
   return out;
 }
 
@@ -171,7 +180,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
       try { const d = await makeDrafts(ctx, id, a.guidance, 1); return { chat_id: id, lead: d.lead, company: d.company, sender: d.sender, intent: d.intent, their_words: d.their_words, last_from_them_at: d.last_from_them_at, contacts: d.contacts, draft_token: d.drafts[0].draft_token, text: d.drafts[0].text, rationale: d.drafts[0].rationale }; }
       catch (e) { const msg = e instanceof Error ? e.message : String(e); return { chat_id: id, error: e instanceof McpError ? e.code : (/^(E_[A-Z_]+)/.exec(msg)?.[1] ?? "E_DRAFT_FAILED"), message: msg }; }
     });
-    return { drafted: results.filter((r) => "draft_token" in r).length, failed: results.filter((r) => "error" in r).length, expires_in_seconds: 1800, drafts: results, next: "Present each draft with the lead, sender, their_words verbatim, contacts (email / phone / LinkedIn, incl. ones mentioned in the thread) and the draft text. Collect accept / accept-with-edits / skip in one message, then call inbox_send_batch with the approvals." };
+    return { drafted: results.filter((r) => "draft_token" in r).length, failed: results.filter((r) => "error" in r).length, expires_in_seconds: 1800, drafts: results, next: "Present each draft with the lead, sender, their_words verbatim, contacts.mentioned_in_thread (emails/numbers they wrote, each with the sentence it came from — say whose it is) and the draft text. Collect accept / accept-with-edits / skip in one message, then call inbox_send_batch with the approvals." };
   });
 
   tool(server, ctx, {

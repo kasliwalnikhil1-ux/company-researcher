@@ -172,6 +172,53 @@ export function normaliseHistory(r: unknown): { messages: ThreadMsg[]; from?: st
   return { messages, from: pick(r, "from", "data.from"), to: pick(r, "to", "data.to") };
 }
 
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const PHONE_RE = /\+?\(?\d[\d\s().-]{6,}\d/g;
+const uniq = (xs: string[]) => [...new Set(xs)];
+
+/** Emails / phone numbers a lead wrote, each with the sentence around it ("please write to my colleague Lena at …") so a human can tell whose it is. */
+export function mentionsIn(texts: string[], exclude: Set<string>): Row[] {
+  const out: Row[] = [], seen = new Set<string>();
+  for (const text of texts) {
+    const hits: Array<{ type: "email" | "phone"; value: string; at: number }> = [];
+    for (const m of text.matchAll(EMAIL_RE)) hits.push({ type: "email", value: m[0].toLowerCase(), at: m.index ?? 0 });
+    for (const m of text.matchAll(PHONE_RE)) { const d = m[0].replace(/\D/g, "").length; if (d >= 8 && d <= 15) hits.push({ type: "phone", value: m[0].trim(), at: m.index ?? 0 }); }
+    for (const h of hits) {
+      const key = h.value.replace(/[^\da-z@.+]/gi, "");
+      if (exclude.has(h.value) || exclude.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      const ctx = text.slice(Math.max(0, h.at - 140), h.at + h.value.length + 40).replace(/\s+/g, " ").trim();
+      out.push({ type: h.type, value: h.value, context: untrusted("lead_email_reply", ctx, 220) });
+    }
+  }
+  return out.slice(0, 10);
+}
+
+/**
+ * Everything needed to follow up outside this thread: the lead's stored details plus emails/phones the lead
+ * wrote in their replies (signatures, "write to my colleague at …"). Quoted mail must already be stripped from
+ * `inboundTexts` so our own signature is not picked up; `exclude` drops our mailboxes and the lead's own address.
+ */
+export function contactsFrom(lead: Row | null | undefined, inboundTexts: string[], exclude: Array<string | undefined>): Row {
+  const skip = new Set(exclude.filter(Boolean).map((e) => String(e).toLowerCase()));
+  const custom = (pick(lead, "custom_fields") ?? {}) as Row;
+  const customPhones = Object.entries(custom).filter(([k, v]) => /phone|mobile|whatsapp/i.test(k) && v).map(([, v]) => String(v));
+  const phones = uniq([pick(lead, "phone_number", "phone", "lead.phone_number", "lead.phone"), ...customPhones].filter(Boolean).map(String));
+  for (const p of phones) skip.add(p.replace(/[^\da-z@.+]/gi, "")); // already shown as the lead's own number
+  const out: Row = {
+    email: pick(lead, "email", "lead_email", "lead.email"),
+    phone: phones,
+    linkedin: pick(lead, "linkedin_profile", "lead.linkedin_profile"),
+    website: pick(lead, "website", "company_url", "lead.website"),
+    // what the lead wrote: "please contact my colleague Lena at lena@…", a number in their signature, …
+    mentioned_in_reply: mentionsIn(inboundTexts, skip),
+  };
+  if (!out.phone.length) delete out.phone;
+  for (const k of ["email", "linkedin", "website"]) if (!out[k]) delete out[k];
+  if (!out.mentioned_in_reply.length) delete out.mentioned_in_reply;
+  return out;
+}
+
 /** One master-inbox row → compact thread brief. */
 export function threadBrief(row: Row, categories: Map<number, string>) {
   const catId = pick(row, "lead_category_id", "category.id", "category_id");
@@ -197,7 +244,10 @@ export function threadBrief(row: Row, categories: Map<number, string>) {
     unread: pick(row, "has_new_unread_email") ?? (pick(row, "is_read") === false ? true : undefined),
     subject: lastIn?.subject ?? pick(row, "last_message.subject", "subject"),
     automated: auto ? auto.kind : undefined,
-    they_wrote: untrusted("lead_email_reply", stripQuoted(lastBody ?? ""), 500),
+    they_wrote: untrusted("lead_email_reply", stripQuoted(lastBody ?? ""), 1200),
+    contacts: contactsFrom({ ...(pick(row, "lead") ?? {}), email: pick(row, "lead_email", "lead.email", "email"), phone_number: pick(row, "lead.phone", "lead.phone_number", "lead_phone_number", "phone_number"), linkedin_profile: pick(row, "lead.linkedin_profile", "linkedin_profile"), website: pick(row, "lead.website", "website") },
+      hist.filter((m) => m.direction === "inbound").map((m) => stripQuoted(m.text)).concat(lastIn ? [] : [stripQuoted(lastBody ?? "")]),
+      [pick(row, "lead_email", "lead.email", "email"), pick(row, "email_account.email", "email_account_email", "from_email")]),
   };
 }
 
