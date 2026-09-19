@@ -1,7 +1,7 @@
 // Sender management actions (manager+): resync, reconnect_link (credentials mode), checkpoint (OTP), refresh_profile, recompute_health, plan_now.
 import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit } from "../_shared/outreach/supabase.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
-import { reconnectLink, syncOwnProfile, applyOnboardingGate, backfillChats } from "../_shared/outreach/inbound.ts";
+import { reconnectLink, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames } from "../_shared/outreach/inbound.ts";
 import { healthForSender } from "../_shared/outreach/health.ts";
 import { planSender } from "../_shared/outreach/planner.ts";
 import { reconnectSender } from "../_shared/outreach/workers.ts";
@@ -44,6 +44,9 @@ serve("sender-manage", async (req) => {
     case "backfill_inbox": {
       const n = await backfillChats(s, 5);
       return json({ ok: true, inserted: n });
+    }
+    case "resolve_chat_names": {
+      return json({ ok: true, ...(await resolveChatNames(s, 100)) });
     }
     case "recompute_health": {
       const h = await healthForSender(s.id, "nightly");

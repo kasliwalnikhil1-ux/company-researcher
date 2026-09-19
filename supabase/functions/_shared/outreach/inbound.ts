@@ -443,7 +443,35 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
     cursor = res.cursor ?? undefined;
     pages++;
   } while (cursor && pages < maxPages);
+  try { await resolveChatNames(sender, 40); } catch (e) { log({ fn: "backfill", warn: `resolveChatNames: ${e}` }); }
   return inserted;
+}
+
+/**
+ * LinkedIn 1:1 chats come back from /chats without a name. Fill attendee_name / public identifier / picture from
+ * the chat's attendee list (a Unipile-side read, no LinkedIn action), newest chats first, bounded per call.
+ */
+export async function resolveChatNames(sender: Sender, max = 40): Promise<{ checked: number; named: number; linked: number }> {
+  if (!sender.unipile_account_id || !unipileConfigured() || sender.provider !== "LINKEDIN") return { checked: 0, named: 0, linked: 0 };
+  const { data: chats } = await admin.from("outreach_chats").select("id, unipile_chat_id, attendee_provider_id, lead_id").eq("sender_id", sender.id).is("attendee_name", null).not("unipile_chat_id", "is", null).order("last_message_at", { ascending: false, nullsFirst: false }).limit(max);
+  let named = 0, linked = 0;
+  for (const c of chats ?? []) {
+    try {
+      const res = await unipile.chats.attendees(c.unipile_chat_id);
+      const items = res.items ?? [];
+      const a = items.find((x: any) => x.provider_id === c.attendee_provider_id) ?? items.find((x: any) => !(x.is_self === 1 || x.is_self === true) && x.provider_id !== sender.provider_user_id);
+      const name = a?.name ?? a?.display_name ?? null;
+      if (!name) continue;
+      const pub = pubIdFromUrl(a?.profile_url ?? a?.public_profile_url ?? null) ?? a?.public_identifier ?? null;
+      const patch: Record<string, unknown> = { attendee_name: name };
+      if (pub) patch.attendee_public_identifier = pub;
+      if (a?.picture_url) patch.attendee_picture_url = a.picture_url;
+      if (!c.lead_id) { const lead = await matchLead(sender.workspace_id, c.attendee_provider_id, pub, name, false, a?.profile_url ?? undefined); if (lead?.id) { patch.lead_id = lead.id; linked++; } }
+      const { error } = await admin.from("outreach_chats").update(patch).eq("id", c.id);
+      if (!error) named++;
+    } catch (e) { log({ fn: "resolveChatNames", chat: c.id, warn: String(e) }); }
+  }
+  return { checked: chats?.length ?? 0, named, linked };
 }
 
 export const _internal = { matchLead, pubIdFromUrl, randInt };

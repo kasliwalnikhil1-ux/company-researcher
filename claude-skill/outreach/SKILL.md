@@ -18,7 +18,7 @@ Tools appear according to the member's role: viewers see reads + inbox; members 
 | Leads | `leads_search`, `lead_get`, `lead_timeline`, `lead_upsert` (bulk, `dry_run`), `lead_tag`, `lead_set_stage`, `lead_set_list`, `lead_suppress` ⚠, `import_create` ⚠, `import_status` | `lead_upsert` ≤500 rows/call, per-row errors |
 | Sequences | `sequences_list`, `sequence_get`, `sequence_templates`, `sequence_validate`, `sequence_project`, `sequence_create`, `sequence_update`, `sequence_edit_copy`, `sequence_edit_timing`, `sequence_activate` ⚠, `sequence_pause`, `sequence_versions`, `sequence_restore` ⚠, `sequence_stats` | Describe sequences as compact **steps** (see below) |
 | Enrolments | `enroll_preview` → `enroll_commit` ⚠, `enrollments_list`, `enrollment_get`, `enrollment_pause`, `enrollment_resume`, `enrollment_exit` ⚠ | Commit only accepts a `preview_token` |
-| Inbox | `inbox_list`, `inbox_thread`, `draft_reply`, `draft_replies_bulk`, `inbox_send_reply` ⚠, `inbox_send_batch` ⚠, `inbox_mark_read`, `inbox_assign`, `inbox_archive`, `inbox_set_intent` | Drafting never sends; sending needs a human yes |
+| Inbox | `inbox_pending` (start here), `inbox_list`, `inbox_thread`, `draft_reply`, `draft_replies_bulk`, `inbox_send_reply` ⚠, `inbox_send_batch` ⚠, `inbox_mark_read`, `inbox_assign`, `inbox_archive`, `inbox_set_intent` | You write drafts yourself (`draft_*` = platform AI, only on request); sending needs a human yes |
 | Tasks | `tasks_list`, `task_get`, `task_create`, `task_complete` | `review_ai_draft` approval queues the real action through the ledger |
 | Reports | `report_overview`, `report_client`, `report_sequence`, `report_sender`, `report_deliverability`, `report_export` ⚠ | Each returns numbers + a quotable `summary` |
 
@@ -59,15 +59,15 @@ Copy rules the platform validates (and you should follow before it has to): invi
 
 ## Workflows
 
-### Morning triage (primary) — read [triage-pipeline.md](triage-pipeline.md)
-`inbox_list(intent:"interested", unread:true)` (then `question`) → `draft_replies_bulk` → present drafts, collect accept / edit / skip in one message → `inbox_send_batch` (one confirmation for the batch) → archive not-interested, create tasks for wrong-person/OOO, fix intents. Target: 20 replies handled in one conversation.
+### Pending replies / morning triage (primary) — read [triage-pipeline.md](triage-pipeline.md)
+`inbox_pending` (ONE call: every thread waiting on us, with their exact words, recent messages, shared contacts) → you sort them and **write the drafts yourself** → one numbered table → accept / edit / skip → `inbox_send_batch([{chat_id, reply_to_message_id, text}])` (one confirmation for the batch) → archive noise, tasks for wrong-person/OOO.
 
-**"Any pending replies?" / "what's waiting on me?" / "anything to reply to?" always ends with drafts, in the same turn.** Never answer with a summary plus "Do you want me to draft replies?" — the user asked so they can approve and send. Concretely:
-- Don't trust the intent tag alone. `unclassified` / `unclear` threads whose last message is from the prospect get read (`inbox_thread`) and judged by you; if one needs an answer, fix its tag with `inbox_set_intent` and include it.
-- Draft every thread that needs a reply from us with `draft_replies_bulk` (≤25; interested first). Pass per-thread facts as `guidance` when the thread calls for it (e.g. a referral: thank them and say you'll reach out to the named person; a "Hello" with no context: short, friendly, ask what they're after). If AI drafting fails, write the draft yourself.
-- Show one numbered table (triage step 3): **Who (with LinkedIn) · Their exact words (verbatim) · Contact they shared (the email/number they wrote, e.g. "contact my colleague X at …", with whose it is from the `context`) · Draft reply · Next action**, plus a ready email draft to any referred person, then ask for `accept` / `edit: …` / `skip` per number. Sending still needs the batch confirmation.
-- Things that are not a reply (call someone, email a referred contact outside LinkedIn) get a one-line suggested action or a draft email text, plus an offer to `task_create`.
-- Soft no's and spam: list them briefly with the archive / mark-not-interested action you propose; no drafts.
+**"Any pending replies?" / "what's waiting on me?" always ends with drafts, in the same turn, fast:**
+- One `inbox_pending` call. No `inbox_list`, no per-thread `inbox_thread` loop, no `draft_reply` / `draft_replies_bulk` (platform AI = paid API + slow; only if the user asks for it). You are the drafter.
+- Ignore the intent tag (usually `unclassified`); judge from `their_words` + `recent`.
+- Table: **Who (with LinkedIn) · Their exact words (verbatim) · Contact they shared (the email/number they wrote, e.g. "contact my colleague X at …", with whose it is from the `context`) · Draft reply · Next action**, plus a ready email draft to any referred person. Then ask `accept` / `edit: …` / `skip` per number.
+- Things that are not a reply (call someone, email a referred contact) get a suggested action + offer to `task_create`.
+- Soft no's and noise: one line each with the archive / intent fix you propose; no drafts.
 
 ### Launch a campaign — read [campaign-pipeline.md](campaign-pipeline.md)
 Capacity (`senders_list`, `senders_capacity`) → audience (`leads_search` or list building) → steps (`sequence_templates`, `sequence_validate` with `ai:true`) → user approves copy → `sequence_create` → `sequence_project` → `enroll_preview` → user approves → `enroll_commit` → `sequence_activate`. Zero UI visits; two confirmations.
