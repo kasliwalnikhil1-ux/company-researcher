@@ -3,6 +3,7 @@ import { admin, log, rpc, emitEvent, audit, randInt } from "./supabase.ts";
 import { unipile, unipileConfigured, distanceToRelation, invitationPending } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
 import { healthForSender } from "./health.ts";
+import { fillChatPicture } from "./avatars.ts";
 
 type Sender = Record<string, any>;
 
@@ -269,6 +270,9 @@ export async function handleMessaging(payload: any): Promise<void> {
     chat.lead_id = lead.id;
   }
   if (!chat) return;
+  if (chat.provider === "LINKEDIN" && chat.attendee_picture_url == null) {
+    try { await fillChatPicture({ ...chat, lead_id: chat.lead_id ?? lead?.id ?? null }); } catch (e) { log({ fn: "messaging", avatar_warn: String(e) }); }
+  }
 
   // first message in chat? (before insert)
   const { count: existing } = await admin.from("outreach_messages").select("id", { count: "exact", head: true }).eq("chat_id", chat.id);

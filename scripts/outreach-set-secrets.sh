@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Push the outreach platform edge-function secrets from a .env file to the CapitalxAI Supabase project
-# using the Management API (POST /v1/projects/{ref}/secrets with a JSON array of {name,value}).
+# Push the edge-function secrets (outreach / smartlead / crm) from the single app env file to the CapitalxAI
+# Supabase project using the Management API (POST /v1/projects/{ref}/secrets with a JSON array of {name,value}).
 #
 # Usage:
-#   cp .env.outreach.example .env.outreach && edit it
-#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-set-secrets.sh [path/to/.env.outreach] [--dry-run]
+#   cp .env.example .env.local && edit it (section 2 holds the edge-function secrets)
+#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-set-secrets.sh [path/to/env-file] [--dry-run]
 #
 # Behaviour:
 #   * lines are KEY=VALUE (optional `export ` prefix, optional single/double quotes around VALUE); # comments and
 #     blank lines are ignored.
+#   * ONLY allowlisted keys are pushed (UNIPILE_*, OUTREACH_* except OUTREACH_TEST_*, STRIPE_*, SMARTLEAD_*, CRM_*,
+#     RESEND_API_KEY, GEMINI_API_KEY, GEMINI_MODEL_ID, EMAIL_FROM, TEMP_MAX_AGE_HOURS). Everything else in the
+#     file (Next.js keys, test logins, ...) stays local.
 #   * keys with an empty value are SKIPPED (existing secrets keep their value; nothing is deleted).
 #   * keys starting with SUPABASE_ are skipped — those are reserved and injected by the platform.
 #   * --dry-run prints the key names that would be pushed and exits without calling the API.
@@ -26,7 +29,7 @@ if [ -z "${CAPITALXAI_SUPABASE_ACCESS_TOKEN:-}" ]; then
 fi
 TOKEN="$CAPITALXAI_SUPABASE_ACCESS_TOKEN"
 
-FILE=".env.outreach"
+FILE=".env.local"
 DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
@@ -36,7 +39,7 @@ for arg in "$@"; do
   esac
 done
 if [ ! -f "$FILE" ]; then
-  echo "ERROR: ${FILE} not found. Copy .env.outreach.example to .env.outreach and fill it in." >&2
+  echo "ERROR: ${FILE} not found. Copy .env.example to .env.local and fill it in." >&2
   exit 1
 fi
 
@@ -51,6 +54,7 @@ trap 'rm -f "$TMP"' EXIT
 "$PY" - "$FILE" > "$TMP" <<'PY'
 import json, re, sys
 path = sys.argv[1]
+ALLOW = re.compile(r'^(UNIPILE_|OUTREACH_|STRIPE_|SMARTLEAD_|CRM_)|^(RESEND_API_KEY|GEMINI_API_KEY|GEMINI_MODEL_ID|EMAIL_FROM|TEMP_MAX_AGE_HOURS)$')
 out, skipped_empty, skipped_reserved, bad = [], [], [], []
 for ln, raw in enumerate(open(path, encoding="utf-8"), 1):
     line = raw.strip()
@@ -68,6 +72,8 @@ for ln, raw in enumerate(open(path, encoding="utf-8"), 1):
         val = val.split(" #", 1)[0].rstrip()
     if key.startswith("SUPABASE_"):
         skipped_reserved.append(key); continue
+    if not ALLOW.match(key) or key.startswith("OUTREACH_TEST_"):
+        continue  # app-only / local-only key: never leaves this machine
     if val == "":
         skipped_empty.append(key); continue
     out.append({"name": key, "value": val})

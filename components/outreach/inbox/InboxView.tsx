@@ -166,7 +166,7 @@ export default function InboxView({ chatId, initialFilters }: { chatId: string |
 
   const showList = !chatId;
   return (
-    <div className="-mx-4 md:-mx-6 -my-6 h-[calc(100vh-6.5rem)] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
+    <div className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh-6.5rem-1px)] md:h-[calc(100dvh-3rem-1px)] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
       {/* Left: chat list */}
       <aside className={cn('w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-gray-200 min-h-0', showList ? 'flex' : 'hidden md:flex', 'flex-col')}>
         <ChatList

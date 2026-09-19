@@ -1,40 +1,24 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useOutreachRealtime, useDashboard } from '@/lib/outreach/queries';
+import { useOutreachRealtime } from '@/lib/outreach/queries';
 import { cn } from '@/lib/utils';
-import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, Settings, ChevronDown, Plus, AlertTriangle } from 'lucide-react';
+import { ChevronDown, Plus, AlertTriangle } from 'lucide-react';
 import { useState } from 'react';
-import { Modal, Input, Button } from './ui';
-
-const NAV = [
-  { href: '/outreach', label: 'Dashboard', icon: LayoutDashboard, exact: true },
-  { href: '/outreach/inbox', label: 'Inbox', icon: Inbox, badge: 'unread' },
-  { href: '/outreach/senders', label: 'Senders', icon: Contact },
-  { href: '/outreach/leads', label: 'Leads', icon: Users },
-  { href: '/outreach/sequences', label: 'Sequences', icon: GitBranch },
-  { href: '/outreach/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks_open' },
-  { href: '/outreach/clients', label: 'Clients', icon: Building2, manager: true },
-  { href: '/outreach/settings/workspace', label: 'Settings', icon: Settings, prefix: '/outreach/settings' },
-];
+import { useOutreachNav, CountBadge, NewWorkspaceModal } from './OutreachNav';
 
 export default function OutreachShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const { workspace, workspaces, switchWorkspace, isManager, suspended, createWorkspace, role } = useWorkspace();
+  const { workspace, workspaces, switchWorkspace, suspended } = useWorkspace();
   useOutreachRealtime(workspace?.id);
-  const dash = useDashboard(workspace?.id);
+  const nav = useOutreachNav();
   const [wsOpen, setWsOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
-
-  const isClientViewer = role === 'client_viewer';
 
   return (
     <div className="flex-1 flex flex-col min-h-screen bg-gray-50">
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6">
+      {/* Desktop top bar. On mobile the workspace switcher + nav live under "Outreach" in the main sidebar. */}
+      <div className="hidden md:block bg-white border-b border-gray-200 px-4 md:px-6">
         <div className="flex items-center gap-4 h-12">
           <div className="relative">
             <button onClick={() => setWsOpen((o) => !o)} className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:bg-gray-100 rounded-lg px-2 py-1">
@@ -60,17 +44,13 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
             )}
           </div>
           <nav className="flex items-center gap-1 overflow-x-auto flex-1">
-            {NAV.filter((n) => (!n.manager || isManager) && !(isClientViewer && ['/outreach/senders', '/outreach/sequences', '/outreach/tasks', '/outreach/clients'].includes(n.href))).map((n) => {
-              const active = n.exact ? pathname === n.href : pathname.startsWith(n.prefix ?? n.href);
-              const count = n.badge ? (dash.data as any)?.[n.badge] : 0;
-              return (
-                <Link key={n.href} href={n.href} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap', active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
-                  <n.icon className="w-4 h-4" />
-                  {n.label}
-                  {count > 0 && <span className="ml-1 text-[10px] bg-indigo-600 text-white rounded-full px-1.5 py-0.5 leading-none">{count > 99 ? '99+' : count}</span>}
-                </Link>
-              );
-            })}
+            {nav.map((n) => (
+              <Link key={n.href} href={n.href} className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
+                <n.icon className="w-4 h-4" />
+                {n.label}
+                <CountBadge count={n.count} />
+              </Link>
+            ))}
           </nav>
         </div>
       </div>
@@ -87,10 +67,7 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
       <div className="flex-1 overflow-auto">
         <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto w-full">{children}</div>
       </div>
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New workspace" size="sm"
-        footer={<><Button variant="secondary" onClick={() => setCreateOpen(false)}>Cancel</Button><Button loading={creating} onClick={async () => { setCreating(true); try { await createWorkspace(newName || 'New workspace'); setCreateOpen(false); setNewName(''); } finally { setCreating(false); } }}>Create</Button></>}>
-        <Input label="Workspace name" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Acme Agency" />
-      </Modal>
+      <NewWorkspaceModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }

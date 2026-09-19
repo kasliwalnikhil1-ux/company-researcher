@@ -126,6 +126,8 @@ export const unipile = {
   chats: {
     list: (accountId: string, q: { cursor?: string; limit?: number; after?: string; before?: string } = {}) => request<{ items: any[]; cursor: string | null }>("/chats", { query: { account_id: accountId, limit: 100, ...q }, accountId }),
     get: (chatId: string) => request<any>(`/chats/${encodeURIComponent(chatId)}`),
+    // Messaging data only (no LinkedIn profile view is triggered).
+    attendees: (chatId: string) => request<{ items: any[] }>(`/chats/${encodeURIComponent(chatId)}/attendees`),
     start: (fields: { account_id: string; attendees_ids: string[]; text: string; subject?: string; linkedin?: Record<string, unknown> }) =>
       request<{ chat_id: string | null; message_id: string | null }>("/chats", { method: "POST", form: form(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
     messages: (chatId: string, q: { cursor?: string; limit?: number; after?: string } = {}) => request<{ items: any[]; cursor: string | null }>(`/chats/${encodeURIComponent(chatId)}/messages`, { query: { limit: 100, ...q } }),

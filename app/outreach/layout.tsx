@@ -6,6 +6,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { OutreachWorkspaceProvider, useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import OutreachShell from '@/components/outreach/Shell';
+import { OutreachSidebarNav } from '@/components/outreach/OutreachNav';
 import { Spinner, ErrorBox } from '@/components/outreach/ui';
 
 function Gate({ children }: { children: React.ReactNode }) {
@@ -18,15 +19,16 @@ function Gate({ children }: { children: React.ReactNode }) {
 
 export default function OutreachLayout({ children }: { children: React.ReactNode }) {
   const [qc] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: false } } }));
+  // Providers wrap MainLayout so its mobile sidebar can render the Outreach sub-nav + workspace switcher.
   return (
     <ProtectedRoute>
-      <MainLayout>
-        <QueryClientProvider client={qc}>
-          <OutreachWorkspaceProvider>
+      <QueryClientProvider client={qc}>
+        <OutreachWorkspaceProvider>
+          <MainLayout outreachSubnav={<OutreachSidebarNav />}>
             <Gate>{children}</Gate>
-          </OutreachWorkspaceProvider>
-        </QueryClientProvider>
-      </MainLayout>
+          </MainLayout>
+        </OutreachWorkspaceProvider>
+      </QueryClientProvider>
     </ProtectedRoute>
   );
 }

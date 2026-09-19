@@ -186,10 +186,20 @@ export function Td({ children, className, ...rest }: React.TdHTMLAttributes<HTML
   return <td className={cn('px-4 py-2.5 border-b border-gray-100 text-gray-700 align-middle', className)} {...rest}>{children}</td>;
 }
 
+function safeImageUrl(src: string | null | undefined): string | null {
+  if (!src) return null;
+  try { return new URL(src).protocol === 'https:' ? src : null; } catch { return null; }
+}
+
 export function Avatar({ src, name, size = 8 }: { src?: string | null; name?: string | null; size?: number }) {
   const initials = (name ?? '?').split(' ').map((s) => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
   const cls = `w-${size} h-${size}`;
-  if (src) return <img src={src} alt={name ?? ''} className={cn(cls, 'rounded-full object-cover flex-shrink-0 bg-gray-100')} />;
+  const url = safeImageUrl(src);
+  // Remember a failed load (e.g. an expired LinkedIn CDN link) and fall back to initials.
+  const [failed, setFailed] = React.useState<string | null>(null);
+  if (url && failed !== url) {
+    return <img src={url} alt={name ?? ''} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(url)} className={cn(cls, 'rounded-full object-cover flex-shrink-0 bg-gray-100')} />;
+  }
   return <div className={cn(cls, 'rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-semibold flex-shrink-0')}>{initials || '?'}</div>;
 }
 

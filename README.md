@@ -105,27 +105,13 @@ yarn dev
 
 ### Environment Setup
 
-Create a `.env.local` file in the root directory with the following structure:
-
-```env
-# Required
-EXA_API_KEY=your_exa_api_key
-GEMINI_API_KEY=your_gemini_api_key
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-
-# Optional - for additional features
-YOUTUBE_API_KEY=your_youtube_api_key
-NEXT_PUBLIC_GITHUB_TOKEN=your_github_token
-```
-
-> For deployment on platforms like Vercel, add these environment variables in your platform's settings.
-
-Alternatively, you can create a copy of our example environment file:
+All configuration lives in one file. Copy the template and fill it in:
 ```bash
 cp .env.example .env.local
 ```
-Then fill in your API keys in the newly created `.env.local` file.
+`.env.example` has three sections: the Next.js app, the edge-function secrets (pushed to Supabase with `scripts/outreach-set-secrets.sh`, which only uploads those keys), and local test logins.
+
+> For deployment on platforms like Vercel, add the section 1 variables in your platform's settings.
 
 <br>
 

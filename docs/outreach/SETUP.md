@@ -133,8 +133,8 @@ Ad-hoc SQL: `./scripts/outreach-sql.sh file.sql` (Management API `/database/quer
 
 ### 2.2 Set secrets
 ```bash
-cp .env.outreach.example .env.outreach     # git-ignored
-# fill in the values, then:
+cp .env.example .env.local     # git-ignored; skip if you already have one
+# fill in section 2 (edge function secrets), then:
 ./scripts/outreach-set-secrets.sh --dry-run   # shows key names only
 ./scripts/outreach-set-secrets.sh
 ```
@@ -168,7 +168,7 @@ Existing webhooks with the same source and URL are kept, so Register is idempote
 
 ### 2.5 Stripe
 1. Create recurring **per-seat** prices: team sender, agency sender, agency-plus sender, mailbox add-on. Give them `lookup_key`s containing `agency_plus`, `agency`, `team` and `mailbox` — `planFromSub()` maps a subscription to a plan by `lookup_key` / `nickname` regex or by equality with `STRIPE_PRICE_*`, and `billing-sync` picks the mailbox item by `/mailbox/i`.
-2. Put the price ids in `.env.outreach` (`STRIPE_PRICE_TEAM_SENDER`, …) and re-run the secrets script.
+2. Put the price ids in `.env.local` (`STRIPE_PRICE_TEAM_SENDER`, …) and re-run the secrets script.
 3. Add a webhook endpoint **`https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/outreach-stripe-webhook`** with events:
    `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`.
    Copy its signing secret to `STRIPE_WEBHOOK_SECRET`.
@@ -215,7 +215,7 @@ select outreach_invoke('outreach-worker-planner', '{"sender_id":"<uuid>"}'::json
 curl -s -X POST "$BASE/outreach-worker-tick" -H "x-cron-secret: $OUTREACH_CRON_SECRET"
 ```
 
-**Rotate the cron secret**: put the new value in `.env.outreach` → run the secrets script → re-run `004_seed_cron.sql` with the new `OUTREACH_CRON_SECRET` (updates Vault). Between the two steps workers answer `401`.
+**Rotate the cron secret**: put the new value in `.env.local` → run the secrets script → re-run `004_seed_cron.sql` with the new `OUTREACH_CRON_SECRET` (updates Vault). Between the two steps workers answer `401`.
 
 **Change the functions base URL**: `update outreach_flags set value = to_jsonb('https://…/functions/v1/'::text) where key = 'functions_base_url';` (trailing slash required) and set `OUTREACH_FUNCTIONS_BASE_URL` so hosted-auth callbacks use it too.
 
@@ -225,7 +225,7 @@ curl -s -X POST "$BASE/outreach-worker-tick" -H "x-cron-secret: $OUTREACH_CRON_S
 
 | PRD name | Implementation | Set where | Notes |
 |---|---|---|---|
-| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | same | injected by the platform | never put in `.env.outreach` |
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | same | injected by the platform | never put in `.env.local` |
 | `UNIPILE_DSN`, `UNIPILE_API_KEY` | same | secrets | DSN with or without `https://` |
 | `UNIPILE_WEBHOOK_SECRET` | same | secrets | `unipile-auth` header check in `outreach-unipile-webhook`; sent by `outreach-unipile-setup` when registering |
 | `CRON_SECRET` | `OUTREACH_CRON_SECRET` | secrets **and** Vault `outreach_cron_secret` | must match |
