@@ -61,7 +61,7 @@ export function registerBrief(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "standup_brief", title: "Standup brief (composite)", cls: "read",
-    description: "Everything the standup screen shows in one call: yesterday's scoreboard, today's meetings, stuck/stale/slipping deals, today's commitments, yesterday's commitments vs actuals, and past meetings that still have no capture. Use whos_meeting_today when you need the full per-meeting history.",
+    description: "Everything the standup screen shows in one call: yesterday's scoreboard, today's meetings, next steps due today (next_steps_today), stuck/stale/slipping deals, today's commitments, yesterday's commitments vs actuals, and past meetings that still have no capture. Use whos_meeting_today when you need the full per-meeting history.",
     input: { date: dateParam("Standup day (default today)").optional(), timezone: tzParam },
   }, async (a) => {
     const r = await rpc<Row>(ctx, "standup", { p_date: a.date ?? null, p_tz: a.timezone ?? null });

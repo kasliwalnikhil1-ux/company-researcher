@@ -1,26 +1,26 @@
 # Meeting capture pipeline
 
-Goal: a complete capture in under a minute, right after the meeting, in the prospect's own words. `capture_meeting` is the only way a meeting becomes `held` or `no_show`, and it refuses partial rows — so collect everything first, then write once.
+Goal: the user types a few words, the capture is saved. `capture_meeting` is the only way a meeting becomes `held` or `no_show`, and it refuses partial rows — so fill every required field from what was said plus the defaults below, then write once.
 
-## 1. Identify the meeting (one tool call)
-- User names a company/contact/time → `meetings_list(status: "scheduled", from: <7 days ago>, to: <today>)` and pick the match; or `search(q)` → company → `meetings_list(company)`.
-- Nothing named → show the uncaptured past meetings from `meetings_list` (`uncaptured_past` > 0) and ask which one.
-- Confirm in one line: "StoryVerse · Ananya Iyer · today 11:00 IST · meeting `5ad3…` — held or no-show?"
+## 1. Identify the meeting (no questions)
+- User names a company/contact/email -> `search(q)` or `meetings_list(status: "scheduled", from: <7 days ago>, to: <today>)` and pick the match.
+- Not in the CRM -> create it silently: `upsert_company` (name from the email domain, website = domain) -> `upsert_contact` -> `create_deal` (value + currency when a price was given) -> `schedule_meeting(deal_id, scheduled_at: today)`.
+- Nothing named at all -> show the uncaptured past meetings (`uncaptured_past` > 0) and ask which one.
 
-## 2. Ask for exactly the fields the outcome needs — in ONE message
+## 2. Fill the fields from what the user said - do not ask
+Anything said about the conversation (pricing, a quote, what they need) means **held**. "Didn't join / no-show" means **no_show**.
 
 **Held**
-1. Pain points, in their words — "what did they say hurts?" (quote, do not paraphrase; one per line)
-2. Commercials — price quoted, volume (videos/month), currency; or "not discussed"
-3. Objections (optional)
-4. Next step + date — or "it's dead" + why
+1. Pain points - the user's words as given, one per item. No rewording, no asking for exact quotes.
+2. Commercials - `{price, volume, currency, notes}`; currency is **INR unless stated**; keep the phrasing in `notes` ("5K for 2 videos"). Nothing about price -> `{none: true}`.
+3. Objections - only if mentioned. Never ask.
+4. Next step - as given, else a short inferred one ("Follow up on 5K quote for 2 videos"). Date - as given, else **today**. "It's dead" -> `is_dead` + reason.
 
 **No-show**
-1. Why (what happened / what they said, or "no reply")
-2. Follow-up action
-3. Follow-up date
+1. Why - as given, else "No-show".
+2. Follow-up action - as given, else "Rebook the meeting". Date - as given, else today.
 
-Accept shorthand ("₹40k/video, 8/mo", "call Fri") and normalise it yourself: currency codes (INR/USD/GBP/AED/EUR), ISO dates in the team timezone, arrays for pain points and objections.
+Source channel, role, meeting time, owner: skip when not mentioned (owner = whoever is connected). Normalise shorthand yourself: currency codes, ISO dates in the team timezone, arrays.
 
 ## 3. Write once
 ```
@@ -41,10 +41,10 @@ capture_meeting(meeting_id, outcome: "no_show",
 - `tags` optional: pass normalised tags (e.g. `["compliance", "video length"]`) when the verbatim pain points are long; otherwise each pain point becomes a tag.
 
 ## 4. Handle the response
-- `E_CAPTURE_INCOMPLETE` → the message lists the missing fields. Ask only for those, then call again with the **full** payload. Never fall back to `update_meeting` or `update_deal` to "mark it held".
+- `E_CAPTURE_INCOMPLETE` → the message lists the missing fields. Fill them from the defaults; ask only if one truly cannot be inferred, then call again with the **full** payload. Never fall back to `update_meeting` or `update_deal` to "mark it held".
 - `E_ALREADY_CAPTURED` → `update_capture(meeting_id, …)` for corrections.
 - `E_MEETING_CANCELLED` → `update_meeting(meeting_id, status: "scheduled", scheduled_at)` then capture.
-- Success → confirm: meeting status, deal stage (`meeting_held`, or `lost`), next step + date, tags created, `is_repeat_no_show` (⚠ flag it — second no-show for a contact usually means a dead lead or a wrong contact).
+- Success → confirm: meeting status, deal stage in plain words ("Meeting held", or "Lost"), next step + date, tags created, `is_repeat_no_show` (⚠ flag it — second no-show for a contact usually means a dead lead or a wrong contact).
 
 ## 5. Follow-through (same conversation)
 - Value or volume changed in the meeting → `update_deal(deal_id, value_monthly, currency, videos_per_month)`.
@@ -52,5 +52,5 @@ capture_meeting(meeting_id, outcome: "no_show",
 - A follow-up call was booked → `schedule_meeting(deal_id, scheduled_at, timezone)`.
 - New stakeholder mentioned → `upsert_contact(company, name, role)`.
 
-## Quality bar for pain points
-Good: "our current UGC creators are flaky — half the videos come late". Bad: "reliability issues". The tag counts across deals (`top_pain_points`) are only useful if the verbatims are real; if the user gives you a paraphrase, ask "what were their actual words?" once, then accept what they have.
+## Pain points
+Store what the user typed. Short is fine ("need realism"). Pass a one-word `tags` entry (e.g. `["realism"]`) so `top_pain_points` groups well. Never push back for verbatims.

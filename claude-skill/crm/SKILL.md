@@ -32,6 +32,20 @@ Resources: `crm://rules` (the enforced rules + team + lookups — read once per 
 5. **Money always has a currency.** Pass `value_monthly` + `currency` (USD, INR, GBP, AED, EUR seeded; add others with `set_fx_rate`). Report values in their currency; totals come back USD-normalised as `value_monthly_usd`.
 6. **Lists are lookup tables.** ICP segments, source channels and activity types accept id, slug or label. If a value does not exist (`E_NOT_FOUND`), ask whether to add it with `lookup_save`; never hardcode the list.
 
+## Defaults — capture without asking
+
+The user types a few words after a meeting; save it in one pass. Do not send a questionnaire.
+
+- **Who did it**: whoever is connected did the meeting and owns the deal (`owner: me`). Never comment on or question which account the connector is signed in as.
+- **Held is implied**: pricing, a quote, pain points or anything they said in the meeting means `outcome: held`. Only ask "held or no-show?" when nothing from the conversation is given.
+- **Currency**: INR unless a currency is stated ("$5k", "5k USD", "AED 3000").
+- **Price**: store what was said ("5K for 2 videos" → `price: 5000, volume: 2, notes: "5K for 2 videos"`). Do not ask per-video vs total.
+- **Pain points**: use the user's words as given ("they need realism" → `["need realism"]`). Do not ask for verbatims, do not expand or reword.
+- **Next step**: if not mentioned, infer a short one from what was said (e.g. "Follow up on 5K quote for 2 videos"). **Date**: if not mentioned, today (team timezone).
+- **Objections, source channel, role, meeting time**: skip when not mentioned. Never ask. Meeting time defaults to today.
+- **Company / contact / deal / meeting not in the CRM**: create them silently — `upsert_company` (name from the email domain) → `upsert_contact` → `create_deal` → `schedule_meeting` (today) → `capture_meeting`.
+- Ask only when the database rejects the call and the missing field cannot be inferred. Reply in 2–3 lines: what was saved, stage, next step + date.
+
 ## Data conventions
 
 - **Timezone**: days are cut in the team timezone (setting, default Asia/Kolkata). Meetings carry the prospect's timezone; show "11:00 IST (09:30 Dubai)" when they differ.
@@ -48,7 +62,7 @@ Resources: `crm://rules` (the enforced rules + team + lookups — read once per 
 `standup_brief()` → uncaptured meetings first (capture them) → scoreboard vs 7-day → today's meetings one line each (offer `whos_meeting_today` detail) → stuck/stale/slipping, write next steps with `update_deal` as they are decided → yesterday's commitments vs actual → collect today's commitments → `log_commitments_bulk` → 5-line digest.
 
 ### Capture a meeting — read [capture-pipeline.md](capture-pipeline.md)
-Find the meeting (`meetings_list` / `search`) → ask "held or no-show?" → ask for exactly the fields that outcome needs, in one message → one `capture_meeting` call → confirm meeting status, deal stage, next step, tags → offer `update_deal` for value/volume changes.
+Find the meeting (`meetings_list` / `search`), or create company → contact → deal → meeting if it is not there → apply the defaults above instead of asking → one `capture_meeting` call → confirm in 2–3 lines (status, stage, next step + date).
 
 ### Log touches
 A call block: `log_activities_bulk` with one row per dial (`outcome: no_answer | connected`), then `schedule_meeting` for anything booked. A reply: `log_activity(direction: "inbound", outcome: "replied")`; the deal moves to `replied` via `update_deal` if it is earlier. New lead: `upsert_company` → `upsert_contact` → `create_deal` (source_channel!).
@@ -58,7 +72,8 @@ A call block: `log_activities_bulk` with one row per dial (`outcome: no_answer |
 
 ## Conventions
 
-- Read before write; confirm the target (company + contact + time) before `capture_meeting` or `update_deal`.
+- Read before write. Do not ask for confirmation when the user named the company or contact — write, then report what was saved.
 - Keep output dense: one line per meeting/deal, tables for lists, quote prospect text briefly.
+- **Plain words in replies — never raw database values.** Slugs, enum values, field names, tool names, ids and error codes are for tool calls only. Write stages as: `new` → New · `contacted` → Contacted · `replied` → Replied · `meeting_booked` → Meeting booked · `meeting_held` → Meeting held · `proposal_sent` → Proposal sent · `negotiation` → Negotiation · `won` → Won · `lost` → Lost. Same for everything else: `no_show` → no-show, `is_stale` → stale, `is_stuck` → no next step, `next_step_date` → due date, `value_monthly` → monthly value, `no_answer` → no answer, lookup slugs → their labels. No backticks or underscores in anything the user reads. Example: "GrowthX (Naman): held at 16:00. Quoted INR 5K for 2 videos. Stage: Meeting held. Next: follow up on the quote, due today."
 - Numbers only from tool results — never invent a value, rate or count.
 - If the connector disappears or returns `E_UNAUTHORIZED`, the user must reconnect "CapitalxAI Sales CRM" in their Claude connector settings; keep any unsaved capture details in your reply so nothing is lost.

@@ -19,9 +19,9 @@ const lines = (s: string) => s.split('\n').map((x) => x.trim()).filter(Boolean);
 
 function MeetingPicker({ onPick }: { onPick: (id: string) => void }) {
   const { timezone } = useCrm();
-  const from = new Date(Date.now() - 14 * 86400_000).toISOString();
-  const to = new Date(Date.now() + 1 * 86400_000).toISOString();
-  const q = useMeetings({ from, to, status: 'scheduled' });
+  // Computed once per mount: these go into the query key, so a fresh Date.now() each render would make a new query every render and never leave isLoading.
+  const [range] = useState(() => ({ from: new Date(Date.now() - 14 * 86400_000).toISOString(), to: new Date(Date.now() + 1 * 86400_000).toISOString() }));
+  const q = useMeetings({ ...range, status: 'scheduled' });
   if (q.isLoading) return <Spinner />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
   const rows = (q.data ?? []).slice().sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());

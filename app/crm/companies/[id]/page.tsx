@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCompanyBrief } from '@/lib/crm/queries';
 import { fmtMoney, STAGE_LABELS, type Contact, type Deal } from '@/lib/crm/types';
-import { Badge, Button, Card, EmptyState, ErrorBox, Flags, Spinner, StageBadge, fmtDate, daysAgo } from '@/components/crm/ui';
+import { Badge, Button, Card, CompanyLogo, EmptyState, ErrorBox, Flags, Spinner, StageBadge, fmtDate, daysAgo, logoDomain } from '@/components/crm/ui';
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
 import { CalendarPlus, ClipboardCheck, ExternalLink, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -46,6 +46,7 @@ export default function CompanyPage() {
         <div>
           <div className="flex items-center gap-2">
             <Link href="/crm/companies" className="text-xs text-gray-400 hover:text-gray-600">Companies /</Link>
+            <CompanyLogo name={c.name} domain={logoDomain(c.domain ?? c.website, contacts.map((ct) => ct.email))} size="lg" />
             <h1 className="text-xl font-bold text-gray-900">{c.name}</h1>
             {c.website && <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer" className="text-gray-400 hover:text-indigo-600"><ExternalLink className="w-4 h-4" /></a>}
             <Button size="xs" variant="ghost" onClick={() => setEditCompany(true)}><Pencil className="w-3 h-3" /> Edit</Button>

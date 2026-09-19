@@ -17,7 +17,7 @@ export function registerAnalysis(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "funnel", title: "Funnel by channel", cls: "read",
-    description: "Cohort funnel for deals created in a date range, per source channel (or one channel): leads → contacted → replied → meeting_booked → meeting_held → proposal_sent → negotiation → won, with stage-to-stage conversion %, cost (if channel spend was entered), CAC, and LTV left null for manual entry.",
+    description: "Cohort funnel for deals created in a date range, per source channel (or one channel): leads → contacted → replied → meeting_booked → meeting_held → proposal_sent → negotiation → won, with stage-to-stage conversion %, cost (if channel spend was entered), CAC, revenue_usd (won deals' monthly value x months since won) and ltv_usd (that revenue per won customer).",
     input: { from: dateParam("Range start"), to: dateParam("Range end (default today)").optional(), source_channel: lookupRef("Source channel") },
   }, async (a) => rpc(ctx, "funnel", { p_from: a.from, p_to: a.to ?? null, p_source_channel: a.source_channel ?? null }));
 

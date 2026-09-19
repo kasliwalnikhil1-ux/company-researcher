@@ -24,7 +24,7 @@ export default function OutreachLayout({ children }: { children: React.ReactNode
     <ProtectedRoute>
       <QueryClientProvider client={qc}>
         <OutreachWorkspaceProvider>
-          <MainLayout outreachSubnav={<OutreachSidebarNav />}>
+          <MainLayout subnav={<OutreachSidebarNav />}>
             <Gate>{children}</Gate>
           </MainLayout>
         </OutreachWorkspaceProvider>

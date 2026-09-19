@@ -5,13 +5,13 @@ import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useStandup } from '@/lib/crm/queries';
 import { SCORE_KEYS, fmtMoney, type AttentionDeal, type TodayMeeting } from '@/lib/crm/types';
-import { Badge, Button, Card, EmptyState, ErrorBox, Spinner, StageBadge, fmtDate, fmtTime, daysAgo, todayISO } from '@/components/crm/ui';
+import { Badge, Button, Card, EmptyState, ErrorBox, Spinner, StageBadge, fmtDate, fmtTime, daysAgo, todayISO, addDaysISO } from '@/components/crm/ui';
 import { CommitmentForm, NextStepModal } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 import { AlertTriangle, ChevronLeft, ChevronRight, ClipboardCheck, RefreshCw } from 'lucide-react';
 
 // The only screen open during the daily meeting. Yesterday's numbers → today's meetings → stuck/stale/slipping → commitments.
-// One screen, internal scrolling per panel, readable across a room.
+// Tall middle row with internal scrolling per panel (commitments sit below it), readable across a room.
 
 function Tile({ label, value, avg, warn }: { label: string; value: number; avg: number; warn?: boolean }) {
   return (
@@ -76,21 +76,56 @@ function MeetingRow({ m, tz }: { m: TodayMeeting; tz: string }) {
   );
 }
 
-function AttentionList({ title, tone, rows, render, onFix }: { title: string; tone: 'amber' | 'red' | 'pink'; rows: AttentionDeal[]; render: (d: AttentionDeal) => React.ReactNode; onFix: (d: AttentionDeal) => void }) {
-  const border = { amber: 'border-amber-200', red: 'border-red-200', pink: 'border-pink-200' }[tone];
+type AttentionTone = 'amber' | 'red' | 'pink';
+interface AttentionGroup { key: string; label: string; hint: string; tone: AttentionTone; rows: AttentionDeal[]; render: (d: AttentionDeal) => React.ReactNode }
+
+const ATTENTION_TONE: Record<AttentionTone, { stripe: string; head: string; tabOn: string }> = {
+  amber: { stripe: 'border-l-amber-400', head: 'bg-amber-50 text-amber-800', tabOn: 'bg-amber-100 text-amber-900 border-amber-300' },
+  red: { stripe: 'border-l-red-400', head: 'bg-red-50 text-red-800', tabOn: 'bg-red-100 text-red-900 border-red-300' },
+  pink: { stripe: 'border-l-pink-400', head: 'bg-pink-50 text-pink-800', tabOn: 'bg-pink-100 text-pink-900 border-pink-300' },
+};
+
+// One panel for stuck/stale/slipping: count tabs on top, one scrolling list with sticky group headers.
+function AttentionPanel({ groups, onFix }: { groups: AttentionGroup[]; onFix: (d: AttentionDeal) => void }) {
+  const [tab, setTab] = useState<string>('all');
+  const total = groups.reduce((n, g) => n + g.rows.length, 0);
+  const shown = tab === 'all' ? groups.filter((g) => g.rows.length > 0) : groups.filter((g) => g.key === tab);
+  const tabCls = (on: boolean, onCls: string) => cn('flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors', on ? onCls : 'border-transparent text-gray-600 hover:bg-gray-100');
   return (
-    <div className={cn('rounded-lg border bg-white flex flex-col min-h-0', border)}>
-      <div className="px-3 py-1.5 border-b border-gray-100 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-gray-600">{title}</span><Badge tone={rows.length ? tone : 'gray'}>{rows.length}</Badge></div>
-      <ul className="divide-y divide-gray-100 overflow-auto min-h-0 flex-1">
-        {rows.length === 0 && <li className="px-3 py-3 text-sm text-gray-400">None 🎉</li>}
-        {rows.map((d) => (
-          <li key={d.deal_id} className="px-3 py-1.5 flex items-center gap-2 text-sm">
-            <div className="flex-1 min-w-0"><span className="font-medium text-gray-900">{d.company}</span> <span className="text-gray-500">· {d.owner ?? '—'}</span><div className="text-xs text-gray-500 truncate">{render(d)}</div></div>
-            <StageBadge stage={d.stage} />
-            <Button size="xs" variant="secondary" onClick={() => onFix(d)}>Next step</Button>
-          </li>
+    <div className="rounded-lg border border-gray-200 bg-white flex flex-col min-h-0 max-lg:max-h-[80vh]">
+      <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-1 flex-wrap">
+        <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 mr-auto">Needs attention</span>
+        <button className={tabCls(tab === 'all', 'bg-gray-100 text-gray-900 border-gray-300')} onClick={() => setTab('all')}>All <span className="tabular-nums font-bold">{total}</span></button>
+        {groups.map((g) => (
+          <button key={g.key} className={tabCls(tab === g.key, ATTENTION_TONE[g.tone].tabOn)} onClick={() => setTab(g.key)} title={g.hint}>
+            {g.label} <span className="tabular-nums font-bold">{g.rows.length}</span>
+          </button>
         ))}
-      </ul>
+      </div>
+      <div className="overflow-auto min-h-0 flex-1">
+        {shown.length === 0 || shown.every((g) => g.rows.length === 0) ? (
+          <div className="px-3 py-6 text-sm text-gray-400 text-center">{tab === 'all' ? 'Nothing needs attention 🎉' : 'None 🎉'}</div>
+        ) : shown.map((g) => (
+          <section key={g.key}>
+            <div className={cn('sticky top-0 z-10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide flex items-center justify-between', ATTENTION_TONE[g.tone].head)}>
+              <span>{g.label} <span className="font-normal normal-case tracking-normal opacity-80">— {g.hint}</span></span>
+              <span className="tabular-nums">{g.rows.length}</span>
+            </div>
+            <ul className="divide-y divide-gray-100">
+              {g.rows.map((d) => (
+                <li key={d.deal_id} className={cn('pl-2.5 pr-3 py-2 flex items-center gap-2 text-sm border-l-[3px] hover:bg-gray-50', ATTENTION_TONE[g.tone].stripe)}>
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate"><span className="font-semibold text-gray-900">{d.company}</span> <span className="text-gray-500">· {d.owner ?? '—'}</span></div>
+                    <div className="text-xs text-gray-600 line-clamp-2">{g.render(d)}</div>
+                  </div>
+                  <StageBadge stage={d.stage} />
+                  <Button size="xs" variant="secondary" className="shrink-0" onClick={() => onFix(d)}>Next step</Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
     </div>
   );
 }
@@ -101,6 +136,7 @@ export default function StandupPage() {
   const q = useStandup(date);
   const s = q.data;
   const [fix, setFix] = useState<AttentionDeal | null>(null);
+  const [dueTab, setDueTab] = useState<'today' | 'week' | 'next'>('today');
 
   const shift = (n: number) => { const d = new Date(`${date}T00:00:00`); d.setDate(d.getDate() + n); setDate(d.toISOString().slice(0, 10)); };
   const day = s?.scoreboard?.day?.totals; const wk = s?.scoreboard?.trailing_7d?.totals;
@@ -109,9 +145,19 @@ export default function StandupPage() {
   if (q.isLoading) return <Spinner />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
   if (!s) return <EmptyState title="No data" />;
+  // Next steps: the standup day / the rest of its week (to Sunday) / the week after. Overdue ones live under Slipping.
+  const upcoming = s.next_steps_upcoming ?? s.next_steps_today ?? [];
+  const weekEnd = addDaysISO(6, s.week_start ?? s.date); const nextWeekEnd = addDaysISO(13, s.week_start ?? s.date);
+  const inRange = (from: string, to: string) => upcoming.filter((d) => !!d.next_step_date && d.next_step_date >= from && d.next_step_date <= to);
+  const dueTabs = [
+    { key: 'today' as const, label: s.date === todayISO() ? 'Today' : fmtDate(s.date), hint: 'Due on the standup day', rows: inRange(s.date, s.date) },
+    { key: 'week' as const, label: 'This week', hint: `Through ${fmtDate(weekEnd)}`, rows: inRange(s.date, weekEnd) },
+    { key: 'next' as const, label: 'Next week', hint: `${fmtDate(addDaysISO(1, weekEnd))} – ${fmtDate(nextWeekEnd)}`, rows: inRange(addDaysISO(1, weekEnd), nextWeekEnd) },
+  ];
+  const due = dueTabs.find((t) => t.key === dueTab)!.rows;
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100vh-4.5rem)] min-h-[600px]">
+    <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-bold text-gray-900">Standup</h1>
@@ -147,21 +193,46 @@ export default function StandupPage() {
       </div>
 
       {/* Meetings + attention */}
-      <div className="grid lg:grid-cols-[3fr_2fr] gap-3 min-h-0 flex-1">
-        <Card title={`Today's meetings (${s.meetings_today.length})`} dense className="min-h-0">
-          <div className="overflow-auto h-full">
-            {s.meetings_today.length === 0 ? <EmptyState compact title="No meetings today" description="Book one from a company page." /> : (
-              <table className="min-w-full text-sm">
-                <tbody>{s.meetings_today.map((m) => <MeetingRow key={m.meeting_id} m={m} tz={timezone} />)}</tbody>
-              </table>
-            )}
-          </div>
-        </Card>
-        <div className="grid grid-rows-3 gap-2 min-h-0">
-          <AttentionList title="Stuck — no next step" tone="amber" rows={s.attention.stuck} render={(d) => `${d.days_in_stage}d in stage · missing ${d.missing}`} onFix={setFix} />
-          <AttentionList title={`Stale — ${s.attention.stale_after_days}d without activity`} tone="red" rows={s.attention.stale} render={(d) => `last activity ${d.last_activity_at ? daysAgo(d.last_activity_at) : 'never'} · ${fmtMoney(d.value_monthly, d.currency)}`} onFix={setFix} />
-          <AttentionList title="Slipping — next step overdue" tone="pink" rows={s.attention.slipping} render={(d) => `${d.days_late}d late: ${d.next_step} (${fmtDate(d.next_step_date)})`} onFix={setFix} />
+      <div className="grid lg:grid-cols-[3fr_2fr] gap-3 lg:h-[78vh] lg:min-h-[620px]">
+        <div className="flex flex-col gap-3 min-h-0 max-lg:h-[80vh]">
+          <Card title={`Today's meetings (${s.meetings_today.length})`} dense className="min-h-0 max-h-[50%] shrink-0">
+            <div className="overflow-auto h-full">
+              {s.meetings_today.length === 0 ? <EmptyState compact title="No meetings today" description="Book one from a company page." /> : (
+                <table className="min-w-full text-sm">
+                  <tbody>{s.meetings_today.map((m) => <MeetingRow key={m.meeting_id} m={m} tz={timezone} />)}</tbody>
+                </table>
+              )}
+            </div>
+          </Card>
+          <Card title={`Next steps due (${due.length})`} dense className="min-h-0 flex-1"
+            actions={<div className="flex items-center gap-0.5">{dueTabs.map((t) => <button key={t.key} onClick={() => setDueTab(t.key)} title={t.hint} className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors', dueTab === t.key ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'border-transparent text-gray-600 hover:bg-gray-100')}>{t.label} <span className="tabular-nums font-bold">{t.rows.length}</span></button>)}</div>}>
+            <div className="overflow-auto h-full">
+              {due.length === 0 ? <div className="px-3 py-3 text-sm text-gray-400">No next steps due {dueTab === 'today' ? (s.date === todayISO() ? 'today' : `on ${fmtDate(s.date)}`) : dueTab === 'week' ? 'in the rest of this week' : 'next week'}.</div> : (
+                <ul className="divide-y divide-gray-100">
+                  {due.map((d) => (
+                    <li key={d.deal_id} className="px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50">
+                      {dueTab !== 'today' && <div className="w-16 shrink-0 text-xs tabular-nums text-gray-500">{d.next_step_date === s.date ? <span className="font-semibold text-indigo-700">{s.date === todayISO() ? 'Today' : fmtDate(s.date)}</span> : d.next_step_date ? new Date(`${d.next_step_date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</div>}
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate"><Link href={`/crm/companies/${d.company_id}`} className="font-semibold text-gray-900 hover:text-indigo-700">{d.company}</Link> <span className="text-gray-500">· {d.owner ?? '—'}</span></div>
+                        <div className="text-xs text-gray-600 line-clamp-2">{d.next_step ?? <span className="text-amber-700">date set, no step written</span>}</div>
+                      </div>
+                      <StageBadge stage={d.stage} />
+                      <Button size="xs" variant="secondary" className="shrink-0" onClick={() => setFix(d)}>Next step</Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </Card>
         </div>
+        <AttentionPanel
+          onFix={setFix}
+          groups={[
+            { key: 'stuck', label: 'Stuck', hint: 'no next step', tone: 'amber', rows: s.attention.stuck, render: (d) => `${d.days_in_stage}d in stage · missing ${d.missing}` },
+            { key: 'stale', label: 'Stale', hint: `${s.attention.stale_after_days}d without activity`, tone: 'red', rows: s.attention.stale, render: (d) => `last activity ${d.last_activity_at ? daysAgo(d.last_activity_at) : 'never'} · ${fmtMoney(d.value_monthly, d.currency)}` },
+            { key: 'slipping', label: 'Slipping', hint: 'next step overdue', tone: 'pink', rows: s.attention.slipping, render: (d) => <><span className="font-medium text-pink-700">{d.days_late}d late</span> · {d.next_step} <span className="text-gray-400">({fmtDate(d.next_step_date)})</span></> },
+          ]}
+        />
       </div>
 
       {/* Commitments */}

@@ -59,6 +59,18 @@ begin
   return s;
 end $$;
 
+/** Domain to fetch a logo for: the company's own domain, else the first contact email domain that is not a free mailbox.
+    The free-mailbox list mirrors FREE_MAIL in components/crm/ui.tsx. */
+create or replace function crm_company_logo_domain(p_company_id uuid, p_domain text default null) returns text
+language sql stable set search_path = public as $$
+  select coalesce(nullif(trim(p_domain), ''), (
+    select crm_domain_from_url(split_part(ct.email, '@', 2)) from crm_contacts ct
+    where ct.company_id = p_company_id and ct.email like '%@%'
+      and crm_domain_from_url(split_part(ct.email, '@', 2)) is not null
+      and lower(trim(split_part(ct.email, '@', 2))) <> all (array['gmail.com','googlemail.com','yahoo.com','yahoo.in','yahoo.co.in','yahoo.co.uk','ymail.com','rocketmail.com','hotmail.com','outlook.com','live.com','msn.com','icloud.com','me.com','mac.com','aol.com','proton.me','protonmail.com','pm.me','zoho.com','zohomail.com','rediffmail.com','gmx.com','gmx.net','mail.com','yandex.com','yandex.ru','hey.com','fastmail.com','qq.com','163.com'])
+    order by ct.is_primary desc, ct.created_at limit 1));
+$$;
+
 create or replace function crm_is_uuid(p text) returns boolean
 language sql immutable as $$
   select p ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
@@ -617,16 +629,16 @@ end $$;
 
 create or replace function crm_upsert_contact(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare cid uuid; ctid uuid; r crm_contacts;
+declare cid uuid; v_contact_id uuid; r crm_contacts;
 begin
   perform crm_require_member();
-  ctid := case when p ? 'id' and p->>'id' is not null then (p->>'id')::uuid else null end;
-  if ctid is null and p->>'email' is not null then select id into ctid from crm_contacts where lower(email) = lower(trim(p->>'email')); end if;
-  if ctid is null then
+  v_contact_id := case when p ? 'id' and p->>'id' is not null then (p->>'id')::uuid else null end;
+  if v_contact_id is null and p->>'email' is not null then select id into v_contact_id from crm_contacts where lower(email) = lower(trim(p->>'email')); end if;
+  if v_contact_id is null then
     cid := crm_resolve_company(p, true);
-    if p->>'name' is not null then select id into ctid from crm_contacts where company_id = cid and lower(name) = lower(trim(p->>'name')) limit 1; end if;
+    if p->>'name' is not null then select id into v_contact_id from crm_contacts where company_id = cid and lower(name) = lower(trim(p->>'name')) limit 1; end if;
   end if;
-  if ctid is null then
+  if v_contact_id is null then
     if nullif(trim(coalesce(p->>'name', '')), '') is null then raise exception 'E_PAYLOAD_INVALID: name is required'; end if;
     insert into crm_contacts(company_id, name, role, email, phone, linkedin_url, timezone, notes, is_primary)
     values (cid, trim(p->>'name'), p->>'role', nullif(lower(trim(p->>'email')), ''), p->>'phone', p->>'linkedin_url', p->>'timezone', p->>'notes',
@@ -642,7 +654,7 @@ begin
       timezone = case when p ? 'timezone' then p->>'timezone' else timezone end,
       notes = case when p ? 'notes' then p->>'notes' else notes end,
       is_primary = coalesce((p->>'is_primary')::boolean, is_primary)
-    where id = ctid returning * into r;
+    where id = v_contact_id returning * into r;
   end if;
   if r.is_primary then update crm_contacts set is_primary = false where company_id = r.company_id and id <> r.id and is_primary; end if;
   return to_jsonb(r);
@@ -700,17 +712,17 @@ end $$;
 -- ------------------------------------------------------------------ activities & meetings
 create or replace function crm_log_activity(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare ctid uuid; did uuid; r crm_activities;
+declare v_contact_id uuid; did uuid; r crm_activities;
 begin
   perform crm_require_member();
-  ctid := crm_resolve_contact(p, false);
+  v_contact_id := crm_resolve_contact(p, false);
   did := case when p->>'deal_id' is not null then (p->>'deal_id')::uuid else null end;
-  if ctid is null and did is null and crm_resolve_company(p, false) is null then
+  if v_contact_id is null and did is null and crm_resolve_company(p, false) is null then
     raise exception 'E_PAYLOAD_INVALID: give contact_id / contact_email / (company + contact_name), or deal_id, or company';
   end if;
   if coalesce(p->>'activity_type', p->>'type') is null then raise exception 'E_PAYLOAD_INVALID: activity_type is required (call, linkedin_message, linkedin_connect, email, meeting, …)'; end if;
   insert into crm_activities(contact_id, company_id, deal_id, activity_type_id, direction, occurred_at, source_channel_id, body, outcome, owner_id, external_ref)
-  values (ctid, crm_resolve_company(p, false), did, crm_resolve_lookup('activity_type', coalesce(p->>'activity_type', p->>'type')),
+  values (v_contact_id, crm_resolve_company(p, false), did, crm_resolve_lookup('activity_type', coalesce(p->>'activity_type', p->>'type')),
           coalesce((p->>'direction')::crm_direction_t, 'outbound'), coalesce((p->>'occurred_at')::timestamptz, now()),
           crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')), p->>'body', p->>'outcome',
           crm_resolve_member(coalesce(p->>'owner', p->>'owner_id')), p->>'external_ref')
@@ -721,23 +733,23 @@ end $$;
 
 create or replace function crm_schedule_meeting(p jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare did uuid; ctid uuid; cid uuid; r crm_meetings;
+declare did uuid; v_contact_id uuid; cid uuid; r crm_meetings;
 begin
   perform crm_require_member();
   if p->>'scheduled_at' is null then raise exception 'E_PAYLOAD_INVALID: scheduled_at (ISO timestamp) is required'; end if;
   did := case when p->>'deal_id' is not null then (p->>'deal_id')::uuid else null end;
-  ctid := crm_resolve_contact(p, false);
+  v_contact_id := crm_resolve_contact(p, false);
   if did is null then
-    cid := coalesce((select company_id from crm_contacts where id = ctid), crm_resolve_company(p, false));
+    cid := coalesce((select company_id from crm_contacts where id = v_contact_id), crm_resolve_company(p, false));
     if cid is null then raise exception 'E_PAYLOAD_INVALID: deal_id, or a contact/company with an open deal, is required'; end if;
     select id into did from crm_deals where company_id = cid and stage not in ('won','lost') order by created_at desc limit 1;
     if did is null then
       insert into crm_deals(company_id, owner_id) values (cid, auth.uid()) returning id into did;
     end if;
   end if;
-  if ctid is null then select id into ctid from crm_contacts where company_id = (select company_id from crm_deals where id = did) order by is_primary desc, created_at limit 1; end if;
+  if v_contact_id is null then select id into v_contact_id from crm_contacts where company_id = (select company_id from crm_deals where id = did) order by is_primary desc, created_at limit 1; end if;
   insert into crm_meetings(deal_id, contact_id, scheduled_at, timezone, duration_min, attendees, notes)
-  values (did, ctid, (p->>'scheduled_at')::timestamptz, coalesce(p->>'timezone', (select timezone from crm_contacts where id = ctid)),
+  values (did, v_contact_id, (p->>'scheduled_at')::timestamptz, coalesce(p->>'timezone', (select timezone from crm_contacts where id = v_contact_id)),
           coalesce((p->>'duration_min')::int, 30),
           coalesce((select array_agg(x) from jsonb_array_elements_text(case when jsonb_typeof(p->'attendees') = 'array' then p->'attendees' else '[]'::jsonb end) x), '{}'),
           p->>'notes')
@@ -1011,7 +1023,7 @@ begin
     'stages', (
       select coalesce(jsonb_agg(jsonb_build_object('stage', s, 'count', (select count(*) from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)),
         'value_monthly_usd', (select coalesce(sum(value_monthly_usd), 0) from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)),
-        'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'company', v.company_name, 'company_id', v.company_id, 'title', v.title, 'value_monthly', v.value_monthly, 'currency', v.currency, 'value_monthly_usd', v.value_monthly_usd,
+        'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'company', v.company_name, 'company_id', v.company_id, 'logo_domain', crm_company_logo_domain(v.company_id, v.company_domain), 'title', v.title, 'value_monthly', v.value_monthly, 'currency', v.currency, 'value_monthly_usd', v.value_monthly_usd,
                     'videos_per_month', v.videos_per_month, 'owner', v.owner_name, 'days_in_stage', v.days_in_stage, 'next_step', v.next_step, 'next_step_date', v.next_step_date,
                     'is_stale', v.is_stale, 'is_stuck', v.is_stuck, 'is_slipping', v.is_slipping, 'icp_segment', v.icp_segment_label, 'source_channel', v.source_channel_label, 'expected_close_date', v.expected_close_date, 'lost_reason', v.lost_reason) order by v.value_monthly_usd desc nulls last, v.days_in_stage desc), '[]')
                   from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch))
@@ -1023,6 +1035,14 @@ begin
                from crm_deals_v v where (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch))
   );
 end $$;
+
+/** Whole months a won deal has been billed up to today: the month it was won counts as 1. */
+create or replace function crm_months_billed(p_won_at timestamptz) returns int
+language sql stable set search_path = public as $$
+  select case when p_won_at is null then 0
+    else greatest(1, (extract(year from age((now() at time zone crm_tz())::date, (p_won_at at time zone crm_tz())::date)) * 12
+                    + extract(month from age((now() at time zone crm_tz())::date, (p_won_at at time zone crm_tz())::date)))::int + 1) end;
+$$;
 
 create or replace function crm_funnel(p_from date, p_to date default null, p_source_channel text default null) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -1044,7 +1064,7 @@ begin
           'won_of_proposal', case when (row_->>'proposal_sent')::int > 0 then round(100.0 * (row_->>'won')::int / (row_->>'proposal_sent')::int, 1) end,
           'won_of_leads', case when (row_->>'leads')::int > 0 then round(100.0 * (row_->>'won')::int / (row_->>'leads')::int, 1) end),
         'cac_usd', case when (row_->>'cost_usd') is not null and (row_->>'won')::int > 0 then round((row_->>'cost_usd')::numeric / (row_->>'won')::int, 2) end,
-        'ltv_usd', null, 'ltv_note', 'manual entry — set when churn/retention is known'
+        'ltv_usd', case when (row_->>'won_customers')::int > 0 then round((row_->>'revenue_usd')::numeric / (row_->>'won_customers')::int, 2) end
       ) order by row_->>'label'), '[]')
       from (
         select jsonb_build_object('source_channel_id', c.id, 'slug', c.slug, 'label', c.label,
@@ -1058,13 +1078,15 @@ begin
           'won', (select count(*) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'won'),
           'lost', (select count(*) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'lost'),
           'won_value_monthly_usd', (select coalesce(sum(value_monthly_usd), 0) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'won'),
+          'won_customers', (select count(distinct d.company_id) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'won'),
+          'revenue_usd', (select coalesce(sum(d.value_monthly_usd * crm_months_billed(d.closed_at)), 0) from crm_deals d where d.source_channel_id is not distinct from c.id and d.created_at >= w.w_from and d.created_at < t_to and d.stage = 'won'),
           'cost_usd', (select sum(cc.cost * coalesce(fx.usd_per_unit, 1)) from crm_channel_costs cc left join crm_fx_rates fx on fx.currency = cc.currency where cc.source_channel_id = c.id and cc.month >= date_trunc('month', p_from)::date and cc.month <= d_to)
         ) as row_
         from (select id, slug, label, sort_order from crm_source_channels where is_active and (ch is null or id = ch)
               union all select null, 'unattributed', 'Unattributed', 9999 where ch is null) c
       ) x
       where (row_->>'leads')::int > 0 or (row_->>'cost_usd') is not null),
-    'note', 'Cohort funnel: deals CREATED in the range, counted at the furthest stage they reached (stage_history). cost/CAC only where channel cost was entered (set_channel_cost). LTV is left for manual entry.');
+    'note', 'Cohort funnel: deals CREATED in the range, counted at the furthest stage they reached (stage_history). cost/CAC only where channel cost was entered (set_channel_cost). revenue_usd = won deals'' monthly value x months billed since they were won (the won month counts, a won deal is assumed still active); ltv_usd = revenue_usd per won customer.');
 end $$;
 
 create or replace function crm_top_pain_points(p_from date default null, p_to date default null, p_icp_segment text default null, p_limit int default 25) returns jsonb
@@ -1185,6 +1207,12 @@ begin
     'scoreboard', crm_daily_scoreboard(d - 1, tz),
     'meetings_today', crm_whos_meeting_today(d, tz) -> 'meetings',
     'attention', crm_deals_needing_attention(),
+    'next_steps_today', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', id, 'company', company_name, 'company_id', company_id, 'stage', stage, 'owner', owner_name, 'value_monthly', value_monthly, 'currency', currency, 'next_step', next_step, 'next_step_date', next_step_date) order by owner_name nulls last, company_name), '[]')
+                         from crm_deals_v where stage not in ('won','lost') and next_step_date = d),
+    -- the day itself through the Sunday of next week (weeks run Mon–Sun); the Standup card splits it into today / this week / next week
+    'week_start', date_trunc('week', d)::date,
+    'next_steps_upcoming', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', id, 'company', company_name, 'company_id', company_id, 'stage', stage, 'owner', owner_name, 'value_monthly', value_monthly, 'currency', currency, 'next_step', next_step, 'next_step_date', next_step_date) order by next_step_date, owner_name nulls last, company_name), '[]')
+                            from crm_deals_v where stage not in ('won','lost') and next_step_date >= d and next_step_date <= date_trunc('week', d)::date + 13),
     'commitments_today', (select coalesce(jsonb_agg(jsonb_build_object('owner', m.display_name, 'owner_id', c.owner_id, 'targets', c.targets, 'notes', c.notes) order by m.display_name), '[]') from crm_commitments c join crm_members m on m.user_id = c.owner_id where c.commit_date = d),
     'yesterday_commitments', crm_commitment_vs_actual(d - 1, d - 1) -> 'rows',
     'uncaptured_meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'company', mv.company_name, 'contact', mv.contact_name, 'scheduled_at', mv.scheduled_at, 'deal_id', mv.deal_id) order by mv.scheduled_at), '[]')

@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { CrmProvider, useCrm } from '@/contexts/CrmContext';
-import CrmShell from '@/components/crm/Shell';
+import CrmShell, { CrmSidebarNav } from '@/components/crm/Shell';
 import { Spinner, ErrorBox, EmptyState } from '@/components/crm/ui';
 
 function Gate({ children }: { children: React.ReactNode }) {
@@ -26,7 +26,7 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
   const [qc] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: true } } }));
   return (
     <ProtectedRoute>
-      <MainLayout>
+      <MainLayout subnav={<CrmSidebarNav />}>
         <QueryClientProvider client={qc}>
           <CrmProvider>
             <Gate>{children}</Gate>

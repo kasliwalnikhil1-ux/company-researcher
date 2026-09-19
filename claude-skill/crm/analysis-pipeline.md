@@ -18,7 +18,8 @@ Reading: high no-show + low close = poor-fit leads from that channel (fix target
 `funnel(from, to?, source_channel?)` — a cohort funnel: deals *created* in the range, counted at the furthest stage reached.
 - Present the conversion chain per channel: leads → contacted → replied → booked → held → proposal → won, with the % between each pair from `conversion_pct`.
 - `cost_usd` / `cac_usd` only exist where spend was entered. If null, say so and offer `set_channel_cost(source_channel, month, cost, currency)`.
-- `ltv_usd` is intentionally null (manual). Do not estimate it.
+- `revenue_usd` = each won deal's monthly value × months since it was won (the won month counts; a won deal is assumed still active). `ltv_usd` = that revenue per won customer — it is revenue to date, so it grows as clients stay. Null when the channel has no wins; do not estimate it. When both exist, give LTV ÷ CAC.
+- The same table (channel · leads · conversion · cost · CAC · LTV · revenue) is the Funnel screen in the app.
 
 ## Top pain points (messaging & showreel)
 `top_pain_points(from?, to?, icp_segment?, limit?)`.

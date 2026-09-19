@@ -9,11 +9,11 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
   // ---------------------------------------------------------------- capture
   tool(server, ctx, {
     name: "capture_meeting", title: "Capture a meeting (held / no-show)", cls: "write",
-    description: "THE main write after a meeting. outcome=held requires pain_points (prospect's own words), commercials_discussed, and either next_step+next_step_date or is_dead+dead_reason. outcome=no_show requires no_show_reason, follow_up_action, follow_up_date. Anything missing → the call is rejected naming the missing fields; nothing partial is written. On success the meeting flips to held/no_show, the deal advances to meeting_held (or lost when is_dead), its next step is set, and pain points tokenise into tags (pass `tags` to override).",
+    description: "THE main write after a meeting. outcome=held requires pain_points (the user's words as given — short is fine), commercials_discussed (currency INR unless stated), and either next_step+next_step_date or is_dead+dead_reason. outcome=no_show requires no_show_reason, follow_up_action, follow_up_date. Anything missing → the call is rejected naming the missing fields; nothing partial is written. On success the meeting flips to held/no_show, the deal advances to meeting_held (or lost when is_dead), its next step is set, and pain points tokenise into tags (pass `tags` to override).",
     input: {
       meeting_id: z.string().uuid(),
       outcome: z.enum(["held", "no_show"]),
-      pain_points: z.array(z.string().min(1).max(500)).max(30).optional().describe("held: verbatim, not paraphrased"),
+      pain_points: z.array(z.string().min(1).max(500)).max(30).optional().describe("held: as the user said it; do not expand or ask for exact quotes"),
       commercials_discussed: z.object({ price: z.number().optional(), currency: z.string().optional(), volume: z.number().optional(), notes: z.string().optional(), none: z.boolean().optional().describe("true when commercials were explicitly not discussed") }).passthrough().optional(),
       objections: z.array(z.string().max(300)).max(20).optional(),
       next_step: z.string().max(300).optional(),

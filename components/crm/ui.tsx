@@ -2,7 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { cn } from '@/lib/utils';
-import { Loader2, X, AlertCircle, Inbox } from 'lucide-react';
+import { Loader2, X, AlertCircle, Inbox, ChevronLeft, ChevronRight } from 'lucide-react';
 import { STAGE_LABELS, type DealStage } from '@/lib/crm/types';
 
 // Small, dense primitives for the CRM screens (fast over pretty, keyboard-friendly, no modal stacking).
@@ -88,6 +88,38 @@ export function Flags({ stale, stuck, slipping }: { stale?: boolean; stuck?: boo
   );
 }
 
+// Free mailboxes say nothing about the company — keep in sync with crm_company_logo_domain() in migrations/crm/002_functions.sql.
+const FREE_MAIL = new Set(['gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.in', 'yahoo.co.in', 'yahoo.co.uk', 'ymail.com', 'rocketmail.com', 'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me', 'protonmail.com', 'pm.me', 'zoho.com', 'zohomail.com', 'rediffmail.com', 'gmx.com', 'gmx.net', 'mail.com', 'yandex.com', 'yandex.ru', 'hey.com', 'fastmail.com', 'qq.com', '163.com']);
+
+/** Domain to fetch a logo for: the company's own domain, else the first contact email domain that is not a free mailbox. */
+export function logoDomain(domain: string | null | undefined, emails: Array<string | null | undefined> = []): string | null {
+  const own = domain?.trim().toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/^www\./, '').split(/[/?:]/)[0];
+  if (own) return own;
+  for (const e of emails) {
+    const d = e?.split('@')[1]?.trim().toLowerCase();
+    if (d && d.includes('.') && !FREE_MAIL.has(d)) return d;
+  }
+  return null;
+}
+
+/** Company logo via Google's favicon service (same source as the investor logos), falling back to the initial. */
+export function CompanyLogo({ name, domain, size = 'sm', className }: { name: string; domain?: string | null; size?: 'xs' | 'sm' | 'lg'; className?: string }) {
+  const [failed, setFailed] = React.useState(false);
+  useEffect(() => setFailed(false), [domain]);
+  const sizes = { xs: 'w-4 h-4 text-[9px] rounded', sm: 'w-6 h-6 text-[11px] rounded-md', lg: 'w-10 h-10 text-base rounded-lg' };
+  const showLogo = !!domain && !failed;
+  // Logos sit on a transparent background with no frame; only the initial fallback gets a tile so it still reads as an avatar.
+  return (
+    <span className={cn('inline-flex items-center justify-center flex-shrink-0 font-semibold text-gray-500 select-none', !showLogo && 'bg-gray-100', sizes[size], className)} aria-hidden>
+      {showLogo ? (
+        // Unknown domains come back as Google's 16px placeholder globe rather than an error — treat that as a miss too.
+        <img src={`https://www.google.com/s2/favicons?sz=128&domain=${encodeURIComponent(domain)}`} alt="" loading="lazy" draggable={false} className="w-full h-full object-contain"
+          onError={() => setFailed(true)} onLoad={(e) => { if (e.currentTarget.naturalWidth <= 16) setFailed(true); }} />
+      ) : (name.trim().charAt(0).toUpperCase() || '?')}
+    </span>
+  );
+}
+
 export function Spinner({ className }: { className?: string }) {
   return <div className={cn('flex items-center justify-center py-12', className)}><Loader2 className="w-6 h-6 text-indigo-500 animate-spin" /></div>;
 }
@@ -151,6 +183,30 @@ export function Th({ children, className }: { children?: React.ReactNode; classN
 }
 export function Td({ children, className, ...rest }: React.TdHTMLAttributes<HTMLTableCellElement>) {
   return <td className={cn('px-3 py-1.5 border-b border-gray-100 text-gray-700 align-top', className)} {...rest}>{children}</td>;
+}
+
+export function Pagination({ page, pageSize, total, onPage, onPageSize, pageSizes = [25, 50, 100], loading }: { page: number; pageSize: number; total: number; onPage: (p: number) => void; onPageSize?: (n: number) => void; pageSizes?: number[]; loading?: boolean }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const to = Math.min(total, page * pageSize);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 mt-2 text-xs text-gray-500">
+      <div className="flex items-center gap-2">
+        <span className="tabular-nums">{from}–{to} of {total}</span>
+        {loading && <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />}
+      </div>
+      <div className="flex items-center gap-2">
+        {onPageSize && (
+          <select aria-label="Rows per page" value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} className="border border-gray-300 rounded-md px-1.5 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            {pageSizes.map((n) => <option key={n} value={n}>{n} / page</option>)}
+          </select>
+        )}
+        <Button variant="secondary" size="xs" aria-label="Previous page" disabled={page <= 1} onClick={() => onPage(page - 1)}><ChevronLeft className="w-3.5 h-3.5" /> Prev</Button>
+        <span className="tabular-nums whitespace-nowrap">Page {page} of {pages}</span>
+        <Button variant="secondary" size="xs" aria-label="Next page" disabled={page >= pages} onClick={() => onPage(page + 1)}>Next <ChevronRight className="w-3.5 h-3.5" /></Button>
+      </div>
+    </div>
+  );
 }
 
 export function fmtDate(v: string | null | undefined, opts: { time?: boolean; tz?: string | null } = {}): string {

@@ -6,7 +6,7 @@ import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, use
 import { useCrm } from '@/contexts/CrmContext';
 import { usePipeline } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, fmtUsd, stageRank, type DealStage, type PipelineDeal } from '@/lib/crm/types';
-import { Badge, Button, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, fmtDate } from '@/components/crm/ui';
+import { Badge, Button, CompanyLogo, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, fmtDate } from '@/components/crm/ui';
 import { NextStepModal, StageModal, useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 
@@ -19,7 +19,10 @@ function DealCard({ d, stage, onNextStep, dragging }: { d: PipelineDeal; stage: 
   return (
     <div ref={setNodeRef} style={style} {...listeners} {...attributes} className={cn('rounded-md border bg-white p-2 text-sm shadow-sm cursor-grab active:cursor-grabbing select-none', d.is_stale ? 'border-red-300 bg-red-50/40' : d.is_slipping ? 'border-pink-200' : d.is_stuck ? 'border-amber-200' : 'border-gray-200', (isDragging || dragging) && 'opacity-60 ring-2 ring-indigo-400')}>
       <div className="flex items-start justify-between gap-1">
-        <Link href={`/crm/companies/${d.company_id}`} className="font-semibold text-gray-900 hover:text-indigo-700 leading-tight" onPointerDown={(e) => e.stopPropagation()}>{d.company}</Link>
+        <div className="flex items-start gap-1.5 min-w-0">
+          <CompanyLogo name={d.company} domain={d.logo_domain} size="xs" className="mt-0.5" />
+          <Link href={`/crm/companies/${d.company_id}`} className="font-semibold text-gray-900 hover:text-indigo-700 leading-tight" onPointerDown={(e) => e.stopPropagation()}>{d.company}</Link>
+        </div>
         <span className="text-[11px] tabular-nums text-gray-500 whitespace-nowrap" title="Days in stage">{d.days_in_stage}d</span>
       </div>
       {d.title && <div className="text-xs text-gray-500">{d.title}</div>}

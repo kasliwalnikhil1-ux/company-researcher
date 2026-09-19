@@ -40,7 +40,7 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
 ]);
 
-export default function MainLayout({ children, outreachSubnav }: { children: React.ReactNode; outreachSubnav?: React.ReactNode }) {
+export default function MainLayout({ children, subnav }: { children: React.ReactNode; subnav?: React.ReactNode }) {
   const { user, signOut } = useAuth();
   const whitelabel = useWhitelabel();
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
@@ -53,7 +53,7 @@ export default function MainLayout({ children, outreachSubnav }: { children: Rea
   const [isMobile, setIsMobile] = useState(false);
   const [isResetAccountModalOpen, setIsResetAccountModalOpen] = useState(false);
   const [isResettingAccount, setIsResettingAccount] = useState(false);
-  const [isOutreachSubnavOpen, setIsOutreachSubnavOpen] = useState(true);
+  const [isSubnavOpen, setIsSubnavOpen] = useState(true);
 
   const primaryUse = useMemo(
     () => onboarding?.flowType ?? onboarding?.step0?.primaryUse ?? 'fundraising',
@@ -224,6 +224,20 @@ export default function MainLayout({ children, outreachSubnav }: { children: Rea
   const isActive = (path: string) => {
     return pathname === path;
   };
+
+  // Mobile-only section sub-nav (Outreach / Sales CRM), collapsible via the arrow on the parent item.
+  const subnavToggle = isMobile && subnav ? (
+    <button
+      type="button"
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsSubnavOpen((o) => !o); }}
+      className="ml-auto -mr-2 p-1 rounded-md hover:bg-indigo-100"
+      aria-label={isSubnavOpen ? 'Collapse section menu' : 'Expand section menu'}
+      aria-expanded={isSubnavOpen}
+    >
+      <ChevronDown className={`w-4 h-4 transition-transform ${isSubnavOpen ? '' : '-rotate-90'}`} />
+    </button>
+  ) : null;
+  const subnavBody = isMobile && isSubnavOpen ? subnav : null;
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);
@@ -397,19 +411,9 @@ export default function MainLayout({ children, outreachSubnav }: { children: Rea
             >
               <Send className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
               {(!isCollapsed || isMobile) && <span>Outreach</span>}
-              {isMobile && outreachSubnav && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsOutreachSubnavOpen((o) => !o); }}
-                  className="ml-auto -mr-2 p-1 rounded-md hover:bg-indigo-100"
-                  aria-label={isOutreachSubnavOpen ? 'Collapse Outreach menu' : 'Expand Outreach menu'}
-                  aria-expanded={isOutreachSubnavOpen}
-                >
-                  <ChevronDown className={`w-4 h-4 transition-transform ${isOutreachSubnavOpen ? '' : '-rotate-90'}`} />
-                </button>
-              )}
+              {pathname.startsWith('/outreach') && subnavToggle}
             </Link>
-            {isMobile && isOutreachSubnavOpen && outreachSubnav}
+            {pathname.startsWith('/outreach') && subnavBody}
 
             <Link
               href="/crm"
@@ -422,7 +426,9 @@ export default function MainLayout({ children, outreachSubnav }: { children: Rea
             >
               <Briefcase className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
               {(!isCollapsed || isMobile) && <span>Sales CRM</span>}
+              {pathname.startsWith('/crm') && subnavToggle}
             </Link>
+            {pathname.startsWith('/crm') && subnavBody}
 
             {routeAccess.showLinkedInInbox && (
               <Link

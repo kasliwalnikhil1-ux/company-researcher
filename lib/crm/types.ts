@@ -102,17 +102,28 @@ export interface CommitmentRow { date: string; owner: string; owner_id: string; 
 
 export interface Standup {
   date: string; timezone: string; scoreboard: Scoreboard; meetings_today: TodayMeeting[]; attention: Attention;
+  next_steps_today?: Array<AttentionDeal & { company_id: string }>;
+  /** Monday of the standup day's week, and open next steps from the standup day through the Sunday of next week. */
+  week_start?: string; next_steps_upcoming?: Array<AttentionDeal & { company_id: string }>;
   commitments_today: Array<{ owner: string; owner_id: string; targets: Record<string, number>; notes: string | null }>;
   yesterday_commitments: CommitmentRow[];
   uncaptured_meetings: Array<{ meeting_id: string; company: string; contact: string | null; scheduled_at: string; deal_id: string }>;
 }
 
 export interface PipelineDeal {
-  deal_id: string; company: string; company_id: string; title: string | null; value_monthly: number | null; currency: string; value_monthly_usd: number | null; videos_per_month: number | null;
+  deal_id: string; company: string; company_id: string; logo_domain?: string | null; title: string | null; value_monthly: number | null; currency: string; value_monthly_usd: number | null; videos_per_month: number | null;
   owner: string | null; days_in_stage: number; next_step: string | null; next_step_date: string | null; is_stale: boolean; is_stuck: boolean; is_slipping: boolean;
   icp_segment: string | null; source_channel: string | null; expected_close_date: string | null; lost_reason: string | null;
 }
 export interface Pipeline { stages: Array<{ stage: DealStage; count: number; value_monthly_usd: number; deals: PipelineDeal[] }>; totals: { open_deals: number; open_value_monthly_usd: number; won_value_monthly_usd: number; stale: number; stuck: number; slipping: number } }
+
+export interface FunnelChannel {
+  source_channel_id: string | null; slug: string; label: string;
+  leads: number; contacted: number; replied: number; meeting_booked: number; meeting_held: number; proposal_sent: number; negotiation: number; won: number; lost: number;
+  won_value_monthly_usd: number; won_customers: number; revenue_usd: number; cost_usd: number | null; cac_usd: number | null; ltv_usd: number | null;
+  conversion_pct: Record<string, number | null>;
+}
+export interface Funnel { from: string; to: string; source_channel: string | null; channels: FunnelChannel[]; note: string }
 
 export interface CompanyBrief {
   company: Company & { icp_segment: string | null; source_channel: string | null; created_by_name: string | null };
