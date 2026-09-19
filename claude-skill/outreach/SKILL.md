@@ -1,6 +1,6 @@
 ---
 name: outreach
-description: Run LinkedIn/email outreach on the CapitalxAI Outreach platform via its MCP connector — triage the inbox and send approved replies ("what replies came in overnight?", "draft answers to the interested ones"), build and launch sequences from a brief ("build a 4-touch sequence for fintech CFOs and dry-run it on the Acme list"), import or clean lead lists, review sender health and capacity, explain why nothing is sending, and produce client reports. Use when the CapitalxAI Outreach connector tools (workspace_context, senders_list, leads_search, sequence_create, enroll_preview, inbox_list, draft_replies_bulk, inbox_send_batch, why_not_sending, report_*) are available.
+description: Run LinkedIn/email outreach on the CapitalxAI Outreach platform via its MCP connector — triage the inbox and send approved replies ("any pending replies?", "what replies came in overnight?", "draft answers to the interested ones"), build and launch sequences from a brief ("build a 4-touch sequence for fintech CFOs and dry-run it on the Acme list"), import or clean lead lists, review sender health and capacity, explain why nothing is sending, and produce client reports. Use when the CapitalxAI Outreach connector tools (workspace_context, senders_list, leads_search, sequence_create, enroll_preview, inbox_list, draft_replies_bulk, inbox_send_batch, why_not_sending, report_*) are available.
 ---
 
 # CapitalxAI Outreach
@@ -61,6 +61,13 @@ Copy rules the platform validates (and you should follow before it has to): invi
 
 ### Morning triage (primary) — read [triage-pipeline.md](triage-pipeline.md)
 `inbox_list(intent:"interested", unread:true)` (then `question`) → `draft_replies_bulk` → present drafts, collect accept / edit / skip in one message → `inbox_send_batch` (one confirmation for the batch) → archive not-interested, create tasks for wrong-person/OOO, fix intents. Target: 20 replies handled in one conversation.
+
+**"Any pending replies?" / "what's waiting on me?" / "anything to reply to?" always ends with drafts, in the same turn.** Never answer with a summary plus "Do you want me to draft replies?" — the user asked so they can approve and send. Concretely:
+- Don't trust the intent tag alone. `unclassified` / `unclear` threads whose last message is from the prospect get read (`inbox_thread`) and judged by you; if one needs an answer, fix its tag with `inbox_set_intent` and include it.
+- Draft every thread that needs a reply from us with `draft_replies_bulk` (≤25; interested first). Pass per-thread facts as `guidance` when the thread calls for it (e.g. a referral: thank them and say you'll reach out to the named person; a "Hello" with no context: short, friendly, ask what they're after). If AI drafting fails, write the draft yourself.
+- Show one numbered table (triage step 3): **Who · Their exact words (verbatim) · Contact for follow-up (email, phone, LinkedIn, and any email/number they wrote in the thread) · Draft reply · Next action**, then ask for `accept` / `edit: …` / `skip` per number. Sending still needs the batch confirmation.
+- Things that are not a reply (call someone, email a referred contact outside LinkedIn) get a one-line suggested action or a draft email text, plus an offer to `task_create`.
+- Soft no's and spam: list them briefly with the archive / mark-not-interested action you propose; no drafts.
 
 ### Launch a campaign — read [campaign-pipeline.md](campaign-pipeline.md)
 Capacity (`senders_list`, `senders_capacity`) → audience (`leads_search` or list building) → steps (`sequence_templates`, `sequence_validate` with `ai:true`) → user approves copy → `sequence_create` → `sequence_project` → `enroll_preview` → user approves → `enroll_commit` → `sequence_activate`. Zero UI visits; two confirmations.

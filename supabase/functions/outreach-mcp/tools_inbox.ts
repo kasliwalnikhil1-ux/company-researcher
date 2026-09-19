@@ -9,7 +9,7 @@ const INTENTS = ["interested", "question", "not_now", "not_interested", "ooo", "
 const CHAT_COLS = "id, workspace_id, client_id, sender_id, lead_id, provider, attendee_name, attendee_public_identifier, subject, last_message_at, last_message_preview, last_direction, unread, unread_count, assigned_to, intent, archived";
 
 async function loadChat(ctx: Ctx, chatId: string): Promise<Row> {
-  const { data, error } = await ctx.user.from("outreach_chats").select(`${CHAT_COLS}, outreach_leads(id, full_name, first_name, headline, company, title, location, do_not_contact, unsubscribed, public_identifier), outreach_senders(id, display_name, status, timezone, public_identifier)`).eq("id", chatId).maybeSingle();
+  const { data, error } = await ctx.user.from("outreach_chats").select(`${CHAT_COLS}, outreach_leads(id, full_name, first_name, headline, company, title, location, do_not_contact, unsubscribed, public_identifier, profile_url, email_work, email_personal, custom), outreach_senders(id, display_name, status, timezone, public_identifier)`).eq("id", chatId).maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) throw new McpError("E_NOT_FOUND", `chat ${chatId} not found or not visible`);
   return data as Row;
@@ -25,6 +25,37 @@ async function briefFor(ctx: Ctx, chat: Row): Promise<string | null> {
   if (!chat.lead_id) return null;
   const { data } = await ctx.user.from("outreach_enrollments").select("outreach_sequences(brief, name)").eq("lead_id", chat.lead_id).eq("sender_id", chat.sender_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
   return (data as Row | null)?.outreach_sequences?.brief ?? null;
+}
+
+const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+const PHONE_RE = /\+?\(?\d[\d\s().-]{6,}\d/g;
+const uniq = (xs: string[]) => [...new Set(xs)];
+
+/** Everything needed to follow up off-LinkedIn: the lead's own details + emails/phones the prospect wrote in the thread. */
+function contactsFor(chat: Row, thread: Row[]): Row {
+  const l = chat.outreach_leads ?? {};
+  const custom = (l.custom ?? {}) as Record<string, unknown>;
+  const customPhones = Object.entries(custom).filter(([k, v]) => /phone|mobile|whatsapp/i.test(k) && v).map(([, v]) => String(v));
+  const inbound = thread.filter((m) => m.direction === "in" && !m.deleted_at).map((m) => m.text ?? "").join("\n");
+  const phones = (inbound.match(PHONE_RE) ?? []).map((p) => p.trim()).filter((p) => { const d = p.replace(/\D/g, "").length; return d >= 8 && d <= 15; });
+  const linkedin = l.profile_url ?? (l.public_identifier || chat.attendee_public_identifier ? `https://www.linkedin.com/in/${l.public_identifier ?? chat.attendee_public_identifier}` : undefined);
+  const out: Row = {
+    linkedin, email: uniq([l.email_work, l.email_personal].filter(Boolean)), phone: customPhones,
+    mentioned_in_thread: { emails: uniq(inbound.match(EMAIL_RE) ?? []), phones: uniq(phones) },
+  };
+  for (const k of ["email", "phone"]) if (!out[k].length) delete out[k];
+  if (!out.mentioned_in_thread.emails.length && !out.mentioned_in_thread.phones.length) delete out.mentioned_in_thread;
+  return out;
+}
+
+/** The prospect's latest inbound messages (since our last message), verbatim. */
+function theirWords(thread: Row[]): Row | undefined {
+  const live = thread.filter((m) => !m.deleted_at);
+  const lastOut = live.map((m) => m.direction).lastIndexOf("out");
+  const tail = live.slice(lastOut + 1).filter((m) => m.direction === "in");
+  const msgs = tail.length ? tail : [...live].reverse().filter((m) => m.direction === "in").slice(0, 1);
+  if (!msgs.length) return undefined;
+  return untrusted("linkedin_message", msgs.map((m) => m.text ?? "").join("\n\n"), 1500);
 }
 
 const chatLine = (c: Row) => ({
@@ -53,7 +84,7 @@ async function makeDrafts(ctx: Ctx, chatId: string, guidance: string | undefined
   await admin.from("outreach_agent_drafts").insert(rows);
   return {
     chat_id: chat.id, lead: chat.outreach_leads?.full_name ?? chat.attendee_name, company: chat.outreach_leads?.company, sender: chat.outreach_senders?.display_name, intent: chat.intent,
-    replying_to: untrusted("linkedin_message", lastIn.text, 600), drafts: rows.map((r) => ({ draft_token: r.token, variant: r.variant, text: r.draft_text, rationale: r.rationale })), expires_in_seconds: 1800,
+    replying_to: untrusted("linkedin_message", lastIn.text, 600), their_words: theirWords(thread), last_from_them_at: lastIn.sent_at, contacts: contactsFor(chat, thread), drafts: rows.map((r) => ({ draft_token: r.token, variant: r.variant, text: r.draft_text, rationale: r.rationale })), expires_in_seconds: 1800,
   };
 }
 
@@ -114,7 +145,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
     const chat = await loadChat(ctx, a.chat_id);
     const [msgs, brief] = await Promise.all([loadThread(ctx, chat.id, a.limit ?? 20), briefFor(ctx, chat)]);
     return {
-      ...chatLine(chat), preview: undefined, subject: chat.subject, lead_li: chat.outreach_leads?.public_identifier ?? chat.attendee_public_identifier, lead_title: chat.outreach_leads?.title, sender_status: chat.outreach_senders?.status, campaign_brief: short(brief, 400),
+      ...chatLine(chat), preview: undefined, subject: chat.subject, contacts: contactsFor(chat, msgs), their_words: theirWords(msgs), lead_li: chat.outreach_leads?.public_identifier ?? chat.attendee_public_identifier, lead_title: chat.outreach_leads?.title, sender_status: chat.outreach_senders?.status, campaign_brief: short(brief, 400),
       messages: msgs.map((m) => ({ id: m.id, from: m.direction === "in" ? "prospect" : "sender", at: m.sent_at, invite_note: m.is_invite_note || undefined, intent: m.intent ?? undefined, summary: m.summary ?? undefined, edited: !!m.edited_at || undefined, deleted: !!m.deleted_at || undefined, attachments: m.attachments?.length || undefined, text: m.deleted_at ? undefined : untrusted(m.direction === "in" ? "linkedin_message" : "own_message", m.text, 1500) })),
     };
   });
@@ -131,16 +162,16 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "draft_replies_bulk", title: "Draft replies for many threads", cls: "read", minRole: "client_viewer",
-    description: "One draft per chat (≤25) for the morning-triage loop: inbox_list(intent=interested, unread=true) → draft_replies_bulk → human accepts/edits/skips → inbox_send_batch. Per-chat errors do not fail the batch.",
+    description: "One draft per chat (≤25) for the triage loop: inbox_list(unread=true) → pick every thread that needs a reply (including unclassified ones you judged) → draft_replies_bulk → human accepts/edits/skips → inbox_send_batch. Use this whenever the user asks about pending replies — draft in the same turn instead of offering to. Per-chat errors do not fail the batch.",
     input: { chat_ids: z.array(z.string()).min(1).max(25), guidance: z.string().optional() },
   }, async (a) => {
     if (!aiConfigured()) throw new McpError("E_AI_UNAVAILABLE", "AI drafting is not configured on this project");
     await dailyQuota(ctx, "drafts", 500);
     const results = await mapPool(a.chat_ids, 4, async (id) => {
-      try { const d = await makeDrafts(ctx, id, a.guidance, 1); return { chat_id: id, lead: d.lead, company: d.company, sender: d.sender, intent: d.intent, replying_to: d.replying_to, draft_token: d.drafts[0].draft_token, text: d.drafts[0].text, rationale: d.drafts[0].rationale }; }
+      try { const d = await makeDrafts(ctx, id, a.guidance, 1); return { chat_id: id, lead: d.lead, company: d.company, sender: d.sender, intent: d.intent, their_words: d.their_words, last_from_them_at: d.last_from_them_at, contacts: d.contacts, draft_token: d.drafts[0].draft_token, text: d.drafts[0].text, rationale: d.drafts[0].rationale }; }
       catch (e) { const msg = e instanceof Error ? e.message : String(e); return { chat_id: id, error: e instanceof McpError ? e.code : (/^(E_[A-Z_]+)/.exec(msg)?.[1] ?? "E_DRAFT_FAILED"), message: msg }; }
     });
-    return { drafted: results.filter((r) => "draft_token" in r).length, failed: results.filter((r) => "error" in r).length, expires_in_seconds: 1800, drafts: results, next: "Present each draft (lead, sender, text). Collect accept / accept-with-edits / skip in one message, then call inbox_send_batch with the approvals." };
+    return { drafted: results.filter((r) => "draft_token" in r).length, failed: results.filter((r) => "error" in r).length, expires_in_seconds: 1800, drafts: results, next: "Present each draft with the lead, sender, their_words verbatim, contacts (email / phone / LinkedIn, incl. ones mentioned in the thread) and the draft text. Collect accept / accept-with-edits / skip in one message, then call inbox_send_batch with the approvals." };
   });
 
   tool(server, ctx, {
