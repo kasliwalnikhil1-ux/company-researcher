@@ -15,11 +15,12 @@ export const DEFAULT_SCHEDULE: Schedule = {
 };
 
 /** Action types that have a daily budget a human cares about (ordered for display). */
-export const BUDGET_ACTION_TYPES: ActionType[] = ['invite', 'message', 'profile_view', 'inmail', 'like', 'comment', 'endorse', 'search_page', 'withdraw', 'email'];
+export const BUDGET_ACTION_TYPES: ActionType[] = ['invite', 'message', 'profile_view', 'inmail', 'like', 'comment', 'endorse', 'follow', 'search_page', 'post_fetch', 'withdraw', 'email'];
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   profile_view: 'Profile views', invite: 'Invitations', withdraw: 'Withdrawals', message: 'Messages', inmail: 'InMails', like: 'Likes', comment: 'Comments',
   endorse: 'Endorsements', search_page: 'Search pages', email: 'Emails', reply: 'Replies', relations_poll: 'Relation polls', call_api: 'API calls',
+  post_fetch: 'Post fetches', follow: 'Follows', find_email: 'Email lookups',
 };
 
 export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP' };

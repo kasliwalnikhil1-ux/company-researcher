@@ -3,12 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { X, ExternalLink, Linkedin, MapPin, Building2, Plus, UserPlus, Ban, CheckSquare, Repeat, Pause, Play, LogOut, Loader2 } from 'lucide-react';
+import { X, ExternalLink, Linkedin, MapPin, Building2, Plus, UserPlus, Ban, CheckSquare, Repeat, Pause, Play, LogOut, Loader2, Phone } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { rpc, parseError } from '@/lib/outreach/api';
 import { qk, useLead, useLists, useSequences, useSenders, useStages, useTags, useTasks } from '@/lib/outreach/queries';
 import { NODE_CATALOG } from '@/lib/outreach/nodes';
 import { LIVE_ENROLLMENT_STATUSES, type Enrollment, type Member, type Relation, type Tag } from '@/lib/outreach/types';
+import { ik, type EnrollmentWithHold, type LeadWithIntel } from '@/lib/outreach/intel';
+import { QueuedActions } from '@/components/outreach/leads/detail/QueuedActions';
+import { HeldNotice } from '@/components/outreach/leads/detail/HeldNotice';
 import { Avatar, Badge, Button, EnrollmentBadge, ErrorBox, Spinner, Toggle, fmtDate, timeAgo } from '@/components/outreach/ui';
 import type { ChatDetail, ConvertKind } from './Thread';
 import { CreateTaskModal, ReenrolModal, ConfirmModal, type CreateTaskInput } from './LeadActions';
@@ -61,11 +64,11 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const tagInputRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLSelectElement>(null);
 
-  const lead = leadQ.data?.lead ?? null;
+  const lead: LeadWithIntel | null = leadQ.data?.lead ?? null;
   const senderName = chat.outreach_senders?.display_name ?? 'this sender';
 
   const invalidate = () => {
-    if (leadId) qc.invalidateQueries({ queryKey: qk.lead(leadId) });
+    if (leadId) { qc.invalidateQueries({ queryKey: qk.lead(leadId) }); qc.invalidateQueries({ queryKey: ik.queued(leadId) }); }
     qc.invalidateQueries({ queryKey: ['outreach', workspaceId, 'tasks'] });
     qc.invalidateQueries({ queryKey: ['outreach', 'enrollments'] });
     qc.invalidateQueries({ queryKey: ['outreach', workspaceId, 'leads'] });
@@ -115,6 +118,8 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const state = leadQ.data?.states.find((s) => s.sender_id === chat.sender_id);
   const otherStates = (leadQ.data?.states ?? []).filter((s) => s.sender_id !== chat.sender_id);
   const activeEnrollment = leadQ.data?.enrollments.find((e) => LIVE_ENROLLMENT_STATUSES.includes(e.status)) ?? null;
+  const heldEnrollment = ((leadQ.data?.enrollments ?? []) as EnrollmentWithHold[]).find((e) => !!e.held_at && e.status === 'paused') ?? null;
+  const heldSeq = heldEnrollment ? seqQ.data?.find((s) => s.id === heldEnrollment.sequence_id) : undefined;
   const activeSeq = activeEnrollment ? seqQ.data?.find((s) => s.id === activeEnrollment.sequence_id) : undefined;
   const currentNode = activeEnrollment?.current_node_id && activeSeq ? activeSeq.graph.nodes[activeEnrollment.current_node_id] : undefined;
   const nodeLabel = currentNode ? (currentNode.label || NODE_CATALOG[currentNode.type]?.label || currentNode.type) : activeEnrollment?.current_node_id ?? '—';
@@ -218,6 +223,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                   {(lead.company || lead.title) && <div className="text-xs text-gray-500 mt-1 inline-flex items-center gap-1"><Building2 className="w-3 h-3" />{[lead.title, lead.company].filter(Boolean).join(' @ ')}</div>}
                   {lead.location && <div className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{lead.location}</div>}
                   {(lead.email_work || lead.email_personal) && <div className="text-xs text-gray-500 mt-0.5 truncate">{lead.email_work ?? lead.email_personal}</div>}
+                  {lead.phone && <a href={`tel:${lead.phone}`} className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1 hover:text-indigo-600"><Phone className="w-3 h-3" />{lead.phone}</a>}
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                     {lead.profile_url && <a href={lead.profile_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0a66c2] hover:underline inline-flex items-center gap-1"><Linkedin className="w-3 h-3" /> LinkedIn</a>}
                     {dnc && <Badge tone="red">Do not contact</Badge>}
@@ -226,6 +232,12 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                 </div>
               </div>
             </div>
+
+            {heldEnrollment && (
+              <div className="px-4 py-3 border-b border-gray-100">
+                <HeldNotice enrollment={heldEnrollment} sequenceName={heldSeq?.name} canWrite={canWrite} compact onDone={invalidate} toast={toast} />
+              </div>
+            )}
 
             <Section title={`Relation · ${senderName}`}>
               {state ? (
@@ -257,7 +269,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                   {activeEnrollment.wait_until && <div>Next at {fmtDate(activeEnrollment.wait_until)}</div>}
                   {canWrite && (
                     <div className="flex items-center gap-1.5 pt-1">
-                      {activeEnrollment.status === 'paused'
+                      {heldEnrollment?.id === activeEnrollment.id ? null : activeEnrollment.status === 'paused'
                         ? <Button size="sm" variant="secondary" loading={busy === 'resume'} onClick={() => run('resume', () => rpc('resume_enrollment', { p_id: activeEnrollment.id }), 'Enrollment resumed')}><Play className="w-3 h-3" /> Resume</Button>
                         : <Button size="sm" variant="secondary" loading={busy === 'pause'} onClick={() => run('pause', () => rpc('pause_enrollment', { p_id: activeEnrollment.id }), 'Enrollment paused')}><Pause className="w-3 h-3" /> Pause</Button>}
                       <Button size="sm" variant="secondary" className="text-red-600" onClick={() => setExitTarget(activeEnrollment)}><LogOut className="w-3 h-3" /> Exit</Button>
@@ -265,6 +277,10 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                   )}
                 </div>
               ) : <p className="text-xs text-gray-500">{dnc ? 'Lead is marked do-not-contact.' : 'Not enrolled in any sequence.'}</p>}
+            </Section>
+
+            <Section title="Next scheduled actions">
+              <QueuedActions leadId={lead.id} leadName={lead.full_name ?? chat.attendee_name} compact toast={toast} />
             </Section>
 
             <Section title="Tags">

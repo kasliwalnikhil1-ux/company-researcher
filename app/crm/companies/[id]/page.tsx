@@ -8,7 +8,8 @@ import { useCompanyBrief } from '@/lib/crm/queries';
 import { fmtMoney, STAGE_LABELS, type Contact, type Deal } from '@/lib/crm/types';
 import { Badge, Button, Card, CompanyLogo, EmptyState, ErrorBox, Flags, Spinner, StageBadge, fmtDate, daysAgo, logoDomain } from '@/components/crm/ui';
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
-import { CalendarPlus, ClipboardCheck, ExternalLink, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
+import { TranscriptModal, fmtDuration } from '@/components/crm/transcript';
+import { CalendarPlus, ClipboardCheck, ExternalLink, FileText, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Everything about one account: contacts, deals, full activity timeline, every past meeting capture.
@@ -25,6 +26,7 @@ export default function CompanyPage() {
   const [activityFor, setActivityFor] = useState<string | null | undefined>(undefined); // deal id or null (company level); undefined = closed
   const [meetingFor, setMeetingFor] = useState<Deal | null>(null);
   const [nextStepFor, setNextStepFor] = useState<Deal | null>(null);
+  const [transcriptFor, setTranscriptFor] = useState<string | null>(null); // meeting id
 
   const timeline = useMemo(() => {
     if (!b) return [];
@@ -122,6 +124,7 @@ export default function CompanyPage() {
                       {m.contact && <span className="text-gray-600">with {m.contact}</span>}
                       {m.status === 'scheduled' && past && <Link href={`/crm/capture?meeting=${m.meeting_id}`}><Button size="xs"><ClipboardCheck className="w-3 h-3" /> Capture now</Button></Link>}
                       {m.status === 'scheduled' && !past && <Link href={`/crm/capture?meeting=${m.meeting_id}`} className="text-xs text-indigo-600 hover:underline">capture</Link>}
+                      {m.transcript && <Button size="xs" variant="secondary" onClick={() => setTranscriptFor(m.meeting_id)} title={m.transcript.summary ?? 'Open the call transcript'}><FileText className="w-3 h-3" /> Transcript · {fmtDuration(m.transcript.duration_seconds)}</Button>}
                     </div>
                     {m.notes && <div className="text-xs text-gray-500 mt-0.5">{m.notes}</div>}
                     {m.capture && (
@@ -172,6 +175,7 @@ export default function CompanyPage() {
       <DealModal companyId={c.id} open={dealModal} onClose={() => setDealModal(false)} />
       <ActivityModal companyId={c.id} contacts={contacts} dealId={activityFor ?? undefined} open={activityFor !== undefined} onClose={() => setActivityFor(undefined)} />
       {meetingFor && <MeetingModal dealId={meetingFor.id} contacts={contacts} defaultTz={c.timezone} open={!!meetingFor} onClose={() => setMeetingFor(null)} />}
+      <TranscriptModal meetingId={transcriptFor} onClose={() => setTranscriptFor(null)} />
       <NextStepModal deal={nextStepFor ? { id: nextStepFor.id, company: c.name, next_step: nextStepFor.next_step, next_step_date: nextStepFor.next_step_date } : null} open={!!nextStepFor} onClose={() => setNextStepFor(null)} />
       <div className="text-[11px] text-gray-400">Last activity {daysAgo(b.deals.map((d) => d.last_activity_at).filter(Boolean).sort().pop() ?? null)}{b.delivery_project_ids.length ? ` · delivery projects: ${b.delivery_project_ids.join(', ')}` : ''}</div>
     </div>

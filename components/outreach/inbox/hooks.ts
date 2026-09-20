@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { fnUrl } from '@/lib/outreach/api';
 import { getValidAccessToken } from '@/lib/api';
 import type { Intent, Member, Message } from '@/lib/outreach/types';
@@ -174,4 +175,20 @@ export function fmtBytes(n: number | undefined): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// ---------------------------------------------------------------------------
+// `?chats=<comma separated ids>&label=<text>`: the reports page links here with exactly the threads behind a number.
+// ---------------------------------------------------------------------------
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function useInboxRestrict(): { ids: string[]; label: string } | null {
+  const params = useSearchParams();
+  const chats = params.get('chats');
+  const label = params.get('label');
+  return useMemo(() => {
+    if (chats == null) return null;
+    const ids = Array.from(new Set(chats.split(',').map((s) => s.trim()).filter((s) => UUID_RE.test(s))));
+    return { ids, label: (label ?? '').trim().slice(0, 120) };
+  }, [chats, label]);
 }

@@ -1,6 +1,6 @@
 // F24 — Stripe subscription lifecycle → outreach_workspaces.plan. Deploy with --no-verify-jwt.
 // Also handles user-invoked billing actions with a JWT: {action:'checkout'|'portal', workspace_id, plan}
-import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, WEB_ORIGIN, timingSafeEqual } from "../_shared/outreach/supabase.ts";
+import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, WEB_ORIGIN, timingSafeEqual, rpc, log } from "../_shared/outreach/supabase.ts";
 import { hmacSha256Hex } from "../_shared/outreach/crypto.ts";
 import { stripeRequest } from "../_shared/outreach/workers.ts";
 
@@ -27,6 +27,11 @@ function planFromSub(sub: any): string {
   return "team";
 }
 
+async function resumeAfterBilling(wsId: string): Promise<void> {
+  try { const n = await rpc<number>("resume_after_billing", { p_ws: wsId }); log({ fn: "stripe-webhook", workspace: wsId, senders_resumed: n }); }
+  catch (e) { log({ fn: "stripe-webhook", workspace: wsId, error: `resume_after_billing failed: ${String((e as any)?.message ?? e)}` }); }
+}
+
 serve("stripe-webhook", async (req) => {
   if (req.headers.get("stripe-signature")) {
     const raw = await req.text();
@@ -46,21 +51,26 @@ serve("stripe-webhook", async (req) => {
       case "customer.subscription.updated": {
         const status = obj.status;
         const patch: Record<string, unknown> = { stripe_subscription_id: obj.id, stripe_customer_id: obj.customer, stripe_status: status };
-        if (status === "active" || status === "trialing") { patch.plan = planFromSub(obj); patch.past_due_since = null; if (ws.plan === "suspended") { await admin.from("outreach_senders").update({ status: "ok", status_reason: null }).eq("workspace_id", ws.id).eq("status", "paused").in("status_reason", ["billing_suspended", "trial_expired"]); } }
+        const wasBlocked = ws.plan === "suspended" || !!ws.past_due_since || ["past_due", "unpaid"].includes(ws.stripe_status ?? "");
+        if (status === "active" || status === "trialing") { patch.plan = planFromSub(obj); patch.past_due_since = null; }
         else if (status === "past_due" || status === "unpaid") { patch.past_due_since = ws.past_due_since ?? new Date().toISOString(); }
-        else if (status === "canceled") { patch.plan = "suspended"; }
+        else if (status === "canceled") { patch.plan = "suspended"; if (ws.plan !== "suspended") patch.settings = { ...(ws.settings ?? {}), plan_before_suspension: ws.plan }; }
         await admin.from("outreach_workspaces").update(patch).eq("id", ws.id);
+        // Payment recovered: senders paused for billing resume on their own (nobody restarts them by hand).
+        if ((status === "active" || status === "trialing") && wasBlocked) await resumeAfterBilling(ws.id);
         break;
       }
       case "customer.subscription.deleted":
-        await admin.from("outreach_workspaces").update({ stripe_status: "canceled", plan: "suspended" }).eq("id", ws.id);
+        await admin.from("outreach_workspaces").update({ stripe_status: "canceled", plan: "suspended", ...(ws.plan !== "suspended" ? { settings: { ...(ws.settings ?? {}), plan_before_suspension: ws.plan } } : {}) }).eq("id", ws.id);
         await admin.from("outreach_senders").update({ status: "paused", status_reason: "billing_suspended" }).eq("workspace_id", ws.id).eq("status", "ok");
         break;
       case "invoice.payment_failed":
         await admin.from("outreach_workspaces").update({ stripe_status: "past_due", past_due_since: ws.past_due_since ?? new Date().toISOString() }).eq("id", ws.id);
         break;
       case "invoice.paid":
-        await admin.from("outreach_workspaces").update({ stripe_status: "active", past_due_since: null, plan: ws.plan === "suspended" ? "team" : ws.plan }).eq("id", ws.id);
+        await admin.from("outreach_workspaces").update({ stripe_status: "active", past_due_since: null }).eq("id", ws.id);
+        // restores the plan remembered at suspension (or team) and resumes the senders that billing paused
+        if (ws.plan === "suspended" || ws.past_due_since || ["past_due", "unpaid"].includes(ws.stripe_status ?? "")) await resumeAfterBilling(ws.id);
         break;
     }
     await audit(ws.id, `stripe.${event.type}`, "workspace", ws.id, { id: event.id });

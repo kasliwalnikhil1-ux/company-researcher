@@ -9,27 +9,34 @@ import '@xyflow/react/dist/style.css';
 import { Clock, Hand } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Graph, GraphNode, NodeStats, NodeType } from '@/lib/outreach/types';
-import { NODE_CATALOG } from '@/lib/outreach/nodes';
-import { formatDelay, nodeSummary, NODE_W, type Lookup } from './helpers';
+import { NODE_CATALOG, exitLabel, nodeExits } from '@/lib/outreach/nodes';
+import { formatDelay, nodeSummary, NODE_W, usesNext, type Lookup } from './helpers';
 
 export type IssueLevel = 'error' | 'warning';
-export type OutreachNodeData = { node: GraphNode; summary: string; stats: NodeStats | null; issue: IssueLevel | null };
+export type StatKind = 'failed' | 'skipped';
+/** One step's figures, summed over its variants (sumNodeStats in lib/outreach/graph.ts). */
+export type StepStats = Omit<NodeStats, 'variant_id'>;
+export type OutreachNodeData = { node: GraphNode; summary: string; stats: StepStats | null; issue: IssueLevel | null; onStat?: (nodeId: string, kind: StatKind) => void };
 export type OutreachRFNode = Node<OutreachNodeData, 'outreach'>;
 
-const STAT_CHIPS: Array<{ key: keyof NodeStats; label: string; cls: string }> = [
+const STAT_CHIPS: Array<{ key: keyof StepStats; label: string; cls: string; open?: StatKind }> = [
   { key: 'queued', label: 'queued', cls: 'bg-gray-100 text-gray-700' },
   { key: 'sent', label: 'sent', cls: 'bg-blue-100 text-blue-800' },
   { key: 'accepted', label: 'accepted', cls: 'bg-green-100 text-green-800' },
   { key: 'replied', label: 'replied', cls: 'bg-purple-100 text-purple-800' },
-  { key: 'failed', label: 'failed', cls: 'bg-red-100 text-red-800' },
+  { key: 'failed', label: 'failed', cls: 'bg-red-100 text-red-800 hover:bg-red-200', open: 'failed' },
+  { key: 'skipped', label: 'skipped', cls: 'bg-amber-100 text-amber-800 hover:bg-amber-200', open: 'skipped' },
 ];
+const chipValue = (stats: StepStats, key: keyof StepStats): number => Number(stats[key] ?? 0) || 0;
 
 const HANDLE_CLS = '!w-3 !h-3 !border-2 !border-white';
 
 export const OutreachNode = memo(function OutreachNode({ data, selected }: NodeProps<OutreachRFNode>) {
-  const { node, summary, stats, issue } = data;
+  const { node, summary, stats, issue, onStat } = data;
   const meta = NODE_CATALOG[node.type];
-  const exits = meta.exits;
+  // ab_split and ai_route get their exits from the step config, so always ask the node
+  const exits = nodeExits(node);
+  const single = usesNext(node);
   const hasDelay = !!node.delay && node.delay.amount > 0;
   return (
     <div
@@ -48,19 +55,24 @@ export const OutreachNode = memo(function OutreachNode({ data, selected }: NodeP
         </span>
       </div>
       <div className="px-3 py-2 text-xs text-gray-600 min-h-[34px] break-words">{summary || <span className="text-gray-400">{meta.description}</span>}</div>
-      {stats && STAT_CHIPS.some((c) => (stats[c.key] as number) > 0) && (
+      {stats && STAT_CHIPS.some((c) => chipValue(stats, c.key) > 0) && (
         <div className="px-3 pb-2 flex flex-wrap gap-1">
-          {STAT_CHIPS.filter((c) => (stats[c.key] as number) > 0).map((c) => (
-            <span key={c.key} className={cn('text-[10px] font-medium rounded-full px-1.5 py-0.5 tabular-nums', c.cls)}>{stats[c.key] as number} {c.label}</span>
-          ))}
+          {STAT_CHIPS.filter((c) => chipValue(stats, c.key) > 0).map((c) => {
+            const text = `${chipValue(stats, c.key).toLocaleString()} ${c.label}`;
+            const cls = cn('text-[10px] font-medium rounded-full px-1.5 py-0.5 tabular-nums', c.cls);
+            // failed / skipped open the recovery list; nodrag + nopan keep React Flow from treating the click as a drag
+            return c.open && onStat
+              ? <button key={c.key} type="button" title={`Show ${c.label} leads and why`} onClick={(e) => { e.stopPropagation(); onStat(node.id, c.open!); }} className={cn(cls, 'nodrag nopan cursor-pointer underline decoration-dotted underline-offset-2 focus:outline-none focus:ring-2 focus:ring-indigo-400')}>{text}</button>
+              : <span key={c.key} className={cls}>{text}</span>;
+          })}
         </div>
       )}
-      {exits.length === 1 && <Handle type="source" position={Position.Right} id={exits[0]} className={cn(HANDLE_CLS, '!bg-indigo-500')} />}
-      {exits.length > 1 && (
+      {single && <Handle type="source" position={Position.Right} id={exits[0]} className={cn(HANDLE_CLS, '!bg-indigo-500')} />}
+      {!single && exits.length > 0 && (
         <div className="border-t border-gray-100 py-1">
           {exits.map((e) => (
             <div key={e} className="relative px-3 py-0.5 text-[11px] text-gray-500 text-right leading-4">
-              {e.replace(/_/g, ' ')}
+              <span className="block truncate pl-2" title={exitLabel(node, e)}>{exitLabel(node, e)}</span>
               <Handle type="source" position={Position.Right} id={e} className={cn(HANDLE_CLS, e === 'error' || e === 'bounced' || e === 'no_credit' || e === 'no_email' ? '!bg-red-400' : e === 'false' || e === 'no_connect' ? '!bg-amber-400' : '!bg-indigo-500')} style={{ top: '50%' }} />
             </div>
           ))}
@@ -75,15 +87,18 @@ export const nodeTypes: NodeTypes = { outreach: OutreachNode };
 export function deriveEdges(graph: Graph, readOnly: boolean): Edge[] {
   const edges: Edge[] = [];
   for (const n of Object.values(graph.nodes)) {
-    const exits = NODE_CATALOG[n.type]?.exits ?? [];
-    if (exits.length === 1 && n.next && graph.nodes[n.next]) {
+    const exits = nodeExits(n);
+    if (usesNext(n)) {
+      if (!n.next || !graph.nodes[n.next]) continue;
       edges.push({ id: `${n.id}::${exits[0]}::${n.next}`, source: n.id, sourceHandle: exits[0], target: n.next, type: 'smoothstep', deletable: !readOnly, data: { handle: exits[0] }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: '#6366f1' }, style: { stroke: '#6366f1', strokeWidth: 1.5 } });
-    } else if (exits.length > 1) {
-      for (const [b, t] of Object.entries(n.branches ?? {})) {
+    } else if (exits.length > 0) {
+      // a call task made outside the builder (API, connector) keeps its fallback only in the top-level `next`
+      const branches = exits.includes('next') && !('next' in (n.branches ?? {})) && n.next ? { ...(n.branches ?? {}), next: n.next } : n.branches ?? {};
+      for (const [b, t] of Object.entries(branches)) {
         if (!t || !graph.nodes[t] || !exits.includes(b)) continue;
         const negative = ['false', 'no_connect', 'error', 'bounced', 'no_credit', 'no_email'].includes(b);
         const color = negative ? '#f59e0b' : '#6366f1';
-        edges.push({ id: `${n.id}::${b}::${t}`, source: n.id, sourceHandle: b, target: t, type: 'smoothstep', label: b.replace(/_/g, ' '), labelStyle: { fontSize: 10, fill: '#6b7280' }, labelBgStyle: { fill: '#fff' }, labelBgPadding: [4, 2], deletable: !readOnly, data: { handle: b }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color }, style: { stroke: color, strokeWidth: 1.5 } });
+        edges.push({ id: `${n.id}::${b}::${t}`, source: n.id, sourceHandle: b, target: t, type: 'smoothstep', label: exitLabel(n, b), labelStyle: { fontSize: 10, fill: '#6b7280' }, labelBgStyle: { fill: '#fff' }, labelBgPadding: [4, 2], deletable: !readOnly, data: { handle: b }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color }, style: { stroke: color, strokeWidth: 1.5 } });
       }
     }
   }
@@ -95,7 +110,7 @@ function sameEdges(a: Edge[], b: Edge[]): boolean {
   return a.length === b.length && a.every((e, i) => e.id === b[i].id && e.deletable === b[i].deletable);
 }
 
-export function deriveNodes(graph: Graph, opts: { stats: Record<string, NodeStats>; issues: Record<string, IssueLevel>; selectedId: string | null; readOnly: boolean; lookup: Lookup }, prev: OutreachRFNode[]): OutreachRFNode[] {
+export function deriveNodes(graph: Graph, opts: { stats: Record<string, StepStats>; issues: Record<string, IssueLevel>; selectedId: string | null; readOnly: boolean; lookup: Lookup; onStat?: (nodeId: string, kind: StatKind) => void }, prev: OutreachRFNode[]): OutreachRFNode[] {
   const prevMap = new Map(prev.map((n) => [n.id, n]));
   return Object.values(graph.nodes).map((gn) => {
     const old = prevMap.get(gn.id);
@@ -110,7 +125,7 @@ export function deriveNodes(graph: Graph, opts: { stats: Record<string, NodeStat
       deletable: gn.type !== 'start' && !opts.readOnly,
       draggable: !opts.readOnly,
       connectable: !opts.readOnly,
-      data: { node: gn, summary: nodeSummary(gn, opts.lookup, graph.nodes), stats: opts.stats[gn.id] ?? null, issue: opts.issues[gn.id] ?? null },
+      data: { node: gn, summary: nodeSummary(gn, opts.lookup, graph.nodes), stats: opts.stats[gn.id] ?? null, issue: opts.issues[gn.id] ?? null, onStat: opts.onStat },
     };
   });
 }
@@ -147,7 +162,7 @@ export interface CanvasHandle {
 
 export interface CanvasProps {
   graph: Graph;
-  stats: Record<string, NodeStats>;
+  stats: Record<string, StepStats>;
   issues: Record<string, IssueLevel>;
   selectedId: string | null;
   readOnly: boolean;
@@ -158,11 +173,13 @@ export interface CanvasProps {
   onDisconnect: (source: string, handle: string) => void;
   onRequestDelete: (ids: string[]) => void;
   onAddNode: (type: NodeType, position: { x: number; y: number }) => void;
+  /** A Failed / Skipped badge on a step was clicked. */
+  onOpenStat?: (nodeId: string, kind: StatKind) => void;
   className?: string;
 }
 
 const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(props, ref) {
-  const { graph, stats, issues, selectedId, readOnly, lookup, onSelect, onMoveNodes, onConnect, onDisconnect, onRequestDelete, onAddNode } = props;
+  const { graph, stats, issues, selectedId, readOnly, lookup, onSelect, onMoveNodes, onConnect, onDisconnect, onRequestDelete, onAddNode, onOpenStat } = props;
   const rf = useReactFlow<OutreachRFNode, Edge>();
   const wrapper = useRef<HTMLDivElement>(null);
   const [nodes, setNodes] = useState<OutreachRFNode[]>([]);
@@ -172,7 +189,9 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
-  useEffect(() => { setNodes((prev) => deriveNodes(graph, { stats, issues, selectedId, readOnly, lookup }, prev)); }, [graph, stats, issues, selectedId, readOnly, lookup]);
+  const openStat = useEvent((nodeId: string, kind: StatKind) => onOpenStat?.(nodeId, kind));
+  const hasStatHandler = !!onOpenStat;
+  useEffect(() => { setNodes((prev) => deriveNodes(graph, { stats, issues, selectedId, readOnly, lookup, onStat: hasStatHandler ? openStat : undefined }, prev)); }, [graph, stats, issues, selectedId, readOnly, lookup, hasStatHandler, openStat]);
   useEffect(() => { setEdges((prev) => { const next = deriveEdges(graph, readOnly); return sameEdges(prev, next) ? prev : next; }); }, [graph, readOnly]);
 
   const select = useEvent((id: string | null) => onSelect(id));

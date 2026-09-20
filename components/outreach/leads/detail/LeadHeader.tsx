@@ -8,10 +8,12 @@ import { qk } from '@/lib/outreach/queries';
 import { parseError, rpc } from '@/lib/outreach/api';
 import type { Lead } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, Modal, fmtDate } from '@/components/outreach/ui';
-import { Briefcase, ExternalLink, GitBranch, Mail, MapPin, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
+import { Briefcase, ExternalLink, GitBranch, Mail, MapPin, MessageSquare, Phone, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
+import type { LeadWithIntel } from '@/lib/outreach/intel';
 import { leadLinkedInUrl, leadName, type ToastFn } from '../helpers';
 
-export function LeadHeader({ lead, onEnroll, toast }: { lead: Lead; onEnroll: () => void; toast: ToastFn }) {
+export function LeadHeader({ lead: leadRow, onEnroll, toast }: { lead: Lead; onEnroll: () => void; toast: ToastFn }) {
+  const lead: LeadWithIntel = leadRow;
   const { workspace, canWrite } = useWorkspace();
   const qc = useQueryClient();
   const router = useRouter();
@@ -66,6 +68,8 @@ export function LeadHeader({ lead, onEnroll, toast }: { lead: Lead; onEnroll: ()
             {lead.email_work && <a href={`mailto:${lead.email_work}`} className="inline-flex items-center gap-1 text-gray-700 hover:text-indigo-700"><Briefcase className="w-3.5 h-3.5 text-gray-400" /> {lead.email_work} <span className="text-xs text-gray-400">work</span></a>}
             {lead.email_personal && <a href={`mailto:${lead.email_personal}`} className="inline-flex items-center gap-1 text-gray-700 hover:text-indigo-700"><Mail className="w-3.5 h-3.5 text-gray-400" /> {lead.email_personal} <span className="text-xs text-gray-400">personal</span></a>}
             {!lead.email_work && !lead.email_personal && <span className="text-gray-400 text-xs">No email on file</span>}
+            {lead.phone && <a href={`tel:${lead.phone}`} className="inline-flex items-center gap-1 text-gray-700 hover:text-indigo-700"><Phone className="w-3.5 h-3.5 text-gray-400" /> {lead.phone}</a>}
+            {lead.last_replied_at && <span className="inline-flex items-center gap-1 text-purple-700" title={new Date(lead.last_replied_at).toLocaleString()}><MessageSquare className="w-3.5 h-3.5" /> Last replied {fmtDate(lead.last_replied_at)}{lead.last_replied_channel ? ` on ${lead.last_replied_channel === 'linkedin' ? 'LinkedIn' : lead.last_replied_channel === 'email' ? 'email' : lead.last_replied_channel}` : ''}</span>}
           </div>
           <p className="text-xs text-gray-400 mt-2">Added {fmtDate(lead.created_at)}{lead.source ? ` via ${lead.source}` : ''} · updated {fmtDate(lead.updated_at)}{lead.last_profile_fetch_at ? ` · profile fetched ${fmtDate(lead.last_profile_fetch_at)}` : ''}</p>
         </div>

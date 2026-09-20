@@ -7,18 +7,14 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useAudit } from '@/lib/outreach/queries';
-import { Badge, Button, Card, ErrorBox, Input, PageHeader, Spinner, Table, Td, Th, Toggle, fmtDate, useToast } from '@/components/outreach/ui';
+import { Badge, Button, Card, ErrorBox, Input, PageHeader, Spinner, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
-import { copyText } from '@/components/outreach/senders/helpers';
+import { copyText } from '@/components/outreach/settings/shared';
+import { BehaviourCard, RegionalCard } from '@/components/outreach/settings/WorkspacePreferences';
+import StageKindsCard from '@/components/outreach/settings/StageKindsCard';
 
 type SetupStatus = { unipile: boolean; unipile_dsn?: string | null; webhook_secret: boolean; cookie_key: boolean; cron_secret?: boolean; ai: boolean; ai_model?: string; resend: boolean; stripe: boolean; stripe_webhook?: boolean; webhook_url: string; unipile_error?: string };
 type SetupResp = { status: SetupStatus; webhooks: Array<{ id: string; source: string; events?: string[]; request_url?: string; enabled?: boolean }> };
-
-const SETTING_TOGGLES: Array<{ key: string; label: string; description: string; defaultValue: boolean }> = [
-  { key: 'recruiter_enabled', label: 'Recruiter features', description: 'Allow the connect wizard to keep LinkedIn Recruiter enabled for senders with a Recruiter seat. Off by default; Recruiter automation carries extra risk.', defaultValue: false },
-  { key: 'create_leads_from_inbound', label: 'Create leads from inbound messages', description: 'When someone who is not yet a lead messages one of your senders, create a lead record automatically so the conversation shows up in the inbox with a profile.', defaultValue: true },
-  { key: 'cookie_mode_opt_in', label: 'Cookie-mode opt-in', description: 'Allow the Chrome extension to keep senders connected by syncing their LinkedIn session cookie. Cookies are encrypted at rest and every access is logged.', defaultValue: true },
-];
 
 const PLAN_LABEL: Record<string, string> = { trial: 'Trial', team: 'Team', agency: 'Agency', agency_plus: 'Agency Plus', suspended: 'Suspended' };
 
@@ -43,7 +39,6 @@ export default function WorkspaceSettingsPage() {
   const [name, setName] = useState(workspace?.name ?? '');
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => setName(workspace?.name ?? ''), [workspace?.name]);
-  const settings = (workspace?.settings ?? {}) as Record<string, unknown>;
   const audit = useAudit(isManager ? ws : null);
   const [auditOpen, setAuditOpen] = useState<Record<number, boolean>>({});
 
@@ -53,14 +48,6 @@ export default function WorkspaceSettingsPage() {
     if (!ws || !name.trim()) return;
     setBusy('rename');
     try { const { error } = await supabase.from('outreach_workspaces').update({ name: name.trim() }).eq('id', ws); if (error) throw error; await refresh(); toast.show('Workspace renamed.'); }
-    catch (e) { toast.show(parseError(e).message, 'error'); }
-    finally { setBusy(null); }
-  }
-
-  async function setSetting(key: string, value: boolean) {
-    if (!ws) return;
-    setBusy(key);
-    try { const { error } = await supabase.from('outreach_workspaces').update({ settings: { ...settings, [key]: value } }).eq('id', ws); if (error) throw error; await refresh(); toast.show('Setting saved.'); }
     catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   }
@@ -96,20 +83,9 @@ export default function WorkspaceSettingsPage() {
             <div className="text-xs text-gray-400 mt-2">Slug: <code>{workspace.slug}</code> · id <code>{workspace.id}</code></div>
           </Card>
 
-          <Card title="Behaviour">
-            <div className="divide-y divide-gray-100">
-              {SETTING_TOGGLES.map((t) => {
-                const value = typeof settings[t.key] === 'boolean' ? (settings[t.key] as boolean) : t.defaultValue;
-                return (
-                  <div key={t.key} className="py-3 flex items-start justify-between gap-4">
-                    <div><div className="text-sm font-medium text-gray-900">{t.label}</div><div className="text-xs text-gray-500 mt-0.5">{t.description}</div></div>
-                    <Toggle checked={value} onChange={(v) => setSetting(t.key, v)} disabled={!isOwner || !canWrite || busy === t.key} />
-                  </div>
-                );
-              })}
-            </div>
-            {!isOwner && <div className="text-xs text-gray-400 mt-2">Only the workspace owner can change these.</div>}
-          </Card>
+          <RegionalCard />
+          <BehaviourCard />
+          <StageKindsCard />
 
           {isOwner && (
             <Card title="Platform setup" actions={<Button size="sm" variant="secondary" onClick={() => setup.refetch()} loading={setup.isFetching}><RefreshCw className="w-3.5 h-3.5" /> Re-check</Button>}>
@@ -121,8 +97,8 @@ export default function WorkspaceSettingsPage() {
                     <StatusRow ok={setup.data.status.cookie_key} label="Cookie encryption key" hint="OUTREACH_COOKIE_KEY" />
                     {setup.data.status.cron_secret != null && <StatusRow ok={setup.data.status.cron_secret} label="Cron secret" hint="OUTREACH_CRON_SECRET" />}
                     <StatusRow ok={setup.data.status.ai} label="Gemini (AI classify / drafts)" hint={setup.data.status.ai_model ?? 'GEMINI_API_KEY'} />
-                    <StatusRow ok={setup.data.status.resend} label="Resend (email notifications)" hint="RESEND_API_KEY — optional; reconnect and invite links can be copied from the app instead" optional />
-                    <StatusRow ok={setup.data.status.stripe} label="Stripe (billing)" hint="STRIPE_SECRET_KEY — optional; billing and trial limits are disabled while unset" optional />
+                    <StatusRow ok={setup.data.status.resend} label="Resend (email notifications)" hint="RESEND_API_KEY. Optional: reconnect and invite links can be copied from the app instead" optional />
+                    <StatusRow ok={setup.data.status.stripe} label="Stripe (billing)" hint="STRIPE_SECRET_KEY. Optional: billing and trial limits are off while it is unset" optional />
                   </div>
                   {setup.data.status.unipile_error && <ErrorBox className="mt-3" message={`Unipile: ${setup.data.status.unipile_error}`} />}
                   <div className="mt-4">

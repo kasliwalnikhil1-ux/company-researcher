@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { BarChart3, Building2, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
@@ -11,6 +11,8 @@ import { qk, useClients, useSenders, useSequences } from '@/lib/outreach/queries
 import { Button, Card, EmptyState, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
 import { browserTimezone, slugify, timezoneOptions } from '@/components/outreach/senders/helpers';
 import type { Client } from '@/lib/outreach/types';
+import { fmtInt, fmtRate, presetRange, useReportClients } from '@/lib/outreach/reports';
+import { CountRate, MetricLabel } from '@/components/outreach/reports/primitives';
 
 export default function ClientsPage() {
   const { workspace, isManager, canWrite } = useWorkspace();
@@ -33,15 +35,11 @@ export default function ClientsPage() {
     setError(null);
   }, [editing]);
 
-  const clientIds = (clients.data ?? []).map((c) => c.id);
-  const leadCounts = useQuery({
-    queryKey: ['outreach', ws ?? '', 'client-lead-counts', clientIds], enabled: !!ws && isManager && clientIds.length > 0,
-    queryFn: async () => {
-      const out: Record<string, number> = {};
-      await Promise.all(clientIds.map(async (id) => { const { count, error } = await supabase.from('outreach_leads').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).eq('client_id', id); if (error) throw parseError(error); out[id] = count ?? 0; }));
-      return out;
-    },
-  });
+  // Last 30 days per client, from the same function the reports page uses (one call for every client).
+  const timezone = (typeof workspace?.settings?.timezone === 'string' && workspace.settings.timezone) || 'UTC';
+  const range = useMemo(() => presetRange('30d', timezone), [timezone]);
+  const report = useReportClients({ ws, range, enabled: isManager });
+  const byClient = useMemo(() => Object.fromEntries((report.data ?? []).map((r) => [r.client_id, r])), [report.data]);
   const senderCount = useMemo(() => { const m: Record<string, number> = {}; for (const s of senders.data ?? []) if (s.client_id && s.status !== 'disabled') m[s.client_id] = (m[s.client_id] ?? 0) + 1; return m; }, [senders.data]);
   const sequenceCount = useMemo(() => { const m: Record<string, number> = {}; for (const s of sequences.data ?? []) if (s.client_id && s.status !== 'archived') m[s.client_id] = (m[s.client_id] ?? 0) + 1; return m; }, [sequences.data]);
 
@@ -80,7 +78,7 @@ export default function ClientsPage() {
         <Card><EmptyState icon={<Building2 className="w-6 h-6" />} title="No clients yet" description="Clients are optional. Create one per customer if you run outreach for several companies; you can then invite a client viewer who only sees their own inbox and stats." action={<Button onClick={() => setEditing('new')} disabled={!canWrite}>Create client</Button>} /></Card>
       ) : (
         <Table>
-          <thead><tr><Th>Client</Th><Th>Slug</Th><Th>Timezone</Th><Th className="text-right">Senders</Th><Th className="text-right">Leads</Th><Th className="text-right">Sequences</Th><Th>Created</Th><Th></Th></tr></thead>
+          <thead><tr><Th>Client</Th><Th>Slug</Th><Th>Timezone</Th><Th className="text-right">Senders</Th><Th className="text-right">Leads</Th><Th className="text-right">Sequences</Th><Th className="text-right"><MetricLabel metric="touches">Touches (30d)</MetricLabel></Th><Th className="text-right"><MetricLabel metric="replies">Replies (30d)</MetricLabel></Th><Th className="text-right"><MetricLabel metric="interested">Interested (30d)</MetricLabel></Th><Th>Created</Th><Th></Th></tr></thead>
           <tbody>
             {clients.data.map((c) => (
               <tr key={c.id}>
@@ -88,12 +86,16 @@ export default function ClientsPage() {
                 <Td className="font-mono text-xs text-gray-600">{c.slug ?? '—'}</Td>
                 <Td>{c.timezone ?? <span className="text-gray-400">—</span>}</Td>
                 <Td className="text-right tabular-nums">{senders.isLoading ? '…' : senderCount[c.id] ?? 0}</Td>
-                <Td className="text-right tabular-nums">{leadCounts.isLoading ? '…' : leadCounts.data?.[c.id] ?? 0}</Td>
+                <Td className="text-right tabular-nums">{report.isLoading ? '…' : fmtInt(byClient[c.id]?.leads ?? 0)}</Td>
                 <Td className="text-right tabular-nums">{sequences.isLoading ? '…' : sequenceCount[c.id] ?? 0}</Td>
+                <Td className="text-right tabular-nums">{report.isLoading ? '…' : fmtInt(byClient[c.id]?.totals.touches ?? 0)}</Td>
+                <Td className="text-right">{report.isLoading ? '…' : byClient[c.id] ? <CountRate count={fmtInt(byClient[c.id].totals.replies)} rate={fmtRate(byClient[c.id].totals.reply_rate)} /> : '—'}</Td>
+                <Td className="text-right">{report.isLoading ? '…' : byClient[c.id] ? <CountRate count={fmtInt(byClient[c.id].totals.interested)} rate={fmtRate(byClient[c.id].totals.positive_reply_rate)} /> : '—'}</Td>
                 <Td className="whitespace-nowrap">{fmtDate(c.created_at, false)}</Td>
                 <Td>
                   <div className="flex justify-end gap-1">
-                    <Link href={`/outreach/c/${c.id}`} title="Open client viewer"><Button size="sm" variant="ghost"><ExternalLink className="w-4 h-4" /></Button></Link>
+                    <Link href={`/outreach/reports?client=${c.id}`} title="Open this client in reports"><Button size="sm" variant="ghost" aria-label="Open this client in reports"><BarChart3 className="w-4 h-4" /></Button></Link>
+                    <Link href={`/outreach/c/${c.id}`} title="Open the client portal"><Button size="sm" variant="ghost" aria-label="Open the client portal"><ExternalLink className="w-4 h-4" /></Button></Link>
                     <Button size="sm" variant="ghost" onClick={() => setEditing(c)} disabled={!canWrite} aria-label="Edit client"><Pencil className="w-4 h-4" /></Button>
                     <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(c)} disabled={!canWrite} aria-label="Delete client"><Trash2 className="w-4 h-4 text-red-500" /></Button>
                   </div>
@@ -103,6 +105,7 @@ export default function ClientsPage() {
           </tbody>
         </Table>
       )}
+      {report.isError && <ErrorBox className="mt-3" message={`The 30-day numbers could not be loaded. ${(report.error as Error).message}`} />}
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing === 'new' ? 'New client' : 'Edit client'} size="sm"
         footer={<><Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button><Button onClick={save} loading={busy} disabled={!form.name.trim()}>{editing === 'new' ? 'Create' : 'Save'}</Button></>}>

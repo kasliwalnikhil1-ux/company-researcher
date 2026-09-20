@@ -68,6 +68,7 @@ export const LEAD_FIELDS: Array<{ value: string; label: string }> = [
   { value: 'location', label: 'Location' },
   { value: 'email_work', label: 'Work email' },
   { value: 'email_personal', label: 'Personal email' },
+  { value: 'phone', label: 'Phone' },
   { value: 'custom', label: 'Custom field…' },
 ];
 
@@ -83,6 +84,7 @@ const GUESSES: Array<[RegExp, string]> = [
   [/location|city|country|region/i, 'location'],
   [/work.?e-?mail|business.?e-?mail|^e-?mail$|^email.?address$/i, 'email_work'],
   [/personal.?e-?mail|private.?e-?mail|home.?e-?mail/i, 'email_personal'],
+  [/^(phone|mobile|cell|tel)(.?(number|no))?$|telephone/i, 'phone'],
 ];
 
 /** Guess the lead field for a CSV header. Returns '' when unsure. */

@@ -4,17 +4,35 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Contact, Lock, Plus } from 'lucide-react';
+import { RunningDryBadge } from '@/components/outreach/senders/RunningDry';
+import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/senders/insights';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, HealthBar, PageHeader, Select, Spinner, StatusPill, Table, Td, Th, timeAgo, fmtDate } from '@/components/outreach/ui';
 import { PROVIDER_LABELS, STATUS_OPTIONS, isFuture, scheduleSummary } from '@/components/outreach/senders/helpers';
 import type { Sender } from '@/lib/outreach/types';
 
-function Budget({ b }: { b?: { used: number; reserved: number; cap: number } }) {
-  if (!b) return <span className="text-gray-400">—</span>;
+type Usage = { used: number; reserved: number; cap: number };
+
+function Budget({ label, b }: { label: string; b?: Usage }) {
+  if (!b) return null;
   const used = b.used + b.reserved;
   const full = b.cap > 0 && used >= b.cap;
-  return <span className={full ? 'text-amber-700 font-medium tabular-nums' : 'tabular-nums'}>{used}/{b.cap}</span>;
+  return (
+    <div className="flex items-center justify-end gap-2 whitespace-nowrap" title={b.cap === 0 ? `No ${label.toLowerCase()} allowance today` : full ? `Today's ${label.toLowerCase()} allowance is used` : undefined}>
+      <span className="text-xs text-gray-500">{label}</span>
+      <span className={full ? 'text-amber-700 font-medium tabular-nums' : b.cap === 0 ? 'text-gray-400 tabular-nums' : 'tabular-nums'}>{used}/{b.cap}</span>
+    </div>
+  );
+}
+
+/** Why a connected sender may still be sending little or nothing, from the sender row itself. */
+function blockedHint(s: SenderV2): string | null {
+  if (s.status !== 'ok') return null;   // the status pill already says it
+  if (isFuture(s.paused_until)) return `Resting until ${fmtDate(s.paused_until)}`;
+  if (s.health_score < 50) return 'Health is below 50: sending is paused';
+  if (isFuture(s.invite_blocked_until)) return `LinkedIn blocked invitations until ${fmtDate(s.invite_blocked_until, false)}`;
+  return null;
 }
 
 export default function SendersPage() {
@@ -24,6 +42,7 @@ export default function SendersPage() {
   const senders = useSenders(ws);
   const clients = useClients(ws);
   const dash = useDashboard(ws);
+  const dry = useRunningDryAlerts(ws);
   const [status, setStatus] = useState('');
   const [client, setClient] = useState('');
 
@@ -34,7 +53,7 @@ export default function SendersPage() {
   }, [dash.data]);
   const clientName = useMemo(() => new Map((clients.data ?? []).map((c) => [c.id, c.name])), [clients.data]);
 
-  const rows = useMemo(() => (senders.data ?? []).filter((s: Sender) => (!status || s.status === status) && (!client || (client === '__none' ? !s.client_id : s.client_id === client))), [senders.data, status, client]);
+  const rows = useMemo(() => ((senders.data ?? []) as SenderV2[]).filter((s: Sender) => (!status || s.status === status) && (!client || (client === '__none' ? !s.client_id : s.client_id === client))), [senders.data, status, client]);
 
   return (
     <div>
@@ -54,12 +73,15 @@ export default function SendersPage() {
       ) : (
         <Table>
           <thead><tr>
-            <Th>Sender</Th><Th>Status</Th><Th>Health</Th><Th>Level</Th><Th>Proxy</Th><Th>Client</Th><Th>Schedule</Th><Th>Last sync</Th><Th className="text-right">Invites</Th><Th className="text-right">Messages</Th>
+            <Th>Sender</Th><Th>Status</Th><Th>Health</Th><Th>Level</Th><Th>Proxy</Th><Th>Client</Th><Th>Schedule</Th><Th>Last sync</Th><Th className="text-right">Used today</Th>
           </tr></thead>
           <tbody>
             {rows.map((s) => {
               const today = todayById.get(s.id);
               const locked = isFuture(s.warmup_locked_until);
+              const dryAlert = dry.data?.get(s.id);
+              const isDry = !!s.running_dry_at || !!dryAlert;
+              const hint = blockedHint(s);
               return (
                 <tr key={s.id} onClick={() => router.push(`/outreach/senders/${s.id}`)} className="cursor-pointer hover:bg-gray-50" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/outreach/senders/${s.id}`); }}>
                   <Td>
@@ -71,7 +93,13 @@ export default function SendersPage() {
                       </div>
                     </div>
                   </Td>
-                  <Td><StatusPill status={s.status} reason={s.status_reason} /></Td>
+                  <Td>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <StatusPill status={s.status} reason={s.status_reason} />
+                      {isDry && <RunningDryBadge alert={dryAlert} />}
+                    </div>
+                    {hint && <div className="text-[11px] text-amber-700 mt-1 max-w-[220px]">{hint}</div>}
+                  </Td>
                   <Td><HealthBar score={s.health_score} /></Td>
                   <Td>
                     <div className="flex items-center gap-1.5">
@@ -86,8 +114,11 @@ export default function SendersPage() {
                     <div className="text-[11px] text-gray-400">{s.timezone}</div>
                   </Td>
                   <Td className="whitespace-nowrap" title={s.last_synced_at ? fmtDate(s.last_synced_at) : undefined}>{timeAgo(s.last_synced_at)}</Td>
-                  <Td className="text-right"><Budget b={today?.invite} /></Td>
-                  <Td className="text-right"><Budget b={today?.message} /></Td>
+                  <Td className="text-right">
+                    {!today ? <span className="text-gray-400">—</span> : s.provider === 'LINKEDIN'
+                      ? <><Budget label="Invites" b={today.invite} /><Budget label="Messages" b={today.message} /></>
+                      : <Budget label="Emails" b={today.email} />}
+                  </Td>
                 </tr>
               );
             })}

@@ -10,12 +10,23 @@
 #   * lines are KEY=VALUE (optional `export ` prefix, optional single/double quotes around VALUE); # comments and
 #     blank lines are ignored.
 #   * ONLY allowlisted keys are pushed (UNIPILE_*, OUTREACH_* except OUTREACH_TEST_*, STRIPE_*, SMARTLEAD_*, CRM_*,
-#     RESEND_API_KEY, GEMINI_API_KEY, GEMINI_MODEL_ID, EMAIL_FROM, TEMP_MAX_AGE_HOURS). Everything else in the
-#     file (Next.js keys, test logins, ...) stays local.
+#     HUBSPOT_*, PIPEDRIVE_*, SALESFORCE_*, RESEND_API_KEY, GEMINI_API_KEY, GEMINI_MODEL_ID, EMAIL_FROM,
+#     TEMP_MAX_AGE_HOURS). Everything else in the file (Next.js keys, test logins, ...) stays local.
 #   * keys with an empty value are SKIPPED (existing secrets keep their value; nothing is deleted).
 #   * keys starting with SUPABASE_ are skipped — those are reserved and injected by the platform.
 #   * --dry-run prints the key names that would be pushed and exits without calling the API.
 #   * values are never printed.
+#
+# Optional secrets (a feature stays off, without errors, while its secret is missing):
+#   RESEND_API_KEY            transactional email: reconnect / paused notices, invitations, stall + running-dry + failed-import
+#                             alerts, the weekly sender report, digests and client reports. Unset = emails are skipped and logged.
+#   OUTREACH_EMAIL_FROM       platform From header, e.g. "CapitalxAI Outreach <no-reply@capitalxai.com>". The domain must be
+#                             verified in Resend. White-label workspaces send from branding.email_from_address when THAT domain is
+#                             verified in Resend too; otherwise the platform address is used with the agency's name and Reply-To.
+#   HUBSPOT_CLIENT_ID / HUBSPOT_CLIENT_SECRET           CRM sync (item 22): OAuth app credentials, one pair per CRM you offer.
+#   PIPEDRIVE_CLIENT_ID / PIPEDRIVE_CLIENT_SECRET       Redirect URL of each app: <functions base>/outreach-crm-oauth/callback
+#   SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET     A CRM whose pair is missing shows as "not available" in Settings → Integrations.
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_*   billing; without them usage is recorded but nothing is suspended or charged.
 #
 # Secrets take effect on the next invocation of each function (no redeploy needed).
 # Optional env: OUTREACH_PROJECT_REF (default ktwqkvjuzsunssudqnrt)
@@ -34,7 +45,7 @@ DRY_RUN=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     *) FILE="$arg" ;;
   esac
 done
@@ -54,7 +65,7 @@ trap 'rm -f "$TMP"' EXIT
 "$PY" - "$FILE" > "$TMP" <<'PY'
 import json, re, sys
 path = sys.argv[1]
-ALLOW = re.compile(r'^(UNIPILE_|OUTREACH_|STRIPE_|SMARTLEAD_|CRM_)|^(RESEND_API_KEY|GEMINI_API_KEY|GEMINI_MODEL_ID|EMAIL_FROM|TEMP_MAX_AGE_HOURS)$')
+ALLOW = re.compile(r'^(UNIPILE_|OUTREACH_|STRIPE_|SMARTLEAD_|CRM_|HUBSPOT_|PIPEDRIVE_|SALESFORCE_)|^(RESEND_API_KEY|GEMINI_API_KEY|GEMINI_MODEL_ID|EMAIL_FROM|TEMP_MAX_AGE_HOURS)$')
 out, skipped_empty, skipped_reserved, bad = [], [], [], []
 for ln, raw in enumerate(open(path, encoding="utf-8"), 1):
     line = raw.strip()

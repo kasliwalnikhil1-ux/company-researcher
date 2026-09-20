@@ -2,7 +2,9 @@
 
 Multi-sender LinkedIn/email outreach (Unipile-backed) built inside the CapitalxAI Next.js app and the CapitalxAI Supabase project `ktwqkvjuzsunssudqnrt`. This document is for whoever operates it: first-time setup, how the automation runs, what to do when it does not, and how to look inside.
 
-PRD: `linkedin-outreach-platform-PRD.md` (repo root). Frontend conventions: `docs/outreach/FRONTEND-BRIEF.md`. SQL API: `docs/outreach/SQL-REFERENCE.md`.
+PRD: `linkedin-outreach-platform-PRD.md` (repo root). Product plan: `outreach-product-plan.md`. Frontend conventions: [FRONTEND-BRIEF.md](FRONTEND-BRIEF.md). SQL API and metric definitions: [SQL-REFERENCE.md](SQL-REFERENCE.md). Public API: [API.md](API.md). Extension install guide for senders: [EXTENSION-UNPACKED-INSTALL.md](EXTENSION-UNPACKED-INSTALL.md). Billing and refund policy draft: [POLICIES.md](POLICIES.md).
+
+**Switching on billing, email, CRM sync, custom domains and the other product-plan features: go to [§9 Switch-on checklist](#9-switch-on-checklist-product-plan-phase-1-and-later).**
 
 ---
 
@@ -40,10 +42,21 @@ PRD: `linkedin-outreach-platform-PRD.md` (repo root). Frontend conventions: `doc
 | `005_patches.sql` | `outreach_consume_budget`, grant tightening, `outreach_lead_timeline`, `outreach_client_stats`, `outreach_sequence_summary` |
 | `006_rpc_hardening.sql` / `007_intent_override.sql` | membership checks on read RPCs (`outreach_effective_cap_checked`), `outreach_set_intent` |
 | `008_agent_mcp.sql` | MCP agent layer: `outreach_agent_confirmations` / `_previews` / `_drafts` / `_calls` (service-role only), `outreach_agent_gc`, and manager RPCs for in-flight edits `outreach_agent_node_queued_actions`, `outreach_agent_set_action_text`, `outreach_agent_reschedule_delay` |
+| `009_enums_v2.sql` | product plan: new enum values only (action types `post_fetch`, `follow`, `find_email`; import kinds; task kinds). **Must be applied before 010+, as its own call** (§9.5) |
+| `010_schema_v2.sql` | product plan: new columns and tables, RLS, realtime |
+| `011_engine_v2.sql` | reply stop everywhere, hold, out-of-office resume, version pinning, A/B variants, new node types, InMail guard, message attribution triggers |
+| `012_editing_recovery_enrol.sql` | draft / publish, queued edits, failed-lead recovery, rebalance, scoped blacklists, the enrol plan, auto-enrol rules |
+| `013_reports.sql` | the one definition of every metric, daily rollup, report functions, stall detection, `why_not_sending`, dashboard |
+| `014_intelligence.sql` | enrichment, render context, AI variables and review, AI routing queue, thread attribution, lead timeline |
+| `015_platform.sql` | API keys and dispatch, CRM plumbing, branding and portal domains, booking, email depth, lead sources, `outreach_resume_after_billing` |
+| `016_seed_cron_v2.sql` | ceilings and warm-up caps for the new action types, flag `portal_cname_target`, 9 new cron jobs (§9.3), report schedule defaults |
+| `017_hardening.sql` | grants and `search_path`: no outreach function is executable by `anon` except the three that work before login. Re-run after adding functions |
 
 Internal/ops/secret tables (`outreach_sender_secrets`, `outreach_sender_tokens`, `outreach_inbound_events`, `outreach_plans`, `outreach_flags`, `outreach_rate_limits`, …) sit in `public` with RLS **enabled and no policies**, so only the service role (edge functions, SQL editor) can touch them.
 
-### 1.3 Edge functions (29, all deployed with `--no-verify-jwt`)
+### 1.3 Edge functions (all deployed with `--no-verify-jwt`)
+The table lists the original 29. The 10 added by the product plan (`outreach-worker-enrich`, `outreach-ai-variables`, `outreach-crm-sync`, `outreach-crm-oauth`, `outreach-worker-reports`, `outreach-domain-check`, `outreach-booking-webhook`, `outreach-unsubscribe`, `outreach-workspace-secrets`, `outreach-api`) are in §9.5. The catalogue in `scripts/outreach-deploy-functions.sh` is the full list.
+
 | Function | Trigger | Auth (in code) | Purpose |
 |---|---|---|---|
 | `outreach-unipile-webhook` | Unipile → HTTP | header `unipile-auth` == `UNIPILE_WEBHOOK_SECRET` | persist raw event to `outreach_inbound_events`, ack |
@@ -53,7 +66,7 @@ Internal/ops/secret tables (`outreach_sender_secrets`, `outreach_sender_tokens`,
 | `outreach-process-inbound` | cron 10 s | `x-cron-secret` | dispatch inbound events (account status, messaging, new_relation, mail, tracking, hosted notify); dead-letter after 5 attempts |
 | `outreach-worker-tick` | cron 1 min | cron | `release_waits`, `claim_due_actions(200)`, execute via Unipile, `complete_action` / `fail_action`, fill pending AI drafts; skips when flag `tick_enabled=false` or lock held |
 | `outreach-worker-planner` | cron hourly (`nightly`, senders at local 00:xx) + every 20 min (`{"mode":"topup"}`) | cron | budgets + jittered action slots; skips when `planner_enabled=false` |
-| `outreach-worker-health` | cron hourly (senders at local 02:xx); `{sender_id}` or `{all:true}` on demand | cron | health score, pause `<50`, warmup level-up |
+| `outreach-worker-health` | cron hourly (senders at local 02:xx); `{sender_id}` or `{all:true}` on demand | cron | health score, pause `<50`, warmup level-up. Every run also calls `outreach_detect_stalls()` and emails new stall, running-dry and failed-import alerts; the nightly branch writes the daily `snapshot` sender event (connections count) |
 | `outreach-worker-reconnect` | cron 15 min | cron | cookie-mode reconnect (≤4 attempts, 1 h apart) then manual-reconnect emails; credentials-mode reminder emails |
 | `outreach-worker-imports` | cron 5 min | cron | advance `search_url` / `csv` / `relations` import jobs under `search_page` budget |
 | `outreach-worker-withdraw` | cron hourly | cron | once per sender-day (local 10:00–16:00) queue withdrawals for stale `pending_out` invites |
@@ -78,7 +91,7 @@ Internal/ops/secret tables (`outreach_sender_secrets`, `outreach_sender_tokens`,
 
 Shared modules (`supabase/functions/_shared/outreach/`): `supabase.ts` (client, CORS, `serve`, `requireUser`, `requireCron`, `rpc`, `rateLimit`, `flag`), `unipile.ts` (typed client), `errors.ts` (Unipile error → decision table), `execute.ts` (action execution), `planner.ts`, `health.ts`, `inbound.ts` (webhook handlers), `workers.ts` (reconnect / imports / withdraw / poll / webhooks / classify / billing), `drafts.ts`, `ai.ts` + `prompts.ts`, `notify.ts` (Resend), `crypto.ts` (AES-GCM cookies, HMAC), `render.ts` (templates).
 
-### 1.4 pg_cron jobs (`outreach-*`, from `004_seed_cron.sql`)
+### 1.4 pg_cron jobs (`outreach-*`, from `004_seed_cron.sql`; the 9 jobs added by `016_seed_cron_v2.sql` are in §9.3)
 | Job | Schedule | Runs |
 |---|---|---|
 | `outreach-tick` | `* * * * *` | `outreach_invoke('outreach-worker-tick')` |
@@ -117,8 +130,8 @@ openssl rand -hex 32      # UNIPILE_WEBHOOK_SECRET
 ```bash
 export CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_...
 export OUTREACH_CRON_SECRET=<the value generated above>
-./scripts/outreach-apply-migrations.sh                                   # 001 → 004
-./scripts/outreach-apply-migrations.sh migrations/outreach/005_patches.sql   # 005 is NOT in the default list
+./scripts/outreach-apply-migrations.sh                                   # 001 → 017, in order, one API call per file
+./scripts/outreach-smoke.sh                                              # SQL smoke tests; each must print PASS
 ```
 The script substitutes `__FUNCTIONS_BASE_URL__` (`https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/`) and `__CRON_SECRET__` into `004_seed_cron.sql`, which writes the flag `functions_base_url` and the Vault secret `outreach_cron_secret`, and (re)schedules every `outreach-*` cron job. Re-running is safe: all files are idempotent (`create or replace`, `on conflict`, unschedule-by-name first).
 
@@ -127,7 +140,7 @@ Verify:
 select jobname, schedule, active from cron.job where jobname like 'outreach-%' order by 1;
 select key, value from outreach_flags;
 select name from vault.secrets where name = 'outreach_cron_secret';
-select count(*) from outreach_platform_ceilings;   -- 13
+select count(*) from outreach_platform_ceilings;   -- 16 (13 from 004 + post_fetch, follow, find_email from 016)
 ```
 Ad-hoc SQL: `./scripts/outreach-sql.sh file.sql` (Management API `/database/query`).
 
@@ -142,7 +155,7 @@ cp .env.example .env.local     # git-ignored; skip if you already have one
 
 ### 2.3 Deploy functions
 ```bash
-./scripts/outreach-deploy-functions.sh                       # all 28
+./scripts/outreach-deploy-functions.sh                       # every function in the catalogue that exists in this checkout
 ./scripts/outreach-deploy-functions.sh worker-tick planner   # subset
 ```
 Everything is deployed `--no-verify-jwt` (see the comment block in the script for why). Smoke test:
@@ -177,13 +190,13 @@ Existing webhooks with the same source and URL are kept, so Register is idempote
 Plan effects: `active`/`trialing` → plan from prices, un-suspend senders paused for billing; `past_due`/`unpaid` → `past_due_since` set, suspended by `billing-sync` after 7 days (senders paused with `status_reason='billing_suspended'`); `canceled`/deleted → `plan='suspended'`. Trial workspaces (14 days, max 3 senders) are suspended by `billing-sync` when the trial ends without a subscription.
 
 ### 2.6 Resend
-Verify the sending domain in Resend, set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM` (e.g. `CapitalxAI Outreach <no-reply@capitalxai.com>`). Emails sent: reconnect needed (with hosted re-login link), automatic reconnect failed, sender paused, sender error, warmup level up, workspace invitation. Without a key the functions log `RESEND_API_KEY unset` and continue.
+Verify the sending domain in Resend, set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM` (e.g. `CapitalxAI Outreach <no-reply@capitalxai.com>`). Without a key the functions log `RESEND_API_KEY unset` and continue. The full list of emails (sender notices, invitation, stall and running-dry alerts, weekly sender report, digest, client reports) and how to verify each is in §9.2.
 
 ### 2.7 Gemini (AI)
 `GEMINI_API_KEY` + optional `OUTREACH_AI_MODEL` (default `gemini-3-flash-preview`, falling back to `GEMINI_MODEL_ID`). This is the same key and model family the rest of the app uses (`utils/azureOpenAiHelper.ts`), called over the REST `generateContent` endpoint: system instruction separated, `thinkingLevel: MEDIUM` + `responseMimeType: application/json` for the JSON tasks, thought parts skipped, markdown fences stripped. Every call is recorded in `outreach_ai_calls` (hashes + token counts) and audited. Without a key: replies are stored as `unclear` (confidence 0), sequence QA returns static checks only (`ai_available:false`), AI drafts cannot be generated.
 
 ### 2.8 Chrome extension
-Ship `extension/` unpacked during beta (see `extension/README.md`). Pairing token: Sender detail → Extension tab → *Generate pairing token* (RPC `outreach_issue_sender_token`, manager+, shown once).
+Ship `extension/` unpacked (developer notes: `extension/README.md`). Zip the folder and send it to the account holder together with [EXTENSION-UNPACKED-INSTALL.md](EXTENSION-UNPACKED-INSTALL.md), which is written for a non-technical reader and covers install, pairing, updating, removal and what the extension reads. The extension is optional: the hosted re-login link is a complete fallback. Pairing token: Sender detail → Extension tab → *Generate pairing token* (RPC `outreach_issue_sender_token`, manager+, shown once).
 
 ### 2.9 First workspace
 Sign in, open `/outreach` — the workspace is created on first visit (`outreach_ensure_workspace`), with default stages. Connect a LinkedIn sender (Senders → Connect → hosted auth), wait for status `ok`, set schedule/timezone, then build a sequence.
@@ -351,9 +364,8 @@ Outbound webhooks: `select * from outreach_outbound_webhook_deliveries where del
 ```sql
 update outreach_workspaces set plan='suspended' where id=…;          -- RLS/RPCs become read-only, senders keep status
 update outreach_senders set status='paused', status_reason='billing_suspended' where workspace_id=… and status='ok';
--- restore
-update outreach_workspaces set plan='team', past_due_since=null where id=…;
-update outreach_senders set status='ok', status_reason=null where workspace_id=… and status='paused' and status_reason in ('billing_suspended','trial_expired');
+-- restore: one call does both updates, restores the plan the workspace had (settings.plan_before_suspension, else 'team'), audits and emits workspace.billing_recovered
+select outreach_resume_after_billing('<workspace id>');
 ```
 
 ---
@@ -434,7 +446,7 @@ Function logs: Supabase dashboard → Edge Functions → `<function>` → Logs. 
 | 2 | Planner + tick + ledger | Enrol a lead; `plan_now` → rows in `outreach_actions` (jittered, never at :00/:30 exactly, `profile_view` prefetch 5–40 min before sends); next tick executes; `outreach_sender_budgets.used` increments; `used + reserved <= cap` always holds (check constraint) |
 | 3 | visit / like / invite / message / withdraw / delay | one sequence with each node; check `outreach_actions.status='sent'`, `response`, `outreach_lead_sender_state.relation` (`pending_out` after invite), delay → `waiting_delay` then released by `outreach_release_waits` |
 | 4 | `wait_connection` with both acceptance signals | (a) note path: our own first message in a new chat while `pending_out` → `relation='first'` (`is_invite_note`); (b) `users.new_relation` webhook → `first`. Trigger `outreach_lss_relation` advances the `connected` branch with a 2 h not-before |
-| 5 | Reply → exit | inbound `message_received` → `replied=true` → trigger `outreach_lss_reply_exit` sets enrollment `exited_replied`, cancels queued actions (`decision='reply_exit'`), `outreach_node_stats.replied++`; `send_always` nodes are exempt |
+| 5 | Reply → exit | inbound `message_received` → `replied=true` → trigger `outreach_lss_reply_exit` exits **every** live enrollment of that lead in the workspace (scope `lead`, the default) and cancels the lead's queued actions on all senders (`decision='reply_exit'`); `send_always` nodes are exempt; an out-of-office intent re-opens it. Covered by `migrations/outreach/tests/smoke_01_reply_stop.sql` |
 | 6 | Inbox with Realtime, reply, attachments | chat appears without refresh (publication includes `outreach_messages`/`outreach_chats`); `send-reply` creates a `reply` action + message, clears unread; attachment URL via `attachment-proxy` |
 | 7 | Import by search URL and CSV | `imports-create` `dry_run` shows estimate; job advances every 5 min within schedule, consuming `search_page` budget; CSV job completes in one pass; leads deduped by `public_identifier` / email |
 | 8 | Builder with versions, projection, node stats | `save_sequence` bumps `head_version` and writes `outreach_sequence_versions`; `restore_sequence_version`; `project_sequence` returns days/bottleneck; `outreach_node_stats` updated by the actions trigger |
@@ -445,3 +457,284 @@ Function logs: Supabase dashboard → Edge Functions → `<function>` → Logs. 
 | 13 | Stripe | checkout from Settings → Billing; webhook `customer.subscription.updated` sets `plan`; `billing-sync` writes `outreach_billing_usage` and updates item quantities |
 | 14 | Chaos: kill tick mid-batch | stop the function (or set `tick_enabled=false` mid-run); reserved rows return to `queued` via the sender-status trigger or `outreach_sweep_stale_reservations` within 10 min; budgets released |
 | 15 | Zero double-sends | `select idempotency_key, count(*) from outreach_actions group by 1 having count(*)>1;` is empty; no two `sent` actions for the same `(enrollment_id, node_id)` unless `attempt` differs |
+
+---
+
+## 9. Switch-on checklist (product plan, Phase 1 and later)
+
+Added 20 Sep 2026. It mirrors the "Phase 1 switch-on checklist" in `outreach-product-plan.md` and adds the operator steps for features that need something outside this repo. **Built is not the same as on.** Until a row below is done, do not tell customers the feature is live.
+
+| # | Item | State on 20 Sep 2026 | What switches it on |
+|---|---|---|---|
+| 9.1 | Stripe billing | Built, off | Keys, prices with lookup keys, webhook endpoint, then the recovered-payment test |
+| 9.2 | Resend email | Built, off | Verified domain, `RESEND_API_KEY`, `OUTREACH_EMAIL_FROM` |
+| 9.3 | New cron jobs, weekly sender report | In `016_seed_cron_v2.sql` | Apply 016, deploy the functions the jobs call |
+| 9.4 | CRM sync (optional) | Needs one OAuth app per CRM | Client id and secret per CRM, redirect URL registered |
+| 9.5 | Database and functions | Migrations 009–017 are applied to the live project | Re-apply after changes, deploy new functions, run the smoke tests |
+| 9.6 | Booking webhook | Built | The customer pastes a URL into Calendly or Cal.com |
+| 9.7 | Custom portal domains | Built | Customer DNS, flag `portal_cname_target`, add the domain at the hosting provider |
+| 9.8 | Custom tracking domains | Built, **manual approval per domain** | Customer CNAME, Unipile support authorises it, you set the row to `active` |
+| 9.9 | `ai_auto_send`, post-fetch budget | Done in the database | Nothing. Verify with the queries below |
+
+### 9.1 Stripe
+
+While `STRIPE_SECRET_KEY` is unset, billing enforcement is off: usage is recorded, nothing is charged and nothing is suspended (trial sender cap, trial expiry and past-due suspension all skip).
+
+1. **Keys.** In Stripe: Developers → API keys. Put the secret key in `.env.local` as `STRIPE_SECRET_KEY`.
+2. **Products and prices.** Create recurring **per-seat** prices: team sender, agency sender, agency-plus sender, and the mailbox add-on. Give each price a **lookup key** containing `team`, `agency`, `agency_plus` or `mailbox`. `planFromSub()` maps a subscription to a plan by lookup key or nickname, or by equality with a `STRIPE_PRICE_*` value; `outreach-billing-sync` finds the mailbox item by `/mailbox/i`. Put the price ids in `STRIPE_PRICE_TEAM_SENDER`, `STRIPE_PRICE_AGENCY_SENDER`, `STRIPE_PRICE_AGENCY_PLUS_SENDER`, `STRIPE_PRICE_MAILBOX_ADDON`. The amounts are a business decision and are not in this repo (see [POLICIES.md](POLICIES.md)).
+3. **Webhook endpoint.** Add `https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/outreach-stripe-webhook` with the events `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`. Copy the signing secret to `STRIPE_WEBHOOK_SECRET`.
+4. **Customer portal.** In Stripe: Settings → Billing → Customer portal. Allow cancelling and changing quantity or plan. The app's "Manage billing" button opens it.
+5. **Failed-payment emails.** Turn on Stripe's own emails for failed payments and upcoming renewals (Settings → Billing → Subscriptions and emails). This repo does not send them.
+6. Run `./scripts/outreach-set-secrets.sh`, then check **Settings → Workspace → Platform setup** shows `stripe` and `stripe_webhook` as present.
+7. **Confirm the trial cap and the nightly quantity sync**, in Stripe test mode:
+   * A trial workspace cannot connect a fourth sender (`outreach-sender-connect` refuses).
+   * Subscribe with 2 active senders, connect a third, then run `select outreach_invoke('outreach-billing-sync');`. The subscription item quantity becomes 3 (`proration_behavior: none`), and `outreach_billing_usage` has today's row.
+8. **Test that senders resume on their own after a recovered payment.** This is the claim we make against GetSales, so test it, do not assume it.
+   1. In test mode, subscribe a workspace that has at least one sender with status `ok`.
+   2. Make the payment fail: replace the customer's card with the test card `4000 0000 0000 0341`, then advance a Stripe test clock past the renewal. `invoice.payment_failed` arrives and `outreach_workspaces.past_due_since` is set.
+   3. Suspension happens 7 days after `past_due_since`, in `outreach-billing-sync`. To avoid waiting: `update outreach_workspaces set past_due_since = now() - interval '8 days' where id = '<ws>';` then `select outreach_invoke('outreach-billing-sync');`.
+   4. Check: `plan = 'suspended'`, `settings->>'plan_before_suspension'` holds the old plan, and the senders are `paused` with `status_reason = 'billing_suspended'`.
+   5. Recover the payment: set a working test card (`4242 4242 4242 4242`) and pay the open invoice in the Stripe dashboard. `invoice.paid` (or `customer.subscription.updated` with status `active`) arrives.
+   6. **Pass** = without touching anything in the app:
+      ```sql
+      select plan, past_due_since, settings->>'plan_before_suspension' from outreach_workspaces where id = '<ws>';   -- old plan back, past_due_since null
+      select display_name, status, status_reason from outreach_senders where workspace_id = '<ws>';                   -- ok, null
+      select at, diff from outreach_audit_log where workspace_id = '<ws>' and action = 'workspace.billing_recovered' order by at desc limit 1;   -- senders_resumed = n
+      ```
+      The webhook calls `outreach_resume_after_billing(p_ws)`, which restores the plan, sets every sender paused for `billing_suspended` or `trial_expired` back to `ok`, audits, and emits the `workspace.billing_recovered` event. Senders a person paused (`user_paused`) stay paused, on purpose.
+   7. Within one planner top-up (20 minutes) the senders have new queued actions. Sequences were never paused, so there is nothing to restart.
+   8. If it fails, by hand: `select outreach_resume_after_billing('<ws>');` from the SQL editor, and read the `outreach-stripe-webhook` logs for `resume_after_billing failed`.
+
+### 9.2 Resend
+
+Without `RESEND_API_KEY` every email is skipped and logged (`RESEND_API_KEY unset`); alerts still show in the app and fire webhooks.
+
+1. In Resend, add and verify the sending **domain** (SPF and DKIM records at the DNS host).
+2. Set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM`, for example `CapitalxAI Outreach <no-reply@capitalxai.com>`. The domain in `OUTREACH_EMAIL_FROM` must be the verified one. Run the secrets script.
+3. White-label workspaces can set their own sender in **Settings → White-label** (`branding.email_from_address`). It is used only when **that** domain is also verified in the same Resend account. Otherwise the platform address is used with the agency's name and reply-to. Verifying a customer's domain is an operator task.
+4. Check **Platform setup** shows `resend` as present.
+
+Emails that exist:
+
+| Email | Sent when | To | Code |
+|---|---|---|---|
+| Reconnect needed, with the hosted re-login link | a sender's LinkedIn session ends (credentials mode), then daily reminders, at most 3 | owners, managers, the sender's owner email, the sender's alert recipients | `notifySender('reconnect_needed')` |
+| Automatic reconnect failed | cookie-mode reconnect gave up after 4 tries, then daily, at most 4 | same | `reconnect_needed_manual` |
+| Sender paused / sender error / warm-up level up | safety pause, provider error, level change | same | `sender_paused`, `sender_error`, `level_up` |
+| Workspace invitation | an owner invites a member | the invitee; branded | `notifyInvitation` (`outreach-invite-member`) |
+| Sequence stalled | `outreach_detect_stalls` opens an alert | owners, managers | `notifyWorkspace('sequence_stalled')` from `outreach-worker-health` |
+| Sender running dry | fewer than 2 days of new leads left | owners, managers, that sender's alert recipients | `sender_running_dry` |
+| Import failed | an import job failed in the last 2 days | owners, managers | `import_failed` |
+| Weekly sender report | Mondays 08:00 workspace time | owners, managers, each sender's alert recipients | `outreach-worker-reports`, schedule kind `sender_report` |
+| Workspace digest | weekly (Monday) or monthly (the 1st), 08:00 workspace time | owners, managers, plus the schedule's recipients | schedule kind `digest` |
+| Client report, branded | weekly or monthly per client | the schedule's recipients, optionally the client's viewers. Never shows the platform name when `hide_platform_name` is on | schedule kind `client_report` |
+
+Each alert is emailed once per occurrence (`outreach_alerts.notified_at`). An alert whose email could not be sent is retried hourly for one day. **While Resend is off, alerts are marked as announced without an email**, so alerts that opened before you switched Resend on are not emailed afterwards; they stay visible on the dashboard until they resolve. Per-sender alert recipients are `outreach_senders.alert_emails` (sender page → Settings → "Alerts, booking and cost", at most 10).
+
+Verify after switching on, as the plan's checklist asks:
+
+* **Invite:** invite a test address from Settings → Members.
+* **Reconnect link:** on a test sender click **Send re-login link**; the email arrives with a working link.
+* **Disconnect:** `update outreach_senders set status = 'credentials' where id = '<test sender>';` then wait one `outreach-reconnect` run (15 minutes). Reconnect the sender afterwards.
+* **Stall alert:** pause every sender in a test sequence's pool and wait for the next `outreach-health` run. One email arrives with the reason. Resume the senders and the alert clears.
+* **Reports:** `curl -s -X POST "$BASE/outreach-worker-reports" -H "x-cron-secret: $OUTREACH_CRON_SECRET" -H 'content-type: application/json' -d '{"schedule_id":"<id>","dry_run":true}'` returns the HTML and sends nothing. Use `"force":true` to send now.
+
+### 9.3 New cron jobs (`016_seed_cron_v2.sql`)
+
+016 does not touch the jobs from 004 and 008. It unschedules its own jobs by name first, so re-applying is safe.
+
+| Job | Schedule | Runs | Needs |
+|---|---|---|---|
+| `outreach-rollup` | `25 * * * *` | `select outreach_rollup_all()` (SQL only). Hourly because each workspace's "yesterday" closes at its own midnight | nothing |
+| `outreach-auto-enroll` | `*/10 * * * *` | `select outreach_run_auto_enroll()` (SQL only) | nothing |
+| `outreach-import-schedules` | `*/15 * * * *` | `select outreach_run_import_schedules()` (SQL only). The jobs it creates are run by the existing `outreach-worker-imports` | nothing |
+| `outreach-enrich` | `*/10 * * * *` | edge function `outreach-worker-enrich` | function deployed |
+| `outreach-ai-variables` | `* * * * *` | edge function `outreach-ai-variables`: AI lines and AI routing decisions | function deployed; an AI key (platform Gemini key, or the workspace's own) |
+| `outreach-crm-sync` | `*/5 * * * *` | edge function `outreach-crm-sync` | function deployed; does nothing for workspaces without an active integration |
+| `outreach-reports` | `0 * * * *` | edge function `outreach-worker-reports`. Sends at 08:00–08:59 workspace time, and catches up in the next two hourly runs | function deployed; Resend |
+| `outreach-domain-check` | `*/30 * * * *` | edge function `outreach-domain-check` | function deployed |
+| `outreach-cleanup-v2` | `30 4 * * *` | deletes API idempotency rows older than 2 days, integration events older than 14 days, CRM sync log, auto-enrol log and resolved alerts older than 90 days | nothing |
+
+The **weekly sender report** is now scheduled: 016 inserts a weekly `sender_report` and a weekly `digest` row in `outreach_report_schedules` for every workspace, and a trigger does the same for new workspaces. Owners and managers can switch them off on the Reports page. Stall and running-dry detection needs no new job: it runs inside the existing `outreach-health` job.
+
+A cron job whose edge function is not deployed yet fails quietly: `outreach_invoke` returns a pg_net request id and the 404 lands in `net._http_response`. Check after deploying:
+
+```sql
+select jobname, schedule, active from cron.job where jobname like 'outreach-%' order by 1;        -- 24 jobs: 15 from 004/008 + 9 from 016
+select id, status_code, left(content, 120) from net._http_response order by id desc limit 30;     -- no 404s
+select key, value from outreach_flags where key = 'portal_cname_target';
+select * from outreach_platform_ceilings where action_type in ('post_fetch','follow','find_email');
+```
+
+### 9.4 New secrets
+
+All optional. A feature whose secret is missing stays off without errors. `scripts/outreach-set-secrets.sh` pushes keys with the prefixes `UNIPILE_`, `OUTREACH_`, `STRIPE_`, `SMARTLEAD_`, `CRM_`, `HUBSPOT_`, `PIPEDRIVE_`, `SALESFORCE_`, plus `RESEND_API_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL_ID`, `EMAIL_FROM`, `TEMP_MAX_AGE_HOURS`.
+
+**CRM OAuth apps (item 22).** One app per CRM you want to offer. Create it in the CRM's developer portal, and register this redirect URL:
+
+```
+<functions base>/outreach-crm-oauth/callback
+for this project: https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/outreach-crm-oauth/callback
+```
+
+| CRM | Secrets | Where to create the app | Scopes the app must allow (from the provider file) |
+|---|---|---|---|
+| HubSpot | `HUBSPOT_CLIENT_ID`, `HUBSPOT_CLIENT_SECRET` | HubSpot developer account → Apps | `HUBSPOT_SCOPES` in `supabase/functions/_shared/outreach/crm/hubspot.ts`: `oauth`, contacts, companies and deals read + write, `crm.lists.read`, `crm.schemas.contacts.write` |
+| Pipedrive | `PIPEDRIVE_CLIENT_ID`, `PIPEDRIVE_CLIENT_SECRET` | Pipedrive Developer Hub | `PIPEDRIVE_SCOPES` in `crm/pipedrive.ts`: `base`, `contacts:full`, `deals:full`, `search:read`; `admin` is optional |
+| Salesforce | `SALESFORCE_CLIENT_ID`, `SALESFORCE_CLIENT_SECRET` | Setup → App Manager → Connected App | `SALESFORCE_SCOPES` in `crm/salesforce.ts`: `api`, `refresh_token` |
+
+Optional overrides: `SALESFORCE_LOGIN_URL` (`https://test.salesforce.com` for sandboxes), `SALESFORCE_API_VERSION`, `HUBSPOT_TOKEN_URL`. The scope lists above are a summary; the constants in the provider files are the source of truth.
+
+* A CRM whose pair is missing shows as not available in **Settings → Integrations**, with the message "The operator has to set …".
+* The redirect URL is built from `OUTREACH_FUNCTIONS_BASE_URL` (default `<SUPABASE_URL>/functions/v1/`). If you change the functions base, update the redirect URL in every CRM app.
+* After the CRM sends the user back, the function redirects to the page the user started from. That page must be on `OUTREACH_WEB_ORIGIN`; anything else falls back to `/outreach/settings/integrations` on that origin.
+* Customer tokens are stored encrypted with `OUTREACH_COOKIE_KEY` in `outreach_integration_secrets` (service role only).
+* **Do not describe CRM sync as live** until at least one CRM has been connected end to end on a test account and `outreach_crm_sync_log` shows `ok` rows. On 20 Sep 2026 no CRM app existed and none of the three providers had been run against a real account.
+
+**Unsubscribe page.** `outreach-unsubscribe` answers `GET` with a small confirmation page and only unsubscribes on `POST` (mail scanners open every link, so a GET must not unsubscribe). On the default `*.supabase.co` domain Supabase serves HTML from edge functions as plain text, so the page would show as source code. Do one of these before the first email with `{{unsubscribe_link}}` goes out: serve functions from a custom domain and set `OUTREACH_FUNCTIONS_BASE_URL` to it, or set `OUTREACH_UNSUBSCRIBE_PAGE_URL` to a page in the web app that shows the button and POSTs to the function. The mailbox provider's one-click request (`List-Unsubscribe-Post`) is a POST and works either way.
+
+**No new secret is needed for:** bring-your-own LLM keys and email-finder keys (customers enter them in Settings → AI & data; they are encrypted with `OUTREACH_COOKIE_KEY` and stored in `outreach_workspace_secrets`), the unsubscribe link (signed with `OUTREACH_CRON_SECRET`), the booking webhook (a per-workspace path secret in the database), and the public API (keys live in `outreach_api_keys`).
+
+**Rotating `OUTREACH_CRON_SECRET` now has a side effect:** unsubscribe links in emails already sent stop verifying. Rotating `OUTREACH_COOKIE_KEY` also invalidates stored CRM tokens and customers' own AI keys, in addition to LinkedIn cookies (§6.5). Customers then reconnect the CRM and re-enter the key.
+
+### 9.5 Apply migrations 009–017 and deploy the new functions
+
+The migrations were applied to the live project on 20 Sep 2026. For a new project, or after a change:
+
+```bash
+export CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_...
+export OUTREACH_CRON_SECRET=<same value as the edge function secret>
+./scripts/outreach-apply-migrations.sh          # 001 → 017, one API call per file
+# or only the product-plan files, in this order:
+./scripts/outreach-apply-migrations.sh migrations/outreach/009_enums_v2.sql
+./scripts/outreach-apply-migrations.sh migrations/outreach/010_schema_v2.sql migrations/outreach/011_engine_v2.sql \
+  migrations/outreach/012_editing_recovery_enrol.sql migrations/outreach/013_reports.sql migrations/outreach/014_intelligence.sql \
+  migrations/outreach/015_platform.sql migrations/outreach/016_seed_cron_v2.sql migrations/outreach/017_hardening.sql
+./scripts/outreach-smoke.sh                     # every smoke test must print PASS
+```
+
+* **009 first, on its own.** It only adds enum values. PostgreSQL cannot use a new enum value in the transaction that added it, and the Management API runs one file as one transaction. The script sends one request per file, so order is all that matters. Never paste 009 and 010 into the SQL editor as one statement batch.
+* Every file is idempotent. Re-run `017_hardening.sql` whenever functions were added: it removes `anon` and `PUBLIC` execute rights from every outreach function except the three that must work before login.
+* What each file contains, what the smoke tests assert and how to read their output: [SQL-REFERENCE.md](SQL-REFERENCE.md).
+
+Deploy:
+
+```bash
+./scripts/outreach-deploy-functions.sh          # everything in the catalogue that exists in this checkout
+./scripts/outreach-deploy-functions.sh worker-enrich ai-variables worker-reports domain-check booking-webhook unsubscribe \
+  workspace-secrets crm-oauth crm-sync api      # only the new ones
+```
+
+With no arguments the script skips catalogue entries whose folder is missing and prints `WARN: … does not exist yet (skipped)`. Read those warnings: a skipped function that a cron job calls means that feature is off. If Docker is not running, set `OUTREACH_DEPLOY_EXTRA_ARGS="--use-api"`.
+
+**Redeploy the existing functions as well, not only the new ones.** The shared modules in `_shared/outreach/` changed in this build (executor, planner, render, notify, workers, inbound), and an edge function only picks up a shared module when it is deployed again. Until `outreach-worker-tick` is redeployed the executor still reads `lss.replied` instead of `outreach_enrollment_reply_blocked`, and does not check scoped blacklists at send time.
+
+New functions and who may call them:
+
+| Function | Trigger | Auth in code |
+|---|---|---|
+| `outreach-worker-enrich` | cron, 10 min | cron secret |
+| `outreach-ai-variables` | cron, 1 min; also the web app for "test on 20 leads" | cron secret or user JWT |
+| `outreach-crm-sync` | cron, 5 min | cron secret |
+| `outreach-worker-reports` | cron, hourly | cron secret |
+| `outreach-domain-check` | cron, 30 min | cron secret |
+| `outreach-booking-webhook` | Calendly / Cal.com | `ws` + `k` in the URL, compared in constant time |
+| `outreach-unsubscribe` | the link in an email | signed token (HMAC with `OUTREACH_CRON_SECRET`) |
+| `outreach-crm-oauth` | web app (start), the CRM (callback) | user JWT for the start call; `state` for the callback |
+| `outreach-workspace-secrets` | web app | user JWT |
+| `outreach-api` | customers' systems, `/v1` | API key, `outreach_api_authenticate`. Docs: [API.md](API.md), spec [openapi.json](openapi.json) |
+
+### 9.6 Booking webhook URL
+
+We do not run a calendar. The customer keeps Calendly or Cal.com and adds one webhook:
+
+```
+<functions base>/outreach-booking-webhook?ws=<workspace id>&k=<booking secret>&p=calendly
+<functions base>/outreach-booking-webhook?ws=<workspace id>&k=<booking secret>&p=calcom
+```
+
+* `<booking secret>` is `outreach_workspace_secrets.booking_secret`, one per workspace. Only owners can read it: `outreach_workspace_ai_settings(p_ws)` returns it as `booking_webhook_secret` to owners and to nobody else, and **Settings → Email & booking** builds the full URL from it. `p` can be left out: the payload shape identifies the provider.
+* The secret lives in a row that is created the first time the workspace saves anything in `outreach_workspace_secrets`. If an owner sees no URL, check the row exists: `insert into outreach_workspace_secrets(workspace_id) values ('<ws>') on conflict do nothing;`
+* Calendly events: `invitee.created`, `invitee.canceled`. Cal.com triggers: `BOOKING_CREATED`, `BOOKING_RESCHEDULED`, `BOOKING_CANCELLED`.
+* **How the lead is found:** links rendered by the platform (`{{booking_link}}`, `{{sender.booking_link}}`) end in `utm_content=<lead id>`. Calendly returns it in `payload.tracking.utm_content`. Cal.com does not echo UTM parameters. The inbox "Send booking link" button (`outreach-send-reply`, code in `_shared/outreach/reply.ts`) therefore also appends `metadata[lead_id]=<lead id>` to cal.com links, which Cal.com returns in `payload.metadata.lead_id`. Links rendered inside sequence steps get `utm_content` only (`buildContext` in `render.ts`), so a Cal.com booking from a sequence message is matched by the invitee's email. A hidden booking question with the identifier `lead_id` also works. A booking that matches no lead is still stored, with `lead_id` null, and logged as `unmatched`.
+* A matched booking moves the lead to the Meeting stage, records the milestone, ends every live sequence for that lead (`meeting_booked`) and emits `meeting.booked`.
+* To rotate a leaked secret: `update outreach_workspace_secrets set booking_secret = encode(gen_random_bytes(18),'hex') where workspace_id = '<ws>';` and have the customer paste the new URL.
+* A sender's link is set on the sender page (Settings → "Alerts, booking and cost") and must start with `https://`.
+
+### 9.7 Custom portal domains (white-label)
+
+The customer wants clients to open `reports.agency.com` instead of our app's address.
+
+1. **Once per platform: set the CNAME target.** `outreach_add_domain` copies the flag `portal_cname_target` into every new domain row. 016 seeds it with `cname.vercel-dns.com`. If the web app is hosted elsewhere, change it **before** customers add domains:
+   ```sql
+   update outreach_flags set value = to_jsonb('<your host''s cname target>'::text) where key = 'portal_cname_target';
+   ```
+   Rows that already exist keep the target they were created with.
+2. **The customer (workspace owner)** adds the hostname in **Settings → White-label**. The app shows two DNS records:
+
+   | Type | Name | Value |
+   |---|---|---|
+   | CNAME | `reports.agency.com` | the `portal_cname_target` value |
+   | TXT | `_outreach-verify.reports.agency.com` | the row's `verification_token` |
+
+3. **`outreach-domain-check`** (every 30 minutes) resolves both over DNS-over-HTTPS. TXT only → `verifying`. Both → `active` with `verified_at`. After 14 days without success → `failed`; remove the domain and add it again to retry. `last_error` holds the reason in plain words.
+4. **You, the operator, add the hostname at the hosting provider** (Vercel: Project → Settings → Domains → Add). This is what issues the TLS certificate. `active` in our table only means the customer's DNS is right. Until the host has the domain, the browser shows a certificate error. There is no API call for this in the repo: it is a manual step per domain, so agree with the owner who gets told when a customer adds one.
+   ```sql
+   select hostname, status, verified_at, last_error from outreach_workspace_domains order by created_at desc;
+   ```
+5. **Web app side.** `proxy.ts` (Next.js 16's name for `middleware.ts`) runs only for `/` and `/outreach/*`. For a host that is not one of the app's own, it calls `outreach_branding_for_host` (callable before login, resolves only `active` rows), sets the `x-outreach-host`, `x-outreach-workspace` and `x-outreach-client` request headers, and rewrites `/` to the client portal. An unknown host, or a failed lookup, passes through unchanged. Set these in the hosting project's environment so the app knows its own hosts:
+
+   | Variable | Value |
+   |---|---|
+   | `NEXT_PUBLIC_APP_URL` | the app's main URL, for example `https://app.capitalxai.com` |
+   | `OUTREACH_APP_HOSTS` | optional, comma-separated extra hosts that are **ours**, not a customer's (a second production domain, a staging host). Vercel preview hosts and localhost are recognised without it |
+
+6. A browser session belongs to one origin, so a client signs in once on the custom domain. Password sign-in needs nothing more. If clients use a magic link or a social login, add `https://<hostname>/**` to Supabase → Authentication → URL Configuration → Redirect URLs, or the link sends them back to the main app.
+7. Limit: 10 domains per workspace.
+
+### 9.8 Custom tracking domains (email opens and clicks)
+
+**This is not self-serve, and it cannot be.** Unipile authorises each domain by hand. Their documentation states no limit on the number of domains and no turnaround time. **Ask Unipile for limits and turnaround before promising customers a date.** `outreach_add_tracking_domain` only accepts workspaces on the `agency` or `agency_plus` plan, or with branding set.
+
+1. **The customer** adds the hostname in **Settings → Email & booking** (or per mailbox on the sender page) and creates one DNS record:
+
+   | Type | Name | Value |
+   |---|---|---|
+   | CNAME | `link.agency.com` | `s1.lnk-fllw.com` |
+
+   The row starts as `pending_dns`.
+2. **`outreach-domain-check`** sees the CNAME resolve and moves the row to `awaiting_approval`. It never sets `active`. If the CNAME disappears while waiting, the row goes back to `pending_dns`.
+3. **You ask Unipile support to authorise the domain** for our account. Find the waiting rows:
+   ```sql
+   select d.hostname, w.name as workspace, s.display_name as mailbox, d.checked_at
+     from outreach_tracking_domains d
+     join outreach_workspaces w on w.id = d.workspace_id
+     left join outreach_senders s on s.id = d.sender_id
+    where d.status = 'awaiting_approval' order by d.created_at;
+   ```
+4. **When Unipile confirms, set the row to `active`:**
+   ```sql
+   update outreach_tracking_domains
+      set status = 'active', approved_at = now(), note = 'Authorised by Unipile support on 2026-09-20'
+    where hostname = 'link.agency.com' and status = 'awaiting_approval';
+   ```
+   If Unipile refuses: `update outreach_tracking_domains set status = 'failed', note = '<their reason>' where hostname = 'link.agency.com';`
+5. From the next send, `outreach_tracking_domain_for(sender)` returns the hostname and the executor passes it as `tracking_options.custom_domain`. A mailbox's own domain wins over the workspace default. **Until the row is `active`, the default tracking domain is used**, so sending never waits for this.
+6. Send one test email from that mailbox, check that a link in it points at the customer's hostname, and click it to confirm the redirect works. If it does not, set the row back to `awaiting_approval` and ask Unipile.
+
+Unsubscribe and booking links carry `data-disable-tracking`, so they are never rewritten, with or without a custom domain.
+
+### 9.9 The two small checklist items
+
+```sql
+-- `ai_auto_send` is gone from every workspace and from the column default (015)
+select count(*) from outreach_workspaces where settings ? 'ai_auto_send';            -- 0
+-- every read of a lead's posts has a budget row (009 + 016)
+select level, per_day from outreach_warmup_caps where action_type = 'post_fetch' order by level;   -- 5,10,15,20,30,30
+select per_day from outreach_platform_ceilings where action_type = 'post_fetch';                   -- 100
+-- ...and the deployed code actually spends it
+select s.display_name, b.day, b.used, b.cap from outreach_sender_budgets b join outreach_senders s on s.id = b.sender_id
+ where b.action_type = 'post_fetch' and b.day >= current_date - 1 and b.used > 0;
+```
+
+The database side is done, and the code in the repo reserves `post_fetch` before every call to Unipile's posts endpoint (`execute.ts` for like and comment steps, `enrich.ts` for enrichment and for AI drafts). The claim "every LinkedIn call is budgeted" becomes true for the running system when `outreach-worker-tick`, `outreach-ai-draft` and `outreach-worker-enrich` are redeployed. The last query proves it: it returns rows after like steps, comment steps or AI drafts have run. No rows while those steps are running means the deployed code is still the old one.

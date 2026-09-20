@@ -3,10 +3,13 @@
 import Link from 'next/link';
 import type { Client, Lead, List, Stage, Tag } from '@/lib/outreach/types';
 import { Avatar, Badge, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
-import { Briefcase, Mail, ShieldOff } from 'lucide-react';
+import { Briefcase, Mail, MessageSquare, ShieldOff, Sparkles } from 'lucide-react';
+import { profileOf, type LeadIntelFields, type LeadProfileSummary } from '@/lib/outreach/intel';
 import { chipStyle, leadName } from './helpers';
 
-export type LeadRow = Lead & { outreach_lead_tags: { tag_id: string }[] };
+export type LeadRow = Lead & LeadIntelFields & { outreach_lead_tags: { tag_id: string }[]; outreach_lead_profiles?: LeadProfileSummary | LeadProfileSummary[] | null };
+
+function compact(n: number): string { return n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n); }
 
 export function TagChip({ tag, size = 'xs' }: { tag: Tag; size?: 'xs' | 'sm' }) {
   return <span className={size === 'xs' ? 'inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-medium border' : 'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border'} style={chipStyle(tag.color)}>{tag.name}</span>;
@@ -51,6 +54,7 @@ export function LeadsTable({ rows, selected, onToggle, onToggleAll, clients, lis
           <Th className="hidden xl:table-cell">Location</Th>
           <Th>Emails</Th>
           <Th className="hidden md:table-cell">Tags</Th>
+          <Th className="hidden lg:table-cell">Signals</Th>
           <Th>Stage</Th>
           <Th className="hidden lg:table-cell">List</Th>
           {clients && clients.length > 0 && <Th className="hidden xl:table-cell">Client</Th>}
@@ -65,6 +69,7 @@ export function LeadsTable({ rows, selected, onToggle, onToggleAll, clients, lis
           const client = l.client_id ? clientMap.get(l.client_id) : undefined;
           const leadTags = (l.outreach_lead_tags ?? []).map((t) => tagMap.get(t.tag_id)).filter((t): t is Tag => !!t);
           const isSel = selected.has(l.id);
+          const prof = profileOf(l);
           return (
             <tr key={l.id} className={isSel ? 'bg-indigo-50/40' : 'hover:bg-gray-50'}>
               {selectable && (
@@ -91,6 +96,15 @@ export function LeadsTable({ rows, selected, onToggle, onToggleAll, clients, lis
                   {leadTags.slice(0, 3).map((t) => <TagChip key={t.id} tag={t} />)}
                   {leadTags.length > 3 && <span className="text-[11px] text-gray-500" title={leadTags.slice(3).map((t) => t.name).join(', ')}>+{leadTags.length - 3}</span>}
                   {leadTags.length === 0 && <span className="text-gray-300">—</span>}
+                </span>
+              </Td>
+              <Td className="hidden lg:table-cell">
+                <span className="flex flex-wrap items-center gap-1 max-w-[200px]">
+                  {l.last_replied_at && <Badge tone="purple"><span title={`Last replied ${fmtDate(l.last_replied_at)}${l.last_replied_channel ? ` on ${l.last_replied_channel}` : ''}`} className="inline-flex items-center"><MessageSquare className="w-3 h-3 mr-1" />Replied</span></Badge>}
+                  {l.enrich_status === 'done' || l.enriched_at ? <Badge tone="green"><span title={l.enriched_at ? `Enriched ${fmtDate(l.enriched_at)}` : 'Enriched'} className="inline-flex items-center"><Sparkles className="w-3 h-3 mr-1" />Enriched</span></Badge>
+                    : l.enrich_status === 'waiting' ? <Badge tone="blue">Enrichment waiting</Badge> : l.enrich_status === 'failed' ? <Badge tone="red">Enrichment failed</Badge> : null}
+                  {prof?.follower_count != null && <span className="text-[11px] text-gray-500 tabular-nums" title={`${prof.follower_count.toLocaleString()} followers`}>{compact(prof.follower_count)} followers</span>}
+                  {!l.last_replied_at && !l.enriched_at && (!l.enrich_status || l.enrich_status === 'none') && <span className="text-gray-300">—</span>}
                 </span>
               </Td>
               <Td>{stage ? <StageChip stage={stage} /> : <span className="text-gray-300">—</span>}</Td>

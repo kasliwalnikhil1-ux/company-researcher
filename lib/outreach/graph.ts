@@ -1,7 +1,11 @@
-// Client-side graph validation mirroring outreach_validate_graph() in SQL (the server is authoritative).
+// Client-side graph validation mirroring outreach_validate_graph() in SQL (011_engine_v2.sql). The server is authoritative.
 import { z } from 'zod';
-import type { Graph, GraphNode, NodeType } from './types';
-import { NODE_CATALOG, TEXT_LIMITS } from './nodes';
+import type { AbBranch, AiRouteOption, Graph, GraphNode, MessageVariant, NodeStats, NodeType } from './types';
+import { AI_ROUTE_ELSE, CALL_OUTCOMES, MAX_VARIANTS } from './types';
+import { NODE_CATALOG, TEXT_LIMITS, VARIANT_TEXT_KEY, nodeExits } from './nodes';
+import { spintaxInfo } from './render';
+
+export { nodeExits, exitLabel, syncNodeBranches } from './nodes';
 
 export const nodeTypeSchema = z.enum(Object.keys(NODE_CATALOG) as [NodeType, ...NodeType[]]);
 
@@ -25,6 +29,16 @@ export const graphSchema = z.object({
 
 export interface GraphIssue { node_id?: string; code: string; message: string }
 
+const TEXT_STEPS: NodeType[] = ['send_invite', 'send_message', 'send_inmail', 'send_email', 'comment_latest_post'];
+const WHAT: Partial<Record<NodeType, string>> = { send_invite: 'invite note', send_message: 'message', comment_latest_post: 'comment', send_inmail: 'InMail body' };
+
+/** The variants of a step, or [] when it is not an A/B test. */
+export function nodeVariants(n: GraphNode): MessageVariant[] {
+  return Array.isArray(n.config?.variants) ? (n.config!.variants as MessageVariant[]) : [];
+}
+
+function str(v: unknown): string { return typeof v === 'string' ? v : ''; }
+
 export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; hasMailbox?: boolean; strict?: boolean } = {}): { errors: GraphIssue[]; warnings: GraphIssue[] } {
   const errors: GraphIssue[] = [];
   const warnings: GraphIssue[] = [];
@@ -42,18 +56,59 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
     if (n.id !== k) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'node id mismatch' });
     if (n.next && !nodes[n.next]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `next points to missing node ${n.next}` });
     for (const [b, t] of Object.entries(n.branches ?? {})) if (t && !nodes[t]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `branch ${b} points to missing node` });
-    const meta = NODE_CATALOG[n.type];
-    if (n.type === 'end' || n.type === 'send_to_sequence' || (meta.exits.length === 1 && !n.next && n.type !== 'start')) hasTerminal = true;
+    if (n.type === 'end' || n.type === 'send_to_sequence' || (!n.next && !n.branches && n.type !== 'start')) hasTerminal = true;
     if (['send_invite', 'wait_connection', 'send_inmail'].includes(n.type)) hasConnectPath = true;
     const c = n.config ?? {};
-    if (n.type === 'send_invite' && (c.note?.length ?? 0) > noteLimit) errors.push({ node_id: k, code: 'E_NOTE_TOO_LONG', message: `invite note exceeds ${noteLimit} characters` });
-    if (n.type === 'send_message' && (c.text?.length ?? 0) > TEXT_LIMITS.message) errors.push({ node_id: k, code: 'E_PAYLOAD_INVALID', message: 'message exceeds 8000 characters' });
-    if (n.type === 'comment_latest_post' && (c.text?.length ?? 0) > TEXT_LIMITS.comment) errors.push({ node_id: k, code: 'E_PAYLOAD_INVALID', message: 'comment exceeds 1250 characters' });
-    if (n.type === 'send_inmail' && ((c.subject?.length ?? 0) > TEXT_LIMITS.inmail_subject || (c.text?.length ?? 0) > TEXT_LIMITS.inmail_body)) errors.push({ node_id: k, code: 'E_PAYLOAD_INVALID', message: 'InMail subject/body exceeds limits (200/1900)' });
+
+    // every text the step can send: the base copy plus each variant; the longest spintax combination is what counts
+    if (TEXT_STEPS.includes(n.type)) {
+      const texts: Array<{ label: string; text: string; subject: string }> = [{ label: '', text: str(c.text) || str(c.note) || str(c.html), subject: str(c.subject) }];
+      if (Array.isArray(c.variants)) {
+        const ids: string[] = [];
+        for (const v of c.variants as MessageVariant[]) {
+          if (!v?.id) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'every variant needs an id' });
+          else if (ids.includes(v.id)) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: `duplicate variant id ${v.id}` });
+          ids.push(v?.id ?? '');
+          if (Number(v?.weight ?? 1) < 0) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'variant weight cannot be negative' });
+          texts.push({ label: ` (variant ${v?.label || v?.id || '?'})`, text: str(v?.text) || str(v?.note) || str(v?.html), subject: str(v?.subject) });
+        }
+        if (c.variants.length === 1) warnings.push({ node_id: k, code: 'W_SINGLE_VARIANT', message: 'an A/B test needs at least two variants' });
+        if (c.variants.length > MAX_VARIANTS) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: `at most ${MAX_VARIANTS} variants per step` });
+      }
+      const lim = n.type === 'send_invite' ? noteLimit : n.type === 'send_message' ? TEXT_LIMITS.message : n.type === 'comment_latest_post' ? TEXT_LIMITS.comment : n.type === 'send_inmail' ? TEXT_LIMITS.inmail_body : null;
+      for (const t of texts) {
+        if (texts.length > 1 && t.label === '' && t.text === '') continue;   // variants replace an empty base copy
+        const ml = spintaxInfo(t.text).maxLen;
+        if (lim != null && ml > lim) {
+          errors.push({ node_id: k, code: n.type === 'send_invite' ? 'E_NOTE_TOO_LONG' : 'E_PAYLOAD_INVALID', message: `${WHAT[n.type]}${t.label} can reach ${ml} characters (limit ${lim}); the longest spintax combination counts` });
+        }
+        if (n.type === 'send_inmail' && spintaxInfo(t.subject).maxLen > TEXT_LIMITS.inmail_subject) errors.push({ node_id: k, code: 'E_PAYLOAD_INVALID', message: `InMail subject${t.label} exceeds 200 characters` });
+        if (n.type === 'send_email' && opts.strict && t.text !== '' && !t.text.includes('unsubscribe_link')) warnings.push({ node_id: k, code: 'W_NO_UNSUBSCRIBE', message: `email${t.label} has no {{unsubscribe_link}}` });
+      }
+    }
+
     if (n.type === 'condition' && !(n.branches?.true !== undefined && n.branches?.false !== undefined)) warnings.push({ node_id: k, code: 'W_BRANCH_MISSING', message: 'condition should define true and false branches' });
     if (n.type === 'wait_connection' && !n.branches?.connected) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'wait_connection needs a connected branch' });
-    if (opts.strict && n.type === 'send_email' && !opts.hasMailbox && !c.mailbox_sender_id) errors.push({ node_id: k, code: 'E_NO_MAILBOX', message: 'email node requires a mailbox sender in the pool' });
+    if (n.type === 'ab_split') {
+      const list: AbBranch[] = Array.isArray(c.branches) ? c.branches : [];
+      if (list.length < 2) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'A/B split needs at least two weighted branches' });
+      else for (const b of list) if (!(n.branches && (b?.id ?? '') in n.branches)) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `A/B branch ${b?.id || '?'} is not connected` });
+    }
+    if (n.type === 'ai_route') {
+      const list: AiRouteOption[] = Array.isArray(c.routes) ? c.routes : [];
+      if (list.length < 1) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'AI routing needs at least one described branch' });
+      else for (const r of list) if (str(r?.description).trim().length < 3) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `describe AI branch ${r?.label || r?.id || '?'} in plain language` });
+      if (!(n.branches && AI_ROUTE_ELSE in n.branches)) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'AI routing needs an "everything else" branch' });
+    }
+    if (n.type === 'call_task') {
+      const dead = CALL_OUTCOMES.filter((o) => n.branches && o in n.branches && !n.branches[o]);
+      if (dead.length > 0 && opts.strict) warnings.push({ node_id: k, code: 'W_CALL_OUTCOME', message: `call outcome ${dead.join(', ').replace(/_/g, ' ')} has no next step: those leads finish the sequence` });
+    }
+    const hasMailboxPool = Array.isArray(c.mailbox_pool) && c.mailbox_pool.length > 0;
+    if (opts.strict && n.type === 'send_email' && !opts.hasMailbox && !c.mailbox_sender_id && !hasMailboxPool) errors.push({ node_id: k, code: 'E_NO_MAILBOX', message: 'email node requires a mailbox sender in the pool' });
+    if (['send_invite', 'send_message', 'comment_latest_post', 'send_inmail'].includes(n.type) && c.ai != null && !c.ai?.brief) warnings.push({ node_id: k, code: 'W_AI_BRIEF', message: 'AI drafting enabled without a brief' });
     if (n.type === 'ai_draft_approval' && !c.brief) warnings.push({ node_id: k, code: 'W_AI_BRIEF', message: 'AI drafting enabled without a brief' });
+    if (n.type === 'send_voice_note' && opts.strict) warnings.push({ node_id: k, code: 'W_VOICE_CLIP', message: 'each pool sender needs a recorded clip for this step; senders without one skip it' });
     if (['add_tag', 'remove_tag'].includes(n.type) && !c.tag_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a tag' });
     if (n.type === 'change_list' && !c.list_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a list' });
     if (n.type === 'change_stage' && !c.stage_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a stage' });
@@ -62,7 +117,7 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
   }
   if (opts.strict) {
     if (!hasTerminal) errors.push({ code: 'E_GRAPH_INVALID', message: 'no exit path (add an End node)' });
-    const hasMsg = Object.values(nodes).some((n) => n.type === 'send_message' && !n.config?.send_always);
+    const hasMsg = Object.values(nodes).some((n) => (n.type === 'send_message' || n.type === 'send_voice_note') && !n.config?.send_always);
     if (hasMsg && !hasConnectPath) errors.push({ code: 'E_RELATION_REQUIRED', message: 'a message node needs an invite / wait_connection (or InMail) path before it' });
     // reachability
     const seen = new Set<string>();
@@ -81,15 +136,73 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
   return { errors, warnings };
 }
 
-export function nodeExits(n: GraphNode): string[] {
-  return NODE_CATALOG[n.type]?.exits ?? [];
-}
-
 export function graphEdges(graph: Graph): Array<{ id: string; source: string; target: string; label: string }> {
   const edges: Array<{ id: string; source: string; target: string; label: string }> = [];
   for (const n of Object.values(graph.nodes)) {
-    if (n.next) edges.push({ id: `${n.id}-next-${n.next}`, source: n.id, target: n.next, label: 'next' });
+    const viaBranch = n.type === 'call_task' ? n.branches?.next : undefined;   // the builder mirrors the fallback into branches.next
+    if (n.next && n.next !== viaBranch) edges.push({ id: `${n.id}-next-${n.next}`, source: n.id, target: n.next, label: 'next' });
     for (const [b, t] of Object.entries(n.branches ?? {})) if (t) edges.push({ id: `${n.id}-${b}-${t}`, source: n.id, target: t, label: b });
   }
   return edges;
+}
+
+/**
+ * Make a call task match what the engine reads (outreach_advance_enrollment):
+ *  - the fallback exit is the top-level `next`; the canvas stores it as branches.next, so mirror it;
+ *  - an outcome key that exists with no target ENDS the sequence for that lead instead of falling back, so drop empty outcome keys.
+ * Idempotent, returns the same object when nothing changes.
+ */
+export function normalizeNode(n: GraphNode): GraphNode {
+  if (n.type !== 'call_task') return n;
+  const branches = { ...(n.branches ?? {}) };
+  let changed = false;
+  for (const o of CALL_OUTCOMES) if (o in branches && !branches[o]) { delete branches[o]; changed = true; }
+  const fallback = 'next' in branches ? branches.next ?? null : n.next ?? null;
+  if ((n.next ?? null) !== fallback) changed = true;
+  if (!changed) return n;
+  return { ...n, next: fallback, branches };
+}
+
+/** Run before saving / publishing a graph. WEB-BUILDER: call this on the draft graph in the save path. */
+export function normalizeGraph(graph: Graph): Graph {
+  let changed = false;
+  const nodes: Record<string, GraphNode> = {};
+  for (const [k, n] of Object.entries(graph.nodes)) {
+    const m = normalizeNode(n);
+    if (m !== n) changed = true;
+    nodes[k] = m;
+  }
+  return changed ? { ...graph, nodes } : graph;
+}
+
+/** outreach_node_stats has one row per (node, variant): sum them for the canvas badges. */
+export function sumNodeStats(rows: NodeStats[] | null | undefined): Record<string, Omit<NodeStats, 'variant_id'>> {
+  const out: Record<string, Omit<NodeStats, 'variant_id'>> = {};
+  for (const r of rows ?? []) {
+    const cur = out[r.node_id] ?? (out[r.node_id] = { sequence_id: r.sequence_id, node_id: r.node_id, queued: 0, sent: 0, failed: 0, skipped: 0, accepted: 0, replied: 0, interested: 0 });
+    cur.queued += r.queued ?? 0; cur.sent += r.sent ?? 0; cur.failed += r.failed ?? 0; cur.skipped += r.skipped ?? 0;
+    cur.accepted += r.accepted ?? 0; cur.replied += r.replied ?? 0; cur.interested += r.interested ?? 0;
+  }
+  return out;
+}
+
+/** The {{ai.<key>}} variables a graph uses (mirror of outreach_sequence_ai_keys). */
+export function sequenceAiKeys(graph: Graph | null | undefined): string[] {
+  const out = new Set<string>();
+  const re = /\{\{\s*ai\.([a-z][a-z0-9_]*)/g;
+  const text = JSON.stringify(graph ?? {});
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) out.add(m[1]);
+  return [...out];
+}
+
+/** Steps that can run an A/B test on their copy. */
+export function supportsVariants(type: NodeType): boolean {
+  return type in VARIANT_TEXT_KEY;
+}
+
+/** True when any exit of the node is wired to a step. */
+export function hasOutgoing(n: GraphNode): boolean {
+  if (n.next) return true;
+  return nodeExits(n).some((e) => !!n.branches?.[e]);
 }

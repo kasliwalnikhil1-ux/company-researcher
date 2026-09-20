@@ -1,15 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { qk, useClients, useLists, useTags } from '@/lib/outreach/queries';
-import { callFn, parseError } from '@/lib/outreach/api';
-import { Badge, Button, ErrorBox, Select, Spinner } from '@/components/outreach/ui';
+import { parseError } from '@/lib/outreach/api';
+import { Badge, Button, ErrorBox, Spinner } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import { FileSpreadsheet, UploadCloud, X, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { TagMultiSelect } from './TagMultiSelect';
+import { EMPTY_COMMON, ImportOptions, importStartedMessage, useImportCreator, type ImportCommon } from './ImportOptions';
 import { LEAD_FIELDS, dedupeKey, formatNumber, guessField, toCustomKey, type ToastFn } from '../helpers';
 
 // papaparse ships without type definitions in this repo; keep a minimal local contract.
@@ -26,6 +24,15 @@ const PREVIEW = 5;
 const DEDUPE_SAMPLE = 200;
 const MAX_BYTES = 50 * 1024 * 1024;
 
+type CsvMode = 'upsert' | 'update_only';
+// Same list as outreach-imports-create / outreach_update_lead_fields. Custom fields (custom.<key>) can always be updated.
+const UPDATABLE = new Set(['first_name', 'last_name', 'full_name', 'headline', 'company', 'title', 'location', 'email_work', 'email_personal', 'phone']);
+const isUpdatable = (field: string) => UPDATABLE.has(field) || field.startsWith('custom.');
+function fieldLabel(field: string): string {
+  if (field.startsWith('custom.')) return `Custom: ${field.slice(7)}`;
+  return LEAD_FIELDS.find((f) => f.value === field)?.label ?? field;
+}
+
 function resolveMapping(headers: string[], cols: Record<string, ColMap>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const h of headers) {
@@ -39,10 +46,7 @@ function resolveMapping(headers: string[], cols: Record<string, ColMap>): Record
 
 export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () => void }) {
   const { workspace } = useWorkspace();
-  const qc = useQueryClient();
-  const clients = useClients(workspace?.id);
-  const lists = useLists(workspace?.id);
-  const tags = useTags(workspace?.id);
+  const createImport = useImportCreator();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [parsed, setParsed] = useState<Parsed | null>(null);
@@ -51,14 +55,18 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
   const [cols, setCols] = useState<Record<string, ColMap>>({});
   const [dedupe, setDedupe] = useState<Dedupe | null>(null);
   const [dedupeBusy, setDedupeBusy] = useState(false);
-  const [clientId, setClientId] = useState('');
-  const [listId, setListId] = useState('');
-  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [common, setCommon] = useState<ImportCommon>(EMPTY_COMMON);
+  const [mode, setMode] = useState<CsvMode>('upsert');
+  const [updateFields, setUpdateFields] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const mapping = useMemo(() => (parsed ? resolveMapping(parsed.headers, cols) : {}), [parsed, cols]);
   const mappedFields = useMemo(() => new Set(Object.values(mapping)), [mapping]);
+  // Update mode: which mapped columns may change. Columns that are mapped later start ticked; unmapped ones drop out.
+  const updatable = useMemo(() => Array.from(mappedFields).filter(isUpdatable).sort(), [mappedFields]);
+  const updatableKey = updatable.join('|');
+  useEffect(() => { setUpdateFields((cur) => { const keep = cur.filter((f) => updatable.includes(f)); const known = new Set(cur); return [...keep, ...updatable.filter((f) => !known.has(f) && !f.startsWith('email_'))]; }); }, [updatableKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const hasKey = mappedFields.has('linkedin_url') || mappedFields.has('public_identifier') || mappedFields.has('email_work') || mappedFields.has('email_personal');
   const duplicateFields = useMemo(() => {
     const seen = new Map<string, number>();
@@ -142,6 +150,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
 
   const submit = async () => {
     if (!parsed || !workspace || !hasKey || duplicateFields.length) return;
+    if (mode === 'update_only' && updateFields.length === 0) return;
     setError(null);
     try {
       setBusy('Uploading file…');
@@ -149,10 +158,13 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
       const up = await supabase.storage.from('outreach-imports').upload(path, parsed.file, { contentType: 'text/csv', upsert: false });
       if (up.error) throw up.error;
       setBusy('Creating import job…');
-      await callFn('imports-create', { workspace_id: workspace.id, kind: 'csv', storage_path: path, mapping, row_count: parsed.rows.length, client_id: clientId || null, list_id: listId || null, tag_ids: tagIds });
-      qc.invalidateQueries({ queryKey: qk.imports(workspace.id) });
-      toast(`Import queued — ${formatNumber(parsed.rows.length)} rows`);
-      reset(); setTagIds([]);
+      const updateOnly = mode === 'update_only';
+      // Update mode never creates leads, so list, tags, client and enrichment do not apply to it.
+      const opts: ImportCommon = updateOnly ? EMPTY_COMMON : common;
+      const r = await createImport({ kind: 'csv', fields: { storage_path: path, mapping, row_count: parsed.rows.length, mode, ...(updateOnly ? { update_fields: updateFields } : {}) } }, opts);
+      const m = importStartedMessage(updateOnly ? `Update queued for ${formatNumber(parsed.rows.length)} rows. Leads that are not found are skipped.` : `Import queued for ${formatNumber(parsed.rows.length)} rows.`, r);
+      toast(m.message, m.type);
+      reset(); setCommon((c) => ({ ...c, tagIds: [] }));
       onCreated();
     } catch (e) {
       setError(parseError(e).message);
@@ -192,6 +204,18 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
         <Button variant="ghost" size="sm" onClick={reset} title="Choose another file"><X className="w-4 h-4" /> Change file</Button>
       </div>
       {parsed.warnings.length > 0 && <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{parsed.warnings.map((w, i) => <div key={i}>{w}</div>)}</div>}
+
+      <section>
+        <h3 className="text-sm font-semibold text-gray-900 mb-2">What should this file do?</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Import mode">
+          {([['upsert', 'Create and update', 'New people become leads. Existing leads keep their data and only empty fields are filled.'], ['update_only', 'Update existing leads only', 'Match on LinkedIn URL or email and change only the columns you pick. No lead is created.']] as const).map(([id, label, hint]) => (
+            <button key={id} type="button" role="radio" aria-checked={mode === id} onClick={() => setMode(id)} className={cn('text-left rounded-xl border p-3 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500', mode === id ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white hover:bg-gray-50')}>
+              <span className="block text-sm font-semibold text-gray-900">{label}</span>
+              <span className="block text-xs text-gray-500 mt-0.5">{hint}</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-1">1. Map columns</h3>
@@ -239,32 +263,47 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
         <h3 className="text-sm font-semibold text-gray-900 mb-1">2. De-duplication preview</h3>
         {!hasKey ? <p className="text-xs text-gray-500">Map an identifier column to preview duplicates.</p> : dedupeBusy && !dedupe ? <p className="text-xs text-gray-500">Checking the first {DEDUPE_SAMPLE} rows…</p> : dedupe ? (
           <div className={cn('flex flex-wrap items-center gap-3 text-sm', dedupeBusy && 'opacity-60')}>
-            <Badge tone="green">{formatNumber(dedupe.fresh)} new</Badge>
-            <Badge tone="blue">{formatNumber(dedupe.existing)} existing (will be merged)</Badge>
+            {mode === 'update_only'
+              ? <><Badge tone="blue">{formatNumber(dedupe.existing)} found (will be updated)</Badge><Badge tone="amber">{formatNumber(dedupe.fresh)} not found (skipped)</Badge></>
+              : <><Badge tone="green">{formatNumber(dedupe.fresh)} new</Badge><Badge tone="blue">{formatNumber(dedupe.existing)} existing (will be merged)</Badge></>}
             {dedupe.unkeyed > 0 && <Badge tone="amber">{formatNumber(dedupe.unkeyed)} without identifier (skipped)</Badge>}
-            <span className="text-xs text-gray-500">based on the first {formatNumber(dedupe.checked)} of {formatNumber(parsed.rows.length)} rows. Existing leads keep their data; empty fields are filled from the file.</span>
+            <span className="text-xs text-gray-500">based on the first {formatNumber(dedupe.checked)} of {formatNumber(parsed.rows.length)} rows. {mode === 'update_only' ? 'Only the columns you pick below change.' : 'Existing leads keep their data; empty fields are filled from the file.'}</span>
           </div>
         ) : null}
       </section>
 
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold text-gray-900">3. Options</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-            <option value="">No client</option>
-            {clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-          <Select label="Add to list (optional)" value={listId} onChange={(e) => setListId(e.target.value)}>
-            <option value="">No list</option>
-            {lists.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </Select>
-        </div>
-        <TagMultiSelect tags={tags.data ?? []} value={tagIds} onChange={setTagIds} />
-      </section>
+      {mode === 'update_only' ? (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold text-gray-900">3. Columns that may change</h3>
+          {updatable.length === 0 ? (
+            <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Map at least one column besides the LinkedIn URL, for example company, title, phone or a custom field.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {updatable.map((f) => {
+                const on = updateFields.includes(f);
+                return (
+                  <label key={f} className={cn('inline-flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm cursor-pointer', on ? 'border-indigo-400 bg-indigo-50/60 text-gray-900' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
+                    <input type="checkbox" checked={on} onChange={() => setUpdateFields((cur) => (on ? cur.filter((x) => x !== f) : [...cur, f]))} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                    {fieldLabel(f)}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-xs text-gray-500">Empty cells never blank a field. Leads that are not found are skipped. Rows are matched on the LinkedIn URL first, then on email. Email columns are left unticked so they are only used for matching unless you choose otherwise.</p>
+          {updatable.length > 0 && updateFields.length === 0 && <p className="text-xs text-red-600">Pick at least one column to update.</p>}
+        </section>
+      ) : (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-gray-900">3. Options</h3>
+          <ImportOptions kind="csv" value={common} onChange={setCommon} />
+          {mappedFields.has('phone') && <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Phone numbers are only written in “Update existing leads only” mode for now. Import the file first, then run it again in update mode with Phone ticked.</p>}
+        </section>
+      )}
 
       {error && <ErrorBox message={error} />}
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={submit} loading={!!busy} disabled={!hasKey || duplicateFields.length > 0}>{busy ?? <><CheckCircle2 className="w-4 h-4" /> Import {formatNumber(parsed.rows.length)} rows</>}</Button>
+        <Button onClick={submit} loading={!!busy} disabled={!hasKey || duplicateFields.length > 0 || (mode === 'update_only' && updateFields.length === 0)}>{busy ?? <><CheckCircle2 className="w-4 h-4" /> {mode === 'update_only' ? 'Update from' : 'Import'} {formatNumber(parsed.rows.length)} rows</>}</Button>
         <span className="text-xs text-gray-500">The file is processed in the background; progress shows in the jobs table below.</span>
       </div>
     </div>

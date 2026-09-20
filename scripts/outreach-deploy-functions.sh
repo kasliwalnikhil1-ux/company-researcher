@@ -2,7 +2,7 @@
 # Deploy the outreach platform edge functions (supabase/functions/outreach-*) to the CapitalxAI Supabase project.
 #
 # Usage:
-#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh            # all 29 functions
+#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh            # all 39 functions
 #   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh worker-tick outreach-process-inbound
 #
 # Names may be given with or without the `outreach-` prefix. Deploys one function at a time, continues on
@@ -49,6 +49,9 @@ WEBHOOK_FUNCS=(
   outreach-sender-notify     # Unipile hosted-auth notify_url callback (sender id in `name`)
   outreach-cookie-sync       # Bearer <sender_token> from the Chrome extension
   outreach-stripe-webhook    # Stripe signature (also user JWT for checkout/portal)
+  outreach-booking-webhook   # Calendly / Cal.com: ?ws=<workspace>&k=<booking_secret> checked in code (constant time)
+  outreach-unsubscribe       # public one-click unsubscribe: signed token (HMAC, OUTREACH_CRON_SECRET) checked in code
+  outreach-crm-oauth         # OAuth callback is public (state checked in code); the start call validates the user JWT
 )
 # Cron workers (x-cron-secret via outreach_invoke / pg_net):
 CRON_FUNCS=(
@@ -64,6 +67,11 @@ CRON_FUNCS=(
   outreach-billing-sync
   outreach-ai-classify
   outreach-ai-draft          # cron ({} fills pending drafts) AND user JWT
+  outreach-worker-enrich     # background profile enrichment (every 10 min)
+  outreach-ai-variables      # AI lines + AI routing decisions (every minute) AND user JWT ("test on 20 leads")
+  outreach-crm-sync          # CRM push / pull (every 5 min)
+  outreach-worker-reports    # weekly sender report, digests, client reports (hourly; sends at 08:00 workspace time)
+  outreach-domain-check      # DNS checks for portal + tracking domains (every 30 min)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
@@ -80,6 +88,8 @@ USER_FUNCS=(
   outreach-invite-member
   outreach-unipile-setup
   outreach-mcp               # remote MCP connector (OAuth bearer checked in code; .well-known must be public)
+  outreach-workspace-secrets # stores the workspace's own AI / finder keys (encrypted); owner JWT
+  outreach-api               # public REST API: the API key is checked in code (outreach_api_authenticate)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")
 
@@ -92,7 +102,10 @@ if [ $# -gt 0 ]; then
     TARGETS+=("$name")
   done
 else
-  TARGETS=("${ALL_FUNCS[@]}")
+  # "all": functions of other workstreams may not be in this checkout yet; skip those instead of aborting the whole deploy
+  for name in "${ALL_FUNCS[@]}"; do
+    if [ -f "supabase/functions/${name}/index.ts" ]; then TARGETS+=("$name"); else echo "WARN: ${name} is in the catalogue but supabase/functions/${name}/index.ts does not exist yet (skipped)." >&2; fi
+  done
 fi
 
 # sanity: every target must exist on disk; warn if it is not in the catalogue above

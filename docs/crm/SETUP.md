@@ -45,6 +45,16 @@ cd supabase/functions && deno check --node-modules-dir=none crm-mcp/index.ts   #
 ```
 Connect in Claude (claude.ai connectors / Claude Desktop / Claude Code) with the URL above; OAuth goes through the project's Supabase Auth (consent page at `app.capitalxai.com/oauth/consent`). Upload `claude-skill/crm.zip` as the skill.
 
+## Call recordings → capture + transcript
+
+"I had a meeting with naman@domain.com today, here is the recording" runs with no questions. The flow lives in `claude-skill/crm/recording-pipeline.md`; transcription is the separate **get-transcript** skill (Deepgram Nova-3, speaker-diarized), which must be installed next to the `crm` skill.
+
+- **Storage**: `crm_meeting_transcripts`, one row per meeting (`turns`, `speakers` with `role: prospect|team|unknown`, `full_text`, summary/topics, `low_confidence` words). Saving again replaces it. It never changes the capture.
+- **Why a ticket, not a tool argument**: an hour of speech is ~10k words. `transcript_upload_ticket(meeting_id)` mints a single-use, 30-minute token bound to that meeting (only its SHA-256 is stored, in `crm_upload_tickets`); `claude-skill/crm/scripts/save_transcript.py` posts the get-transcript folder to `POST /crm-mcp/transcript` with it. That route is the one place the service-role client calls a CRM write RPC — `crm_save_transcript` verifies the ticket and writes as the member who minted it. `save_transcript` (turns as arguments) is the fallback when the script cannot reach the network.
+- **Speaker indexes**: Deepgram's are 0-based; get-transcript prints them 1-based ("Speaker 1" = index 0). The script takes the printed label and does the mapping; the database and tools use the 0-based index.
+- **Reading**: `get_transcript` (filter by `q` / `role` / time, with `context`), `transcripts_search` (across meetings; `role: "prospect"` = only what customers said), `set_transcript_speakers` to fix who is who. In the app: Companies → a company → **Transcript** on the meeting row.
+- **Rebuild the skill zip** after editing the skill: `python scripts/crm-build-skill-zip.py` (Python zipfile — Compress-Archive's backslash paths are rejected by claude.ai).
+
 ## Hooks left for later (schema-ready, not built)
 
 - `crm_deals.delivery_project_id` — join to the client portal.

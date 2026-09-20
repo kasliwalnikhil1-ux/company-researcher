@@ -8,15 +8,36 @@ import { qk, useImportJobs, useSenders } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
 import type { ImportJob, JobStatus } from '@/lib/outreach/types';
 import { Badge, Button, EmptyState, ErrorBox, Modal, Spinner, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
-import { Pause, Play, XCircle, FileSpreadsheet, Search, Users } from 'lucide-react';
+import { AlertCircle, Building2, MessageSquare, Pause, Play, ThumbsUp, XCircle, FileSpreadsheet, Search, Users } from 'lucide-react';
+import { importKindLabel } from '@/lib/outreach/intel';
 import { formatNumber, type ToastFn } from './helpers';
 
 const STATUS_TONE: Record<JobStatus, 'gray' | 'green' | 'red' | 'amber' | 'blue' | 'indigo'> = { queued: 'blue', running: 'indigo', paused: 'amber', done: 'green', failed: 'red', cancelled: 'gray' };
-const KIND_LABEL: Record<ImportJob['kind'], string> = { search_url: 'Search URL', csv: 'CSV', relations: 'Connections' };
 
-function KindIcon({ kind }: { kind: ImportJob['kind'] }) {
-  const cls = 'w-4 h-4 text-gray-400';
-  return kind === 'csv' ? <FileSpreadsheet className={cls} /> : kind === 'relations' ? <Users className={cls} /> : <Search className={cls} />;
+type JobRow = ImportJob & { mode?: 'upsert' | 'update_only'; update_fields?: string[]; enrich?: boolean; schedule_id?: string | null };
+interface JobParams { storage_path?: string; api?: string; url?: string; post_url?: string; name?: string | null; companies?: unknown[]; only_replied?: boolean; repeat_run?: number; _state?: { not_found?: number | string[]; row_errors?: number; first_row_error?: string | null; company_name?: string | null; idx?: number } }
+
+function KindIcon({ kind }: { kind: string }) {
+  const cls = 'w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5';
+  if (kind === 'csv') return <FileSpreadsheet className={cls} />;
+  if (kind === 'relations') return <Users className={cls} />;
+  if (kind === 'post_engagement') return <ThumbsUp className={cls} />;
+  if (kind === 'conversations') return <MessageSquare className={cls} />;
+  if (kind === 'company_people') return <Building2 className={cls} />;
+  return <Search className={cls} />;
+}
+
+function jobLabel(j: JobRow): string {
+  const p = j.params as JobParams;
+  const kind: string = j.kind;
+  if (kind === 'csv') return String(p.storage_path ?? '').split('/').pop()?.replace(/^\d+-/, '') || 'CSV file';
+  if (kind === 'search_url') return `${p.api === 'sales_navigator' ? 'Sales Navigator' : 'Classic'} people search`;
+  if (kind === 'relations') return '1st-degree connections';
+  if (kind === 'post_engagement') return 'People who engaged with a post';
+  if (kind === 'conversations') return p.only_replied ? 'Conversations where they replied' : 'All conversations without a lead';
+  if (kind === 'sn_saved_search' || kind === 'sn_lead_list') return p.name || importKindLabel(kind);
+  if (kind === 'company_people') return `People in ${Array.isArray(p.companies) ? p.companies.length : 0} companies`;
+  return importKindLabel(kind);
 }
 
 export function ImportJobsTable({ toast }: { toast: ToastFn }) {
@@ -62,12 +83,16 @@ export function ImportJobsTable({ toast }: { toast: ToastFn }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((j) => {
+          {(rows as JobRow[]).map((j) => {
             const sender = senders.data?.find((s) => s.id === j.sender_id);
             const pct = j.total_expected ? Math.min(100, Math.round((j.fetched / j.total_expected) * 100)) : null;
             const live = j.status === 'queued' || j.status === 'running';
-            const label = j.kind === 'csv' ? String((j.params as { storage_path?: string }).storage_path ?? '').split('/').pop()?.replace(/^\d+-/, '') || 'CSV file'
-              : j.kind === 'search_url' ? `${(j.params as { api?: string }).api === 'sales_navigator' ? 'Sales Navigator' : 'Classic'} people search` : '1st-degree connections';
+            const label = jobLabel(j);
+            const p = j.params as JobParams;
+            const st = p._state ?? {};
+            const link = (j.kind as string) === 'post_engagement' ? p.post_url : j.kind === 'search_url' ? p.url : undefined;
+            const notFound = Array.isArray(st.not_found) ? st.not_found.length : Number(st.not_found ?? 0);
+            const failed = j.status === 'failed';
             return (
               <tr key={j.id} className="align-top">
                 <Td>
@@ -75,8 +100,24 @@ export function ImportJobsTable({ toast }: { toast: ToastFn }) {
                     <KindIcon kind={j.kind} />
                     <div className="min-w-0">
                       <div className="font-medium text-gray-900 truncate max-w-[260px]" title={label}>{label}</div>
-                      <div className="text-xs text-gray-500">{KIND_LABEL[j.kind]}{j.kind === 'search_url' && (j.params as { url?: string }).url ? <> · <a href={(j.params as { url?: string }).url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">open search</a></> : null}</div>
-                      {j.error && <div className="text-xs text-red-600 mt-0.5 max-w-[320px] break-words" title={j.error}>{j.error}</div>}
+                      <div className="text-xs text-gray-500">{importKindLabel(j.kind)}{link && /^https:\/\//i.test(link) ? <> · <a href={link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">{(j.kind as string) === 'post_engagement' ? 'open post' : 'open search'}</a></> : null}</div>
+                      {(j.mode === 'update_only' || j.enrich || j.schedule_id) && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {j.mode === 'update_only' && <Badge tone="purple"><span title={j.update_fields?.length ? `Columns: ${j.update_fields.join(', ')}` : undefined}>Update only</span></Badge>}
+                          {j.enrich && <Badge tone="indigo">Enrich after import</Badge>}
+                          {j.schedule_id && <Badge tone="blue">Repeating{p.repeat_run ? ` · run ${p.repeat_run}` : ''}</Badge>}
+                        </div>
+                      )}
+                      {/* The real reason, as the worker wrote it. Failed jobs say why; running jobs with a message are waiting on something. */}
+                      {j.error && (
+                        <div role={failed ? 'alert' : undefined} className={`mt-1 flex items-start gap-1.5 text-xs max-w-[360px] break-words rounded-md px-2 py-1 ${failed ? 'bg-red-50 text-red-700 border border-red-100' : 'bg-amber-50 text-amber-800 border border-amber-100'}`}>
+                          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span>{failed ? 'Failed: ' : ''}{j.error}</span>
+                        </div>
+                      )}
+                      {failed && !j.error && <div className="mt-1 text-xs text-red-700">Failed without an error message. Start the import again, and contact support if it fails twice.</div>}
+                      {notFound > 0 && <div className="text-xs text-gray-500 mt-0.5">{j.mode === 'update_only' ? `${formatNumber(notFound)} rows matched no lead and were skipped.` : `${formatNumber(notFound)} compan${notFound === 1 ? 'y was' : 'ies were'} not found on LinkedIn${Array.isArray(st.not_found) ? `: ${st.not_found.slice(0, 5).join(', ')}${notFound > 5 ? '…' : ''}` : ''}.`}</div>}
+                      {!!st.row_errors && <div className="text-xs text-amber-700 mt-0.5">{formatNumber(st.row_errors)} rows could not be read{st.first_row_error ? `. First error: ${st.first_row_error}` : ''}.</div>}
+                      {(j.kind as string) === 'company_people' && j.status === 'running' && st.company_name && <div className="text-xs text-gray-500 mt-0.5">Now on: {st.company_name}</div>}
                     </div>
                   </div>
                 </Td>
@@ -89,7 +130,7 @@ export function ImportJobsTable({ toast }: { toast: ToastFn }) {
                 <Td className="hidden md:table-cell"><span className="block max-w-[160px] truncate">{sender ? (sender.display_name ?? sender.public_identifier ?? 'Sender') : j.sender_id ? 'Removed sender' : '—'}</span></Td>
                 <Td>
                   <div className="min-w-[140px]">
-                    <div className="text-xs text-gray-700 tabular-nums">{formatNumber(j.fetched)}{j.total_expected != null ? ` / ${formatNumber(j.total_expected)}` : ''} fetched</div>
+                    <div className="text-xs text-gray-700 tabular-nums">{formatNumber(j.fetched)}{j.total_expected != null ? ` / ${formatNumber(j.total_expected)}` : ''} {j.kind === 'csv' ? 'rows' : 'fetched'}</div>
                     {pct != null && <div className="mt-1 h-1.5 w-full bg-gray-200 rounded-full overflow-hidden"><div className={`h-full ${j.status === 'failed' ? 'bg-red-500' : j.status === 'done' ? 'bg-green-500' : 'bg-indigo-500'}`} style={{ width: `${pct}%` }} /></div>}
                   </div>
                 </Td>

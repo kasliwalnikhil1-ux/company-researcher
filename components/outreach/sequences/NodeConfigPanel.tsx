@@ -11,6 +11,8 @@ import {
   VisitProfileForm, WaitConnectionForm, WithdrawForm, type FormProps,
 } from './FormsOutreach';
 import { CallApiForm, CallWebhookForm, ChangeListForm, ChangeSenderForm, ChangeStageForm, ConditionForm, DelayEditor, DelayForm, RotateSenderForm, SendToSequenceForm, TagForm } from './FormsLogic';
+import { AbSplitForm, CallTaskForm, FindEmailForm, FollowProfileForm, RefreshProfileForm, SendVoiceNoteForm } from './FormsSteps';
+import AiRouteForm from './AiRouteForm';
 
 function TypeForm(props: FormProps) {
   switch (props.node.type) {
@@ -39,6 +41,13 @@ function TypeForm(props: FormProps) {
     case 'send_to_sequence': return <SendToSequenceForm {...props} />;
     case 'manual_task': return <ManualTaskForm {...props} />;
     case 'ai_draft_approval': return <AiDraftApprovalForm {...props} />;
+    case 'refresh_profile': return <RefreshProfileForm {...props} />;
+    case 'follow_profile': return <FollowProfileForm />;
+    case 'find_email': return <FindEmailForm />;
+    case 'call_task': return <CallTaskForm {...props} />;
+    case 'send_voice_note': return <SendVoiceNoteForm {...props} />;
+    case 'ab_split': return <AbSplitForm {...props} />;
+    case 'ai_route': return <AiRouteForm node={props.node} cfg={props.cfg} update={props.update} />;
     default: return null;
   }
 }
@@ -57,11 +66,12 @@ interface Props {
 export default function NodeConfigPanel({ node, issues, readOnly, onChange, onDelete, onDuplicate, onClose, className }: Props) {
   const meta = NODE_CATALOG[node.type];
   const cfg = node.config ?? {};
-  const set = (key: string, value: unknown) => {
+  const patch = (values: Record<string, unknown>) => {
     const next = { ...cfg };
-    if (value === undefined) delete next[key]; else next[key] = value;
+    for (const [key, value] of Object.entries(values)) { if (value === undefined) delete next[key]; else next[key] = value; }
     onChange({ ...node, config: next });
   };
+  const set = (key: string, value: unknown) => patch({ [key]: value });
   const executable = EXECUTABLE_TYPES.includes(node.type);
   const canPreDelay = !['start', 'end', 'delay'].includes(node.type);
   const errors = issues.filter((i) => i.code.startsWith('E_'));
@@ -102,7 +112,7 @@ export default function NodeConfigPanel({ node, issues, readOnly, onChange, onDe
           </div>
         )}
         <div className="border-t border-gray-100 pt-3">
-          <TypeForm key={node.id} node={node} cfg={cfg} set={set} />
+          <TypeForm key={node.id} node={node} cfg={cfg} set={set} patch={patch} update={onChange} />
         </div>
       </fieldset>
       {!readOnly && (

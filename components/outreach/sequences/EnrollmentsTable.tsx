@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { LogOut, Pause, Play } from 'lucide-react';
@@ -9,13 +10,20 @@ import { useEnrollments } from '@/lib/outreach/queries';
 import { LIVE_ENROLLMENT_STATUSES, type EnrollmentStatus, type Sequence } from '@/lib/outreach/types';
 import { Avatar, Button, Card, EmptyState, EnrollmentBadge, ErrorBox, fmtDate, Select, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { nodeTitle } from './helpers';
+import { useFailedCount } from './hooks';
+import { FailedLeadsPanel } from './FailedLeadsDrawer';
+import type { FailedKind } from './publishTypes';
 
 const ALL_STATUSES: EnrollmentStatus[] = ['active', 'waiting_connection', 'waiting_delay', 'waiting_task', 'paused', 'completed', 'exited_replied', 'exited_manual', 'exited_suppressed', 'exited_sender_disabled', 'failed', 'cancelled'];
 
 export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Sequence; canWrite: boolean }) {
   const [filter, setFilter] = useState<'all' | 'live' | EnrollmentStatus>('live');
+  // "Failed" is its own view: it shows why each lead failed and offers retry / skip / exit in bulk.
+  const [view, setView] = useState<'list' | 'failed'>('list');
+  const [failedKind, setFailedKind] = useState<FailedKind>('failed');
+  const failedCount = useFailedCount(sequence.id);
   const status = filter === 'all' ? undefined : filter === 'live' ? LIVE_ENROLLMENT_STATUSES : [filter];
-  const q = useEnrollments({ sequence_id: sequence.id, status, limit: 200 });
+  const q = useEnrollments({ sequence_id: view === 'list' ? sequence.id : undefined, status, limit: 200 });
   const qc = useQueryClient();
   const toast = useToast();
   const [busy, setBusy] = useState<string | null>(null);
@@ -35,14 +43,24 @@ export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Seq
 
   const rows = q.data ?? [];
   return (
-    <Card title={`Enrollments${q.data ? ` (${rows.length}${rows.length === 200 ? '+' : ''})` : ''}`} actions={
-      <Select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Filter enrollments" className="!py-1 !text-xs w-auto">
-        <option value="live">Live</option>
-        <option value="all">All</option>
-        {ALL_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
-      </Select>
+    <Card title={view === 'failed' ? 'Failed and skipped leads' : `Enrollments${q.data ? ` (${rows.length}${rows.length === 200 ? '+' : ''})` : ''}`} actions={
+      <>
+        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs" role="tablist" aria-label="Enrollment view">
+          <button type="button" role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={cn('px-3 py-1', view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>Enrollments</button>
+          <button type="button" role="tab" aria-selected={view === 'failed'} onClick={() => setView('failed')} className={cn('px-3 py-1 tabular-nums', view === 'failed' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>Failed{failedCount.data ? ` (${failedCount.data.toLocaleString()})` : ''}</button>
+        </div>
+        {view === 'list' && (
+          <Select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Filter enrollments" className="!py-1 !text-xs w-auto">
+            <option value="live">Live</option>
+            <option value="all">All</option>
+            {ALL_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+          </Select>
+        )}
+      </>
     }>
-      {q.isLoading ? <Spinner /> : q.error ? <ErrorBox message={parseError(q.error).message} /> : rows.length === 0 ? (
+      {view === 'failed' ? (
+        <FailedLeadsPanel sequenceId={sequence.id} kind={failedKind} onKindChange={setFailedKind} graph={sequence.graph} canWrite={canWrite} />
+      ) : q.isLoading ? <Spinner /> : q.error ? <ErrorBox message={parseError(q.error).message} /> : rows.length === 0 ? (
         <EmptyState title="No enrollments" description={filter === 'live' ? 'No leads are currently live in this sequence.' : 'Nothing matches this filter.'} />
       ) : (
         <Table className="border-0">

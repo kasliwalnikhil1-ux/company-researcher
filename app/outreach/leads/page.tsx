@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useClients, useLeads, useLists, useStages, useTags } from '@/lib/outreach/queries';
+import { useClients, useLists, useStages, useTags } from '@/lib/outreach/queries';
+import { useLeadsIntel } from '@/lib/outreach/intel';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { Button, EmptyState, ErrorBox, PageHeader, Spinner, useToast } from '@/components/outreach/ui';
 import { LeadFilterBar, EMPTY_FILTERS, isFilterEmpty, type ViewFilters } from '@/components/outreach/leads/LeadFilterBar';
@@ -28,7 +29,8 @@ export default function LeadsPage() {
   const [manage, setManage] = useState<TaxonomyKind | null>(null);
   const [exporting, setExporting] = useState(false);
 
-  const leads = useLeads(ws, { ...filters, page, pageSize: PAGE_SIZE });
+  // Same list as before plus the item-13 filters (replied, enriched, posts, followers, time in role, past company, skill, language).
+  const leads = useLeadsIntel(ws, { ...filters, page, pageSize: PAGE_SIZE });
   const clients = useClients(ws);
   const lists = useLists(ws);
   const stages = useStages(ws);

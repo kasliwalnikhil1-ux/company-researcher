@@ -7,7 +7,7 @@ The flagship workflow. Goal: every reply that needs a human answer gets a good o
 - Read `outreach://safety/policy` once per session if you have not.
 
 ## 1. Pull the queue — ONE call
-`inbox_pending()` (add `client_id` / `since` / `unread_only` when the user scoped it). It returns every open thread whose last message is from the prospect, newest first, each with `chat_id`, `reply_to_message_id`, lead / title / company, sender, `their_words` (verbatim), `recent` messages for context and `contacts` (incl. `mentioned_in_thread`).
+`inbox_pending()` (add `client_id` / `sequence_id` / `since` / `unread_only` when the user scoped it). It returns every open thread whose last message is from the prospect, newest first, each with `chat_id`, `reply_to_message_id`, lead / title / company, sender, `their_words` (verbatim), `recent` messages for context, `contacts` (incl. `mentioned_in_thread`) and `answering` = the sequence, step number + label, A/B variant and sender their reply answers. Each of our `recent` messages carries `via`: automated (sequence · step · variant · sender) or manual (which teammate sent it).
 
 **Speed rules:** do not call `inbox_list` and do not open threads one by one with `inbox_thread` — that is what makes this slow. Only open a thread when `recent` truly isn't enough to write a good reply (rare). Skip `workspace_context` and the safety-policy read unless you need them. Target: 1 read call, then the table.
 
@@ -20,6 +20,8 @@ Sort the threads yourself (the intent tag is usually `unclassified`, ignore it):
 
 ## 2. Draft — you write them
 Write every reply yourself, in this conversation. **Do not call `draft_reply` / `draft_replies_bulk`** (those use the platform's paid AI API and are slow) unless the user explicitly asks for the platform's drafts.
+
+Use `answering` to stay consistent with what we sent: a reply to "Step 1: invite note" deserves a different answer than a reply to the third follow-up. Mention the step in the Who column when it helps the user ("replying to Step 2 of Fintech CFOs").
 
 Drafting rules: write as the sender (first person, their name is in `sender`), match the prospect's language and register, answer what they actually said, one clear next step, 1–3 short sentences, LinkedIn-chat tone — no subject line, no signature, no links unless they asked, no pitch dump, no em dashes or "I hope this finds you well". Use what the user told you as facts (offers, availability); never invent prices, dates or claims. A referral → thank them, say you'll reach out to the named person. A bare "Hello" → friendly, ask what they're after. `suppressed: true` or `sender_ok` set → no draft, say why.
 
@@ -58,9 +60,10 @@ Read the per-item results:
 Do not retry a failed send blindly. Replies do not consume the outbound ledger, but there is a 300/day agent limit.
 
 ## 5. Everything that was not drafted
-- `not_interested`: `inbox_archive(chat_ids)`; if they asked to never be contacted, `lead_suppress(lead_ids, reason)` (gated — ask).
+- `not_interested`: `inbox_archive(chat_ids)`; if they asked to never be contacted, `lead_suppress(lead_ids, reason)` (gated, ask). The reply already stopped every sequence for that lead on every sender; suppressing keeps them out of future enrolments. Nothing is deleted.
 - `wrong_person`: `task_create` ("Find the right contact at X — they named Y") linked to the lead; `inbox_archive` if nothing else to do.
-- `ooo`: `task_create` with `due_at` = the return date if stated; leave unread off (`inbox_mark_read`).
+- `ooo`: nothing to do in most cases. The platform re-opens the lead's sequence by itself after the return date (or 7 days). `inbox_mark_read`; a `task_create` only if the auto-reply names someone else to contact.
+- Held leads (sequence set to hold on reply): `enrollment_hold_list` → the user decides resume or exit per lead ([recovery-and-holds.md](recovery-and-holds.md)).
 - `not_now`: `task_create` for the date they gave; `inbox_mark_read`.
 - `unclear` / `unclassified`: read the thread; if it is really interested/question, `inbox_set_intent` then draft it in the next pass.
 - Misclassified anything: `inbox_set_intent(chat_id, intent)`.

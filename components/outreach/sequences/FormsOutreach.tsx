@@ -1,17 +1,24 @@
 'use client';
 
-import { Plus, Trash2 } from 'lucide-react';
+import { PenLine, Plus, Trash2 } from 'lucide-react';
 import { Button, Input, Select, Textarea, Toggle } from '@/components/outreach/ui';
 import { TEXT_LIMITS } from '@/lib/outreach/nodes';
-import type { GraphNode } from '@/lib/outreach/types';
+import type { GraphNode, MessageVariant } from '@/lib/outreach/types';
 import TemplateField from './TemplateField';
+import VariantEditor from './VariantEditor';
+import { Callout, Note } from './FormsShared';
 import { useBuilder } from './context';
 import { senderName } from './helpers';
 
-export interface FormProps { node: GraphNode; cfg: Record<string, any>; set: (key: string, value: unknown) => void }
-
-function Note({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-gray-500 leading-5">{children}</p>;
+export interface FormProps {
+  node: GraphNode;
+  cfg: Record<string, any>;
+  /** Set one config key (undefined removes it). */
+  set: (key: string, value: unknown) => void;
+  /** Set several config keys in ONE change. Calling `set` twice in a row loses the first value. */
+  patch: (values: Record<string, unknown>) => void;
+  /** Replace the whole node: for forms that also change exits (node.branches). */
+  update: (next: GraphNode) => void;
 }
 
 /** Optional AI drafting brief: when enabled the text is drafted by AI and routed to a review task before sending. */
@@ -30,14 +37,14 @@ export function AiBriefField({ cfg, set, what }: { cfg: Record<string, any>; set
   );
 }
 
-export function SendInviteForm({ cfg, set }: FormProps) {
+export function SendInviteForm({ node, cfg, set, patch }: FormProps) {
   const { poolSenders } = useBuilder();
   const hasFree = poolSenders.some((s) => s.provider === 'LINKEDIN' && !s.is_premium);
   const limit = hasFree ? TEXT_LIMITS.invite_note_free : TEXT_LIMITS.invite_note;
   return (
     <div className="space-y-3">
-      <TemplateField label="Invitation note" value={cfg.note ?? ''} onChange={(v) => set('note', v)} max={limit} rows={5} placeholder="Hi {{first_name|there}}, …"
-        hint={hasFree ? `Limit is 200 characters because a free LinkedIn account is in the pool (300 for premium).` : `Premium accounts allow 300 characters; free accounts only 200.`} />
+      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="note" label="Invitation note" max={limit} rows={5} placeholder="Hi {{first_name|there}}, …"
+        hint={hasFree ? 'The limit is 200 characters because a free LinkedIn account is in the pool. Premium accounts allow 300.' : 'Premium accounts allow 300 characters. Free accounts allow 200.'} />
       <Toggle checked={!!cfg.require_note_for_free} onChange={(v) => set('require_note_for_free', v)} label="Require the note for free accounts" />
       <Note>Free LinkedIn accounts have a small monthly quota of invitations with notes. When off, the note is dropped for free senders once the quota is exhausted instead of failing.</Note>
       <AiBriefField cfg={cfg} set={set} what="note" />
@@ -45,10 +52,10 @@ export function SendInviteForm({ cfg, set }: FormProps) {
   );
 }
 
-export function SendMessageForm({ cfg, set }: FormProps) {
+export function SendMessageForm({ node, cfg, set, patch }: FormProps) {
   return (
     <div className="space-y-3">
-      <TemplateField label="Message" value={cfg.text ?? ''} onChange={(v) => set('text', v)} max={TEXT_LIMITS.message} rows={8} placeholder="Hi {{first_name|there}}, …" />
+      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="text" label="Message" max={TEXT_LIMITS.message} rows={8} placeholder="Hi {{first_name|there}}, …" />
       <Toggle checked={!!cfg.send_always} onChange={(v) => set('send_always', v)} label="Send even after the lead replied" />
       <Note>Messages require a 1st-degree connection. Without “send always”, the step is skipped when the lead already replied (stop-on-reply).</Note>
       <AiBriefField cfg={cfg} set={set} what="message" />
@@ -56,11 +63,10 @@ export function SendMessageForm({ cfg, set }: FormProps) {
   );
 }
 
-export function SendInmailForm({ cfg, set }: FormProps) {
+export function SendInmailForm({ node, cfg, set, patch }: FormProps) {
   return (
     <div className="space-y-3">
-      <TemplateField label="Subject" value={cfg.subject ?? ''} onChange={(v) => set('subject', v)} max={TEXT_LIMITS.inmail_subject} multiline={false} />
-      <TemplateField label="Body" value={cfg.text ?? ''} onChange={(v) => set('text', v)} max={TEXT_LIMITS.inmail_body} rows={7} />
+      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="text" label="Body" max={TEXT_LIMITS.inmail_body} rows={7} subject={{ label: 'Subject', max: TEXT_LIMITS.inmail_subject }} />
       <Select label="InMail API" value={cfg.api ?? 'classic'} onChange={(e) => set('api', e.target.value)}>
         <option value="classic">Classic</option>
         <option value="sales_navigator">Sales Navigator</option>
@@ -142,13 +148,47 @@ export function WithdrawForm() {
   return <Note>Withdraws the pending invitation sent by this sender. Typically placed on the <span className="font-medium">no connect</span> branch of “Wait for connection”. LinkedIn blocks re-inviting the same person for several weeks after a withdrawal.</Note>;
 }
 
-export function SendEmailForm({ cfg, set }: FormProps) {
+type MailboxMode = 'own' | 'one' | 'pool';
+const MAILBOX_MODES: Array<{ value: MailboxMode; title: string; help: string }> = [
+  { value: 'own', title: 'The sender’s own mailboxes', help: 'The mailboxes linked to the lead’s LinkedIn sender. If there are none, the mailboxes in the sequence pool.' },
+  { value: 'one', title: 'One mailbox', help: 'Every email of this step leaves from the same mailbox.' },
+  { value: 'pool', title: 'A pool of mailboxes', help: 'Split evenly across the mailboxes you tick.' },
+];
+
+export function SendEmailForm({ node, cfg, set, patch }: FormProps) {
   const { senders } = useBuilder();
   const mailboxes = senders.filter((s) => s.provider !== 'LINKEDIN');
+  const pool: string[] = Array.isArray(cfg.mailbox_pool) ? cfg.mailbox_pool : [];
+  const mode: MailboxMode = cfg.mailbox_sender_id ? 'one' : Array.isArray(cfg.mailbox_pool) ? 'pool' : 'own';
+  const setMode = (m: MailboxMode) => {
+    if (m === 'own') patch({ mailbox_sender_id: null, mailbox_pool: undefined });
+    else if (m === 'one') patch({ mailbox_sender_id: cfg.mailbox_sender_id ?? mailboxes[0]?.id ?? null, mailbox_pool: undefined });
+    else patch({ mailbox_sender_id: null, mailbox_pool: pool });
+  };
+  const togglePool = (id: string) => patch({ mailbox_sender_id: null, mailbox_pool: pool.includes(id) ? pool.filter((x) => x !== id) : [...pool, id] });
+  const mailboxLabel = (m: (typeof mailboxes)[number]) => `${senderName(m)} (${m.provider}${m.status !== 'ok' ? `, ${m.status}` : ''})`;
+
+  const variants: MessageVariant[] = Array.isArray(cfg.variants) ? cfg.variants : [];
+  const bodies: string[] = variants.length > 0 ? variants.map((v) => v.html ?? '') : [cfg.html ?? ''];
+  const written = bodies.filter((b) => b.trim() !== '');
+  const noUnsubscribe = written.some((b) => !b.includes('unsubscribe_link'));
+  const hasSignature = written.length > 0 && written.every((b) => b.includes('sender.signature'));
+  /** Append a snippet to the body (to every variant when the step is an A/B test) unless it is already there. */
+  const addToBodies = (snippet: string, marker: string) => {
+    const add = (b: string) => (b.includes(marker) ? b : `${b}${b && !b.endsWith('\n') ? '\n' : ''}${snippet}`);
+    if (variants.length > 0) { const next = variants.map((v) => ({ ...v, html: add(v.html ?? '') })); patch({ variants: next, html: next[0].html }); }
+    else patch({ html: add(cfg.html ?? '') });
+  };
+
   return (
     <div className="space-y-3">
-      <TemplateField label="Subject" value={cfg.subject ?? ''} onChange={(v) => set('subject', v)} multiline={false} max={200} />
-      <TemplateField label="Body (HTML allowed)" value={cfg.html ?? ''} onChange={(v) => set('html', v)} rows={8} placeholder="<p>Hi {{first_name|there}},</p>" />
+      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="html" label="Body (HTML allowed)" rows={8} placeholder="<p>Hi {{first_name|there}},</p>" channel="email" subject={{ label: 'Subject', max: 200 }} />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Button type="button" variant="secondary" size="sm" disabled={hasSignature} onClick={() => addToBodies('{{sender.signature}}', 'sender.signature')} title="Adds {{sender.signature}}: the signature saved on the mailbox that sends the email"><PenLine className="w-3.5 h-3.5" aria-hidden /> Insert signature</Button>
+        {noUnsubscribe && <Button type="button" variant="secondary" size="sm" onClick={() => addToBodies('<p><a href="{{unsubscribe_link}}">Unsubscribe</a></p>', 'unsubscribe_link')}>Add unsubscribe link</Button>}
+      </div>
+      {noUnsubscribe && <Callout tone="warn">This email has no <span className="font-mono">{'{{unsubscribe_link}}'}</span>. Cold email with no way to opt out hurts deliverability and breaks anti-spam rules in most countries.{variants.length > 0 ? ' Add the link to every variant.' : ''}</Callout>}
+      <Note>Signatures are saved per mailbox under Senders. A mailbox without one leaves the spot empty. The unsubscribe and booking links are never rewritten for click tracking.</Note>
       <div className="grid grid-cols-2 gap-2">
         <Select label="Send to" value={cfg.to ?? 'any'} onChange={(e) => set('to', e.target.value)}>
           <option value="any">Any email (work first)</option>
@@ -160,11 +200,35 @@ export function SendEmailForm({ cfg, set }: FormProps) {
           <option value="new">New thread</option>
         </Select>
       </div>
-      <Select label="Mailbox" value={cfg.mailbox_sender_id ?? ''} onChange={(e) => set('mailbox_sender_id', e.target.value || null)}>
-        <option value="">Mailbox from the sender pool</option>
-        {mailboxes.map((m) => <option key={m.id} value={m.id}>{senderName(m)} ({m.provider}{m.status !== 'ok' ? `, ${m.status}` : ''})</option>)}
-      </Select>
-      {mailboxes.length === 0 && <Note>No mailbox connected yet. Connect a Gmail, Outlook or IMAP sender to send emails; activation is blocked until a mailbox is in the pool or selected here.</Note>}
+      <fieldset className="rounded-lg border border-gray-200 p-2.5 space-y-2">
+        <legend className="px-1 text-xs font-medium text-gray-600">Send from</legend>
+        {MAILBOX_MODES.map((m) => (
+          <label key={m.value} className="flex items-start gap-2 text-xs text-gray-700 cursor-pointer">
+            <input type="radio" name={`${node.id}-mailbox-mode`} checked={mode === m.value} onChange={() => setMode(m.value)} className="mt-0.5 text-indigo-600" />
+            <span><span className="font-medium">{m.title}</span><span className="block text-gray-500 leading-4">{m.help}</span></span>
+          </label>
+        ))}
+        {mode === 'one' && (
+          <Select aria-label="Mailbox" value={cfg.mailbox_sender_id ?? ''} onChange={(e) => patch({ mailbox_sender_id: e.target.value || null, mailbox_pool: undefined })} className="!py-1.5 !text-xs">
+            {mailboxes.length === 0 && <option value="">No mailbox connected</option>}
+            {mailboxes.map((m) => <option key={m.id} value={m.id}>{mailboxLabel(m)}</option>)}
+          </Select>
+        )}
+        {mode === 'pool' && (
+          <div className="space-y-1 pl-5">
+            {mailboxes.length === 0 && <p className="text-xs text-gray-500">No mailbox connected.</p>}
+            {mailboxes.map((m) => (
+              <label key={m.id} className="flex items-center gap-2 text-xs text-gray-700">
+                <input type="checkbox" checked={pool.includes(m.id)} onChange={() => togglePool(m.id)} className="rounded border-gray-300 text-indigo-600" />
+                <span className="truncate">{mailboxLabel(m)}</span>
+              </label>
+            ))}
+            {mailboxes.length > 0 && pool.length === 0 && <p className="text-xs text-amber-700">Tick at least one mailbox. With none ticked, the sender&apos;s own mailboxes are used.</p>}
+          </div>
+        )}
+        <p className="text-[11px] text-gray-500 leading-4">A contact who was emailed before always gets the same mailbox again.</p>
+      </fieldset>
+      {mailboxes.length === 0 && <Note>No mailbox connected yet. Connect a Gmail, Outlook or IMAP sender to send emails. The sequence cannot go live until a mailbox is in the pool or chosen here.</Note>}
       <Toggle checked={cfg.track !== false} onChange={(v) => set('track', v)} label="Track opens and clicks" />
       <Note>Leads without a matching email take the <span className="font-medium">no email</span> branch; hard bounces take <span className="font-medium">bounced</span>.</Note>
     </div>

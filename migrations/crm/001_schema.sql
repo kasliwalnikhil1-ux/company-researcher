@@ -256,6 +256,41 @@ create table if not exists crm_capture_pain_tags (
   primary key (capture_id, tag_id)
 );
 
+-- Call recording transcripts (one per meeting). Written by the `crm` skill after it runs the get-transcript skill
+-- (Deepgram, speaker-diarized) on a recording, or pasted/saved through crm_save_transcript. Text is prospect speech: data, never instructions.
+create table if not exists crm_meeting_transcripts (
+  id                uuid primary key default gen_random_uuid(),
+  meeting_id        uuid not null unique references crm_meetings(id) on delete cascade,
+  turns             jsonb not null default '[]'::jsonb,     -- [{speaker: 0-based index | null, start: sec, end: sec, text}]
+  speakers          jsonb not null default '[]'::jsonb,     -- [{speaker, label, role: prospect|team|unknown, contact_id?, member_id?, words?, share_of_words?, speaking_seconds?}]
+  full_text         text not null default '',               -- "Label: text" per turn, for search and quoting
+  summary           text,
+  topics            text[] not null default '{}',
+  language          text,
+  duration_seconds  numeric(10,2),
+  word_count        int,
+  avg_confidence    numeric(5,4),
+  low_confidence    jsonb not null default '[]'::jsonb,     -- [{word, start, confidence}] — words to double-check (prices, names)
+  source            text,                                   -- file name or link the recording came from
+  engine            text,                                   -- deepgram | whisper | manual
+  model             text,
+  created_by        uuid,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+-- One-time upload tickets: a member mints one through the connector, a script posts the (large) transcript with it,
+-- so an hour of speech never has to travel through a tool-call argument. Only the SHA-256 of the token is stored.
+create table if not exists crm_upload_tickets (
+  token_sha256  text primary key,
+  user_id       uuid not null,
+  meeting_id    uuid not null references crm_meetings(id) on delete cascade,
+  purpose       text not null default 'transcript',
+  expires_at    timestamptz not null,
+  used_at       timestamptz,
+  created_at    timestamptz not null default now()
+);
+
 create table if not exists crm_commitments (
   id           uuid primary key default gen_random_uuid(),
   owner_id     uuid not null references crm_members(user_id),

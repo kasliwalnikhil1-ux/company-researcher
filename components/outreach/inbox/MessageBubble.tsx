@@ -1,9 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download } from 'lucide-react';
+import Link from 'next/link';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';
+import type { ThreadAttributionRow } from '@/lib/outreach/intel';
 import { Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
 
@@ -39,12 +41,51 @@ export interface MessageBubbleProps {
   m: Message;
   provider: Provider;
   now: number;
+  /** Item 4: which sequence, step and sender produced this message (from outreach_thread_attribution). */
+  attribution?: ThreadAttributionRow;
   canEdit: boolean;          // permission-level gate (canReply, sender ok, etc.)
   onEdit: (id: string, text: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }
 
-export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDelete }: MessageBubbleProps) {
+function stepHref(a: ThreadAttributionRow): string {
+  return `/outreach/sequences/${a.sequence_id}${a.node_id ? `?node=${encodeURIComponent(a.node_id)}` : ''}`;
+}
+
+function stepName(a: ThreadAttributionRow): string {
+  const n = a.step_number != null ? `Step ${a.step_number}` : 'Step';
+  return a.step_label ? `${n}: ${a.step_label}` : n;
+}
+
+function Attribution({ a, mine }: { a: ThreadAttributionRow; mine: boolean }) {
+  const cls = 'flex items-center gap-1 mt-1 text-[11px] text-gray-500 max-w-full flex-wrap';
+  if (a.kind === 'automated') {
+    return (
+      <div className={cls}>
+        <GitBranch className="w-3 h-3 text-indigo-400 flex-shrink-0" aria-hidden />
+        {a.sequence_id
+          ? <Link href={stepHref(a)} className="hover:text-indigo-600 hover:underline">{a.sequence_name ?? 'Sequence'} · {stepName(a)}</Link>
+          : <span>Automated · {stepName(a)}</span>}
+        {a.variant_label || a.variant_id ? <span className="px-1.5 py-px rounded bg-purple-50 text-purple-700">{a.variant_label ?? `Variant ${a.variant_id}`}</span> : null}
+        {a.sender_name && <span>· via {a.sender_name}</span>}
+      </div>
+    );
+  }
+  if (a.kind === 'manual' && mine) {
+    return <div className={cls}><User className="w-3 h-3 text-gray-400 flex-shrink-0" aria-hidden /><span>{a.sent_by_name ? `Sent by ${a.sent_by_name}` : 'Sent by hand'}</span></div>;
+  }
+  if (a.kind === 'inbound' && a.sequence_id && (a.replying_to_message_id || a.node_id)) {
+    return (
+      <div className={cls}>
+        <CornerDownRight className="w-3 h-3 text-gray-400 flex-shrink-0" aria-hidden />
+        <Link href={stepHref(a)} className="hover:text-indigo-600 hover:underline" title={[a.sequence_name, a.step_label].filter(Boolean).join(' · ') || undefined}>Replying to {a.step_number != null ? `Step ${a.step_number}` : (a.step_label ?? 'a sequence step')}</Link>
+      </div>
+    );
+  }
+  return null;
+}
+
+export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDelete, attribution }: MessageBubbleProps) {
   const mine = m.direction === 'out';
   const deleted = !!m.deleted_at;
   const pending = m.id.startsWith('temp-');
@@ -96,6 +137,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
           <span className="italic">{m.summary}</span>
         </div>
       )}
+      {attribution && !pending && <Attribution a={attribution} mine={mine} />}
       <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
         <span title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : fmtDate(m.sent_at)}</span>
         {m.edited_at && !deleted && <span>· edited</span>}

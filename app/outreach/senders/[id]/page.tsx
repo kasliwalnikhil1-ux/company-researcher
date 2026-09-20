@@ -14,9 +14,15 @@ import BudgetsPanel from '@/components/outreach/senders/BudgetsPanel';
 import EventsTimeline from '@/components/outreach/senders/EventsTimeline';
 import ExtensionSetup from '@/components/outreach/senders/ExtensionSetup';
 import DangerZone from '@/components/outreach/senders/DangerZone';
+import SenderInsights from '@/components/outreach/senders/SenderInsights';
+import SenderActivityReport from '@/components/outreach/senders/SenderActivityReport';
+import SenderSettings from '@/components/outreach/senders/SenderSettings';
+import SenderDiagnosis from '@/components/outreach/senders/SenderDiagnosis';
+import RunningDryCallout from '@/components/outreach/senders/RunningDry';
+import type { SenderV2 } from '@/components/outreach/senders/insights';
 import { cn } from '@/lib/utils';
 
-const TABS = ['Overview', 'Schedule', 'Budgets', 'Events', 'Extension', 'Danger'] as const;
+const TABS = ['Overview', 'Insights', 'Activity', 'Schedule', 'Budgets', 'Events', 'Settings', 'Extension', 'Danger'] as const;
 type Tab = (typeof TABS)[number];
 
 function SenderDetail() {
@@ -45,7 +51,7 @@ function SenderDetail() {
   if (role === 'client_viewer') return <ErrorBox message="Client viewers cannot open sender pages." />;
   if (sender.isLoading) return <Spinner />;
   if (sender.isError) return <ErrorBox message={(sender.error as Error).message} />;
-  const s = sender.data;
+  const s = sender.data as SenderV2 | undefined;
   if (!s || s.workspace_id !== workspace?.id) return <div><ErrorBox message="Sender not found in this workspace." /><Link href="/outreach/senders" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Back to senders</Link></div>;
 
   const visibleTabs = TABS.filter((t) => t !== 'Danger' || isManager);
@@ -66,12 +72,15 @@ function SenderDetail() {
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {s.status !== 'disabled' && <SenderDiagnosis senderId={s.id} senderName={s.display_name} />}
           <StatusPill status={s.status} reason={s.status_reason} />
           <Badge tone="indigo">Level {s.warmup_level}</Badge>
           <HealthBar score={s.health_score} />
         </div>
       </div>
+
+      <RunningDryCallout sender={s} canWrite={canWrite} />
 
       <div className="border-b border-gray-200 mb-6 overflow-x-auto">
         <nav className="flex gap-1 -mb-px" role="tablist">
@@ -82,6 +91,9 @@ function SenderDetail() {
       </div>
 
       {tab === 'Overview' && <SenderOverview sender={s} clients={clients.data ?? []} isManager={isManager} canWrite={canWrite} connected={connected} notify={toast.show} />}
+      {tab === 'Insights' && <SenderInsights sender={s} />}
+      {tab === 'Activity' && <SenderActivityReport sender={s} workspaceTimezone={typeof workspace?.settings?.timezone === 'string' ? workspace.settings.timezone : null} />}
+      {tab === 'Settings' && <SenderSettings sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} workspaceSettings={workspace?.settings} />}
       {tab === 'Schedule' && <ScheduleEditor sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Budgets' && <BudgetsPanel sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Events' && <EventsTimeline senderId={s.id} />}

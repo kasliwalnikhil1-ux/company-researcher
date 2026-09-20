@@ -32,7 +32,15 @@ Tell the operator: total rows, would create, would update, rejected (with reason
 ## 5. Hand-off
 Report: created / updated / failed counts, the list and tag names, and — if a campaign follows — the `leads_search` filter that selects exactly this list (`list_id`) for `enroll_preview`.
 
+## 6. Optional: enrich and blacklist
+- `leads_enrich(lead_ids | filters)` (confirmation above 50 leads) queues profile enrichment for leads that are not in a sequence yet. It only spends profile views left over after the day's sequence actions (at most 30% of a sender's allowance, none at warm-up level 0–1), so a big list takes days. Leads that enter a sequence are enriched for free. Skip it unless the copy or the filters need the data before launch.
+- A "do not contact" column in the file → `suppressions_add(rows:[{value}], client_id?)` ⚠. Kinds are inferred (email, LinkedIn profile URL, company name or company URL, domain). Scope it to the client when the list belongs to one. Blacklisting never deletes leads or chats.
+
 ## When to use the platform importer instead
-- A LinkedIn people-search URL → `import_create(kind:"search_url", url, sender_id, max_results)`; gated; consumes that sender's `search_page` budget (10 or 50 profiles per page) over several days; `import_status(job_id)` to follow.
-- The sender's own connections → `import_create(kind:"relations", sender_id)`.
-- A CSV already uploaded by the app to the `outreach-imports` bucket → `import_create(kind:"csv", storage_path, mapping, row_count)`; for local files prefer `lead_upsert`.
+All gated (`import_create` ⚠); every LinkedIn source runs inside the sender's search / profile-view allowances and working hours, over several days; follow with `import_status(job_id)`.
+- A LinkedIn people-search URL → `kind:"search_url", url, sender_id, max_results` (10 or 50 profiles per page).
+- People who engaged with a post → `kind:"post_engagement", url:<post URL>, sender_id`. High intent; works for the client's own posts and for competitors' posts.
+- Sales Navigator saved search / lead list → `kind:"sn_saved_search" | "sn_lead_list", sender_id, params:{id}`.
+- The sender's own connections → `kind:"relations", sender_id`. Existing conversations as leads → `kind:"conversations", sender_id`.
+- A CSV already uploaded by the app to the `outreach-imports` bucket → `kind:"csv", storage_path, mapping, row_count`; `mode:"update_only"` + `update_fields` updates chosen columns on matching leads and touches nothing else. For local files prefer `lead_upsert`.
+- Repeating imports (daily / weekly / monthly, only new people are added) are set up in the app; `import_schedules_list` shows them. Pair one with `auto_enroll_rules_save` ⚠ so new leads enter a sequence by themselves, inside a daily cap and the usual enrolment checks.

@@ -9,6 +9,7 @@ import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, StatusPill } from '
 import MessageBubble from './MessageBubble';
 import Compose from './Compose';
 import { INTENTS, INTENT_LABELS, memberLabel, useNow, editWindowRemainingMs } from './hooks';
+import { useThreadAttribution } from '@/lib/outreach/intel';
 
 export type ConvertKind = 'task' | 'tag' | 'stage' | 'reenrol';
 export type ChatDetail = Chat & { outreach_leads: Lead | null; outreach_senders: Sender | null };
@@ -105,6 +106,10 @@ export default function Thread(p: ThreadProps) {
 
   const assignee = members?.find((m) => m.user_id === chat.assigned_to);
 
+  // Item 4: one attribution call per thread, fetched again when a message arrives that it does not know yet.
+  const lastStoredId = useMemo(() => { const real = (messages ?? []).filter((m) => !m.id.startsWith('temp-')); return real.length ? real[real.length - 1].id : null; }, [messages]);
+  const attributionQ = useThreadAttribution(chat.id, lastStoredId);
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-gray-50">
       {/* Header */}
@@ -175,7 +180,7 @@ export default function Thread(p: ThreadProps) {
           <div key={g.day} className="space-y-3">
             <div className="flex items-center gap-3 text-[11px] text-gray-400 uppercase tracking-wide"><span className="flex-1 h-px bg-gray-200" />{g.day}<span className="flex-1 h-px bg-gray-200" /></div>
             {g.items.map((m) => (
-              <MessageBubble key={m.id} m={m} provider={chat.provider} now={now} canEdit={canEditMessages} onEdit={p.onEditMessage} onDelete={p.onDeleteMessage} />
+              <MessageBubble key={m.id} m={m} attribution={attributionQ.data?.[m.id]} provider={chat.provider} now={now} canEdit={canEditMessages} onEdit={p.onEditMessage} onDelete={p.onDeleteMessage} />
             ))}
           </div>
         ))}

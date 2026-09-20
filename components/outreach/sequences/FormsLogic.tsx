@@ -8,11 +8,8 @@ import ConditionEditor from './ConditionEditor';
 import TemplateField from './TemplateField';
 import { useBuilder } from './context';
 import { nodeTitle, senderName } from './helpers';
+import { Note } from './FormsShared';
 import type { FormProps } from './FormsOutreach';
-
-function Note({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs text-gray-500 leading-5">{children}</p>;
-}
 
 export function DelayEditor({ value, onChange, label }: { value: Partial<NodeDelay>; onChange: (d: NodeDelay) => void; label?: string }) {
   const amount = value.amount ?? 1, unit = value.unit ?? 'days', jitter = value.jitter_pct ?? 0;
@@ -39,21 +36,22 @@ export function DelayEditor({ value, onChange, label }: { value: Partial<NodeDel
   );
 }
 
-export function DelayForm({ cfg, set }: FormProps) {
+export function DelayForm({ cfg, patch }: FormProps) {
   return (
     <div className="space-y-3">
-      <DelayEditor value={cfg as Partial<NodeDelay>} onChange={(d) => { set('amount', d.amount); set('unit', d.unit); set('jitter_pct', d.jitter_pct ?? 0); }} label="Wait for" />
+      <DelayEditor value={cfg as Partial<NodeDelay>} onChange={(d) => patch({ amount: d.amount, unit: d.unit, jitter_pct: d.jitter_pct ?? 0 })} label="Wait for" />
       <Note>Jitter randomises the wait so sends do not cluster. The next executable step is then planned inside the sender schedule.</Note>
     </div>
   );
 }
 
-export function ConditionForm({ cfg, set }: FormProps) {
+export function ConditionForm({ cfg, patch }: FormProps) {
   const rules: ConditionRule[] = Array.isArray(cfg.rules) ? cfg.rules : [];
   return (
     <div className="space-y-3">
-      <ConditionEditor rules={rules} match={cfg.match === 'any' ? 'any' : 'all'} onChange={(r, m) => { set('rules', r); set('match', m); }} />
-      <Note>Evaluated instantly against the lead, its relation with the current sender and the sender itself.</Note>
+      <ConditionEditor rules={rules} match={cfg.match === 'any' ? 'any' : 'all'} onChange={(r, m) => patch({ rules: r, match: m })} />
+      <Note>Checked the moment the lead reaches this step, against the lead, the stored profile data, the connection with the current sender and the sender itself.</Note>
+      <Note>Profile data rules are false for a lead whose profile has not been read yet. Put a Refresh profile step first, or tick “Wait for profile enrichment” when you enrol.</Note>
     </div>
   );
 }

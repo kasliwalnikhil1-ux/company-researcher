@@ -33,3 +33,25 @@ export async function hmacSha256Hex(secret: string, body: string): Promise<strin
   const sig = await crypto.subtle.sign("HMAC", k, new TextEncoder().encode(body));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+// ---- one-click unsubscribe tokens (item 20). HMAC-SHA256 with OUTREACH_CRON_SECRET over "unsub:<leadId>".
+// The token never expires on purpose: an unsubscribe link in an old email must keep working.
+function unsubSecret(): string {
+  const s = Deno.env.get("OUTREACH_CRON_SECRET") ?? "";
+  if (!s) throw new Error("OUTREACH_CRON_SECRET not set");
+  return s;
+}
+
+export async function unsubscribeToken(leadId: string): Promise<string> {
+  return (await hmacSha256Hex(unsubSecret(), `unsub:${String(leadId).toLowerCase()}`)).slice(0, 40);
+}
+
+export async function verifyUnsubscribeToken(leadId: string, token: string): Promise<boolean> {
+  if (!leadId || !token || !/^[0-9a-f]{40}$/i.test(token)) return false;
+  let want: string;
+  try { want = await unsubscribeToken(leadId); } catch { return false; }
+  const got = token.toLowerCase();
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
+}

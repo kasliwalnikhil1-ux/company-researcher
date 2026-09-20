@@ -37,3 +37,6 @@ next-env.d.ts
 
 # outreach platform secrets (see scripts/outreach-set-secrets.sh)
 .env.outreach
+
+# Playwright MCP scratch (console logs, screenshots)
+.playwright-mcp/

@@ -4,22 +4,21 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Search, UserPlus } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Search, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { parseError, rpc } from '@/lib/outreach/api';
+import { parseError } from '@/lib/outreach/api';
+import { SEQUENCE_ASSIGNMENTS, type EnrollResult } from '@/lib/outreach/types';
 import { useClients, useLeads, useLists, useSenders, useSequence, useStages, useTags, type LeadFilters } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, Input, Select, Spinner, StatusPill, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
 import { ProjectionView } from '@/components/outreach/sequences/Projection';
 import EnrollmentsTable from '@/components/outreach/sequences/EnrollmentsTable';
 import { fetchLeadIds, projectSequence, useEffectiveCaps, type ProjectionRow } from '@/components/outreach/sequences/hooks';
 import { senderName, STATUS_TONE } from '@/components/outreach/sequences/helpers';
+import { commitEnrollment, EnrollOptions, EnrollPreviewPanel, EnrollResultPanel, requestAiLines, useEnrollPreview, useSequenceAiVariables, type AiBatchLink, type EnrollOptionsValue } from './EnrollGuard';
 
 const PAGE = 50;
-const CHUNK = 500;
 const MAX = 10000;
-
-interface EnrollResult { enrolled: number; skipped_active: number; skipped_suppressed: number; skipped_other: number }
 
 function Step({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
   return (
@@ -51,20 +50,31 @@ export default function EnrollPage() {
   const [projection, setProjection] = useState<{ row: ProjectionRow | null; error?: string; loading: boolean } | null>(null);
   const [enrolling, setEnrolling] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<EnrollResult | null>(null);
+  const [partialError, setPartialError] = useState<string | null>(null);
+  const [includeReplied, setIncludeReplied] = useState(false);
+  const [options, setOptions] = useState<EnrollOptionsValue | null>(null);
+  const [aiBatches, setAiBatches] = useState<AiBatchLink[]>([]);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => { const t = setTimeout(() => setFilters((f) => ({ ...f, search: searchText.trim() || undefined, page: 0 })), 300); return () => clearTimeout(t); }, [searchText]);
   const leads = useLeads(ws, filters);
   const pool = useMemo(() => (seq.data?.sender_pool ?? []).map((sid) => senders.data?.find((s) => s.id === sid)).filter(Boolean) as NonNullable<typeof senders.data>, [seq.data?.sender_pool, senders.data]);
   const caps = useEffectiveCaps(pool.map((s) => s.id), 'invite');
   const count = selected.size;
+  const ids = useMemo(() => [...selected], [selected]);
+  const ai = useSequenceAiVariables(ws, seq.data?.graph);
+  // The enrol guard: eligibility, exclusions, assignment and warnings all come from the database.
+  const guard = useEnrollPreview(seq.data?.id ?? null, ids, fixedSender || null, includeReplied, step === 3);
+  const eligible = guard.preview?.eligible ?? 0;
+  const opts: EnrollOptionsValue = options ?? { waitEnrichment: !!seq.data?.settings?.wait_for_enrichment, generateAi: true };
 
   useEffect(() => {
-    if (step !== 3 || !seq.data) return;
+    if (step !== 3 || !seq.data || eligible === 0) { setProjection(null); return; }
     let cancelled = false;
     setProjection({ row: null, loading: true });
-    projectSequence(seq.data.id, count).then((row) => { if (!cancelled) setProjection({ row, loading: false }); }).catch((e) => { if (!cancelled) setProjection({ row: null, loading: false, error: parseError(e).message }); });
+    projectSequence(seq.data.id, eligible).then((row) => { if (!cancelled) setProjection({ row, loading: false }); }).catch((e) => { if (!cancelled) setProjection({ row: null, loading: false, error: parseError(e).message }); });
     return () => { cancelled = true; };
-  }, [step, seq.data, count]);
+  }, [step, seq.data, eligible]);
 
   const toggle = (lid: string) => setSelected((s) => { const n = new Set(s); if (n.has(lid)) n.delete(lid); else n.add(lid); return n; });
   const pageIds = (leads.data?.rows ?? []).map((l) => l.id);
@@ -83,29 +93,35 @@ export default function EnrollPage() {
   };
 
   const enroll = async () => {
-    if (!seq.data || count === 0) return;
-    const ids = [...selected];
-    const total: EnrollResult = { enrolled: 0, skipped_active: 0, skipped_suppressed: 0, skipped_other: 0 };
+    if (!seq.data || !ws || !guard.preview || eligible === 0) return;
+    const sequenceId = seq.data.id;
+    const enrolledIds = guard.preview.eligible_ids;
     setEnrolling({ done: 0, total: ids.length });
+    setPartialError(null); setAiError(null); setAiBatches([]);
+    let total: EnrollResult | null = null;
     try {
-      for (let i = 0; i < ids.length; i += CHUNK) {
-        const chunk = ids.slice(i, i + CHUNK);
-        const rows = await rpc<EnrollResult[] | EnrollResult>('enroll_leads', { p_sequence: seq.data.id, p_lead_ids: chunk, p_sender: fixedSender || null, p_priority: priority });
-        const r = Array.isArray(rows) ? rows[0] : rows;
-        if (r) { total.enrolled += r.enrolled ?? 0; total.skipped_active += r.skipped_active ?? 0; total.skipped_suppressed += r.skipped_suppressed ?? 0; total.skipped_other += r.skipped_other ?? 0; }
-        setEnrolling({ done: Math.min(i + CHUNK, ids.length), total: ids.length });
+      // every selected lead goes to the database, so the result row also says who was skipped and why
+      total = await commitEnrollment(sequenceId, ids, { senderId: fixedSender || null, priority, includeReplied, waitEnrichment: opts.waitEnrichment, onProgress: (done, all) => setEnrolling({ done, total: all }) });
+    } catch (e) {
+      const partial = (e as { partial?: EnrollResult }).partial;
+      if (partial && partial.enrolled > 0) { total = partial; setPartialError(parseError(e).message); }
+      else toast.show(parseError(e).message, 'error');
+    }
+    if (total) {
+      if (opts.generateAi && ai.used.length > 0 && total.enrolled > 0 && enrolledIds.length > 0) {
+        try { setAiBatches(await requestAiLines(ws, sequenceId, ai.used, enrolledIds)); }
+        catch (e) { setAiError(parseError(e).message); }
       }
       setResult(total);
       setStep(4);
       qc.invalidateQueries({ queryKey: ['outreach', 'enrollments'] });
-      if (ws) qc.invalidateQueries({ queryKey: ['outreach', ws, 'sequence_summary'] });
-    } catch (e) {
-      toast.show(parseError(e).message, 'error');
-      if (total.enrolled > 0) { setResult(total); setStep(4); }
-    } finally { setEnrolling(null); }
+      qc.invalidateQueries({ queryKey: ['outreach', ws, 'sequence_summary'] });
+      qc.invalidateQueries({ queryKey: ['outreach', ws, 'dashboard'] });
+    }
+    setEnrolling(null);
   };
 
-  const reset = () => { setSelected(new Set()); setResult(null); setProjection(null); setStep(1); };
+  const reset = () => { setSelected(new Set()); setResult(null); setProjection(null); setIncludeReplied(false); setAiBatches([]); setAiError(null); setPartialError(null); setStep(1); };
 
   if (seq.isLoading) return <Spinner />;
   if (seq.error) return <ErrorBox message={parseError(seq.error).message} />;
@@ -211,11 +227,11 @@ export default function EnrollPage() {
                     ))}
                   </tbody>
                 </Table>
-                <p className="text-xs text-gray-500 mt-1">Assignment: <span className="font-medium capitalize">{s.assignment.replace('_', ' ')}</span>. Senders that are not connected cannot execute actions until they are reconnected.</p>
+                <p className="text-xs text-gray-500 mt-1">Assignment rule: <span className="font-medium text-gray-700">{SEQUENCE_ASSIGNMENTS.find((a) => a.value === s.assignment)?.label ?? s.assignment}</span>. {SEQUENCE_ASSIGNMENTS.find((a) => a.value === s.assignment)?.description} Senders that are not connected send nothing until they are reconnected.</p>
               </div>
               <div className="grid sm:grid-cols-2 gap-3 max-w-xl">
                 <Select label="Fixed sender (optional)" value={fixedSender} onChange={(e) => setFixedSender(e.target.value)}>
-                  <option value="">Assign by strategy</option>
+                  <option value="">Use the assignment rule</option>
                   {pool.map((p) => <option key={p.id} value={p.id} disabled={p.status !== 'ok'}>{senderName(p)}{p.status !== 'ok' ? ` (${p.status})` : ''}</option>)}
                 </Select>
                 <Input type="number" min={1} max={1000} label="Priority" value={priority} onChange={(e) => setPriority(Math.max(1, Number(e.target.value) || 100))} hint="Lower numbers are planned first (default 100)." />
@@ -225,32 +241,31 @@ export default function EnrollPage() {
           )}
 
           {step === 3 && (
-            <div className="space-y-4">
-              <div className="grid sm:grid-cols-3 gap-3 text-sm">
-                <div className="rounded-lg border border-gray-200 p-3"><div className="text-xs text-gray-500">Leads</div><div className="text-lg font-semibold">{count.toLocaleString()}</div></div>
+            <div className="space-y-5">
+              <div className="grid sm:grid-cols-2 gap-3 text-sm">
                 <div className="rounded-lg border border-gray-200 p-3"><div className="text-xs text-gray-500">Sender</div><div className="text-lg font-semibold truncate">{fixedSender ? senderName(pool.find((p) => p.id === fixedSender)) : `${pool.length} in pool`}</div></div>
                 <div className="rounded-lg border border-gray-200 p-3"><div className="text-xs text-gray-500">Priority</div><div className="text-lg font-semibold">{priority}</div></div>
               </div>
-              {projection?.loading ? <Spinner /> : projection?.error ? <ErrorBox message={projection.error} /> : projection?.row ? <ProjectionView row={projection.row} leadCount={count} /> : null}
-              <p className="text-xs text-gray-500">Leads that are suppressed, do-not-contact, or already live in this sequence with the same sender are skipped and reported.</p>
+              <EnrollPreviewPanel preview={guard.preview} loading={guard.loading} error={guard.error} includeReplied={includeReplied} onIncludeReplied={setIncludeReplied} hideProjection />
+              {guard.error && <Button variant="secondary" size="sm" onClick={guard.refresh}>Try again</Button>}
+              {eligible > 0 && (projection?.loading ? <Spinner /> : projection?.error ? <ErrorBox message={projection.error} /> : projection?.row ? <ProjectionView row={projection.row} leadCount={eligible} /> : null)}
+              {guard.preview && eligible > 0 && <EnrollOptions sequence={s} value={opts} onChange={setOptions} ai={ai} disabled={!!enrolling} />}
               {enrolling && (
-                <div>
-                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 transition-all" style={{ width: `${Math.round((enrolling.done / enrolling.total) * 100)}%` }} /></div>
+                <div role="status" aria-live="polite">
+                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-indigo-600 transition-all" style={{ width: `${Math.round((enrolling.done / Math.max(1, enrolling.total)) * 100)}%` }} /></div>
                   <div className="text-xs text-gray-500 mt-1">Enrolling {enrolling.done.toLocaleString()} / {enrolling.total.toLocaleString()}…</div>
                 </div>
               )}
-              <div className="flex justify-between pt-2"><Button variant="secondary" disabled={!!enrolling} onClick={() => setStep(2)}><ArrowLeft className="w-4 h-4" /> Back</Button><Button loading={!!enrolling} disabled={poolEmpty} onClick={enroll}><UserPlus className="w-4 h-4" /> Enrol {count.toLocaleString()} lead{count === 1 ? '' : 's'}</Button></div>
+              <div className="flex justify-between pt-2">
+                <Button variant="secondary" disabled={!!enrolling} onClick={() => setStep(2)}><ArrowLeft className="w-4 h-4" /> Back</Button>
+                <Button loading={!!enrolling} disabled={poolEmpty || guard.loading || !guard.preview || eligible === 0} onClick={enroll}><UserPlus className="w-4 h-4" /> Enrol {eligible.toLocaleString()} lead{eligible === 1 ? '' : 's'}</Button>
+              </div>
             </div>
           )}
 
           {step === 4 && result && (
             <div className="space-y-4">
-              <div className="flex items-center gap-2 text-green-800 bg-green-50 rounded-lg px-4 py-3 text-sm"><CheckCircle2 className="w-5 h-5" /> <span><span className="font-semibold">{result.enrolled.toLocaleString()}</span> lead{result.enrolled === 1 ? '' : 's'} enrolled.</span></div>
-              <div className="grid sm:grid-cols-3 gap-3 text-sm">
-                <div className="rounded-lg border border-gray-200 p-3"><div className="text-xs text-gray-500">Skipped: already live</div><div className="text-lg font-semibold">{result.skipped_active}</div></div>
-                <div className="rounded-lg border border-gray-200 p-3"><div className="text-xs text-gray-500">Skipped: suppressed / DNC</div><div className="text-lg font-semibold">{result.skipped_suppressed}</div></div>
-                <div className="rounded-lg border border-gray-200 p-3"><div className="text-xs text-gray-500">Skipped: other</div><div className="text-lg font-semibold">{result.skipped_other}</div></div>
-              </div>
+              <EnrollResultPanel result={result} aiBatches={aiBatches} aiError={aiError} partialError={partialError} />
               <div className="flex flex-wrap gap-2">
                 <Link href={`/outreach/sequences/${id}`}><Button variant="secondary"><ArrowLeft className="w-4 h-4" /> Back to builder</Button></Link>
                 <Button onClick={reset}><UserPlus className="w-4 h-4" /> Enrol more</Button>

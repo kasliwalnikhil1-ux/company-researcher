@@ -4,7 +4,7 @@
 # Usage:
 #   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... OUTREACH_CRON_SECRET=<secret> ./scripts/outreach-apply-migrations.sh [files...]
 #
-# Defaults to applying 001..004 in order. The cron secret must match the edge function secret OUTREACH_CRON_SECRET.
+# Defaults to applying 001..016 in order (every file is idempotent). Afterwards run ./scripts/outreach-smoke.sh. The cron secret must match the edge function secret OUTREACH_CRON_SECRET.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -15,7 +15,10 @@ BASE_URL="https://${PROJECT_REF}.supabase.co/functions/v1/"
 
 FILES=("$@")
 if [ ${#FILES[@]} -eq 0 ]; then
-  FILES=(migrations/outreach/001_schema.sql migrations/outreach/002_functions.sql migrations/outreach/003_triggers_rls.sql migrations/outreach/004_seed_cron.sql migrations/outreach/005_patches.sql migrations/outreach/006_rpc_hardening.sql migrations/outreach/007_intent_override.sql migrations/outreach/008_agent_mcp.sql)
+  FILES=(migrations/outreach/001_schema.sql migrations/outreach/002_functions.sql migrations/outreach/003_triggers_rls.sql migrations/outreach/004_seed_cron.sql migrations/outreach/005_patches.sql migrations/outreach/006_rpc_hardening.sql migrations/outreach/007_intent_override.sql migrations/outreach/008_agent_mcp.sql
+         # product plan (Sept 2026). 009 adds enum values and MUST be its own call: a new enum value cannot be used in the transaction that adds it.
+         migrations/outreach/009_enums_v2.sql migrations/outreach/010_schema_v2.sql migrations/outreach/011_engine_v2.sql migrations/outreach/012_editing_recovery_enrol.sql
+         migrations/outreach/013_reports.sql migrations/outreach/014_intelligence.sql migrations/outreach/015_platform.sql migrations/outreach/016_seed_cron_v2.sql migrations/outreach/017_hardening.sql)
 fi
 
 for f in "${FILES[@]}"; do

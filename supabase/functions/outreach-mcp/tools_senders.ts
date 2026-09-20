@@ -33,27 +33,6 @@ export function senderBrief(s: Row, today?: Row) {
   };
 }
 
-const HEALTH_EXPLAIN: Record<string, (v: number) => string> = {
-  session_stability: (v) => v < 100 ? `session_stability ${v}: LinkedIn session dropped recently (disconnects in the last 14 days${v < 60 ? ", currently not connected" : ""}). Remedy: reconnect and keep the extension/cookie sync active; avoid logging in from new devices.` : "",
-  rejection_rate: (v) => v < 100 ? `rejection_rate ${v}: LinkedIn/Unipile rejected ${v <= 40 ? "many" : "some"} actions (429/5xx) in the last 14 days. Remedy: keep volume flat; do not raise caps; wait for the score to recover.` : "",
-  acceptance_rate: (v) => v < 100 ? `acceptance_rate ${v}: invitation acceptance is low over the last 14 days. Remedy: tighter targeting, better invite notes, or invite without a note; fewer invites per day.` : "",
-  reply_rate: (v) => v < 100 ? `reply_rate ${v}: few replies to messages in the last 14 days. Remedy: shorter, more specific first messages; fewer follow-ups.` : "",
-  consistency: (v) => v < 100 ? `consistency ${v}: daily volume is spiky${v <= 10 ? " (burst after several idle days — the riskiest pattern)" : ""}. Remedy: send a similar amount every working day; warm back up gradually after breaks.` : "",
-  verification: (v) => v < 100 ? `verification ${v}: LinkedIn asked for a checkpoint/OTP recently. Remedy: lower volume for a week; make sure the proxy country matches the user's location.` : "",
-};
-
-export function explainHealth(score: number, breakdown: Row | null | undefined): string[] {
-  const out: string[] = [];
-  if (score < 50) out.push(`score ${score} < 50: the platform pauses this sender for 24h automatically (cap multiplier 0).`);
-  else if (score < 70) out.push(`score ${score} < 70: all daily caps are multiplied by 0.6 until the score recovers.`);
-  else if (score >= 85) out.push(`score ${score} ≥ 85: healthy; after 14 consecutive days ≥ 85 the warmup level increases automatically.`);
-  const b = breakdown ?? {};
-  const cats = Object.entries(b).filter(([k, v]) => typeof v === "number" && k in HEALTH_EXPLAIN).sort((a, b2) => (a[1] as number) - (b2[1] as number));
-  for (const [k, v] of cats) { const s = HEALTH_EXPLAIN[k](v as number); if (s) out.push(s); }
-  if (out.length === 0) out.push("all health categories at 100.");
-  return out;
-}
-
 export function registerSenders(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "senders_list", title: "List senders", cls: "read", minRole: "client_viewer",
@@ -96,15 +75,26 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "sender_health", title: "Sender health", cls: "read", minRole: "client_viewer",
-    description: "Health score (0–100 = the minimum of six categories), per-category breakdown, 14-day trend, and plain-language causes + remedies. Explains pauses (<50) and cap reductions (<70).",
+    description: "Health score (0–100 = the lowest of six categories), the per-category breakdown, the platform's own rule-based recommendations (severity, area, text: never AI, the same lines the sender page shows) and the 14-day score trend. Below 50 every allowance is 0; below 70 allowances drop to 60%. For warm-up progress, headroom and the invites-vs-cap chart use sender_insights.",
     input: { sender_id: z.string() },
   }, async (a) => {
-    const s = await loadSender(ctx, a.sender_id, "id, display_name, status, health_score, health_breakdown, health_high_since, warmup_level, paused_until, status_reason");
+    const s = await loadSender(ctx, a.sender_id, "id, health_high_since, paused_until, status_reason");
     const since = new Date(Date.now() - 14 * 86400_000).toISOString();
-    const { data: ev } = await ctx.user.from("outreach_sender_events").select("at, data").eq("sender_id", s.id).eq("kind", "health").gte("at", since).order("at", { ascending: true }).limit(60);
-    const trend = (ev ?? []).map((e: Row) => ({ at: e.at.slice(0, 16), score: e.data?.score ?? e.data?.health_score })).filter((x) => typeof x.score === "number");
-    const { computed_at, trigger, ...cats } = (s.health_breakdown ?? {}) as Row;
-    return { sender: s.display_name, status: s.status, score: s.health_score, computed_at, categories: cats, high_since: s.health_high_since, paused_until: s.paused_until, causes: explainHealth(s.health_score, cats), trend_14d: trend };
+    const [ins, { data: ev }] = await Promise.all([
+      urpc<Row>(ctx, "sender_insights", { p_sender: s.id }),
+      ctx.user.from("outreach_sender_events").select("at, data").eq("sender_id", s.id).eq("kind", "health").gte("at", since).order("at", { ascending: true }).limit(60),
+    ]);
+    const trend = (ev ?? []).map((e: Row) => ({ at: e.at.slice(0, 16), score: e.data?.to ?? e.data?.score ?? e.data?.health_score })).filter((x) => typeof x.score === "number");
+    return { sender: ins.sender?.name, status: ins.sender?.status, score: ins.sender?.health, categories: ins.health_breakdown, recommendations: ins.recommendations, high_since: s.health_high_since, paused_until: s.paused_until && new Date(s.paused_until) > new Date() ? s.paused_until : undefined, status_reason: s.status_reason, trend_14d: trend };
+  });
+
+  tool(server, ctx, {
+    name: "sender_insights", title: "Sender insights", cls: "read", minRole: "client_viewer",
+    description: "Everything the sender page shows, from one database function: health_breakdown; recommendations [{severity high|medium|low|ok, area, text}] written by rules over the breakdown (quote them, do not invent advice); warmup {level, max_level, locked_until, next_level_on, unlocks (plain sentence), caps_now, caps_next}; last_30_days {headroom_pct (unused share of the invitation allowance), limit_hits (LinkedIn's own limit), acceptance_rate and acceptance_rate_previous, network_growth, invites, accepted, replies, reply_rate}; invites_vs_cap [{day, sent, cap}] for 30 days; inmail_guard {max_today, rule}: InMails may grow at most about 50% above last week's daily average. Headroom is room for more leads on this sender, never a reason to raise caps.",
+    input: { sender_id: z.string(), include_chart: z.boolean().optional().describe("Include the 30-day invites_vs_cap series (default true)") },
+  }, async (a) => {
+    const r = await urpc<Row>(ctx, "sender_insights", { p_sender: a.sender_id });
+    return { ...r, invites_vs_cap: a.include_chart === false ? undefined : r.invites_vs_cap };
   });
 
   tool(server, ctx, {
@@ -146,7 +136,7 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "senders_capacity", title: "Aggregate capacity", cls: "read", minRole: "client_viewer",
-    description: "How many actions (invite/message/profile_view/inmail/email) a set of senders can do over the next N days, from effective caps × scheduled days, minus what is already used today. Use before planning volume or choosing a pool.",
+    description: "Planning estimate: how many actions (invite/message/profile_view/inmail/email) a set of senders can do over the next N days, from the platform's effective caps × scheduled days, minus what is already used or reserved today. A sender the platform reports as blocked (disconnected, paused, no working hours, health below 50: the why_not_sending diagnosis) contributes 0 and carries the reason. An estimate for choosing a pool, not a reported metric; the ledger enforces the real numbers.",
     input: { sender_ids: z.array(z.string()).min(1).max(50), days: z.number().int().min(1).max(60).optional().describe("Horizon in days (default 7)") },
   }, async (a) => {
     const days = a.days ?? 7;
@@ -163,7 +153,10 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
       const now = new Date();
       for (let d = 0; d < days; d++) { const w = WEEKDAYS[new Date(now.getTime() + d * 86400_000).getUTCDay()]; if ((sched[w] ?? []).length > 0) workDays++; }
       const row: Row = { id: s.id, name: s.display_name, status: s.status, health: s.health_score, level: s.warmup_level, scheduled_days: workDays, available: {} };
-      if (s.status !== "ok") { row.note = `status ${s.status}: contributes 0 until reconnected/resumed`; per.push(row); continue; }
+      // whether this sender can send at all is the platform's call (the same diagnosis as why_not_sending)
+      const diag = await urpc<Row>(ctx, "why_not_sending", { p_sender: s.id }).catch((): Row => ({}));
+      const hard = (diag.causes ?? []).filter((c: Row) => c.blocking && c.code !== "E_CAP_ZERO"); // a zero cap for one action type already shows as 0 below
+      if (hard.length) { row.blocked = true; row.note = `${hard[0].detail}. Contributes 0 until that is fixed: ${hard[0].remedy}`; per.push(row); continue; }
       for (const t of ["invite", "message", "profile_view", "inmail", "email"]) {
         const cap = await urpc<number>(ctx, "effective_cap_checked", { p_sender: s.id, p_type: t }).catch(() => 0);
         let avail = cap * workDays - (today?.[t]?.used ?? 0) - (today?.[t]?.reserved ?? 0);

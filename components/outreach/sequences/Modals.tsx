@@ -1,6 +1,7 @@
 'use client';
 
-import { AlertTriangle, CheckCircle2, Sparkles, XCircle } from 'lucide-react';
+import { useEffect, useRef } from 'react';
+import { AlertTriangle, CheckCircle2, Sparkles, X, XCircle } from 'lucide-react';
 import { Button, ErrorBox, Modal, Spinner } from '@/components/outreach/ui';
 import type { GraphIssue } from '@/lib/outreach/graph';
 import type { Graph } from '@/lib/outreach/types';
@@ -8,7 +9,7 @@ import { nodeTitle } from './helpers';
 
 export interface QaState { loading: boolean; errors: GraphIssue[]; warnings: GraphIssue[]; ai_available: boolean; failed?: string | null; activating?: boolean }
 
-function IssueList({ items, level, graph, onFocus }: { items: GraphIssue[]; level: 'error' | 'warning'; graph: Graph; onFocus: (id: string) => void }) {
+export function IssueList({ items, level, graph, onFocus }: { items: GraphIssue[]; level: 'error' | 'warning'; graph: Graph; onFocus: (id: string) => void }) {
   if (items.length === 0) return null;
   const err = level === 'error';
   return (
@@ -69,32 +70,65 @@ export function ConfirmModal({ open, title, body, confirmLabel, danger, busy, on
   );
 }
 
-export function InflightDeleteModal({ req, busy, onChoose }: { req: { nodeId: string; label: string; count: number } | null; busy: boolean; onChoose: (mode: 'skip' | 'cancel' | null) => void }) {
-  if (!req) return null;
+/**
+ * Leaving the builder. The graph is auto-saved as a draft, so this only shows when the draft write failed
+ * or when name / settings / pool changes (which the draft does not carry) would be lost.
+ */
+export function UnsavedModal({ open, busy, draftFailed, metaLabels, primaryLabel, onCancel, onLeave, onPrimary }: {
+  open: boolean; busy: boolean; draftFailed: boolean; metaLabels: string[]; primaryLabel: string;
+  onCancel: () => void; onLeave: () => void; onPrimary: () => void;
+}) {
   return (
-    <Modal open onClose={() => onChoose(null)} title={`Delete “${req.label}”`} size="md" footer={
-      <>
-        <Button variant="secondary" onClick={() => onChoose(null)} disabled={busy}>Keep step</Button>
-        <Button variant="secondary" loading={busy} onClick={() => onChoose('skip')}>Skip in-flight ({req.count})</Button>
-        <Button variant="danger" loading={busy} onClick={() => onChoose('cancel')}>Cancel in-flight ({req.count})</Button>
-      </>
-    }>
+    <Modal open={open} onClose={onCancel} title="Changes not saved yet" size="sm" footer={<><Button variant="secondary" onClick={onCancel} disabled={busy}>Stay</Button><Button variant="danger" onClick={onLeave} disabled={busy}>Leave anyway</Button><Button loading={busy} onClick={onPrimary} autoFocus>{primaryLabel}</Button></>}>
       <div className="text-sm text-gray-700 space-y-2">
-        <p><span className="font-semibold">{req.count.toLocaleString()}</span> enrollment{req.count === 1 ? ' is' : 's are'} currently at this step.</p>
-        <ul className="list-disc pl-5 text-xs text-gray-600 space-y-1">
-          <li><span className="font-medium text-gray-800">Skip</span>: queued actions for this step are cancelled and the enrollments move on to the next step immediately.</li>
-          <li><span className="font-medium text-gray-800">Cancel</span>: the enrollments exit the sequence (exited manually, reason “node deleted”).</li>
-        </ul>
-        <p className="text-xs text-gray-500">The choice is applied right away and recorded in the audit log; remember to save the graph afterwards.</p>
+        {draftFailed && <p>The draft could not be saved to the server. A copy is kept in this browser, and you can restore it when you come back.</p>}
+        {metaLabels.length > 0 && <p>These changes are not part of the saved draft: <span className="font-medium">{metaLabels.join(', ')}</span>. They are kept in this browser only until you {primaryLabel.toLowerCase().startsWith('save') ? 'save' : 'publish'}.</p>}
       </div>
     </Modal>
   );
 }
 
-export function UnsavedModal({ open, busy, onCancel, onDiscard, onSaveAndGo }: { open: boolean; busy: boolean; onCancel: () => void; onDiscard: () => void; onSaveAndGo: () => void }) {
+const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Right-hand drawer: focus moves in on open, Tab stays inside, Escape closes, focus returns on close. */
+export function Drawer({ open, onClose, title, subtitle, children, footer, width = 'max-w-2xl' }: { open: boolean; onClose: () => void; title: React.ReactNode; subtitle?: React.ReactNode; children: React.ReactNode; footer?: React.ReactNode; width?: string }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.activeElement as HTMLElement | null;
+    panel.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      // a modal opened from inside the drawer (confirmations) owns the keyboard while it is up
+      if (document.querySelector('.fixed.inset-0.z-50')) return;
+      if (e.key === 'Escape') { e.stopPropagation(); onCloseRef.current(); return; }
+      if (e.key !== 'Tab' || !panel.current) return;
+      const items = Array.from(panel.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);
+      if (items.length === 0) { e.preventDefault(); return; }
+      const first = items[0], last = items[items.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === panel.current)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { window.removeEventListener('keydown', onKey); prev?.focus?.(); };
+  }, [open]);
+  if (!open) return null;
   return (
-    <Modal open={open} onClose={onCancel} title="Unsaved changes" size="sm" footer={<><Button variant="secondary" onClick={onCancel} disabled={busy}>Stay</Button><Button variant="danger" onClick={onDiscard} disabled={busy}>Discard</Button><Button loading={busy} onClick={onSaveAndGo}>Save and continue</Button></>}>
-      <p className="text-sm text-gray-700">You have unsaved changes to this sequence. Save them before leaving, or discard them.</p>
-    </Modal>
+    <div className="fixed inset-0 z-40 flex justify-end nokey" data-outreach-drawer>
+      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} tabIndex={-1} className={`relative bg-white shadow-2xl w-full ${width} h-full flex flex-col focus:outline-none`}>
+        <div className="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-100">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-gray-900 truncate">{title}</h3>
+            {subtitle && <p className="text-xs text-gray-500 mt-0.5">{subtitle}</p>}
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">{children}</div>
+        {footer && <div className="px-5 py-3 border-t border-gray-100 flex flex-wrap items-center justify-end gap-2">{footer}</div>}
+      </div>
+    </div>
   );
 }

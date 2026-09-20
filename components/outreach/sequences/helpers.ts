@@ -1,6 +1,6 @@
 // Pure helpers for the sequence builder: graph mutations, layout, summaries, diffs.
 import type { Graph, GraphNode, List, NodeDelay, NodeType, OutboundWebhook, Sender, Sequence, SequenceStatus, Stage, Tag } from '@/lib/outreach/types';
-import { NODE_CATALOG, newNode } from '@/lib/outreach/nodes';
+import { NODE_CATALOG, newNode, nodeExits } from '@/lib/outreach/nodes';
 import { parseError } from '@/lib/outreach/api';
 
 export interface Lookup {
@@ -81,6 +81,14 @@ export function nodeSummary(node: GraphNode, lookup: Lookup = {}, nodes: Record<
   }
 }
 
+/**
+ * True when the step leaves through the top-level `next`. Steps whose exits come from their config
+ * (A/B split, AI routing) always use `branches`, even with a single branch left.
+ */
+export function usesNext(n: GraphNode): boolean {
+  return nodeExits(n).length === 1 && !NODE_CATALOG[n.type]?.dynamicExits;
+}
+
 export function cloneGraph(g: Graph): Graph {
   return JSON.parse(JSON.stringify(g)) as Graph;
 }
@@ -90,9 +98,9 @@ export function connectNodes(g: Graph, source: string, handle: string, target: s
   const next = cloneGraph(g);
   const n = next.nodes[source];
   if (!n || !next.nodes[target] || source === target) return g;
-  const exits = NODE_CATALOG[n.type].exits;
+  const exits = nodeExits(n);
   if (exits.length === 0) return g;
-  if (exits.length === 1) { n.next = target; }
+  if (usesNext(n)) { n.next = target; }
   else { n.branches = { ...(n.branches ?? {}), [exits.includes(handle) ? handle : exits[0]]: target }; }
   return next;
 }
@@ -101,9 +109,11 @@ export function disconnectNodes(g: Graph, source: string, handle: string): Graph
   const next = cloneGraph(g);
   const n = next.nodes[source];
   if (!n) return g;
-  const exits = NODE_CATALOG[n.type].exits;
-  if (exits.length === 1) n.next = null;
+  if (usesNext(n)) n.next = null;
   else if (n.branches && handle in n.branches) n.branches[handle] = null;
+  // a fallback that only lives in the top-level `next` (step made outside the builder): record the cut in branches,
+  // normalizeGraph then clears `next` when the graph is saved
+  else if (handle === 'next' && n.next && nodeExits(n).includes('next')) { n.branches = { ...(n.branches ?? {}), next: null }; n.next = null; }
   return next;
 }
 
@@ -228,8 +238,8 @@ export function nodeCount(g: Graph | null | undefined): number {
   return g ? Object.keys(g.nodes ?? {}).length : 0;
 }
 
-export function isTerminal(type: NodeType): boolean {
-  return NODE_CATALOG[type].exits.length === 0;
+export function isTerminal(node: GraphNode): boolean {
+  return nodeExits(node).length === 0;
 }
 
 export function poolSummary(pool: string[], senders: Sender[]): { ok: Sender[]; notOk: Sender[]; missing: number } {

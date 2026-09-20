@@ -9,7 +9,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
-import { qk, useChat, useChats, useClients, useMembers, useMessages, useSenders, type ChatFilters } from '@/lib/outreach/queries';
+import { qk, useChat, useChats, useClients, useMembers, useMessages, useSenders, useSequences, type ChatFilters } from '@/lib/outreach/queries';
+import { CHAT_IDS_FETCH_LIMIT, useChatsByIds, useSequenceChatIds } from '@/lib/outreach/intel';
 import type { Chat, Intent, Message } from '@/lib/outreach/types';
 import { EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import ChatList from './ChatList';
@@ -19,7 +20,11 @@ import { isTypingTarget, useDebounced, useMediaQuery } from './hooks';
 
 const FILTERS_KEY = 'outreach-inbox-filters';
 
-function loadFilters(): ChatFilters {
+/** `?chats=<ids>&label=<text>`: the reports page opens the inbox on exactly these threads. */
+export interface InboxRestrict { ids: string[]; label: string }
+type InboxFilters = ChatFilters & { sequence_id?: string | null };
+
+function loadFilters(): InboxFilters {
   try {
     const raw = localStorage.getItem(FILTERS_KEY);
     if (raw) { const f = JSON.parse(raw); if (f && typeof f === 'object') return { ...f, search: undefined }; }
@@ -27,7 +32,7 @@ function loadFilters(): ChatFilters {
   return {};
 }
 
-export default function InboxView({ chatId, initialFilters }: { chatId: string | null; initialFilters?: Partial<ChatFilters> }) {
+export default function InboxView({ chatId, initialFilters, restrict }: { chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null }) {
   const router = useRouter();
   const qc = useQueryClient();
   const { user } = useAuth();
@@ -36,7 +41,7 @@ export default function InboxView({ chatId, initialFilters }: { chatId: string |
   const toast = useToast();
   const userId = user?.id ?? null;
 
-  const [filters, setFilters] = useState<ChatFilters>({});
+  const [filters, setFilters] = useState<InboxFilters>({});
   const [search, setSearch] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
   const [convert, setConvert] = useState<ConvertKind | null>(null);
@@ -47,7 +52,7 @@ export default function InboxView({ chatId, initialFilters }: { chatId: string |
     // URL params (e.g. from dashboard links) override the remembered filters.
     setFilters(initialFilters ? { ...loadFilters(), ...initialFilters } : loadFilters());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const patchFilters = useCallback((patch: Partial<ChatFilters>) => {
+  const patchFilters = useCallback((patch: Partial<InboxFilters>) => {
     setFilters((f) => {
       const next = { ...f, ...patch };
       try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
@@ -55,19 +60,49 @@ export default function InboxView({ chatId, initialFilters }: { chatId: string |
     });
   }, []);
 
-  const effectiveFilters = useMemo<ChatFilters>(() => ({ ...filters, search: debouncedSearch || undefined }), [filters, debouncedSearch]);
-  const chatsQ = useChats(ws, effectiveFilters);
+  const effectiveFilters = useMemo<ChatFilters>(() => { const { sequence_id: _seq, ...rest } = filters; return { ...rest, search: debouncedSearch || undefined }; }, [filters, debouncedSearch]);
+
+  // Restrictions by thread id: the reports drill-down (?chats=) and the sequence filter (outreach_sequence_chat_ids).
+  const sequenceId = filters.sequence_id ?? null;
+  const seqIdsQ = useSequenceChatIds(sequenceId);
+  const restrictKey = restrict ? restrict.ids.join(',') : '';
+  const restrictIds = useMemo<string[] | null>(() => {
+    const fromUrl = restrict ? restrict.ids : null;
+    const fromSeq = sequenceId ? (seqIdsQ.data ? Array.from(seqIdsQ.data) : []) : null;
+    if (fromUrl && fromSeq) { const s = new Set(fromSeq); return fromUrl.filter((id) => s.has(id)); }
+    return fromUrl ?? fromSeq;
+  }, [restrictKey, sequenceId, seqIdsQ.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  const waitingForSeq = !!sequenceId && seqIdsQ.isLoading;
+  const fetchByIds = !!restrictIds && !waitingForSeq && restrictIds.length <= CHAT_IDS_FETCH_LIMIT;
+  const listQ = useChats(fetchByIds || waitingForSeq ? null : ws, effectiveFilters);
+  const byIdsQ = useChatsByIds(fetchByIds ? ws : null, fetchByIds ? restrictIds : null, effectiveFilters);
+  const chatsQ = fetchByIds ? byIdsQ : listQ;
   const sendersQ = useSenders(ws);
+  const sequencesQ = useSequences(ws);
+  // A remembered sequence filter that no longer exists (deleted, other workspace) is dropped instead of erroring.
+  useEffect(() => {
+    if (sequenceId && sequencesQ.data && !sequencesQ.data.some((s) => s.id === sequenceId)) patchFilters({ sequence_id: null });
+  }, [sequenceId, sequencesQ.data, patchFilters]);
   const clientsQ = useClients(ws);
   const membersQ = useMembers(ws);
   const chatQ = useChat(chatId);
   const messagesQ = useMessages(chatId);
 
-  const rows = chatsQ.data;
+  const rows = useMemo(() => {
+    if (waitingForSeq) return undefined;
+    if (fetchByIds || !restrictIds) return chatsQ.data;
+    const allowed = new Set(restrictIds);
+    return chatsQ.data?.filter((c) => allowed.has(c.id));
+  }, [waitingForSeq, fetchByIds, restrictIds, chatsQ.data]);
+  const listError = seqIdsQ.error ?? chatsQ.error;
+  const listNote = restrictIds && !fetchByIds && !waitingForSeq ? `This filter matches ${restrictIds.length.toLocaleString()} conversations. Showing the ones among the 300 most recent.` : null;
   const chat = chatQ.data ?? null;
 
-  const select = useCallback((id: string) => { router.replace(`/outreach/inbox/${id}`); setPanelOpen(false); }, [router]);
-  const back = useCallback(() => router.replace('/outreach/inbox'), [router]);
+  // Keep the drill-down in the URL while moving between threads.
+  const restrictQs = useMemo(() => (restrict ? `?chats=${encodeURIComponent(restrict.ids.join(','))}&label=${encodeURIComponent(restrict.label)}` : ''), [restrictKey, restrict?.label]); // eslint-disable-line react-hooks/exhaustive-deps
+  const select = useCallback((id: string) => { router.replace(`/outreach/inbox/${id}${restrictQs}`); setPanelOpen(false); }, [router, restrictQs]);
+  const back = useCallback(() => router.replace(`/outreach/inbox${restrictQs}`), [router, restrictQs]);
+  const clearRestrict = useCallback(() => router.replace(chatId ? `/outreach/inbox/${chatId}` : '/outreach/inbox'), [router, chatId]);
 
   // ---------------------------------------------------------------- chat mutations
   const updateChat = useCallback(async (id: string, patch: Partial<Chat>, silent = false) => {
@@ -170,7 +205,9 @@ export default function InboxView({ chatId, initialFilters }: { chatId: string |
       {/* Left: chat list */}
       <aside className={cn('w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-gray-200 min-h-0', showList ? 'flex' : 'hidden md:flex', 'flex-col')}>
         <ChatList
-          rows={rows} loading={chatsQ.isLoading} error={chatsQ.error ? parseError(chatsQ.error).message : null}
+          rows={rows} loading={chatsQ.isLoading || waitingForSeq} error={listError ? parseError(listError).message : null}
+          sequences={sequencesQ.data} sequenceId={sequenceId} onSequence={(id) => patchFilters({ sequence_id: id })}
+          restrictLabel={restrict?.label ?? null} restrictCount={restrict?.ids.length ?? 0} onClearRestrict={clearRestrict} note={listNote}
           filters={filters} onFilters={patchFilters} search={search} onSearch={setSearch}
           senders={sendersQ.data} clients={clientsQ.data} currentUserId={userId} selectedId={chatId} onSelect={select}
         />

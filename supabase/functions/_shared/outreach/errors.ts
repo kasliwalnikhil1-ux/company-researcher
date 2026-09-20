@@ -10,7 +10,10 @@ export type Decision =
   | { kind: "sender_cap_hit"; type: "invite"; until: Date; reason: string }
   | { kind: "sender_pause"; hours: number; reason: string }
   | { kind: "sender_credentials"; reason: string }
-  | { kind: "branch"; name: string; reason: string };
+  | { kind: "branch"; name: string; reason: string }
+  // clean exits, not failures: fail_action maps them to exited_replied / exited_suppressed and records no sender reject
+  | { kind: "replied"; reason: string }
+  | { kind: "suppressed"; reason: string };
 
 export interface ErrorCtx {
   actionType: string;

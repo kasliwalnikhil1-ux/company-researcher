@@ -4,9 +4,10 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useLead } from '@/lib/outreach/queries';
+import { useQueryClient } from '@tanstack/react-query';
+import { qk, useLead, useSequences } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
-import { Button, EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
+import { Button, Card, EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import { ArrowLeft, UserX } from 'lucide-react';
 import { EnrollModal } from '@/components/outreach/leads/EnrollModal';
 import { LeadHeader } from '@/components/outreach/leads/detail/LeadHeader';
@@ -16,11 +17,18 @@ import { LeadCustomFields } from '@/components/outreach/leads/detail/LeadCustomF
 import { LeadRelations } from '@/components/outreach/leads/detail/LeadRelations';
 import { LeadEnrollments } from '@/components/outreach/leads/detail/LeadEnrollments';
 import { LeadChats, LeadRecentActions, LeadTasks, LeadTimeline } from '@/components/outreach/leads/detail/LeadActivity';
+import { EnrichmentCard } from '@/components/outreach/leads/detail/EnrichmentCard';
+import { QueuedActions } from '@/components/outreach/leads/detail/QueuedActions';
+import { HeldNotice } from '@/components/outreach/leads/detail/HeldNotice';
+import { leadName } from '@/components/outreach/leads/helpers';
+import { ik, type EnrollmentWithHold } from '@/lib/outreach/intel';
 
 export default function LeadDetailPage() {
   const params = useParams<{ id: string }>();
   const id = typeof params?.id === 'string' ? params.id : '';
-  const { workspace } = useWorkspace();
+  const { workspace, canWrite } = useWorkspace();
+  const qc = useQueryClient();
+  const sequences = useSequences(workspace?.id);
   const toast = useToast();
   const lead = useLead(id);
   const [enrollOpen, setEnrollOpen] = useState(false);
@@ -40,19 +48,27 @@ export default function LeadDetailPage() {
     return <div>{back}<div className="bg-white border border-gray-200 rounded-xl"><EmptyState icon={<UserX className="w-6 h-6" />} title="Lead belongs to another workspace" description="Switch workspace from the top bar to view it." action={<Link href="/outreach/leads"><Button variant="secondary">Back to leads</Button></Link>} /></div></div>;
   }
 
+  const held = (enrollments as EnrollmentWithHold[]).filter((e) => !!e.held_at && e.status === 'paused');
+
   return (
     <div className="space-y-4">
       {back}
       <LeadHeader lead={l} onEnroll={() => setEnrollOpen(true)} toast={toast.show} />
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,3fr),minmax(0,2fr)] gap-4">
         <div className="space-y-4 min-w-0">
+          {held.map((e) => (
+            <HeldNotice key={e.id} enrollment={e} sequenceName={sequences.data?.find((s) => s.id === e.sequence_id)?.name} canWrite={canWrite} toast={toast.show}
+              onDone={() => { qc.invalidateQueries({ queryKey: qk.lead(l.id) }); qc.invalidateQueries({ queryKey: ik.queued(l.id) }); qc.invalidateQueries({ queryKey: ik.timeline(l.id) }); if (workspace) qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'tasks'] }); }} />
+          ))}
           <LeadRelations states={states} />
           <LeadEnrollments leadId={l.id} enrollments={enrollments} onEnroll={() => setEnrollOpen(true)} toast={toast.show} />
+          <Card title="Next scheduled actions"><QueuedActions leadId={l.id} leadName={leadName(l)} toast={toast.show} /></Card>
           <LeadChats chats={chats} />
           <LeadTimeline leadId={l.id} />
           <LeadRecentActions actions={actions} />
         </div>
         <div className="space-y-4 min-w-0">
+          <EnrichmentCard lead={l} toast={toast.show} />
           <LeadEditForm lead={l} toast={toast.show} />
           <LeadTagsEditor leadId={l.id} tagIds={tagIds} toast={toast.show} />
           <LeadCustomFields leadId={l.id} custom={l.custom ?? {}} toast={toast.show} />

@@ -406,6 +406,9 @@ create trigger crm_captures_bd before delete on crm_meeting_captures for each ro
 drop trigger if exists crm_commitments_bu on crm_commitments;
 create trigger crm_commitments_bu before update on crm_commitments for each row execute function crm_set_updated_at();
 
+drop trigger if exists crm_transcripts_bu on crm_meeting_transcripts;
+create trigger crm_transcripts_bu before update on crm_meeting_transcripts for each row execute function crm_set_updated_at();
+
 -- -----------------------------------------------------------------------------
 -- Views (security_invoker → RLS of the caller applies)
 -- -----------------------------------------------------------------------------
@@ -432,14 +435,16 @@ select mt.*,
        d.company_id, c.name as company_name, d.stage as deal_stage, d.value_monthly, d.currency, d.value_monthly_usd, d.owner_id,
        ct.name as contact_name, ct.role as contact_role, ct.email as contact_email,
        seg.label as icp_segment_label, ch.label as source_channel_label,
-       (cap.id is not null) as has_capture, cap.outcome as capture_outcome
+       (cap.id is not null) as has_capture, cap.outcome as capture_outcome,
+       (tr.id is not null) as has_transcript          -- new columns go last: create or replace view cannot reorder
 from crm_meetings mt
 join crm_deals d on d.id = mt.deal_id
 join crm_companies c on c.id = d.company_id
 left join crm_contacts ct on ct.id = mt.contact_id
 left join crm_icp_segments seg on seg.id = c.icp_segment_id
 left join crm_source_channels ch on ch.id = d.source_channel_id
-left join crm_meeting_captures cap on cap.meeting_id = mt.id;
+left join crm_meeting_captures cap on cap.meeting_id = mt.id
+left join crm_meeting_transcripts tr on tr.meeting_id = mt.id;
 
 create or replace view crm_activities_v with (security_invoker = true) as
 select a.*, t.slug as activity_type_slug, t.label as activity_type_label, t.counts_as,
@@ -460,7 +465,7 @@ declare t text;
 begin
   for t in select unnest(array['crm_settings','crm_icp_segments','crm_source_channels','crm_activity_types','crm_fx_rates','crm_channel_costs',
                                'crm_companies','crm_contacts','crm_deals','crm_stage_history','crm_activities','crm_meetings','crm_meeting_captures',
-                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments']) loop
+                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments','crm_meeting_transcripts']) loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists crm_member_all on %I', t);
     execute format('create policy crm_member_all on %I for all to authenticated using (crm_is_member()) with check (crm_is_member())', t);
@@ -473,6 +478,7 @@ create policy crm_members_read on crm_members for select to authenticated using 
 -- writes to crm_members only via RPCs (security definer)
 
 alter table crm_agent_calls enable row level security;   -- no policies: service role only
+alter table crm_upload_tickets enable row level security; -- no policies: minted/consumed only inside crm_transcript_ticket / crm_save_transcript
 
 grant select on crm_deals_v, crm_meetings_v, crm_activities_v to authenticated;
 
@@ -847,6 +853,211 @@ begin
   return to_jsonb(cap);
 end $$;
 
+-- ------------------------------------------------------------------ transcripts (call recordings)
+-- Speaker indexes are 0-based (Deepgram); the default label is "Speaker N+1", the way the get-transcript pack prints it.
+create or replace function crm_transcript_label(p_speakers jsonb, p_speaker int) returns text
+language sql immutable as $$
+  select case when p_speaker is null then 'Speaker'
+              else coalesce((select nullif(trim(s->>'label'), '') from jsonb_array_elements(coalesce(p_speakers, '[]'::jsonb)) s where (s->>'speaker')::int = p_speaker limit 1),
+                            'Speaker ' || (p_speaker + 1)) end;
+$$;
+
+create or replace function crm_transcript_text(p_turns jsonb, p_speakers jsonb) returns text
+language sql immutable as $$
+  select coalesce(string_agg(crm_transcript_label(p_speakers, nullif(t.v->>'speaker', '')::int) || ': ' || (t.v->>'text'), E'\n' order by t.ord), '')
+  from jsonb_array_elements(coalesce(p_turns, '[]'::jsonb)) with ordinality t(v, ord);
+$$;
+
+-- Everything about a transcript except the turns. Security INVOKER on purpose: called directly it is RLS-scoped (members only).
+create or replace function crm_transcript_json(p_meeting_id uuid) returns jsonb
+language sql stable set search_path = public as $$
+  select jsonb_build_object(
+    'meeting_id', tr.meeting_id, 'company', mv.company_name, 'company_id', mv.company_id, 'contact', mv.contact_name, 'scheduled_at', mv.scheduled_at, 'meeting_status', mv.status,
+    'summary', tr.summary, 'topics', to_jsonb(tr.topics), 'language', tr.language, 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count,
+    'avg_confidence', tr.avg_confidence, 'low_confidence', tr.low_confidence, 'speakers', tr.speakers, 'turn_count', jsonb_array_length(tr.turns),
+    'source', tr.source, 'engine', tr.engine, 'model', tr.model, 'saved_by', mem.display_name, 'created_at', tr.created_at, 'updated_at', tr.updated_at)
+  from crm_meeting_transcripts tr join crm_meetings_v mv on mv.id = tr.meeting_id left join crm_members mem on mem.user_id = tr.created_by
+  where tr.meeting_id = p_meeting_id;
+$$;
+
+-- A member mints a one-time ticket (the connector makes the token and passes only its SHA-256); a script then posts the
+-- transcript with it. 30 minutes, single use, bound to one meeting.
+create or replace function crm_transcript_ticket(p_meeting_id uuid, p_token_sha256 text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare exp timestamptz := now() + interval '30 minutes';
+begin
+  perform crm_require_member();
+  if p_token_sha256 is null or p_token_sha256 !~ '^[0-9a-f]{64}$' then raise exception 'E_PAYLOAD_INVALID: token hash must be 64 lowercase hex characters'; end if;
+  if not exists (select 1 from crm_meetings where id = p_meeting_id) then raise exception 'E_NOT_FOUND: meeting % not found', p_meeting_id; end if;
+  delete from crm_upload_tickets where expires_at < now() - interval '1 day';
+  insert into crm_upload_tickets(token_sha256, user_id, meeting_id, expires_at) values (p_token_sha256, auth.uid(), p_meeting_id, exp);
+  return jsonb_build_object('meeting_id', p_meeting_id, 'expires_at', exp);
+end $$;
+
+-- Save (or replace) a meeting's transcript. Two ways in, one write path:
+--   member:  crm_save_transcript(meeting_id, p)                — /crm screens and the connector's save_transcript tool
+--   ticket:  crm_save_transcript(null, p, sha256(token))       — the connector's upload endpoint; the ticket IS the authority
+-- p = {turns:[{speaker,start,end,text}], speakers:[{speaker,label,role,contact_id?,member_id?,words?,share_of_words?,speaking_seconds?}],
+--      summary, topics[], language, duration_seconds, word_count, avg_confidence, low_confidence[], source, engine, model}
+create or replace function crm_save_transcript(p_meeting_id uuid, p jsonb, p_ticket_sha256 text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid; mid uuid := p_meeting_id; tk crm_upload_tickets; m crm_meetings; v_turns jsonb; v_speakers jsonb; n int; chars bigint; num_re constant text := '^\d+(\.\d+)?$';
+begin
+  if p_ticket_sha256 is null then
+    perform crm_require_member();
+    uid := auth.uid();
+  else
+    -- a rejected payload rolls this back too, so a failed upload can be retried with the same ticket
+    update crm_upload_tickets set used_at = now() where token_sha256 = p_ticket_sha256 and used_at is null and expires_at > now() returning * into tk;
+    if tk.token_sha256 is null then raise exception 'E_UNAUTHORIZED: upload ticket is invalid, expired or already used — get a new one with transcript_upload_ticket'; end if;
+    if not exists (select 1 from crm_members where user_id = tk.user_id and is_active) then raise exception 'E_FORBIDDEN: the ticket owner is no longer on the CRM team'; end if;
+    uid := tk.user_id; mid := tk.meeting_id;
+  end if;
+  select * into m from crm_meetings where id = mid;
+  if m.id is null then raise exception 'E_NOT_FOUND: meeting % not found', mid; end if;
+  if p is null or jsonb_typeof(p->'turns') is distinct from 'array' then raise exception 'E_PAYLOAD_INVALID: turns must be an array of {speaker, start, end, text}'; end if;
+
+  select coalesce(jsonb_agg(jsonb_build_object('speaker', sp, 'start', st, 'end', en, 'text', tx) order by ord), '[]'::jsonb), count(*), coalesce(sum(length(tx)), 0)
+    into v_turns, n, chars
+  from (select ord, case when (t->>'speaker') ~ '^\d+$' then (t->>'speaker')::int end as sp,
+               case when (t->>'start') ~ num_re then round((t->>'start')::numeric, 2) end as st,
+               case when (t->>'end') ~ num_re then round((t->>'end')::numeric, 2) end as en,
+               trim(t->>'text') as tx
+        from jsonb_array_elements(p->'turns') with ordinality x(t, ord)) z
+  where tx is not null and tx <> '';
+  if n = 0 then raise exception 'E_PAYLOAD_INVALID: turns has no text'; end if;
+  if n > 6000 or chars > 1500000 then raise exception 'E_PAYLOAD_INVALID: transcript too large (% turns, % characters; max 6000 turns / 1.5M characters)', n, chars; end if;
+
+  -- speakers = what the caller named + any index that speaks in the turns and was not named
+  with given as (
+    select distinct on (sp) sp, s from (select case when (s->>'speaker') ~ '^\d+$' then (s->>'speaker')::int end as sp, s
+                                         from jsonb_array_elements(case when jsonb_typeof(p->'speakers') = 'array' then p->'speakers' else '[]'::jsonb end) s) g
+    where sp is not null order by sp
+  ), seen as (
+    select distinct (t->>'speaker')::int as sp from jsonb_array_elements(v_turns) t where t->>'speaker' is not null
+  ), allsp as (select sp from given union select sp from seen)
+  select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+           'speaker', a.sp,
+           'label', coalesce(nullif(trim(g.s->>'label'), ''), 'Speaker ' || (a.sp + 1)),
+           'role', case when g.s->>'role' in ('prospect', 'team') then g.s->>'role' else 'unknown' end,
+           'contact_id', case when crm_is_uuid(g.s->>'contact_id') then g.s->>'contact_id' end,
+           'member_id', case when crm_is_uuid(g.s->>'member_id') then g.s->>'member_id' end,
+           'words', case when (g.s->>'words') ~ '^\d+$' then (g.s->>'words')::int end,
+           'share_of_words', case when (g.s->>'share_of_words') ~ num_re then (g.s->>'share_of_words')::numeric end,
+           'speaking_seconds', case when (g.s->>'speaking_seconds') ~ num_re then (g.s->>'speaking_seconds')::numeric end)) order by a.sp), '[]'::jsonb)
+    into v_speakers
+  from allsp a left join given g on g.sp = a.sp;
+
+  -- a lone prospect voice is the meeting's contact; a lone team voice is whoever saved it
+  select coalesce(jsonb_agg(case
+           when s->>'role' = 'prospect' and not (s ? 'contact_id') and m.contact_id is not null
+                and (select count(*) from jsonb_array_elements(v_speakers) x where x->>'role' = 'prospect') = 1 then s || jsonb_build_object('contact_id', m.contact_id)
+           when s->>'role' = 'team' and not (s ? 'member_id')
+                and (select count(*) from jsonb_array_elements(v_speakers) x where x->>'role' = 'team') = 1 then s || jsonb_build_object('member_id', uid)
+           else s end order by (s->>'speaker')::int), '[]'::jsonb)
+    into v_speakers
+  from jsonb_array_elements(v_speakers) s;
+
+  insert into crm_meeting_transcripts as tr (meeting_id, turns, speakers, full_text, summary, topics, language, duration_seconds, word_count, avg_confidence, low_confidence, source, engine, model, created_by)
+  values (mid, v_turns, v_speakers, crm_transcript_text(v_turns, v_speakers), nullif(trim(p->>'summary'), ''),
+          coalesce((select array_agg(left(trim(x), 80)) from jsonb_array_elements_text(case when jsonb_typeof(p->'topics') = 'array' then p->'topics' else '[]'::jsonb end) x where trim(x) <> ''), '{}'),
+          nullif(trim(p->>'language'), ''),
+          case when (p->>'duration_seconds') ~ num_re then round((p->>'duration_seconds')::numeric, 2) end,
+          coalesce(case when (p->>'word_count') ~ '^\d+$' then (p->>'word_count')::int end,
+                   (select sum(coalesce(array_length(regexp_split_to_array(t->>'text', '\s+'), 1), 0))::int from jsonb_array_elements(v_turns) t)),
+          case when (p->>'avg_confidence') ~ num_re and (p->>'avg_confidence')::numeric <= 1 then round((p->>'avg_confidence')::numeric, 4) end,
+          coalesce((select jsonb_agg(x order by o) from (select x, o from jsonb_array_elements(case when jsonb_typeof(p->'low_confidence') = 'array' then p->'low_confidence' else '[]'::jsonb end) with ordinality a(x, o) order by o limit 50) lc), '[]'::jsonb),
+          left(nullif(trim(p->>'source'), ''), 500), left(nullif(trim(p->>'engine'), ''), 40), left(nullif(trim(p->>'model'), ''), 80), uid)
+  on conflict (meeting_id) do update set
+    turns = excluded.turns, speakers = excluded.speakers, full_text = excluded.full_text, summary = excluded.summary, topics = excluded.topics, language = excluded.language,
+    duration_seconds = excluded.duration_seconds, word_count = excluded.word_count, avg_confidence = excluded.avg_confidence, low_confidence = excluded.low_confidence,
+    source = excluded.source, engine = excluded.engine, model = excluded.model, created_by = excluded.created_by;
+
+  return crm_transcript_json(mid);
+end $$;
+
+-- Rename speakers / say who is the prospect after the fact (diarization knows voices differ, not who they are).
+create or replace function crm_set_transcript_speakers(p_meeting_id uuid, p_speakers jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare tr crm_meeting_transcripts; v_speakers jsonb;
+begin
+  perform crm_require_member();
+  if jsonb_typeof(p_speakers) is distinct from 'array' then raise exception 'E_PAYLOAD_INVALID: speakers must be an array of {speaker, label?, role?, contact_id?, member_id?}'; end if;
+  select * into tr from crm_meeting_transcripts where meeting_id = p_meeting_id;
+  if tr.id is null then raise exception 'E_NOT_FOUND: no transcript saved for meeting %', p_meeting_id; end if;
+  select coalesce(jsonb_agg(jsonb_strip_nulls(s || coalesce((
+           select jsonb_build_object(
+                    'label', coalesce(nullif(trim(g->>'label'), ''), s->>'label'),
+                    'role', case when g->>'role' in ('prospect', 'team', 'unknown') then g->>'role' else s->>'role' end,
+                    'contact_id', case when g ? 'contact_id' then (case when crm_is_uuid(g->>'contact_id') then g->>'contact_id' end) else s->>'contact_id' end,
+                    'member_id', case when g ? 'member_id' then (case when crm_is_uuid(g->>'member_id') then g->>'member_id' end) else s->>'member_id' end)
+           from jsonb_array_elements(p_speakers) g where (g->>'speaker') ~ '^\d+$' and (g->>'speaker')::int = (s->>'speaker')::int limit 1), '{}'::jsonb)) order by (s->>'speaker')::int), '[]'::jsonb)
+    into v_speakers
+  from jsonb_array_elements(tr.speakers) s;
+  update crm_meeting_transcripts set speakers = v_speakers, full_text = crm_transcript_text(turns, v_speakers) where meeting_id = p_meeting_id;
+  return crm_transcript_json(p_meeting_id);
+end $$;
+
+-- Read a transcript, whole or filtered. p = {q, speaker, role, from_s, to_s, context (turns either side of a match, 0-5), offset, limit}
+create or replace function crm_get_transcript(p_meeting_id uuid, p jsonb default '{}'::jsonb) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare tr crm_meeting_transcripts; needle text := lower(nullif(trim(p->>'q'), '')); matched int; res jsonb;
+        lim int := least(greatest(coalesce((p->>'limit')::int, 400), 1), 6000); skip int := greatest(coalesce((p->>'offset')::int, 0), 0);
+        around int := least(greatest(coalesce((p->>'context')::int, 0), 0), 5);
+begin
+  perform crm_require_member();
+  select * into tr from crm_meeting_transcripts where meeting_id = p_meeting_id;
+  if tr.id is null then raise exception 'E_NOT_FOUND: no transcript saved for meeting %', p_meeting_id; end if;
+  with t as (
+    select (ord - 1)::int as i, nullif(v->>'speaker', '')::int as sp, (v->>'start')::numeric as st, (v->>'end')::numeric as en, v->>'text' as tx
+    from jsonb_array_elements(tr.turns) with ordinality x(v, ord)
+  ), tt as (
+    select t.*, crm_transcript_label(tr.speakers, t.sp) as lbl,
+           coalesce((select s->>'role' from jsonb_array_elements(tr.speakers) s where (s->>'speaker')::int = t.sp limit 1), 'unknown') as rl
+    from t
+  ), hit as (
+    select i from tt
+    where (needle is null or position(needle in lower(tx)) > 0)
+      and (p->>'speaker' is null or sp = (p->>'speaker')::int)
+      and (p->>'role' is null or rl = p->>'role')
+      and (p->>'from_s' is null or coalesce(en, st, 0) >= (p->>'from_s')::numeric)
+      and (p->>'to_s' is null or coalesce(st, 0) <= (p->>'to_s')::numeric)
+  ), pick as (
+    select distinct tt.i from tt join hit h on tt.i between h.i - around and h.i + around
+  ), page as (
+    select tt.*, (around > 0 and exists (select 1 from hit h where h.i = tt.i)) as is_match from tt join pick using (i) order by tt.i offset skip limit lim
+  )
+  select (select count(*) from hit),
+         coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('i', i, 'speaker', sp, 'label', lbl, 'role', rl, 'start', st, 'end', en, 'text', tx, 'match', case when is_match then true end)) order by i) from page), '[]'::jsonb)
+    into matched, res;
+  return crm_transcript_json(p_meeting_id) || jsonb_build_object('matched_turns', matched, 'returned', jsonb_array_length(res), 'turns', res);
+end $$;
+
+-- Transcripts across meetings, newest first. p = {company, q, role, from, to, limit}; with q each row carries up to 5 matching turns.
+create or replace function crm_transcripts(p jsonb default '{}'::jsonb) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare cid uuid; needle text := lower(nullif(trim(p->>'q'), '')); lim int := least(greatest(coalesce((p->>'limit')::int, 20), 1), 100);
+begin
+  perform crm_require_member();
+  if nullif(trim(p->>'company'), '') is not null then cid := crm_resolve_company(jsonb_build_object('company', p->>'company'), true); end if;
+  return jsonb_build_object('transcripts', (
+    select coalesce(jsonb_agg(row_json order by scheduled_at desc), '[]'::jsonb) from (
+      select mv.scheduled_at, jsonb_strip_nulls(crm_transcript_json(tr.meeting_id) - 'low_confidence' || jsonb_build_object('matches', case when needle is not null then (
+               select jsonb_agg(jsonb_build_object('i', i, 'label', crm_transcript_label(tr.speakers, sp), 'start', st, 'text', tx) order by i) from (
+                 select (ord - 1)::int as i, nullif(v->>'speaker', '')::int as sp, (v->>'start')::numeric as st, v->>'text' as tx
+                 from jsonb_array_elements(tr.turns) with ordinality x(v, ord)
+                 where position(needle in lower(v->>'text')) > 0
+                   and (p->>'role' is null or coalesce((select s->>'role' from jsonb_array_elements(tr.speakers) s where s->>'speaker' = v->>'speaker' limit 1), 'unknown') = p->>'role')
+                 order by ord limit 5) hits) end)) as row_json
+      from crm_meeting_transcripts tr join crm_meetings_v mv on mv.id = tr.meeting_id
+      where (cid is null or mv.company_id = cid)
+        and (needle is null or position(needle in lower(tr.full_text)) > 0)
+        and (p->>'from' is null or mv.scheduled_at >= (p->>'from')::date)
+        and (p->>'to' is null or mv.scheduled_at < ((p->>'to')::date + 1))
+      order by mv.scheduled_at desc limit lim) rows_
+    where needle is null or p->>'role' is null or row_json ? 'matches'));   -- a role-filtered search only lists meetings where that side said it
+end $$;
+
 -- ------------------------------------------------------------------ morning brief
 create or replace function crm_whos_meeting_today(p_date date default null, p_tz text default null) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -1170,7 +1381,8 @@ begin
                  'stage_history', (select coalesce(jsonb_agg(jsonb_build_object('from', h.from_stage, 'to', h.to_stage, 'at', h.changed_at, 'reason', h.reason, 'by', mm.display_name) order by h.changed_at), '[]') from crm_stage_history h left join crm_members mm on mm.user_id = h.changed_by where h.deal_id = v.id)
                ) order by v.created_at desc), '[]') from crm_deals_v v where v.company_id = cid),
     'meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'deal_id', mv.deal_id, 'scheduled_at', mv.scheduled_at, 'status', mv.status, 'contact', mv.contact_name, 'attendees', mv.attendees, 'notes', mv.notes,
-                   'capture', (select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('tags', (select coalesce(jsonb_agg(pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cp.id)) from crm_meeting_captures cp where cp.meeting_id = mv.id)
+                   'capture', (select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('tags', (select coalesce(jsonb_agg(pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cp.id)) from crm_meeting_captures cp where cp.meeting_id = mv.id),
+                   'transcript', (select jsonb_build_object('summary', tr.summary, 'topics', to_jsonb(tr.topics), 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count, 'speakers', tr.speakers) from crm_meeting_transcripts tr where tr.meeting_id = mv.id)
                  ) order by mv.scheduled_at desc), '[]') from crm_meetings_v mv where mv.company_id = cid),
     'activities', (select coalesce(jsonb_agg(jsonb_build_object('at', a.occurred_at, 'type', a.activity_type_label, 'direction', a.direction, 'channel', a.source_channel_label, 'contact', a.contact_name, 'outcome', a.outcome, 'body', a.body, 'by', a.owner_name, 'deal_id', a.deal_id) order by a.occurred_at desc), '[]') from crm_activities_v a where a.company_id = cid),
     'pain_points', (select coalesce(jsonb_agg(distinct pp), '[]') from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id, unnest(cp.pain_points) pp where d.company_id = cid),

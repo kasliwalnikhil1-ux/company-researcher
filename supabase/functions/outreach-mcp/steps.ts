@@ -20,6 +20,7 @@ export interface CompileIssue { step_path: string; field?: string; code: string;
 // step verb → node type
 const VERBS: Record<string, string> = {
   visit_profile: "visit_profile", visit: "visit_profile",
+  refresh_profile: "refresh_profile", follow: "follow_profile", follow_profile: "follow_profile",
   like_post: "like_latest_post", like: "like_latest_post",
   comment_post: "comment_latest_post", comment: "comment_latest_post",
   endorse: "endorse_skills",
@@ -51,6 +52,21 @@ export function parseWait(v: unknown): { amount: number; unit: "minutes" | "hour
   if (!m) return null;
   const n = Number(m[1]); const u = m[2].toLowerCase()[0];
   return { amount: n, unit: u === "m" ? "minutes" : u === "h" ? "hours" : "days" };
+}
+
+/**
+ * A/B message variants on invite / message / inmail / email: [{id?, label?, text, subject?, weight?}] (2–5).
+ * `text` lands in the step's own copy field (note / text / html). The database validates ids, weights and lengths.
+ */
+function compileVariants(s: Step, field: "note" | "text" | "html", p: string, errors: CompileIssue[]): Record<string, unknown>[] | undefined {
+  if (s.variants == null) return undefined;
+  if (!Array.isArray(s.variants) || s.variants.length < 2 || s.variants.length > 5) { errors.push({ step_path: p, field: "variants", code: "E_VARIANT_INVALID", message: "variants must be a list of 2 to 5 {id?, label?, text, subject?, weight?}" }); return undefined; }
+  return (s.variants as Step[]).map((v, i) => {
+    const raw = String(v?.text ?? v?.note ?? v?.html ?? "");
+    if (!raw) errors.push({ step_path: `${p}.variants[${i}]`, field: "text", code: "E_TEXT_REQUIRED", message: "every variant needs text" });
+    const id = String(v?.id ?? String.fromCharCode(97 + i));
+    return { id, label: String(v?.label ?? id.toUpperCase()), [field]: field === "html" ? raw.replace(/\n/g, "<br/>") : raw, ...(v?.subject ? { subject: String(v.subject) } : {}), weight: Number(v?.weight ?? 1) };
+  });
 }
 
 export function compileSteps(input: unknown): { graph: Graph | null; errors: CompileIssue[] } {
@@ -88,6 +104,8 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
 
       switch (type) {
         case "visit_profile": node.config = { notify: s.notify !== false }; break;
+        case "refresh_profile": node.config = { only_if_stale_days: Math.max(1, Math.min(365, Number(s.only_if_stale_days ?? 90))) }; break;
+        case "follow_profile": node.config = {}; break;
         case "like_latest_post": node.config = { max_age_days: Number(s.max_age_days ?? 90), reaction: String(s.reaction ?? "like") }; break;
         case "comment_latest_post": {
           const t = String(s.text ?? "");
@@ -99,25 +117,34 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
         case "send_invite": {
           const note = String(s.note ?? s.text ?? "");
           if (note.length > TEXT_LIMITS.invite_note) errors.push({ step_path: p, field: "note", code: "E_NOTE_TOO_LONG", message: `invite note exceeds ${TEXT_LIMITS.invite_note} characters (200 for free LinkedIn accounts)` });
-          node.config = { note, require_note_for_free: !!s.require_note_for_free }; break;
+          node.config = { note, require_note_for_free: !!s.require_note_for_free };
+          { const vs = compileVariants(s, "note", p, errors); if (vs) node.config.variants = vs; }
+          break;
         }
         case "withdraw_invite": node.config = {}; break;
         case "send_message": {
           const t = String(s.text ?? "");
-          if (!t) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "message needs text" });
+          if (!t && !Array.isArray(s.variants)) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "message needs text (or variants)" });
           if (t.length > TEXT_LIMITS.message) errors.push({ step_path: p, field: "text", code: "E_TEXT_TOO_LONG", message: `message exceeds ${TEXT_LIMITS.message} characters` });
-          node.config = { text: t, send_always: !!s.send_always }; break;
+          node.config = { text: t, send_always: !!s.send_always };
+          { const vs = compileVariants(s, "text", p, errors); if (vs) node.config.variants = vs; }
+          break;
         }
         case "send_inmail": {
           const subject = String(s.subject ?? ""), t = String(s.text ?? "");
-          if (!t) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "inmail needs text" });
+          if (!t && !Array.isArray(s.variants)) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "inmail needs text (or variants)" });
           if (subject.length > TEXT_LIMITS.inmail_subject || t.length > TEXT_LIMITS.inmail_body) errors.push({ step_path: p, code: "E_TEXT_TOO_LONG", message: "InMail subject/body exceed 200/1900 characters" });
-          node.config = { subject, text: t, api: String(s.api ?? "classic"), open_profile_only: !!s.open_profile_only }; break;
+          node.config = { subject, text: t, api: String(s.api ?? "classic"), open_profile_only: !!s.open_profile_only };
+          { const vs = compileVariants(s, "text", p, errors); if (vs) node.config.variants = vs; }
+          break;
         }
         case "send_email": {
           const subject = String(s.subject ?? ""), html = String(s.html ?? s.text ?? "").replace(/\n/g, "<br/>");
-          if (!subject || !html) errors.push({ step_path: p, code: "E_TEXT_REQUIRED", message: "email needs subject and text/html" });
-          node.config = { subject, html, to: String(s.to ?? "any"), thread: String(s.thread ?? "continue"), mailbox_sender_id: s.mailbox_sender_id ?? null, track: s.track !== false }; break;
+          if ((!subject || !html) && !Array.isArray(s.variants)) errors.push({ step_path: p, code: "E_TEXT_REQUIRED", message: "email needs subject and text/html (or variants with subject + text)" });
+          node.config = { subject, html, to: String(s.to ?? "any"), thread: String(s.thread ?? "continue"), mailbox_sender_id: s.mailbox_sender_id ?? null, track: s.track !== false };
+          if (Array.isArray(s.mailbox_pool) && s.mailbox_pool.length) node.config.mailbox_pool = s.mailbox_pool;
+          { const vs = compileVariants(s, "html", p, errors); if (vs) node.config.variants = vs; }
+          break;
         }
         case "delay": {
           const d = wait ?? parseWait(s.for) ?? (s.amount != null ? parseWait({ amount: Number(s.amount), unit: String(s.unit ?? "days") }) : null);
@@ -200,12 +227,20 @@ export function renderGraph(graph: Graph, stats?: Record<string, any>): string {
   const nodes = graph.nodes ?? {};
   const desc = (n: GraphNode): string => {
     const c = n.config ?? {};
+    const ab = Array.isArray(c.variants) && c.variants.length ? ` [A/B: ${(c.variants as Array<Record<string, unknown>>).map((v) => `${v.label ?? v.id} ${v.weight ?? 1}`).join(" / ")}]` : "";
     const q = (s: unknown, max = 90) => (s ? `"${String(s).replace(/\s+/g, " ").slice(0, max)}${String(s).length > max ? "…" : ""}"` : "");
     switch (n.type) {
-      case "send_invite": return `invite${c.note ? ` note ${q(c.note)}` : " (no note)"}`;
-      case "send_message": return `message ${q(c.text)}${c.send_always ? " [send_always]" : ""}`;
-      case "send_inmail": return `inmail ${q(c.subject, 40)} ${q(c.text)}`;
-      case "send_email": return `email ${q(c.subject, 60)}`;
+      case "send_invite": return `invite${c.note ? ` note ${q(c.note)}` : ab ? "" : " (no note)"}${ab}`;
+      case "send_message": return `message ${q(c.text)}${c.send_always ? " [send_always]" : ""}${ab}`;
+      case "send_inmail": return `inmail ${q(c.subject, 40)} ${q(c.text)}${ab}`;
+      case "send_email": return `email ${q(c.subject, 60)}${ab}`;
+      case "ab_split": return `A/B split ${(Array.isArray(c.branches) ? (c.branches as Array<Record<string, unknown>>) : []).map((b) => `${b.label ?? b.id} ${b.weight ?? 1}`).join(" / ")}`;
+      case "ai_route": return `AI routing: ${(Array.isArray(c.routes) ? (c.routes as Array<Record<string, unknown>>) : []).map((r) => r.label ?? r.id).join(" | ")} | else`;
+      case "call_task": return `call task ${q(c.title, 60)} (connected / voicemail / no_answer / wrong_number)`;
+      case "send_voice_note": return "voice note (one recorded clip per sender)";
+      case "find_email": return "find email (found / not_found)";
+      case "refresh_profile": return `refresh profile (if older than ${c.only_if_stale_days ?? 90}d)`;
+      case "follow_profile": return "follow";
       case "comment_latest_post": return `comment ${q(c.text)}`;
       case "delay": return `delay ${c.amount} ${c.unit}${c.jitter_pct ? ` ±${c.jitter_pct}%` : ""}`;
       case "wait_connection": return `wait for connection (window ${c.window_days ?? 14}d)`;

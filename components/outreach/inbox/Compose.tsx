@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Paperclip, Send, X, Lock } from 'lucide-react';
+import { Paperclip, Send, X, Lock, CalendarCheck } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
@@ -29,6 +29,12 @@ function defaultSubject(chat: Chat): string {
   return /^re:/i.test(chat.subject.trim()) ? chat.subject : `Re: ${chat.subject}`;
 }
 
+/** Item 24. The line outreach-send-reply uses when `booking: true` arrives without text. It appends the tracked link itself. */
+const BOOKING_DEFAULT_TEXT = 'Here is my calendar, pick any time that suits you:';
+function bookingTitle(typed: string): string {
+  return typed ? 'Sends your text with the booking link added below it' : `Sends: “${BOOKING_DEFAULT_TEXT}” followed by the booking link`;
+}
+
 export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent }: ComposeProps) {
   const qc = useQueryClient();
   const isEmail = chat.provider !== 'LINKEDIN';
@@ -36,6 +42,9 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   const [subject, setSubject] = useState(() => defaultSubject(chat));
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [sendingBooking, setSendingBooking] = useState(false);
+  const bookingLink = ((sender as (Sender & { booking_link?: string | null }) | null)?.booking_link ?? '').trim() || null;
+  const interested = chat.intent === 'interested';
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
@@ -51,17 +60,22 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  const send = async () => {
-    const body = text.trim();
-    if (!body || sending || disabledReason) return;
-    setSending(true);
+  const send = async (booking = false) => {
+    if (sending || sendingBooking || disabledReason) return;
+    if (booking && !bookingLink) return;
+    // Booking: outreach-send-reply appends the sender's booking link (with the lead id for the booking webhook) to the text,
+    // or to a short default line when the composer is empty. The link is therefore never typed into `text` here.
+    const typed = text.trim();
+    if (!booking && !typed) return;
+    const body = booking ? [typed || BOOKING_DEFAULT_TEXT, '', bookingLink].join('\n') : typed;   // what the optimistic bubble shows
+    if (booking) setSendingBooking(true); else setSending(true);
     const tempId = `temp-${Date.now()}`;
-    const optimistic: Message = {
+    const optimistic = {
       id: tempId, workspace_id: chat.workspace_id, chat_id: chat.id, unipile_message_id: null, direction: 'out', text: body, html: null,
       attachments: files.map((f, i) => ({ id: `${tempId}-${i}`, name: f.name, type: f.type, size: f.size })),
       sent_at: new Date().toISOString(), is_invite_note: false, intent: null, intent_confidence: null, summary: null, classified_at: null,
       opens: 0, clicks: 0, edited_at: null, deleted_at: null, action_id: null, created_at: new Date().toISOString(),
-    };
+    } as Message;
     const key = qk.messages(chat.id);
     qc.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
     try {
@@ -72,9 +86,10 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
         if (error) throw new Error(`Upload failed for ${f.name}: ${error.message}`);
         paths.push(path);
       }
-      const payload: Record<string, unknown> = { chat_id: chat.id, text: body };
+      const payload: Record<string, unknown> = { chat_id: chat.id, text: booking ? typed : body };
       if (paths.length) payload.attachments = paths;
       if (isEmail && subject.trim()) payload.subject = subject.trim();
+      if (booking) payload.booking = true;
       await callFn('send-reply', payload);
       setText('');
       setFiles([]);
@@ -87,6 +102,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       onError(parseError(e).message);
     } finally {
       setSending(false);
+      setSendingBooking(false);
     }
   };
 
@@ -101,6 +117,15 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
 
   return (
     <div className="border-t border-gray-200 bg-white p-3 space-y-2">
+      {bookingLink && interested && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
+          <CalendarCheck className="w-4 h-4 text-green-700 flex-shrink-0" />
+          <div className="min-w-0 flex-1 text-xs text-green-900">
+            <span className="font-medium">This lead is interested.</span> Send {sender?.display_name ? `${sender.display_name}'s` : 'the'} booking link in one click{text.trim() ? ', together with the text below' : ''}.
+          </div>
+          <Button type="button" size="sm" className="bg-green-600 hover:bg-green-700" loading={sendingBooking} disabled={sending} onClick={() => send(true)} title={bookingTitle(text.trim())}><CalendarCheck className="w-4 h-4" /> Send booking link</Button>
+        </div>
+      )}
       {isEmail && (
         <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Email subject" className="w-full text-sm px-3 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
       )}
@@ -108,7 +133,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
         ref={textRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(); } }}
+        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(false); } }}
         placeholder={`Reply as ${sender?.display_name ?? 'sender'}… (${typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter to send)`}
         aria-label="Reply"
         rows={3}
@@ -132,7 +157,12 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           <Button type="button" variant="ghost" size="sm" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip className="w-4 h-4" /> Attach</Button>
           <span className="text-[11px] text-gray-400 hidden sm:inline">Replies don't count against outbound caps.</span>
         </div>
-        <Button type="button" size="sm" loading={sending} disabled={!text.trim()} onClick={send} title="Send reply"><Send className="w-4 h-4" /> Send</Button>
+        <div className="flex items-center gap-2">
+          {bookingLink && !interested && (
+            <Button type="button" variant="secondary" size="sm" loading={sendingBooking} disabled={sending} onClick={() => send(true)} title={bookingTitle(text.trim())}><CalendarCheck className="w-4 h-4" /> Send booking link</Button>
+          )}
+          <Button type="button" size="sm" loading={sending} disabled={!text.trim() || sendingBooking} onClick={() => send(false)} title="Send reply"><Send className="w-4 h-4" /> Send</Button>
+        </div>
       </div>
     </div>
   );

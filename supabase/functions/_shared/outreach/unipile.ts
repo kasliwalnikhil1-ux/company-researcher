@@ -24,12 +24,19 @@ export class UnipileError extends Error {
   }
 }
 
-interface ReqOpts { method?: string; query?: Record<string, unknown>; body?: unknown; form?: FormData; timeoutMs?: number; retries?: number; raw?: boolean; accountId?: string }
+export interface ReqOpts { method?: string; query?: Record<string, unknown>; body?: unknown; form?: FormData; timeoutMs?: number; retries?: number; raw?: boolean; accountId?: string }
+
+/** Low-level request. Exported so new call sites (lead sources, enrichment) can add endpoints without editing this file's typed client. */
+export async function unipileRequest<T = any>(path: string, opts: ReqOpts = {}): Promise<T> { return request<T>(path, opts); }
 
 async function request<T = any>(path: string, opts: ReqOpts = {}): Promise<T> {
   if (!unipileConfigured()) throw new UnipileError(503, "errors/not_configured", "UNIPILE_DSN / UNIPILE_API_KEY not set", null);
   const url = new URL(`${unipileBase()}/api/v1${path}`);
-  for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
+  for (const [k, v] of Object.entries(opts.query ?? {})) {
+    if (v === undefined || v === null || v === "") continue;
+    if (Array.isArray(v)) { for (const x of v) url.searchParams.append(k, String(x)); continue; }   // OpenAPI array params (linkedin_sections) are repeated
+    url.searchParams.set(k, String(v));
+  }
   const headers: Record<string, string> = { "X-API-KEY": API_KEY, accept: "application/json" };
   let body: BodyInit | undefined;
   if (opts.form) body = opts.form;
@@ -105,7 +112,8 @@ export const unipile = {
   },
   users: {
     me: (accountId: string) => request<any>("/users/me", { query: { account_id: accountId }, accountId }),
-    profile: (accountId: string, identifier: string, q: { notify?: boolean; linkedin_api?: string; linkedin_sections?: string } = {}) =>
+    // linkedin_sections: "*_preview" (cheap) or the named full sections we store (FULL_PROFILE_SECTIONS). Never "*": LinkedIn throttles it.
+    profile: (accountId: string, identifier: string, q: { notify?: boolean; linkedin_api?: string; linkedin_sections?: string | string[] } = {}) =>
       request<any>(`/users/${encodeURIComponent(identifier)}`, { query: { account_id: accountId, ...q }, accountId, timeoutMs: 30000 }),
     invite: (body: { account_id: string; provider_id: string; message?: string; user_email?: string }) => request<{ invitation_id: string; usage?: number }>("/users/invite", { method: "POST", body, accountId: body.account_id, retries: 0 }),
     cancelInvite: (accountId: string, invitationId: string) => request<any>(`/users/invite/sent/${encodeURIComponent(invitationId)}`, { method: "DELETE", query: { account_id: accountId }, accountId, retries: 0 }),
@@ -128,11 +136,12 @@ export const unipile = {
     get: (chatId: string) => request<any>(`/chats/${encodeURIComponent(chatId)}`),
     // Messaging data only (no LinkedIn profile view is triggered).
     attendees: (chatId: string) => request<{ items: any[] }>(`/chats/${encodeURIComponent(chatId)}/attendees`),
-    start: (fields: { account_id: string; attendees_ids: string[]; text: string; subject?: string; linkedin?: Record<string, unknown> }) =>
+    // voice_message: (LinkedIn | WhatsApp) a file sent as a voice note; LinkedIn prefers .m4a. Pass a File so the name/extension survives.
+    start: (fields: { account_id: string; attendees_ids: string[]; text?: string; subject?: string; linkedin?: Record<string, unknown>; voice_message?: Blob }) =>
       request<{ chat_id: string | null; message_id: string | null }>("/chats", { method: "POST", form: form(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
     messages: (chatId: string, q: { cursor?: string; limit?: number; after?: string } = {}) => request<{ items: any[]; cursor: string | null }>(`/chats/${encodeURIComponent(chatId)}/messages`, { query: { limit: 100, ...q } }),
-    send: (chatId: string, fields: { account_id?: string; text: string; attachments?: Blob[] }) => {
-      const f = form({ account_id: fields.account_id, text: fields.text });
+    send: (chatId: string, fields: { account_id?: string; text?: string; attachments?: Blob[]; voice_message?: Blob }) => {
+      const f = form({ account_id: fields.account_id, text: fields.text, voice_message: fields.voice_message });
       for (const a of fields.attachments ?? []) f.append("attachments", a);
       return request<{ message_id: string | null }>(`/chats/${encodeURIComponent(chatId)}/messages`, { method: "POST", form: f, accountId: fields.account_id, retries: 0, timeoutMs: 30000 });
     },
@@ -143,7 +152,8 @@ export const unipile = {
     attachment: (messageId: string, attachmentId: string) => request<Response>(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`, { raw: true, timeoutMs: 60000 }),
   },
   mails: {
-    send: (fields: { account_id: string; to: Array<{ identifier: string; display_name?: string }>; subject?: string; body: string; reply_to?: string; tracking_options?: Record<string, unknown>; from?: Record<string, unknown> }) =>
+    // custom_headers: Unipile only accepts names starting with X- plus List-Unsubscribe, List-Unsubscribe-Post, Reply-To, Content-Type.
+    send: (fields: { account_id: string; to: Array<{ identifier: string; display_name?: string }>; cc?: Array<{ identifier: string; display_name?: string }>; bcc?: Array<{ identifier: string; display_name?: string }>; subject?: string; body: string; reply_to?: string; tracking_options?: Record<string, unknown>; from?: Record<string, unknown>; custom_headers?: Array<{ name: string; value: string }> }) =>
       request<{ tracking_id: string; provider_id: string | null }>("/emails", { method: "POST", form: form(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
     list: (accountId: string, q: Record<string, unknown> = {}) => request<{ items: any[]; cursor: string | null }>("/emails", { query: { account_id: accountId, limit: 50, ...q }, accountId }),
     get: (emailId: string, accountId?: string) => request<any>(`/emails/${encodeURIComponent(emailId)}`, { query: { account_id: accountId } }),
@@ -155,6 +165,10 @@ export const unipile = {
     delete: (id: string) => request<any>(`/webhooks/${encodeURIComponent(id)}`, { method: "DELETE" }),
   },
 };
+
+/** The full profile sections enrichment stores (item 13). Named sections, never "*". */
+export const FULL_PROFILE_SECTIONS = ["about", "experience", "education", "skills", "languages"] as const;
+export const PREVIEW_SECTIONS = "*_preview";
 
 /** Normalise LinkedIn network distance strings to our relation enum. */
 export function distanceToRelation(d: unknown): "first" | "none" | null {

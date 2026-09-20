@@ -58,7 +58,21 @@ export interface Meeting {
   status: MeetingStatus; notes: string | null; created_at: string;
   company_id: string; company_name: string; deal_stage: DealStage; value_monthly: number | null; currency: string; value_monthly_usd: number | null; owner_id: string | null;
   contact_name: string | null; contact_role: string | null; contact_email: string | null; icp_segment_label: string | null; source_channel_label: string | null;
-  has_capture: boolean; capture_outcome: 'held' | 'no_show' | null;
+  has_capture: boolean; capture_outcome: 'held' | 'no_show' | null; has_transcript: boolean;
+}
+
+export type SpeakerRole = 'prospect' | 'team' | 'unknown';
+/** `speaker` is Deepgram's 0-based index; an unnamed one is labelled "Speaker N+1". */
+export interface TranscriptSpeaker { speaker: number; label: string; role: SpeakerRole; contact_id?: string; member_id?: string; words?: number; share_of_words?: number; speaking_seconds?: number }
+export interface TranscriptTurn { i: number; speaker?: number; label: string; role: SpeakerRole; start?: number; end?: number; text: string }
+/** What company_brief carries per meeting — enough to show that a transcript exists without loading it. */
+export interface TranscriptSummary { summary: string | null; topics: string[]; duration_seconds: number | null; word_count: number | null; speakers: TranscriptSpeaker[] }
+/** Result of crm_get_transcript */
+export interface Transcript extends TranscriptSummary {
+  meeting_id: string; company: string; company_id: string; contact: string | null; scheduled_at: string;
+  language: string | null; avg_confidence: number | null; low_confidence: Array<{ word: string; start?: number; confidence?: number }>;
+  turn_count: number; source: string | null; engine: string | null; model: string | null; saved_by: string | null; created_at: string; updated_at: string;
+  matched_turns: number; returned: number; turns: TranscriptTurn[];
 }
 
 export interface Capture {
@@ -129,7 +143,7 @@ export interface CompanyBrief {
   company: Company & { icp_segment: string | null; source_channel: string | null; created_by_name: string | null };
   contacts: Contact[];
   deals: Array<Deal & { stage_history: Array<{ from: DealStage | null; to: DealStage; at: string; reason: string | null; by: string | null }> }>;
-  meetings: Array<{ meeting_id: string; deal_id: string; scheduled_at: string; status: MeetingStatus; contact: string | null; attendees: string[]; notes: string | null; capture: (Capture & { tags: string[] }) | null }>;
+  meetings: Array<{ meeting_id: string; deal_id: string; scheduled_at: string; status: MeetingStatus; contact: string | null; attendees: string[]; notes: string | null; capture: (Capture & { tags: string[] }) | null; transcript: TranscriptSummary | null }>;
   activities: Array<{ at: string; type: string; direction: Direction; channel: string | null; contact: string | null; outcome: string | null; body: string | null; by: string | null; deal_id: string | null }>;
   pain_points: string[]; pain_point_tags: string[]; objections: string[]; commercials: Array<Record<string, unknown>>;
   open_next_steps: Array<{ deal_id: string; stage: DealStage; next_step: string | null; next_step_date: string | null; owner: string | null }>;

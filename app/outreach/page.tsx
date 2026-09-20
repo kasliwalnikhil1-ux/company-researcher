@@ -1,16 +1,17 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo } from 'react';
-import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Contact, GitBranch, Inbox, MessageSquare, Plus, Sparkles, Upload, CheckSquare } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Contact, FileWarning, GitBranch, Hand, Inbox, MessageSquare, PauseCircle, Plus, Sparkles, Upload, CheckSquare, UserMinus, Wand2, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useDashboard, useSequences } from '@/lib/outreach/queries';
+import { useSequences } from '@/lib/outreach/queries';
+import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
+import { MetricLabel } from '@/components/outreach/reports/primitives';
 import { Button, Card, EmptyState, ErrorBox, PageHeader, Spinner, Stat, StatusPill, Badge } from '@/components/outreach/ui';
 import { healthTileClasses, healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import { cn } from '@/lib/utils';
-import type { DashboardData } from '@/lib/outreach/types';
 
-type DashSender = DashboardData['senders'][number];
+type DashSender = DashboardV2['senders'][number];
 const TILE_TYPES: Array<{ key: string; label: string }> = [{ key: 'invite', label: 'Invites' }, { key: 'message', label: 'Messages' }, { key: 'profile_view', label: 'Views' }];
 
 function HealthTile({ s }: { s: DashSender }) {
@@ -26,6 +27,7 @@ function HealthTile({ s }: { s: DashSender }) {
       <div className="mt-2 flex items-center gap-2 flex-wrap">
         <StatusPill status={s.status} reason={s.status_reason} />
         {s.paused_until && new Date(s.paused_until).getTime() > Date.now() && <Badge tone="amber">auto-paused</Badge>}
+        {s.running_dry && <Badge tone="amber">running out of leads</Badge>}
       </div>
       <div className="mt-3 grid grid-cols-3 gap-2">
         {TILE_TYPES.map((t) => {
@@ -46,6 +48,48 @@ function HealthTile({ s }: { s: DashSender }) {
   );
 }
 
+// What each attention kind means and what to do about it. The sentence itself comes from the database.
+interface AttentionAction { label: string; href: string }
+function attentionView(a: AttentionItem): { icon: React.ReactNode; title: string; actions: AttentionAction[] } {
+  const cls = 'w-4 h-4 flex-shrink-0';
+  switch (a.kind) {
+    case 'sequence_stalled':
+      return { icon: <PauseCircle className={cn(cls, 'text-red-500')} />, title: `${a.label ?? 'A sequence'} has stopped sending`, actions: [{ label: 'Why isn’t this sending?', href: `/outreach/sequences/${a.id}?why=1` }] };
+    case 'sender_running_dry':
+      return { icon: <UserMinus className={cn(cls, 'text-amber-500')} />, title: `${a.label ?? 'A sender'} is running out of leads`, actions: [{ label: 'Enrol more leads', href: '/outreach/leads' }, { label: 'Add an auto-enrol rule', href: '/outreach/sequences' }] };
+    case 'import_failed':
+      return { icon: <FileWarning className={cn(cls, 'text-red-500')} />, title: `An import failed${a.label ? ` (${a.label.replace(/_/g, ' ')})` : ''}`, actions: [{ label: 'Open imports', href: '/outreach/leads/import' }] };
+    case 'held_leads':
+      return { icon: <Hand className={cn(cls, 'text-amber-500')} />, title: `${a.label ?? 'A sequence'}: replies waiting for a decision`, actions: [{ label: 'Review held leads', href: '/outreach/tasks?kind=reply_hold' }] };
+    case 'failed_leads':
+      return { icon: <XCircle className={cn(cls, 'text-red-500')} />, title: `${a.label ?? 'A sequence'}: failed leads`, actions: [{ label: 'Open failed leads', href: `/outreach/sequences/${a.id}?failed=1` }] };
+    case 'ai_review':
+      return { icon: <Wand2 className={cn(cls, 'text-purple-500')} />, title: `AI lines for “${a.label ?? 'a variable'}” are ready`, actions: [{ label: 'Review AI lines', href: `/outreach/ai-review?batch=${a.id}` }] };
+    case 'sequence':
+      return { icon: <GitBranch className={cn(cls, 'text-gray-400')} />, title: a.label ?? 'Sequence', actions: [{ label: 'Open sequence', href: `/outreach/sequences/${a.id}` }] };
+    default:
+      return { icon: <Contact className={cn(cls, 'text-gray-400')} />, title: a.label ?? 'Sender', actions: [{ label: 'Open sender', href: `/outreach/senders/${a.id}` }] };
+  }
+}
+
+function AttentionRow({ a }: { a: AttentionItem }) {
+  const v = attentionView(a);
+  return (
+    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+        <span className="mt-0.5">{v.icon}</span>
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-gray-900">{v.title}</div>
+          {a.reason && <div className="text-sm text-gray-600 mt-0.5">{a.reason}</div>}
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap pl-6">
+        {v.actions.map((x, i) => <Link key={x.href + x.label} href={x.href}><Button size="sm" variant={i === 0 ? 'secondary' : 'ghost'}>{x.label}</Button></Link>)}
+      </div>
+    </li>
+  );
+}
+
 function ChecklistItem({ done, title, description, href, cta }: { done: boolean; title: string; description: string; href: string; cta: string }) {
   return (
     <div className={cn('flex items-start gap-3 p-4 rounded-xl border', done ? 'border-green-200 bg-green-50/50' : 'border-gray-200 bg-white')}>
@@ -62,7 +106,8 @@ function ChecklistItem({ done, title, description, href, cta }: { done: boolean;
 export default function OutreachDashboardPage() {
   const { workspace, isManager, canWrite, role } = useWorkspace();
   const ws = workspace?.id;
-  const dash = useDashboard(ws);
+  const dash = useDashboardV2(ws);
+  useAlertsRealtime(ws);
   const sequences = useSequences(ws);
   const d = dash.data;
 
@@ -77,6 +122,7 @@ export default function OutreachDashboardPage() {
   if (dash.isLoading) return <Spinner />;
   if (dash.isError) return <ErrorBox message={(dash.error as Error).message} />;
   if (!d) return <EmptyState title="No dashboard data" />;
+  const w = d.last_7_days;
 
   const quickActions = canWrite && !isViewer ? (
     <>
@@ -106,9 +152,9 @@ export default function OutreachDashboardPage() {
       {emptyWorkspace ? null : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-            <Stat label="Sent today" value={d.sent_today} hint="all senders, last 24h" />
-            <Stat label="Queued (next 24h)" value={d.queued_today} />
-            <Stat label="Live enrollments" value={d.enrollments_live} />
+            <Stat label="Sent today" value={fmtInt(d.sent_today)} hint="All senders, today in the workspace timezone" />
+            <Stat label="Queued (next 24h)" value={fmtInt(d.queued_today)} />
+            <Stat label="Live enrollments" value={fmtInt(d.enrollments_live)} />
             <Stat label="Leads" value={d.leads_total.toLocaleString()} />
           </div>
 
@@ -123,18 +169,22 @@ export default function OutreachDashboardPage() {
               </Card>
             </div>
             <div className="space-y-6">
-              <Card title="Last 7 days">
+              <Card title="Last 7 days" actions={<Link href="/outreach/reports" className="text-xs text-indigo-600 hover:underline">Open reports</Link>}>
                 <div className="grid grid-cols-2 gap-3">
-                  {[['Invites sent', d.stats_7d.invites], ['Accepted', d.stats_7d.accepted], ['Messages sent', d.stats_7d.messages], ['Replies', d.stats_7d.replies]].map(([l, v]) => (
-                    <div key={String(l)} className="bg-gray-50 rounded-lg px-3 py-2">
-                      <div className="text-xs text-gray-500">{l}</div>
-                      <div className="text-lg font-semibold text-gray-900 tabular-nums">{v as number}</div>
+                  {([
+                    { metric: 'touches', label: 'Sent touches', value: fmtInt(w.touches), sub: `${fmtInt(w.invites)} invites` },
+                    { metric: 'accepted', label: 'Accepted', value: fmtInt(w.accepted), sub: `${fmtRate(w.acceptance_rate)} acceptance rate` },
+                    { metric: 'replies', label: 'Replies', value: fmtInt(w.replies), sub: `${fmtRate(w.reply_rate)} reply rate` },
+                    { metric: 'positive_reply_rate', label: 'Interested', value: fmtInt(w.interested), sub: `${fmtRate(w.positive_reply_rate)} positive reply rate` },
+                  ]).map((x) => (
+                    <div key={x.label} className="bg-gray-50 rounded-lg px-3 py-2">
+                      <div className="text-xs text-gray-500"><MetricLabel metric={x.metric}>{x.label}</MetricLabel></div>
+                      <div className="text-lg font-semibold text-gray-900 tabular-nums">{x.value}</div>
+                      <div className="text-xs text-gray-500">{x.sub}</div>
                     </div>
                   ))}
                 </div>
-                {d.stats_7d.invites > 0 && (
-                  <div className="text-xs text-gray-500 mt-3">Acceptance {Math.round((d.stats_7d.accepted / Math.max(1, d.stats_7d.invites)) * 100)}% · Reply {Math.round((d.stats_7d.replies / Math.max(1, d.stats_7d.messages)) * 100)}%</div>
-                )}
+                <div className="text-xs text-gray-500 mt-3">{fmtInt(w.meetings)} {w.meetings === 1 ? 'meeting' : 'meetings'} booked. The reports page shows the same numbers.</div>
               </Card>
               <Card title="Waiting on you">
                 <div className="divide-y divide-gray-100">
@@ -156,6 +206,10 @@ export default function OutreachDashboardPage() {
                         <span className="flex items-center gap-2 text-sm text-gray-700"><Sparkles className="w-4 h-4 text-purple-600" /> AI drafts awaiting review</span>
                         <Badge tone={d.drafts_awaiting > 0 ? 'purple' : 'gray'}>{d.drafts_awaiting}</Badge>
                       </Link>
+                      <Link href="/outreach/ai-review" className="flex items-center justify-between py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
+                        <span className="flex items-center gap-2 text-sm text-gray-700"><Wand2 className="w-4 h-4 text-purple-600" /> AI lines awaiting review</span>
+                        <Badge tone={(d.ai_lines_awaiting ?? 0) > 0 ? 'purple' : 'gray'}>{d.ai_lines_awaiting ?? 0}</Badge>
+                      </Link>
                     </>
                   )}
                 </div>
@@ -165,22 +219,9 @@ export default function OutreachDashboardPage() {
 
           <Card title={<span className="flex items-center gap-2"><AlertTriangle className="w-4 h-4 text-amber-500" /> Needs attention</span>}>
             {d.attention.length === 0 ? (
-              <div className="text-sm text-gray-500 py-2">Everything looks healthy. No senders need a re-login and no sequences are throttled.</div>
+              <div className="text-sm text-gray-500 py-2">Nothing needs you right now. No sender is disconnected, no sequence is stalled and no lead is waiting on a decision.</div>
             ) : (
-              <ul className="divide-y divide-gray-100">
-                {d.attention.map((a, i) => (
-                  <li key={`${a.kind}-${a.id}-${i}`}>
-                    <Link href={a.kind === 'sequence' ? `/outreach/sequences/${a.id}` : `/outreach/senders/${a.id}`} className="flex items-center justify-between gap-3 py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
-                      <span className="flex items-center gap-2 min-w-0">
-                        {a.kind === 'sequence' ? <GitBranch className="w-4 h-4 text-gray-400 flex-shrink-0" /> : <Contact className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                        <span className="text-sm font-medium text-gray-900 truncate">{a.label ?? (a.kind === 'sequence' ? 'Sequence' : 'Sender')}</span>
-                        <span className="text-xs text-gray-500 truncate">{a.reason}</span>
-                      </span>
-                      <ArrowRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+              <ul className="divide-y divide-gray-100">{d.attention.map((a, i) => <AttentionRow key={`${a.kind}-${a.id}-${i}`} a={a} />)}</ul>
             )}
           </Card>
         </>

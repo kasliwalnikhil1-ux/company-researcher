@@ -8,9 +8,13 @@ import { parseError, rpc } from '@/lib/outreach/api';
 import type { Action, Chat, Task } from '@/lib/outreach/types';
 import { Badge, Card, EmptyState, ErrorBox, IntentBadge, Spinner, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
-import { Activity, CheckSquare, GitBranch, MessageSquare, Zap, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Activity, CheckSquare, GitBranch, MessageSquare, Zap, ArrowDownLeft, ArrowUpRight, Split, Flag, Sparkles, Hand } from 'lucide-react';
+import { factLines } from '@/lib/outreach/intel';
 
-interface TimelineRow { at: string | null; kind: 'action' | 'message' | 'enrollment' | 'task' | string; title: string; data: Record<string, unknown> | null }
+interface TimelineRow { at: string | null; kind: 'action' | 'message' | 'enrollment' | 'task' | 'ai_route' | 'milestone' | 'enrichment' | string; title: string; data: Record<string, unknown> | null }
+
+const HELD_TITLE = 'Held for review after a reply';
+const CALL_OUTCOME: Record<string, string> = { connected: 'Connected', voicemail: 'Voicemail', no_answer: 'No answer', wrong_number: 'Wrong number' };
 
 const ACTION_TONE: Record<Action['status'], 'gray' | 'green' | 'red' | 'amber' | 'blue' | 'indigo'> = { queued: 'blue', reserved: 'indigo', sent: 'green', skipped: 'amber', failed: 'red', cancelled: 'gray' };
 
@@ -51,7 +55,7 @@ export function LeadTasks({ tasks }: { tasks: Task[] }) {
         <ul className="space-y-2">
           {open.map((t) => (
             <li key={t.id}>
-              <Link href="/outreach/tasks" className="flex items-start gap-2 group">
+              <Link href={`/outreach/tasks?task=${t.id}`} className="flex items-start gap-2 group">
                 <CheckSquare className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
                 <span className="min-w-0">
                   <span className="block text-sm text-gray-900 group-hover:text-indigo-700 truncate">{t.title}</span>
@@ -66,10 +70,14 @@ export function LeadTasks({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function TimelineIcon({ kind }: { kind: string }) {
+function TimelineIcon({ kind, held }: { kind: string; held?: boolean }) {
   const cls = 'w-3.5 h-3.5';
+  if (held) return <Hand className={cls} />;
   if (kind === 'message') return <MessageSquare className={cls} />;
   if (kind === 'enrollment') return <GitBranch className={cls} />;
+  if (kind === 'ai_route') return <Split className={cls} />;
+  if (kind === 'milestone') return <Flag className={cls} />;
+  if (kind === 'enrichment') return <Sparkles className={cls} />;
   if (kind === 'task') return <CheckSquare className={cls} />;
   return <Zap className={cls} />;
 }
@@ -83,14 +91,34 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
           {q.data.map((row, i) => {
             const d = row.data ?? {};
             const isMsg = row.kind === 'message';
-            const tone = row.kind === 'message' ? 'bg-indigo-100 text-indigo-700' : row.kind === 'enrollment' ? 'bg-purple-100 text-purple-700' : row.kind === 'task' ? 'bg-amber-100 text-amber-700' : String(d.error_code ?? '') ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600';
+            const held = row.kind === 'enrollment' && row.title === HELD_TITLE;
+            const facts = row.kind === 'ai_route' ? factLines(d.facts) : [];
+            const emptySections = row.kind === 'enrichment' && Array.isArray(d.empty_sections) ? (d.empty_sections as unknown[]).map(String) : [];
+            const taskResult = row.kind === 'task' && d.result && typeof d.result === 'object' ? (d.result as Record<string, unknown>) : null;
+            const tone = held ? 'bg-amber-100 text-amber-700' : row.kind === 'message' ? 'bg-indigo-100 text-indigo-700' : row.kind === 'enrollment' ? 'bg-purple-100 text-purple-700' : row.kind === 'task' ? 'bg-amber-100 text-amber-700'
+              : row.kind === 'ai_route' ? 'bg-fuchsia-100 text-fuchsia-700' : row.kind === 'milestone' ? 'bg-green-100 text-green-700' : row.kind === 'enrichment' ? 'bg-sky-100 text-sky-700' : String(d.error_code ?? '') ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600';
             return (
               <li key={`${row.kind}-${row.at}-${i}`} className="ml-4">
-                <span className={cn('absolute -left-[11px] w-[22px] h-[22px] rounded-full flex items-center justify-center ring-4 ring-white', tone)}><TimelineIcon kind={row.kind} /></span>
+                <span className={cn('absolute -left-[11px] w-[22px] h-[22px] rounded-full flex items-center justify-center ring-4 ring-white', tone)}><TimelineIcon kind={row.kind} held={held} /></span>
                 <div className="text-sm text-gray-900">{row.title}{isMsg && d.intent ? <span className="ml-2 inline-block align-middle"><IntentBadge intent={d.intent as Chat['intent']} /></span> : null}</div>
                 {isMsg && typeof d.text === 'string' && d.text && <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{d.text}</p>}
                 {row.kind === 'action' && (d.decision || d.error_code) ? <p className="text-xs text-gray-500 mt-0.5">{[d.decision, d.error_code].filter(Boolean).join(' · ')}</p> : null}
-                {row.kind === 'enrollment' && typeof d.reason === 'string' && d.reason ? <p className="text-xs text-gray-500 mt-0.5">{d.reason}</p> : null}
+                {row.kind === 'enrollment' && (d.reason_text || d.reason) ? <p className="text-xs text-gray-500 mt-0.5">{String(d.reason_text || d.reason)}</p> : null}
+                {held && <p className="text-xs text-gray-500 mt-0.5">The sequence waits until someone resumes it or exits the lead.</p>}
+                {row.kind === 'ai_route' && (
+                  <div className="mt-1 rounded-lg border border-fuchsia-100 bg-fuchsia-50/50 px-2.5 py-1.5 text-xs text-gray-700 space-y-1">
+                    {typeof d.reason === 'string' && d.reason ? <p><span className="font-medium text-gray-900">Why:</span> {d.reason}</p> : <p className="text-gray-500">No reason was stored.</p>}
+                    {facts.length > 0 && (
+                      <div>
+                        <span className="font-medium text-gray-900">Facts used:</span>
+                        <ul className="list-disc ml-4 mt-0.5 space-y-0.5">{facts.slice(0, 8).map((f, j) => <li key={j} className="break-words">{f}</li>)}</ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {row.kind === 'milestone' && (d.source || (d.value != null && d.value !== '')) ? <p className="text-xs text-gray-500 mt-0.5">{[d.source ? `from ${String(d.source).replace(/_/g, ' ')}` : null, d.value != null && d.value !== '' ? `value ${String(d.value)}` : null].filter(Boolean).join(' · ')}</p> : null}
+                {row.kind === 'enrichment' && <p className="text-xs text-gray-500 mt-0.5">{d.source ? `From ${String(d.source).replace(/_/g, ' ')}` : 'Profile data stored'}{emptySections.length ? `. Still empty, will be retried: ${emptySections.join(', ')}` : ''}</p>}
+                {taskResult && (taskResult.outcome || taskResult.decision) ? <p className="text-xs text-gray-500 mt-0.5">{taskResult.outcome ? `Call outcome: ${CALL_OUTCOME[String(taskResult.outcome)] ?? String(taskResult.outcome)}` : `Decision: ${String(taskResult.decision)}`}{typeof taskResult.notes === 'string' && taskResult.notes ? ` · ${taskResult.notes}` : ''}</p> : null}
                 <div className="text-xs text-gray-400 mt-0.5">{fmtDate(row.at)}{isMsg && typeof d.chat_id === 'string' ? <> · <Link href={`/outreach/inbox/${d.chat_id}`} className="text-indigo-600 hover:underline">open chat</Link></> : null}</div>
               </li>
             );

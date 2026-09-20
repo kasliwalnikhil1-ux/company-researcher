@@ -1,0 +1,971 @@
+[
+  {
+    "name": "plain variable",
+    "kind": "render",
+    "template": "Hi {{first_name}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Hi Asha"
+  },
+  {
+    "name": "fallback used when the field is missing",
+    "kind": "render",
+    "template": "Hi {{nickname|there}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Hi there"
+  },
+  {
+    "name": "fallback ignored when the field has a value",
+    "kind": "render",
+    "template": "Hi {{first_name|there}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Hi Asha"
+  },
+  {
+    "name": "missing variable without fallback renders nothing",
+    "kind": "render",
+    "template": "Hi {{nickname}}!",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Hi !"
+  },
+  {
+    "name": "first_name derived from full_name",
+    "kind": "render",
+    "template": "Hi {{first_name|there}}",
+    "ctx": {
+      "lead": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "full_name": "Ben Ortiz",
+        "custom": {}
+      }
+    },
+    "expected": "Hi Ben"
+  },
+  {
+    "name": "lead. prefix is the same as the bare name",
+    "kind": "render",
+    "template": "{{lead.company}} / {{company}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Northwind / Northwind"
+  },
+  {
+    "name": "whitespace inside the tag",
+    "kind": "render",
+    "template": "Hi {{  first_name  |  friend  }}",
+    "ctx": {
+      "lead": {}
+    },
+    "expected": "Hi friend"
+  },
+  {
+    "name": "custom field",
+    "kind": "render",
+    "template": "How is {{custom.city|your city}}?",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "How is Pune?"
+  },
+  {
+    "name": "empty custom field falls back",
+    "kind": "render",
+    "template": "Plan: {{custom.plan|free}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Plan: free"
+  },
+  {
+    "name": "sender fields",
+    "kind": "render",
+    "template": "{{sender.first_name}} ({{sender.full_name}})",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "sender": {
+        "display_name": "Maya Chen"
+      }
+    },
+    "expected": "Maya (Maya Chen)"
+  },
+  {
+    "name": "sender signature",
+    "kind": "render",
+    "template": "Thanks,\n{{sender.signature}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "sender": {
+        "display_name": "Maya Chen",
+        "first_name": "Maya",
+        "signature": "Maya Chen\nFounder, Acme",
+        "booking_link": "https://cal.com/maya/intro"
+      }
+    },
+    "expected": "Thanks,\nMaya Chen\nFounder, Acme"
+  },
+  {
+    "name": "null sender does not throw",
+    "kind": "render",
+    "template": "From {{sender.first_name|the team}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "sender": null
+    },
+    "expected": "From the team"
+  },
+  {
+    "name": "enrich variables",
+    "kind": "render",
+    "template": "You spent {{enrich.years_in_role}} years here after {{enrich.previous_company|your last role}}.",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "enrich": {
+        "about": "Building growth teams.",
+        "previous_company": "Contoso",
+        "years_in_role": 3,
+        "months_in_role": 0,
+        "skills": "SEO, Paid social",
+        "recent_post": "Why {onboarding|activation} matters {{more}}"
+      }
+    },
+    "expected": "You spent 3 years here after Contoso."
+  },
+  {
+    "name": "enrich zero is a value, not empty",
+    "kind": "render",
+    "template": "{{enrich.months_in_role|n/a}} months",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "enrich": {
+        "about": "Building growth teams.",
+        "previous_company": "Contoso",
+        "years_in_role": 3,
+        "months_in_role": 0,
+        "skills": "SEO, Paid social",
+        "recent_post": "Why {onboarding|activation} matters {{more}}"
+      }
+    },
+    "expected": "0 months"
+  },
+  {
+    "name": "enrich fallback when nothing is stored",
+    "kind": "render",
+    "template": "{{enrich.about|I read your profile.}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "enrich": {}
+    },
+    "expected": "I read your profile."
+  },
+  {
+    "name": "approved ai line",
+    "kind": "render",
+    "template": "{{ai.icebreaker|Hope you are well.}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "ai": {
+        "icebreaker": "Loved your talk on activation."
+      }
+    },
+    "expected": "Loved your talk on activation."
+  },
+  {
+    "name": "ai fallback when no approved line exists",
+    "kind": "render",
+    "template": "{{ai.icebreaker|Hope you are well.}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "ai": {}
+    },
+    "expected": "Hope you are well."
+  },
+  {
+    "name": "spintax without a seed takes the first option",
+    "kind": "render",
+    "template": "{Hi|Hello|Hey} {{first_name}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Hi Asha"
+  },
+  {
+    "name": "spintax seed one",
+    "kind": "render",
+    "template": "{Hi|Hello|Hey} {{first_name}}, {quick question|one thing|a thought}.",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "expected": "Hey Asha, one thing."
+  },
+  {
+    "name": "spintax seed two",
+    "kind": "render",
+    "template": "{Hi|Hello|Hey} {{first_name}}, {quick question|one thing|a thought}.",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000002"
+    },
+    "expected": "Hi Asha, one thing."
+  },
+  {
+    "name": "spintax seed three",
+    "kind": "render",
+    "template": "{Hi|Hello|Hey} {{first_name}}, {quick question|one thing|a thought}.",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000007"
+    },
+    "expected": "Hi Asha, a thought."
+  },
+  {
+    "name": "same seed gives the same text again (preview equals send)",
+    "kind": "render",
+    "template": "{Hi|Hello|Hey} {{first_name}}, {quick question|one thing|a thought}.",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "expected": "Hey Asha, one thing."
+  },
+  {
+    "name": "spintax with an empty option",
+    "kind": "render",
+    "template": "Thanks{ a lot|}!",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "Thanks a lot!"
+  },
+  {
+    "name": "single braces without a pipe are left alone",
+    "kind": "render",
+    "template": "Use {curly} braces and {{first_name}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "expected": "Use {curly} braces and Asha"
+  },
+  {
+    "name": "a variable with a fallback is never spintax",
+    "kind": "render",
+    "template": "{{nickname|a|b}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000002"
+    },
+    "expected": "a|b"
+  },
+  {
+    "name": "a value containing braces stays literal",
+    "kind": "render",
+    "template": "You wrote: {{enrich.recent_post}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "enrich": {
+        "about": "Building growth teams.",
+        "previous_company": "Contoso",
+        "years_in_role": 3,
+        "months_in_role": 0,
+        "skills": "SEO, Paid social",
+        "recent_post": "Why {onboarding|activation} matters {{more}}"
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000002"
+    },
+    "expected": "You wrote: Why {onboarding|activation} matters {{more}}"
+  },
+  {
+    "name": "a value containing a conditional tag stays literal",
+    "kind": "render",
+    "template": "{{custom.note}}",
+    "ctx": {
+      "lead": {
+        "custom": {
+          "note": "{{#if company}}x{{/if}} {a|b}"
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "expected": "{{#if company}}x{{/if}} {a|b}"
+  },
+  {
+    "name": "conditional true",
+    "kind": "render",
+    "template": "I saw your work{{#if company}} at {{company}}{{/if}}.",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "I saw your work at Northwind."
+  },
+  {
+    "name": "conditional false leaves a clean sentence",
+    "kind": "render",
+    "template": "I saw your work{{#if company}} at {{company}}{{/if}}.",
+    "ctx": {
+      "lead": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "full_name": "Ben Ortiz",
+        "custom": {}
+      }
+    },
+    "expected": "I saw your work."
+  },
+  {
+    "name": "conditional else",
+    "kind": "render",
+    "template": "{{#if company}}How are things at {{company}}?{{else}}How is work?{{/if}}",
+    "ctx": {
+      "lead": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "full_name": "Ben Ortiz",
+        "custom": {}
+      }
+    },
+    "expected": "How is work?"
+  },
+  {
+    "name": "conditional on an enrich path",
+    "kind": "render",
+    "template": "{{#if enrich.previous_company}}Ex-{{enrich.previous_company}}, nice.{{else}}Nice background.{{/if}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "enrich": {
+        "about": "Building growth teams.",
+        "previous_company": "Contoso",
+        "years_in_role": 3,
+        "months_in_role": 0,
+        "skills": "SEO, Paid social",
+        "recent_post": "Why {onboarding|activation} matters {{more}}"
+      }
+    },
+    "expected": "Ex-Contoso, nice."
+  },
+  {
+    "name": "conditional on an ai path with nothing approved",
+    "kind": "render",
+    "template": "{{#if ai.icebreaker}}{{ai.icebreaker}} {{/if}}Open to a chat?",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "ai": {}
+    },
+    "expected": "Open to a chat?"
+  },
+  {
+    "name": "nested conditional, both true",
+    "kind": "render",
+    "template": "{{#if company}}At {{company}}{{#if title}} as {{title}}{{/if}}.{{else}}Hello.{{/if}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "At Northwind as Head of Growth."
+  },
+  {
+    "name": "nested conditional, inner false",
+    "kind": "render",
+    "template": "{{#if company}}At {{company}}{{#if title}} as {{title}}{{else}} (role unknown){{/if}}.{{else}}Hello.{{/if}}",
+    "ctx": {
+      "lead": {
+        "company": "Northwind"
+      }
+    },
+    "expected": "At Northwind (role unknown)."
+  },
+  {
+    "name": "nested conditional, outer false hides the inner block",
+    "kind": "render",
+    "template": "{{#if company}}At {{company}}{{#if title}} as {{title}}{{/if}}.{{else}}Hello.{{/if}}",
+    "ctx": {
+      "lead": {
+        "title": "CTO"
+      }
+    },
+    "expected": "Hello."
+  },
+  {
+    "name": "spintax inside a conditional keeps its position-based pick",
+    "kind": "render",
+    "template": "{{#if company}}{Great|Nice} team at {{company}}.{{else}}{Great|Nice} profile.{{/if}} {Cheers|Best}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000002"
+    },
+    "expected": "Nice team at Northwind. Best"
+  },
+  {
+    "name": "same template, conditional flipped, last group unchanged",
+    "kind": "render",
+    "template": "{{#if company}}{Great|Nice} team at {{company}}.{{else}}{Great|Nice} profile.{{/if}} {Cheers|Best}",
+    "ctx": {
+      "lead": {
+        "id": "22222222-2222-4222-8222-222222222222",
+        "full_name": "Ben Ortiz",
+        "custom": {}
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000002"
+    },
+    "expected": "Great profile. Best"
+  },
+  {
+    "name": "unsubscribe link",
+    "kind": "render",
+    "template": "<a href=\"{{unsubscribe_link}}\">unsubscribe</a>",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "unsubscribe_link": "https://x.supabase.co/functions/v1/outreach-unsubscribe?l=11111111-1111-4111-8111-111111111111&t=abc123"
+    },
+    "expected": "<a href=\"https://x.supabase.co/functions/v1/outreach-unsubscribe?l=11111111-1111-4111-8111-111111111111&t=abc123\">unsubscribe</a>"
+  },
+  {
+    "name": "unsubscribe link missing renders the fallback",
+    "kind": "render",
+    "template": "{{unsubscribe_link|#}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "#"
+  },
+  {
+    "name": "booking link falls back to the sender's",
+    "kind": "render",
+    "template": "Book here: {{booking_link}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "sender": {
+        "display_name": "Maya Chen",
+        "first_name": "Maya",
+        "signature": "Maya Chen\nFounder, Acme",
+        "booking_link": "https://cal.com/maya/intro"
+      }
+    },
+    "expected": "Book here: https://cal.com/maya/intro"
+  },
+  {
+    "name": "buildContext adds the lead id to the booking link",
+    "kind": "build",
+    "template": "{{booking_link}} | {{sender.booking_link}} | {{unsubscribe_link}} | {Hi|Hello} {{first_name}} | {{enrich.skills}} | {{ai.icebreaker}}",
+    "rpc": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "sender": {
+        "display_name": "Maya Chen",
+        "first_name": "Maya",
+        "signature": "Maya Chen\nFounder, Acme",
+        "booking_link": "https://cal.com/maya/intro"
+      },
+      "enrich": {
+        "about": "Building growth teams.",
+        "previous_company": "Contoso",
+        "years_in_role": 3,
+        "months_in_role": 0,
+        "skills": "SEO, Paid social",
+        "recent_post": "Why {onboarding|activation} matters {{more}}"
+      },
+      "ai": {
+        "icebreaker": "Loved your talk on activation."
+      },
+      "seed": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "extras": {
+      "unsubscribe_link": "https://x.supabase.co/functions/v1/outreach-unsubscribe?l=11111111-1111-4111-8111-111111111111&t=abc123"
+    },
+    "expected": "https://cal.com/maya/intro?utm_content=11111111-1111-4111-8111-111111111111&metadata%5Blead_id%5D=11111111-1111-4111-8111-111111111111 | https://cal.com/maya/intro?utm_content=11111111-1111-4111-8111-111111111111&metadata%5Blead_id%5D=11111111-1111-4111-8111-111111111111 | https://x.supabase.co/functions/v1/outreach-unsubscribe?l=11111111-1111-4111-8111-111111111111&t=abc123 | Hi Asha | SEO, Paid social | Loved your talk on activation."
+  },
+  {
+    "name": "buildContext keeps an existing query string",
+    "kind": "build",
+    "template": "{{booking_link}}",
+    "rpc": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      },
+      "sender": {
+        "booking_link": "https://calendly.com/maya/30min?month=2026-10#top"
+      },
+      "enrich": {},
+      "ai": {},
+      "seed": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    "extras": {},
+    "expected": "https://calendly.com/maya/30min?month=2026-10&utm_content=11111111-1111-4111-8111-111111111111#top"
+  },
+  {
+    "name": "stray else and endif tags are dropped",
+    "kind": "render",
+    "template": "a{{else}}b{{/if}}c",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": "abc"
+  },
+  {
+    "name": "longest combination",
+    "kind": "spintaxInfo",
+    "template": "{Hi|Hello|Hey} {{first_name}}, {quick question|one thing}.",
+    "expected": {
+      "maxLen": 37,
+      "combinations": 6
+    }
+  },
+  {
+    "name": "identical groups are counted once, like the SQL function",
+    "kind": "spintaxInfo",
+    "template": "{a|bb} and {a|bb} and {x|y|zzz}",
+    "expected": {
+      "maxLen": 17,
+      "combinations": 6
+    }
+  },
+  {
+    "name": "conditional tags are stripped from the longest length, else is kept (SQL parity)",
+    "kind": "spintaxInfo",
+    "template": "{{#if company}}at {{company}}{{else}}hi{{/if}}",
+    "expected": {
+      "maxLen": 24,
+      "combinations": 1
+    }
+  },
+  {
+    "name": "no spintax",
+    "kind": "spintaxInfo",
+    "template": "Hello {{first_name|there}}",
+    "expected": {
+      "maxLen": 26,
+      "combinations": 1
+    }
+  },
+  {
+    "name": "length is counted in characters",
+    "kind": "spintaxInfo",
+    "template": "{👋|hi}",
+    "expected": {
+      "maxLen": 2,
+      "combinations": 2
+    }
+  },
+  {
+    "name": "missing variables ignore fallbacks and untaken branches",
+    "kind": "missing",
+    "template": "{{first_name}} {{nickname}} {{nickname}} {{city|x}} {{#if company}}{{company}} {{custom.team}}{{else}}{{custom.other}}{{/if}} {{ai.icebreaker}}",
+    "ctx": {
+      "lead": {
+        "id": "11111111-1111-4111-8111-111111111111",
+        "first_name": "Asha",
+        "last_name": "Rao",
+        "full_name": "Asha Rao",
+        "company": "Northwind",
+        "title": "Head of Growth",
+        "custom": {
+          "city": "Pune",
+          "plan": ""
+        }
+      }
+    },
+    "expected": [
+      "nickname",
+      "custom.team",
+      "ai.icebreaker"
+    ]
+  },
+  {
+    "name": "template variables",
+    "kind": "variables",
+    "template": "{{first_name|x}} {{#if company}}{{company}}{{else}}{{sender.first_name}}{{/if}} {a|b} {{enrich.about}}",
+    "expected": [
+      "first_name",
+      "company",
+      "sender.first_name",
+      "enrich.about"
+    ]
+  }
+]

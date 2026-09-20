@@ -5,16 +5,20 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, Copy, ExternalLink, GitBranch, MoreHorizontal, Plus, Search, Trash2 } from 'lucide-react';
+import { AlertTriangle, Archive, Copy, ExternalLink, GitBranch, MoreHorizontal, Plus, Search, Trash2, UserX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
+import { normalizeGraph } from '@/lib/outreach/graph';
 import { qk, useClients, useSenders, useSequences } from '@/lib/outreach/queries';
 import type { Sequence, SequenceStatus } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
-import { useSequenceSummary } from '@/components/outreach/sequences/hooks';
+import { useFailedCounts, useSequenceSummary } from '@/components/outreach/sequences/hooks';
+import FailedLeadsDrawer from '@/components/outreach/sequences/FailedLeadsDrawer';
+import { WhyNotSendingDialog } from '@/components/outreach/sequences/WhyNotSendingDialog';
+import { fmtInt, type SequenceExt } from '@/components/outreach/sequences/publishTypes';
 import { formatGraphError, nodeCount, senderName, STATUS_TONE } from '@/components/outreach/sequences/helpers';
 
 const STATUSES: SequenceStatus[] = ['draft', 'active', 'paused', 'archived'];
@@ -82,12 +86,15 @@ function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequen
 }
 
 export default function SequencesPage() {
-  const { workspace, isManager, suspended } = useWorkspace();
+  const { workspace, isManager, canWrite, suspended } = useWorkspace();
   const ws = workspace?.id ?? null;
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
   const seqs = useSequences(ws);
+  const failedCounts = useFailedCounts(ws);
+  const [whyFor, setWhyFor] = useState<string | null>(null);
+  const [failedFor, setFailedFor] = useState<Sequence | null>(null);
   const senders = useSenders(ws);
   const clients = useClients(ws);
   const summary = useSequenceSummary(ws);
@@ -126,7 +133,7 @@ export default function SequencesPage() {
     setBusyId(s.id);
     try {
       const id = await rpc<string>('create_sequence', { p_workspace: ws, p_name: `${s.name} (copy)`, p_client_id: s.client_id });
-      await rpc('save_sequence', { p_id: id, p_graph: s.graph, p_pool: s.sender_pool, p_settings: s.settings, p_assignment: s.assignment, p_use_sender_schedule: s.use_sender_schedule, p_brief: s.brief ?? '' });
+      await rpc('save_sequence', { p_id: id, p_graph: normalizeGraph(s.graph), p_pool: s.sender_pool, p_settings: s.settings, p_assignment: s.assignment, p_use_sender_schedule: s.use_sender_schedule, p_brief: s.brief ?? '' });
       invalidate();
       toast.show(`Duplicated “${s.name}”`);
     } catch (e) { toast.show(formatGraphError(e), 'error'); }
@@ -187,6 +194,8 @@ export default function SequencesPage() {
           <tbody>
             {rows.map((s) => {
               const sm = summaryMap[s.id];
+              const ext = s as SequenceExt;
+              const failed = failedCounts.data?.[s.id] ?? 0;
               const pool = s.sender_pool.map((id) => senders.data?.find((x) => x.id === id)).filter(Boolean) as NonNullable<typeof senders.data>;
               const clientName = clients.data?.find((c) => c.id === s.client_id)?.name;
               return (
@@ -198,7 +207,13 @@ export default function SequencesPage() {
                   <Td>
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <Badge tone={STATUS_TONE[s.status]} className="capitalize">{s.status}</Badge>
+                      {ext.stalled_at && s.status === 'active' && (
+                        <button type="button" onClick={() => setWhyFor(s.id)} title={`${ext.stalled_reason ?? 'Nothing was sent in the last sending window'}. Stalled ${timeAgo(ext.stalled_at)}. Click to see why.`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200"><AlertTriangle className="w-3 h-3" /> Stalled</button>
+                      )}
                       {s.throttled_reason && <Badge tone="amber" className="cursor-help"><span title={s.throttled_reason} className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> throttled</span></Badge>}
+                      {failed > 0 && (
+                        <button type="button" onClick={() => setFailedFor(s)} title="Leads that failed a step. Click to see why and to retry, skip or exit them." className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 tabular-nums"><UserX className="w-3 h-3" /> {fmtInt(failed)}{failed >= 5000 ? '+' : ''} failed</button>
+                      )}
                     </div>
                   </Td>
                   <Td className="text-gray-600">{clientName ?? <span className="text-gray-400">—</span>}</Td>
@@ -240,6 +255,8 @@ export default function SequencesPage() {
         body={<p>Archiving “{confirm?.s.name}” exits all live enrollments ({summaryMap[confirm?.s.id ?? '']?.live ?? 0}) and stops scheduling. The graph and history are kept.</p>} />
       <ConfirmModal open={confirm?.kind === 'delete'} title="Delete sequence" confirmLabel="Delete permanently" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
         body={<p>This permanently deletes “{confirm?.s.name}”, its versions, node statistics and enrollment history. This cannot be undone.</p>} />
+      <WhyNotSendingDialog open={!!whyFor} onClose={() => setWhyFor(null)} sequenceId={whyFor} />
+      <FailedLeadsDrawer open={!!failedFor} onClose={() => setFailedFor(null)} sequenceId={failedFor?.id ?? ''} nodeLabel={undefined} graph={failedFor?.graph ?? null} canWrite={canWrite} />
       {toast.node}
     </div>
   );

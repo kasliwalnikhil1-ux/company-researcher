@@ -1,13 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { qk, useClients, useLists, useSenders, useTags } from '@/lib/outreach/queries';
+import { useSenders } from '@/lib/outreach/queries';
 import { callFn, parseError } from '@/lib/outreach/api';
-import { Badge, Button, ErrorBox, Input, Select } from '@/components/outreach/ui';
+import { Badge, Button, ErrorBox, Input } from '@/components/outreach/ui';
 import { Info, Search } from 'lucide-react';
-import { TagMultiSelect } from './TagMultiSelect';
+import { EMPTY_COMMON, ImportOptions, importStartedMessage, useImportCreator, type ImportCommon } from './ImportOptions';
 import { SenderPicker, importableSenders, useSearchPageBudget } from './SenderPicker';
 import { formatNumber, type ToastFn } from '../helpers';
 
@@ -15,19 +14,14 @@ interface Estimate { api: 'classic' | 'sales_navigator'; cap: number; per_page: 
 
 export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreated: () => void }) {
   const { workspace } = useWorkspace();
-  const qc = useQueryClient();
   const senders = useSenders(workspace?.id);
-  const clients = useClients(workspace?.id);
-  const lists = useLists(workspace?.id);
-  const tags = useTags(workspace?.id);
+  const createImport = useImportCreator();
   const ready = importableSenders(senders.data);
 
   const [url, setUrl] = useState('');
   const [senderId, setSenderId] = useState('');
   const [maxResults, setMaxResults] = useState('');
-  const [clientId, setClientId] = useState('');
-  const [listId, setListId] = useState('');
-  const [tagIds, setTagIds] = useState<string[]>([]);
+  const [common, setCommon] = useState<ImportCommon>(EMPTY_COMMON);
   const [estimate, setEstimate] = useState<Estimate | null>(null);
   const [busy, setBusy] = useState<'estimate' | 'create' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +34,7 @@ export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreate
   const body = () => ({
     workspace_id: workspace!.id, kind: 'search_url' as const, sender_id: senderId, url: url.trim(),
     max_results: maxResults ? Math.max(1, parseInt(maxResults, 10) || 0) : undefined,
-    client_id: clientId || null, list_id: listId || null, tag_ids: tagIds,
+    client_id: common.clientId || null, list_id: common.listId || null, tag_ids: common.tagIds, enrich: common.enrich,
   });
 
   const runEstimate = async () => {
@@ -57,10 +51,11 @@ export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreate
     if (!workspace || !estimate) return;
     setBusy('create'); setError(null);
     try {
-      await callFn('imports-create', body());
-      qc.invalidateQueries({ queryKey: qk.imports(workspace.id) });
-      toast('Import started — leads will arrive over the coming days');
-      setUrl(''); setMaxResults(''); setEstimate(null); setTagIds([]);
+      const max = maxResults ? Math.max(1, parseInt(maxResults, 10) || 0) : undefined;
+      const r = await createImport({ kind: 'search_url', sender_id: senderId, fields: { url: url.trim(), ...(max ? { max_results: max } : {}) }, name: `${isSalesNav ? 'Sales Navigator' : 'LinkedIn'} search` }, common);
+      const m = importStartedMessage('Import started. Leads will arrive over the coming days.', { ...r, estimatedDays: null });
+      toast(m.message, m.type);
+      setUrl(''); setMaxResults(''); setEstimate(null); setCommon((c) => ({ ...c, tagIds: [], cadence: '' }));
       onCreated();
     } catch (e) { setError(parseError(e).message); }
     finally { setBusy(null); }
@@ -82,18 +77,10 @@ export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreate
           ) : <span>unavailable</span>}
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="max-w-xs">
         <Input label="Max results (optional)" type="number" min={1} value={maxResults} onChange={(e) => setMaxResults(e.target.value)} placeholder={isSalesNav ? 'up to 2,500' : 'up to 1,000'} hint="LinkedIn stops returning results at 1,000 (Classic) or 2,500 (Sales Navigator)." />
-        <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-          <option value="">No client</option>
-          {clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </Select>
-        <Select label="Add to list (optional)" value={listId} onChange={(e) => setListId(e.target.value)}>
-          <option value="">No list</option>
-          {lists.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </Select>
       </div>
-      <TagMultiSelect tags={tags.data ?? []} value={tagIds} onChange={setTagIds} />
+      <ImportOptions kind="search_url" value={common} onChange={setCommon} />
 
       {estimate && (
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/60 p-4 space-y-2">

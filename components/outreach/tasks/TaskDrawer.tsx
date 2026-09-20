@@ -3,17 +3,39 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, ExternalLink, RefreshCw, Sparkles, Check, XCircle, MessageSquare, Contact, Loader2, Building2 } from 'lucide-react';
+import { X, ExternalLink, RefreshCw, Sparkles, Check, XCircle, MessageSquare, Contact, Loader2, Building2, Phone, Play, LogOut } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { useLead, useMessages, useSender } from '@/lib/outreach/queries';
 import { NODE_CATALOG, TEXT_LIMITS } from '@/lib/outreach/nodes';
 import { renderTemplate } from '@/lib/outreach/render';
-import type { Graph, Member, Task, TaskKind } from '@/lib/outreach/types';
-import { Avatar, Badge, Button, ErrorBox, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
+import type { Graph, Member, Message, Task } from '@/lib/outreach/types';
+import { Avatar, Badge, Button, ErrorBox, IntentBadge, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
+import { cn } from '@/lib/utils';
 
-export const TASK_KIND_LABEL: Record<TaskKind, string> = { manual_node: 'Manual step', follow_up: 'Follow-up', review_ai_draft: 'Review AI draft', reconnect: 'Reconnect sender' };
-export const TASK_KIND_TONE: Record<TaskKind, 'blue' | 'amber' | 'purple' | 'red'> = { manual_node: 'blue', follow_up: 'amber', review_ai_draft: 'purple', reconnect: 'red' };
+type KindTone = 'blue' | 'amber' | 'purple' | 'red' | 'green' | 'indigo' | 'gray';
+// Keyed by string so a task kind added to the database later still renders.
+export const TASK_KINDS = ['manual_node', 'follow_up', 'review_ai_draft', 'reconnect', 'call', 'reply_hold'] as const;
+export const TASK_KIND_LABEL: Record<string, string> = { manual_node: 'Manual step', follow_up: 'Follow-up', review_ai_draft: 'Review AI draft', reconnect: 'Reconnect sender', call: 'Call', reply_hold: 'Held after a reply' };
+export const TASK_KIND_TONE: Record<string, KindTone> = { manual_node: 'blue', follow_up: 'amber', review_ai_draft: 'purple', reconnect: 'red', call: 'green', reply_hold: 'indigo' };
+export function taskKindLabel(kind: string): string { return TASK_KIND_LABEL[kind] ?? kind.replace(/_/g, ' '); }
+export function taskKindTone(kind: string): KindTone { return TASK_KIND_TONE[kind] ?? 'gray'; }
+
+export const CALL_OUTCOMES = [
+  { id: 'connected', label: 'Connected', hint: 'You spoke to the lead' },
+  { id: 'voicemail', label: 'Voicemail', hint: 'You left a message' },
+  { id: 'no_answer', label: 'No answer', hint: 'Nobody picked up' },
+  { id: 'wrong_number', label: 'Wrong number', hint: 'The number is not theirs' },
+] as const;
+export type CallOutcome = typeof CALL_OUTCOMES[number]['id'];
+
+/** Call tasks carry "Phone: <number>" on the first line of the body, then the script (outreach_create_node_task). */
+export function parseCallBody(body: string | null | undefined): { phone: string | null; script: string } {
+  const m = /^Phone:\s*(.*?)\s*(?:\r?\n|$)/.exec(body ?? '');
+  if (!m) return { phone: null, script: (body ?? '').trim() };
+  const phone = m[1] && m[1].toLowerCase() !== 'not on file' ? m[1] : null;
+  return { phone, script: (body ?? '').slice(m[0].length).trim() };
+}
 
 const OUTREACH_TEXT_TYPES = new Set(['send_invite', 'send_message', 'send_inmail', 'send_email', 'comment_latest_post']);
 const DRAFT_WAIT_MS = 60_000;
@@ -65,6 +87,21 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
     },
   });
   const messagesQ = useMessages(task?.kind === 'follow_up' ? task.chat_id : null);
+  const kind: string = task?.kind ?? '';
+
+  // reply_hold: the reply that put the sequence on hold (latest inbound message from this lead).
+  const heldReplyQ = useQuery({
+    queryKey: ['outreach', 'task', taskId, 'held-reply', task?.lead_id ?? ''],
+    enabled: kind === 'reply_hold' && !!task?.lead_id,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('outreach_messages').select('id, chat_id, text, summary, intent, sent_at, outreach_chats!inner(lead_id)')
+        .eq('outreach_chats.lead_id', task!.lead_id!).eq('direction', 'in').order('sent_at', { ascending: false }).limit(1);
+      if (error) throw parseError(error);
+      return ((data ?? [])[0] ?? null) as unknown as (Pick<Message, 'id' | 'chat_id' | 'text' | 'summary' | 'intent' | 'sent_at'>) | null;
+    },
+  });
+  const [outcome, setOutcome] = useState<CallOutcome | ''>('');
+  const [notes, setNotes] = useState('');
 
   const [text, setText] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -111,6 +148,12 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
   }, 'Draft regenerated');
   const approve = () => run('approve', () => rpc('complete_task', { p_id: taskId, p_text: text.trim(), p_result: null }), 'Approved — queued for sending', true);
   const reject = () => run('reject', () => rpc('complete_task', { p_id: taskId, p_text: null, p_result: { decision: 'reject' } }), 'Draft rejected', true);
+  const completeCall = () => {
+    if (!outcome) return;
+    const n = notes.trim();
+    return run('call', () => rpc('complete_task', { p_id: taskId, p_text: n || null, p_result: { outcome, notes: n || null } }), 'Call logged. The sequence continues on the matching branch.', true);
+  };
+  const decideHold = (decision: 'resume' | 'exit') => run(decision, () => rpc('complete_task', { p_id: taskId, p_text: null, p_result: { decision } }), decision === 'resume' ? 'Sequence resumed' : 'Lead exited from the sequence', true);
   const done = (withText: boolean) => run('done', () => rpc('complete_task', { p_id: taskId, p_text: withText && text.trim() ? text.trim() : null, p_result: null }), 'Task completed', true);
 
   const limit = draftLimit(task?.draft_kind ?? node?.config?.kind, senderQ.data?.is_premium);
@@ -127,7 +170,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
       <div className="relative w-full max-w-xl h-full bg-white shadow-xl flex flex-col" role="dialog" aria-label="Task details">
         <div className="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-200">
           <div className="min-w-0">
-            {task && <Badge tone={TASK_KIND_TONE[task.kind]}>{TASK_KIND_LABEL[task.kind]}</Badge>}
+            {task && <Badge tone={taskKindTone(kind)}>{taskKindLabel(kind)}</Badge>}
             <h2 className="text-base font-semibold text-gray-900 mt-1 truncate">{task?.title ?? 'Task'}</h2>
             {task && (
               <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-3">
@@ -264,6 +307,85 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
                     <div className="flex-1" />
                     {!completed && canWrite && <Button size="sm" loading={busy === 'done'} onClick={() => done(false)}><Check className="w-3.5 h-3.5" /> Done</Button>}
                   </div>
+                </div>
+              )}
+
+              {kind === 'call' && (() => {
+                const { phone: bodyPhone, script } = parseCallBody(task.body);
+                const phone = (lead as (typeof lead & { phone?: string | null }) | undefined)?.phone || bodyPhone;
+                const result = (task.result ?? {}) as { outcome?: string; notes?: string | null };
+                return (
+                  <div className="space-y-3">
+                    <div className="rounded-xl border border-green-200 bg-green-50 p-3 flex items-center gap-3">
+                      <span className="w-9 h-9 rounded-full bg-green-600 text-white flex items-center justify-center flex-shrink-0"><Phone className="w-4 h-4" /></span>
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-green-800">Phone number</div>
+                        {phone ? <a href={`tel:${phone.replace(/[^+\d]/g, '')}`} className="text-lg font-semibold text-gray-900 hover:text-green-700 tabular-nums break-all">{phone}</a>
+                          : <div className="text-sm text-gray-700">No number on file. {lead && <Link href={`/outreach/leads/${lead.id}`} className="text-indigo-600 hover:underline">Add one on the lead page</Link>}</div>}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Script</div>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 border border-gray-200 rounded-lg p-3">{script || 'No script was written for this step.'}</p>
+                    </div>
+                    {enrollmentQ.data && <div className="text-xs text-gray-500">Sequence <Link href={`/outreach/sequences/${enrollmentQ.data.sequence_id}${task.node_id ? `?node=${encodeURIComponent(task.node_id)}` : ''}`} className="text-indigo-600 hover:underline">{enrollmentQ.data.outreach_sequences?.name ?? 'sequence'}</Link>. The outcome decides which branch the lead takes next.</div>}
+                    {completed ? (
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Outcome</div>
+                        <Badge tone="green">{CALL_OUTCOMES.find((o) => o.id === result.outcome)?.label ?? String(result.outcome ?? 'Completed')}</Badge>
+                        {result.notes && <p className="text-sm text-gray-700 whitespace-pre-wrap mt-2">{result.notes}</p>}
+                      </div>
+                    ) : canWrite ? (
+                      <>
+                        <fieldset>
+                          <legend className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">How did the call go?</legend>
+                          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Call outcome">
+                            {CALL_OUTCOMES.map((o) => (
+                              <button key={o.id} type="button" role="radio" aria-checked={outcome === o.id} onClick={() => setOutcome(o.id)}
+                                className={cn('text-left rounded-lg border px-3 py-2 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500', outcome === o.id ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white hover:bg-gray-50')}>
+                                <span className="block text-sm font-medium text-gray-900">{o.label}</span>
+                                <span className="block text-xs text-gray-500">{o.hint}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </fieldset>
+                        <Textarea label="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[80px]" placeholder="What was said, when to call back…" />
+                        <div className="flex items-center justify-end gap-3">
+                          {!outcome && <span className="text-xs text-gray-500">Pick an outcome to complete the task.</span>}
+                          <Button size="sm" loading={busy === 'call'} disabled={!outcome} onClick={completeCall}><Check className="w-3.5 h-3.5" /> Log call</Button>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                );
+              })()}
+
+              {kind === 'reply_hold' && (
+                <div className="space-y-3">
+                  <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-3">This lead replied and the sequence is set to hold for review. Nothing else is sent until you decide. Held leads are exited on their own once the hold limit passes.</p>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Their reply</div>
+                    {heldReplyQ.isLoading ? <p className="text-xs text-gray-400">Loading…</p> : heldReplyQ.error ? <ErrorBox message={parseError(heldReplyQ.error).message} /> : heldReplyQ.data ? (
+                      <div className="bg-white border border-gray-200 rounded-lg p-3">
+                        <p className="text-sm text-gray-800 whitespace-pre-wrap line-clamp-6">{heldReplyQ.data.text || <span className="text-gray-400">Message without text</span>}</p>
+                        {heldReplyQ.data.summary && <p className="text-xs text-gray-600 italic mt-2 inline-flex items-start gap-1"><Sparkles className="w-3 h-3 mt-0.5 text-fuchsia-500 flex-shrink-0" />{heldReplyQ.data.summary}</p>}
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-2">
+                          <span>{fmtDate(heldReplyQ.data.sent_at)}</span>
+                          {heldReplyQ.data.intent && <IntentBadge intent={heldReplyQ.data.intent} />}
+                          <Link href={`/outreach/inbox/${heldReplyQ.data.chat_id}`} className="inline-flex items-center gap-1 text-indigo-600 hover:underline"><MessageSquare className="w-3.5 h-3.5" /> Open conversation</Link>
+                        </div>
+                      </div>
+                    ) : <p className="text-sm text-gray-500">The reply is not in the inbox yet. Open the lead to check.</p>}
+                  </div>
+                  {enrollmentQ.data && <div className="text-xs text-gray-500">Sequence <Link href={`/outreach/sequences/${enrollmentQ.data.sequence_id}`} className="text-indigo-600 hover:underline">{enrollmentQ.data.outreach_sequences?.name ?? 'sequence'}</Link></div>}
+                  {completed ? (
+                    <div><div className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1">Decision</div><Badge tone={task.result?.decision === 'exit' ? 'red' : 'green'}>{task.result?.decision === 'exit' ? 'Lead exited' : 'Sequence resumed'}</Badge>{task.result?.by === 'ooo' && <span className="text-xs text-gray-500 ml-2">Resumed on its own after an out-of-office reply.</span>}</div>
+                  ) : canWrite ? (
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Button variant="secondary" size="sm" className="text-red-600" loading={busy === 'exit'} disabled={busy === 'resume'} onClick={() => decideHold('exit')}><LogOut className="w-3.5 h-3.5" /> Exit lead</Button>
+                      <Button size="sm" loading={busy === 'resume'} disabled={busy === 'exit'} onClick={() => decideHold('resume')}><Play className="w-3.5 h-3.5" /> Resume</Button>
+                    </div>
+                  ) : null}
                 </div>
               )}
 

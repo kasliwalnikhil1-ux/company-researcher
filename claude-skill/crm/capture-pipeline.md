@@ -2,6 +2,8 @@
 
 Goal: the user types a few words, the capture is saved. `capture_meeting` is the only way a meeting becomes `held` or `no_show`, and it refuses partial rows — so fill every required field from what was said plus the defaults below, then write once.
 
+**The user gave a recording** (file, path or link)? Stop here and follow [recording-pipeline.md](recording-pipeline.md) instead — it transcribes the call and fills these same fields from what the prospect actually said.
+
 ## 1. Identify the meeting (no questions)
 - User names a company/contact/email -> `search(q)` or `meetings_list(status: "scheduled", from: <7 days ago>, to: <today>)` and pick the match.
 - Not in the CRM -> create it silently: `upsert_company` (name from the email domain, website = domain) -> `upsert_contact` -> `create_deal` (value + currency when a price was given) -> `schedule_meeting(deal_id, scheduled_at: today)`.

@@ -10,12 +10,12 @@ import type { Lead } from '@/lib/outreach/types';
 import { Button, Card, ErrorBox, Input, Select } from '@/components/outreach/ui';
 import type { ToastFn } from '../helpers';
 
-type Form = { first_name: string; last_name: string; headline: string; company: string; title: string; location: string; email_work: string; email_personal: string; client_id: string; list_id: string; stage_id: string };
+type Form = { first_name: string; last_name: string; headline: string; company: string; title: string; location: string; email_work: string; email_personal: string; phone: string; client_id: string; list_id: string; stage_id: string };
 
 function fromLead(l: Lead): Form {
   return {
     first_name: l.first_name ?? '', last_name: l.last_name ?? '', headline: l.headline ?? '', company: l.company ?? '', title: l.title ?? '', location: l.location ?? '',
-    email_work: l.email_work ?? '', email_personal: l.email_personal ?? '', client_id: l.client_id ?? '', list_id: l.list_id ?? '', stage_id: l.stage_id ?? '',
+    email_work: l.email_work ?? '', email_personal: l.email_personal ?? '', phone: (l as Lead & { phone?: string | null }).phone ?? '', client_id: l.client_id ?? '', list_id: l.list_id ?? '', stage_id: l.stage_id ?? '',
   };
 }
 
@@ -39,10 +39,11 @@ export function LeadEditForm({ lead, toast }: { lead: Lead; toast: ToastFn }) {
     setBusy(true); setError(null);
     try {
       const first = form.first_name.trim() || null; const last = form.last_name.trim() || null;
-      const patch: Partial<Lead> = {
+      const patch: Partial<Lead> & { phone?: string | null } = {
         first_name: first, last_name: last, headline: form.headline.trim() || null, company: form.company.trim() || null, title: form.title.trim() || null, location: form.location.trim() || null,
         email_work: form.email_work.trim().toLowerCase() || null, email_personal: form.email_personal.trim().toLowerCase() || null,
         client_id: form.client_id || null, list_id: form.list_id || null, stage_id: form.stage_id || null,
+        phone: form.phone.trim() || null,
       };
       if ((first || last) && (first !== lead.first_name || last !== lead.last_name)) patch.full_name = [first, last].filter(Boolean).join(' ');
       const { error: err } = await supabase.from('outreach_leads').update(patch).eq('id', lead.id);
@@ -74,6 +75,7 @@ export function LeadEditForm({ lead, toast }: { lead: Lead; toast: ToastFn }) {
           <Input label="Work email" type="email" value={form.email_work} onChange={set('email_work')} readOnly={ro} />
           <Input label="Personal email" type="email" value={form.email_personal} onChange={set('email_personal')} readOnly={ro} />
         </div>
+        <Input label="Phone" type="tel" value={form.phone} onChange={set('phone')} readOnly={ro} hint="Shown on call tasks." />
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Select label="Client" value={form.client_id} onChange={set('client_id')} disabled={ro}>
             <option value="">No client</option>

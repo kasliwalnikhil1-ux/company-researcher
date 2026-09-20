@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Search, Linkedin, Mail, Inbox } from 'lucide-react';
+import { Search, Linkedin, Mail, Inbox, X, Filter } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ChatFilters } from '@/lib/outreach/queries';
-import type { Chat, Client, Lead, Sender } from '@/lib/outreach/types';
+import type { Chat, Client, Lead, Sender, Sequence } from '@/lib/outreach/types';
 import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/components/outreach/ui';
 import { INTENTS, INTENT_LABELS } from './hooks';
 
@@ -23,6 +23,15 @@ export interface ChatListProps {
   currentUserId: string | null;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** Item 4: filter by sequence (threads that carry a step of it). */
+  sequences?: Sequence[];
+  sequenceId?: string | null;
+  onSequence?: (id: string | null) => void;
+  /** Reports drill-down: only these threads are listed until the chip is dismissed. */
+  restrictLabel?: string | null;
+  restrictCount?: number;
+  onClearRestrict?: () => void;
+  note?: string | null;
 }
 
 const ROW_H = 76;
@@ -48,7 +57,7 @@ function Chip({ active, onClick, children, title }: { active: boolean; onClick: 
   );
 }
 
-export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect }: ChatListProps) {
+export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note }: ChatListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
@@ -81,6 +90,13 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="p-3 border-b border-gray-100 space-y-2">
+        {restrictLabel != null && (
+          <div className="flex items-center gap-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs pl-2.5 pr-1 py-1" role="status">
+            <Filter className="w-3 h-3 flex-shrink-0" />
+            <span className="min-w-0 flex-1 truncate" title={restrictLabel}>Showing: <span className="font-medium">{restrictLabel || 'selected conversations'}</span>{restrictCount ? ` (${restrictCount.toLocaleString()})` : ''}</span>
+            <button type="button" onClick={onClearRestrict} className="p-1 rounded hover:bg-indigo-100" aria-label="Show all conversations" title="Show all conversations"><X className="w-3 h-3" /></button>
+          </div>
+        )}
         <label className="relative block">
           <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search conversations" aria-label="Search conversations" className="w-full pl-8 pr-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -94,6 +110,12 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
             <MiniSelect title="Client" value={filters.client_id ?? ''} onChange={(v) => onFilters({ client_id: v || null })}>
               <option value="">All clients</option>
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </MiniSelect>
+          )}
+          {onSequence && !!sequences?.length && (
+            <MiniSelect title="Sequence" value={sequenceId ?? ''} onChange={(v) => onSequence(v || null)}>
+              <option value="">All sequences</option>
+              {sequences.filter((q) => q.status !== 'archived' || q.id === sequenceId).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
             </MiniSelect>
           )}
           <MiniSelect title="Intent" value={filters.intent ?? ''} onChange={(v) => onFilters({ intent: v || null })}>
@@ -119,8 +141,9 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
         {error && <ErrorBox message={error} className="m-3" />}
         {!error && loading && !rows && <Spinner />}
         {!error && rows && rows.length === 0 && (
-          <EmptyState icon={<Inbox className="w-6 h-6" />} title={filters.archived ? 'No archived conversations' : 'No conversations'} description={search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id ? 'Try clearing some filters.' : 'Replies land here as soon as a sender receives a message.'} />
+          <EmptyState icon={<Inbox className="w-6 h-6" />} title={filters.archived ? 'No archived conversations' : 'No conversations'} description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation carries a step of this sequence with these filters.' : search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id ? 'Try clearing some filters.' : 'Replies land here as soon as a sender receives a message.'} />
         )}
+        {note && rows && rows.length > 0 && <p className="px-3 py-1.5 text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100">{note}</p>}
         {rows && rows.length > 0 && (
           <div style={{ height: list.length * ROW_H, position: 'relative' }}>
             <div style={{ transform: `translateY(${start * ROW_H}px)` }}>

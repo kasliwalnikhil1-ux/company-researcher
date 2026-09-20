@@ -5,7 +5,9 @@
 // caller's JWT and every write goes through the same `crm_*` RPCs the /crm
 // screens call — so there is no MCP-only or UI-only path, and the database rules
 // (capture-before-held, forward-only stages, stage history) apply to both.
-// The service-role client is used ONLY for the connector's own call log.
+// The service-role client is used ONLY for the connector's own call log and for the
+// ticketed transcript upload (index.ts POST /transcript), where the one-time ticket —
+// verified inside crm_save_transcript — stands in for the member's JWT.
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.76.1";
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";

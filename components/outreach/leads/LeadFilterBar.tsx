@@ -2,17 +2,24 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { LeadFilters } from '@/lib/outreach/queries';
+import type { IntelLeadFilters, TimeInRole } from '@/lib/outreach/intel';
 import type { Client, List, Stage, Tag } from '@/lib/outreach/types';
 import { Button, Input, Modal, Select } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
-import { Bookmark, BookmarkPlus, Search, Settings2, X } from 'lucide-react';
+import { Bookmark, BookmarkPlus, Search, Settings2, SlidersHorizontal, X } from 'lucide-react';
 import type { ToastFn } from './helpers';
 import type { TaxonomyKind } from './ManageTaxonomy';
 
-export type ViewFilters = Pick<LeadFilters, 'search' | 'client_id' | 'list_id' | 'stage_id' | 'tag_id' | 'dnc'>;
+export type ViewFilters = Pick<LeadFilters, 'search' | 'client_id' | 'list_id' | 'stage_id' | 'tag_id' | 'dnc'> & IntelLeadFilters;
 export interface SavedView { id: string; name: string; filters: ViewFilters }
 
-export const EMPTY_FILTERS: ViewFilters = { search: '', client_id: null, list_id: null, stage_id: null, tag_id: null, dnc: null };
+export const EMPTY_FILTERS: ViewFilters = {
+  search: '', client_id: null, list_id: null, stage_id: null, tag_id: null, dnc: null,
+  enriched: null, replied: null, posted_30d: null, min_followers: null, time_in_role: null, past_company: null, skill: null, language: null,
+};
+const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as (keyof ViewFilters)[];
+const PROFILE_KEYS: (keyof ViewFilters)[] = ['enriched', 'replied', 'posted_30d', 'min_followers', 'time_in_role', 'past_company', 'skill', 'language'];
+const isSet = (v: unknown) => v != null && v !== '' && v !== false;
 
 function storageKey(ws: string) { return `outreach-lead-views:${ws}`; }
 
@@ -41,12 +48,25 @@ export function useSavedViews(ws: string | undefined) {
 }
 
 export function isFilterEmpty(f: ViewFilters): boolean {
-  return !f.search && !f.client_id && !f.list_id && !f.stage_id && !f.tag_id && f.dnc == null;
+  return FILTER_KEYS.every((k) => (k === 'dnc' || k === 'enriched' || k === 'replied' ? f[k] == null : !isSet(f[k])));
 }
 
 function sameFilters(a: ViewFilters, b: ViewFilters): boolean {
-  return (a.search ?? '') === (b.search ?? '') && (a.client_id ?? null) === (b.client_id ?? null) && (a.list_id ?? null) === (b.list_id ?? null)
-    && (a.stage_id ?? null) === (b.stage_id ?? null) && (a.tag_id ?? null) === (b.tag_id ?? null) && (a.dnc ?? null) === (b.dnc ?? null);
+  const norm = (v: unknown) => (v == null || v === '' || v === false ? null : v);
+  return FILTER_KEYS.every((k) => (k === 'dnc' || k === 'enriched' || k === 'replied' ? (a[k] ?? null) === (b[k] ?? null) : norm(a[k]) === norm(b[k])));
+}
+
+/** Text inputs of the profile filters apply after a short pause, like the search box. */
+function DebouncedInput({ value, onCommit, ...rest }: { value: string; onCommit: (v: string) => void } & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
+  const [v, setV] = useState(value);
+  useEffect(() => { setV(value); }, [value]);
+  useEffect(() => {
+    if (v === value) return;
+    const t = setTimeout(() => onCommit(v), 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v]);
+  return <input {...rest} value={v} onChange={(e) => setV(e.target.value)} />;
 }
 
 export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags, ws, canWrite, onManage, toast }: {
@@ -59,6 +79,9 @@ export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags,
   const [saveOpen, setSaveOpen] = useState(false);
   const [viewName, setViewName] = useState('');
   const [manageOpen, setManageOpen] = useState(false);
+  const profileCount = PROFILE_KEYS.filter((k) => (k === 'enriched' || k === 'replied' ? filters[k] != null : isSet(filters[k]))).length;
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => { if (profileCount > 0) setMoreOpen(true); }, [profileCount]);
 
   // Debounce free-text search
   useEffect(() => {
@@ -116,6 +139,7 @@ export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags,
           <option value="yes">DNC: yes</option>
           <option value="no">DNC: no</option>
         </select>
+        <Button variant={profileCount > 0 ? 'primary' : 'secondary'} size="sm" aria-expanded={moreOpen} aria-controls="lead-profile-filters" onClick={() => setMoreOpen((o) => !o)} title="Filter on replies and enriched profile data"><SlidersHorizontal className="w-3.5 h-3.5" /> Profile filters{profileCount > 0 ? ` (${profileCount})` : ''}</Button>
         {!isFilterEmpty(filters) && <Button variant="ghost" size="sm" onClick={() => onChange(EMPTY_FILTERS)}><X className="w-3.5 h-3.5" /> Clear</Button>}
         {canWrite && (
           <div className="relative ml-auto">
@@ -133,6 +157,38 @@ export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags,
           </div>
         )}
       </div>
+      {moreOpen && (
+        <div id="lead-profile-filters" className="rounded-xl border border-gray-200 bg-white p-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <select aria-label="Enriched" value={filters.enriched == null ? '' : filters.enriched ? 'yes' : 'no'} onChange={(e) => set('enriched', e.target.value === '' ? null : e.target.value === 'yes')} className={sel}>
+              <option value="">Enriched: any</option>
+              <option value="yes">Enriched: yes</option>
+              <option value="no">Enriched: no</option>
+            </select>
+            <select aria-label="Replied" value={filters.replied == null ? '' : filters.replied ? 'yes' : 'no'} onChange={(e) => set('replied', e.target.value === '' ? null : e.target.value === 'yes')} className={sel}>
+              <option value="">Replied: any</option>
+              <option value="yes">Has replied</option>
+              <option value="no">Never replied</option>
+            </select>
+            <select aria-label="Time in current role" value={filters.time_in_role ?? ''} onChange={(e) => set('time_in_role', (e.target.value || null) as TimeInRole | null)} className={sel}>
+              <option value="">Time in role: any</option>
+              <option value="lt6">Under 6 months</option>
+              <option value="6to12">6 to 12 months</option>
+              <option value="1to3">1 to 3 years</option>
+              <option value="gt3">Over 3 years</option>
+            </select>
+            <label className={cn(sel, 'flex items-center gap-2 cursor-pointer')}>
+              <input type="checkbox" checked={!!filters.posted_30d} onChange={(e) => set('posted_30d', e.target.checked ? true : null)} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+              Posted in the last 30 days
+            </label>
+            <DebouncedInput aria-label="Minimum followers" type="number" min={0} inputMode="numeric" placeholder="Followers at least…" value={filters.min_followers != null ? String(filters.min_followers) : ''} onCommit={(v) => { const n = parseInt(v, 10); set('min_followers', Number.isFinite(n) && n > 0 ? n : null); }} className={sel} />
+            <DebouncedInput aria-label="Past company" placeholder="Past company" value={filters.past_company ?? ''} onCommit={(v) => set('past_company', v.trim() || null)} className={sel} />
+            <DebouncedInput aria-label="Skill" placeholder="Skill" value={filters.skill ?? ''} onCommit={(v) => set('skill', v.trim() || null)} className={sel} />
+            <DebouncedInput aria-label="Profile language" placeholder="Profile language, e.g. en" value={filters.language ?? ''} onCommit={(v) => set('language', v.trim() || null)} className={sel} />
+          </div>
+          <p className="text-xs text-gray-500 mt-2">Time in role, posts, followers, past company, skill and language only match enriched leads.</p>
+        </div>
+      )}
       <Modal open={saveOpen} onClose={() => setSaveOpen(false)} title="Save view" size="sm"
         footer={<><Button variant="secondary" onClick={() => setSaveOpen(false)}>Cancel</Button><Button disabled={!viewName.trim()} onClick={() => { save(viewName.trim(), { ...filters }); setSaveOpen(false); toast('View saved'); }}>Save</Button></>}>
         <form onSubmit={(e) => { e.preventDefault(); if (viewName.trim()) { save(viewName.trim(), { ...filters }); setSaveOpen(false); toast('View saved'); } }}>

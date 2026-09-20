@@ -1,4 +1,4 @@
-// Shared types for the Outreach platform (mirrors migrations/outreach/*.sql)
+// Shared types for the Outreach platform (mirrors migrations/outreach/*.sql, including 009–016)
 
 export type Role = 'owner' | 'manager' | 'member' | 'client_viewer';
 export type Provider = 'LINKEDIN' | 'GMAIL' | 'OUTLOOK' | 'IMAP';
@@ -7,7 +7,8 @@ export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paus
 export type Relation = 'none' | 'pending_out' | 'pending_in' | 'first' | 'blocked' | 'invalid';
 export type ActionType =
   | 'profile_view' | 'invite' | 'withdraw' | 'message' | 'inmail' | 'like' | 'comment'
-  | 'endorse' | 'search_page' | 'email' | 'reply' | 'relations_poll' | 'call_api';
+  | 'endorse' | 'search_page' | 'email' | 'reply' | 'relations_poll' | 'call_api'
+  | 'post_fetch' | 'follow' | 'find_email';
 export type ActionStatus = 'queued' | 'reserved' | 'sent' | 'skipped' | 'failed' | 'cancelled';
 export type EnrollmentStatus =
   | 'active' | 'waiting_connection' | 'waiting_delay' | 'waiting_task' | 'paused' | 'completed'
@@ -15,9 +16,18 @@ export type EnrollmentStatus =
 export type SequenceStatus = 'draft' | 'active' | 'paused' | 'archived';
 export type Direction = 'in' | 'out';
 export type Intent = 'interested' | 'question' | 'not_now' | 'not_interested' | 'ooo' | 'wrong_person' | 'unclear' | 'unclassified';
-export type ImportKind = 'search_url' | 'csv' | 'relations';
+export type ImportKind =
+  | 'search_url' | 'csv' | 'relations'
+  | 'post_engagement' | 'conversations' | 'sn_saved_search' | 'sn_lead_list' | 'company_people';
 export type JobStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
-export type TaskKind = 'manual_node' | 'follow_up' | 'review_ai_draft' | 'reconnect';
+export type TaskKind = 'manual_node' | 'follow_up' | 'review_ai_draft' | 'reconnect' | 'reply_hold' | 'call';
+export type EnrichStatus = 'none' | 'waiting' | 'done' | 'failed';
+export type EmailStatus = 'verified' | 'unverified' | 'invalid';
+export type ReplyChannel = 'linkedin' | 'email';
+/** Why an enrollment sits in `waiting_task` without a task (set at enrol time or by the AI routing step). */
+export type WaitReason = 'enrichment' | 'ai_review' | 'ai_route';
+export type CallOutcome = 'connected' | 'voicemail' | 'no_answer' | 'wrong_number';
+export const CALL_OUTCOMES: CallOutcome[] = ['connected', 'voicemail', 'no_answer', 'wrong_number'];
 
 export const LIVE_ENROLLMENT_STATUSES: EnrollmentStatus[] = ['active', 'waiting_connection', 'waiting_delay', 'waiting_task', 'paused'];
 
@@ -107,6 +117,20 @@ export interface Sender {
   last_disconnect_at: string | null;
   last_synced_at: string | null;
   extension_token_issued_at: string | null;
+  // 010_schema_v2
+  running_dry_at: string | null;
+  alert_emails: string[];
+  booking_link: string | null;
+  /** HTML signature, used as {{sender.signature}}. */
+  signature: string | null;
+  bcc_address: string | null;
+  /** Set on a mailbox that belongs to a person (a LinkedIn sender): "the sender's own mailboxes". */
+  parent_sender_id: string | null;
+  monthly_cost: number | null;
+  /** null = follow the workspace default. */
+  track_replies: boolean | null;
+  enrich_empty_streak: number;
+  enrich_backoff_until: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -155,6 +179,14 @@ export interface Lead {
   source: string | null;
   import_job_id: string | null;
   last_profile_fetch_at: string | null;
+  // 010_schema_v2
+  /** Last reply to any sender on any channel (the enrol guard looks back 90 days). */
+  last_replied_at: string | null;
+  last_replied_channel: ReplyChannel | null;
+  phone: string | null;
+  enrich_status: EnrichStatus;
+  enriched_at: string | null;
+  email_status: EmailStatus | null;
   created_at: string;
   updated_at: string;
 }
@@ -178,9 +210,23 @@ export interface LeadSenderState {
 }
 
 export interface List { id: string; workspace_id: string; client_id: string | null; name: string }
-export interface Stage { id: string; workspace_id: string; name: string; position: number; color: string | null }
+export type StageKind = 'new' | 'contacted' | 'connected' | 'replied' | 'interested' | 'meeting' | 'won' | 'lost';
+export interface Stage { id: string; workspace_id: string; name: string; position: number; color: string | null; kind: StageKind | null; deal_value: number | null }
 export interface Tag { id: string; workspace_id: string; name: string; color: string | null }
-export interface Suppression { id: string; workspace_id: string; kind: 'domain' | 'public_identifier' | 'email'; value: string; reason: string | null; created_at: string }
+export type SuppressionKind = 'domain' | 'public_identifier' | 'email' | 'company';
+/** Scope: both ids null = the whole workspace; `client_id` = one client; `sequence_id` = one sequence (never both). */
+export interface Suppression {
+  id: string;
+  workspace_id: string;
+  client_id: string | null;
+  sequence_id: string | null;
+  kind: SuppressionKind;
+  value: string;
+  reason: string | null;
+  /** manual | csv | crm | unsubscribe */
+  source: string;
+  created_at: string;
+}
 
 export interface ImportJob {
   id: string;
@@ -200,8 +246,35 @@ export interface ImportJob {
   error: string | null;
   list_id: string | null;
   tag_ids: string[];
+  mode: 'upsert' | 'update_only';
+  update_fields: string[];
+  enrich: boolean;
+  schedule_id: string | null;
   created_at: string;
   finished_at: string | null;
+}
+
+export type SequenceAssignment = 'round_robin' | 'least_loaded' | 'fixed' | 'fresh_sender' | 'same_sender';
+export const SEQUENCE_ASSIGNMENTS: Array<{ value: SequenceAssignment; label: string; description: string }> = [
+  { value: 'round_robin', label: 'Round robin', description: 'Leads are dealt to the pool in turn.' },
+  { value: 'least_loaded', label: 'Least loaded', description: 'Each lead goes to the sender with the fewest live leads.' },
+  { value: 'fixed', label: 'Fixed', description: 'You choose the sender when you enrol.' },
+  { value: 'fresh_sender', label: 'Fresh sender', description: 'Only a sender that never invited or messaged the lead. Leads with no fresh sender left are skipped.' },
+  { value: 'same_sender', label: 'Same sender as before', description: 'Whoever last spoke to the lead, so the conversation stays in one place.' },
+];
+
+/** Keys the engine reads (docs/outreach/PLAN-BUILD-CONTRACT.md, item 1). Unknown keys are kept as they are. */
+export interface SequenceSettings {
+  stop_on_reply?: boolean;
+  stop_on_reply_scope?: 'lead' | 'sender';
+  on_reply?: 'exit' | 'hold';
+  resume_after_ooo?: boolean;
+  ooo_resume_days?: number;
+  hold_max_days?: number;
+  wait_for_enrichment?: boolean;
+  hold_for_ai_review?: boolean;
+  withdraw_after_days?: number;
+  [k: string]: unknown;
 }
 
 export interface Sequence {
@@ -213,17 +286,25 @@ export interface Sequence {
   head_version: number;
   graph: Graph;
   sender_pool: string[];
-  assignment: 'round_robin' | 'least_loaded' | 'fixed';
+  assignment: SequenceAssignment;
   use_sender_schedule: boolean;
-  settings: { stop_on_reply?: boolean; withdraw_after_days?: number; [k: string]: unknown };
+  settings: SequenceSettings;
   throttled_reason: string | null;
   brief: string | null;
+  // draft / publish (item 5)
+  draft_graph: Graph | null;
+  draft_updated_at: string | null;
+  draft_updated_by: string | null;
+  draft_base_version: number | null;
+  // stall state (item 3)
+  stalled_at: string | null;
+  stalled_reason: string | null;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
 }
 
-export interface SequenceVersion { sequence_id: string; version: number; graph: Graph; created_by: string | null; created_at: string }
+export interface SequenceVersion { sequence_id: string; version: number; graph: Graph; created_by: string | null; created_at: string; note: string | null; publish_mode: 'all' | 'new_only' | null }
 
 export interface Enrollment {
   id: string;
@@ -240,6 +321,14 @@ export interface Enrollment {
   restart_count: number;
   rotation_count: number;
   priority: number;
+  /** Set when a publish pinned this lead to an older version (item 6). null = follows the live graph. */
+  pinned_version: number | null;
+  /** Held for review after a reply (status `paused`). */
+  held_at: string | null;
+  hold_reason: string | null;
+  wait_reason: WaitReason | null;
+  /** The auto-enrol rule that created this enrollment, if any. */
+  rule_id: string | null;
   created_at: string;
   completed_at: string | null;
 }
@@ -252,6 +341,8 @@ export interface Action {
   sender_id: string;
   lead_id: string | null;
   node_id: string | null;
+  /** A/B message variant the lead was given at this step (null = the step has no variants). */
+  variant_id: string | null;
   action_type: ActionType;
   scheduled_for: string;
   status: ActionStatus;
@@ -265,7 +356,8 @@ export interface Action {
   created_at: string;
 }
 
-export interface NodeStats { sequence_id: string; node_id: string; queued: number; sent: number; failed: number; skipped: number; accepted: number; replied: number }
+/** One row per (sequence, node, variant). `variant_id` is '' when the step has no variants: sum the rows per node (sumNodeStats in graph.ts). */
+export interface NodeStats { sequence_id: string; node_id: string; variant_id: string; queued: number; sent: number; failed: number; skipped: number; accepted: number; replied: number; interested: number }
 
 export interface Chat {
   id: string;
@@ -311,6 +403,11 @@ export interface Message {
   edited_at: string | null;
   deleted_at: string | null;
   action_id: string | null;
+  /** Inbound: the automated action this message answers (attribution, item 4). */
+  replied_to_action_id: string | null;
+  is_first_reply: boolean;
+  /** Manual replies: the teammate who sent it. */
+  sent_by: string | null;
   created_at: string;
 }
 
@@ -348,7 +445,8 @@ export type NodeType =
   | 'start' | 'end' | 'visit_profile' | 'like_latest_post' | 'comment_latest_post' | 'endorse_skills' | 'send_invite'
   | 'wait_connection' | 'withdraw_invite' | 'send_message' | 'send_inmail' | 'send_email' | 'delay' | 'condition'
   | 'rotate_sender' | 'change_sender' | 'add_tag' | 'remove_tag' | 'change_list' | 'change_stage' | 'call_webhook'
-  | 'call_api' | 'send_to_sequence' | 'manual_task' | 'ai_draft_approval';
+  | 'call_api' | 'send_to_sequence' | 'manual_task' | 'ai_draft_approval'
+  | 'refresh_profile' | 'follow_profile' | 'send_voice_note' | 'find_email' | 'call_task' | 'ab_split' | 'ai_route';
 
 export interface NodeDelay { amount: number; unit: 'minutes' | 'hours' | 'days'; jitter_pct?: number }
 
@@ -370,7 +468,161 @@ export interface Graph {
   nodes: Record<string, GraphNode>;
 }
 
-export interface ConditionRule { field: string; op: 'eq' | 'neq' | 'contains' | 'not_contains' | 'exists' | 'not_exists' | 'gt' | 'lt'; value?: string }
+export type ConditionOp = 'eq' | 'neq' | 'contains' | 'not_contains' | 'exists' | 'not_exists' | 'gt' | 'lt' | 'gte' | 'lte';
+export interface ConditionRule { field: string; op: ConditionOp; value?: string }
+
+// --- A/B testing (item 11) ---------------------------------------------------
+/** One copy of a step's text. The text key depends on the step: invite → note, message / InMail → text, email → html (+ subject). */
+export interface MessageVariant { id: string; label: string; text?: string; note?: string; html?: string; subject?: string; weight: number; promoted_at?: string }
+export const MAX_VARIANTS = 5;
+/** `ab_split` step: config.branches. Each id is also a key of node.branches. */
+export interface AbBranch { id: string; label: string; weight: number }
+/** `ai_route` step: config.routes. Each id is a key of node.branches, next to the fixed `else`. */
+export interface AiRouteOption { id: string; label: string; description: string }
+export const AI_ROUTE_ELSE = 'else';
+
+export interface AbVariantResult {
+  variant_id: string;
+  label: string;
+  weight?: number | null;
+  /** ab_split only: the branch cohort. */
+  leads?: number;
+  sent: number;
+  accepted: number;
+  replies: number;
+  interested: number;
+  meetings?: number;
+  acceptance_rate: number | null;
+  reply_rate: number | null;
+  interested_rate: number | null;
+  is_leading: boolean;
+  confidence_vs_leader: number | null;
+  verdict_vs_leader: string | null;
+}
+/** Return shape of the RPC ab_results. */
+export interface AbResults {
+  sequence_id: string;
+  node_id: string;
+  node_type: NodeType;
+  judged_on: 'accepted' | 'interested';
+  period: { from: string; to: string };
+  enough_data: boolean;
+  min_sends_per_variant: number;
+  variants: AbVariantResult[];
+  leader: string | null;
+  can_promote: boolean;
+}
+
+// --- Enrichment + AI variables (items 13, 14) ---------------------------------
+export interface LeadProfileRole { company?: string; company_id?: string; title?: string; start?: string; end?: string; current?: boolean; location?: string; description?: string }
+export interface LeadProfileSchool { school?: string; degree?: string; field?: string; start?: string; end?: string }
+export interface LeadProfilePost { id: string; text?: string; date?: string; reactions?: number; comments?: number; url?: string }
+export interface LeadProfile {
+  lead_id: string;
+  workspace_id: string;
+  about: string | null;
+  current_title: string | null;
+  current_company: string | null;
+  current_started_on: string | null;
+  experience: LeadProfileRole[] | null;
+  education: LeadProfileSchool[] | null;
+  skills: string[] | null;
+  languages: string[] | null;
+  profile_language: string | null;
+  follower_count: number | null;
+  connections_count: number | null;
+  posts: LeadProfilePost[] | null;
+  posts_fetched_at: string | null;
+  last_posted_at: string | null;
+  enriched_at: string | null;
+  enriched_by_sender: string | null;
+  source: string | null;
+  /** Sections that came back empty last time: unknown, not "this person has none". */
+  empty_sections: string[];
+  updated_at: string;
+}
+
+/** A saved prompt + fallback, used in templates as {{ai.<key>|fallback}}. Only approved values are ever rendered. */
+export interface AiVariable {
+  id: string;
+  workspace_id: string;
+  key: string;
+  name: string;
+  prompt: string;
+  fallback: string;
+  needs_posts: boolean;
+  max_chars: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export type AiValueStatus = 'pending' | 'generated' | 'approved' | 'skipped' | 'blank' | 'failed';
+export interface AiValue {
+  id: string;
+  workspace_id: string;
+  lead_id: string;
+  variable_id: string;
+  batch_id: string | null;
+  text: string | null;
+  /** The profile facts the line relied on (shown in the review table). */
+  facts: unknown[];
+  status: AiValueStatus;
+  edited: boolean;
+  model: string | null;
+  error: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+/** Return shape of the RPC ai_generate_request. */
+export interface AiGenerateResult { batch_id: string; to_generate: number; kept_existing: number; note?: string }
+
+export interface VoiceClip {
+  sequence_id: string;
+  node_id: string;
+  sender_id: string;
+  workspace_id: string;
+  /** Path inside the `outreach-attachments` bucket: <ws>/voice/<sequence>/<node>/<sender>.<ext> */
+  path: string;
+  mime: string;
+  duration_s: number | null;
+  size_bytes: number | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+/** JSON returned by the RPC render_context; pass it to buildContext() from lib/outreach/render.ts. */
+export interface RenderContextJson {
+  lead: Record<string, unknown>;
+  sender: Record<string, unknown>;
+  enrich: Record<string, unknown>;
+  ai: Record<string, string>;
+  seed: string;
+}
+
+// --- Enrol guard (items 1, 17, 19) --------------------------------------------
+/** Return shape of the RPC enroll_preview. */
+export interface EnrollPreview {
+  sequence_id: string;
+  sequence_status: SequenceStatus;
+  include_replied: boolean;
+  requested: number;
+  eligible: number;
+  eligible_ids: string[];
+  /** Keyed by reason: not_in_workspace, suppressed:<why>, replied_recently, already_enrolled, no_fresh_sender. */
+  excluded: Record<string, { count: number; sample_ids: string[] }>;
+  /** At most 50 rows. */
+  replied_recently: Array<{ id: string; name: string | null; company: string | null; last_replied_at: string; channel: ReplyChannel | null }>;
+  assignment: Array<{ sender_id: string; name: string | null; status: SenderStatus; leads: number }>;
+  assignment_rule: SequenceAssignment;
+  /** Keyed by note: moved_to_fresh_sender, kept_with_previous_sender, contacted_before_by_this_sender. */
+  rule_effects: Record<string, number>;
+  projection?: { estimated_days: number; bottleneck: string | null };
+  warnings: string[];
+}
+/** The one row returned by the RPC enroll_leads. */
+export interface EnrollResult { enrolled: number; skipped_active: number; skipped_suppressed: number; skipped_other: number; skipped_replied: number; waiting: number }
 
 export interface DashboardData {
   senders: Array<{ id: string; display_name: string | null; provider: Provider; status: SenderStatus; status_reason: string | null; health_score: number; warmup_level: number; client_id: string | null; paused_until: string | null; today: Record<string, { used: number; reserved: number; cap: number }> }>;
@@ -384,6 +636,10 @@ export interface DashboardData {
   queued_today: number;
   leads_total: number;
   stats_7d: { invites: number; messages: number; accepted: number; replies: number };
+  /** Totals objects with the same keys as the reports (outreach__totals_from in 013). */
+  today?: Record<string, unknown>;
+  last_7_days?: Record<string, unknown>;
+  ai_lines_awaiting?: number;
 }
 
 export const EVENT_NAMES = [
@@ -392,4 +648,8 @@ export const EVENT_NAMES = [
   'message.sent', 'message.received', 'message.classified', 'email.sent', 'email.opened', 'email.clicked', 'email.bounced',
   'enrollment.started', 'enrollment.exited', 'enrollment.completed', 'task.created', 'task.completed',
   'sequence.activated', 'sequence.paused', 'sequence.throttled', 'sequence.webhook',
+  // product plan (009–016)
+  'sequence.published', 'sequence.stalled', 'sequence.recovered', 'sender.running_dry',
+  'enrollment.held', 'enrollment.resumed', 'enrollment.recovered', 'lead.unsubscribed', 'meeting.booked',
 ] as const;
+export type EventName = (typeof EVENT_NAMES)[number];

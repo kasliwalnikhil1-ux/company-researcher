@@ -4,19 +4,18 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { CheckSquare, ExternalLink, Users } from 'lucide-react';
+import { CheckSquare, ExternalLink, Phone, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { supabase } from '@/utils/supabase/client';
 import { parseError } from '@/lib/outreach/api';
 import { useClients, useMembers, useTasks } from '@/lib/outreach/queries';
-import type { Lead, Sender, Task, TaskKind } from '@/lib/outreach/types';
+import type { Lead, Sender, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, PageHeader, Spinner, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
-import TaskDrawer, { TASK_KIND_LABEL, TASK_KIND_TONE, memberName } from '@/components/outreach/tasks/TaskDrawer';
+import TaskDrawer, { TASK_KINDS, memberName, parseCallBody, taskKindLabel, taskKindTone } from '@/components/outreach/tasks/TaskDrawer';
 
 type TaskRow = Task & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
-const KINDS: TaskKind[] = ['manual_node', 'follow_up', 'review_ai_draft', 'reconnect'];
 
 function TasksPageInner() {
   const router = useRouter();
@@ -80,7 +79,7 @@ function TasksPageInner() {
 
   return (
     <div>
-      <PageHeader title="Tasks" subtitle="Manual steps, AI drafts to review, follow-ups and sender reconnects." actions={
+      <PageHeader title="Tasks" subtitle="Manual steps, calls, AI drafts to review, leads held after a reply, follow-ups and sender reconnects." actions={
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {(['open', 'completed'] as const).map((t) => (
             <button key={t} type="button" onClick={() => setTab(t)} className={cn('px-3 py-1.5 text-sm rounded-md capitalize', tab === t ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{t}{t === 'open' && openCount != null && tasksQ.data ? ` (${openCount})` : ''}</button>
@@ -91,7 +90,7 @@ function TasksPageInner() {
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Task kind" className="text-sm rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500">
           <option value="">All kinds</option>
-          {KINDS.map((k) => <option key={k} value={k}>{TASK_KIND_LABEL[k]}</option>)}
+          {TASK_KINDS.map((k) => <option key={k} value={k}>{taskKindLabel(k)}</option>)}
         </select>
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           <button type="button" onClick={() => setMine(false)} className={cn('px-2.5 py-1 text-sm rounded-md', !mine ? 'bg-gray-100 text-gray-900' : 'text-gray-600')}>Anyone</button>
@@ -120,7 +119,7 @@ function TasksPageInner() {
       {tasksQ.isLoading && <Spinner />}
       {tasksQ.error && <ErrorBox message={parseError(tasksQ.error).message} />}
       {tasksQ.data && rows.length === 0 && (
-        <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step, an AI draft needs approval, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
+        <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
       )}
       {rows.length > 0 && (
         <Table>
@@ -142,11 +141,13 @@ function TasksPageInner() {
               return (
                 <tr key={t.id} onClick={() => setOpenTask(t.id)} className={cn('cursor-pointer hover:bg-gray-50', selected.has(t.id) && 'bg-indigo-50/60')}>
                   {canWrite && <Td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${t.title}`} checked={selected.has(t.id)} onChange={() => toggle(t.id)} className="rounded border-gray-300" /></Td>}
-                  <Td><Badge tone={TASK_KIND_TONE[t.kind]}>{TASK_KIND_LABEL[t.kind]}</Badge></Td>
+                  <Td><Badge tone={taskKindTone(t.kind)}>{taskKindLabel(t.kind)}</Badge></Td>
                   <Td className="max-w-[320px]">
                     <div className="font-medium text-gray-900 truncate">{t.title}</div>
                     {t.kind === 'review_ai_draft' && !t.ai_draft && !t.completed_at && <div className="text-xs text-fuchsia-600">Drafting…</div>}
-                    {t.body && <div className="text-xs text-gray-500 truncate">{t.body}</div>}
+                    {(t.kind as string) === 'call'
+                      ? <div className="text-xs text-gray-500 truncate inline-flex items-center gap-1"><Phone className="w-3 h-3" />{parseCallBody(t.body).phone ?? 'No number on file'}</div>
+                      : t.body && <div className="text-xs text-gray-500 truncate">{t.body}</div>}
                   </Td>
                   <Td>
                     {t.outreach_leads?.id ? (

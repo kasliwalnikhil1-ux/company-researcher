@@ -128,7 +128,11 @@ const REMEDIES: Record<string, string> = {
   E_CONFIRMATION_MISMATCH: "Arguments changed since the token was issued. Call again without confirmation_token.",
   E_PREVIEW_EXPIRED: "Run enroll_preview again and commit within 15 minutes.",
   E_AMBIGUOUS_TARGET: "Pass workspace_id explicitly (see the workspaces list in the detail).",
-  E_DRAFT_STALE: "The prospect wrote again after this draft. Read inbox_thread and draft a new reply.",
+  E_DRAFT_STALE: "Reply draft: the prospect wrote again, so read inbox_thread and draft a new reply. Sequence draft: someone else published while this draft was open, so call the tool again without a token to see the fresh impact, show it, and publish with force:true only after the human agrees.",
+  E_VARIANT_INVALID: "Fix the A/B variants of the named step: every variant needs a unique id, a weight of 0 or more, and at most 5 variants per step. Then validate again.",
+  E_PLAN_REQUIRED: "This feature belongs to a higher plan (agency / white-label). Tell the user; an owner changes the plan in Settings → Billing.",
+  E_AI_KEY_INVALID: "The workspace's own AI key was rejected by the provider. A manager re-enters it in Settings → AI, or switches back to the platform key. Until then the fallback text is used.",
+  E_NODE_OCCUPIED: "Leads sit on a step you removed. Publish with removed_mode 'skip' (move them to the next step) or 'exit'.",
   E_DRAFT_EXPIRED: "Drafts live 30 minutes; call draft_reply again.",
   E_DRAFT_ALREADY_SENT: "This draft was already sent; nothing to do.",
   E_NO_IDENTIFIER: "Each lead needs a LinkedIn public_identifier/URL or an email.",
@@ -285,25 +289,49 @@ export async function callFn<T = Record<string, unknown>>(ctx: Ctx, name: string
 }
 
 // ---------------------------------------------------------------------------
-// Periods (reports)
+// Periods (reports). Every report RPC takes INCLUSIVE dates (YYYY-MM-DD) in the
+// workspace timezone; this helper only turns "7d" / {from,to} into those two dates.
+// No metric is ever computed here.
 // ---------------------------------------------------------------------------
 
 export const periodSchema = z.union([
   z.enum(["7d", "14d", "30d", "90d"]),
-  z.object({ from: z.string().describe("ISO date/time"), to: z.string().optional().describe("ISO date/time, defaults to now") }),
-]).optional().describe("7d | 14d | 30d | 90d (default 7d) or {from, to}");
+  z.object({ from: z.string().describe("YYYY-MM-DD (an ISO date-time is cut to its date)"), to: z.string().optional().describe("YYYY-MM-DD, defaults to today") }),
+]).optional().describe("7d | 14d | 30d | 90d (default 7d; 7d = today and the 6 days before it) or {from, to}. Dates are inclusive calendar days in the workspace timezone.");
 
-export function period(p: unknown): { from: string; to: string; label: string } {
-  const to = new Date();
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Today's calendar date in a timezone, as YYYY-MM-DD. */
+export function todayIn(tz?: string | null): string {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+  catch { return new Date().toISOString().slice(0, 10); }
+}
+
+function shiftDate(d: string, days: number): string {
+  const t = new Date(`${d}T00:00:00Z`); t.setUTCDate(t.getUTCDate() + days);
+  return t.toISOString().slice(0, 10);
+}
+
+function asDate(v: string, what: string): string {
+  const d = String(v).trim().slice(0, 10);
+  if (!DATE_RE.test(d) || isNaN(new Date(`${d}T00:00:00Z`).getTime())) throw new McpError("E_PAYLOAD_INVALID", `period.${what} must be a date like 2026-09-01`);
+  return d;
+}
+
+/** "7d" | {from,to} → inclusive dates for p_from / p_to. `tz` is the workspace timezone (settings.timezone). */
+export function period(p: unknown, tz?: string | null): { from: string; to: string; label: string } {
+  const today = todayIn(tz);
   if (p && typeof p === "object") {
     const o = p as { from: string; to?: string };
-    const f = new Date(o.from), t = o.to ? new Date(o.to) : to;
-    if (isNaN(f.getTime()) || isNaN(t.getTime())) throw new McpError("E_PAYLOAD_INVALID", "period.from/to must be ISO dates");
-    return { from: f.toISOString(), to: t.toISOString(), label: `${f.toISOString().slice(0, 10)}..${t.toISOString().slice(0, 10)}` };
+    const from = asDate(o.from, "from"), to = o.to ? asDate(o.to, "to") : today;
+    if (to < from) throw new McpError("E_PAYLOAD_INVALID", "period.from must not be after period.to");
+    return { from, to, label: `${from} to ${to}` };
   }
   const days = Number(String(p ?? "7d").replace("d", "")) || 7;
-  return { from: new Date(to.getTime() - days * 86400_000).toISOString(), to: to.toISOString(), label: `last ${days} days` };
+  return { from: shiftDate(today, -(days - 1)), to: today, label: `the last ${days} days` };
 }
+
+export const wsTz = (m: Membership): string | null => (typeof m.settings?.timezone === "string" ? (m.settings.timezone as string) : null);
 
 // ---------------------------------------------------------------------------
 // Pagination cursors (opaque offset)

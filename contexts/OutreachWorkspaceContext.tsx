@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { rpc, parseError } from '@/lib/outreach/api';
 import type { Workspace, Role } from '@/lib/outreach/types';
@@ -16,6 +16,9 @@ interface Ctx {
   canWrite: boolean;    // owner/manager/member and plan active
   canReply: boolean;
   suspended: boolean;
+  isClientViewer: boolean;
+  /** IANA timezone of the workspace. Reports and "today" use it. */
+  timezone: string;
   switchWorkspace: (id: string) => void;
   refresh: () => Promise<void>;
   createWorkspace: (name: string) => Promise<Workspace>;
@@ -31,9 +34,14 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const loadedFor = useRef<string | null>(null);
+
   const load = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
+    // Only the first load (or a new user) shows the full-page spinner. A later `refresh()` runs quietly,
+    // otherwise the layout would unmount the open page and lose its form state and toasts.
+    const first = loadedFor.current !== user.id;
+    if (first) setLoading(true);
     setError(null);
     try {
       let rows = await rpc<Workspace[]>('my_workspaces');
@@ -42,18 +50,19 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
         rows = await rpc<Workspace[]>('my_workspaces');
       }
       setWorkspaces(rows);
+      loadedFor.current = user.id;
       let stored: string | null = null;
       try { stored = localStorage.getItem(LS_KEY); } catch { /* ignore */ }
       const pick = rows.find((w) => w.id === stored) ?? rows[0] ?? null;
-      setCurrentId(pick?.id ?? null);
+      setCurrentId((cur) => (!first && cur && rows.some((w) => w.id === cur) ? cur : pick?.id ?? null));
     } catch (e) {
-      setError(parseError(e).message);
+      if (first) setError(parseError(e).message); else throw parseError(e);
     } finally {
       setLoading(false);
     }
   }, [user]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load().catch(() => { /* a quiet refresh failed: keep what is on screen */ }); }, [load]);
 
   const switchWorkspace = useCallback((id: string) => {
     setCurrentId(id);
@@ -70,6 +79,7 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
   const workspace = useMemo(() => workspaces.find((w) => w.id === currentId) ?? null, [workspaces, currentId]);
   const role = workspace?.role ?? null;
   const suspended = workspace?.plan === 'suspended';
+  const tz = (workspace?.settings as Record<string, unknown> | undefined)?.timezone;
 
   const value: Ctx = {
     workspaces,
@@ -82,6 +92,8 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
     canWrite: !!role && role !== 'client_viewer' && !suspended,
     canReply: !!workspace?.can_reply && !suspended,
     suspended,
+    isClientViewer: role === 'client_viewer',
+    timezone: typeof tz === 'string' && tz ? tz : 'UTC',
     switchWorkspace,
     refresh: load,
     createWorkspace,
