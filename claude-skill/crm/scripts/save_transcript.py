@@ -15,13 +15,22 @@ one-time ticket, so the saved transcript is byte-for-byte what Deepgram returned
     The pack prints speakers 1-based ("Speaker 1"); the CRM stores Deepgram's 0-based index. Give the label exactly as
     transcript.speakers.txt shows it and the script does the mapping. A bare number works too ("2=Naman:prospect").
 
-Exit code 0 = saved. On a network failure it prints UPLOAD_FAILED and exits 2: fall back to the connector's
+The call AUDIO is stored too (the studio's private Oracle bucket), with the same ticket, before the transcript is
+posted. Only ever audio: if the recording is a video, its audio track is extracted and the video itself is never uploaded. It uses --recording if given, else the audio get-transcript kept in the pack (run transcribe.py with
+--keep-audio -> audio.flac). With ffmpeg on PATH it is first shrunk to mono 32 kbps AAC (.m4a, ~15 MB per hour, plays
+in every browser). Audio problems never block the transcript: it prints RECORDING_SKIPPED / RECORDING_FAILED and
+carries on. --no-audio skips it.
+
+Exit code 0 = transcript saved. On a network failure it prints UPLOAD_FAILED and exits 2: fall back to the connector's
 save_transcript tool. Python standard library only.
 """
 import argparse
 import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -94,6 +103,67 @@ def segments_from_timed(path, label_to_index):
     return segs
 
 
+AUDIO_TYPES = {".m4a": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".flac": "audio/flac", ".ogg": "audio/ogg", ".opus": "audio/opus", ".aac": "audio/aac"}
+VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv"}     # only ever a SOURCE: the audio track is pulled out, the video is never stored
+UA = "crm-skill-save-transcript/1"
+
+
+def find_audio(pack, override):
+    if override:
+        p = Path(override)
+        return p if p.is_file() else None
+    for name in ("audio.flac", "audio.wav", "audio.m4a", "audio.mp3"):
+        if (pack / name).is_file():
+            return pack / name
+    return None
+
+
+def shrink(src, workdir):
+    """Mono 32 kbps AAC, audio track only (-vn): speech stays clear, an hour is ~15 MB, every browser plays it.
+    No ffmpeg -> the source is returned as is, and upload_audio() refuses it unless it is already an audio file."""
+    if not shutil.which("ffmpeg"):
+        return src
+    out = Path(workdir) / "call.m4a"
+    r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vn", "-ac", "1", "-c:a", "aac", "-b:a", "32k", "-movflags", "+faststart", str(out)],
+                       capture_output=True, text=True)
+    return out if r.returncode == 0 and out.is_file() and out.stat().st_size > 0 else src
+
+
+def call(url, token, payload):
+    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), method="POST",
+                                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "User-Agent": UA})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def upload_audio(base, token, src, original_name, duration):
+    """upload-url -> PUT straight to storage -> confirm. Returns a one-line status; never raises."""
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            f = shrink(src, tmp)
+            if f.suffix.lower() in VIDEO_EXT or f.suffix.lower() not in AUDIO_TYPES:
+                return (f"RECORDING_SKIPPED: {src.name} is not an audio file and its audio could not be extracted "
+                        f"({'ffmpeg failed' if shutil.which('ffmpeg') else 'ffmpeg not found'}). Only audio is stored, never video - the transcript is still saved.")
+            ctype = AUDIO_TYPES[f.suffix.lower()]
+            size = f.stat().st_size
+            grant = call(f"{base}/recording/upload-url", token, {"content_type": ctype, "filename": f.name, "bytes": size})
+            with open(f, "rb") as fh:
+                put = urllib.request.Request(grant["put_url"], data=fh, method="PUT", headers={"Content-Type": ctype, "Content-Length": str(size), "User-Agent": UA})
+                urllib.request.urlopen(put, timeout=1800).read()
+            call(f"{base}/recording/confirm", token, {"key": grant["key"], "content_type": ctype, "filename": original_name or src.name, "duration_seconds": duration})
+            return f"RECORDING_SAVED: {size / 1048576:.1f} MB {f.suffix[1:]} ({'compressed from ' + src.name if f != src else 'as is - ffmpeg not found'})"
+    except urllib.error.HTTPError as e:
+        try:
+            err = json.loads(e.read().decode("utf-8"))
+        except ValueError:
+            err = {}
+        if err.get("code") == "E_STORAGE_NOT_CONFIGURED":
+            return "RECORDING_SKIPPED: audio storage is not set up on the CRM yet (the transcript is still saved)."
+        return f"RECORDING_FAILED ({e.code} {err.get('code', '')}): {err.get('message') or e.reason}"
+    except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        return f"RECORDING_FAILED: {e}"
+
+
 def main():
     ap = argparse.ArgumentParser(description="Post a get-transcript pack to the Sales CRM.")
     ap.add_argument("pack", help="get-transcript output folder")
@@ -102,6 +172,8 @@ def main():
     ap.add_argument("--speaker", action="append", default=[], metavar='"Speaker 1=Name:role"',
                     help="name a voice and say which side it is on (repeatable)")
     ap.add_argument("--source", help="recording file name or link (default: taken from the pack)")
+    ap.add_argument("--recording", help="audio/video file to store (default: the audio.flac get-transcript kept with --keep-audio)")
+    ap.add_argument("--no-audio", action="store_true", help="save the transcript only")
     ap.add_argument("--dry-run", action="store_true", help="build the payload and print its stats; post nothing")
     a = ap.parse_args()
 
@@ -168,14 +240,25 @@ def main():
         print('WARNING: no voice is marked prospect. Pass --speaker "<label>=<name>:prospect" so the CRM knows whose words are the customer\'s.')
     if meta.get("engine") == "whisper":
         print("NOTE: Whisper fallback pack — no speaker labels, no confidence data.")
+    audio = None if a.no_audio else find_audio(pack, a.recording)
+    if a.no_audio:
+        pass
+    elif audio:
+        print(f"audio:      {audio.name} ({audio.stat().st_size / 1048576:.1f} MB){'' if shutil.which('ffmpeg') else (' - ffmpeg not found, cannot pull the audio out of a video' if audio.suffix.lower() in VIDEO_EXT else ' - ffmpeg not found, will upload as is')}")
+    else:
+        print("audio:      none found - rerun get-transcript with --keep-audio, or pass --recording <file>, to store the call audio")
     if a.dry_run:
         print("dry run: nothing posted.")
         return
     if not a.url or not a.token:
         sys.exit("ERROR: --url and --token are required (from the connector's transcript_upload_ticket tool).")
 
+    # audio first: it needs the ticket unconsumed, and saving the transcript is what consumes it
+    if audio:
+        print(upload_audio(a.url.rsplit("/transcript", 1)[0], a.token, audio, Path(a.recording).name if a.recording else a.source, payload.get("duration_seconds")))
+
     req = urllib.request.Request(a.url, data=body, method="POST",
-                                 headers={"Authorization": f"Bearer {a.token}", "Content-Type": "application/json", "User-Agent": "crm-skill-save-transcript/1"})
+                                 headers={"Authorization": f"Bearer {a.token}", "Content-Type": "application/json", "User-Agent": UA})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
             out = json.loads(r.read().decode("utf-8"))

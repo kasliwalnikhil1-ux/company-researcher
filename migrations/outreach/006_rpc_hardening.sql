@@ -9,6 +9,7 @@ begin
   select workspace_id into ws from outreach_senders where id = p_sender;
   if ws is null then return '{}'::jsonb; end if;
   if not outreach_is_service() then perform outreach_require(ws, 'client_viewer'); end if;
+  if not outreach_client_visible(ws, (select sn_.client_id from outreach_senders sn_ where sn_.id = p_sender)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   select coalesce(jsonb_object_agg(action_type, jsonb_build_object('used', used, 'reserved', reserved, 'cap', cap)), '{}'::jsonb)
     into res from outreach_sender_budgets where sender_id = p_sender and day = outreach_sender_local_date(p_sender, now());
   return res;
@@ -24,6 +25,7 @@ begin
   select * into s from outreach_sequences where id = p_sequence;
   if not found then return; end if;
   if not outreach_is_service() then perform outreach_require(s.workspace_id, 'client_viewer'); end if;
+  if not outreach_client_visible(s.workspace_id, s.client_id) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   for n in select value from jsonb_each(s.graph->'nodes') loop
     if outreach_is_executable_node(n->>'type') then
       t := outreach_node_action_type(n->>'type');
@@ -70,5 +72,6 @@ begin
   select workspace_id into ws from outreach_senders where id = p_sender;
   if ws is null then return 0; end if;
   perform outreach_require(ws, 'client_viewer');
+  if not outreach_client_visible(ws, (select sn_.client_id from outreach_senders sn_ where sn_.id = p_sender)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   return outreach_effective_cap(p_sender, p_type);
 end $$;

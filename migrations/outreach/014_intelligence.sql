@@ -344,6 +344,7 @@ begin
   if p_action = 'edit' and (array_length(p_value_ids,1) <> 1 or nullif(trim(coalesce(p_text,'')), '') is null) then raise exception 'E_PAYLOAD_INVALID: edit takes one id and a text'; end if;
   for x in select v.id, v.workspace_id, v.lead_id, v.batch_id, v.status, v.text, var.max_chars from outreach_ai_values v join outreach_ai_variables var on var.id = v.variable_id where v.id = any(p_value_ids) for update of v loop
     perform outreach_require(x.workspace_id, 'member');
+    if not outreach_client_visible(x.workspace_id, (select ld_.client_id from outreach_leads ld_ where ld_.id = x.lead_id)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
     if p_action = 'approve' then
       if x.status not in ('generated','approved','skipped') or nullif(trim(coalesce(x.text,'')), '') is null then continue; end if;   -- there must be a line to approve
       update outreach_ai_values set status = 'approved', approved_by = auth.uid(), approved_at = now(), updated_at = now() where id = x.id;
@@ -493,6 +494,7 @@ begin
   select workspace_id into ws from outreach_leads where id = p_lead;
   if ws is null then return; end if;
   perform outreach_require(ws, 'client_viewer');
+  if not outreach_client_visible(ws, (select ld_.client_id from outreach_leads ld_ where ld_.id = p_lead)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   return query
     select x.at, x.kind, x.title, x.data from (
       select a.executed_at as at, 'action'::text as kind, initcap(replace(a.action_type::text,'_',' ')) || ' ' || a.status::text || coalesce(' — ' || case when a.status in ('failed','skipped') then outreach_reason_text(a.error_code, a.decision) end, '') as title,

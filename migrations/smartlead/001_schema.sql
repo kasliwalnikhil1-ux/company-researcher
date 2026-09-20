@@ -192,6 +192,7 @@ $$;
 
 revoke all on function smartlead_context(), smartlead_add_member(text, text), smartlead_set_member_active(uuid, boolean), smartlead_set_setting(text, jsonb), smartlead_agent_gc() from public, anon;
 grant execute on function smartlead_context(), smartlead_add_member(text, text), smartlead_set_member_active(uuid, boolean), smartlead_set_setting(text, jsonb) to authenticated;
+revoke all on function smartlead_agent_gc() from authenticated;   -- Supabase's default privileges grant it explicitly; 'public, anon' alone leaves it callable by any signed-in user
 grant execute on function smartlead_agent_gc() to service_role;
 revoke all on function smartlead_is_member(), smartlead_require_member() from public, anon;
 grant execute on function smartlead_is_member(), smartlead_require_member() to authenticated, service_role;

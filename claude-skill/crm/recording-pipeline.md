@@ -8,6 +8,8 @@ That is the whole input. **Run every step below without asking anything**, then 
 
 A recording is a file they attached, a path on disk, or a link (Drive, Loom, Zoom, YouTube). No recording → this is a normal capture: use [capture-pipeline.md](capture-pipeline.md).
 
+**The audio is already in the CRM** ("transcribe the recording for the GrowthX meeting", or `meetings_list` / `company_brief` shows the meeting has a recording but no transcript — someone uploaded it from the app): `get_recording_url(meeting_id)` → use that `url` as the recording in step 2, then carry on as normal. In step 5 pass `--no-audio`: it is stored already.
+
 ## 1. Find or create the meeting
 - `search(q: <email>)`. Found → `meetings_list(company: …, status: "scheduled")` and take the meeting nearest today (a past one that was never captured counts).
 - Not in the CRM → create it silently: `upsert_company` (name from the email domain, website = domain) → `upsert_contact` (email; name from the email until the transcript gives a better one) → `create_deal` → `schedule_meeting(scheduled_at: <today, or the date the user gave>)`.
@@ -19,8 +21,11 @@ Use the **get-transcript** skill; do not transcribe any other way. It extracts t
 
 ```bash
 python3 <get-transcript>/scripts/transcribe.py "<recording>" --out ./transcripts/<company> \
-  --keyterm "<Company name>" --keyterm "<Contact name>" --keyterm "<Studio name>" --speakers 2
+  --keyterm "<Company name>" --keyterm "<Contact name>" --keyterm "<Studio name>" --speakers 2 --keep-audio
 ```
+
+- **Only audio is ever stored — never the video.** A video recording is fine as input: get-transcript pulls the audio out, and step 5 uploads just that. Do not pass the video to `--recording` to "keep the original"; if the audio cannot be extracted the script skips it (`RECORDING_SKIPPED`) rather than upload a video.
+- **`--keep-audio` always.** It leaves `audio.flac` in the output folder, and step 5 stores that audio against the meeting so the team can listen back later. Without it only the text is kept.
 
 - **Keyterms are not optional.** Pass the company, the contact and the studio name (`crm_context` → `settings.studio_name`), plus any product the user mentioned. They are what stop the company name and the price from being mangled.
 - `--speakers 2` for a one-to-one call. Leave it off when you do not know how many people were on it.
@@ -56,14 +61,15 @@ If the transcript gives the prospect's real name or role and the CRM only has th
 1. `capture_meeting(meeting_id, outcome, …)` — once, with everything from step 4.
    - `E_ALREADY_CAPTURED` → the capture stays as it is. Carry on and save the transcript, then tell the user in one line what the recording says differently and offer `update_capture`.
 2. `transcript_upload_ticket(meeting_id)` → returns `upload_url` and `token`.
-3. Post the transcript with this skill's script — it sends the file itself, so the saved text is exactly what was transcribed:
+3. Post it with this skill's script. It stores the call audio first (shrunk to a small `.m4a` when ffmpeg is available), then sends the transcript file itself, so the saved text is exactly what was transcribed:
    ```bash
    python3 <crm skill>/scripts/save_transcript.py ./transcripts/<company> \
-     --url "<upload_url>" --token "<token>" \
+     --url "<upload_url>" --token "<token>" --source "<recording file name or link>" \
      --speaker "Speaker 1=Aarushi:team" --speaker "Speaker 2=Naman Jain:prospect"
    ```
    `--speaker` takes the label **exactly as `transcript.speakers.txt` prints it** ("Speaker 1", "Speaker 2"), then the real name, then `prospect` or `team`. With several recordings in one run, pass the subfolder for this one.
 4. What it prints:
+   - `RECORDING_SAVED: …` → the audio is stored. `RECORDING_SKIPPED` / `RECORDING_FAILED` / `audio: none found` → the audio was not stored; **the transcript is still saved**, so carry on, and mention it in one short line of the confirmation. Never retry the whole run just for the audio.
    - `SAVED: …` → done.
    - `REJECTED (401 …)` → the ticket expired or was used; get a new one and run it again.
    - `UPLOAD_FAILED …` → this environment cannot reach the CRM. Fall back to `save_transcript(meeting_id, turns, speakers, summary, …)`, copying each turn's text exactly from `transcript.speakers.txt`. It is slow for a long call — say so in one line, and do it anyway.
@@ -71,12 +77,13 @@ If the transcript gives the prospect's real name or role and the CRM only has th
 Capture first, transcript second: if the upload fails the meeting is still captured, and the transcript can be saved later without touching the capture.
 
 ## 6. Confirm (2–3 lines, plain words)
-> GrowthX (Naman Jain): held, 42-minute call. Quoted INR 40,000 per video for 8 a month. Stage: Meeting held. Next: send the proposal, due Friday 25 Sep. Transcript saved.
+> GrowthX (Naman Jain): held, 42-minute call. Quoted INR 40,000 per video for 8 a month. Stage: Meeting held. Next: send the proposal, due Friday 25 Sep. Transcript and audio saved.
 > Check: the transcriber was unsure of "forty" at 12:54 — confirm the price.
 
 Follow-through is the same as any capture: the value changed → `update_deal`; a follow-up call was booked on the recording → `schedule_meeting`; a new stakeholder spoke → `upsert_contact`.
 
 ## Using saved transcripts later
+- "Let me hear that call" / "send me the recording" → `get_recording_url(meeting_id)` gives a private link that works for 6 hours. Give it to the user only; never post it anywhere shared.
 - "What did Naman say about pricing?" → `get_transcript(meeting_id, q: "pric", role: "prospect", context: 1)`. Filter; never page through an hour of turns.
 - "Which prospects brought up compliance?" → `transcripts_search(q: "compliance", role: "prospect")`.
 - Proposal or call prep → `company_brief` shows which meetings have a transcript; pull the prospect's exact words with `get_transcript` and quote them.

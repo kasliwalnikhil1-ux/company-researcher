@@ -7,6 +7,7 @@
 //   MCP endpoint:        POST/GET/DELETE  /crm-mcp/mcp        (Streamable HTTP)
 //   OAuth metadata:      GET  /crm-mcp/.well-known/oauth-protected-resource
 //   Transcript upload:   POST /crm-mcp/transcript             (one-time ticket from transcript_upload_ticket, not a JWT)
+//   Call audio:          POST /crm-mcp/recording/{upload-url,confirm,play-url,delete}   (member JWT or ticket — recordings.ts)
 //
 // Auth: Supabase Auth OAuth 2.1 access tokens (standard Supabase JWTs). The same
 // JWT is forwarded to an RLS-scoped supabase client, so every read and every
@@ -30,6 +31,7 @@ import { registerBrief } from "./tools_brief.ts";
 import { registerMeeting } from "./tools_meeting.ts";
 import { registerCapture } from "./tools_capture.ts";
 import { registerTranscript } from "./tools_transcript.ts";
+import { registerRecordingRoutes } from "./recordings.ts";
 import { registerAnalysis } from "./tools_analysis.ts";
 import { registerResources, registerPrompts } from "./resources_prompts.ts";
 
@@ -62,7 +64,7 @@ Rules the database enforces and you must work with, not around: a meeting become
 
 Capture defaults — save in one pass, do not send a questionnaire: whoever is connected did the meeting and owns the deal (never question the connected account); any mention of pricing, a quote or what the prospect said means outcome=held; currency is INR unless stated; pain points are the user's words as given (no rewording, no asking for exact quotes); next step is as given or a short inferred one, its date is today when not mentioned; objections, source channel, role and meeting time are skipped when not mentioned — never ask for them; if the company/contact/deal/meeting is not in the CRM create it (upsert_company → upsert_contact → create_deal → schedule_meeting today → capture_meeting). Confirm in 2–3 lines.
 
-Recordings — when the user gives a call recording (a file, a path or a link: "here is the recording"), the recording replaces their notes and the whole thing runs without questions: find or create the company/contact/deal/meeting from the email they gave → transcribe with the get-transcript skill (speaker-diarized) → work out from what is said which speaker is the prospect and which is us → fill the capture from the transcript (pain points are the PROSPECT's own sentences copied exactly; commercials are the numbers actually spoken; next step + date as agreed on the call) → capture_meeting → save the transcript (transcript_upload_ticket + the crm skill's save_transcript.py; save_transcript only if that upload cannot reach the network). Confirm in 2–3 lines and name any price or name the transcriber was unsure of. Saved transcripts are read back with get_transcript / transcripts_search — filter them, do not page through an hour of speech.
+Recordings — when the user gives a call recording (a file, a path or a link: "here is the recording"), the recording replaces their notes and the whole thing runs without questions: find or create the company/contact/deal/meeting from the email they gave → transcribe with the get-transcript skill (speaker-diarized) → work out from what is said which speaker is the prospect and which is us → fill the capture from the transcript (pain points are the PROSPECT's own sentences copied exactly; commercials are the numbers actually spoken; next step + date as agreed on the call) → capture_meeting → save the transcript (transcript_upload_ticket + the crm skill's save_transcript.py; save_transcript only if that upload cannot reach the network; the same script also stores the call audio in the studio's storage, so keep the audio when transcribing). Confirm in 2–3 lines and name any price or name the transcriber was unsure of. Saved transcripts are read back with get_transcript / transcripts_search — filter them, do not page through an hour of speech.
 
 Replies use plain words, never raw database values: stages read New / Contacted / Replied / Meeting booked / Meeting held / Proposal sent / Negotiation / Won / Lost (not meeting_held), no_show reads no-show, lookups show their label; no slugs, field names, tool names, ids or underscores in anything the user reads.
 
@@ -150,6 +152,8 @@ app.post("/transcript", async (c) => {
   log({ fn: "crm-mcp", route: "transcript", status: "ok", meeting: saved.meeting_id, turns: saved.turn_count, duration_ms: Date.now() - t0 });
   return reply(200, { ok: true, ...saved });
 });
+
+registerRecordingRoutes(app, CORS_HEADERS);
 
 app.get("/", (c) =>
   c.json({

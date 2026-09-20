@@ -14,6 +14,7 @@ export const qk = {
   meeting: (id: string) => ['crm', 'meeting', id] as const,
   deal: (id: string) => ['crm', 'deal', id] as const,
   transcript: (meetingId: string) => ['crm', 'transcript', meetingId] as const,
+  recordingUrl: (meetingId: string) => ['crm', 'recording-url', meetingId] as const,
   commitments: (from: string, to?: string) => ['crm', 'commitments', from, to] as const,
   channelCosts: () => ['crm', 'channel_costs'] as const,
   funnel: (from: string, to?: string) => ['crm', 'funnel', from, to ?? 'today'] as const,

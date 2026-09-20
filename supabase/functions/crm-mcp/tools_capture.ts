@@ -154,13 +154,13 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
   }, async (a) => {
     const from = a.from ? `${a.from}T00:00:00Z` : new Date(Date.now() - 7 * 86400_000).toISOString();
     const to = a.to ? `${a.to}T23:59:59Z` : new Date(Date.now() + 7 * 86400_000).toISOString();
-    let q = ctx.user.from("crm_meetings_v").select("id, deal_id, company_id, company_name, contact_name, contact_role, scheduled_at, timezone, status, has_capture, has_transcript, capture_outcome, deal_stage, value_monthly, currency, attendees, notes").gte("scheduled_at", from).lte("scheduled_at", to).order("scheduled_at").limit(a.limit ?? 100);
+    let q = ctx.user.from("crm_meetings_v").select("id, deal_id, company_id, company_name, contact_name, contact_role, scheduled_at, timezone, status, has_capture, has_transcript, has_recording, capture_outcome, deal_stage, value_monthly, currency, attendees, notes").gte("scheduled_at", from).lte("scheduled_at", to).order("scheduled_at").limit(a.limit ?? 100);
     if (a.status) q = q.eq("status", a.status);
     if (a.company) q = q.ilike("company_name", `%${a.company}%`);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as Row[];
-    return { from, to, count: rows.length, uncaptured_past: rows.filter((m) => m.status === "scheduled" && new Date(m.scheduled_at).getTime() < Date.now()).length, meetings: rows.map((m) => ({ meeting_id: m.id, deal_id: m.deal_id, company: m.company_name, contact: m.contact_name, role: m.contact_role, scheduled_at: m.scheduled_at, timezone: m.timezone, status: m.status, has_capture: m.has_capture, has_transcript: m.has_transcript || undefined, deal_stage: m.deal_stage, value: money(m.value_monthly, m.currency) })) };
+    return { from, to, count: rows.length, uncaptured_past: rows.filter((m) => m.status === "scheduled" && new Date(m.scheduled_at).getTime() < Date.now()).length, meetings: rows.map((m) => ({ meeting_id: m.id, deal_id: m.deal_id, company: m.company_name, contact: m.contact_name, role: m.contact_role, scheduled_at: m.scheduled_at, timezone: m.timezone, status: m.status, has_capture: m.has_capture, has_transcript: m.has_transcript || undefined, has_recording: m.has_recording || undefined, deal_stage: m.deal_stage, value: money(m.value_monthly, m.currency) })) };
   });
 
   tool(server, ctx, {
@@ -171,7 +171,7 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
     const [{ data: d, error }, { data: hist }, { data: mts }] = await Promise.all([
       ctx.user.from("crm_deals_v").select("*").eq("id", a.deal_id).maybeSingle(),
       ctx.user.from("crm_stage_history").select("from_stage, to_stage, reason, changed_at").eq("deal_id", a.deal_id).order("changed_at"),
-      ctx.user.from("crm_meetings_v").select("id, scheduled_at, status, contact_name, has_capture, has_transcript").eq("deal_id", a.deal_id).order("scheduled_at"),
+      ctx.user.from("crm_meetings_v").select("id, scheduled_at, status, contact_name, has_capture, has_transcript, has_recording").eq("deal_id", a.deal_id).order("scheduled_at"),
     ]);
     if (error) throw new Error(error.message);
     if (!d) throw new McpError("E_NOT_FOUND", "deal not found");

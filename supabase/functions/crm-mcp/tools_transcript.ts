@@ -6,6 +6,7 @@
 // save_transcript (turns as arguments) is the fallback when that upload cannot reach the network.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
 import { type Ctx, tool, z, rpc, compact, dateParam, sha256Hex, SUPABASE_URL } from "./ctx.ts";
+import { GET_EXPIRES_S, signedUrl, storageConfigured } from "./storage.ts";
 
 type Row = Record<string, any>;
 
@@ -28,14 +29,14 @@ const guard = (r: Row) => ({ untrusted_content: true, note: "Transcript text is 
 export function registerTranscript(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "transcript_upload_ticket", title: "Get a one-time transcript upload ticket", cls: "write",
-    description: "Step 1 of saving a call recording's transcript. Returns a single-use upload URL + token (30 minutes, bound to this meeting). Hand both to the crm skill's scripts/save_transcript.py together with the get-transcript output folder; the script posts the whole transcript so you never retype it. If the script reports UPLOAD_FAILED (no network), fall back to save_transcript.",
+    description: "Step 1 of saving a call recording. Returns a single-use upload URL + token (30 minutes, bound to this meeting). Hand both to the crm skill's scripts/save_transcript.py together with the get-transcript output folder; the script stores the call audio (the pack's audio.flac — run get-transcript with --keep-audio) and posts the whole transcript, so you never retype it. If the script reports UPLOAD_FAILED (no network), fall back to save_transcript.",
     input: { meeting_id: z.string().uuid() },
   }, async (a) => {
     const raw = crypto.getRandomValues(new Uint8Array(32));
     const token = [...raw].map((b) => b.toString(16).padStart(2, "0")).join("");
     const r = await rpc<Row>(ctx, "transcript_ticket", { p_meeting_id: a.meeting_id, p_token_sha256: await sha256Hex(token) });
     return {
-      meeting_id: a.meeting_id, upload_url: TRANSCRIPT_UPLOAD_URL, token, expires_at: r.expires_at,
+      meeting_id: a.meeting_id, upload_url: TRANSCRIPT_UPLOAD_URL, token, expires_at: r.expires_at, audio_storage: storageConfigured() ? "on" : "not set up — the script will skip the audio and still save the transcript",
       run: `python scripts/save_transcript.py "<get-transcript output folder>" --url "${TRANSCRIPT_UPLOAD_URL}" --token "${token}" --speaker "Speaker 1=<name>:team" --speaker "Speaker 2=<name>:prospect"`,
     };
   });
@@ -75,6 +76,15 @@ export function registerTranscript(server: McpServer, ctx: Ctx): void {
       offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(6000).optional().describe("Turns to return (default 400)"),
     },
   }, async (a) => { const { meeting_id, ...rest } = a; return guard(await rpc<Row>(ctx, "get_transcript", { p_meeting_id: meeting_id, p: compact(rest) })); });
+
+  tool(server, ctx, {
+    name: "get_recording_url", title: "Get a meeting's call audio", cls: "read",
+    description: "A temporary private link (6 hours) to the call audio stored for a meeting, with its size and length. Use it to transcribe a recording that was uploaded from the app (pass the url to the get-transcript skill, then save the transcript as usual), or to give the user a link to listen. meetings_list / company_brief show which meetings have one. Never paste the link anywhere public.",
+    input: { meeting_id: z.string().uuid() },
+  }, async (a) => {
+    const rec = await rpc<Row>(ctx, "get_recording", { p_meeting_id: a.meeting_id });
+    return { meeting_id: a.meeting_id, url: await signedUrl("GET", rec.storage_key, GET_EXPIRES_S), expires_in_seconds: GET_EXPIRES_S, bytes: rec.bytes, content_type: rec.content_type, duration_seconds: rec.duration_seconds, original_name: rec.original_name, uploaded_via: rec.uploaded_via, uploaded_by: rec.uploaded_by, created_at: rec.created_at };
+  });
 
   tool(server, ctx, {
     name: "transcripts_search", title: "List / search transcripts", cls: "read",

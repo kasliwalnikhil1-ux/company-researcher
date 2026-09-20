@@ -51,6 +51,9 @@ PRD: `linkedin-outreach-platform-PRD.md` (repo root). Product plan: `outreach-pr
 | `015_platform.sql` | API keys and dispatch, CRM plumbing, branding and portal domains, booking, email depth, lead sources, `outreach_resume_after_billing` |
 | `016_seed_cron_v2.sql` | ceilings and warm-up caps for the new action types, flag `portal_cname_target`, 9 new cron jobs (§9.3), report schedule defaults |
 | `017_hardening.sql` | grants and `search_path`: no outreach function is executable by `anon` except the three that work before login. Re-run after adding functions |
+| `018_scope_hardening.sql` | access audit (21 Sep 2026): internal helpers (`outreach_effective_cap`, `outreach_ws_tz`, `outreach_audit`, …) are no longer executable by signed-in users — only `SECURITY DEFINER` RPCs call them. Must run **after** 017 |
+
+**Rule for every RPC that takes an id:** `outreach_require()` proves workspace membership only. A member or client viewer can be limited to some clients (`outreach_members.client_ids`), so right after it check `outreach_client_visible(ws, <the row's client>)` — enrollment → its sequence's client, queued action → its sender's, AI line → its lead's, task → its own — the same rule the RLS policies use. `tests/smoke_04_access_scope.sql` calls the id-taking RPCs as an outsider, a restricted viewer and a restricted member, and its last check fails if any viewer/member RPC has no client check at all.
 
 Internal/ops/secret tables (`outreach_sender_secrets`, `outreach_sender_tokens`, `outreach_inbound_events`, `outreach_plans`, `outreach_flags`, `outreach_rate_limits`, …) sit in `public` with RLS **enabled and no policies**, so only the service role (edge functions, SQL editor) can touch them.
 
@@ -130,7 +133,7 @@ openssl rand -hex 32      # UNIPILE_WEBHOOK_SECRET
 ```bash
 export CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_...
 export OUTREACH_CRON_SECRET=<the value generated above>
-./scripts/outreach-apply-migrations.sh                                   # 001 → 017, in order, one API call per file
+./scripts/outreach-apply-migrations.sh                                   # 001 → 018, in order, one API call per file
 ./scripts/outreach-smoke.sh                                              # SQL smoke tests; each must print PASS
 ```
 The script substitutes `__FUNCTIONS_BASE_URL__` (`https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/`) and `__CRON_SECRET__` into `004_seed_cron.sql`, which writes the flag `functions_base_url` and the Vault secret `outreach_cron_secret`, and (re)schedules every `outreach-*` cron job. Re-running is safe: all files are idempotent (`create or replace`, `on conflict`, unschedule-by-name first).
@@ -470,7 +473,7 @@ Added 20 Sep 2026. It mirrors the "Phase 1 switch-on checklist" in `outreach-pro
 | 9.2 | Resend email | Built, off | Verified domain, `RESEND_API_KEY`, `OUTREACH_EMAIL_FROM` |
 | 9.3 | New cron jobs, weekly sender report | In `016_seed_cron_v2.sql` | Apply 016, deploy the functions the jobs call |
 | 9.4 | CRM sync (optional) | Needs one OAuth app per CRM | Client id and secret per CRM, redirect URL registered |
-| 9.5 | Database and functions | Migrations 009–017 are applied to the live project | Re-apply after changes, deploy new functions, run the smoke tests |
+| 9.5 | Database and functions | Migrations 009–018 are applied to the live project | Re-apply after changes, deploy new functions, run the smoke tests |
 | 9.6 | Booking webhook | Built | The customer pastes a URL into Calendly or Cal.com |
 | 9.7 | Custom portal domains | Built | Customer DNS, flag `portal_cname_target`, add the domain at the hosting provider |
 | 9.8 | Custom tracking domains | Built, **manual approval per domain** | Customer CNAME, Unipile support authorises it, you set the row to `active` |
@@ -597,19 +600,19 @@ Optional overrides: `SALESFORCE_LOGIN_URL` (`https://test.salesforce.com` for sa
 
 **Rotating `OUTREACH_CRON_SECRET` now has a side effect:** unsubscribe links in emails already sent stop verifying. Rotating `OUTREACH_COOKIE_KEY` also invalidates stored CRM tokens and customers' own AI keys, in addition to LinkedIn cookies (§6.5). Customers then reconnect the CRM and re-enter the key.
 
-### 9.5 Apply migrations 009–017 and deploy the new functions
+### 9.5 Apply migrations 009–018 and deploy the new functions
 
 The migrations were applied to the live project on 20 Sep 2026. For a new project, or after a change:
 
 ```bash
 export CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_...
 export OUTREACH_CRON_SECRET=<same value as the edge function secret>
-./scripts/outreach-apply-migrations.sh          # 001 → 017, one API call per file
+./scripts/outreach-apply-migrations.sh          # 001 → 018, one API call per file
 # or only the product-plan files, in this order:
 ./scripts/outreach-apply-migrations.sh migrations/outreach/009_enums_v2.sql
 ./scripts/outreach-apply-migrations.sh migrations/outreach/010_schema_v2.sql migrations/outreach/011_engine_v2.sql \
   migrations/outreach/012_editing_recovery_enrol.sql migrations/outreach/013_reports.sql migrations/outreach/014_intelligence.sql \
-  migrations/outreach/015_platform.sql migrations/outreach/016_seed_cron_v2.sql migrations/outreach/017_hardening.sql
+  migrations/outreach/015_platform.sql migrations/outreach/016_seed_cron_v2.sql migrations/outreach/017_hardening.sql migrations/outreach/018_scope_hardening.sql
 ./scripts/outreach-smoke.sh                     # every smoke test must print PASS
 ```
 

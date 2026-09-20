@@ -39,8 +39,11 @@ const config: Config = {
   			'gray-800': 'var(--gray-800)',
   			'gray-900': 'var(--gray-900)',
   			'gray-950': 'var(--gray-950)',
-  			black: 'var(--black)',
-  			white: 'var(--white)',
+  			// Not var(--black) / var(--white): Tailwind 3 cannot put an opacity on a bare CSS variable, so every `bg-black/40`
+  			// (all the modal backdrops) and `text-white/80` silently generated NO css. Both variables are constants in
+  			// globals.css (#000000 / #ffffff), so plain `bg-black` / `text-white` look exactly the same as before.
+  			black: 'rgb(0 0 0 / <alpha-value>)',
+  			white: 'rgb(255 255 255 / <alpha-value>)',
   			'accent-yellow-light': 'var(--accent-yellow-light)',
   			'accent-yellow-dark': 'var(--accent-yellow-dark)',
   			'accent-skyblue-light': 'var(--accent-skyblue-light)',

@@ -55,6 +55,27 @@ Connect in Claude (claude.ai connectors / Claude Desktop / Claude Code) with the
 - **Reading**: `get_transcript` (filter by `q` / `role` / time, with `context`), `transcripts_search` (across meetings; `role: "prospect"` = only what customers said), `set_transcript_speakers` to fix who is who. In the app: Companies → a company → **Transcript** on the meeting row.
 - **Rebuild the skill zip** after editing the skill: `python scripts/crm-build-skill-zip.py` (Python zipfile — Compress-Archive's backslash paths are rejected by claude.ai).
 
+## Call audio storage (Oracle Object Storage)
+
+The call audio is kept too — one file per meeting, in the private `kaptured-storage` bucket (Mumbai) through Oracle's S3-compatible API, under `crm/recordings/<meeting_id>/`. `crm_meeting_recordings` holds the pointer. Background: `oracle-storage-setup.md`.
+
+**Switch it on** (once): paste the real customer secret key pair into `oracle-storage.env` (git-ignored; access key 40 chars, secret 44), then
+```bash
+CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... bash scripts/crm-set-storage-secrets.sh
+```
+It sets `CRM_S3_ENDPOINT / REGION / BUCKET / ACCESS_KEY_ID / SECRET_ACCESS_KEY` on the project and refuses placeholder values.
+
+**A brand-new key is rejected for a few minutes.** Oracle creates a customer secret key in the tenancy's home region and replicates it; until it reaches Mumbai every request fails with `403 SignatureDoesNotMatch — "The secret key required to complete authentication could not be found"`. That message means *Oracle does not know this access key yet*, not that the signature is wrong (the official AWS SDK fails identically). On 2026-09-20 it took about four minutes. Wait and retry before touching any code or regenerating the key.
+
+**If the secrets are ever missing** (a new environment, a rotated key not yet pushed), every recording route answers `E_STORAGE_NOT_CONFIGURED` and everything else keeps working: the skill prints `RECORDING_SKIPPED` and still saves the transcript.
+
+- **The key never leaves crm-mcp.** `storage.ts` presigns SigV4 URLs itself (no AWS SDK; checked against the AWS documentation's worked example) — path-style, region `ap-mumbai-1`. Browser and script only get a short-lived URL for one object and talk to Oracle directly, so audio never passes through the function. Oracle answers CORS preflights with `allow-origin: *`, which is what lets the browser PUT.
+- **One upload path, two callers** (`recordings.ts`): `POST /crm-mcp/recording/upload-url` → PUT to Oracle → `POST /recording/confirm` (HEADs the object, enforces the 300 MB cap — audio types only — then `crm_save_recording`; a replaced file's old object is deleted). Bearer is a member JWT (the app) or the upload ticket (the skill — peeked, not consumed; saving the transcript consumes it). `play-url` (6-hour link) and `delete` are JWT-only: a ticket can upload and nothing else. `crm_save_recording` refuses a key outside the meeting's own prefix.
+- **Skill**: run get-transcript with `--keep-audio`; `save_transcript.py` finds `audio.flac`, shrinks it with ffmpeg to mono 32 kbps AAC `.m4a` (~15 MB per hour) and uploads it before the transcript. `get_recording_url` lets Claude transcribe audio that was uploaded from the app.
+- **Audio only, never video.** A video is just a source: the skill pulls the audio track out (`ffmpeg -vn`) and, if it cannot, skips the audio rather than upload the video (`RECORDING_SKIPPED`). The app's picker takes audio files only, and `upload-url` refuses any non-audio content type (400) as a backstop. Reason: the bucket's free tier is 10 GiB — an hour of audio is ~15 MB, an hour of video is hundreds.
+- **App**: Companies → a company → **Add recording** on a past meeting; the transcript view has the player, and each timestamp jumps the audio to that line.
+- **Limits**: free tier is 10 GiB (≈ 650 hours at 15 MB). Deleting a meeting removes the row but not the object — orphans under `crm/recordings/` can be swept by listing the prefix against `crm_meeting_recordings.storage_key`.
+
 ## Hooks left for later (schema-ready, not built)
 
 - `crm_deals.delivery_project_id` — join to the client portal.

@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useTranscript } from '@/lib/crm/queries';
 import type { SpeakerRole, TranscriptSpeaker } from '@/lib/crm/types';
 import { Badge, Button, ErrorBox, Input, Modal, Select, Spinner, fmtDate, type Tone } from './ui';
 import { useWrite } from './forms';
+import { DeleteRecordingButton, RecordingPlayer, UploadRecordingButton, type PlayerHandle } from './recording';
 import { Check, Copy, Pencil, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -59,6 +60,7 @@ export function TranscriptModal({ meetingId, onClose }: { meetingId: string | nu
   const [find, setFind] = useState('');
   const [prospectOnly, setProspectOnly] = useState(false);
   const [copied, setCopied] = useState(false);
+  const player = useRef<PlayerHandle>(null);
 
   const needle = find.trim().toLowerCase();
   const turns = useMemo(() => (t?.turns ?? []).filter((x) => (!prospectOnly || x.role === 'prospect') && (!needle || x.text.toLowerCase().includes(needle))), [t, prospectOnly, needle]);
@@ -79,6 +81,15 @@ export function TranscriptModal({ meetingId, onClose }: { meetingId: string | nu
           <div className="text-xs text-gray-500">
             {fmtDuration(t.duration_seconds)} · {t.word_count?.toLocaleString() ?? '—'} words{t.language ? ` · ${t.language}` : ''}{t.avg_confidence != null ? ` · ${Math.round(t.avg_confidence * 100)}% transcription confidence` : ''}{t.source ? ` · ${t.source}` : ''}{t.saved_by ? ` · saved by ${t.saved_by}` : ''}
           </div>
+
+          {t.has_recording ? (
+            <div className="flex items-start gap-2">
+              <div className="flex-1 min-w-0"><RecordingPlayer ref={player} meetingId={t.meeting_id} /></div>
+              <DeleteRecordingButton meetingId={t.meeting_id} />
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">No audio stored for this call. <UploadRecordingButton meetingId={t.meeting_id} /></div>
+          )}
 
           {t.summary && <p className="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-md px-3 py-2">{t.summary}</p>}
           {t.topics.length > 0 && <div className="flex flex-wrap gap-1">{t.topics.map((x) => <Badge key={x} tone="purple">{x}</Badge>)}</div>}
@@ -113,7 +124,9 @@ export function TranscriptModal({ meetingId, onClose }: { meetingId: string | nu
             {turns.length === 0 && <li className="text-sm text-gray-400 py-4 text-center">Nothing matches.</li>}
             {turns.map((x) => (
               <li key={x.i} className={cn('text-sm flex gap-3 rounded-md px-2 py-1.5', x.role === 'prospect' ? 'bg-green-50/60' : 'bg-transparent')}>
-                <span className="text-[11px] text-gray-400 tabular-nums w-12 shrink-0 pt-0.5 text-right">{clock(x.start)}</span>
+                {t.has_recording && x.start != null
+                  ? <button onClick={() => player.current?.seek(x.start!)} title="Play from here" className="text-[11px] text-indigo-500 hover:text-indigo-700 hover:underline tabular-nums w-12 shrink-0 pt-0.5 text-right">{clock(x.start)}</button>
+                  : <span className="text-[11px] text-gray-400 tabular-nums w-12 shrink-0 pt-0.5 text-right">{clock(x.start)}</span>}
                 <div className="min-w-0">
                   <span className={cn('font-medium mr-1.5', x.role === 'prospect' ? 'text-green-800' : x.role === 'team' ? 'text-indigo-700' : 'text-gray-700')}>{x.label}</span>
                   <span className="text-gray-800 whitespace-pre-wrap"><Highlight text={x.text} q={find.trim()} /></span>

@@ -40,3 +40,6 @@ next-env.d.ts
 
 # Playwright MCP scratch (console logs, screenshots)
 .playwright-mcp/
+
+# Oracle Object Storage credentials (pushed to the edge function with scripts/crm-set-storage-secrets.sh)
+oracle-storage.env

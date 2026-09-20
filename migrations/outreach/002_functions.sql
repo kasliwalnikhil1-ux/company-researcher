@@ -996,6 +996,8 @@ begin
   select * into s from outreach_sequences where id = p_sequence;
   if not found then raise exception 'E_NOT_FOUND'; end if;
   perform outreach_require(s.workspace_id, 'member');
+  if not outreach_client_visible(s.workspace_id, s.client_id) then raise exception 'E_FORBIDDEN: client not visible'; end if;
+  if exists (select 1 from outreach_leads ld_ where ld_.id = any(p_lead_ids) and not outreach_client_visible(s.workspace_id, ld_.client_id)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   if array_length(p_lead_ids,1) > 10000 then raise exception 'E_TOO_MANY: max 10000 per request'; end if;
   pool := s.sender_pool;
   if p_sender is not null then
@@ -1051,6 +1053,7 @@ begin
   select * into e from outreach_enrollments where id = p_id;
   if not found then raise exception 'E_NOT_FOUND'; end if;
   perform outreach_require(e.workspace_id, 'member');
+  if not outreach_client_visible(e.workspace_id, (select sq_.client_id from outreach_sequences sq_ where sq_.id = e.sequence_id)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   perform outreach_complete_enrollment(p_id, 'exited_manual', p_reason);
 end $$;
 
@@ -1061,6 +1064,7 @@ begin
   select * into e from outreach_enrollments where id = p_id;
   if not found then raise exception 'E_NOT_FOUND'; end if;
   perform outreach_require(e.workspace_id, 'member');
+  if not outreach_client_visible(e.workspace_id, (select sq_.client_id from outreach_sequences sq_ where sq_.id = e.sequence_id)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   update outreach_enrollments set paused_from = status, status = 'paused' where id = p_id and status in ('active','waiting_connection','waiting_delay','waiting_task');
 end $$;
 
@@ -1071,6 +1075,7 @@ begin
   select * into e from outreach_enrollments where id = p_id;
   if not found then raise exception 'E_NOT_FOUND'; end if;
   perform outreach_require(e.workspace_id, 'member');
+  if not outreach_client_visible(e.workspace_id, (select sq_.client_id from outreach_sequences sq_ where sq_.id = e.sequence_id)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   update outreach_enrollments set status = coalesce(paused_from,'active'), paused_from = null where id = p_id and status = 'paused';
 end $$;
 
@@ -1084,6 +1089,8 @@ begin
   select * into t from outreach_tasks where id = p_id for update;
   if not found then raise exception 'E_NOT_FOUND'; end if;
   perform outreach_require(t.workspace_id, 'member');
+  if not outreach_client_visible(t.workspace_id, t.client_id) then raise exception 'E_FORBIDDEN: client not visible'; end if;
+  if not outreach_client_visible(t.workspace_id, (select sq_.client_id from outreach_enrollments en_ join outreach_sequences sq_ on sq_.id = en_.sequence_id where en_.id = t.enrollment_id)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   if t.completed_at is not null then return; end if;
   update outreach_tasks set completed_at = now(), completed_by = auth.uid(), result = coalesce(p_result, jsonb_build_object('text', p_text)),
     ai_draft = coalesce(p_text, ai_draft) where id = p_id;

@@ -27,6 +27,7 @@ begin
   select workspace_id into ws from outreach_leads where id = p_lead;
   if ws is null then return; end if;
   perform outreach_require(ws, 'client_viewer');
+  if not outreach_client_visible(ws, (select ld_.client_id from outreach_leads ld_ where ld_.id = p_lead)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   return query
     select a.executed_at, 'action'::text, a.action_type::text || ' ' || a.status::text, jsonb_build_object('id', a.id, 'sender_id', a.sender_id, 'node_id', a.node_id, 'decision', a.decision, 'error_code', a.error_code)
       from outreach_actions a where a.lead_id = p_lead and a.executed_at is not null
@@ -78,5 +79,5 @@ language sql stable security definer set search_path = public, extensions as $$
     (select count(*)::int from outreach_enrollments e where e.sequence_id = s.id and e.status = 'exited_replied'),
     (select coalesce(sum(n.sent),0)::int from outreach_node_stats n where n.sequence_id = s.id),
     (select coalesce(sum(n.queued),0)::int from outreach_node_stats n where n.sequence_id = s.id)
-  from outreach_sequences s where s.workspace_id = p_ws and s.workspace_id in (select outreach_workspace_ids())
+  from outreach_sequences s where s.workspace_id = p_ws and s.workspace_id in (select outreach_workspace_ids()) and outreach_client_visible(s.workspace_id, s.client_id)
 $$;

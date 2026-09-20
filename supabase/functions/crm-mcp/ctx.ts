@@ -129,6 +129,7 @@ const REMEDIES: Record<string, string> = {
   E_STAGE_BACKWARD: "Stages move forward or to lost. To move backwards, repeat update_deal with a `reason` — it is written to stage_history.",
   E_UNKNOWN_CURRENCY: "Add the currency with set_fx_rate(currency, usd_per_unit) first; values are never stored without a currency.",
   E_LAST_MEMBER: "At least one active team member must remain.",
+  E_STORAGE_NOT_CONFIGURED: "Call-audio storage is not set up on the server yet. Tell the user; transcripts and captures still work without it.",
   E_INTERNAL: "Report the code and message to the user; do not retry blindly.",
 };
 

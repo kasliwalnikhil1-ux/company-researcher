@@ -91,6 +91,12 @@ end $$;
 -- -----------------------------------------------------------------------------
 -- Lookup / entity resolvers (accept uuid | slug | label so chat can say "LinkedIn")
 -- -----------------------------------------------------------------------------
+-- SECURITY INVOKER ON PURPOSE (no `security definer` on the resolvers, crm_deal_json, crm_numbers, crm_owner_actuals):
+-- the grants loop at the bottom exposes every crm_* function to `authenticated`, i.e. to every signed-in user of the
+-- wider app, not just the CRM team. A definer helper with no crm_require_member() is therefore a public read of CRM data
+-- (crm_numbers handed the whole scoreboard to non-members until 2026-09-20). As invoker functions they run under the
+-- caller's RLS when called directly (a non-member sees nothing) and as the owner when called from the guarded RPCs.
+-- Rule for new helpers: member-check it, or leave it invoker. Never definer + unguarded.
 create or replace function crm_lookup_table(p_kind text) returns text
 language plpgsql immutable as $$
 begin
@@ -102,7 +108,7 @@ begin
 end $$;
 
 create or replace function crm_resolve_lookup(p_kind text, p_ref text) returns uuid
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql stable set search_path = public as $$
 declare tbl text := crm_lookup_table(p_kind); r uuid;
 begin
   if tbl is null then raise exception 'E_PAYLOAD_INVALID: unknown lookup kind %', p_kind; end if;
@@ -119,7 +125,7 @@ begin
 end $$;
 
 create or replace function crm_resolve_member(p_ref text) returns uuid
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql stable set search_path = public as $$
 declare r uuid;
 begin
   if p_ref is null or trim(p_ref) = '' or lower(p_ref) = 'me' then return auth.uid(); end if;
@@ -137,7 +143,7 @@ end $$;
 
 /** company_id | company (domain, website, or name). */
 create or replace function crm_resolve_company(p jsonb, p_required boolean default true) returns uuid
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql stable set search_path = public as $$
 declare r uuid; ref text; d text;
 begin
   if p ? 'company_id' and p->>'company_id' is not null then
@@ -161,7 +167,7 @@ end $$;
 
 /** contact_id | contact_email | (company + contact_name). */
 create or replace function crm_resolve_contact(p jsonb, p_required boolean default true) returns uuid
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql stable set search_path = public as $$
 declare r uuid; cid uuid; nm text;
 begin
   if p ? 'contact_id' and p->>'contact_id' is not null then
@@ -409,6 +415,9 @@ create trigger crm_commitments_bu before update on crm_commitments for each row 
 drop trigger if exists crm_transcripts_bu on crm_meeting_transcripts;
 create trigger crm_transcripts_bu before update on crm_meeting_transcripts for each row execute function crm_set_updated_at();
 
+drop trigger if exists crm_recordings_bu on crm_meeting_recordings;
+create trigger crm_recordings_bu before update on crm_meeting_recordings for each row execute function crm_set_updated_at();
+
 -- -----------------------------------------------------------------------------
 -- Views (security_invoker → RLS of the caller applies)
 -- -----------------------------------------------------------------------------
@@ -436,7 +445,8 @@ select mt.*,
        ct.name as contact_name, ct.role as contact_role, ct.email as contact_email,
        seg.label as icp_segment_label, ch.label as source_channel_label,
        (cap.id is not null) as has_capture, cap.outcome as capture_outcome,
-       (tr.id is not null) as has_transcript          -- new columns go last: create or replace view cannot reorder
+       (tr.id is not null) as has_transcript,         -- new columns go last: create or replace view cannot reorder
+       (rec.id is not null) as has_recording
 from crm_meetings mt
 join crm_deals d on d.id = mt.deal_id
 join crm_companies c on c.id = d.company_id
@@ -444,7 +454,8 @@ left join crm_contacts ct on ct.id = mt.contact_id
 left join crm_icp_segments seg on seg.id = c.icp_segment_id
 left join crm_source_channels ch on ch.id = d.source_channel_id
 left join crm_meeting_captures cap on cap.meeting_id = mt.id
-left join crm_meeting_transcripts tr on tr.meeting_id = mt.id;
+left join crm_meeting_transcripts tr on tr.meeting_id = mt.id
+left join crm_meeting_recordings rec on rec.meeting_id = mt.id;
 
 create or replace view crm_activities_v with (security_invoker = true) as
 select a.*, t.slug as activity_type_slug, t.label as activity_type_label, t.counts_as,
@@ -465,7 +476,7 @@ declare t text;
 begin
   for t in select unnest(array['crm_settings','crm_icp_segments','crm_source_channels','crm_activity_types','crm_fx_rates','crm_channel_costs',
                                'crm_companies','crm_contacts','crm_deals','crm_stage_history','crm_activities','crm_meetings','crm_meeting_captures',
-                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments','crm_meeting_transcripts']) loop
+                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments','crm_meeting_transcripts','crm_meeting_recordings']) loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists crm_member_all on %I', t);
     execute format('create policy crm_member_all on %I for all to authenticated using (crm_is_member()) with check (crm_is_member())', t);
@@ -667,7 +678,7 @@ begin
 end $$;
 
 create or replace function crm_deal_json(p_deal_id uuid) returns jsonb
-language sql stable security definer set search_path = public as $$
+language sql stable set search_path = public as $$
   select to_jsonb(v) from crm_deals_v v where v.id = p_deal_id;
 $$;
 
@@ -875,7 +886,8 @@ language sql stable set search_path = public as $$
     'meeting_id', tr.meeting_id, 'company', mv.company_name, 'company_id', mv.company_id, 'contact', mv.contact_name, 'scheduled_at', mv.scheduled_at, 'meeting_status', mv.status,
     'summary', tr.summary, 'topics', to_jsonb(tr.topics), 'language', tr.language, 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count,
     'avg_confidence', tr.avg_confidence, 'low_confidence', tr.low_confidence, 'speakers', tr.speakers, 'turn_count', jsonb_array_length(tr.turns),
-    'source', tr.source, 'engine', tr.engine, 'model', tr.model, 'saved_by', mem.display_name, 'created_at', tr.created_at, 'updated_at', tr.updated_at)
+    'source', tr.source, 'engine', tr.engine, 'model', tr.model, 'saved_by', mem.display_name, 'created_at', tr.created_at, 'updated_at', tr.updated_at,
+    'has_recording', mv.has_recording)
   from crm_meeting_transcripts tr join crm_meetings_v mv on mv.id = tr.meeting_id left join crm_members mem on mem.user_id = tr.created_by
   where tr.meeting_id = p_meeting_id;
 $$;
@@ -1058,6 +1070,69 @@ begin
     where needle is null or p->>'role' is null or row_json ? 'matches'));   -- a role-filtered search only lists meetings where that side said it
 end $$;
 
+-- ------------------------------------------------------------------ recordings (call audio in Oracle Object Storage)
+-- Is this upload ticket still good? Does NOT consume it: the skill's script uses one ticket first to upload the audio,
+-- then to save the transcript — and only that last step burns it.
+create or replace function crm_ticket_peek(p_ticket_sha256 text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare tk crm_upload_tickets;
+begin
+  select * into tk from crm_upload_tickets where token_sha256 = p_ticket_sha256 and used_at is null and expires_at > now();
+  if tk.token_sha256 is null then raise exception 'E_UNAUTHORIZED: upload ticket is invalid, expired or already used — get a new one with transcript_upload_ticket'; end if;
+  if not exists (select 1 from crm_members where user_id = tk.user_id and is_active) then raise exception 'E_FORBIDDEN: the ticket owner is no longer on the CRM team'; end if;
+  return jsonb_build_object('user_id', tk.user_id, 'meeting_id', tk.meeting_id, 'expires_at', tk.expires_at);
+end $$;
+
+-- Point a meeting at its uploaded audio (member JWT, or an unconsumed ticket). The object must sit under the meeting's own
+-- prefix, so a caller can never attach another meeting's file. Returns replaced_key when an older object should be deleted.
+-- p = {storage_key, bytes, content_type, duration_seconds, original_name, uploaded_via}
+create or replace function crm_save_recording(p_meeting_id uuid, p jsonb, p_ticket_sha256 text default null) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid; mid uuid := p_meeting_id; tk jsonb; old_key text; rec crm_meeting_recordings; k text := nullif(trim(p->>'storage_key'), ''); num_re constant text := '^\d+(\.\d+)?$';
+begin
+  if p_ticket_sha256 is null then
+    perform crm_require_member();
+    uid := auth.uid();
+  else
+    tk := crm_ticket_peek(p_ticket_sha256);
+    uid := (tk->>'user_id')::uuid; mid := (tk->>'meeting_id')::uuid;
+  end if;
+  if not exists (select 1 from crm_meetings where id = mid) then raise exception 'E_NOT_FOUND: meeting % not found', mid; end if;
+  if k is null or not starts_with(k, 'crm/recordings/' || mid::text || '/') or position('..' in k) > 0 then
+    raise exception 'E_PAYLOAD_INVALID: storage_key must be under crm/recordings/%/', mid;
+  end if;
+  select storage_key into old_key from crm_meeting_recordings where meeting_id = mid;
+  insert into crm_meeting_recordings(meeting_id, storage_key, bytes, content_type, duration_seconds, original_name, uploaded_via, created_by)
+  values (mid, k, case when (p->>'bytes') ~ '^\d+$' then (p->>'bytes')::bigint end, left(nullif(trim(p->>'content_type'), ''), 120),
+          case when (p->>'duration_seconds') ~ num_re then round((p->>'duration_seconds')::numeric, 2) end,
+          left(nullif(trim(p->>'original_name'), ''), 300), case when p->>'uploaded_via' in ('app', 'skill') then p->>'uploaded_via' end, uid)
+  on conflict (meeting_id) do update set storage_key = excluded.storage_key, bytes = excluded.bytes, content_type = excluded.content_type,
+    duration_seconds = excluded.duration_seconds, original_name = excluded.original_name, uploaded_via = excluded.uploaded_via, created_by = excluded.created_by
+  returning * into rec;
+  return jsonb_strip_nulls(to_jsonb(rec) - 'created_by' || jsonb_build_object('replaced_key', case when old_key is distinct from k then old_key end));
+end $$;
+
+create or replace function crm_get_recording(p_meeting_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare rec crm_meeting_recordings;
+begin
+  perform crm_require_member();
+  select * into rec from crm_meeting_recordings where meeting_id = p_meeting_id;
+  if rec.id is null then raise exception 'E_NOT_FOUND: no recording saved for meeting %', p_meeting_id; end if;
+  return jsonb_strip_nulls(to_jsonb(rec) - 'created_by' || jsonb_build_object('uploaded_by', (select display_name from crm_members where user_id = rec.created_by)));
+end $$;
+
+-- Removes the pointer and returns the key so the caller (the edge function) can delete the object too.
+create or replace function crm_delete_recording(p_meeting_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare k text;
+begin
+  perform crm_require_member();
+  delete from crm_meeting_recordings where meeting_id = p_meeting_id returning storage_key into k;
+  if k is null then raise exception 'E_NOT_FOUND: no recording saved for meeting %', p_meeting_id; end if;
+  return jsonb_build_object('meeting_id', p_meeting_id, 'storage_key', k);
+end $$;
+
 -- ------------------------------------------------------------------ morning brief
 create or replace function crm_whos_meeting_today(p_date date default null, p_tz text default null) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
@@ -1093,7 +1168,7 @@ end $$;
 
 /** Per-channel metric counts inside a window. Channel rows come from crm_source_channels at query time. */
 create or replace function crm_numbers(p_from timestamptz, p_to timestamptz) returns jsonb
-language plpgsql stable security definer set search_path = public as $$
+language plpgsql stable set search_path = public as $$
 declare res jsonb;
 begin
   res := (with acts as (
@@ -1181,7 +1256,7 @@ end $$;
 
 /** Actual numbers a member produced on a local day (for commitment_vs_actual). */
 create or replace function crm_owner_actuals(p_owner uuid, p_from timestamptz, p_to timestamptz) returns jsonb
-language sql stable security definer set search_path = public as $$
+language sql stable set search_path = public as $$
   select jsonb_build_object(
     'dials', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'dial' and a.direction = 'outbound'),
     'connects', (select count(*) from crm_activities a join crm_activity_types t on t.id = a.activity_type_id where a.owner_id = p_owner and a.occurred_at >= p_from and a.occurred_at < p_to and t.counts_as = 'dial' and lower(coalesce(a.outcome,'')) in ('connected','connect','spoke','conversation')),
@@ -1382,7 +1457,8 @@ begin
                ) order by v.created_at desc), '[]') from crm_deals_v v where v.company_id = cid),
     'meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'deal_id', mv.deal_id, 'scheduled_at', mv.scheduled_at, 'status', mv.status, 'contact', mv.contact_name, 'attendees', mv.attendees, 'notes', mv.notes,
                    'capture', (select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('tags', (select coalesce(jsonb_agg(pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cp.id)) from crm_meeting_captures cp where cp.meeting_id = mv.id),
-                   'transcript', (select jsonb_build_object('summary', tr.summary, 'topics', to_jsonb(tr.topics), 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count, 'speakers', tr.speakers) from crm_meeting_transcripts tr where tr.meeting_id = mv.id)
+                   'transcript', (select jsonb_build_object('summary', tr.summary, 'topics', to_jsonb(tr.topics), 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count, 'speakers', tr.speakers) from crm_meeting_transcripts tr where tr.meeting_id = mv.id),
+                   'recording', (select jsonb_build_object('bytes', rc.bytes, 'content_type', rc.content_type, 'duration_seconds', rc.duration_seconds, 'original_name', rc.original_name, 'uploaded_via', rc.uploaded_via, 'created_at', rc.created_at) from crm_meeting_recordings rc where rc.meeting_id = mv.id)
                  ) order by mv.scheduled_at desc), '[]') from crm_meetings_v mv where mv.company_id = cid),
     'activities', (select coalesce(jsonb_agg(jsonb_build_object('at', a.occurred_at, 'type', a.activity_type_label, 'direction', a.direction, 'channel', a.source_channel_label, 'contact', a.contact_name, 'outcome', a.outcome, 'body', a.body, 'by', a.owner_name, 'deal_id', a.deal_id) order by a.occurred_at desc), '[]') from crm_activities_v a where a.company_id = cid),
     'pain_points', (select coalesce(jsonb_agg(distinct pp), '[]') from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id, unnest(cp.pain_points) pp where d.company_id = cid),

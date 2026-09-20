@@ -279,6 +279,23 @@ create table if not exists crm_meeting_transcripts (
   updated_at        timestamptz not null default now()
 );
 
+-- The call audio itself lives in Oracle Object Storage (S3-compatible, private bucket); this row is the pointer.
+-- One per meeting. Uploaded from the app (browser → presigned PUT) or by the crm skill's save_transcript.py.
+-- The bucket credentials exist only as crm-mcp edge-function secrets; clients only ever get short-lived presigned URLs.
+create table if not exists crm_meeting_recordings (
+  id                uuid primary key default gen_random_uuid(),
+  meeting_id        uuid not null unique references crm_meetings(id) on delete cascade,
+  storage_key       text not null,                          -- crm/recordings/<meeting_id>/<file>
+  bytes             bigint,
+  content_type      text,
+  duration_seconds  numeric(10,2),
+  original_name     text,
+  uploaded_via      text,                                   -- app | skill
+  created_by        uuid,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
 -- One-time upload tickets: a member mints one through the connector, a script posts the (large) transcript with it,
 -- so an hour of speech never has to travel through a tool-call argument. Only the SHA-256 of the token is stored.
 create table if not exists crm_upload_tickets (

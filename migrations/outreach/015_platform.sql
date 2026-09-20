@@ -684,6 +684,7 @@ language plpgsql security definer set search_path = public, extensions as $$
 declare ws uuid := (p->>'workspace_id')::uuid; sid uuid; k outreach_import_kind_t := (p->>'kind')::outreach_import_kind_t;
 begin
   perform outreach_require(ws, 'member');
+  if not outreach_client_visible(ws, coalesce((select is_.client_id from outreach_import_schedules is_ where is_.id = nullif(p->>'id','')::uuid), nullif(p->>'client_id','')::uuid)) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   if k not in ('search_url','post_engagement','sn_saved_search','sn_lead_list','relations','company_people') then raise exception 'E_PAYLOAD_INVALID: this source cannot repeat'; end if;
   if (p->>'cadence') not in ('daily','weekly','monthly') then raise exception 'E_PAYLOAD_INVALID: cadence must be daily, weekly or monthly'; end if;
   if nullif(p->>'sender_id','') is null or not exists (select 1 from outreach_senders where id = (p->>'sender_id')::uuid and workspace_id = ws and provider = 'LINKEDIN' and deleted_at is null) then raise exception 'E_NOT_FOUND: sender'; end if;
@@ -787,6 +788,7 @@ begin
   select * into s from outreach_senders where id = p_sender;
   if q.id is null or s.id is null or s.workspace_id <> q.workspace_id then raise exception 'E_NOT_FOUND'; end if;
   perform outreach_require(q.workspace_id, 'member');
+  if not outreach_client_visible(q.workspace_id, q.client_id) then raise exception 'E_FORBIDDEN: client not visible'; end if;
   -- the sender's owner or a manager may record for a sender
   if outreach_role_in(q.workspace_id) not in ('owner','manager') and s.owner_user_id is distinct from auth.uid() and not outreach_is_service() then raise exception 'E_FORBIDDEN: only the sender''s owner or a manager can record for this sender'; end if;
   if p_mime not in ('audio/mp4','audio/m4a','audio/x-m4a','audio/mpeg','audio/ogg','audio/webm','audio/wav','audio/x-wav') then raise exception 'E_PAYLOAD_INVALID: unsupported audio type'; end if;
