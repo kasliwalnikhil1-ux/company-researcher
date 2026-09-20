@@ -1,0 +1,3 @@
+[    1464ms] [ERROR] Failed to load resource: the server responded with a status of 404 (File not found) @ http://localhost:4501/api/geo/:0
+[   35682ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ https://via.placeholder.com/600x400:0
+[   60952ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_TIMED_OUT @ https://via.placeholder.com/600x400:0

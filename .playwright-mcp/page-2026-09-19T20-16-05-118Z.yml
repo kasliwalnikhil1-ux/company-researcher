@@ -1,0 +1,145 @@
+- generic [active] [ref=f1e1]:
+  - link "Skip to content" [ref=f1e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=f1e3]:
+    - generic [ref=f1e4]:
+      - link "CapitalxAI Outreach home" [ref=f1e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=f1e6]: CapitalxAI Outreach
+      - navigation "Main" [ref=f1e7]:
+        - link "Features" [ref=f1e8] [cursor=pointer]:
+          - /url: /features/
+        - link "Pricing" [ref=f1e9] [cursor=pointer]:
+          - /url: /pricing/
+        - link "Blog" [ref=f1e10] [cursor=pointer]:
+          - /url: /blog/
+      - generic [ref=f1e11]:
+        - link "Sign in" [ref=f1e12] [cursor=pointer]:
+          - /url: https://app.capitalxai.com/login/
+        - link "Start free" [ref=f1e13] [cursor=pointer]:
+          - /url: https://app.capitalxai.com/signup/
+  - main [ref=f1e14]:
+    - generic [ref=f1e15]:
+      - navigation "Breadcrumb" [ref=f1e16]:
+        - list [ref=f1e17]:
+          - listitem [ref=f1e18]:
+            - link "Home" [ref=f1e19] [cursor=pointer]:
+              - /url: /
+          - listitem [ref=f1e20]:
+            - link "Blog" [ref=f1e23] [cursor=pointer]:
+              - /url: /blog/
+          - listitem [ref=f1e24]:
+            - link "Welcome to the CapitalxAI Outreach blog" [ref=f1e27] [cursor=pointer]:
+              - /url: /blog/welcome/
+      - article [ref=f1e28]:
+        - generic [ref=f1e29]:
+          - generic [ref=f1e30]:
+            - time [ref=f1e31]: Sep 20, 2026
+            - generic [ref=f1e32]: · CapitalxAI Team
+            - generic [ref=f1e33]: Draft
+          - heading "Welcome to the CapitalxAI Outreach blog" [level=1] [ref=f1e34]
+          - paragraph [ref=f1e35]: A sample post showing the front-matter fields and MDX features this blog supports. Replace or delete it.
+        - generic [ref=f1e36]:
+          - paragraph [ref=f1e37]:
+            - text: This is a
+            - strong [ref=f1e38]: sample post
+            - text: . It’s marked
+            - code [ref=f1e39]: "draft: true"
+            - text: ", so it shows in"
+            - code [ref=f1e40]: npm run dev
+            - text: but is left out of production builds, the RSS feed and the sitemap.
+          - heading "Writing a post" [level=2] [ref=f1e41]
+          - list [ref=f1e42]:
+            - listitem [ref=f1e43]:
+              - text: Add a file to
+              - code [ref=f1e44]: src/content/posts/
+              - text: . The file name becomes the URL (
+              - code [ref=f1e45]: /blog/<file-name>/
+              - text: ).
+            - listitem [ref=f1e46]:
+              - text: "Fill in the front matter:"
+              - code [ref=f1e47]: title
+              - text: ","
+              - code [ref=f1e48]: description
+              - text: (160 characters max) and
+              - code [ref=f1e49]: publishDate
+              - text: are required.
+            - listitem [ref=f1e50]:
+              - text: Write Markdown. In
+              - code [ref=f1e51]: .mdx
+              - text: "files you can also import and use components, like this one:"
+              - generic [ref=f1e52]: Live
+          - heading "What’s styled" [level=2] [ref=f1e53]
+          - paragraph [ref=f1e54]:
+            - text: Headings, lists, links,
+            - code [ref=f1e55]: inline code
+            - text: ", tables and quotes are all styled by the typography plugin."
+          - blockquote [ref=f1e56]:
+            - paragraph [ref=f1e57]: Replies stop the sequence, and each one lands in the shared inbox.
+          - table [ref=f1e58]:
+            - rowgroup [ref=f1e59]:
+              - row [ref=f1e60]:
+                - columnheader "Channel" [ref=f1e61]
+                - columnheader "Actions" [ref=f1e62]
+            - rowgroup [ref=f1e63]:
+              - row [ref=f1e64]:
+                - cell "LinkedIn" [ref=f1e65]
+                - cell "Invite, message, profile view" [ref=f1e66]
+              - row [ref=f1e67]:
+                - cell "Email" [ref=f1e68]
+                - cell "Send, follow up" [ref=f1e69]
+        - generic [ref=f1e70]: announcements
+    - generic [ref=f1e75]:
+      - heading "Put it into practice" [level=2] [ref=f1e76]
+      - link "Start free" [ref=f1e78] [cursor=pointer]:
+        - /url: https://app.capitalxai.com/signup/
+  - contentinfo [ref=f1e81]:
+    - generic [ref=f1e82]:
+      - generic [ref=f1e83]:
+        - generic [ref=f1e84]:
+          - link "CapitalxAI Outreach home" [ref=f1e85] [cursor=pointer]:
+            - /url: /
+            - generic [ref=f1e86]: CapitalxAI Outreach
+          - paragraph [ref=f1e87]: Multi-sender LinkedIn and email outreach that stays inside the limits.
+        - generic [ref=f1e88]:
+          - heading "Product" [level=2] [ref=f1e89]
+          - list [ref=f1e90]:
+            - listitem [ref=f1e91]:
+              - link "Features" [ref=f1e92] [cursor=pointer]:
+                - /url: /features/
+            - listitem [ref=f1e93]:
+              - link "Pricing" [ref=f1e94] [cursor=pointer]:
+                - /url: /pricing/
+            - listitem [ref=f1e95]:
+              - link "Open the app" [ref=f1e96] [cursor=pointer]:
+                - /url: https://app.capitalxai.com/outreach/
+        - generic [ref=f1e97]:
+          - heading "Resources" [level=2] [ref=f1e98]
+          - list [ref=f1e99]:
+            - listitem [ref=f1e100]:
+              - link "Blog" [ref=f1e101] [cursor=pointer]:
+                - /url: /blog/
+            - listitem [ref=f1e102]:
+              - link "RSS" [ref=f1e103] [cursor=pointer]:
+                - /url: /rss.xml
+        - generic [ref=f1e104]:
+          - heading "Company" [level=2] [ref=f1e105]
+          - list [ref=f1e106]:
+            - listitem [ref=f1e107]:
+              - link "Contact" [ref=f1e108] [cursor=pointer]:
+                - /url: /contact/
+            - listitem [ref=f1e109]:
+              - link "Privacy" [ref=f1e110] [cursor=pointer]:
+                - /url: /privacy/
+            - listitem [ref=f1e111]:
+              - link "Terms" [ref=f1e112] [cursor=pointer]:
+                - /url: /terms/
+      - generic [ref=f1e113]:
+        - paragraph [ref=f1e114]: © 2026 CapitalxAI. All rights reserved.
+        - link "LinkedIn" [ref=f1e116] [cursor=pointer]:
+          - /url: https://www.linkedin.com/company/capitalxai
+  - generic [ref=f1e119]:
+    - button [ref=f1e120]
+    - button [ref=f1e126]
+    - button [ref=f1e130]
+    - button [ref=f1e135]

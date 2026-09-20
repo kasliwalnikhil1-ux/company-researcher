@@ -1,0 +1,216 @@
+- generic [active] [ref=e1]:
+  - link "Skip to content" [ref=e2] [cursor=pointer]:
+    - /url: "#main"
+  - banner [ref=e3]:
+    - generic [ref=e4]:
+      - link "CapitalxAI Outreach home" [ref=e5] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e6]: CapitalxAI Outreach
+      - navigation "Main" [ref=e7]:
+        - link "Features" [ref=e8] [cursor=pointer]:
+          - /url: /features/
+        - link "Pricing" [ref=e9] [cursor=pointer]:
+          - /url: /pricing/
+        - link "Blog" [ref=e10] [cursor=pointer]:
+          - /url: /blog/
+      - generic [ref=e11]:
+        - link "Sign in" [ref=e12] [cursor=pointer]:
+          - /url: https://app.capitalxai.com/login/
+        - link "Start free" [ref=e13] [cursor=pointer]:
+          - /url: https://app.capitalxai.com/signup/
+  - main [ref=e14]:
+    - generic [ref=e16]:
+      - generic [ref=e17]: LinkedIn + email outreach
+      - heading "Run outreach across every sender from one place" [level=1] [ref=e18]
+      - paragraph [ref=e19]: Connect all your team's LinkedIn and email accounts, build one sequence, and let the platform spread the work across senders while it respects each account's limits.
+      - generic [ref=e20]:
+        - link "Start free" [ref=e21] [cursor=pointer]:
+          - /url: https://app.capitalxai.com/signup/
+        - link "Book a demo" [ref=e24] [cursor=pointer]:
+          - /url: /contact/
+      - paragraph [ref=e25]: No credit card required.
+      - generic [ref=e27]:
+        - generic [ref=e28]: app.capitalxai.com/outreach
+        - generic [ref=e33]: Product screenshot
+    - generic [ref=e40]:
+      - paragraph [ref=e41]: Trusted by teams who live in their inbox
+      - list [ref=e42]:
+        - listitem [ref=e43]: Acme
+        - listitem [ref=e44]: Northwind
+        - listitem [ref=e45]: Globex
+        - listitem [ref=e46]: Initech
+        - listitem [ref=e47]: Umbrella
+    - generic [ref=e49]:
+      - generic [ref=e50]:
+        - paragraph [ref=e51]: Features
+        - heading "Everything outreach needs, in one workspace" [level=2] [ref=e52]
+        - paragraph [ref=e53]: "Placeholder: one line on why teams switch."
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - heading "Many senders, one workspace" [level=3] [ref=e62]
+          - paragraph [ref=e63]: Connect LinkedIn and email accounts for the whole team and see each one's health, warmup level and daily budget.
+        - generic [ref=e64]:
+          - heading "Visual sequences" [level=3] [ref=e70]
+          - paragraph [ref=e71]: Build multi-step flows with invites, messages, profile views, emails and waits, then preview exactly when each step will send.
+        - generic [ref=e72]:
+          - heading "Shared inbox" [level=3] [ref=e77]
+          - paragraph [ref=e78]: Every reply from every sender lands in one inbox, threaded by lead, with assignment and read state.
+        - generic [ref=e79]:
+          - heading "AI reply triage" [level=3] [ref=e84]
+          - paragraph [ref=e85]: Replies are tagged interested, question, not now or out of office, and follow-up tasks are created for you.
+        - generic [ref=e86]:
+          - heading "Safety caps built in" [level=3] [ref=e91]
+          - paragraph [ref=e92]: Daily caps, working hours, warmup and auto-pause on warning signs are enforced by the platform, not left to memory.
+        - generic [ref=e93]:
+          - heading "Reporting that answers questions" [level=3] [ref=e97]
+          - paragraph [ref=e98]: Per-sequence, per-sender and per-client reports, plus a plain answer to “why isn't this sending?”.
+    - generic [ref=e101]:
+      - generic [ref=e102]:
+        - paragraph [ref=e103]: Sequences
+        - heading "Build the flow once, run it from every sender" [level=2] [ref=e104]
+        - paragraph [ref=e105]: "Placeholder: describe the sequence builder and send-time preview."
+        - list [ref=e106]:
+          - listitem [ref=e107]: Invites, messages, emails and waits in one flow
+          - listitem [ref=e111]: Copy checks before you go live
+          - listitem [ref=e115]: Preview exactly when each step will send
+        - link "See all features" [ref=e119] [cursor=pointer]:
+          - /url: /features/
+      - generic [ref=e121]:
+        - generic [ref=e122]: app.capitalxai.com/outreach
+        - generic [ref=e127]: Product screenshot
+    - generic [ref=e135]:
+      - generic [ref=e136]:
+        - paragraph [ref=e137]: Inbox
+        - heading "Every reply, every sender, one inbox" [level=2] [ref=e138]
+        - paragraph [ref=e139]: "Placeholder: describe the shared inbox and AI triage."
+        - list [ref=e140]:
+          - listitem [ref=e141]: Replies stop the sequence automatically
+          - listitem [ref=e145]: AI tags intent and drafts an answer
+          - listitem [ref=e149]: Assign threads to teammates
+      - generic [ref=e154]:
+        - generic [ref=e155]: app.capitalxai.com/outreach
+        - generic [ref=e160]: Product screenshot
+    - generic [ref=e167]:
+      - generic [ref=e168]:
+        - paragraph [ref=e169]: How it works
+        - heading "Live in an afternoon" [level=2] [ref=e170]
+      - list [ref=e171]:
+        - listitem [ref=e172]:
+          - generic [ref=e173]: "1"
+          - heading "Connect senders" [level=3] [ref=e176]
+          - paragraph [ref=e177]: Log in each LinkedIn or email account once. Warmup starts automatically.
+        - listitem [ref=e178]:
+          - generic [ref=e179]: "2"
+          - heading "Import leads" [level=3] [ref=e182]
+          - paragraph [ref=e183]: Upload a CSV or add leads by hand. Duplicates and suppressed contacts are skipped.
+        - listitem [ref=e184]:
+          - generic [ref=e185]: "3"
+          - heading "Build a sequence" [level=3] [ref=e188]
+          - paragraph [ref=e189]: Pick a template or start blank, validate the copy, and choose which senders run it.
+        - listitem [ref=e190]:
+          - generic [ref=e191]: "4"
+          - heading "Work the replies" [level=3] [ref=e193]
+          - paragraph [ref=e194]: Answer from the shared inbox. Anyone who replies is taken out of the sequence.
+    - generic [ref=e197]:
+      - generic [ref=e198]:
+        - term [ref=e199]: senders per workspace
+        - definition [ref=e200]: 10+
+      - generic [ref=e201]:
+        - term [ref=e202]: inbox for every reply
+        - definition [ref=e203]: "1"
+      - generic [ref=e204]:
+        - term [ref=e205]: scheduling across time zones
+        - definition [ref=e206]: 24/7
+      - generic [ref=e207]:
+        - term [ref=e208]: manual cap tracking
+        - definition [ref=e209]: "0"
+    - generic [ref=e211]:
+      - generic [ref=e212]:
+        - paragraph [ref=e213]: Customers
+        - heading "Teams that switched" [level=2] [ref=e214]
+      - generic [ref=e215]:
+        - generic [ref=e216]:
+          - blockquote [ref=e217]: “We went from juggling five browser profiles to one screen. Replies stopped slipping through.”
+          - generic [ref=e218]:
+            - generic [ref=e219]: PN
+            - generic [ref=e220]:
+              - generic [ref=e221]: Placeholder Name
+              - generic [ref=e222]: Head of Growth, Company
+        - generic [ref=e223]:
+          - blockquote [ref=e224]: “The caps and warmup mean I don't worry about accounts getting restricted any more.”
+          - generic [ref=e225]:
+            - generic [ref=e226]: PN
+            - generic [ref=e227]:
+              - generic [ref=e228]: Placeholder Name
+              - generic [ref=e229]: Founder, Company
+        - generic [ref=e230]:
+          - blockquote [ref=e231]: “AI tagging sorts the inbox before I open it, so I start the day with the interested leads.”
+          - generic [ref=e232]:
+            - generic [ref=e233]: PN
+            - generic [ref=e234]:
+              - generic [ref=e235]: Placeholder Name
+              - generic [ref=e236]: SDR Lead, Company
+    - generic [ref=e238]:
+      - heading "Frequently asked questions" [level=2] [ref=e240]
+      - generic [ref=e241]:
+        - group [ref=e242]:
+          - generic "Which channels are supported?" [ref=e243] [cursor=pointer]
+        - group [ref=e246]:
+          - generic "Will this get my LinkedIn account restricted?" [ref=e247] [cursor=pointer]
+        - group [ref=e250]:
+          - generic "What happens when someone replies?" [ref=e251] [cursor=pointer]
+        - group [ref=e254]:
+          - generic "Can I manage outreach for several clients?" [ref=e255] [cursor=pointer]
+    - generic [ref=e261]:
+      - heading "Start your first sequence today" [level=2] [ref=e262]
+      - paragraph [ref=e263]: Connect a sender and send your first invites in minutes.
+      - generic [ref=e264]:
+        - link "Start free" [ref=e265] [cursor=pointer]:
+          - /url: https://app.capitalxai.com/signup/
+        - link "Book a demo" [ref=e268] [cursor=pointer]:
+          - /url: /contact/
+  - contentinfo [ref=e269]:
+    - generic [ref=e270]:
+      - generic [ref=e271]:
+        - generic [ref=e272]:
+          - link "CapitalxAI Outreach home" [ref=e273] [cursor=pointer]:
+            - /url: /
+            - generic [ref=e274]: CapitalxAI Outreach
+          - paragraph [ref=e275]: Multi-sender LinkedIn and email outreach that stays inside the limits.
+        - generic [ref=e276]:
+          - heading "Product" [level=2] [ref=e277]
+          - list [ref=e278]:
+            - listitem [ref=e279]:
+              - link "Features" [ref=e280] [cursor=pointer]:
+                - /url: /features/
+            - listitem [ref=e281]:
+              - link "Pricing" [ref=e282] [cursor=pointer]:
+                - /url: /pricing/
+            - listitem [ref=e283]:
+              - link "Open the app" [ref=e284] [cursor=pointer]:
+                - /url: https://app.capitalxai.com/outreach/
+        - generic [ref=e285]:
+          - heading "Resources" [level=2] [ref=e286]
+          - list [ref=e287]:
+            - listitem [ref=e288]:
+              - link "Blog" [ref=e289] [cursor=pointer]:
+                - /url: /blog/
+            - listitem [ref=e290]:
+              - link "RSS" [ref=e291] [cursor=pointer]:
+                - /url: /rss.xml
+        - generic [ref=e292]:
+          - heading "Company" [level=2] [ref=e293]
+          - list [ref=e294]:
+            - listitem [ref=e295]:
+              - link "Contact" [ref=e296] [cursor=pointer]:
+                - /url: /contact/
+            - listitem [ref=e297]:
+              - link "Privacy" [ref=e298] [cursor=pointer]:
+                - /url: /privacy/
+            - listitem [ref=e299]:
+              - link "Terms" [ref=e300] [cursor=pointer]:
+                - /url: /terms/
+      - generic [ref=e301]:
+        - paragraph [ref=e302]: © 2026 CapitalxAI. All rights reserved.
+        - link "LinkedIn" [ref=e304] [cursor=pointer]:
+          - /url: https://www.linkedin.com/company/capitalxai
