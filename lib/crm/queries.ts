@@ -37,21 +37,41 @@ export function useStandup(date?: string) {
   return useQuery({ queryKey: qk.standup(date), refetchInterval: 60_000, queryFn: () => rpc<Standup>('standup', { p_date: date ?? null, p_tz: null }) });
 }
 
-export function usePipeline(filters: { owner?: string; icp_segment?: string; source_channel?: string; include_closed?: boolean }) {
+export type PipelineFilters = {
+  owner?: string; icp_segment?: string; source_channel?: string; include_closed?: boolean;
+  created_from?: string; created_to?: string; activity_from?: string; activity_to?: string; sort?: 'value' | 'created' | 'activity';
+};
+
+export function usePipeline(filters: PipelineFilters) {
   return useQuery({ queryKey: qk.pipeline(filters), queryFn: () => rpc<Pipeline>('pipeline', { p: compact(filters) }) });
 }
 
-export type CompanyRow = Company & { crm_deals: Array<Pick<Deal, 'id' | 'stage' | 'value_monthly' | 'currency' | 'value_monthly_usd' | 'last_activity_at' | 'next_step' | 'next_step_date'>>; crm_contacts: Array<Pick<Contact, 'id' | 'name' | 'role' | 'email' | 'is_primary'>> };
+export type CompanyRow = Company & { crm_last_activity_at: string | null; crm_deals: Array<Pick<Deal, 'id' | 'stage' | 'value_monthly' | 'currency' | 'value_monthly_usd' | 'last_activity_at' | 'next_step' | 'next_step_date'>>; crm_contacts: Array<Pick<Contact, 'id' | 'name' | 'role' | 'email' | 'is_primary'>> };
 
 /** Server-side paginated (page is 1-based). `total` is the exact count for the current filters, not just this page. */
-export function useCompanies(f: { q?: string; icp_segment_id?: string; source_channel_id?: string; page?: number; pageSize?: number }) {
+export type CompanyFilters = {
+  q?: string; icp_segment_id?: string; source_channel_id?: string; page?: number; pageSize?: number;
+  created_from?: string; created_to?: string; activity_from?: string; activity_to?: string;
+  /** Default 'created' (newest first). 'activity' = latest deal activity first. */
+  sort?: 'created' | 'activity' | 'name';
+};
+
+export function useCompanies(f: CompanyFilters) {
   const page = Math.max(1, f.page ?? 1);
   const pageSize = f.pageSize ?? 50;
   return useQuery({
     queryKey: qk.companies({ ...f, page, pageSize }),
     placeholderData: keepPreviousData,
     queryFn: async () => {
-      let q = supabase.from('crm_companies').select('*, crm_deals(id, stage, value_monthly, currency, value_monthly_usd, last_activity_at, next_step, next_step_date), crm_contacts(id, name, role, email, is_primary)', { count: 'exact' }).order('name').order('id');
+      // crm_last_activity_at is a computed field (SQL function over crm_deals) so it filters and sorts server-side.
+      let q = supabase.from('crm_companies').select('*, crm_last_activity_at, crm_deals(id, stage, value_monthly, currency, value_monthly_usd, last_activity_at, next_step, next_step_date), crm_contacts(id, name, role, email, is_primary)', { count: 'exact' });
+      const sort = f.sort ?? 'created';
+      q = sort === 'name' ? q.order('name') : sort === 'activity' ? q.order('crm_last_activity_at', { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }) : q.order('created_at', { ascending: false });
+      q = q.order('id');
+      if (f.created_from) q = q.gte('created_at', f.created_from);
+      if (f.created_to) q = q.lt('created_at', f.created_to);
+      if (f.activity_from) q = q.gte('crm_last_activity_at', f.activity_from);
+      if (f.activity_to) q = q.lt('crm_last_activity_at', f.activity_to);
       if (f.icp_segment_id) q = q.eq('icp_segment_id', f.icp_segment_id);
       if (f.source_channel_id) q = q.eq('source_channel_id', f.source_channel_id);
       if (f.q) q = q.or(`name.ilike.%${f.q}%,domain.ilike.%${f.q}%,country.ilike.%${f.q}%`);

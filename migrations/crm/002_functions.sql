@@ -1296,31 +1296,53 @@ begin
 end $$;
 
 -- ------------------------------------------------------------------ pipeline & analysis
+-- Filters: owner / icp_segment / source_channel / stages / include_closed, plus time windows on when the deal was created
+-- (created_from / created_to) and its latest activity (activity_from / activity_to) — timestamptz, from inclusive, to exclusive.
+-- sort: 'value' (default: biggest first) | 'created' (newest first) | 'activity' (most recent activity first).
 create or replace function crm_pipeline(p jsonb default '{}'::jsonb) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare owner uuid; seg uuid; ch uuid; stages crm_deal_stage_t[]; include_closed boolean := coalesce((p->>'include_closed')::boolean, false);
+  c_from timestamptz := (p->>'created_from')::timestamptz; c_to timestamptz := (p->>'created_to')::timestamptz;
+  a_from timestamptz := (p->>'activity_from')::timestamptz; a_to timestamptz := (p->>'activity_to')::timestamptz;
+  sort_by text := coalesce(nullif(p->>'sort', ''), 'value');
 begin
   perform crm_require_member();
   owner := case when p->>'owner' is not null then crm_resolve_member(p->>'owner') end;
   seg := crm_resolve_lookup('icp_segment', coalesce(p->>'icp_segment', p->>'icp_segment_id'));
   ch := crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id'));
   if jsonb_typeof(p->'stages') = 'array' then select array_agg(x::crm_deal_stage_t) into stages from jsonb_array_elements_text(p->'stages') x; end if;
-  return jsonb_build_object(
-    'stages', (
-      select coalesce(jsonb_agg(jsonb_build_object('stage', s, 'count', (select count(*) from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)),
-        'value_monthly_usd', (select coalesce(sum(value_monthly_usd), 0) from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)),
-        'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'company', v.company_name, 'company_id', v.company_id, 'logo_domain', crm_company_logo_domain(v.company_id, v.company_domain), 'title', v.title, 'value_monthly', v.value_monthly, 'currency', v.currency, 'value_monthly_usd', v.value_monthly_usd,
-                    'videos_per_month', v.videos_per_month, 'owner', v.owner_name, 'days_in_stage', v.days_in_stage, 'next_step', v.next_step, 'next_step_date', v.next_step_date,
-                    'is_stale', v.is_stale, 'is_stuck', v.is_stuck, 'is_slipping', v.is_slipping, 'icp_segment', v.icp_segment_label, 'source_channel', v.source_channel_label, 'expected_close_date', v.expected_close_date, 'lost_reason', v.lost_reason) order by v.value_monthly_usd desc nulls last, v.days_in_stage desc), '[]')
-                  from crm_deals_v v where v.stage = s and (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch))
-      ) order by crm_stage_rank(s)), '[]')
-      from unnest(enum_range(null::crm_deal_stage_t)) s
-      where (stages is null or s = any(stages)) and (include_closed or s not in ('won','lost'))),
-    'totals', (select jsonb_build_object('open_deals', count(*) filter (where is_active), 'open_value_monthly_usd', coalesce(sum(value_monthly_usd) filter (where is_active), 0),
-                                         'won_value_monthly_usd', coalesce(sum(value_monthly_usd) filter (where stage = 'won'), 0), 'stale', count(*) filter (where is_stale), 'stuck', count(*) filter (where is_stuck), 'slipping', count(*) filter (where is_slipping))
-               from crm_deals_v v where (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch))
-  );
+  return (
+    with f as (
+      select v.* from crm_deals_v v
+      where (owner is null or v.owner_id = owner) and (seg is null or v.icp_segment_id = seg) and (ch is null or v.source_channel_id = ch)
+        and (c_from is null or v.created_at >= c_from) and (c_to is null or v.created_at < c_to)
+        and (a_from is null or v.last_activity_at >= a_from) and (a_to is null or v.last_activity_at < a_to))
+    select jsonb_build_object(
+      'stages', (
+        select coalesce(jsonb_agg(jsonb_build_object('stage', s, 'count', (select count(*) from f where f.stage = s),
+          'value_monthly_usd', (select coalesce(sum(f.value_monthly_usd), 0) from f where f.stage = s),
+          'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', f.id, 'company', f.company_name, 'company_id', f.company_id, 'logo_domain', crm_company_logo_domain(f.company_id, f.company_domain), 'title', f.title, 'value_monthly', f.value_monthly, 'currency', f.currency, 'value_monthly_usd', f.value_monthly_usd,
+                      'videos_per_month', f.videos_per_month, 'owner', f.owner_name, 'days_in_stage', f.days_in_stage, 'next_step', f.next_step, 'next_step_date', f.next_step_date,
+                      'is_stale', f.is_stale, 'is_stuck', f.is_stuck, 'is_slipping', f.is_slipping, 'icp_segment', f.icp_segment_label, 'source_channel', f.source_channel_label, 'expected_close_date', f.expected_close_date, 'lost_reason', f.lost_reason,
+                      'created_at', f.created_at, 'last_activity_at', f.last_activity_at)
+                    order by case when sort_by = 'created' then f.created_at end desc nulls last, case when sort_by = 'activity' then f.last_activity_at end desc nulls last,
+                             f.value_monthly_usd desc nulls last, f.days_in_stage desc), '[]')
+                    from f where f.stage = s)
+        ) order by crm_stage_rank(s)), '[]')
+        from unnest(enum_range(null::crm_deal_stage_t)) s
+        where (stages is null or s = any(stages)) and (include_closed or s not in ('won','lost'))),
+      'totals', (select jsonb_build_object('open_deals', count(*) filter (where is_active), 'open_value_monthly_usd', coalesce(sum(value_monthly_usd) filter (where is_active), 0),
+                                           'won_value_monthly_usd', coalesce(sum(value_monthly_usd) filter (where stage = 'won'), 0), 'stale', count(*) filter (where is_stale), 'stuck', count(*) filter (where is_stuck), 'slipping', count(*) filter (where is_slipping))
+                 from f)
+    ));
 end $$;
+
+-- PostgREST computed field: `crm_companies?select=*,crm_last_activity_at&order=crm_last_activity_at.desc` — latest activity across the
+-- company's deals, so the paginated /crm/companies list can filter and sort on it server-side. Security INVOKER (caller's RLS).
+create or replace function crm_last_activity_at(c crm_companies) returns timestamptz
+language sql stable set search_path = public as $$
+  select max(d.last_activity_at) from crm_deals d where d.company_id = c.id;
+$$;
 
 /** Whole months a won deal has been billed up to today: the month it was won counts as 1. */
 create or replace function crm_months_billed(p_won_at timestamptz) returns int

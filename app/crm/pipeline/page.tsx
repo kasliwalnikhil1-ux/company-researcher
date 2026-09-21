@@ -4,16 +4,19 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { useCrm } from '@/contexts/CrmContext';
-import { usePipeline } from '@/lib/crm/queries';
+import { usePipeline, type PipelineFilters } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, fmtUsd, stageRank, type DealStage, type PipelineDeal } from '@/lib/crm/types';
-import { Badge, Button, CompanyLogo, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, fmtDate } from '@/components/crm/ui';
+import { Badge, Button, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, TIME_RANGES, calendarDaysAgo, fmtDate, timeWindow, type TimeRange } from '@/components/crm/ui';
 import { NextStepModal, StageModal, useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 
 // Kanban by stage: drag to move. Card shows company, value, days in stage, next step. Stale cards are visibly marked.
 // Forward moves save immediately; backwards / lost open the reason modal (the database requires the reason).
+// Time filters (created / latest activity: today, yesterday, this week, this month) and the sort run in crm_pipeline, so counts and totals follow them.
 
-function DealCard({ d, stage, onNextStep, dragging }: { d: PipelineDeal; stage: DealStage; onNextStep: (d: PipelineDeal) => void; dragging?: boolean }) {
+type Sort = NonNullable<PipelineFilters['sort']>;
+
+function DealCard({ d, stage, sort, onNextStep, dragging }: { d: PipelineDeal; stage: DealStage; sort: Sort; onNextStep: (d: PipelineDeal) => void; dragging?: boolean }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: d.deal_id, data: { deal: d, fromStage: stage } });
   const style = transform ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` } : undefined;
   return (
@@ -23,9 +26,11 @@ function DealCard({ d, stage, onNextStep, dragging }: { d: PipelineDeal; stage: 
           <CompanyLogo name={d.company} domain={d.logo_domain} size="xs" className="mt-0.5" />
           <Link href={`/crm/companies/${d.company_id}`} className="font-semibold text-gray-900 hover:text-indigo-700 leading-tight" onPointerDown={(e) => e.stopPropagation()}>{d.company}</Link>
         </div>
-        <span className="text-[11px] tabular-nums text-gray-500 whitespace-nowrap" title="Days in stage">{d.days_in_stage}d</span>
+        <DayTag days={d.days_in_stage} title={d.days_in_stage <= 1 ? 'Moved into this stage' : 'Days in stage'} />
       </div>
       {d.title && <div className="text-xs text-gray-500">{d.title}</div>}
+      {sort === 'created' && <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-500">Added <DayTag days={calendarDaysAgo(d.created_at)} suffix=" ago" title={fmtDate(d.created_at, { time: true })} /></div>}
+      {sort === 'activity' && <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-500">Activity <DayTag days={calendarDaysAgo(d.last_activity_at)} suffix=" ago" title={d.last_activity_at ? fmtDate(d.last_activity_at, { time: true }) : 'No activity logged'} /></div>}
       <div className="mt-1 flex items-center justify-between gap-1">
         <span className="font-medium text-gray-800 tabular-nums">{fmtMoney(d.value_monthly, d.currency)}<span className="text-gray-400 text-[11px]">/mo</span></span>
         <span className="text-[11px] text-gray-500 truncate">{d.owner ?? '—'}</span>
@@ -54,7 +59,11 @@ function Column({ stage, count, value, children }: { stage: DealStage; count: nu
 export default function PipelinePage() {
   const { activeMembers, lookups } = useCrm();
   const [filters, setFilters] = useState<{ owner?: string; icp_segment?: string; source_channel?: string; include_closed?: boolean }>({});
-  const q = usePipeline(filters);
+  const [created, setCreated] = useState<TimeRange>('');
+  const [activity, setActivity] = useState<TimeRange>('');
+  const [sort, setSort] = useState<Sort>('value');
+  const cw = timeWindow(created), aw = timeWindow(activity);
+  const q = usePipeline({ ...filters, created_from: cw.from, created_to: cw.to, activity_from: aw.from, activity_to: aw.to, sort: sort === 'value' ? undefined : sort });
   const { write } = useWrite();
   const [active, setActive] = useState<{ deal: PipelineDeal; fromStage: DealStage } | null>(null);
   const [pendingMove, setPendingMove] = useState<{ deal: PipelineDeal; from: DealStage; to: DealStage } | null>(null);
@@ -83,6 +92,9 @@ export default function PipelinePage() {
             <Select value={filters.owner ?? ''} onChange={(e) => setFilters({ ...filters, owner: e.target.value || undefined })}><option value="">All owners</option>{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
             <Select value={filters.icp_segment ?? ''} onChange={(e) => setFilters({ ...filters, icp_segment: e.target.value || undefined })}><option value="">All segments</option>{lookups('icp_segment', true).map((s) => <option key={s.id} value={s.id}>{s.label}{s.is_active ? '' : ' (inactive)'}</option>)}</Select>
             <Select value={filters.source_channel ?? ''} onChange={(e) => setFilters({ ...filters, source_channel: e.target.value || undefined })}><option value="">All channels</option>{lookups('source_channel', true).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
+            <Select value={created} onChange={(e) => setCreated(e.target.value as TimeRange)} title="When the deal was created"><option value="">Created: any time</option>{TIME_RANGES.map((r) => <option key={r.value} value={r.value}>Created {r.label.toLowerCase()}</option>)}</Select>
+            <Select value={activity} onChange={(e) => setActivity(e.target.value as TimeRange)} title="Latest activity on the deal"><option value="">Activity: any time</option>{TIME_RANGES.map((r) => <option key={r.value} value={r.value}>Activity {r.label.toLowerCase()}</option>)}</Select>
+            <Select value={sort} onChange={(e) => setSort(e.target.value as Sort)} title="Order of cards in each column"><option value="value">Sort: biggest value</option><option value="created">Sort: newest created</option><option value="activity">Sort: latest activity</option></Select>
             <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={!!filters.include_closed} onChange={(e) => setFilters({ ...filters, include_closed: e.target.checked || undefined })} /> won / lost</label>
             <Badge tone="gray" title="Legend"><span className="text-red-700">stale</span> · <span className="text-amber-700">stuck</span> · <span className="text-pink-700">slipping</span></Badge>
           </div>
@@ -95,11 +107,11 @@ export default function PipelinePage() {
           <div className="flex gap-2 overflow-x-auto flex-1 min-h-0 pb-2">
             {stages.map((s) => (
               <Column key={s.stage} stage={s.stage} count={s.count} value={s.value_monthly_usd}>
-                {s.deals.map((d) => <DealCard key={d.deal_id} d={d} stage={s.stage} onNextStep={setNextStep} />)}
+                {s.deals.map((d) => <DealCard key={d.deal_id} d={d} stage={s.stage} sort={sort} onNextStep={setNextStep} />)}
               </Column>
             ))}
           </div>
-          <DragOverlay>{active ? <div className="w-[194px]"><DealCard d={active.deal} stage={active.fromStage} onNextStep={() => {}} dragging /></div> : null}</DragOverlay>
+          <DragOverlay>{active ? <div className="w-[194px]"><DealCard d={active.deal} stage={active.fromStage} sort={sort} onNextStep={() => {}} dragging /></div> : null}</DragOverlay>
         </DndContext>
       )}
       <StageModal deal={pendingMove ? { id: pendingMove.deal.deal_id, company: pendingMove.deal.company, stage: pendingMove.from } : null} toStage={pendingMove?.to ?? null} open={!!pendingMove} onClose={() => setPendingMove(null)} />

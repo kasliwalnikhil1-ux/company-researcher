@@ -130,6 +130,7 @@ export interface PipelineDeal {
   deal_id: string; company: string; company_id: string; logo_domain?: string | null; title: string | null; value_monthly: number | null; currency: string; value_monthly_usd: number | null; videos_per_month: number | null;
   owner: string | null; days_in_stage: number; next_step: string | null; next_step_date: string | null; is_stale: boolean; is_stuck: boolean; is_slipping: boolean;
   icp_segment: string | null; source_channel: string | null; expected_close_date: string | null; lost_reason: string | null;
+  created_at: string; last_activity_at: string | null;
 }
 export interface Pipeline { stages: Array<{ stage: DealStage; count: number; value_monthly_usd: number; deals: PipelineDeal[] }>; totals: { open_deals: number; open_value_monthly_usd: number; won_value_monthly_usd: number; stale: number; stuck: number; slipping: number } }
 

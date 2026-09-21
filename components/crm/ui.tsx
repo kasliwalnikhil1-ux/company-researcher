@@ -229,6 +229,36 @@ export function daysAgo(v: string | null | undefined): string {
   return d <= 0 ? 'today' : d === 1 ? '1d ago' : `${d}d ago`;
 }
 
+/** Whole calendar days between a timestamp and today (local time): 0 = today, 1 = yesterday. */
+export function calendarDaysAgo(v: string | null | undefined): number | null {
+  if (!v) return null;
+  const d = new Date(v); if (isNaN(d.getTime())) return null;
+  const a = new Date(); a.setHours(0, 0, 0, 0); d.setHours(0, 0, 0, 0);
+  return Math.round((a.getTime() - d.getTime()) / 86400000);
+}
+
+/** "Today" / "Yesterday" pill for 0 / 1 days, plain `Nd` text otherwise. */
+export function DayTag({ days, title, suffix = '' }: { days: number | null; title?: string; suffix?: string }) {
+  if (days === null) return <span className="text-[11px] text-gray-400" title={title}>never</span>;
+  if (days <= 0) return <Badge tone="green" title={title}>Today</Badge>;
+  if (days === 1) return <Badge tone="blue" title={title}>Yesterday</Badge>;
+  return <span className="text-[11px] tabular-nums text-gray-500 whitespace-nowrap" title={title}>{days}d{suffix}</span>;
+}
+
+export type TimeRange = '' | 'today' | 'yesterday' | 'this_week' | 'this_month';
+export const TIME_RANGES: Array<{ value: Exclude<TimeRange, ''>; label: string }> = [
+  { value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'this_week', label: 'This week' }, { value: 'this_month', label: 'This month' },
+];
+/** Local-time window for a range as ISO timestamps (from inclusive, to exclusive; open-ended to now). Weeks start Monday, like the standup. */
+export function timeWindow(r: TimeRange): { from?: string; to?: string } {
+  if (!r) return {};
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  if (r === 'today') return { from: start.toISOString() };
+  if (r === 'yesterday') { const y = new Date(start); y.setDate(y.getDate() - 1); return { from: y.toISOString(), to: start.toISOString() }; }
+  if (r === 'this_week') { start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); return { from: start.toISOString() }; }
+  start.setDate(1); return { from: start.toISOString() };
+}
+
 export const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 export const addDaysISO = (n: number, from = todayISO()) => { const d = new Date(`${from}T00:00:00`); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 

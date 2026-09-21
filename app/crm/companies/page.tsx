@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
-import { useCompanies } from '@/lib/crm/queries';
+import { useCompanies, type CompanyFilters } from '@/lib/crm/queries';
 import { fmtMoney } from '@/lib/crm/types';
-import { Button, CompanyLogo, EmptyState, ErrorBox, Input, PageHeader, Pagination, Select, Spinner, StageBadge, Table, Td, Th, daysAgo, logoDomain } from '@/components/crm/ui';
+import { Button, CompanyLogo, EmptyState, ErrorBox, Input, PageHeader, Pagination, Select, Spinner, StageBadge, Table, Td, Th, DayTag, TIME_RANGES, calendarDaysAgo, fmtDate, logoDomain, timeWindow, type TimeRange } from '@/components/crm/ui';
 import { CompanyModal } from '@/components/crm/forms';
 import { Plus } from 'lucide-react';
 
@@ -19,10 +19,14 @@ export default function CompaniesPage() {
   const [create, setCreate] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
-  const list = useCompanies({ q: q || undefined, icp_segment_id: seg || undefined, source_channel_id: ch || undefined, page, pageSize });
+  const [created, setCreated] = useState<TimeRange>('');
+  const [activity, setActivity] = useState<TimeRange>('');
+  const [sort, setSort] = useState<NonNullable<CompanyFilters['sort']>>('created');
+  const cw = timeWindow(created), aw = timeWindow(activity);
+  const list = useCompanies({ q: q || undefined, icp_segment_id: seg || undefined, source_channel_id: ch || undefined, created_from: cw.from, created_to: cw.to, activity_from: aw.from, activity_to: aw.to, sort, page, pageSize });
   const rows = list.data?.rows;
   const total = list.data?.total ?? 0;
-  const filtered = !!(q || seg || ch);
+  const filtered = !!(q || seg || ch || created || activity);
 
   // Any filter change restarts from page 1; a page left past the end (rows deleted elsewhere) snaps back in range.
   const refilter = <T,>(set: (v: T) => void) => (v: T) => { set(v); setPage(1); };
@@ -40,6 +44,9 @@ export default function CompaniesPage() {
             <Input placeholder="Search name, domain, country…" value={q} onChange={(e) => refilter(setQ)(e.target.value)} className="w-56" autoFocus />
             <Select value={seg} onChange={(e) => refilter(setSeg)(e.target.value)}><option value="">All segments</option>{lookups('icp_segment', true).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
             <Select value={ch} onChange={(e) => refilter(setCh)(e.target.value)}><option value="">All channels</option>{lookups('source_channel', true).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
+            <Select value={created} onChange={(e) => refilter(setCreated)(e.target.value as TimeRange)} title="When the company was added"><option value="">Created: any time</option>{TIME_RANGES.map((r) => <option key={r.value} value={r.value}>Created {r.label.toLowerCase()}</option>)}</Select>
+            <Select value={activity} onChange={(e) => refilter(setActivity)(e.target.value as TimeRange)} title="Latest activity on any of its deals"><option value="">Activity: any time</option>{TIME_RANGES.map((r) => <option key={r.value} value={r.value}>Activity {r.label.toLowerCase()}</option>)}</Select>
+            <Select value={sort} onChange={(e) => refilter(setSort)(e.target.value as NonNullable<CompanyFilters['sort']>)}><option value="created">Sort: newest created</option><option value="activity">Sort: latest activity</option><option value="name">Sort: name A–Z</option></Select>
             <Button size="sm" onClick={() => setCreate(true)}><Plus className="w-3.5 h-3.5" /> New company</Button>
           </div>
         } />
@@ -51,12 +58,11 @@ export default function CompaniesPage() {
       {rows && rows.length > 0 && (
         <>
         <Table className={list.isPlaceholderData ? 'opacity-60 transition-opacity' : undefined}>
-          <thead><tr><Th>Company</Th><Th>Country</Th><Th>Segment</Th><Th>Channel</Th><Th>Primary contact</Th><Th>Open deals</Th><Th>Next step</Th><Th>Last activity</Th></tr></thead>
+          <thead><tr><Th>Company</Th><Th>Country</Th><Th>Segment</Th><Th>Channel</Th><Th>Primary contact</Th><Th>Open deals</Th><Th>Next step</Th><Th>Created</Th><Th>Last activity</Th></tr></thead>
           <tbody>
             {rows.map((c) => {
               const open = c.crm_deals.filter((d) => d.stage !== 'won' && d.stage !== 'lost');
               const primary = c.crm_contacts.find((x) => x.is_primary) ?? c.crm_contacts[0];
-              const last = c.crm_deals.map((d) => d.last_activity_at).filter(Boolean).sort().pop() ?? null;
               const next = open.find((d) => d.next_step);
               return (
                 <tr key={c.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => router.push(`/crm/companies/${c.id}`)}>
@@ -72,7 +78,8 @@ export default function CompaniesPage() {
                   <Td>{primary ? <>{primary.name}{primary.role && <span className="text-gray-400 text-xs"> · {primary.role}</span>}</> : '—'}</Td>
                   <Td>{open.length === 0 ? (c.crm_deals.length ? <span className="text-gray-400">{c.crm_deals.map((d) => d.stage).join(', ')}</span> : '—') : open.map((d) => <div key={d.id} className="flex items-center gap-1.5 whitespace-nowrap"><StageBadge stage={d.stage} /><span className="tabular-nums">{fmtMoney(d.value_monthly, d.currency)}</span></div>)}</Td>
                   <Td className="max-w-[240px] truncate text-gray-600">{next?.next_step ?? (open.length ? <span className="text-amber-700">stuck</span> : '—')}</Td>
-                  <Td className="whitespace-nowrap text-gray-500">{daysAgo(last)}</Td>
+                  <Td className="whitespace-nowrap"><DayTag days={calendarDaysAgo(c.created_at)} suffix=" ago" title={fmtDate(c.created_at, { time: true })} /></Td>
+                  <Td className="whitespace-nowrap"><DayTag days={calendarDaysAgo(c.crm_last_activity_at)} suffix=" ago" title={c.crm_last_activity_at ? fmtDate(c.crm_last_activity_at, { time: true }) : 'No activity logged'} /></Td>
                 </tr>
               );
             })}
