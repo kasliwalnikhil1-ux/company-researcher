@@ -6,13 +6,13 @@ import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, use
 import { useCrm } from '@/contexts/CrmContext';
 import { usePipeline, type PipelineFilters } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, fmtUsd, stageRank, type DealStage, type PipelineDeal } from '@/lib/crm/types';
-import { Badge, Button, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, TIME_RANGES, calendarDaysAgo, fmtDate, timeWindow, type TimeRange } from '@/components/crm/ui';
+import { Badge, Button, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, TimeRangeFilter, calendarDaysAgo, fmtDate, timeWindow, type TimeFilter } from '@/components/crm/ui';
 import { NextStepModal, StageModal, useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 
 // Kanban by stage: drag to move. Card shows company, value, days in stage, next step. Stale cards are visibly marked.
 // Forward moves save immediately; backwards / lost open the reason modal (the database requires the reason).
-// Time filters (created / latest activity: today, yesterday, this week, this month) and the sort run in crm_pipeline, so counts and totals follow them.
+// Time filters (created / latest activity: today, yesterday, this / last week, this month, custom dates) and the sort run in crm_pipeline, so counts and totals follow them.
 
 type Sort = NonNullable<PipelineFilters['sort']>;
 
@@ -59,8 +59,8 @@ function Column({ stage, count, value, children }: { stage: DealStage; count: nu
 export default function PipelinePage() {
   const { activeMembers, lookups } = useCrm();
   const [filters, setFilters] = useState<{ owner?: string; icp_segment?: string; source_channel?: string; include_closed?: boolean }>({});
-  const [created, setCreated] = useState<TimeRange>('');
-  const [activity, setActivity] = useState<TimeRange>('');
+  const [created, setCreated] = useState<TimeFilter>({ range: '' });
+  const [activity, setActivity] = useState<TimeFilter>({ range: '' });
   const [sort, setSort] = useState<Sort>('value');
   const cw = timeWindow(created), aw = timeWindow(activity);
   const q = usePipeline({ ...filters, created_from: cw.from, created_to: cw.to, activity_from: aw.from, activity_to: aw.to, sort: sort === 'value' ? undefined : sort });
@@ -92,8 +92,8 @@ export default function PipelinePage() {
             <Select value={filters.owner ?? ''} onChange={(e) => setFilters({ ...filters, owner: e.target.value || undefined })}><option value="">All owners</option>{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
             <Select value={filters.icp_segment ?? ''} onChange={(e) => setFilters({ ...filters, icp_segment: e.target.value || undefined })}><option value="">All segments</option>{lookups('icp_segment', true).map((s) => <option key={s.id} value={s.id}>{s.label}{s.is_active ? '' : ' (inactive)'}</option>)}</Select>
             <Select value={filters.source_channel ?? ''} onChange={(e) => setFilters({ ...filters, source_channel: e.target.value || undefined })}><option value="">All channels</option>{lookups('source_channel', true).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
-            <Select value={created} onChange={(e) => setCreated(e.target.value as TimeRange)} title="When the deal was created"><option value="">Created: any time</option>{TIME_RANGES.map((r) => <option key={r.value} value={r.value}>Created {r.label.toLowerCase()}</option>)}</Select>
-            <Select value={activity} onChange={(e) => setActivity(e.target.value as TimeRange)} title="Latest activity on the deal"><option value="">Activity: any time</option>{TIME_RANGES.map((r) => <option key={r.value} value={r.value}>Activity {r.label.toLowerCase()}</option>)}</Select>
+            <TimeRangeFilter label="Created" value={created} onChange={setCreated} title="When the deal was created" />
+            <TimeRangeFilter label="Activity" value={activity} onChange={setActivity} title="Latest activity on the deal" />
             <Select value={sort} onChange={(e) => setSort(e.target.value as Sort)} title="Order of cards in each column"><option value="value">Sort: biggest value</option><option value="created">Sort: newest created</option><option value="activity">Sort: latest activity</option></Select>
             <label className="flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" checked={!!filters.include_closed} onChange={(e) => setFilters({ ...filters, include_closed: e.target.checked || undefined })} /> won / lost</label>
             <Badge tone="gray" title="Legend"><span className="text-red-700">stale</span> · <span className="text-amber-700">stuck</span> · <span className="text-pink-700">slipping</span></Badge>

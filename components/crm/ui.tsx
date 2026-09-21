@@ -245,18 +245,52 @@ export function DayTag({ days, title, suffix = '' }: { days: number | null; titl
   return <span className="text-[11px] tabular-nums text-gray-500 whitespace-nowrap" title={title}>{days}d{suffix}</span>;
 }
 
-export type TimeRange = '' | 'today' | 'yesterday' | 'this_week' | 'this_month';
+export type TimeRange = '' | 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'custom';
+/** A range plus, for 'custom', the chosen local dates (YYYY-MM-DD, both inclusive; either may be left open). */
+export type TimeFilter = { range: TimeRange; from?: string; to?: string };
 export const TIME_RANGES: Array<{ value: Exclude<TimeRange, ''>; label: string }> = [
-  { value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'this_week', label: 'This week' }, { value: 'this_month', label: 'This month' },
+  { value: 'today', label: 'Today' }, { value: 'yesterday', label: 'Yesterday' }, { value: 'this_week', label: 'This week' },
+  { value: 'last_week', label: 'Last week' }, { value: 'this_month', label: 'This month' }, { value: 'custom', label: 'Custom…' },
 ];
-/** Local-time window for a range as ISO timestamps (from inclusive, to exclusive; open-ended to now). Weeks start Monday, like the standup. */
-export function timeWindow(r: TimeRange): { from?: string; to?: string } {
+/** Local-time window as ISO timestamps (from inclusive, to exclusive; open-ended to now). Weeks run Monday–Sunday, like the standup. */
+export function timeWindow(f: TimeFilter): { from?: string; to?: string } {
+  const r = f.range;
   if (!r) return {};
   const start = new Date(); start.setHours(0, 0, 0, 0);
+  const shift = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+  const monday = shift(start, -((start.getDay() + 6) % 7));
   if (r === 'today') return { from: start.toISOString() };
-  if (r === 'yesterday') { const y = new Date(start); y.setDate(y.getDate() - 1); return { from: y.toISOString(), to: start.toISOString() }; }
-  if (r === 'this_week') { start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); return { from: start.toISOString() }; }
+  if (r === 'yesterday') return { from: shift(start, -1).toISOString(), to: start.toISOString() };
+  if (r === 'this_week') return { from: monday.toISOString() };
+  if (r === 'last_week') return { from: shift(monday, -7).toISOString(), to: monday.toISOString() };
+  if (r === 'custom') {
+    const day = (v?: string) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(`${v}T00:00:00`) : null);
+    const a = day(f.from), b = day(f.to);
+    return { from: a?.toISOString(), to: b ? shift(b, 1).toISOString() : undefined };
+  }
   start.setDate(1); return { from: start.toISOString() };
+}
+
+/** "Created: any time / today / … / custom" select; custom reveals from–to date pickers. */
+export function TimeRangeFilter({ label, value, onChange, title }: { label: string; value: TimeFilter; onChange: (v: TimeFilter) => void; title?: string }) {
+  return (
+    <div className="flex items-center gap-1">
+      <Select value={value.range} title={title} onChange={(e) => {
+        const range = e.target.value as TimeRange;
+        onChange(range === 'custom' ? { range, from: value.from ?? todayISO(), to: value.to ?? todayISO() } : { range });
+      }}>
+        <option value="">{label}: any time</option>
+        {TIME_RANGES.map((r) => <option key={r.value} value={r.value}>{label} {r.value === 'custom' ? 'custom…' : r.label.toLowerCase()}</option>)}
+      </Select>
+      {value.range === 'custom' && (
+        <>
+          <input type="date" aria-label={`${label} from`} className={cn(fieldCls, 'w-[8.5rem]')} value={value.from ?? ''} max={value.to || undefined} onChange={(e) => onChange({ ...value, from: e.target.value || undefined })} />
+          <span className="text-xs text-gray-400">to</span>
+          <input type="date" aria-label={`${label} to`} className={cn(fieldCls, 'w-[8.5rem]')} value={value.to ?? ''} min={value.from || undefined} onChange={(e) => onChange({ ...value, to: e.target.value || undefined })} />
+        </>
+      )}
+    </div>
+  );
 }
 
 export const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
