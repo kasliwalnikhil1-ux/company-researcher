@@ -308,6 +308,39 @@ create table if not exists crm_upload_tickets (
   created_at    timestamptz not null default now()
 );
 
+-- Sales coach: one coaching analysis per meeting, written by the crm skill from the transcript (crm_save_coaching; saving again
+-- replaces it, version + 1). The rubric (12 criteria + the 4-point Kaptured lens, ratings met | partial | missed | na | insufficient)
+-- is fixed in crm_coaching_criteria() / crm_coaching_lens() so every call is scored the same way and calls can be compared.
+-- execution_score is the salesperson's execution (from the criteria); readiness is the deal — kept apart on purpose.
+-- Every piece of evidence is [{t: seconds, speaker: prospect|team, quote}] so the app can jump the recording to that moment.
+create table if not exists crm_call_coaching (
+  id                uuid primary key default gen_random_uuid(),
+  meeting_id        uuid not null unique references crm_meetings(id) on delete cascade,
+  version           int not null default 1,
+  purpose           text,                                   -- what this call was for, in a few words (discovery, pricing follow-up, …)
+  summary           text not null,                          -- what happened, 2–4 lines
+  lens              jsonb not null default '[]'::jsonb,     -- [{key, label, rating, note}] the 4 Kaptured questions
+  criteria          jsonb not null default '[]'::jsonb,     -- [{key, label, rating, finding, better?, evidence[]}] the 12 criteria
+  buyer_brief       jsonb not null default '{}'::jsonb,     -- {problem, desired_outcome, scope, deadline, awareness, decision_process, budget}: {status: confirmed|unclear|not_discussed, text}
+  qualification     jsonb not null default '[]'::jsonb,     -- [{key, label, status: confirmed|unclear|not_discussed, text, evidence[]}]
+  what_worked       jsonb not null default '[]'::jsonb,     -- [{title, why, evidence[]}] two effective behaviours
+  biggest_miss      jsonb,                                  -- {title, diagnosis, evidence[], better}
+  priorities        jsonb not null default '[]'::jsonb,     -- [{title, why, t?}] 1–3 improvements for this call
+  moments           jsonb not null default '[]'::jsonb,     -- [{t, speaker, quote, response, diagnosis, better, priority?}] coached moments
+  uncertainties     jsonb not null default '[]'::jsonb,     -- [{question, why_it_matters, how_to_resolve}]
+  next_action       jsonb not null default '{}'::jsonb,     -- {what, why, commitment, before, questions[], proof[], draft: {channel, text}}
+  practice          jsonb,                                  -- {skill, why, role_play: {setup, buyer_says, aim, example}}
+  readiness         jsonb not null default '{}'::jsonb,     -- {stage: not_a_fit|early|price_blocked|advancing|ready|unknown, interest: polite|interested|committed|unknown, summary, blockers[]}
+  limits            text[] not null default '{}',           -- what the recording cannot establish (silent screen shares, what happened after, …)
+  context_used      jsonb not null default '{}'::jsonb,     -- {transcript, capture, crm_history, follow_ups, materials}: what the coach had
+  execution_score   int,                                    -- 0–100 = (met + partial/2) / (met + partial + missed), computed on save
+  counts            jsonb,                                  -- {met, partial, missed, na, insufficient}
+  model             text,
+  created_by        uuid,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
 create table if not exists crm_commitments (
   id           uuid primary key default gen_random_uuid(),
   owner_id     uuid not null references crm_members(user_id),

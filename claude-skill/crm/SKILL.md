@@ -1,6 +1,6 @@
 ---
 name: crm
-description: Run the video studio's sales operation through the CapitalxAI Sales CRM connector — read the daily standup ("who are we meeting today?", "what's stuck?"), capture a meeting in under a minute ("we just finished the StoryVerse call", "Sneha no-showed"), capture a meeting automatically from its call recording ("I had a meeting with naman@domain.com today, here is the recording" — transcribes it with the get-transcript skill, fills the capture from the prospect's words, saves the speaker-labelled transcript), look up what was said on a past call, log calls/LinkedIn/email touches and commitments, move deals, and answer pipeline questions (funnel, channel quality, top pain points, company brief). Use when the CapitalxAI Sales CRM connector tools (standup_brief, whos_meeting_today, deals_needing_attention, capture_meeting, transcript_upload_ticket, get_transcript, update_deal, log_activity, log_commitment, pipeline, company_brief) are available.
+description: Run the video studio's sales operation through the CapitalxAI Sales CRM connector — read the daily standup ("who are we meeting today?", "what's stuck?"), capture a meeting in under a minute ("we just finished the StoryVerse call"), capture a meeting automatically from its call recording ("I had a meeting with naman@domain.com, here is the recording" — transcribes it with the get-transcript skill, fills the capture from the prospect's words, saves the transcript), coach every call as a sales coach & deal assistant (what happened, the exact moments to handle better, the next action; per call and across calls), look up what was said on a past call, log touches and commitments, move deals, and answer pipeline questions (funnel, channel quality, pain points, company brief). Use when the CapitalxAI Sales CRM connector tools (standup_brief, capture_meeting, transcript_upload_ticket, get_transcript, save_call_coaching, update_deal, log_activity, pipeline, company_brief) are available.
 ---
 
 # CapitalxAI Sales CRM
@@ -18,11 +18,12 @@ Tools appear only for accounts on the CRM team. If only `crm_whoami` is availabl
 | In the meeting | `log_commitment`, `log_commitments_bulk`, `commitment_vs_actual` | Commit with measured keys (below) |
 | After a meeting | `capture_meeting` ★, `update_capture`, `update_deal`, `log_activity`, `log_activities_bulk`, `schedule_meeting`, `update_meeting`, `meetings_list`, `get_deal` | `capture_meeting` is the main write |
 | Call recordings | `transcript_upload_ticket` → `scripts/save_transcript.py`, `save_transcript` (fallback), `get_transcript`, `transcripts_search`, `set_transcript_speakers`, `get_recording_url` | One transcript + one audio file per meeting; transcribing is the **get-transcript** skill's job; the script stores the audio too |
+| Sales coach | `save_call_coaching`, `get_call_coaching`, `call_coaching_list`, `delete_call_coaching` | One coaching report per call (12 criteria + the 4 Kaptured lens questions, timestamped evidence, 1–3 priorities); runs after every recording capture — [coaching-pipeline.md](coaching-pipeline.md) |
 | Entities | `upsert_company`, `upsert_contact`, `create_deal` | Match by id → domain/email → name |
 | Analysis | `pipeline`, `funnel`, `channel_quality`, `top_pain_points`, `company_brief` | Each returns structured data + a quotable `summary` where useful |
 | Settings | `lookup_save`, `lookup_reorder`, `set_fx_rate`, `set_channel_cost`, `set_setting`, `add_team_member`, `set_team_member` | Adding a segment/channel never needs a developer |
 
-Resources: `crm://rules` (the enforced rules + team + lookups — read once per session), `crm://standup/today` (the meeting as markdown), `crm://context`, `crm://companies/{id|domain|name}`. Prompts (slash commands in Claude Desktop): `daily_standup`, `capture_meeting`, `company_brief`, `weekly_review`.
+Resources: `crm://rules` (the enforced rules + team + lookups — read once per session), `crm://standup/today` (the meeting as markdown), `crm://context`, `crm://companies/{id|domain|name}`, `crm://coaching/rubric` (the coaching criteria). Prompts (slash commands in Claude Desktop): `daily_standup`, `capture_meeting`, `capture_from_recording`, `coach_call`, `company_brief`, `weekly_review`.
 
 ## Rules the database enforces (work with them, never around them)
 
@@ -32,6 +33,7 @@ Resources: `crm://rules` (the enforced rules + team + lookups — read once per 
 4. **Stages move forward, or to `lost`**: `new → contacted → replied → meeting_booked → meeting_held → proposal_sent → negotiation → won`. Backwards needs `reason` on `update_deal` (written to `stage_history`). Every stage change writes history automatically.
 5. **Money always has a currency.** Pass `value_monthly` + `currency` (USD, INR, GBP, AED, EUR seeded; add others with `set_fx_rate`). Report values in their currency; totals come back USD-normalised as `value_monthly_usd`.
 6. **Lists are lookup tables.** ICP segments, source channels and activity types accept id, slug or label. If a value does not exist (`E_NOT_FOUND`), ask whether to add it with `lookup_save`; never hardcode the list.
+7. **Every recorded call gets coached.** One coaching report per meeting (`save_call_coaching`; saving again replaces it): all 12 criteria and the 4 lens questions rated met / partial / missed / na / insufficient, met and partial with timestamped evidence, 1–3 priorities — never more. Salesperson execution (scored by the database) stays separate from deal readiness.
 
 ## Defaults — capture without asking
 
@@ -67,6 +69,9 @@ Find the meeting (`meetings_list` / `search`), or create company → contact →
 
 ### Capture from a recording — read [recording-pipeline.md](recording-pipeline.md)
 Triggered by a recording (attached file, path or link) plus who the meeting was with. **Fully automatic — ask nothing.** Find or create the meeting from the email → run the **get-transcript** skill on the recording (company, contact and studio names as keyterms) → decide who is the prospect from what is said, never from the speaker numbers → pain points are the prospect's sentences copied exactly, commercials are the numbers actually spoken → `capture_meeting` → `transcript_upload_ticket` + `scripts/save_transcript.py` to store the call audio and the transcript (run get-transcript with `--keep-audio`) → confirm in 2–3 lines, naming any price or name the transcriber was unsure of. The one difference from a typed capture: here the pain points come from the prospect's mouth, so copy them; do not shorten them into your own words.
+
+### Coach a call — read [coaching-pipeline.md](coaching-pipeline.md)
+Runs by itself at the end of every recording capture, and on request ("coach the elev8 call", "how did I do?", "coach every call from last week"). `get_transcript` (all of it) + `company_brief` → rate the 12 criteria and the 4 Kaptured lens questions (understood the brand's needs · demonstrated relevant value · addressed quality concerns · secured a clear next step) with timestamped excerpts → the exact moments with a better response, the biggest missed opportunity, two things that worked → buyer brief, qualification grid, uncertainties, next action with a follow-up draft, one skill to practise → `save_call_coaching` once (1–3 priorities). Confirm in 3–5 lines; the full report is in the app (Sales Coach tab, and the call's transcript). Across calls: `call_coaching_list` → which criteria keep being missed, per owner, over time.
 
 ### Log touches
 A call block: `log_activities_bulk` with one row per dial (`outcome: no_answer | connected`), then `schedule_meeting` for anything booked. A reply: `log_activity(direction: "inbound", outcome: "replied")`; the deal moves to `replied` via `update_deal` if it is earlier. New lead: `upsert_company` → `upsert_contact` → `create_deal` (source_channel!).

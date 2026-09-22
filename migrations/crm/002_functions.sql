@@ -446,7 +446,8 @@ select mt.*,
        seg.label as icp_segment_label, ch.label as source_channel_label,
        (cap.id is not null) as has_capture, cap.outcome as capture_outcome,
        (tr.id is not null) as has_transcript,         -- new columns go last: create or replace view cannot reorder
-       (rec.id is not null) as has_recording
+       (rec.id is not null) as has_recording,
+       (cc.id is not null) as has_coaching, cc.execution_score as coaching_score
 from crm_meetings mt
 join crm_deals d on d.id = mt.deal_id
 join crm_companies c on c.id = d.company_id
@@ -455,7 +456,8 @@ left join crm_icp_segments seg on seg.id = c.icp_segment_id
 left join crm_source_channels ch on ch.id = d.source_channel_id
 left join crm_meeting_captures cap on cap.meeting_id = mt.id
 left join crm_meeting_transcripts tr on tr.meeting_id = mt.id
-left join crm_meeting_recordings rec on rec.meeting_id = mt.id;
+left join crm_meeting_recordings rec on rec.meeting_id = mt.id
+left join crm_call_coaching cc on cc.meeting_id = mt.id;
 
 create or replace view crm_activities_v with (security_invoker = true) as
 select a.*, t.slug as activity_type_slug, t.label as activity_type_label, t.counts_as,
@@ -476,7 +478,7 @@ declare t text;
 begin
   for t in select unnest(array['crm_settings','crm_icp_segments','crm_source_channels','crm_activity_types','crm_fx_rates','crm_channel_costs',
                                'crm_companies','crm_contacts','crm_deals','crm_stage_history','crm_activities','crm_meetings','crm_meeting_captures',
-                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments','crm_meeting_transcripts','crm_meeting_recordings']) loop
+                               'crm_pain_point_tags','crm_capture_pain_tags','crm_commitments','crm_meeting_transcripts','crm_meeting_recordings','crm_call_coaching']) loop
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists crm_member_all on %I', t);
     execute format('create policy crm_member_all on %I for all to authenticated using (crm_is_member()) with check (crm_is_member())', t);
@@ -887,7 +889,7 @@ language sql stable set search_path = public as $$
     'summary', tr.summary, 'topics', to_jsonb(tr.topics), 'language', tr.language, 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count,
     'avg_confidence', tr.avg_confidence, 'low_confidence', tr.low_confidence, 'speakers', tr.speakers, 'turn_count', jsonb_array_length(tr.turns),
     'source', tr.source, 'engine', tr.engine, 'model', tr.model, 'saved_by', mem.display_name, 'created_at', tr.created_at, 'updated_at', tr.updated_at,
-    'has_recording', mv.has_recording)
+    'has_recording', mv.has_recording, 'has_coaching', mv.has_coaching)
   from crm_meeting_transcripts tr join crm_meetings_v mv on mv.id = tr.meeting_id left join crm_members mem on mem.user_id = tr.created_by
   where tr.meeting_id = p_meeting_id;
 $$;
@@ -929,14 +931,24 @@ begin
   if m.id is null then raise exception 'E_NOT_FOUND: meeting % not found', mid; end if;
   if p is null or jsonb_typeof(p->'turns') is distinct from 'array' then raise exception 'E_PAYLOAD_INVALID: turns must be an array of {speaker, start, end, text}'; end if;
 
-  select coalesce(jsonb_agg(jsonb_build_object('speaker', sp, 'start', st, 'end', en, 'text', tx) order by ord), '[]'::jsonb), count(*), coalesce(sum(length(tx)), 0)
+  -- w = word timings, one [start, end] per whitespace token of the text (the app highlights and seeks by word). Kept only
+  -- when it lines up with the text exactly; otherwise dropped and the app estimates from the turn's start/end.
+  select coalesce(jsonb_agg(jsonb_build_object('speaker', sp, 'start', st, 'end', en, 'text', tx)
+                            || case when w is not null then jsonb_build_object('w', w) else '{}'::jsonb end order by ord), '[]'::jsonb),
+         count(*), coalesce(sum(length(tx)), 0)
     into v_turns, n, chars
-  from (select ord, case when (t->>'speaker') ~ '^\d+$' then (t->>'speaker')::int end as sp,
-               case when (t->>'start') ~ num_re then round((t->>'start')::numeric, 2) end as st,
-               case when (t->>'end') ~ num_re then round((t->>'end')::numeric, 2) end as en,
-               trim(t->>'text') as tx
-        from jsonb_array_elements(p->'turns') with ordinality x(t, ord)) z
-  where tx is not null and tx <> '';
+  from (select ord, sp, st, en, tx,
+               case when jsonb_typeof(wr) = 'array' and jsonb_array_length(wr) = cardinality(regexp_split_to_array(tx, '\s+'))
+                     and not exists (select 1 from jsonb_array_elements(wr) e
+                                     where case when jsonb_typeof(e) <> 'array' then true
+                                                else jsonb_array_length(e) <> 2 or jsonb_typeof(e->0) <> 'number' or jsonb_typeof(e->1) <> 'number' end)
+                    then (select jsonb_agg(jsonb_build_array(round((e->>0)::numeric, 2), round((e->>1)::numeric, 2)) order by o) from jsonb_array_elements(wr) with ordinality q(e, o)) end as w
+        from (select ord, case when (t->>'speaker') ~ '^\d+$' then (t->>'speaker')::int end as sp,
+                     case when (t->>'start') ~ num_re then round((t->>'start')::numeric, 2) end as st,
+                     case when (t->>'end') ~ num_re then round((t->>'end')::numeric, 2) end as en,
+                     trim(t->>'text') as tx, t->'w' as wr
+              from jsonb_array_elements(p->'turns') with ordinality x(t, ord)) y
+        where tx is not null and tx <> '') z;
   if n = 0 then raise exception 'E_PAYLOAD_INVALID: turns has no text'; end if;
   if n > 6000 or chars > 1500000 then raise exception 'E_PAYLOAD_INVALID: transcript too large (% turns, % characters; max 6000 turns / 1.5M characters)', n, chars; end if;
 
@@ -1010,18 +1022,20 @@ begin
   return crm_transcript_json(p_meeting_id);
 end $$;
 
--- Read a transcript, whole or filtered. p = {q, speaker, role, from_s, to_s, context (turns either side of a match, 0-5), offset, limit}
+-- Read a transcript, whole or filtered. p = {q, speaker, role, from_s, to_s, context (turns either side of a match, 0-5), offset, limit,
+--   words (true = include each turn's word timings `w`; the app's player wants them, the connector never asks — ~10k pairs an hour)}
 create or replace function crm_get_transcript(p_meeting_id uuid, p jsonb default '{}'::jsonb) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare tr crm_meeting_transcripts; needle text := lower(nullif(trim(p->>'q'), '')); matched int; res jsonb;
         lim int := least(greatest(coalesce((p->>'limit')::int, 400), 1), 6000); skip int := greatest(coalesce((p->>'offset')::int, 0), 0);
-        around int := least(greatest(coalesce((p->>'context')::int, 0), 0), 5);
+        around int := least(greatest(coalesce((p->>'context')::int, 0), 0), 5); with_words boolean := coalesce((p->>'words')::boolean, false);
 begin
   perform crm_require_member();
   select * into tr from crm_meeting_transcripts where meeting_id = p_meeting_id;
   if tr.id is null then raise exception 'E_NOT_FOUND: no transcript saved for meeting %', p_meeting_id; end if;
   with t as (
-    select (ord - 1)::int as i, nullif(v->>'speaker', '')::int as sp, (v->>'start')::numeric as st, (v->>'end')::numeric as en, v->>'text' as tx
+    select (ord - 1)::int as i, nullif(v->>'speaker', '')::int as sp, (v->>'start')::numeric as st, (v->>'end')::numeric as en, v->>'text' as tx,
+           case when with_words then v->'w' end as w
     from jsonb_array_elements(tr.turns) with ordinality x(v, ord)
   ), tt as (
     select t.*, crm_transcript_label(tr.speakers, t.sp) as lbl,
@@ -1040,7 +1054,7 @@ begin
     select tt.*, (around > 0 and exists (select 1 from hit h where h.i = tt.i)) as is_match from tt join pick using (i) order by tt.i offset skip limit lim
   )
   select (select count(*) from hit),
-         coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('i', i, 'speaker', sp, 'label', lbl, 'role', rl, 'start', st, 'end', en, 'text', tx, 'match', case when is_match then true end)) order by i) from page), '[]'::jsonb)
+         coalesce((select jsonb_agg(jsonb_strip_nulls(jsonb_build_object('i', i, 'speaker', sp, 'label', lbl, 'role', rl, 'start', st, 'end', en, 'text', tx, 'w', w, 'match', case when is_match then true end)) order by i) from page), '[]'::jsonb)
     into matched, res;
   return crm_transcript_json(p_meeting_id) || jsonb_build_object('matched_turns', matched, 'returned', jsonb_array_length(res), 'turns', res);
 end $$;
@@ -1134,6 +1148,217 @@ begin
 end $$;
 
 -- ------------------------------------------------------------------ morning brief
+-- ------------------------------------------------------------------ sales coach (per-call coaching analysis)
+-- One coaching record per meeting, written by the crm skill after it has read the transcript (crm_save_coaching; saving again
+-- replaces it). The rubric is fixed here so every call is scored the same way: 12 criteria (crm_coaching_criteria) rated
+-- met | partial | missed | na | insufficient, plus the 4-point Kaptured lens (crm_coaching_lens). Salesperson execution
+-- (execution_score, from the criteria) is kept apart from deal readiness (readiness): a great call can rightly find a poor fit.
+create or replace function crm_coaching_criteria() returns jsonb
+language sql immutable as $$
+  select jsonb_build_array(
+    jsonb_build_object('key', 'buyer_problem',          'label', 'Buyer''s actual problem',       'asks', 'Did the buyer confirm a problem (launch delays, expensive shoots, coordination, creative variety, quality) — or did we assume one?'),
+    jsonb_build_object('key', 'discovery_depth',        'label', 'Depth of discovery',           'asks', 'Were the causes, consequences, urgency and desired outcome explored, not just the surface need?'),
+    jsonb_build_object('key', 'buyer_awareness',        'label', 'Buyer awareness',              'asks', 'Exploring AI, comparing agencies, replacing a vendor, or ready to commission — and did the pitch adapt to that?'),
+    jsonb_build_object('key', 'qualification',          'label', 'Qualification',                'asks', 'Assets, quantities, usage, deadlines, budget, decision-makers, approval process, quality requirements: confirmed, unclear or not discussed?'),
+    jsonb_build_object('key', 'pitch_relevance',        'label', 'Pitch relevance',              'asks', 'Did the examples and explanation address the buyer''s stated problem?'),
+    jsonb_build_object('key', 'features_to_value',      'label', 'Features became business value', 'asks', 'Were speed, volume, resolution and variations tied to outcomes the buyer needs (SKUs, channels, launches, testing)?'),
+    jsonb_build_object('key', 'tech_talk',              'label', 'Technology talk in proportion', 'asks', 'Did model names and generation techniques displace accuracy, consistency, service and delivery?'),
+    jsonb_build_object('key', 'proof',                  'label', 'Proof and credibility',        'asks', 'Were relevant examples, client results, the review process or a suitable pilot used to answer concerns?'),
+    jsonb_build_object('key', 'objections',             'label', 'Objection handling',           'asks', 'Was each concern clarified, answered and checked again — or discounted / talked past?'),
+    jsonb_build_object('key', 'interest',               'label', 'Interest vs politeness',       'asks', 'Did the buyer articulate value, discuss implementation or commit — and did we test that, or accept "looks nice"?'),
+    jsonb_build_object('key', 'recommendation_pricing', 'label', 'Recommendation and pricing',   'asks', 'Was the scope justified by the buyer''s requirements, and was interest established before the price?'),
+    jsonb_build_object('key', 'closing',                'label', 'Closing quality',              'asks', 'Was there an explicit ask and an agreed next step with an owner and a date?')
+  );
+$$;
+
+create or replace function crm_coaching_lens() returns jsonb
+language sql immutable as $$
+  select jsonb_build_array(
+    jsonb_build_object('key', 'understood_needs',  'label', 'Understood the brand''s needs'),
+    jsonb_build_object('key', 'relevant_value',    'label', 'Demonstrated relevant value'),
+    jsonb_build_object('key', 'quality_concerns',  'label', 'Addressed quality concerns'),
+    jsonb_build_object('key', 'next_step',         'label', 'Secured a clear next step')
+  );
+$$;
+
+create or replace function crm_coaching_json(p_meeting_id uuid) returns jsonb
+language sql stable set search_path = public as $$
+  select (to_jsonb(cc) - 'id' - 'created_by') || jsonb_build_object(
+    'company', mv.company_name, 'company_id', mv.company_id, 'contact', mv.contact_name, 'scheduled_at', mv.scheduled_at, 'meeting_status', mv.status,
+    'deal_id', mv.deal_id, 'deal_stage', mv.deal_stage, 'owner', om.display_name, 'owner_id', mv.owner_id,
+    'has_transcript', mv.has_transcript, 'has_recording', mv.has_recording, 'duration_seconds', tr.duration_seconds, 'saved_by', mem.display_name)
+  from crm_call_coaching cc
+  join crm_meetings_v mv on mv.id = cc.meeting_id
+  left join crm_meeting_transcripts tr on tr.meeting_id = cc.meeting_id
+  left join crm_members mem on mem.user_id = cc.created_by
+  left join crm_members om on om.user_id = mv.owner_id
+  where cc.meeting_id = p_meeting_id;
+$$;
+
+-- p = {purpose, summary*, lens*[4], criteria*[12], buyer_brief, qualification[], what_worked[], biggest_miss, priorities*[1..3], moments[],
+--      uncertainties[], next_action*{what*, why, commitment, before, questions[], proof[], draft{channel, text}}, practice, readiness*{stage*, interest, summary, blockers[]},
+--      limits[], context_used{}, model}. Evidence everywhere is [{t: seconds, speaker: prospect|team, quote}] so the app can play the moment.
+create or replace function crm_save_coaching(p_meeting_id uuid, p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare m crm_meetings; keys text[]; seen text[] := '{}'; c jsonb; k text; r text; lbl text;
+        n_met int := 0; n_partial int := 0; n_missed int := 0; n_na int := 0; n_ins int := 0;
+        v_criteria jsonb := '[]'::jsonb; v_lens jsonb := '[]'::jsonb; score int; npri int; existed boolean; row_ crm_call_coaching;
+        arr_keys constant text[] := array['qualification', 'what_worked', 'priorities', 'moments', 'uncertainties', 'limits'];
+begin
+  perform crm_require_member();
+  select * into m from crm_meetings where id = p_meeting_id;
+  if m.id is null then raise exception 'E_NOT_FOUND: meeting % not found', p_meeting_id; end if;
+  if p is null or jsonb_typeof(p) <> 'object' then raise exception 'E_PAYLOAD_INVALID: coaching payload must be an object'; end if;
+  if nullif(trim(p->>'summary'), '') is null then raise exception 'E_PAYLOAD_INVALID: summary (what happened on the call, 2–4 lines) is required'; end if;
+  foreach k in array arr_keys loop
+    if p ? k and jsonb_typeof(p->k) <> 'array' then raise exception 'E_PAYLOAD_INVALID: % must be an array', k; end if;
+  end loop;
+
+  -- criteria: every canonical key exactly once, each with a rating; met / partial need evidence (timestamp + excerpt)
+  if jsonb_typeof(p->'criteria') is distinct from 'array' then raise exception 'E_PAYLOAD_INVALID: criteria must be an array of {key, rating, finding, evidence[], better}'; end if;
+  select array_agg(x->>'key' order by ord) into keys from jsonb_array_elements(crm_coaching_criteria()) with ordinality x(x, ord);
+  for c in select * from jsonb_array_elements(p->'criteria') loop
+    k := c->>'key'; r := c->>'rating';
+    if k is null or not (k = any(keys)) then raise exception 'E_PAYLOAD_INVALID: unknown criterion key "%" — use: %', coalesce(k, '(none)'), array_to_string(keys, ', '); end if;
+    if k = any(seen) then raise exception 'E_PAYLOAD_INVALID: criterion % given twice', k; end if;
+    if r is null or r not in ('met', 'partial', 'missed', 'na', 'insufficient') then raise exception 'E_PAYLOAD_INVALID: criterion % rating must be met | partial | missed | na | insufficient', k; end if;
+    if r in ('met', 'partial') and (jsonb_typeof(c->'evidence') is distinct from 'array' or jsonb_array_length(c->'evidence') = 0) then
+      raise exception 'E_PAYLOAD_INVALID: criterion % is rated % but has no evidence — add [{t, speaker, quote}] from the transcript, or rate it insufficient', k, r;
+    end if;
+    if nullif(trim(c->>'finding'), '') is null then raise exception 'E_PAYLOAD_INVALID: criterion % needs a finding (one or two sentences)', k; end if;
+    seen := seen || k;
+    case r when 'met' then n_met := n_met + 1; when 'partial' then n_partial := n_partial + 1; when 'missed' then n_missed := n_missed + 1; when 'na' then n_na := n_na + 1; else n_ins := n_ins + 1; end case;
+    select x->>'label' into lbl from jsonb_array_elements(crm_coaching_criteria()) x where x->>'key' = k;
+    v_criteria := v_criteria || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('key', k, 'label', lbl, 'rating', r, 'finding', c->>'finding', 'better', c->>'better', 'evidence', coalesce(c->'evidence', '[]'::jsonb))));
+  end loop;
+  if array_length(seen, 1) is distinct from array_length(keys, 1) then
+    raise exception 'E_PAYLOAD_INVALID: every criterion must be rated (use na or insufficient when it does not apply) — missing: %', array_to_string((select array_agg(x) from unnest(keys) x where not (x = any(seen))), ', ');
+  end if;
+  score := case when n_met + n_partial + n_missed > 0 then round(100.0 * (n_met + 0.5 * n_partial) / (n_met + n_partial + n_missed))::int end;
+
+  -- lens: the four Kaptured questions, same ratings
+  if jsonb_typeof(p->'lens') is distinct from 'array' then raise exception 'E_PAYLOAD_INVALID: lens must rate the 4 Kaptured questions [{key, rating, note}]: understood_needs, relevant_value, quality_concerns, next_step'; end if;
+  seen := '{}';
+  for c in select * from jsonb_array_elements(p->'lens') loop
+    k := c->>'key'; r := c->>'rating';
+    select x->>'label' into lbl from jsonb_array_elements(crm_coaching_lens()) x where x->>'key' = k;
+    if lbl is null then raise exception 'E_PAYLOAD_INVALID: unknown lens key "%" — use understood_needs, relevant_value, quality_concerns, next_step', coalesce(k, '(none)'); end if;
+    if k = any(seen) then raise exception 'E_PAYLOAD_INVALID: lens % given twice', k; end if;
+    if r is null or r not in ('met', 'partial', 'missed', 'na', 'insufficient') then raise exception 'E_PAYLOAD_INVALID: lens % rating must be met | partial | missed | na | insufficient', k; end if;
+    seen := seen || k;
+    v_lens := v_lens || jsonb_build_array(jsonb_strip_nulls(jsonb_build_object('key', k, 'label', lbl, 'rating', r, 'note', c->>'note')));
+  end loop;
+  if array_length(seen, 1) is distinct from 4 then raise exception 'E_PAYLOAD_INVALID: all 4 lens questions must be rated (understood_needs, relevant_value, quality_concerns, next_step)'; end if;
+
+  npri := coalesce(jsonb_array_length(p->'priorities'), 0);
+  if npri < 1 or npri > 3 then raise exception 'E_PAYLOAD_INVALID: priorities must hold 1 to 3 improvements [{title, why, t}] — the full analysis belongs in criteria and moments, not here'; end if;
+  if nullif(trim(p->'next_action'->>'what'), '') is null then raise exception 'E_PAYLOAD_INVALID: next_action.what is required ({what, why, commitment, before, questions[], proof[], draft{channel, text}})'; end if;
+  if coalesce(p->'readiness'->>'stage', '') not in ('not_a_fit', 'early', 'price_blocked', 'advancing', 'ready', 'unknown') then
+    raise exception 'E_PAYLOAD_INVALID: readiness.stage must be one of not_a_fit | early | price_blocked | advancing | ready | unknown';
+  end if;
+  if coalesce(p->'readiness'->>'interest', 'unknown') not in ('polite', 'interested', 'committed', 'unknown') then
+    raise exception 'E_PAYLOAD_INVALID: readiness.interest must be polite | interested | committed | unknown';
+  end if;
+
+  existed := exists (select 1 from crm_call_coaching where meeting_id = p_meeting_id);
+  insert into crm_call_coaching (meeting_id, purpose, summary, lens, criteria, buyer_brief, qualification, what_worked, biggest_miss, priorities, moments, uncertainties,
+                                 next_action, practice, readiness, limits, context_used, execution_score, counts, model, created_by)
+  values (p_meeting_id, nullif(trim(p->>'purpose'), ''), trim(p->>'summary'), v_lens, v_criteria,
+          coalesce(p->'buyer_brief', '{}'::jsonb), coalesce(p->'qualification', '[]'::jsonb), coalesce(p->'what_worked', '[]'::jsonb), p->'biggest_miss', p->'priorities',
+          coalesce(p->'moments', '[]'::jsonb), coalesce(p->'uncertainties', '[]'::jsonb), p->'next_action', p->'practice',
+          p->'readiness' || jsonb_build_object('interest', coalesce(p->'readiness'->>'interest', 'unknown')),
+          coalesce((select array_agg(x) from jsonb_array_elements_text(p->'limits') x), '{}'), coalesce(p->'context_used', '{}'::jsonb),
+          score, jsonb_build_object('met', n_met, 'partial', n_partial, 'missed', n_missed, 'na', n_na, 'insufficient', n_ins), nullif(trim(p->>'model'), ''), auth.uid())
+  on conflict (meeting_id) do update set
+    purpose = excluded.purpose, summary = excluded.summary, lens = excluded.lens, criteria = excluded.criteria, buyer_brief = excluded.buyer_brief, qualification = excluded.qualification,
+    what_worked = excluded.what_worked, biggest_miss = excluded.biggest_miss, priorities = excluded.priorities, moments = excluded.moments, uncertainties = excluded.uncertainties,
+    next_action = excluded.next_action, practice = excluded.practice, readiness = excluded.readiness, limits = excluded.limits, context_used = excluded.context_used,
+    execution_score = excluded.execution_score, counts = excluded.counts, model = excluded.model, created_by = excluded.created_by,
+    version = crm_call_coaching.version + 1, updated_at = now()
+  returning * into row_;
+  return jsonb_build_object('meeting_id', p_meeting_id, 'company', (select company_name from crm_meetings_v where id = p_meeting_id), 'replaced', existed, 'version', row_.version,
+                            'execution_score', row_.execution_score, 'counts', row_.counts, 'readiness', row_.readiness,
+                            'priorities', (select jsonb_agg(x->>'title') from jsonb_array_elements(row_.priorities) x),
+                            'biggest_miss', row_.biggest_miss->>'title', 'next_action', row_.next_action->>'what');
+end $$;
+
+create or replace function crm_get_coaching(p_meeting_id uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare r jsonb;
+begin
+  perform crm_require_member();
+  r := crm_coaching_json(p_meeting_id);
+  if r is null then raise exception 'E_NOT_FOUND: no coaching saved for meeting % (the crm skill writes one from the transcript with save_call_coaching)', p_meeting_id; end if;
+  return r;
+end $$;
+
+create or replace function crm_delete_coaching(p_meeting_id uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  perform crm_require_member();
+  delete from crm_call_coaching where meeting_id = p_meeting_id; get diagnostics n = row_count;
+  if n = 0 then raise exception 'E_NOT_FOUND: no coaching saved for meeting %', p_meeting_id; end if;
+  return jsonb_build_object('meeting_id', p_meeting_id, 'deleted', true);
+end $$;
+
+-- Every coached call plus what repeats across them. p = {company, owner, from, to, limit}. `rollup.criteria` counts each rating per
+-- criterion over the filtered calls (a criterion that is mostly missed is the process weakness to fix); `uncoached` lists meetings
+-- that have a transcript but no coaching yet, so the team can ask Claude to coach them.
+create or replace function crm_coaching_list(p jsonb default '{}'::jsonb) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare cid uuid; oid uuid; lim int := least(greatest(coalesce((p->>'limit')::int, 50), 1), 200); f_from date := (p->>'from')::date; f_to date := (p->>'to')::date;
+begin
+  perform crm_require_member();
+  if nullif(trim(p->>'company'), '') is not null then cid := crm_resolve_company(jsonb_build_object('company', p->>'company'), true); end if;
+  if nullif(trim(p->>'owner'), '') is not null then oid := crm_resolve_member(p->>'owner'); end if;
+  return (
+    with base as (
+      select cc.meeting_id, cc.purpose, cc.summary, cc.lens, cc.criteria, cc.biggest_miss, cc.priorities, cc.readiness, cc.next_action, cc.execution_score, cc.counts, cc.version, cc.updated_at,
+             mv.company_name, mv.company_id, mv.contact_name, mv.scheduled_at, mv.owner_id, mv.deal_id, mv.deal_stage, om.display_name as owner_name, mv.has_transcript, mv.has_recording, tr.duration_seconds
+      from crm_call_coaching cc
+      join crm_meetings_v mv on mv.id = cc.meeting_id
+      left join crm_meeting_transcripts tr on tr.meeting_id = cc.meeting_id
+      left join crm_members om on om.user_id = mv.owner_id
+      where (cid is null or mv.company_id = cid) and (oid is null or mv.owner_id = oid)
+        and (f_from is null or mv.scheduled_at >= f_from) and (f_to is null or mv.scheduled_at < f_to + 1)
+    )
+    select jsonb_build_object(
+      'total', (select count(*) from base),
+      'avg_score', (select round(avg(execution_score))::int from base),
+      'calls', (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object(
+                  'meeting_id', b.meeting_id, 'company', b.company_name, 'company_id', b.company_id, 'contact', b.contact_name, 'scheduled_at', b.scheduled_at,
+                  'owner', b.owner_name, 'owner_id', b.owner_id, 'deal_id', b.deal_id, 'deal_stage', b.deal_stage, 'duration_seconds', b.duration_seconds,
+                  'purpose', b.purpose, 'summary', b.summary, 'execution_score', b.execution_score, 'counts', b.counts, 'lens', b.lens, 'readiness', b.readiness,
+                  'biggest_miss', b.biggest_miss->>'title', 'priorities', (select jsonb_agg(x->>'title') from jsonb_array_elements(b.priorities) x),
+                  'next_action', b.next_action->>'what', 'has_transcript', b.has_transcript, 'has_recording', b.has_recording, 'version', b.version, 'updated_at', b.updated_at)) order by b.scheduled_at desc), '[]'::jsonb)
+                from (select * from base order by scheduled_at desc limit lim) b),
+      'rollup', jsonb_build_object(
+        'criteria', (select coalesce(jsonb_agg(jsonb_build_object('key', k.key, 'label', k.label, 'met', s.met, 'partial', s.partial, 'missed', s.missed, 'na', s.na, 'insufficient', s.insufficient) order by k.ord), '[]'::jsonb)
+                     from (select x->>'key' as key, x->>'label' as label, ord from jsonb_array_elements(crm_coaching_criteria()) with ordinality x(x, ord)) k
+                     left join lateral (
+                       select count(*) filter (where c->>'rating' = 'met') as met, count(*) filter (where c->>'rating' = 'partial') as partial, count(*) filter (where c->>'rating' = 'missed') as missed,
+                              count(*) filter (where c->>'rating' = 'na') as na, count(*) filter (where c->>'rating' = 'insufficient') as insufficient
+                       from base b, jsonb_array_elements(b.criteria) c where c->>'key' = k.key) s on true),
+        'lens', (select coalesce(jsonb_agg(jsonb_build_object('key', k.key, 'label', k.label, 'met', s.met, 'partial', s.partial, 'missed', s.missed, 'na', s.na, 'insufficient', s.insufficient) order by k.ord), '[]'::jsonb)
+                 from (select x->>'key' as key, x->>'label' as label, ord from jsonb_array_elements(crm_coaching_lens()) with ordinality x(x, ord)) k
+                 left join lateral (
+                   select count(*) filter (where c->>'rating' = 'met') as met, count(*) filter (where c->>'rating' = 'partial') as partial, count(*) filter (where c->>'rating' = 'missed') as missed,
+                          count(*) filter (where c->>'rating' = 'na') as na, count(*) filter (where c->>'rating' = 'insufficient') as insufficient
+                   from base b, jsonb_array_elements(b.lens) c where c->>'key' = k.key) s on true),
+        'readiness', (select coalesce(jsonb_object_agg(st, n), '{}'::jsonb) from (select readiness->>'stage' as st, count(*) as n from base group by 1) x),
+        'by_owner', (select coalesce(jsonb_agg(jsonb_build_object('owner', owner_name, 'owner_id', owner_id, 'calls', n, 'avg_score', s) order by n desc), '[]'::jsonb)
+                     from (select owner_name, owner_id, count(*) as n, round(avg(execution_score))::int as s from base group by 1, 2) x)),
+      'uncoached', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'company', mv.company_name, 'company_id', mv.company_id, 'contact', mv.contact_name, 'scheduled_at', mv.scheduled_at, 'owner', om.display_name) order by mv.scheduled_at desc), '[]'::jsonb)
+                    from (select * from crm_meetings_v mv2
+                          where mv2.has_transcript and not exists (select 1 from crm_call_coaching cc where cc.meeting_id = mv2.id)
+                            and (cid is null or mv2.company_id = cid) and (oid is null or mv2.owner_id = oid)
+                            and (f_from is null or mv2.scheduled_at >= f_from) and (f_to is null or mv2.scheduled_at < f_to + 1)
+                          order by mv2.scheduled_at desc limit 50) mv
+                    left join crm_members om on om.user_id = mv.owner_id)
+    ));
+end $$;
+
 create or replace function crm_whos_meeting_today(p_date date default null, p_tz text default null) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
 declare tz text := coalesce(p_tz, crm_tz()); d date := coalesce(p_date, (now() at time zone coalesce(p_tz, crm_tz()))::date); w record;
@@ -1480,7 +1705,8 @@ begin
     'meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'deal_id', mv.deal_id, 'scheduled_at', mv.scheduled_at, 'status', mv.status, 'contact', mv.contact_name, 'attendees', mv.attendees, 'notes', mv.notes,
                    'capture', (select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('tags', (select coalesce(jsonb_agg(pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cp.id)) from crm_meeting_captures cp where cp.meeting_id = mv.id),
                    'transcript', (select jsonb_build_object('summary', tr.summary, 'topics', to_jsonb(tr.topics), 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count, 'speakers', tr.speakers) from crm_meeting_transcripts tr where tr.meeting_id = mv.id),
-                   'recording', (select jsonb_build_object('bytes', rc.bytes, 'content_type', rc.content_type, 'duration_seconds', rc.duration_seconds, 'original_name', rc.original_name, 'uploaded_via', rc.uploaded_via, 'created_at', rc.created_at) from crm_meeting_recordings rc where rc.meeting_id = mv.id)
+                   'recording', (select jsonb_build_object('bytes', rc.bytes, 'content_type', rc.content_type, 'duration_seconds', rc.duration_seconds, 'original_name', rc.original_name, 'uploaded_via', rc.uploaded_via, 'created_at', rc.created_at) from crm_meeting_recordings rc where rc.meeting_id = mv.id),
+                   'coaching', (select jsonb_build_object('execution_score', cc.execution_score, 'counts', cc.counts, 'readiness', cc.readiness, 'purpose', cc.purpose, 'biggest_miss', cc.biggest_miss->>'title', 'priorities', (select jsonb_agg(x->>'title') from jsonb_array_elements(cc.priorities) x), 'next_action', cc.next_action->>'what', 'lens', cc.lens, 'version', cc.version, 'updated_at', cc.updated_at) from crm_call_coaching cc where cc.meeting_id = mv.id)
                  ) order by mv.scheduled_at desc), '[]') from crm_meetings_v mv where mv.company_id = cid),
     'activities', (select coalesce(jsonb_agg(jsonb_build_object('at', a.occurred_at, 'type', a.activity_type_label, 'direction', a.direction, 'channel', a.source_channel_label, 'contact', a.contact_name, 'outcome', a.outcome, 'body', a.body, 'by', a.owner_name, 'deal_id', a.deal_id) order by a.occurred_at desc), '[]') from crm_activities_v a where a.company_id = cid),
     'pain_points', (select coalesce(jsonb_agg(distinct pp), '[]') from crm_meeting_captures cp join crm_meetings m on m.id = cp.meeting_id join crm_deals d on d.id = m.deal_id, unnest(cp.pain_points) pp where d.company_id = cid),

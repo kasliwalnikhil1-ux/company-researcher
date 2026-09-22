@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { qk, useCrmInvalidate } from '@/lib/crm/queries';
 import { parseError } from '@/lib/crm/api';
@@ -14,19 +14,28 @@ export const fmtBytes = (b: number | null | undefined) => (b == null ? '' : b < 
 
 export interface PlayerHandle { seek: (seconds: number) => void }
 
-/** Native audio controls; `seek` lets the transcript jump to the moment a line was said. */
-export const RecordingPlayer = forwardRef<PlayerHandle, { meetingId: string }>(function RecordingPlayer({ meetingId }, ref) {
+/** Native audio controls; `seek` lets the transcript jump to the moment a line was said, `onTime` follows playback (every frame while playing). */
+export const RecordingPlayer = forwardRef<PlayerHandle, { meetingId: string; onTime?: (seconds: number, playing: boolean) => void }>(function RecordingPlayer({ meetingId, onTime }, ref) {
   const el = useRef<HTMLAudioElement>(null);
+  const raf = useRef<number | null>(null);
+  const onTimeRef = useRef(onTime);
+  onTimeRef.current = onTime;
   // the link is good for 6 hours; refetch well inside that, and never keep a stale one around
   const q = useQuery({ queryKey: qk.recordingUrl(meetingId), queryFn: () => getRecordingUrl(meetingId), staleTime: 60 * 60_000, gcTime: 0, retry: false });
   useImperativeHandle(ref, () => ({ seek: (s) => { const a = el.current; if (!a) return; a.currentTime = Math.max(0, s); void a.play().catch(() => {}); } }), []);
+
+  const stopLoop = () => { if (raf.current != null) cancelAnimationFrame(raf.current); raf.current = null; };
+  const report = () => { const a = el.current; if (a) onTimeRef.current?.(a.currentTime, !a.paused); };
+  const startLoop = () => { stopLoop(); const tick = () => { report(); raf.current = requestAnimationFrame(tick); }; raf.current = requestAnimationFrame(tick); };
+  useEffect(() => stopLoop, []);
 
   if (q.isLoading) return <div className="h-10 flex items-center text-xs text-gray-400">Loading audio…</div>;
   if (q.isError) return <ErrorBox message={`Could not load the audio: ${(q.error as Error).message}`} />;
   const r = q.data!.recording;
   return (
     <div>
-      <audio ref={el} controls preload="metadata" src={q.data!.url} className="w-full h-10" />
+      <audio ref={el} controls preload="metadata" src={q.data!.url} className="w-full h-10"
+        onPlay={startLoop} onPause={() => { stopLoop(); report(); }} onEnded={() => { stopLoop(); report(); }} onSeeked={report} />
       <div className="text-[11px] text-gray-400 mt-0.5">{[r.original_name, fmtBytes(r.bytes), r.uploaded_by ? `uploaded by ${r.uploaded_by}` : null, r.uploaded_via === 'skill' ? 'via Claude' : null].filter(Boolean).join(' · ')}</div>
     </div>
   );

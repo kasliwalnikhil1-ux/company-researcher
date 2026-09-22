@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc, compact } from './api';
-import type { Activity, Company, CompanyBrief, Contact, Deal, Funnel, Meeting, Pipeline, Standup, StageHistory, Capture, Transcript } from './types';
+import type { Activity, Company, CompanyBrief, Contact, Deal, Funnel, Meeting, Pipeline, Standup, StageHistory, Capture, Transcript, Coaching, CoachingList } from './types';
 
 export const qk = {
   standup: (date?: string) => ['crm', 'standup', date ?? 'today'] as const,
@@ -15,6 +15,8 @@ export const qk = {
   deal: (id: string) => ['crm', 'deal', id] as const,
   transcript: (meetingId: string) => ['crm', 'transcript', meetingId] as const,
   recordingUrl: (meetingId: string) => ['crm', 'recording-url', meetingId] as const,
+  coaching: (meetingId: string) => ['crm', 'coaching', meetingId] as const,
+  coachingList: (f: unknown) => ['crm', 'coaching-list', f] as const,
   commitments: (from: string, to?: string) => ['crm', 'commitments', from, to] as const,
   channelCosts: () => ['crm', 'channel_costs'] as const,
   funnel: (from: string, to?: string) => ['crm', 'funnel', from, to ?? 'today'] as const,
@@ -117,7 +119,18 @@ export function useMeeting(id: string | undefined) {
 
 /** The whole transcript in one read (a long call is a few hundred turns); search and the prospect-only filter run in the browser. */
 export function useTranscript(meetingId: string | null | undefined) {
-  return useQuery({ queryKey: qk.transcript(meetingId ?? ''), enabled: !!meetingId, queryFn: () => rpc<Transcript>('get_transcript', { p_meeting_id: meetingId, p: { limit: 6000 } }) });
+  return useQuery({ queryKey: qk.transcript(meetingId ?? ''), enabled: !!meetingId, queryFn: () => rpc<Transcript>('get_transcript', { p_meeting_id: meetingId, p: { limit: 6000, words: true } }) });
+}
+
+/** The sales coach report for one call. `enabled` lets callers wait until they know one exists (crm_meetings_v.has_coaching). */
+export function useCoaching(meetingId: string | null | undefined, enabled = true) {
+  return useQuery({ queryKey: qk.coaching(meetingId ?? ''), enabled: !!meetingId && enabled, retry: false, queryFn: () => rpc<Coaching>('get_coaching', { p_meeting_id: meetingId }) });
+}
+
+export type CoachingFilters = { company?: string; owner?: string; from?: string; to?: string; limit?: number };
+/** Every coached call + the per-criterion rollup + calls that still need coaching. */
+export function useCoachingList(f: CoachingFilters) {
+  return useQuery({ queryKey: qk.coachingList(f), placeholderData: keepPreviousData, queryFn: () => rpc<CoachingList>('coaching_list', { p: compact(f) }) });
 }
 
 export function useDeal(id: string | undefined) {

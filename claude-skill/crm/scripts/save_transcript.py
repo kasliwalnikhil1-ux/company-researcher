@@ -11,6 +11,9 @@ one-time ticket, so the saved transcript is byte-for-byte what Deepgram returned
 
 <pack_dir> is the folder get-transcript wrote (metadata.json, response.json, words.json, intelligence.json ...).
 
+Each turn also carries the transcriber's word timings ("w": one [start, end] per whitespace token of its text), so the
+app highlights the exact word being said and plays from any word. They are stored, not shown to Claude.
+
 --speaker "<label as printed in the transcript files>=<real name>[:prospect|team]"
     The pack prints speakers 1-based ("Speaker 1"); the CRM stores Deepgram's 0-based index. Give the label exactly as
     transcript.speakers.txt shows it and the script does the mapping. A bare number works too ("2=Naman:prospect").
@@ -51,24 +54,71 @@ def num(v):
 
 
 def merge(segments):
-    """Consecutive segments from one speaker become one turn, capped at MAX_TURN_CHARS."""
+    """Consecutive segments from one speaker become one turn, capped at MAX_TURN_CHARS. Word timings travel along."""
     turns = []
     for s in segments:
         text = (s.get("text") or "").strip()
         if not text:
             continue
+        words = list(s.get("words") or [])
         last = turns[-1] if turns else None
         if last and last["speaker"] == s.get("speaker") and len(last["text"]) + len(text) + 1 <= MAX_TURN_CHARS:
             last["text"] += " " + text
             last["end"] = s.get("end") if s.get("end") is not None else last["end"]
+            last["_words"] += words
         else:
-            turns.append({"speaker": s.get("speaker"), "start": num(s.get("start")), "end": num(s.get("end")), "text": text})
+            turns.append({"speaker": s.get("speaker"), "start": num(s.get("start")), "end": num(s.get("end")), "text": text, "_words": words})
     return turns
+
+
+def norm(t):
+    return re.sub(r"[\W_]+", "", t or "").lower()
+
+
+def word_times(turn):
+    """One [start, end] per whitespace token of the turn's text, from the transcriber's own word timings, so the app
+    can highlight the word being said and play from any word. Usually the tokens ARE the words (1:1); otherwise tokens
+    are matched to words in order, and any token left over gets a time interpolated between its neighbours.
+    None when there is nothing to go on (a pack without word timings)."""
+    words = [w for w in turn.pop("_words", []) if isinstance(w.get("start"), (int, float))]
+    tokens = turn["text"].split()
+    if not words or not tokens:
+        return None
+    if len(words) == len(tokens) and sum(norm(t) == norm(w.get("text")) for t, w in zip(tokens, words)) >= 0.9 * len(tokens):
+        return [[num(w["start"]), num(w.get("end") if isinstance(w.get("end"), (int, float)) else w["start"])] for w in words]
+    out, j = [None] * len(tokens), 0
+    for i, tok in enumerate(tokens):
+        key = norm(tok)
+        for k in range(j, min(j + 6, len(words))):
+            wkey = norm(words[k].get("text"))
+            if key and wkey and (key == wkey or key.startswith(wkey) or wkey.startswith(key)):
+                w = words[k]
+                out[i] = [num(w["start"]), num(w.get("end") if isinstance(w.get("end"), (int, float)) else w["start"])]
+                j = k + 1
+                break
+    start = turn["start"] if turn.get("start") is not None else 0
+    end = turn["end"] if turn.get("end") is not None else start
+    known = [i for i, x in enumerate(out) if x]
+    if not known:
+        return None
+    for i, x in enumerate(out):
+        if x:
+            continue
+        before = max((k for k in known if k < i), default=None)
+        after = min((k for k in known if k > i), default=None)
+        a = out[before][1] if before is not None else start
+        b = out[after][0] if after is not None else max(end, a)
+        lo, hi = (before if before is not None else -1), (after if after is not None else len(tokens))
+        t = a + (b - a) * (i - lo) / (hi - lo)
+        out[i] = [num(t), num(t)]
+    return out
 
 
 def segments_from_response(resp):
     utts = ((resp or {}).get("results") or {}).get("utterances") or []
-    return [{"speaker": u.get("speaker"), "start": u.get("start"), "end": u.get("end"), "text": u.get("transcript")} for u in utts]
+    return [{"speaker": u.get("speaker"), "start": u.get("start"), "end": u.get("end"), "text": u.get("transcript"),
+             "words": [{"text": w.get("punctuated_word") or w.get("word"), "start": w.get("start"), "end": w.get("end")} for w in u.get("words") or []]}
+            for u in utts]
 
 
 def segments_from_words(words):
@@ -79,11 +129,13 @@ def segments_from_words(words):
         if not text:
             continue
         gap = (w.get("start") or 0) - (cur["end"] or 0) if cur else 0
+        timed = {"text": text, "start": w.get("start"), "end": w.get("end")}
         if cur and cur["speaker"] == w.get("speaker") and gap < 1.2:
             cur["text"] += " " + text
             cur["end"] = w.get("end")
+            cur["words"].append(timed)
         else:
-            cur = {"speaker": w.get("speaker"), "start": w.get("start"), "end": w.get("end"), "text": text}
+            cur = {"speaker": w.get("speaker"), "start": w.get("start"), "end": w.get("end"), "text": text, "words": [timed]}
             segs.append(cur)
     return segs
 
@@ -198,6 +250,23 @@ def main():
     if not turns:
         sys.exit(f"ERROR: could not find any speech in {pack} (looked at response.json, words.json, transcript.timed.txt).")
 
+    # turns rebuilt from transcript.timed.txt carry no words: take them from words.json by time (and voice)
+    if any(not t["_words"] for t in turns):
+        all_words = [{"text": w.get("word") or w.get("raw"), "start": w.get("start"), "end": w.get("end"), "speaker": w.get("speaker")}
+                     for w in load(pack / "words.json") or [] if isinstance(w.get("start"), (int, float))]
+        for t in turns:
+            if t["_words"] or t["start"] is None:
+                continue
+            hi = t["end"] if t["end"] is not None else t["start"]
+            t["_words"] = [w for w in all_words if t["start"] - 0.05 <= w["start"] <= hi + 0.05
+                           and (t["speaker"] is None or w["speaker"] is None or w["speaker"] == t["speaker"])]
+    timed = 0
+    for t in turns:
+        w = word_times(t)
+        if w:
+            t["w"] = w
+            timed += 1
+
     seen = sorted({t["speaker"] for t in turns if isinstance(t["speaker"], int)})
     named = {}
     for spec in a.speaker:
@@ -235,6 +304,7 @@ def main():
 
     roles = ", ".join(f'{s["label"]} ({s["role"]}, {round(100 * s.get("share_of_words", 0))}% of words)' for s in speakers) or "not diarized"
     print(f"transcript: {len(turns)} turns, {payload.get('word_count', '?')} words, {round((payload.get('duration_seconds') or 0) / 60)} min, {len(body) // 1024} KB")
+    print(f"word times: {timed} of {len(turns)} turns" + ("" if timed == len(turns) else " - the app estimates the rest from the turn's start/end"))
     print(f"speakers:   {roles}")
     if speakers and not any(s["role"] == "prospect" for s in speakers):
         print('WARNING: no voice is marked prospect. Pass --speaker "<label>=<name>:prospect" so the CRM knows whose words are the customer\'s.')

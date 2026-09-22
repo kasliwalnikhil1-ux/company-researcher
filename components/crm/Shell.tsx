@@ -6,13 +6,14 @@ import { useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import { useCrm } from '@/contexts/CrmContext';
 import { useGoShortcuts } from './ui';
-import { Sunrise, Kanban, Building2, ClipboardCheck, Filter, Settings } from 'lucide-react';
+import { Sunrise, Kanban, Building2, ClipboardCheck, Filter, Settings, GraduationCap } from 'lucide-react';
 
-// Five screens + Settings. Resist adding more.
+// Six screens + Settings. Resist adding more. (Sales Coach = every coached call + what repeats across them.)
 const NAV = [
   { href: '/crm', label: 'Standup', icon: Sunrise, exact: true, key: 's' },
   { href: '/crm/pipeline', label: 'Pipeline', icon: Kanban, key: 'p' },
   { href: '/crm/companies', label: 'Companies', icon: Building2, key: 'c' },
+  { href: '/crm/coach', label: 'Sales Coach', icon: GraduationCap, key: 'o' },
   { href: '/crm/capture', label: 'Capture', icon: ClipboardCheck, key: 'k' },
   { href: '/crm/funnel', label: 'Funnel', icon: Filter, key: 'f' },
   { href: '/crm/settings', label: 'Settings', icon: Settings, key: 't' },

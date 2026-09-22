@@ -76,9 +76,12 @@ If the transcript gives the prospect's real name or role and the CRM only has th
 
 Capture first, transcript second: if the upload fails the meeting is still captured, and the transcript can be saved later without touching the capture.
 
+5. **Coach the call** — always, without being asked, once the transcript is saved: follow [coaching-pipeline.md](coaching-pipeline.md) (`get_transcript` for the whole call, `company_brief` for context, rate the 12 criteria + the 4 lens questions with timestamped evidence, the moments with a better response, next action, 1–3 priorities) and save it with `save_call_coaching`. If the transcript could not be saved at all, coach from the `transcript.speakers.txt` you already read and still save the coaching — the `t` values are the turn start times in that file.
+
 ## 6. Confirm (2–3 lines, plain words)
 > GrowthX (Naman Jain): held, 42-minute call. Quoted INR 40,000 per video for 8 a month. Stage: Meeting held. Next: send the proposal, due Friday 25 Sep. Transcript and audio saved.
 > Check: the transcriber was unsure of "forty" at 12:54 — confirm the price.
+> Coach: execution 58/100 (5 met, 4 partly, 3 missed) · deal advancing, buyer interested. Biggest miss: at 18:20 the accuracy question got a tools answer — show the review process. Priorities: ask what the delay costs before pricing; close with a date. Next: send the jewellery example + revised scope tonight, ask for a review call Friday. Full report in the app's Sales coach tab.
 
 Follow-through is the same as any capture: the value changed → `update_deal`; a follow-up call was booked on the recording → `schedule_meeting`; a new stakeholder spoke → `upsert_contact`.
 

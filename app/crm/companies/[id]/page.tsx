@@ -5,12 +5,12 @@ import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCompanyBrief } from '@/lib/crm/queries';
-import { fmtMoney, STAGE_LABELS, type Capture, type Contact, type Deal } from '@/lib/crm/types';
+import { fmtMoney, READINESS_LABELS, STAGE_LABELS, type Capture, type Contact, type Deal } from '@/lib/crm/types';
 import { Badge, Button, Card, CompanyLogo, EmptyState, ErrorBox, Flags, Spinner, StageBadge, fmtDate, daysAgo, logoDomain } from '@/components/crm/ui';
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
-import { TranscriptModal, fmtDuration } from '@/components/crm/transcript';
+import { TranscriptModal, fmtDuration, type TranscriptTab } from '@/components/crm/transcript';
 import { RecordingModal, UploadRecordingButton } from '@/components/crm/recording';
-import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
+import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, GraduationCap, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Everything about one account: contacts, deals, full activity timeline, every past meeting capture.
@@ -27,7 +27,7 @@ export default function CompanyPage() {
   const [activityFor, setActivityFor] = useState<string | null | undefined>(undefined); // deal id or null (company level); undefined = closed
   const [meetingFor, setMeetingFor] = useState<Deal | null>(null);
   const [nextStepFor, setNextStepFor] = useState<Deal | null>(null);
-  const [transcriptFor, setTranscriptFor] = useState<string | null>(null); // meeting id
+  const [transcriptFor, setTranscriptFor] = useState<{ id: string; tab: TranscriptTab } | null>(null); // meeting id + which tab to open on
   const [recordingFor, setRecordingFor] = useState<string | null>(null); // meeting id — audio without a transcript
 
   const timeline = useMemo(() => {
@@ -126,7 +126,13 @@ export default function CompanyPage() {
                       {m.contact && <span className="text-gray-600">with {m.contact}</span>}
                       {m.status === 'scheduled' && past && <Link href={`/crm/capture?meeting=${m.meeting_id}`}><Button size="xs"><ClipboardCheck className="w-3 h-3" /> Capture now</Button></Link>}
                       {m.status === 'scheduled' && !past && <Link href={`/crm/capture?meeting=${m.meeting_id}`} className="text-xs text-indigo-600 hover:underline">capture</Link>}
-                      {m.transcript && <Button size="xs" variant="secondary" onClick={() => setTranscriptFor(m.meeting_id)} title={m.transcript.summary ?? 'Open the call transcript'}><FileText className="w-3 h-3" /> Transcript · {fmtDuration(m.transcript.duration_seconds)}{m.recording ? ' + audio' : ''}</Button>}
+                      {m.transcript && <Button size="xs" variant="secondary" onClick={() => setTranscriptFor({ id: m.meeting_id, tab: 'transcript' })} title={m.transcript.summary ?? 'Open the call transcript'}><FileText className="w-3 h-3" /> Transcript · {fmtDuration(m.transcript.duration_seconds)}{m.recording ? ' + audio' : ''}</Button>}
+                      {m.coaching && (
+                        <Button size="xs" variant="secondary" onClick={() => setTranscriptFor({ id: m.meeting_id, tab: 'coach' })} title={`Sales coach: ${m.coaching.biggest_miss ?? 'open the report'}`} className={cn(m.coaching.execution_score != null && (m.coaching.execution_score >= 70 ? 'border-green-300 text-green-800' : m.coaching.execution_score >= 45 ? 'border-amber-300 text-amber-800' : 'border-red-300 text-red-800'))}>
+                          <GraduationCap className="w-3 h-3" /> Coach · {m.coaching.execution_score ?? '—'}<span className="font-normal opacity-70">/100</span>{m.coaching.readiness?.stage && <span className="font-normal opacity-70"> · {READINESS_LABELS[m.coaching.readiness.stage]}</span>}
+                        </Button>
+                      )}
+                      {m.transcript && !m.coaching && <span className="text-[11px] text-gray-400" title="Ask Claude to coach this call">not coached yet</span>}
                       {m.recording && !m.transcript && <Button size="xs" variant="secondary" onClick={() => setRecordingFor(m.meeting_id)}><Headphones className="w-3 h-3" /> Recording{m.recording.duration_seconds ? ` · ${fmtDuration(m.recording.duration_seconds)}` : ''}</Button>}
                       {!m.recording && !m.transcript && m.status !== 'cancelled' && past && <UploadRecordingButton meetingId={m.meeting_id} />}
                     </div>
@@ -161,7 +167,7 @@ export default function CompanyPage() {
       <DealModal companyId={c.id} open={dealModal} onClose={() => setDealModal(false)} />
       <ActivityModal companyId={c.id} contacts={contacts} dealId={activityFor ?? undefined} open={activityFor !== undefined} onClose={() => setActivityFor(undefined)} />
       {meetingFor && <MeetingModal dealId={meetingFor.id} contacts={contacts} defaultTz={c.timezone} open={!!meetingFor} onClose={() => setMeetingFor(null)} />}
-      <TranscriptModal meetingId={transcriptFor} onClose={() => setTranscriptFor(null)} />
+      <TranscriptModal meetingId={transcriptFor?.id ?? null} initialTab={transcriptFor?.tab} onClose={() => setTranscriptFor(null)} />
       <RecordingModal meetingId={recordingFor} title={c.name} onClose={() => setRecordingFor(null)} />
       <NextStepModal deal={nextStepFor ? { id: nextStepFor.id, company: c.name, next_step: nextStepFor.next_step, next_step_date: nextStepFor.next_step_date } : null} open={!!nextStepFor} onClose={() => setNextStepFor(null)} />
       <div className="text-[11px] text-gray-400">Last activity {daysAgo(b.deals.map((d) => d.last_activity_at).filter(Boolean).sort().pop() ?? null)}{b.delivery_project_ids.length ? ` · delivery projects: ${b.delivery_project_ids.join(', ')}` : ''}</div>

@@ -41,5 +41,13 @@ Structure the brief as the proposal will use it:
 5. **Open items**: `open_next_steps`; any past meeting without a capture (fix it first).
 If asked to draft the proposal or deck: use the verbatims as the problem statement, the discussed commercials as the starting price, and the segment's top pain points (`top_pain_points(icp_segment)`) as supporting proof. Do not invent case studies, prices or timelines.
 
+## Sales coach across calls
+`call_coaching_list(company?, owner?, from?, to?)` — every coached call (execution score, readiness, biggest miss, priorities) plus `rollup.criteria`: per criterion, how many calls were met / partial / missed. Read it as a process report, not a league table:
+- **Recurring weakness** = the criteria with the most missed + partial ("Depth of discovery missed on 6 of 8 calls"); quote one moment per pattern from `get_call_coaching`.
+- **Salesperson development** = one owner's scores and per-criterion ratings over time (`owner`, `from`); say how many calls the trend rests on.
+- **Readiness mix** (`rollup.readiness`) crossed with source channel / contact role (`company_brief`) = marketing alignment: which sources bring brand decision-makers versus unsuitable enquiries.
+- `uncoached` = calls with a transcript and no coaching yet — offer to coach them.
+A recording alone cannot say why a buyer went quiet, which content attracted them, or what they thought of a sample shown on a silent screen share; name the CRM data that would (follow-ups, proposal history, loss reasons, materials) instead of inferring it. Full method: [coaching-pipeline.md](coaching-pipeline.md).
+
 ## Weekly review (prompt `weekly_review`)
 Order: `pipeline` → `channel_quality(from)` → `funnel(from)` → `top_pain_points(from)` → `commitment_vs_actual(from)`. End with three decisions, each backed by one number from the results (e.g. "pause Reddit: 4 booked, 3 no-shows, 0 won in 30 days").

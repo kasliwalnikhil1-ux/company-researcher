@@ -64,7 +64,7 @@ export interface Meeting {
 export type SpeakerRole = 'prospect' | 'team' | 'unknown';
 /** `speaker` is Deepgram's 0-based index; an unnamed one is labelled "Speaker N+1". */
 export interface TranscriptSpeaker { speaker: number; label: string; role: SpeakerRole; contact_id?: string; member_id?: string; words?: number; share_of_words?: number; speaking_seconds?: number }
-export interface TranscriptTurn { i: number; speaker?: number; label: string; role: SpeakerRole; start?: number; end?: number; text: string }
+export interface TranscriptTurn { i: number; speaker?: number; label: string; role: SpeakerRole; start?: number; end?: number; text: string; /** word timings, one [start, end] per whitespace token of text — only when asked for (p.words) */ w?: Array<[number, number]> }
 /** What company_brief carries per meeting — enough to show that a transcript exists without loading it. */
 export interface TranscriptSummary { summary: string | null; topics: string[]; duration_seconds: number | null; word_count: number | null; speakers: TranscriptSpeaker[] }
 /** The call audio stored for a meeting (the file itself is in Oracle Object Storage; see lib/crm/recordings.ts). */
@@ -74,8 +74,56 @@ export interface Transcript extends TranscriptSummary {
   meeting_id: string; company: string; company_id: string; contact: string | null; scheduled_at: string;
   language: string | null; avg_confidence: number | null; low_confidence: Array<{ word: string; start?: number; confidence?: number }>;
   turn_count: number; source: string | null; engine: string | null; model: string | null; saved_by: string | null; created_at: string; updated_at: string;
-  has_recording: boolean; matched_turns: number; returned: number; turns: TranscriptTurn[];
+  has_recording: boolean; has_coaching: boolean; matched_turns: number; returned: number; turns: TranscriptTurn[];
 }
+
+// ---------------------------------------------------------------- sales coach (crm_call_coaching)
+export type CoachRating = 'met' | 'partial' | 'missed' | 'na' | 'insufficient';
+export type CoachStatus = 'confirmed' | 'unclear' | 'not_discussed';
+export type ReadinessStage = 'not_a_fit' | 'early' | 'price_blocked' | 'advancing' | 'ready' | 'unknown';
+export type BuyerInterest = 'polite' | 'interested' | 'committed' | 'unknown';
+/** A moment on the recording: seconds in, who spoke, the words said. */
+export interface CoachEvidence { t: number; speaker?: 'prospect' | 'team'; quote: string }
+export interface CoachCriterion { key: string; label: string; rating: CoachRating; finding: string; better?: string; evidence: CoachEvidence[] }
+export interface CoachLens { key: string; label: string; rating: CoachRating; note?: string }
+export interface CoachMoment { t: number; speaker?: 'prospect' | 'team'; quote: string; response?: string; diagnosis: string; better: string; priority?: number }
+export interface CoachReadiness { stage: ReadinessStage; interest?: BuyerInterest; summary?: string; blockers?: string[] }
+export interface CoachCounts { met: number; partial: number; missed: number; na: number; insufficient: number }
+export interface CoachBriefField { status: CoachStatus; text: string }
+export interface CoachNextAction { what: string; why?: string; commitment?: string; before?: string; questions?: string[]; proof?: string[]; draft?: { channel: string; text: string } }
+export interface Coaching {
+  meeting_id: string; version: number; purpose: string | null; summary: string;
+  lens: CoachLens[]; criteria: CoachCriterion[];
+  buyer_brief: Partial<Record<'problem' | 'desired_outcome' | 'scope' | 'deadline' | 'awareness' | 'decision_process' | 'budget', CoachBriefField>>;
+  qualification: Array<{ key: string; label: string; status: CoachStatus; text?: string; evidence?: CoachEvidence[] }>;
+  what_worked: Array<{ title: string; why: string; evidence: CoachEvidence[] }>;
+  biggest_miss: { title: string; diagnosis: string; evidence: CoachEvidence[]; better: string } | null;
+  priorities: Array<{ title: string; why: string; t?: number }>;
+  moments: CoachMoment[];
+  uncertainties: Array<{ question: string; why_it_matters: string; how_to_resolve?: string }>;
+  next_action: CoachNextAction;
+  practice: { skill: string; why?: string; role_play?: { setup: string; buyer_says: string; aim: string; example?: string } } | null;
+  readiness: CoachReadiness; limits: string[]; context_used: Record<string, boolean>;
+  execution_score: number | null; counts: CoachCounts | null; model: string | null; created_at: string; updated_at: string;
+  // header from crm_meetings_v
+  company: string; company_id: string; contact: string | null; scheduled_at: string; meeting_status: MeetingStatus; deal_id: string; deal_stage: DealStage;
+  owner: string | null; owner_id: string | null; has_transcript: boolean; has_recording: boolean; duration_seconds: number | null; saved_by: string | null;
+}
+/** What company_brief carries per meeting. */
+export interface CoachingSummary { execution_score: number | null; counts: CoachCounts | null; readiness: CoachReadiness; purpose: string | null; biggest_miss: string | null; priorities: string[] | null; next_action: string | null; lens: CoachLens[]; version: number; updated_at: string }
+export interface CoachingListRow {
+  meeting_id: string; company: string; company_id: string; contact: string | null; scheduled_at: string; owner: string | null; owner_id: string | null; deal_id: string; deal_stage: DealStage; duration_seconds: number | null;
+  purpose: string | null; summary: string; execution_score: number | null; counts: CoachCounts | null; lens: CoachLens[]; readiness: CoachReadiness; biggest_miss: string | null; priorities: string[] | null; next_action: string | null;
+  has_transcript: boolean; has_recording: boolean; version: number; updated_at: string;
+}
+export interface CoachRollupRow { key: string; label: string; met: number; partial: number; missed: number; na: number; insufficient: number }
+export interface CoachingList {
+  total: number; avg_score: number | null; calls: CoachingListRow[];
+  rollup: { criteria: CoachRollupRow[]; lens: CoachRollupRow[]; readiness: Record<string, number>; by_owner: Array<{ owner: string | null; owner_id: string | null; calls: number; avg_score: number | null }> };
+  uncoached: Array<{ meeting_id: string; company: string; company_id: string; contact: string | null; scheduled_at: string; owner: string | null }>;
+}
+export const READINESS_LABELS: Record<ReadinessStage, string> = { not_a_fit: 'Not a fit', early: 'Early', price_blocked: 'Price-blocked', advancing: 'Advancing', ready: 'Ready', unknown: 'Unknown' };
+export const RATING_LABELS: Record<CoachRating, string> = { met: 'Met', partial: 'Partly met', missed: 'Missed', na: 'N/A', insufficient: 'Insufficient evidence' };
 
 export interface Capture {
   id: string; meeting_id: string; outcome: 'held' | 'no_show'; pain_points: string[]; commercials_discussed: Record<string, unknown> | null; objections: string[];
@@ -146,7 +194,7 @@ export interface CompanyBrief {
   company: Company & { icp_segment: string | null; source_channel: string | null; created_by_name: string | null };
   contacts: Contact[];
   deals: Array<Deal & { stage_history: Array<{ from: DealStage | null; to: DealStage; at: string; reason: string | null; by: string | null }> }>;
-  meetings: Array<{ meeting_id: string; deal_id: string; scheduled_at: string; status: MeetingStatus; contact: string | null; attendees: string[]; notes: string | null; capture: (Capture & { tags: string[] }) | null; transcript: TranscriptSummary | null; recording: RecordingSummary | null }>;
+  meetings: Array<{ meeting_id: string; deal_id: string; scheduled_at: string; status: MeetingStatus; contact: string | null; attendees: string[]; notes: string | null; capture: (Capture & { tags: string[] }) | null; transcript: TranscriptSummary | null; recording: RecordingSummary | null; coaching: CoachingSummary | null }>;
   activities: Array<{ at: string; type: string; direction: Direction; channel: string | null; contact: string | null; outcome: string | null; body: string | null; by: string | null; deal_id: string | null }>;
   pain_points: string[]; pain_point_tags: string[]; objections: string[]; commercials: Array<Record<string, unknown>>;
   open_next_steps: Array<{ deal_id: string; stage: DealStage; next_step: string | null; next_step_date: string | null; owner: string | null }>;
