@@ -5,12 +5,12 @@ import { useParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCompanyBrief } from '@/lib/crm/queries';
-import { fmtMoney, STAGE_LABELS, type Contact, type Deal } from '@/lib/crm/types';
+import { fmtMoney, STAGE_LABELS, type Capture, type Contact, type Deal } from '@/lib/crm/types';
 import { Badge, Button, Card, CompanyLogo, EmptyState, ErrorBox, Flags, Spinner, StageBadge, fmtDate, daysAgo, logoDomain } from '@/components/crm/ui';
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
 import { TranscriptModal, fmtDuration } from '@/components/crm/transcript';
 import { RecordingModal, UploadRecordingButton } from '@/components/crm/recording';
-import { CalendarPlus, ClipboardCheck, ExternalLink, FileText, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
+import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Everything about one account: contacts, deals, full activity timeline, every past meeting capture.
@@ -131,25 +131,7 @@ export default function CompanyPage() {
                       {!m.recording && !m.transcript && m.status !== 'cancelled' && past && <UploadRecordingButton meetingId={m.meeting_id} />}
                     </div>
                     {m.notes && <div className="text-xs text-gray-500 mt-0.5">{m.notes}</div>}
-                    {m.capture && (
-                      <div className="mt-1.5 rounded-md bg-gray-50 border border-gray-200 px-2.5 py-2 text-xs space-y-1">
-                        {m.capture.outcome === 'held' ? (
-                          <>
-                            <div><span className="text-gray-500">Pain points:</span> {m.capture.pain_points.map((p, i) => <span key={i} className="block text-gray-800">“{p}”</span>)}</div>
-                            {m.capture.commercials_discussed && <div><span className="text-gray-500">Commercials:</span> {Object.entries(m.capture.commercials_discussed).map(([k, v]) => `${k}: ${String(v)}`).join(' · ')}</div>}
-                            {m.capture.objections.length > 0 && <div><span className="text-gray-500">Objections:</span> {m.capture.objections.join('; ')}</div>}
-                            <div>{m.capture.is_dead ? <span className="text-red-700">Dead: {m.capture.dead_reason}</span> : <><span className="text-gray-500">Next:</span> {m.capture.next_step} ({fmtDate(m.capture.next_step_date)})</>}</div>
-                            {m.capture.tags.length > 0 && <div className="flex flex-wrap gap-1">{m.capture.tags.map((t) => <Badge key={t} tone="indigo">{t}</Badge>)}</div>}
-                          </>
-                        ) : (
-                          <>
-                            <div><span className="text-gray-500">No-show:</span> {m.capture.no_show_reason} {m.capture.is_repeat_no_show && <Badge tone="red">repeat</Badge>}</div>
-                            <div><span className="text-gray-500">Follow-up:</span> {m.capture.follow_up_action} ({fmtDate(m.capture.follow_up_date)})</div>
-                          </>
-                        )}
-                        {m.capture.raw_notes && <div className="text-gray-500 whitespace-pre-wrap">{m.capture.raw_notes}</div>}
-                      </div>
-                    )}
+                    {m.capture && <CaptureDetail capture={m.capture} />}
                   </li>
                 );
               })}
@@ -183,6 +165,119 @@ export default function CompanyPage() {
       <RecordingModal meetingId={recordingFor} title={c.name} onClose={() => setRecordingFor(null)} />
       <NextStepModal deal={nextStepFor ? { id: nextStepFor.id, company: c.name, next_step: nextStepFor.next_step, next_step_date: nextStepFor.next_step_date } : null} open={!!nextStepFor} onClose={() => setNextStepFor(null)} />
       <div className="text-[11px] text-gray-400">Last activity {daysAgo(b.deals.map((d) => d.last_activity_at).filter(Boolean).sort().pop() ?? null)}{b.delivery_project_ids.length ? ` · delivery projects: ${b.delivery_project_ids.join(', ')}` : ''}</div>
+    </div>
+  );
+}
+
+// A saved meeting capture, laid out for scanning: summary first, the numbers, the agreed next step, then the prospect's own words.
+function CaptureDetail({ capture: cap }: { capture: Capture & { tags: string[] } }) {
+  const [allPains, setAllPains] = useState(false);
+
+  if (cap.outcome !== 'held') {
+    return (
+      <div className="mt-2 rounded-lg border border-red-100 bg-red-50/50 px-3 py-2.5 text-xs space-y-1.5">
+        <div className="flex items-center gap-1.5 text-red-800 font-medium">No-show{cap.no_show_reason && <span className="font-normal text-gray-700">· {cap.no_show_reason}</span>}{cap.is_repeat_no_show && <Badge tone="red">repeat</Badge>}</div>
+        {cap.follow_up_action && <NextRow label="Follow-up" text={cap.follow_up_action} date={cap.follow_up_date} />}
+        {cap.raw_notes && <p className="text-gray-600 whitespace-pre-wrap leading-relaxed">{cap.raw_notes}</p>}
+      </div>
+    );
+  }
+
+  // "From recording (26 min): …" → label + body
+  const summaryMatch = cap.raw_notes?.match(/^From recording(?: \(([^)]+)\))?:\s*/i);
+  const summary = summaryMatch ? cap.raw_notes!.slice(summaryMatch[0].length) : cap.raw_notes;
+
+  const com = cap.commercials_discussed ?? {};
+  const currency = typeof com.currency === 'string' ? com.currency : null;
+  const comNote = typeof com.notes === 'string' ? com.notes : null;
+  const facts = Object.entries(com)
+    .filter(([k, v]) => k !== 'currency' && k !== 'notes' && v != null && v !== '')
+    .map(([k, v]) => ({
+      label: k.replace(/_/g, ' '),
+      value: /price|value|amount|budget|quote|fee/i.test(k) && !isNaN(Number(v)) ? fmtMoney(Number(v), currency) : String(v),
+    }));
+
+  const objections = cap.objections.flatMap((o) => o.split(/;\s+/)).filter(Boolean);
+  const pains = allPains ? cap.pain_points : cap.pain_points.slice(0, 3);
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-200 bg-white text-xs divide-y divide-gray-100">
+      {summary && (
+        <div className="px-3 py-2.5">
+          <SectionLabel>Summary{summaryMatch?.[1] ? ` · from ${summaryMatch[1]} recording` : ''}</SectionLabel>
+          <p className="text-[13px] text-gray-800 leading-relaxed whitespace-pre-wrap">{summary}</p>
+        </div>
+      )}
+
+      {(cap.is_dead || cap.next_step) && (
+        <div className="px-3 py-2.5">
+          {cap.is_dead
+            ? <div className="text-red-700"><span className="font-medium">Dead</span> · {cap.dead_reason}</div>
+            : <NextRow label="Next step" text={cap.next_step!} date={cap.next_step_date} />}
+        </div>
+      )}
+
+      {(facts.length > 0 || comNote) && (
+        <div className="px-3 py-2.5">
+          <SectionLabel>Commercials</SectionLabel>
+          {facts.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {facts.map((f) => (
+                <div key={f.label} className="rounded-md bg-gray-50 border border-gray-100 px-2.5 py-1.5 min-w-[5.5rem]">
+                  <div className="text-[10px] uppercase tracking-wide text-gray-400">{f.label}</div>
+                  <div className="text-sm font-semibold text-gray-900 tabular-nums">{f.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {comNote && <p className={cn('text-gray-600 leading-relaxed', facts.length > 0 && 'mt-2')}>{comNote}</p>}
+        </div>
+      )}
+
+      {objections.length > 0 && (
+        <div className="px-3 py-2.5">
+          <SectionLabel>Objections</SectionLabel>
+          <ul className="space-y-1">
+            {objections.map((o, i) => (
+              <li key={i} className="flex gap-2 text-gray-800"><span className="mt-[5px] h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />{o}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {cap.pain_points.length > 0 && (
+        <div className="px-3 py-2.5">
+          <SectionLabel>In their words</SectionLabel>
+          <ul className="space-y-1.5">
+            {pains.map((p, i) => (
+              <li key={i} className="border-l-2 border-indigo-200 pl-2.5 text-gray-700 italic leading-relaxed">“{p}”</li>
+            ))}
+          </ul>
+          {cap.pain_points.length > 3 && (
+            <button type="button" onClick={() => setAllPains((v) => !v)} className="mt-1.5 text-indigo-600 hover:underline">
+              {allPains ? 'Show fewer' : `Show all ${cap.pain_points.length} quotes`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {cap.tags.length > 0 && (
+        <div className="px-3 py-2 flex flex-wrap gap-1">{cap.tags.map((t) => <Badge key={t} tone="gray">{t}</Badge>)}</div>
+      )}
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{children}</div>;
+}
+
+function NextRow({ label, text, date }: { label: string; text: string; date: string | null }) {
+  return (
+    <div className="flex items-start gap-2 rounded-md bg-indigo-50/70 border border-indigo-100 px-2.5 py-2">
+      <ArrowRight className="w-3.5 h-3.5 mt-0.5 shrink-0 text-indigo-500" />
+      <div className="flex-1 min-w-0 text-gray-800 leading-relaxed"><span className="font-medium text-indigo-900">{label}:</span> {text}</div>
+      {date && <span className="shrink-0 rounded bg-white border border-indigo-100 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700 tabular-nums">{fmtDate(date)}</span>}
     </div>
   );
 }
