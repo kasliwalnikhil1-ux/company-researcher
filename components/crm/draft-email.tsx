@@ -13,12 +13,30 @@ import { cn } from '@/lib/utils';
 type Meeting = CompanyBrief['meetings'][number];
 type Kind = 'recap' | 'nurture';
 
-// Both chats prefill their message box from the same ?q= parameter. The domain doubles as the
-// menu icon — CompanyLogo already turns one into a brand mark, with a letter tile if it misses.
+const KIND_LABEL: Record<Kind, string> = { recap: 'Draft follow-up', nurture: 'Draft nurture email' };
+
+// Both chats prefill their message box from the same ?q= parameter, but they need different
+// messages: the client-comms skill on claude.ai already holds the brief, while ChatGPT has no
+// such skill and gets it inline. The domain doubles as the menu icon — CompanyLogo already turns
+// one into a brand mark, with a letter tile if it misses.
 const TARGETS = [
-  { key: 'chatgpt', name: 'ChatGPT', domain: 'chatgpt.com', href: (q: string) => `https://chatgpt.com/?q=${q}` },
-  { key: 'claude', name: 'Claude', domain: 'claude.ai', href: (q: string) => `https://claude.ai/new?q=${q}` },
+  {
+    key: 'chatgpt',
+    name: 'ChatGPT',
+    domain: 'chatgpt.com',
+    href: (q: string) => `https://chatgpt.com/?q=${q}`,
+    lead: (kind: Kind) => `${kind === 'recap' ? RECAP_BRIEF : NURTURE_BRIEF}\n\n--- THE MEETING ---`,
+  },
+  {
+    key: 'claude',
+    name: 'Claude',
+    domain: 'claude.ai',
+    href: (q: string) => `https://claude.ai/new?q=${q}`,
+    lead: (kind: Kind) => `Use /client-comms skill\n${KIND_LABEL[kind]}`,
+  },
 ] as const;
+
+type Target = (typeof TARGETS)[number];
 
 const MAX_PAINS = 8;
 const MAX_ACTIVITIES = 10;
@@ -131,14 +149,14 @@ How to write it:
 
 Give me, in this order: a suggested send date with one line on why that timing, two subject line options, then the email body. If it needs an asset I may not have (a case study, a sample, a benchmark), say so plainly instead of inventing one, and mark anything I must fill in myself [like this].`;
 
-function buildPrompt(kind: Kind, b: CompanyBrief, m: Meeting, tz: string | null): string {
-  return `${kind === 'recap' ? RECAP_BRIEF : NURTURE_BRIEF}\n\n--- THE MEETING ---\n${meetingContext(b, m, tz)}`;
+function buildPrompt(kind: Kind, target: Target, b: CompanyBrief, m: Meeting, tz: string | null): string {
+  return `${target.lead(kind)}\n\n${meetingContext(b, m, tz)}`;
 }
 
 const MENU_HEIGHT = TARGETS.length * 28 + 8; // items + the menu's own padding
 
 /** An outline button that drops down to pick which chat writes the draft. */
-function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.ReactNode; title: string; onPick: (target: (typeof TARGETS)[number]) => void }) {
+function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.ReactNode; title: string; onPick: (target: Target) => void }) {
   const [open, setOpen] = useState(false);
   const [up, setUp] = useState(false); // the last meeting sits at the page bottom: flip rather than run off-screen
   const ref = useRef<HTMLDivElement>(null);
@@ -191,8 +209,8 @@ function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.
 export function DraftEmailButtons({ brief, meeting, timezone }: { brief: CompanyBrief; meeting: Meeting; timezone: string | null }) {
   const { show, node } = useToast();
 
-  const draft = (kind: Kind, target: (typeof TARGETS)[number]) => {
-    const prompt = buildPrompt(kind, brief, meeting, timezone);
+  const draft = (kind: Kind, target: Target) => {
+    const prompt = buildPrompt(kind, target, brief, meeting, timezone);
     // The clipboard write and the tab open must both start in this click tick: the write needs
     // document focus (lost once the tab opens) and the open needs the user gesture (lost after an
     // await). A long prompt can be dropped from the ?q= URL, and then the seller just pastes.
@@ -209,13 +227,13 @@ export function DraftEmailButtons({ brief, meeting, timezone }: { brief: Company
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       <DraftMenu
-        label="Draft follow-up"
+        label={KIND_LABEL.recap}
         icon={<Mail className="w-3 h-3" />}
         title="Draft the same-day recap email: their goals, what was decided, who does what by when, one next step"
         onPick={(t) => draft('recap', t)}
       />
       <DraftMenu
-        label="Draft nurture email"
+        label={KIND_LABEL.nurture}
         icon={<Sprout className="w-3 h-3" />}
         title="Draft a nurture email for a few days later: something useful about a concern from this call, with a suggested send date"
         onPick={(t) => draft('nurture', t)}
