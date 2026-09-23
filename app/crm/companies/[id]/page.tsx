@@ -10,6 +10,7 @@ import { Badge, Button, Card, CompanyLogo, EmptyState, ErrorBox, Flags, Spinner,
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
 import { TranscriptModal, fmtDuration, type TranscriptTab } from '@/components/crm/transcript';
 import { RecordingModal, UploadRecordingButton } from '@/components/crm/recording';
+import { DraftEmailButtons } from '@/components/crm/draft-email';
 import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, GraduationCap, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -138,6 +139,7 @@ export default function CompanyPage() {
                     </div>
                     {m.notes && <div className="text-xs text-gray-500 mt-0.5">{m.notes}</div>}
                     {m.capture && <CaptureDetail capture={m.capture} />}
+                    {(m.capture || m.notes) && m.status !== 'cancelled' && <DraftEmailButtons brief={b} meeting={m} timezone={timezone} />}
                   </li>
                 );
               })}
