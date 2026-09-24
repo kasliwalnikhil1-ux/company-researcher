@@ -22,7 +22,7 @@ import RunningDryCallout from '@/components/outreach/senders/RunningDry';
 import type { SenderV2 } from '@/components/outreach/senders/insights';
 import { cn } from '@/lib/utils';
 
-const TABS = ['Overview', 'Insights', 'Activity', 'Schedule', 'Budgets', 'Events', 'Settings', 'Extension', 'Danger'] as const;
+const TABS = ['Overview', 'Insights', 'Activity', 'Schedule', 'Budgets', 'Events', 'Settings', 'Session', 'Danger'] as const;
 type Tab = (typeof TABS)[number];
 
 function SenderDetail() {
@@ -31,7 +31,8 @@ function SenderDetail() {
   const router = useRouter();
   const search = useSearchParams();
   const connected = search.get('connected');
-  const initialTab = (TABS as readonly string[]).includes(search.get('tab') ?? '') ? (search.get('tab') as Tab) : 'Overview';
+  const tabParam = search.get('tab') === 'Extension' ? 'Session' : search.get('tab') ?? ''; // old links used ?tab=Extension
+  const initialTab = (TABS as readonly string[]).includes(tabParam) ? (tabParam as Tab) : 'Overview';
   const [tab, setTab] = useState<Tab>(initialTab);
   const { workspace, isManager, canWrite, role } = useWorkspace();
   const sender = useSender(id);
@@ -97,7 +98,7 @@ function SenderDetail() {
       {tab === 'Schedule' && <ScheduleEditor sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Budgets' && <BudgetsPanel sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Events' && <EventsTimeline senderId={s.id} />}
-      {tab === 'Extension' && <ExtensionSetup sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {tab === 'Session' && <ExtensionSetup sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Danger' && isManager && <DangerZone sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {toast.node}
     </div>

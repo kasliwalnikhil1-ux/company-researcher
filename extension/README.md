@@ -31,7 +31,7 @@ The backend accepts one sync per sender every 10 minutes; the extension backs of
 
 ## Pair it with a sender
 
-1. In GrowthxAI Outreach open **Senders → (the sender) → Extension** tab.
+1. In GrowthxAI Outreach open **Senders → (the sender) → Session** tab.
 2. Click **Generate pairing token**. The token is shown **once**; generating a new one invalidates the previous one. (Managers and owners can do this.)
 3. Click the extension icon, paste the token into **Pairing token**, click **Save**, then **Sync now**.
 4. The popup shows the sender name returned by the backend and the status `Synced`.
