@@ -7,6 +7,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useAudit } from '@/lib/outreach/queries';
+import { useLocalhostOnly } from '@/lib/outreach/platformAdmin';
 import { Badge, Button, Card, ErrorBox, fmtDate, Input, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { copyText } from '@/components/outreach/settings/shared';
@@ -40,9 +41,11 @@ export default function WorkspaceSettingsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => setName(workspace?.name ?? ''), [workspace?.name]);
   const audit = useAudit(isManager ? ws : null);
+  // Deployment-level configuration (secrets, connector webhooks) is operated from a local checkout only: never shown on a deployed host.
+  const isLocal = useLocalhostOnly();
   const [auditOpen, setAuditOpen] = useState<Record<number, boolean>>({});
 
-  const setup = useQuery({ queryKey: ['outreach', ws ?? '', 'platform-setup'], enabled: !!ws && isOwner, staleTime: 60_000, retry: 0, queryFn: () => callFn<SetupResp>('unipile-setup', { workspace_id: ws, action: 'status' }) });
+  const setup = useQuery({ queryKey: ['outreach', ws ?? '', 'platform-setup'], enabled: !!ws && isOwner && isLocal, staleTime: 60_000, retry: 0, queryFn: () => callFn<SetupResp>('unipile-setup', { workspace_id: ws, action: 'status' }) });
 
   async function rename() {
     if (!ws || !name.trim()) return;
@@ -87,7 +90,7 @@ export default function WorkspaceSettingsPage() {
           <BehaviourCard />
           <StageKindsCard />
 
-          {isOwner && (
+          {isOwner && isLocal && (
             <Card title="Platform setup" actions={<Button size="sm" variant="secondary" onClick={() => setup.refetch()} loading={setup.isFetching}><RefreshCw className="w-3.5 h-3.5" /> Re-check</Button>}>
               {setup.isLoading ? <Spinner /> : setup.isError ? <ErrorBox message={parseError(setup.error).message} /> : setup.data ? (
                 <>

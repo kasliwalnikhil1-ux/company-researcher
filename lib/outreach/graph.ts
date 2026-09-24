@@ -29,6 +29,51 @@ export const graphSchema = z.object({
 
 export interface GraphIssue { node_id?: string; code: string; message: string }
 
+/**
+ * Server-side checks (SQL, edge functions) still speak in technical terms. Translate the known ones into plain
+ * language; anything unrecognised passes through untouched. Client-side messages are already plain, so this is
+ * safe to apply to every issue shown in the builder.
+ */
+const ISSUE_TRANSLATIONS: Array<[RegExp, string | ((m: RegExpMatchArray) => string)]> = [
+  [/^graph must be an object$|^graph\.nodes missing$/i, 'The sequence could not be read. Reload the page and try again'],
+  [/^start node not found$/i, 'The sequence has no start'],
+  [/^unknown node type (.+)$/i, (m) => `“${m[1]}” is not a step this version supports. Remove it`],
+  [/^node id mismatch$/i, 'This step is stored under the wrong name. Delete it and add it again'],
+  [/^next points to missing node/i, 'This step leads to a step that no longer exists. Connect it again'],
+  [/^branch (\S+) points to missing node$/i, (m) => `The “${m[1].replace(/_/g, ' ')}” branch leads to a step that no longer exists. Connect it again`],
+  [/^invite note exceeds (\d+) characters$/i, (m) => `The invitation note is longer than ${m[1]} characters`],
+  [/^message exceeds (\d+) characters$/i, (m) => `The message is longer than ${m[1]} characters`],
+  [/^comment exceeds (\d+) characters$/i, (m) => `The comment is longer than ${m[1]} characters`],
+  [/^InMail subject\/body exceeds limits/i, 'The InMail is too long: subjects can be 200 characters and the body 1,900'],
+  [/^condition should define true and false branches$/i, 'Give both the “true” and “false” branches a next step'],
+  [/^wait_connection needs a connected branch$/i, 'Add what happens once the lead connects (the “connected” branch)'],
+  [/^email node requires a mailbox sender in the pool$/i, 'Emails need a connected mailbox. Add one to the sender pool or pick a mailbox in this step'],
+  [/^AI drafting enabled without a brief$/i, 'AI drafting is on but there is no brief. Tell the AI what to write about'],
+  [/^no exit path/i, 'The sequence never ends. Add an “End” step at the bottom of every branch'],
+  [/^a message node needs an invite/i, 'A message can only reach connected leads. Put “Send invitation” and “Wait for connection” (or an InMail) before it'],
+  [/^node is not reachable from start$/i, 'This step is not connected to the sequence, so no lead will ever reach it'],
+  [/^every variant needs an id$/i, 'One of the A/B versions is missing its name. Remove it and add it again'],
+  [/^duplicate variant id/i, 'Two A/B versions share the same name. Rename one of them'],
+  [/^variant weight cannot be negative$/i, 'An A/B version has a share below zero. Use 0 or more'],
+  [/^an A\/B test needs at least two variants$/i, 'An A/B test needs at least two versions to compare'],
+  [/^at most (\d+) variants per step$/i, (m) => `A step can have at most ${m[1]} A/B versions`],
+  [/^A\/B split needs at least two weighted branches$/i, 'An A/B split needs at least two paths with a share each'],
+  [/^A\/B branch (\S+) is not connected$/i, (m) => `Path “${m[1]}” of the A/B split has no next step`],
+  [/^AI routing needs at least one described branch$/i, 'Describe at least one path for AI routing'],
+  [/^AI routing needs an "everything else" branch$/i, 'Add a next step for “everything else” (leads that match no path)'],
+];
+
+export function humanizeIssue(message: string | null | undefined): string {
+  const text = (message ?? '').trim();
+  if (!text) return 'Something about this step needs a fix';
+  for (const [re, out] of ISSUE_TRANSLATIONS) {
+    const m = text.match(re);
+    if (m) return typeof out === 'function' ? out(m) : out;
+  }
+  // last resort: soften the jargon without changing the meaning
+  return text.replace(/\bnodes?\b/g, 'step').replace(/\benrol+ments?\b/gi, 'lead').replace(/\bpayload\b/gi, 'content').replace(/\bgraph\b/gi, 'sequence');
+}
+
 const TEXT_STEPS: NodeType[] = ['send_invite', 'send_message', 'send_inmail', 'send_email', 'comment_latest_post'];
 const WHAT: Partial<Record<NodeType, string>> = { send_invite: 'invite note', send_message: 'message', comment_latest_post: 'comment', send_inmail: 'InMail body' };
 
@@ -48,14 +93,14 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
     return { errors, warnings };
   }
   const nodes = graph.nodes;
-  if (!nodes[graph.start]) errors.push({ code: 'E_GRAPH_INVALID', message: 'start node not found' });
+  if (!nodes[graph.start]) errors.push({ code: 'E_GRAPH_INVALID', message: 'The sequence has no start' });
   const noteLimit = opts.hasFreeSender ? TEXT_LIMITS.invite_note_free : TEXT_LIMITS.invite_note;
   let hasTerminal = false;
   let hasConnectPath = false;
   for (const [k, n] of Object.entries(nodes)) {
-    if (n.id !== k) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'node id mismatch' });
-    if (n.next && !nodes[n.next]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `next points to missing node ${n.next}` });
-    for (const [b, t] of Object.entries(n.branches ?? {})) if (t && !nodes[t]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `branch ${b} points to missing node` });
+    if (n.id !== k) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'This step is stored under the wrong name. Delete it and add it again' });
+    if (n.next && !nodes[n.next]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'This step leads to a step that no longer exists. Connect it again' });
+    for (const [b, t] of Object.entries(n.branches ?? {})) if (t && !nodes[t]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `The “${b.replace(/_/g, ' ')}” branch leads to a step that no longer exists. Connect it again` });
     if (n.type === 'end' || n.type === 'send_to_sequence' || (!n.next && !n.branches && n.type !== 'start')) hasTerminal = true;
     if (['send_invite', 'wait_connection', 'send_inmail'].includes(n.type)) hasConnectPath = true;
     const c = n.config ?? {};
@@ -66,59 +111,59 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
       if (Array.isArray(c.variants)) {
         const ids: string[] = [];
         for (const v of c.variants as MessageVariant[]) {
-          if (!v?.id) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'every variant needs an id' });
-          else if (ids.includes(v.id)) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: `duplicate variant id ${v.id}` });
+          if (!v?.id) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'One of the A/B versions is missing its name. Remove it and add it again' });
+          else if (ids.includes(v.id)) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'Two A/B versions share the same name. Rename one of them' });
           ids.push(v?.id ?? '');
-          if (Number(v?.weight ?? 1) < 0) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'variant weight cannot be negative' });
+          if (Number(v?.weight ?? 1) < 0) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: 'An A/B version has a share below zero. Use 0 or more' });
           texts.push({ label: ` (variant ${v?.label || v?.id || '?'})`, text: str(v?.text) || str(v?.note) || str(v?.html), subject: str(v?.subject) });
         }
-        if (c.variants.length === 1) warnings.push({ node_id: k, code: 'W_SINGLE_VARIANT', message: 'an A/B test needs at least two variants' });
-        if (c.variants.length > MAX_VARIANTS) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: `at most ${MAX_VARIANTS} variants per step` });
+        if (c.variants.length === 1) warnings.push({ node_id: k, code: 'W_SINGLE_VARIANT', message: 'An A/B test needs at least two versions to compare' });
+        if (c.variants.length > MAX_VARIANTS) errors.push({ node_id: k, code: 'E_VARIANT_INVALID', message: `A step can have at most ${MAX_VARIANTS} A/B versions` });
       }
       const lim = n.type === 'send_invite' ? noteLimit : n.type === 'send_message' ? TEXT_LIMITS.message : n.type === 'comment_latest_post' ? TEXT_LIMITS.comment : n.type === 'send_inmail' ? TEXT_LIMITS.inmail_body : null;
       for (const t of texts) {
         if (texts.length > 1 && t.label === '' && t.text === '') continue;   // variants replace an empty base copy
         const ml = spintaxInfo(t.text).maxLen;
         if (lim != null && ml > lim) {
-          errors.push({ node_id: k, code: n.type === 'send_invite' ? 'E_NOTE_TOO_LONG' : 'E_PAYLOAD_INVALID', message: `${WHAT[n.type]}${t.label} can reach ${ml} characters (limit ${lim}); the longest spintax combination counts` });
+          errors.push({ node_id: k, code: n.type === 'send_invite' ? 'E_NOTE_TOO_LONG' : 'E_PAYLOAD_INVALID', message: `The ${WHAT[n.type]}${t.label} can run to ${ml} characters. LinkedIn allows ${lim}. Shorten it (the longest spin option counts)` });
         }
-        if (n.type === 'send_inmail' && spintaxInfo(t.subject).maxLen > TEXT_LIMITS.inmail_subject) errors.push({ node_id: k, code: 'E_PAYLOAD_INVALID', message: `InMail subject${t.label} exceeds 200 characters` });
-        if (n.type === 'send_email' && opts.strict && t.text !== '' && !t.text.includes('unsubscribe_link')) warnings.push({ node_id: k, code: 'W_NO_UNSUBSCRIBE', message: `email${t.label} has no {{unsubscribe_link}}` });
+        if (n.type === 'send_inmail' && spintaxInfo(t.subject).maxLen > TEXT_LIMITS.inmail_subject) errors.push({ node_id: k, code: 'E_PAYLOAD_INVALID', message: `The InMail subject${t.label} is longer than 200 characters` });
+        if (n.type === 'send_email' && opts.strict && t.text !== '' && !t.text.includes('unsubscribe_link')) warnings.push({ node_id: k, code: 'W_NO_UNSUBSCRIBE', message: `The email${t.label} has no unsubscribe link. Add {{unsubscribe_link}} so people can opt out` });
       }
     }
 
-    if (n.type === 'condition' && !(n.branches?.true !== undefined && n.branches?.false !== undefined)) warnings.push({ node_id: k, code: 'W_BRANCH_MISSING', message: 'condition should define true and false branches' });
-    if (n.type === 'wait_connection' && !n.branches?.connected) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'wait_connection needs a connected branch' });
+    if (n.type === 'condition' && !(n.branches?.true !== undefined && n.branches?.false !== undefined)) warnings.push({ node_id: k, code: 'W_BRANCH_MISSING', message: 'Give both the “true” and “false” branches a next step' });
+    if (n.type === 'wait_connection' && !n.branches?.connected) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'Add what happens once the lead connects (the “connected” branch)' });
     if (n.type === 'ab_split') {
       const list: AbBranch[] = Array.isArray(c.branches) ? c.branches : [];
-      if (list.length < 2) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'A/B split needs at least two weighted branches' });
-      else for (const b of list) if (!(n.branches && (b?.id ?? '') in n.branches)) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `A/B branch ${b?.id || '?'} is not connected` });
+      if (list.length < 2) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'An A/B split needs at least two paths with a share each' });
+      else for (const b of list) if (!(n.branches && (b?.id ?? '') in n.branches)) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `Path “${b?.label || b?.id || '?'}” of the A/B split has no next step` });
     }
     if (n.type === 'ai_route') {
       const list: AiRouteOption[] = Array.isArray(c.routes) ? c.routes : [];
-      if (list.length < 1) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'AI routing needs at least one described branch' });
-      else for (const r of list) if (str(r?.description).trim().length < 3) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `describe AI branch ${r?.label || r?.id || '?'} in plain language` });
-      if (!(n.branches && AI_ROUTE_ELSE in n.branches)) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'AI routing needs an "everything else" branch' });
+      if (list.length < 1) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'Describe at least one path for AI routing' });
+      else for (const r of list) if (str(r?.description).trim().length < 3) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `Describe the “${r?.label || r?.id || '?'}” path in a sentence so AI knows when to pick it` });
+      if (!(n.branches && AI_ROUTE_ELSE in n.branches)) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'Add a next step for “everything else” (leads that match no path)' });
     }
     if (n.type === 'call_task') {
       const dead = CALL_OUTCOMES.filter((o) => n.branches && o in n.branches && !n.branches[o]);
-      if (dead.length > 0 && opts.strict) warnings.push({ node_id: k, code: 'W_CALL_OUTCOME', message: `call outcome ${dead.join(', ').replace(/_/g, ' ')} has no next step: those leads finish the sequence` });
+      if (dead.length > 0 && opts.strict) warnings.push({ node_id: k, code: 'W_CALL_OUTCOME', message: `Nothing follows the call outcome ${dead.join(', ').replace(/_/g, ' ')}. Leads with that outcome finish the sequence here` });
     }
     const hasMailboxPool = Array.isArray(c.mailbox_pool) && c.mailbox_pool.length > 0;
-    if (opts.strict && n.type === 'send_email' && !opts.hasMailbox && !c.mailbox_sender_id && !hasMailboxPool) errors.push({ node_id: k, code: 'E_NO_MAILBOX', message: 'email node requires a mailbox sender in the pool' });
-    if (['send_invite', 'send_message', 'comment_latest_post', 'send_inmail'].includes(n.type) && c.ai != null && !c.ai?.brief) warnings.push({ node_id: k, code: 'W_AI_BRIEF', message: 'AI drafting enabled without a brief' });
-    if (n.type === 'ai_draft_approval' && !c.brief) warnings.push({ node_id: k, code: 'W_AI_BRIEF', message: 'AI drafting enabled without a brief' });
-    if (n.type === 'send_voice_note' && opts.strict) warnings.push({ node_id: k, code: 'W_VOICE_CLIP', message: 'each pool sender needs a recorded clip for this step; senders without one skip it' });
-    if (['add_tag', 'remove_tag'].includes(n.type) && !c.tag_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a tag' });
-    if (n.type === 'change_list' && !c.list_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a list' });
-    if (n.type === 'change_stage' && !c.stage_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a stage' });
-    if (n.type === 'send_to_sequence' && !c.sequence_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a sequence' });
-    if (n.type === 'call_webhook' && !c.webhook_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'select a webhook' });
+    if (opts.strict && n.type === 'send_email' && !opts.hasMailbox && !c.mailbox_sender_id && !hasMailboxPool) errors.push({ node_id: k, code: 'E_NO_MAILBOX', message: 'Emails need a connected mailbox. Add one to the sender pool or pick a mailbox in this step' });
+    if (['send_invite', 'send_message', 'comment_latest_post', 'send_inmail'].includes(n.type) && c.ai != null && !c.ai?.brief) warnings.push({ node_id: k, code: 'W_AI_BRIEF', message: 'AI drafting is on but there is no brief. Tell the AI what to write about' });
+    if (n.type === 'ai_draft_approval' && !c.brief) warnings.push({ node_id: k, code: 'W_AI_BRIEF', message: 'AI drafting is on but there is no brief. Tell the AI what to write about' });
+    if (n.type === 'send_voice_note' && opts.strict) warnings.push({ node_id: k, code: 'W_VOICE_CLIP', message: 'Every sender in the pool needs a recorded clip for this step. Senders without one skip it' });
+    if (['add_tag', 'remove_tag'].includes(n.type) && !c.tag_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'Choose which tag' });
+    if (n.type === 'change_list' && !c.list_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'Choose which list' });
+    if (n.type === 'change_stage' && !c.stage_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'Choose which stage' });
+    if (n.type === 'send_to_sequence' && !c.sequence_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'Choose which sequence' });
+    if (n.type === 'call_webhook' && !c.webhook_id) warnings.push({ node_id: k, code: 'W_CONFIG', message: 'Choose which webhook' });
   }
   if (opts.strict) {
-    if (!hasTerminal) errors.push({ code: 'E_GRAPH_INVALID', message: 'no exit path (add an End node)' });
+    if (!hasTerminal) errors.push({ code: 'E_GRAPH_INVALID', message: 'The sequence never ends. Add an “End” step at the bottom of every branch' });
     const hasMsg = Object.values(nodes).some((n) => (n.type === 'send_message' || n.type === 'send_voice_note') && !n.config?.send_always);
-    if (hasMsg && !hasConnectPath) errors.push({ code: 'E_RELATION_REQUIRED', message: 'a message node needs an invite / wait_connection (or InMail) path before it' });
+    if (hasMsg && !hasConnectPath) errors.push({ code: 'E_RELATION_REQUIRED', message: 'A message can only reach connected leads. Put “Send invitation” and “Wait for connection” (or an InMail) before it' });
     // reachability
     const seen = new Set<string>();
     const q = [graph.start];
@@ -131,7 +176,7 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
       if (n.next) q.push(n.next);
       for (const t of Object.values(n.branches ?? {})) if (t) q.push(t);
     }
-    for (const k of Object.keys(nodes)) if (!seen.has(k)) warnings.push({ node_id: k, code: 'W_UNREACHABLE', message: 'node is not reachable from start' });
+    for (const k of Object.keys(nodes)) if (!seen.has(k)) warnings.push({ node_id: k, code: 'W_UNREACHABLE', message: 'This step is not connected to the sequence, so no lead will ever reach it' });
   }
   return { errors, warnings };
 }

@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { AlertTriangle, CheckCircle2, Sparkles, X, XCircle } from 'lucide-react';
-import { Button, ErrorBox, Modal, Spinner } from '@/components/outreach/ui';
-import type { GraphIssue } from '@/lib/outreach/graph';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Circle, Crosshair, Loader2, Sparkles, X, XCircle } from 'lucide-react';
+import { Button, ErrorBox, Modal } from '@/components/outreach/ui';
+import { humanizeIssue, type GraphIssue } from '@/lib/outreach/graph';
 import type { Graph } from '@/lib/outreach/types';
 import { nodeTitle } from './helpers';
 
 export interface QaState { loading: boolean; errors: GraphIssue[]; warnings: GraphIssue[]; ai_available: boolean; failed?: string | null; activating?: boolean }
 
+/** Problems found in the sequence, in plain words. Each one names its step and has a "Show me" button that zooms to it. */
 export function IssueList({ items, level, graph, onFocus }: { items: GraphIssue[]; level: 'error' | 'warning'; graph: Graph; onFocus: (id: string) => void }) {
   if (items.length === 0) return null;
   const err = level === 'error';
@@ -16,17 +17,75 @@ export function IssueList({ items, level, graph, onFocus }: { items: GraphIssue[
     <div className={err ? 'rounded-lg border border-red-200 bg-red-50' : 'rounded-lg border border-amber-200 bg-amber-50'}>
       <div className={`px-3 py-2 text-xs font-semibold flex items-center gap-1.5 ${err ? 'text-red-800' : 'text-amber-800'}`}>
         {err ? <XCircle className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-        {items.length} {err ? 'blocking error' : 'warning'}{items.length === 1 ? '' : 's'}
+        {err ? `${items.length} ${items.length === 1 ? 'thing' : 'things'} to fix before this can go live` : `${items.length} ${items.length === 1 ? 'suggestion' : 'suggestions'}`}
       </div>
       <ul className="divide-y divide-white/60">
-        {items.map((i, idx) => (
-          <li key={idx} className={`px-3 py-1.5 text-xs ${err ? 'text-red-900' : 'text-amber-900'}`}>
-            {i.node_id && graph.nodes[i.node_id] ? <button type="button" onClick={() => onFocus(i.node_id!)} className="font-medium underline-offset-2 hover:underline mr-1">{nodeTitle(graph.nodes[i.node_id])}:</button> : null}
-            {i.message}
-            <span className="opacity-60 ml-1">({i.code})</span>
-          </li>
-        ))}
+        {items.map((i, idx) => {
+          const step = i.node_id ? graph.nodes[i.node_id] : null;
+          return (
+            <li key={idx} className={`px-3 py-1.5 text-xs flex items-start gap-2 ${err ? 'text-red-900' : 'text-amber-900'}`}>
+              <span className="flex-1 min-w-0">
+                {step && <span className="font-medium">{nodeTitle(step)}: </span>}
+                {humanizeIssue(i.message)}
+              </span>
+              {step && (
+                <button type="button" onClick={() => onFocus(i.node_id!)} title={`Zoom to “${nodeTitle(step)}”`} className={`flex-shrink-0 inline-flex items-center gap-1 rounded-md border bg-white px-2 py-0.5 text-[11px] font-medium ${err ? 'border-red-200 text-red-800 hover:bg-red-100' : 'border-amber-200 text-amber-800 hover:bg-amber-100'}`}>
+                  <Crosshair className="w-3 h-3" /> Show me
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * What the pre-activation check does, in the order the server does it (load → structure checks → AI copy review → results).
+ * The server answers in one shot, so the list advances on a timer: the first steps finish fast; the AI step stays "in progress"
+ * until the response lands. `at` is the second at which each step is considered done (the last one never is).
+ */
+const QA_STEPS: { title: string; detail: string; at: number }[] = [
+  { title: 'Loading your sequence', detail: 'Fetching the latest saved version of the steps and messages.', at: 1 },
+  { title: 'Checking the structure', detail: 'Every step is connected, delays and conditions make sense, and the senders in the pool are ready.', at: 3 },
+  { title: 'Reviewing the message copy with AI', detail: 'Looks at the first message (no hard sell, no links), personalisation, follow-up spacing, tone and anything unsafe.', at: Infinity },
+  { title: 'Putting the results together', detail: 'Things to fix and suggestions, each linked to the step it is about.', at: Infinity },
+];
+
+function QaProgress() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const t = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 500);
+    return () => clearInterval(t);
+  }, []);
+  const doneCount = QA_STEPS.filter((s) => elapsed >= s.at).length;
+  return (
+    <div className="py-2">
+      <p className="text-sm font-medium text-gray-900">Checking your sequence before it goes live…</p>
+      <p className="text-xs text-gray-500 mt-0.5">This usually takes 10–20 seconds. Nothing is sent until you confirm.</p>
+      <ol className="mt-4 space-y-3" aria-live="polite">
+        {QA_STEPS.map((s, i) => {
+          const state = i < doneCount ? 'done' : i === doneCount ? 'active' : 'todo';
+          return (
+            <li key={s.title} className="flex items-start gap-3">
+              <span className="mt-0.5 shrink-0">
+                {state === 'done' && <CheckCircle2 className="w-4 h-4 text-green-600" />}
+                {state === 'active' && <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />}
+                {state === 'todo' && <Circle className="w-4 h-4 text-gray-300" />}
+              </span>
+              <div className="min-w-0">
+                <p className={`text-sm ${state === 'todo' ? 'text-gray-400' : state === 'done' ? 'text-gray-600' : 'text-gray-900 font-medium'}`}>
+                  {s.title}{state === 'active' ? '…' : ''}
+                </p>
+                <p className={`text-xs ${state === 'todo' ? 'text-gray-300' : 'text-gray-500'}`}>{s.detail}</p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+      {elapsed >= 30 && <p className="mt-4 text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2">Taking longer than usual. The AI review is still running; you can wait or cancel and try again.</p>}
     </div>
   );
 }
@@ -35,27 +94,24 @@ export function QaModal({ qa, graph, onClose, onActivate, onFocus }: { qa: QaSta
   if (!qa) return null;
   const blocked = qa.errors.length > 0;
   return (
-    <Modal open onClose={onClose} title="Pre-activation check" size="lg" footer={
+    <Modal open onClose={onClose} title="Final check before going live" size="lg" footer={
       <>
         <Button variant="secondary" onClick={onClose}>{blocked ? 'Fix issues' : 'Cancel'}</Button>
         {!blocked && !qa.loading && <Button loading={qa.activating} onClick={onActivate}>{qa.warnings.length ? 'Activate anyway' : 'Activate'}</Button>}
       </>
     }>
       {qa.loading ? (
-        <div className="py-6 text-center">
-          <Spinner className="py-2" />
-          <p className="text-sm text-gray-600">Validating the graph and reviewing copy with AI…</p>
-        </div>
+        <QaProgress />
       ) : (
         <div className="space-y-3">
-          {qa.failed && <ErrorBox message={`The QA service could not be reached (${qa.failed}). The server still validates the graph when you activate.`} />}
+          {qa.failed && <ErrorBox message={`The AI review could not run right now (${qa.failed}). The sequence is still checked when you activate.`} />}
           {!blocked && qa.warnings.length === 0 && !qa.failed && (
             <div className="flex items-center gap-2 text-sm text-green-800 bg-green-50 rounded-lg px-3 py-2"><CheckCircle2 className="w-4 h-4" /> No issues found. The sequence is ready to run.</div>
           )}
           <IssueList items={qa.errors} level="error" graph={graph} onFocus={(id) => { onFocus(id); onClose(); }} />
           <IssueList items={qa.warnings} level="warning" graph={graph} onFocus={(id) => { onFocus(id); onClose(); }} />
-          <p className="text-xs text-gray-500 flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" />{qa.ai_available ? 'Warnings include AI suggestions on tone, length and personalisation.' : 'AI review is not configured for this workspace; only static checks ran.'}</p>
-          {blocked && <p className="text-xs text-gray-600">Blocking errors must be fixed before the sequence can be activated. Activation also requires every pool sender to be connected.</p>}
+          <p className="text-xs text-gray-500 flex items-center gap-1"><Sparkles className="w-3.5 h-3.5" />{qa.ai_available ? 'Suggestions include AI feedback on tone, length and personalisation.' : 'AI review is not set up for this workspace, so only the built-in checks ran.'}</p>
+          {blocked && <p className="text-xs text-gray-600">Fix the items in red before activating. Every sender in the pool also needs to be connected.</p>}
         </div>
       )}
     </Modal>

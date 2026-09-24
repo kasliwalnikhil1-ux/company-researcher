@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Filter } from 'lucide-react';
 import { EmptyState, Select } from '@/components/outreach/ui';
 import { useLists, useSenders, useSequences, useTags } from '@/lib/outreach/queries';
@@ -8,9 +8,11 @@ import { FUNNEL_LABELS, csvFileName, downloadCsv, fmtRange, useReportFunnel, typ
 import { ChartSkeleton, ExportButton, MetricLabel, Refreshing, RetryError, Section } from './primitives';
 import { FunnelBars } from './charts';
 import type { TabProps } from './OverviewTab';
+import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 export default function FunnelTab({ ws, client, range }: TabProps) {
-  const [filters, setFilters] = useState<FunnelFilters>({});
+  // Filters are remembered per workspace in this browser.
+  const { filters, setFilters } = usePersistedFilters<FunnelFilters>('reports-funnel', ws, { sequence_id: undefined, sender_id: undefined, list_id: undefined, tag_id: undefined });
   const sequences = useSequences(ws); const senders = useSenders(ws); const lists = useLists(ws); const tags = useTags(ws);
   const q = useReportFunnel({ ws, client, range }, filters);
   const set = (k: keyof FunnelFilters) => (e: React.ChangeEvent<HTMLSelectElement>) => setFilters((f) => ({ ...f, [k]: e.target.value || undefined }));

@@ -125,7 +125,7 @@ export default function PublishDialog({ open, onClose, sequenceId, liveGraph, dr
     } catch (e) {
       const err = parseError(e);
       if (err.code === 'E_DRAFT_STALE') { setStaleHit(err.message); void load(); }
-      else setError(formatGraphError(e));
+      else setError(formatGraphError(e, draft.graph));
     } finally { setBusy(false); }
   };
 

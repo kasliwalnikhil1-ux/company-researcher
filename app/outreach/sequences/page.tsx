@@ -20,6 +20,7 @@ import FailedLeadsDrawer from '@/components/outreach/sequences/FailedLeadsDrawer
 import { WhyNotSendingDialog } from '@/components/outreach/sequences/WhyNotSendingDialog';
 import { fmtInt, type SequenceExt } from '@/components/outreach/sequences/publishTypes';
 import { formatGraphError, nodeCount, senderName, STATUS_TONE } from '@/components/outreach/sequences/helpers';
+import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const STATUSES: SequenceStatus[] = ['draft', 'active', 'paused', 'archived'];
 
@@ -100,8 +101,13 @@ export default function SequencesPage() {
   const summary = useSequenceSummary(ws);
   const canManage = isManager && !suspended;
 
-  const [status, setStatus] = useState<'' | SequenceStatus>('');
-  const [client, setClient] = useState('');
+  // Status and client filters are remembered per workspace in this browser; the search is not.
+  const { filters: listFilters, patch: patchListFilters } = usePersistedFilters<{ status: '' | SequenceStatus; client: string }>('sequences', ws, { status: '', client: '' }, {
+    sanitize: (raw, d) => { const v = sanitizeLike(raw, d); if (v.status && !(STATUSES as readonly string[]).includes(v.status)) v.status = ''; return v; },
+  });
+  const { status, client } = listFilters;
+  const setStatus = (v: '' | SequenceStatus) => patchListFilters({ status: v });
+  const setClient = (v: string) => patchListFilters({ client: v });
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -252,9 +258,9 @@ export default function SequencesPage() {
       </Modal>
 
       <ConfirmModal open={confirm?.kind === 'archive'} title="Archive sequence" confirmLabel="Archive" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-        body={<p>Archiving “{confirm?.s.name}” exits all live enrollments ({summaryMap[confirm?.s.id ?? '']?.live ?? 0}) and stops scheduling. The graph and history are kept.</p>} />
+        body={<p>Archiving “{confirm?.s.name}” takes all {summaryMap[confirm?.s.id ?? '']?.live ?? 0} leads currently in it out of the sequence and stops sending. The steps and history are kept.</p>} />
       <ConfirmModal open={confirm?.kind === 'delete'} title="Delete sequence" confirmLabel="Delete permanently" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-        body={<p>This permanently deletes “{confirm?.s.name}”, its versions, node statistics and enrollment history. This cannot be undone.</p>} />
+        body={<p>This permanently deletes “{confirm?.s.name}”, its versions, its step statistics and the history of every lead that went through it. This cannot be undone.</p>} />
       <WhyNotSendingDialog open={!!whyFor} onClose={() => setWhyFor(null)} sequenceId={whyFor} />
       <FailedLeadsDrawer open={!!failedFor} onClose={() => setFailedFor(null)} sequenceId={failedFor?.id ?? ''} nodeLabel={undefined} graph={failedFor?.graph ?? null} canWrite={canWrite} />
       {toast.node}

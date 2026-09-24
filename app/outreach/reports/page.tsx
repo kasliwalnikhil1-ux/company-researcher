@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { CalendarClock, Globe } from 'lucide-react';
@@ -18,6 +18,7 @@ import SendersTab from '@/components/outreach/reports/SendersTab';
 import ClientsTab from '@/components/outreach/reports/ClientsTab';
 import CostTab from '@/components/outreach/reports/CostTab';
 import SchedulesDrawer from '@/components/outreach/reports/SchedulesDrawer';
+import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const TABS = [
   { key: 'overview', label: 'Overview' }, { key: 'funnel', label: 'Funnel' }, { key: 'replies', label: 'Replies' }, { key: 'sequences', label: 'Sequences' },
@@ -55,6 +56,17 @@ function ReportsPage() {
     router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }, [params, pathname, router]);
 
+  // The client selection is remembered per workspace in this browser. It is restored only when the page opens with a bare URL
+  // (no tab, range or client), so a shared report link still shows exactly the numbers it points to.
+  const { filters: remembered, patch: rememberClient, ready: rememberedReady } = usePersistedFilters('reports', ws || null, { client: '' });
+  const restoredRef = useRef(false);
+  const bareUrl = params.toString() === '';
+  useEffect(() => {
+    if (restoredRef.current || !rememberedReady || !clients.data) return;
+    restoredRef.current = true;
+    if (bareUrl && remembered.client && clients.data.some((c) => c.id === remembered.client)) setParams({ client: remembered.client });
+  }, [rememberedReady, clients.data, bareUrl, remembered.client, setParams]);
+
   const showToast = toast.show;
   const notice = useCallback((m: string, t?: 'success' | 'error') => showToast(m, t), [showToast]);
   if (!workspace) return <PageLoader />;
@@ -70,7 +82,7 @@ function ReportsPage() {
         <div className="flex flex-wrap items-center gap-4">
           {hasClients && (
             <label className="flex items-center gap-2 text-sm text-gray-600">Client
-              <select value={client ?? ''} onChange={(e) => setParams({ client: e.target.value || null })} className="px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 max-w-[220px] focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <select value={client ?? ''} onChange={(e) => { rememberClient({ client: e.target.value }); setParams({ client: e.target.value || null }); }} className="px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 max-w-[220px] focus:outline-none focus:ring-2 focus:ring-indigo-500">
                 <option value="">All clients</option>{(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </label>

@@ -79,6 +79,52 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
   return sender;
 }
 
+/**
+ * A LinkedIn/mailbox identity may only exist once per workspace. When a freshly connected sender turns out to be the
+ * same account as an existing (non-deleted) sender — typically the owner used "Connect an account" instead of
+ * "Reconnect" after a re-login prompt — fold the new connection into the existing row: it takes over the new Unipile
+ * account id and profile fields, keeps its chats / lead state / enrollments / schedule, and the new row becomes a
+ * tombstone (deleted_at set, status_reason "merged_into:<id>") so the hosted-auth redirect can forward to the survivor.
+ * Returns the sender that now owns the account (the survivor, or `sender` unchanged when there is no duplicate).
+ */
+export async function absorbDuplicateSender(sender: Sender): Promise<Sender> {
+  if (!sender.provider_user_id || !sender.unipile_account_id) return sender;
+  const { data: twins } = await admin.from("outreach_senders").select("*")
+    .eq("workspace_id", sender.workspace_id).eq("provider", sender.provider).eq("provider_user_id", sender.provider_user_id)
+    .neq("id", sender.id).is("deleted_at", null).order("created_at");
+  const survivor = (twins ?? [])[0];
+  if (!survivor) return sender;
+  const newAccountId = sender.unipile_account_id as string;
+  const oldAccountId = survivor.unipile_account_id as string | null;
+  const now = new Date().toISOString();
+  // 1. free the unique unipile_account_id on the duplicate and tombstone it
+  const { error: e1 } = await admin.from("outreach_senders").update({
+    unipile_account_id: null, status: "disabled", status_reason: `merged_into:${survivor.id}`, deleted_at: now,
+  }).eq("id", sender.id);
+  if (e1) { log({ fn: "absorbDuplicateSender", error: e1.message, sender_id: sender.id }); return sender; }
+  // 2. the survivor takes over the new account and the fresh profile snapshot
+  const patch: Record<string, unknown> = {
+    unipile_account_id: newAccountId, status: survivor.status === "disabled" ? "disabled" : "connecting", status_reason: null,
+    auth_method: sender.auth_method ?? survivor.auth_method, public_identifier: sender.public_identifier ?? survivor.public_identifier,
+    picture_url: sender.picture_url ?? survivor.picture_url, is_premium: sender.is_premium ?? survivor.is_premium,
+    has_sales_nav: sender.has_sales_nav ?? survivor.has_sales_nav, has_recruiter: sender.has_recruiter ?? survivor.has_recruiter,
+    connections_count: sender.connections_count ?? survivor.connections_count, owner_email: survivor.owner_email ?? sender.owner_email,
+    client_id: survivor.client_id ?? sender.client_id, connected_at: survivor.connected_at ?? now, last_ok_at: now,
+    reconnect_attempts: 0, consecutive_errors: 0, paused_until: null,
+  };
+  const { data: merged, error: e2 } = await admin.from("outreach_senders").update(patch).eq("id", survivor.id).select("*").single();
+  if (e2) { log({ fn: "absorbDuplicateSender", error: e2.message, sender_id: survivor.id }); return sender; }
+  // 3. keep the connection history on the survivor; the old Unipile account (if still on the DSN) is now orphaned
+  await admin.from("outreach_sender_events").update({ sender_id: survivor.id }).eq("sender_id", sender.id);
+  await admin.from("outreach_sender_events").insert({ sender_id: survivor.id, kind: "reconnect", data: { method: "merged_duplicate", merged_sender_id: sender.id, previous_account_id: oldAccountId, account_id: newAccountId } });
+  if (oldAccountId && oldAccountId !== newAccountId) {
+    try { if (await accountExistsOnDsn(oldAccountId)) await unipile.accounts.delete(oldAccountId); } catch (e) { log({ fn: "absorbDuplicateSender", warn: "old account cleanup failed", error: String(e) }); }
+  }
+  await audit(survivor.workspace_id, "sender.merged_duplicate", "sender", survivor.id, { merged_sender_id: sender.id, previous_account_id: oldAccountId, account_id: newAccountId });
+  log({ fn: "absorbDuplicateSender", merged: sender.id, into: survivor.id });
+  return merged ?? { ...survivor, ...patch };
+}
+
 /** Onboarding gate (§13.4): thin/unknown accounts locked at level 0 for 28 days; free accounts capped at level 1. */
 export async function applyOnboardingGate(sender: Sender): Promise<void> {
   const conns = sender.connections_count;
@@ -104,6 +150,7 @@ export async function handleAccountStatus(payload: any): Promise<void> {
   switch (message) {
     case "CREATION_SUCCESS": {
       sender = await syncOwnProfile(sender);
+      sender = await absorbDuplicateSender(sender);
       await applyOnboardingGate(sender);
       await admin.from("outreach_senders").update({ status: sender.status === "disabled" ? "disabled" : "connecting", connected_at: sender.connected_at ?? new Date().toISOString() }).eq("id", sender.id);
       break;
@@ -220,13 +267,14 @@ export async function handleHostedNotify(payload: any): Promise<void> {
   }
   await audit(s.workspace_id, "sender.hosted_auth", "sender", senderId, { status, account_id: accountId });
   if (status === "CREATION_SUCCESS") {
-    const fresh = await syncOwnProfile({ ...s, unipile_account_id: accountId });
+    // same LinkedIn / mailbox already connected in this workspace → fold into that sender (it now owns accountId)
+    const fresh = await absorbDuplicateSender(await syncOwnProfile({ ...s, unipile_account_id: accountId }));
     await applyOnboardingGate(fresh);
     // if the webhook OK never arrives (platform webhook missing), poll account once
     try {
       const acc = await unipile.accounts.get(accountId);
       const st = String(acc?.sources?.[0]?.status ?? "").toUpperCase();
-      if (st === "OK") await admin.from("outreach_senders").update({ status: "ok", status_reason: null, last_ok_at: new Date().toISOString() }).eq("id", senderId);
+      if (st === "OK") await admin.from("outreach_senders").update({ status: fresh.status === "disabled" ? "disabled" : "ok", status_reason: null, last_ok_at: new Date().toISOString() }).eq("id", fresh.id);
     } catch { /* ignore */ }
   }
 }

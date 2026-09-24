@@ -58,7 +58,7 @@ export function LeadsTable({ rows, selected, onToggle, onToggleAll, clients, lis
           <Th>Stage</Th>
           <Th className="hidden lg:table-cell">List</Th>
           {clients && clients.length > 0 && <Th className="hidden xl:table-cell">Client</Th>}
-          <Th className="hidden md:table-cell">DNC</Th>
+          <Th className="hidden md:table-cell" title="Do not contact — flagged leads are excluded from every sequence">DNC</Th>
           <Th className="hidden lg:table-cell">Created</Th>
         </tr>
       </thead>
@@ -110,7 +110,7 @@ export function LeadsTable({ rows, selected, onToggle, onToggleAll, clients, lis
               <Td>{stage ? <StageChip stage={stage} /> : <span className="text-gray-300">—</span>}</Td>
               <Td className="hidden lg:table-cell"><span className="block max-w-[140px] truncate text-gray-600">{list?.name ?? '—'}</span></Td>
               {clients && clients.length > 0 && <Td className="hidden xl:table-cell"><span className="block max-w-[140px] truncate text-gray-600">{client?.name ?? '—'}</span></Td>}
-              <Td className="hidden md:table-cell">{l.do_not_contact ? <Badge tone="red"><ShieldOff className="w-3 h-3 mr-1" /> DNC</Badge> : l.unsubscribed ? <Badge tone="amber">unsubscribed</Badge> : <span className="text-gray-300">—</span>}</Td>
+              <Td className="hidden md:table-cell">{l.do_not_contact ? <span title="Do not contact — this lead is excluded from every sequence" className="cursor-help"><Badge tone="red"><ShieldOff className="w-3 h-3 mr-1" /> DNC</Badge></span> : l.unsubscribed ? <span title="Unsubscribed — this lead opted out of emails" className="cursor-help"><Badge tone="amber">unsubscribed</Badge></span> : <span className="text-gray-300">—</span>}</Td>
               <Td className="hidden lg:table-cell whitespace-nowrap text-gray-500 text-xs">{fmtDate(l.created_at, false)}</Td>
             </tr>
           );

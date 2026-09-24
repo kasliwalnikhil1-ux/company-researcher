@@ -79,7 +79,7 @@ export type RecoverAction = 'retry' | 'skip' | 'exit';
 export interface RecoverResult { done: number; action?: RecoverAction; refused: Array<{ id: string; reason: string }> }
 
 export const REFUSED_REASON: Record<string, string> = {
-  not_found: 'the enrolment no longer exists',
+  not_found: 'the lead is no longer in this sequence',
   not_failed: 'the lead is no longer in a failed state',
   lead_suppressed: 'the lead is on a do-not-contact list',
   profile_invalid: 'LinkedIn says the profile cannot be contacted',

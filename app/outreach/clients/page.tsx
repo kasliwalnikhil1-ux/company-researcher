@@ -8,8 +8,8 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { qk, useClients, useSenders, useSequences } from '@/lib/outreach/queries';
-import { Button, Card, EmptyState, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, Select, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
-import { browserTimezone, slugify, timezoneOptions } from '@/components/outreach/senders/helpers';
+import { Button, Card, EmptyState, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, SearchableSelect, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
+import { browserTimezone, slugify, timezoneChoices } from '@/components/outreach/senders/helpers';
 import type { Client } from '@/lib/outreach/types';
 import { fmtInt, fmtRate, presetRange, useReportClients } from '@/lib/outreach/reports';
 import { CountRate, MetricLabel } from '@/components/outreach/reports/primitives';
@@ -22,7 +22,7 @@ export default function ClientsPage() {
   const clients = useClients(ws);
   const senders = useSenders(isManager ? ws : null);
   const sequences = useSequences(isManager ? ws : null);
-  const tzList = useMemo(() => timezoneOptions(), []);
+  const tzList = useMemo(() => timezoneChoices(), []);
   const [editing, setEditing] = useState<Client | 'new' | null>(null);
   const [form, setForm] = useState({ name: '', slug: '', timezone: browserTimezone(), slugTouched: false });
   const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
@@ -112,10 +112,7 @@ export default function ClientsPage() {
         <form onSubmit={save} className="space-y-3">
           <Input label="Name" value={form.name} autoFocus required onChange={(e) => setForm({ ...form, name: e.target.value, slug: form.slugTouched ? form.slug : slugify(e.target.value) })} placeholder="Acme Corp" />
           <Input label="Slug" value={form.slug} onChange={(e) => setForm({ ...form, slug: slugify(e.target.value), slugTouched: true })} hint="Used in URLs and exports; letters, digits and dashes." />
-          <Select label="Timezone" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
-            {!tzList.includes(form.timezone) && form.timezone && <option value={form.timezone}>{form.timezone}</option>}
-            {tzList.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-          </Select>
+          <SearchableSelect label="Timezone" value={form.timezone} onChange={(tz) => setForm({ ...form, timezone: tz })} options={tzList} searchPlaceholder="Search city, region or GMT offset…" />
           {error && <ErrorBox message={error} />}
         </form>
       </Modal>

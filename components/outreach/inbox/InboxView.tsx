@@ -17,20 +17,15 @@ import ChatList from './ChatList';
 import Thread, { type ConvertKind } from './Thread';
 import LeadPanel from './LeadPanel';
 import { isTypingTarget, useDebounced, useMediaQuery } from './hooks';
+import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
-const FILTERS_KEY = 'outreach-inbox-filters';
 
 /** `?chats=<ids>&label=<text>`: the reports page opens the inbox on exactly these threads. */
 export interface InboxRestrict { ids: string[]; label: string }
 type InboxFilters = ChatFilters & { sequence_id?: string | null };
 
-function loadFilters(): InboxFilters {
-  try {
-    const raw = localStorage.getItem(FILTERS_KEY);
-    if (raw) { const f = JSON.parse(raw); if (f && typeof f === 'object') return { ...f, search: undefined }; }
-  } catch { /* ignore */ }
-  return {};
-}
+// Filters are remembered per workspace in this browser; the search is never stored (it is not a key of the defaults).
+const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null };
 
 export default function InboxView({ chatId, initialFilters, restrict }: { chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null }) {
   const router = useRouter();
@@ -41,24 +36,14 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   const toast = useToast();
   const userId = user?.id ?? null;
 
-  const [filters, setFilters] = useState<InboxFilters>({});
+  // URL params (e.g. from dashboard links) override the remembered filters.
+  const { filters, patch: patchFilters, ready: filtersReady } = usePersistedFilters<InboxFilters>('inbox', ws, INBOX_FILTER_DEFAULTS, { overrides: initialFilters ?? null });
   const [search, setSearch] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
   const [convert, setConvert] = useState<ConvertKind | null>(null);
   const debouncedSearch = useDebounced(search.trim(), 300);
   const isXl = useMediaQuery('(min-width: 1280px)');
 
-  useEffect(() => {
-    // URL params (e.g. from dashboard links) override the remembered filters.
-    setFilters(initialFilters ? { ...loadFilters(), ...initialFilters } : loadFilters());
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const patchFilters = useCallback((patch: Partial<InboxFilters>) => {
-    setFilters((f) => {
-      const next = { ...f, ...patch };
-      try { localStorage.setItem(FILTERS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
-      return next;
-    });
-  }, []);
 
   const effectiveFilters = useMemo<ChatFilters>(() => { const { sequence_id: _seq, ...rest } = filters; return { ...rest, search: debouncedSearch || undefined }; }, [filters, debouncedSearch]);
 
@@ -74,8 +59,8 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   }, [restrictKey, sequenceId, seqIdsQ.data]); // eslint-disable-line react-hooks/exhaustive-deps
   const waitingForSeq = !!sequenceId && seqIdsQ.isLoading;
   const fetchByIds = !!restrictIds && !waitingForSeq && restrictIds.length <= CHAT_IDS_FETCH_LIMIT;
-  const listQ = useChats(fetchByIds || waitingForSeq ? null : ws, effectiveFilters);
-  const byIdsQ = useChatsByIds(fetchByIds ? ws : null, fetchByIds ? restrictIds : null, effectiveFilters);
+  const listQ = useChats(fetchByIds || waitingForSeq || !filtersReady ? null : ws, effectiveFilters);
+  const byIdsQ = useChatsByIds(fetchByIds && filtersReady ? ws : null, fetchByIds ? restrictIds : null, effectiveFilters);
   const chatsQ = fetchByIds ? byIdsQ : listQ;
   const sendersQ = useSenders(ws);
   const sequencesQ = useSequences(ws);
@@ -201,11 +186,11 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
 
   const showList = !chatId;
   return (
-    <div className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh-6.5rem-1px)] md:h-[calc(100dvh-3rem-1px)] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
+    <div className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh-3.5rem)] md:h-[100dvh] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
       {/* Left: chat list */}
       <aside className={cn('w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-gray-200 min-h-0', showList ? 'flex' : 'hidden md:flex', 'flex-col')}>
         <ChatList
-          rows={rows} loading={chatsQ.isLoading || waitingForSeq} error={listError ? parseError(listError).message : null}
+          rows={rows} loading={!filtersReady || chatsQ.isLoading || waitingForSeq} error={listError ? parseError(listError).message : null}
           sequences={sequencesQ.data} sequenceId={sequenceId} onSequence={(id) => patchFilters({ sequence_id: id })}
           restrictLabel={restrict?.label ?? null} restrictCount={restrict?.ids.length ?? 0} onClearRestrict={clearRestrict} note={listNote}
           filters={filters} onFilters={patchFilters} search={search} onSearch={setSearch}

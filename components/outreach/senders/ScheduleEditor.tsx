@@ -5,8 +5,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Copy, Plus, Save, Trash2, Info } from 'lucide-react';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
-import { Button, Card, ErrorBox, Select } from '@/components/outreach/ui';
-import { WEEKDAYS, localTime, normalizeSchedule, scheduleSummary, timezoneCountryHint, timezoneOptions } from './helpers';
+import { Button, Card, ErrorBox, SearchableSelect } from '@/components/outreach/ui';
+import { WEEKDAYS, localTime, normalizeSchedule, scheduleSummary, timezoneChoices, timezoneCountryHint } from './helpers';
 import type { Schedule, ScheduleWindow, Sender } from '@/lib/outreach/types';
 
 type Notify = (message: string, type?: 'success' | 'error') => void;
@@ -31,7 +31,7 @@ export default function ScheduleEditor({ sender, isManager, canWrite, notify }: 
   const [schedule, setSchedule] = useState<Schedule>(() => normalizeSchedule(sender.schedule));
   const [timezone, setTimezone] = useState(sender.timezone || 'UTC');
   const [saving, setSaving] = useState(false);
-  const tzList = useMemo(() => timezoneOptions(), []);
+  const tzList = useMemo(() => timezoneChoices(), []);
   useEffect(() => { setSchedule(normalizeSchedule(sender.schedule)); setTimezone(sender.timezone || 'UTC'); }, [sender.id, sender.schedule, sender.timezone]);
 
   const error = useMemo(() => validate(schedule), [schedule]);
@@ -67,10 +67,7 @@ export default function ScheduleEditor({ sender, isManager, canWrite, notify }: 
       ) : undefined}>
         <p className="text-sm text-gray-500 mb-4">Actions are only scheduled inside these local-time windows, with random jitter so nothing lands on a round minute. Summary: <span className="text-gray-800 font-medium">{scheduleSummary(schedule)}</span>.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <Select label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} disabled={!canEdit}>
-            {!tzList.includes(timezone) && <option value={timezone}>{timezone}</option>}
-            {tzList.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-          </Select>
+          <SearchableSelect label="Timezone" value={timezone} onChange={setTimezone} options={tzList} disabled={!canEdit} searchPlaceholder="Search city, region or GMT offset…" />
           <div className="text-xs text-gray-500 md:pt-6">Sender-local time now: <span className="text-gray-800 font-medium">{localTime(timezone)}</span></div>
         </div>
         {mismatch && (

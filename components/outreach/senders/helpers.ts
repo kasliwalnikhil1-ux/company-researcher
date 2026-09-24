@@ -95,6 +95,59 @@ export function timezoneOptions(): string[] {
   return FALLBACK_TIMEZONES;
 }
 
+/** "GMT+05:30" style offset for a zone right now; '' when the zone is unknown. */
+export function timezoneOffsetLabel(tz: string, at: Date = new Date()): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' }).formatToParts(at);
+    const p = parts.find((x) => x.type === 'timeZoneName')?.value ?? '';
+    return p === 'GMT' ? 'GMT+00:00' : p;
+  } catch { return ''; }
+}
+
+/**
+ * Browsers return the older ICU names for some zones (Asia/Calcutta, not Asia/Kolkata). People search
+ * for the modern city name, so these are matched as hidden keywords. Also covers a few common aliases.
+ */
+const TIMEZONE_KEYWORDS: Record<string, string> = {
+  'Asia/Calcutta': 'Kolkata India IST Mumbai Delhi Bangalore Bengaluru Chennai Hyderabad',
+  'Asia/Kolkata': 'Calcutta India IST Mumbai Delhi Bangalore Bengaluru Chennai Hyderabad',
+  'Asia/Katmandu': 'Kathmandu Nepal',
+  'Asia/Kathmandu': 'Katmandu Nepal',
+  'Asia/Saigon': 'Ho Chi Minh Vietnam',
+  'Asia/Ho_Chi_Minh': 'Saigon Vietnam',
+  'Asia/Rangoon': 'Yangon Myanmar',
+  'Asia/Yangon': 'Rangoon Myanmar',
+  'Asia/Dacca': 'Dhaka Bangladesh',
+  'Asia/Dhaka': 'Dacca Bangladesh',
+  'Asia/Macau': 'Macao',
+  'Asia/Macao': 'Macau',
+  'Europe/Kiev': 'Kyiv Ukraine',
+  'Europe/Kyiv': 'Kiev Ukraine',
+  'America/Buenos_Aires': 'Argentina',
+  'America/Argentina/Buenos_Aires': 'Argentina',
+  'America/Indianapolis': 'Indiana',
+  'America/Louisville': 'Kentucky',
+  'Pacific/Truk': 'Chuuk',
+  'Pacific/Ponape': 'Pohnpei',
+  'Atlantic/Faeroe': 'Faroe',
+  'Europe/London': 'UK Britain England GMT BST',
+  'America/New_York': 'US Eastern EST EDT',
+  'America/Chicago': 'US Central CST CDT',
+  'America/Denver': 'US Mountain MST MDT',
+  'America/Los_Angeles': 'US Pacific PST PDT San Francisco Seattle',
+  'Asia/Dubai': 'UAE Gulf GST',
+  'Asia/Singapore': 'SGT',
+  'Australia/Sydney': 'AEST AEDT',
+  'Europe/Berlin': 'Germany CET CEST',
+  'Europe/Paris': 'France CET CEST',
+};
+
+/** Options for a searchable timezone picker: readable label plus the current UTC offset as a hint. */
+export function timezoneChoices(list: string[] = timezoneOptions()): Array<{ value: string; label: string; hint: string; keywords?: string }> {
+  const now = new Date();
+  return list.map((tz) => ({ value: tz, label: tz.replace(/_/g, ' '), hint: timezoneOffsetLabel(tz, now), keywords: TIMEZONE_KEYWORDS[tz] }));
+}
+
 export function browserTimezone(): string {
   try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
 }

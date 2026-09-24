@@ -4,13 +4,13 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, ArrowUpCircle, Code2, Eye, History, LayoutGrid, RotateCcw } from 'lucide-react';
+import { ArrowUpCircle, Code2, Eye, History, LayoutGrid, RotateCcw } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph } from '@/lib/outreach/graph';
 import { qk, useLists, useMembers, useSenders, useSequence, useSequenceVersions, useStages, useTags, useWebhooks, useSequences } from '@/lib/outreach/queries';
 import type { SequenceVersion } from '@/lib/outreach/types';
-import { Badge, Button, EmptyState, ErrorBox, fmtDate, Modal, PageHeader, PageLoader, Table, Td, Th, useToast } from '@/components/outreach/ui';
+import { BackLink, Badge, Button, EmptyState, ErrorBox, fmtDate, Modal, PageHeader, PageLoader, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import MiniCanvas from '@/components/outreach/sequences/MiniCanvas';
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
 import { diffGraphs, formatGraphError, nodeCount, nodeTitle, type Lookup } from '@/components/outreach/sequences/helpers';
@@ -98,7 +98,7 @@ export default function SequenceVersionsPage() {
 
   return (
     <div>
-      <Link href={`/outreach/sequences/${id}`} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3"><ArrowLeft className="w-4 h-4" /> Back to builder</Link>
+      <BackLink href={`/outreach/sequences/${id}`}>Back to builder</BackLink>
       <PageHeader title={<span className="flex items-center gap-2"><History className="w-6 h-6 text-gray-400" /> Version history</span>} subtitle={<>{seq.data.name} · live version v{seq.data.head_version}. Every publish that changes the steps creates a version. Restoring loads a version into the draft, so nothing changes for live leads until you publish.</>} />
       {(seq.data as SequenceExt).draft_graph && <p className="mb-3 text-xs text-amber-800 bg-amber-50 rounded-lg px-3 py-2">This sequence has an unpublished draft. Restoring a version replaces that draft.</p>}
       {usage.error && <ErrorBox className="mb-3" message={`Lead counts per version could not be loaded: ${parseError(usage.error).message}`} />}
@@ -148,7 +148,7 @@ export default function SequenceVersionsPage() {
         footer={<>
           <div className="mr-auto inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
             <button type="button" onClick={() => setMode('canvas')} className={`px-3 py-1.5 inline-flex items-center gap-1 ${mode === 'canvas' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700'}`}><LayoutGrid className="w-3.5 h-3.5" /> Canvas</button>
-            <button type="button" onClick={() => setMode('json')} className={`px-3 py-1.5 inline-flex items-center gap-1 ${mode === 'json' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700'}`}><Code2 className="w-3.5 h-3.5" /> JSON</button>
+            <button type="button" onClick={() => setMode('json')} className={`px-3 py-1.5 inline-flex items-center gap-1 ${mode === 'json' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700'}`}><Code2 className="w-3.5 h-3.5" /> Raw data</button>
           </div>
           {canManage && preview && preview.version !== seq.data.head_version && <Button variant="secondary" onClick={() => { setRestore(preview); setPreview(null); }}><RotateCcw className="w-4 h-4" /> Restore this version</Button>}
           <Button onClick={() => setPreview(null)}>Close</Button>

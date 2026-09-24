@@ -2,6 +2,7 @@
 import type { Graph, GraphNode, List, NodeDelay, NodeType, OutboundWebhook, Sender, Sequence, SequenceStatus, Stage, Tag } from '@/lib/outreach/types';
 import { NODE_CATALOG, newNode, nodeExits } from '@/lib/outreach/nodes';
 import { parseError } from '@/lib/outreach/api';
+import { humanizeIssue } from '@/lib/outreach/graph';
 
 export interface Lookup {
   tags?: Tag[];
@@ -15,8 +16,9 @@ export interface Lookup {
 export const STATUS_TONE: Record<SequenceStatus, 'gray' | 'green' | 'amber' | 'blue'> = { draft: 'gray', active: 'green', paused: 'amber', archived: 'blue' };
 
 export const NODE_W = 240;
-export const LAYOUT_X = 320;
-export const LAYOUT_Y = 170;
+/** Tree layout: one column per branch, one row per step (HeyReach-style, top to bottom). */
+export const COL_W = NODE_W + 72;
+export const ROW_H = 200;
 
 export function senderName(s: Pick<Sender, 'display_name' | 'owner_email' | 'public_identifier' | 'provider'> | null | undefined): string {
   if (!s) return 'Unknown sender';
@@ -53,7 +55,7 @@ export function nodeSummary(node: GraphNode, lookup: Lookup = {}, nodes: Record<
   const c = node.config ?? {};
   switch (node.type) {
     case 'start': return 'Entry point';
-    case 'end': return c.reason ? `Reason: ${truncate(c.reason, 50)}` : 'Completes the enrollment';
+    case 'end': return c.reason ? `Reason: ${truncate(c.reason, 50)}` : 'The sequence ends here for this lead';
     case 'visit_profile': return c.notify === false ? 'Silent visit' : 'Visit and notify the lead';
     case 'like_latest_post': return `${c.reaction || 'like'} · posts newer than ${c.max_age_days ?? 90}d`;
     case 'comment_latest_post': return truncate(c.text) || (c.ai ? 'AI-drafted comment (needs approval)' : 'No comment text');
@@ -138,6 +140,62 @@ export function addNode(g: Graph, type: NodeType, position: { x: number; y: numb
   return { graph: next, node };
 }
 
+// ---------------------------------------------------------------------------
+// Exits: tone + "add here" insertion
+// ---------------------------------------------------------------------------
+export type ExitTone = 'positive' | 'negative' | 'neutral';
+const POSITIVE_EXITS = new Set(['true', 'connected', 'found']);
+const NEGATIVE_EXITS = new Set(['false', 'no_connect', 'error', 'bounced', 'no_credit', 'no_email', 'not_found', 'wrong_number']);
+
+/** How a branch pill is coloured: the success path green, the failure path red, everything else neutral. */
+export function exitTone(exit: string): ExitTone {
+  if (POSITIVE_EXITS.has(exit)) return 'positive';
+  if (NEGATIVE_EXITS.has(exit)) return 'negative';
+  return 'neutral';
+}
+
+/** Exits of `n` with no (existing) step connected: the ones that get an "add step" button. */
+export function openExits(n: GraphNode, nodes: Record<string, GraphNode>): string[] {
+  const exits = nodeExits(n);
+  if (exits.length === 0) return [];
+  if (usesNext(n)) return n.next && nodes[n.next] ? [] : [exits[0]];
+  return exits.filter((e) => {
+    // a call task made outside the builder keeps its fallback in the top-level `next`
+    const t = n.branches && e in n.branches ? n.branches[e] : e === 'next' ? n.next : null;
+    return !(t && nodes[t]);
+  });
+}
+
+/** The exit that carries on the main path when a step is inserted into an existing line. */
+export function primaryExit(n: GraphNode): string | null {
+  const exits = nodeExits(n);
+  if (exits.length === 0) return null;
+  if (exits.includes('next')) return 'next';
+  return exits.find((e) => exitTone(e) === 'positive') ?? exits[0];
+}
+
+/**
+ * Add a step on exit `handle` of `source` and wire it in: the "+" button on a line / dangling branch.
+ * With a `target` (the exit already leads somewhere) the new step goes between the two and keeps the old
+ * target on its primary exit. The tree is laid out again afterwards, so positions never need a hand.
+ */
+export function insertNode(g: Graph, type: NodeType, source: string, handle: string, target: string | null): { graph: Graph; node: GraphNode } | null {
+  const src = g.nodes[source];
+  if (!src) return null;
+  const exits = nodeExits(src);
+  if (exits.length === 0) return null;
+  const exit = exits.includes(handle) ? handle : exits[0];
+  const tgt = target ? g.nodes[target] ?? null : null;
+  const added = addNode(g, type, { x: src.position.x, y: src.position.y + ROW_H });
+  let out = connectNodes(added.graph, source, exit, added.node.id);
+  if (tgt) {
+    const onward = primaryExit(added.node);
+    if (onward) out = connectNodes(out, added.node.id, onward, tgt.id);
+  }
+  out = autoLayout(out);
+  return { graph: out, node: out.nodes[added.node.id] };
+}
+
 export function duplicateNode(g: Graph, id: string): { graph: Graph; node: GraphNode } | null {
   const src = g.nodes[id];
   if (!src || src.type === 'start') return null;
@@ -157,54 +215,83 @@ export function updateNode(g: Graph, node: GraphNode): Graph {
   return next;
 }
 
-export function moveNodes(g: Graph, positions: Record<string, { x: number; y: number }>): Graph {
-  const next = cloneGraph(g);
-  let changed = false;
-  for (const [id, p] of Object.entries(positions)) {
-    const n = next.nodes[id];
-    if (!n) continue;
-    const x = Math.round(p.x), y = Math.round(p.y);
-    if (n.position.x !== x || n.position.y !== y) { n.position = { x, y }; changed = true; }
-  }
-  return changed ? next : g;
-}
-
-function outgoing(n: GraphNode): string[] {
+// ---------------------------------------------------------------------------
+// Layout: a top-to-bottom tree (start at the top, every branch fans out below its step)
+// ---------------------------------------------------------------------------
+/** Steps this one leads to, in exit order, each once. */
+function childrenOf(n: GraphNode): string[] {
   const out: string[] = [];
-  if (n.next) out.push(n.next);
-  for (const t of Object.values(n.branches ?? {})) if (t) out.push(t);
+  const push = (t: string | null | undefined) => { if (t && !out.includes(t)) out.push(t); };
+  if (usesNext(n)) push(n.next);
+  else for (const e of nodeExits(n)) push(n.branches && e in n.branches ? n.branches[e] : e === 'next' ? n.next : null);
   return out;
 }
 
-/** Simple left-to-right layered layout (BFS levels from start; unreachable nodes appended). */
-export function autoLayout(g: Graph): Graph {
-  const next = cloneGraph(g);
-  const level = new Map<string, number>();
-  const order: string[] = [];
-  const queue: string[] = next.nodes[next.start] ? [next.start] : [];
-  level.set(next.start, 0);
+/**
+ * Where every step sits. Columns come from a depth-first walk (each step is centred over the steps under it,
+ * branches side by side in exit order), rows from the longest path down from the start, so a step two branches
+ * join into sits below both. Steps not reachable from the start line up in a row at the bottom.
+ */
+export function layoutPositions(g: Graph): Record<string, { x: number; y: number }> {
+  const nodes = g.nodes;
+  const kids = new Map<string, string[]>();
+  const treeDepth = new Map<string, number>();
+  const visit = (id: string, d: number) => {
+    treeDepth.set(id, d);
+    const own: string[] = [];
+    for (const c of childrenOf(nodes[id])) if (nodes[c] && !treeDepth.has(c)) { own.push(c); visit(c, d + 1); }
+    kids.set(id, own);
+  };
+  if (nodes[g.start]) visit(g.start, 0);
+
+  // rows: longest path from the start; steps caught in a loop keep their walk depth
+  const reach = Array.from(treeDepth.keys());
+  const indeg = new Map<string, number>(reach.map((id) => [id, 0]));
+  for (const u of reach) for (const v of childrenOf(nodes[u])) if (indeg.has(v)) indeg.set(v, (indeg.get(v) ?? 0) + 1);
+  const depth = new Map<string, number>();
+  const queue = reach.filter((id) => (indeg.get(id) ?? 0) === 0);
+  for (const id of queue) depth.set(id, treeDepth.get(id) ?? 0);
   while (queue.length) {
-    const cur = queue.shift()!;
-    order.push(cur);
-    const n = next.nodes[cur];
-    if (!n) continue;
-    for (const t of outgoing(n)) {
-      if (!next.nodes[t] || level.has(t)) continue;
-      level.set(t, (level.get(cur) ?? 0) + 1);
-      queue.push(t);
+    const u = queue.shift()!;
+    for (const v of childrenOf(nodes[u])) {
+      if (!indeg.has(v)) continue;
+      depth.set(v, Math.max(depth.get(v) ?? 0, (depth.get(u) ?? 0) + 1));
+      indeg.set(v, (indeg.get(v) ?? 0) - 1);
+      if (indeg.get(v) === 0) queue.push(v);
     }
   }
-  let maxLevel = 0;
-  for (const l of level.values()) maxLevel = Math.max(maxLevel, l);
-  const unreachable = Object.keys(next.nodes).filter((id) => !level.has(id)).sort();
-  unreachable.forEach((id, i) => { level.set(id, maxLevel + 1 + Math.floor(i / 4)); order.push(id); });
-  const rows = new Map<number, number>();
-  for (const id of order) {
-    const l = level.get(id) ?? 0;
-    const row = rows.get(l) ?? 0;
-    rows.set(l, row + 1);
-    next.nodes[id].position = { x: 60 + l * LAYOUT_X, y: 60 + row * LAYOUT_Y };
-  }
+  for (const id of reach) if (!depth.has(id)) depth.set(id, treeDepth.get(id) ?? 0);
+
+  // columns: a step is as wide as everything under it
+  const width = new Map<string, number>();
+  const measure = (id: string): number => {
+    const w = Math.max(1, (kids.get(id) ?? []).reduce((s, c) => s + measure(c), 0));
+    width.set(id, w);
+    return w;
+  };
+  if (nodes[g.start]) measure(g.start);
+
+  const pos: Record<string, { x: number; y: number }> = {};
+  const place = (id: string, left: number) => {
+    const w = width.get(id) ?? 1;
+    pos[id] = { x: Math.round(left + (w * COL_W) / 2 - NODE_W / 2), y: (depth.get(id) ?? 0) * ROW_H };
+    let cursor = left;
+    for (const c of kids.get(id) ?? []) { place(c, cursor); cursor += (width.get(c) ?? 1) * COL_W; }
+  };
+  if (nodes[g.start]) place(g.start, 0);
+
+  let maxDepth = 0;
+  for (const d of depth.values()) maxDepth = Math.max(maxDepth, d);
+  const loose = Object.keys(nodes).filter((id) => !pos[id]).sort();
+  loose.forEach((id, i) => { pos[id] = { x: i * COL_W, y: (maxDepth + 2) * ROW_H }; });
+  return pos;
+}
+
+/** Store the tree layout in the graph (positions travel with the saved draft). */
+export function autoLayout(g: Graph): Graph {
+  const pos = layoutPositions(g);
+  const next = cloneGraph(g);
+  for (const [id, p] of Object.entries(pos)) if (next.nodes[id]) next.nodes[id].position = p;
   return next;
 }
 
@@ -221,15 +308,22 @@ export function diffGraphs(base: Graph, other: Graph): { added: string[]; remove
   return { added, removed, changed };
 }
 
-/** Make E_GRAPH_INVALID payloads (JSON arrays of issues) human-readable. */
-export function formatGraphError(e: unknown): string {
+/**
+ * Turn a server-side rejection of the sequence (a JSON list of issues, or a bare code) into plain language.
+ * Pass the graph so an issue can name the step instead of its id.
+ */
+export function formatGraphError(e: unknown, graph?: Graph | null): string {
   const err = parseError(e);
+  const stepName = (id: unknown) => (typeof id === 'string' ? nodeTitle(graph?.nodes?.[id]) : '') || (typeof id === 'string' ? id : '');
   if (err.code === 'E_GRAPH_INVALID') {
     try {
       const arr = JSON.parse(err.message);
-      if (Array.isArray(arr)) return `Graph invalid: ${arr.map((i: any) => (i.node_id ? `${i.node_id}: ` : '') + (i.message ?? i.code)).join('; ')}`;
+      if (Array.isArray(arr)) {
+        const parts = arr.map((i: { node_id?: string; message?: string; code?: string }) => (i.node_id ? `“${stepName(i.node_id)}”: ` : '') + humanizeIssue(i.message ?? i.code));
+        return `The sequence cannot be saved yet. ${parts.join('. ')}.`;
+      }
     } catch { /* not json */ }
-    return `Graph invalid: ${err.message}`;
+    return `The sequence cannot be saved yet: ${err.message}`;
   }
   return err.message;
 }

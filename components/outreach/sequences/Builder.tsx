@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, History as HistoryIcon } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
@@ -14,7 +13,8 @@ import { qk, useClients, useLeads, useLists, useNodeStats, useSenders, useSequen
 import type { Graph, GraphNode, NodeType, Tag } from '@/lib/outreach/types';
 import { Button, EmptyState, ErrorBox, PageLoader, useToast } from '@/components/outreach/ui';
 import Canvas, { type CanvasHandle, type IssueLevel, type StatKind } from './Canvas';
-import NodePalette from './NodePalette';
+import StepPicker, { type StepPickerTarget } from './StepPicker';
+import { allowedNext } from './allowedNext';
 import NodeConfigPanel from './NodeConfigPanel';
 import TopBar, { type DraftIndicator, type StatusAction } from './TopBar';
 import ValidationBar from './ValidationBar';
@@ -23,7 +23,7 @@ import { BuilderContext, type BuilderCtx } from './context';
 import { draftFromSequence, saveArgs, type Draft } from './draft';
 import { clearLocalDraft, readLocalDraft, stableStringify, useDraftAutosave, writeLocalDraft, type LocalDraftCopy } from './DraftAutosave';
 import { sqk, useEverEnrolled, useFailedCount, useInflightCount } from './hooks';
-import { addNode, autoLayout, connectNodes, disconnectNodes, duplicateNode, formatGraphError, LAYOUT_X, moveNodes, nodeTitle, removeNode, updateNode, type Lookup } from './helpers';
+import { autoLayout, connectNodes, disconnectNodes, duplicateNode, formatGraphError, insertNode, nodeTitle, removeNode, updateNode, type Lookup } from './helpers';
 import { fmtClock, fmtInt, isLiveStatus, plural, type PublishImpact, type SequenceExt, type SetPoolResult } from './publishTypes';
 import PublishDialog, { type PublishOutcome } from './PublishDialog';
 import QueuedNotice from './QueuedNotice';
@@ -66,7 +66,6 @@ export default function Builder({ id }: { id: string }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [qa, setQa] = useState<QaState | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'pause' | 'resume' | 'archive' | 'discard'; busy?: boolean } | null>(null);
   const [unsaved, setUnsaved] = useState<{ href: string; draftFailed: boolean; busy?: boolean } | null>(null);
@@ -174,23 +173,25 @@ export default function Builder({ id }: { id: string }) {
   const patchDraft = useCallback((patch: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...patch } : d)), []);
   const onSelect = useCallback((nid: string | null) => setSelectedId(nid), []);
   const focusNode = useCallback((nid: string) => { setSelectedId(nid); canvasRef.current?.focusNode(nid); }, []);
-  const onMoveNodes = useCallback((positions: Record<string, { x: number; y: number }>) => updateGraph((g) => moveNodes(g, positions)), [updateGraph]);
-  const onConnect = useCallback((s: string, h: string, t: string) => updateGraph((g) => connectNodes(g, s, h, t)), [updateGraph]);
-  const onDisconnect = useCallback((s: string, h: string) => updateGraph((g) => disconnectNodes(g, s, h)), [updateGraph]);
+  // The tree is laid out again after every change to the wiring, so steps always sit under the step they follow.
+  const onConnect = useCallback((s: string, h: string, t: string) => updateGraph((g) => autoLayout(connectNodes(g, s, h, t))), [updateGraph]);
+  const onDisconnect = useCallback((s: string, h: string) => updateGraph((g) => autoLayout(disconnectNodes(g, s, h))), [updateGraph]);
 
-  const onAddNode = useCallback((type: NodeType, position?: { x: number; y: number }) => {
+  // "+" on a line or a dangling branch: remember the spot, let the picker choose the step, then wire it in.
+  const [picker, setPicker] = useState<StepPickerTarget | null>(null);
+  const onAddHere = useCallback((source: string, handle: string, target: string | null) => { if (!readOnly) setPicker({ source, handle, target }); }, [readOnly]);
+  const closePicker = useCallback(() => setPicker(null), []);
+  const pickerAllowed = useMemo(() => (picker && draft ? allowedNext(draft.graph, picker.source, picker.handle) : null), [picker, draft]);
+  const onPickStep = useCallback((type: NodeType) => {
     const d = draftRef.current;
-    if (!d) return;
-    let pos = position;
-    if (!pos) {
-      const sel = selectedId ? d.graph.nodes[selectedId] : null;
-      pos = sel ? { x: sel.position.x + LAYOUT_X, y: sel.position.y } : canvasRef.current?.centerPosition() ?? { x: 200, y: 200 };
-    }
-    const { graph, node } = addNode(d.graph, type, pos);
-    setDraft({ ...d, graph });
-    setSelectedId(node.id);
-    setPaletteOpen(false);
-  }, [selectedId]);
+    if (!d || !picker) return;
+    const r = insertNode(d.graph, type, picker.source, picker.handle, picker.target);
+    setPicker(null);
+    if (!r) return;
+    setDraft({ ...d, graph: r.graph });
+    setSelectedId(r.node.id);
+    setTimeout(() => canvasRef.current?.focusNode(r.node.id), 60);
+  }, [picker]);
 
   const onNodeChange = useCallback((next: GraphNode) => updateGraph((g) => updateNode(g, next)), [updateGraph]);
   const onDuplicate = useCallback((nid: string) => {
@@ -198,7 +199,7 @@ export default function Builder({ id }: { id: string }) {
     if (!d) return;
     const r = duplicateNode(d.graph, nid);
     if (!r) return;
-    setDraft({ ...d, graph: r.graph });
+    setDraft({ ...d, graph: autoLayout(r.graph) });
     setSelectedId(r.node.id);
   }, []);
 
@@ -208,7 +209,7 @@ export default function Builder({ id }: { id: string }) {
     if (!d || readOnly || overlayOpen.current) return;
     const removable = ids.filter((nid) => d.graph.nodes[nid] && nid !== d.graph.start);
     if (removable.length === 0) return;
-    updateGraph((g) => removable.reduce((acc, nid) => removeNode(acc, nid), g));
+    updateGraph((g) => autoLayout(removable.reduce((acc, nid) => removeNode(acc, nid), g)));
     setSelectedId((cur) => (cur && removable.includes(cur) ? null : cur));
     if (publishMode && !deleteHintShown.current) {
       deleteHintShown.current = true;
@@ -244,7 +245,7 @@ export default function Builder({ id }: { id: string }) {
       invalidateSequence();
       return true;
     } catch (e) {
-      toast.show(formatGraphError(e), 'error');
+      toast.show(formatGraphError(e, draftRef.current?.graph), 'error');
       return false;
     } finally { setSaving(false); }
   }, [readOnly, sequence, toast, patchCache, invalidateSequence]);
@@ -321,7 +322,7 @@ export default function Builder({ id }: { id: string }) {
       qc.invalidateQueries({ queryKey: qk.sequences(sequence.workspace_id) });
       qc.invalidateQueries({ queryKey: ['outreach', 'enrollments'] });
       return true;
-    } catch (e) { toast.show(formatGraphError(e), 'error'); return false; }
+    } catch (e) { toast.show(formatGraphError(e, draftRef.current?.graph), 'error'); return false; }
   }, [sequence, qc, toast]);
 
   const onStatus = useCallback(async (action: StatusAction) => {
@@ -461,17 +462,15 @@ export default function Builder({ id }: { id: string }) {
 
   return (
     <BuilderContext.Provider value={ctx}>
-      <div className="flex flex-col -mx-4 md:-mx-6 -my-6 h-[calc(100vh-6.5rem)] md:h-[calc(100vh-3rem)] min-h-[560px] bg-gray-50">
+      <div className="flex flex-col -mx-4 md:-mx-6 -my-6 h-[calc(100dvh-3.5rem)] md:h-[100dvh] min-h-[560px] bg-gray-50">
         <TopBar
           sequence={sequence} draft={draft} dirty={dirty} saving={saving} version={sequence.head_version} readOnly={readOnly} canManage={canManage}
           publishMode={publishMode} modeKnown={modeKnown} canDiscard={dirty || !!autosave.savedAt} indicator={indicator}
           senders={senders} clients={clientsQ.data ?? []} inflight={inflightQ.data} failedCount={failedQ.data}
           onChange={patchDraft} onSave={save} onPublish={openPublish} onDiscard={() => setConfirm({ kind: 'discard' })} onPoolApplied={onPoolApplied} onStatus={onStatus}
           onWhy={() => setWhyOpen(true)} onAutoEnrol={() => setRulesOpen(true)} onFailed={() => setFailedView({ nodeId: null, kind: 'failed' })}
-          onAutoLayout={() => { updateGraph(autoLayout); setTimeout(() => canvasRef.current?.fitView(), 50); }}
           onFit={() => canvasRef.current?.fitView()}
           onNavigate={navigate}
-          onOpenPalette={() => setPaletteOpen(true)}
         />
 
         {stale && (
@@ -491,22 +490,15 @@ export default function Builder({ id }: { id: string }) {
         )}
 
         <div className="flex-1 flex min-h-0 relative">
-          {paletteOpen && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setPaletteOpen(false)} />}
-          <NodePalette
-            onAdd={(t) => onAddNode(t)}
-            readOnly={readOnly}
-            onClose={() => setPaletteOpen(false)}
-            className={cn(paletteOpen ? 'fixed inset-y-0 left-0 z-40 w-72 shadow-xl md:static md:w-60 md:shadow-none md:z-auto' : 'hidden md:flex md:w-60', 'flex-shrink-0')}
-          />
           <div className="flex-1 min-w-0 relative">
             <Canvas
               ref={canvasRef}
               graph={draft.graph} stats={stats} issues={issues} selectedId={selectedId} readOnly={readOnly} lookup={lookup}
-              onSelect={onSelect} onMoveNodes={onMoveNodes} onConnect={onConnect} onDisconnect={onDisconnect}
-              onRequestDelete={requestDelete} onAddNode={onAddNode} onOpenStat={onOpenStat}
+              onSelect={onSelect} onConnect={onConnect} onDisconnect={onDisconnect}
+              onRequestDelete={requestDelete} onAddHere={onAddHere} onOpenStat={onOpenStat}
             />
             {Object.keys(draft.graph.nodes).length <= 2 && !readOnly && (
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 shadow-sm pointer-events-none">Click or drag steps from the palette, then connect the handles.</div>
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-white/90 backdrop-blur border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-600 shadow-sm pointer-events-none">Click the <span className="inline-flex items-center justify-center w-4 h-4 rounded border border-gray-300 text-[10px] font-semibold align-middle">+</span> under a step to add what happens next. Every branch gets its own.</div>
             )}
           </div>
           {selectedNode && (
@@ -522,6 +514,7 @@ export default function Builder({ id }: { id: string }) {
         </div>
         <ValidationBar errors={validation.errors} warnings={validation.warnings} graph={draft.graph} onFocus={focusNode} />
 
+        <StepPicker open={!!picker && !readOnly} target={picker} nodes={draft.graph.nodes} allowed={pickerAllowed} onPick={onPickStep} onClose={closePicker} />
         <QaModal qa={qa} graph={draft.graph} onClose={() => setQa(null)} onActivate={confirmActivate} onFocus={focusNode} />
         <PublishDialog
           open={publishOpen} onClose={() => setPublishOpen(false)} sequenceId={sequence.id} liveGraph={live.graph} draft={publishDraft}
@@ -543,15 +536,15 @@ export default function Builder({ id }: { id: string }) {
         />
         <ConfirmModal
           open={confirm?.kind === 'pause'} title="Pause sequence" confirmLabel="Pause" busy={confirm?.busy} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-          body={<><p><span className="font-semibold">{(inflightQ.data ?? 0).toLocaleString()}</span> live enrollment{inflightQ.data === 1 ? '' : 's'} will be paused: queued actions are cancelled and nothing is sent until you resume.</p><p className="text-xs text-gray-500">Waits and delays keep counting; resuming re-plans the current steps.</p></>}
+          body={<><p><span className="font-semibold">{(inflightQ.data ?? 0).toLocaleString()}</span> lead{inflightQ.data === 1 ? ' is' : 's are'} currently in this sequence. Pausing stops everything: nothing queued goes out until you resume.</p><p className="text-xs text-gray-500">Waits and delays keep counting. On resume, each lead picks up from the step they were on.</p></>}
         />
         <ConfirmModal
           open={confirm?.kind === 'resume'} title="Resume sequence" confirmLabel="Resume" busy={confirm?.busy} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-          body={<p>Paused enrollments return to their previous state and the planner picks them up in the next sender windows. All pool senders must be connected.</p>}
+          body={<p>Paused leads carry on from the step they were on, in the senders’ next working hours. Every sender in the pool must be connected.</p>}
         />
         <ConfirmModal
           open={confirm?.kind === 'archive'} title="Archive sequence" confirmLabel="Archive" danger busy={confirm?.busy} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-          body={<><p>Archiving exits <span className="font-semibold">all {(inflightQ.data ?? 0).toLocaleString()}</span> live enrollment{inflightQ.data === 1 ? '' : 's'} (reason “sequence archived”) and cancels their queued actions.</p><p className="text-xs text-gray-500">The graph and history are kept; you can move it back to draft later.</p></>}
+          body={<><p>Archiving takes <span className="font-semibold">all {(inflightQ.data ?? 0).toLocaleString()}</span> lead{inflightQ.data === 1 ? '' : 's'} out of this sequence and cancels anything waiting to send.</p><p className="text-xs text-gray-500">The steps and history are kept. You can move it back to draft later.</p></>}
         />
         <UnsavedModal
           open={!!unsaved} busy={!!unsaved?.busy} draftFailed={!!unsaved?.draftFailed} metaLabels={metaLabels}

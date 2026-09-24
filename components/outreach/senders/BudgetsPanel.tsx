@@ -75,7 +75,7 @@ export default function BudgetsPanel({ sender, isManager, canWrite, notify }: { 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2" title={<span>Today <span className="font-normal text-gray-400">({today}, sender-local)</span></span>}>
           {budgets.isLoading ? <Spinner /> : budgets.isError ? <ErrorBox message={(budgets.error as Error).message} /> : todayRows.length === 0 ? (
-            <div className="text-sm text-gray-500 py-4">No budget rows for today yet. The planner creates them at the start of the sender's day, or when you click “Plan now” on the Overview tab.</div>
+            <div className="text-sm text-gray-500 py-4">No budget rows for today yet. The planner creates them at the start of the sender's day, or when you click “Schedule today's actions” on the Overview tab.</div>
           ) : (
             <Table>
               <thead><tr><Th>Action</Th><Th className="text-right">Used</Th><Th className="text-right">Reserved</Th><Th className="text-right">Cap</Th><Th>Progress</Th></tr></thead>

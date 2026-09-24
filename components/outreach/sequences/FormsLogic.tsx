@@ -66,7 +66,7 @@ export function RotateSenderForm({ node, cfg, set }: FormProps) {
         {candidates.map((n) => <option key={n.id} value={n.id}>{nodeTitle(n)} ({n.id})</option>)}
       </Select>
       <Input type="number" min={0} max={10} label="Max rotations per lead" value={cfg.max_rotations ?? 2} onChange={(e) => set('max_rotations', Math.max(0, Number(e.target.value) || 0))} />
-      <Note>Completes this enrollment and starts a new one for the same lead with the next sender in the pool, at the chosen step. Useful after “no connect”.</Note>
+      <Note>Ends this run for the lead and starts them again from the chosen step with the next sender in the pool. Useful after “no connect”.</Note>
     </div>
   );
 }
@@ -147,7 +147,7 @@ export function CallWebhookForm({ cfg, set }: FormProps) {
         {webhooks.map((w) => <option key={w.id} value={w.id}>{w.url}{!w.active ? ' (inactive)' : ''}</option>)}
       </Select>
       {webhooks.length === 0 && <Note>No outbound webhooks configured. The workspace owner can add them under Settings → Webhooks.</Note>}
-      <Note>Posts a signed <span className="font-mono">sequence.webhook</span> event with the lead, sender and enrollment.</Note>
+      <Note>Sends the lead, the sender and where the lead is in the sequence to your webhook. The request is signed so your system can trust it.</Note>
     </div>
   );
 }
@@ -204,7 +204,7 @@ export function SendToSequenceForm({ cfg, set }: FormProps) {
         {options.map((s) => <option key={s.id} value={s.id}>{s.name}{s.status !== 'active' ? ` (${s.status})` : ''}</option>)}
       </Select>
       {options.length === 0 && <Note>No other sequences yet.</Note>}
-      <Note>Completes this enrollment and enrols the lead into the target sequence (using that sequence's pool). Only active sequences progress.</Note>
+      <Note>Ends this sequence for the lead and moves them into the chosen one, which uses its own senders. Only active sequences send.</Note>
     </div>
   );
 }

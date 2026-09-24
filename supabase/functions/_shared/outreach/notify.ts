@@ -227,7 +227,7 @@ export async function notifySender(senderId: string, kind: NotifyKind, extra: Re
       break;
     case "sender_error":
       subject = `${plainName} is in error state`;
-      html = layout(`${name} stopped syncing`, `<p>The provider reported repeated errors for this sender (${esc(extra.reason ?? "ERROR")}). Try a resync from the sender page; if it persists, reconnect.</p><p><a href="${senderUrl}">Open sender page</a></p>`, branding);
+      html = layout(`${name} stopped syncing`, `<p>The provider reported repeated errors for this sender (${esc(extra.reason ?? "ERROR")}). Try <strong>Refresh conversations</strong> on the sender page; if it persists, reconnect.</p><p><a href="${senderUrl}">Open sender page</a></p>`, branding);
       break;
     case "level_up":
       subject = `${plainName} moved to warmup level ${extra.level}`;

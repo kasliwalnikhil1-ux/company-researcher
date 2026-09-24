@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { Loader2, X, AlertCircle, Inbox } from 'lucide-react';
+import { Loader2, X, AlertCircle, Inbox, ChevronDown, Check, Search, ArrowLeft } from 'lucide-react';
 import type { SenderStatus, EnrollmentStatus, Intent } from '@/lib/outreach/types';
 
 export function Button({ variant = 'primary', size = 'md', loading, className, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; size?: 'sm' | 'md'; loading?: boolean }) {
@@ -69,6 +71,178 @@ export function Select({ className, label, children, ...rest }: React.SelectHTML
         {children}
       </select>
     </label>
+  );
+}
+
+/** `keywords` are matched by the search box but never rendered (aliases, old names, country). */
+export type SelectOption = { value: string; label?: string; hint?: string; keywords?: string };
+
+function normalizeSearch(s: string): string {
+  return s.toLowerCase().replace(/[_/\-().,]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A `<select>` replacement for long lists (timezones, countries, currencies…): a button that opens a
+ * searchable list. Type to filter, arrow keys to move, Enter to pick, Escape to close.
+ * The list renders in a portal with fixed positioning so it is never clipped by a scrolling modal body.
+ */
+export function SearchableSelect({ label, value, onChange, options, placeholder = 'Select…', searchPlaceholder = 'Type to search…', emptyOption, disabled, className, hint, error, 'aria-label': ariaLabel, id: idProp }: {
+  label?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<SelectOption | string>;
+  placeholder?: string;
+  searchPlaceholder?: string;
+  /** Render a first option that sets the value to '' (e.g. "No client"). */
+  emptyOption?: string;
+  disabled?: boolean;
+  className?: string;
+  hint?: string;
+  error?: string;
+  'aria-label'?: string;
+  id?: string;
+}) {
+  const reactId = useId();
+  const id = idProp ?? `ss-${reactId}`;
+  const listId = `${id}-list`;
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [active, setActive] = useState(0);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; up: boolean } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const all = useMemo<SelectOption[]>(() => {
+    const base = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
+    const list = emptyOption != null ? [{ value: '', label: emptyOption }, ...base] : base;
+    // Keep an unknown current value selectable so it is never silently dropped.
+    if (value && !list.some((o) => o.value === value)) list.unshift({ value, label: value });
+    return list;
+  }, [options, emptyOption, value]);
+
+  const selected = all.find((o) => o.value === value);
+  const selectedLabel = selected ? (selected.label ?? selected.value) : '';
+
+  const filtered = useMemo(() => {
+    const q = normalizeSearch(query);
+    if (!q) return all;
+    const tokens = q.split(' ');
+    return all.filter((o) => {
+      const hay = normalizeSearch(`${o.label ?? ''} ${o.value} ${o.hint ?? ''} ${o.keywords ?? ''}`);
+      return tokens.every((t) => hay.includes(t));
+    });
+  }, [all, query]);
+
+  function place() {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom;
+    const up = below < 300 && r.top > below;
+    setPos({ top: up ? r.top - 4 : r.bottom + 4, left: r.left, width: r.width, up });
+  }
+
+  function openList() {
+    if (disabled) return;
+    setQuery('');
+    const idx = Math.max(0, all.findIndex((o) => o.value === value));
+    setActive(idx);
+    place();
+    setOpen(true);
+  }
+
+  function pick(v: string) {
+    onChange(v);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    inputRef.current?.focus();
+  }, [open]);
+
+  // Keep the highlighted row in view while navigating.
+  useEffect(() => {
+    if (!open) return;
+    const row = panelRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`);
+    row?.scrollIntoView({ block: 'nearest' });
+  }, [open, active]);
+
+  useEffect(() => { setActive(0); }, [query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (panelRef.current?.contains(t) || triggerRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onScroll = (e: Event) => { if (panelRef.current?.contains(e.target as Node)) return; place(); };
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', onScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [open]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  function onKey(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(filtered.length - 1, a + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(0, a - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); setActive(0); }
+    else if (e.key === 'End') { e.preventDefault(); setActive(Math.max(0, filtered.length - 1)); }
+    else if (e.key === 'Enter') { e.preventDefault(); const o = filtered[active]; if (o) pick(o.value); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); triggerRef.current?.focus(); }
+    else if (e.key === 'Tab') { setOpen(false); }
+  }
+
+  const panel = open && pos && typeof document !== 'undefined' ? createPortal(
+    <div ref={panelRef} role="dialog" aria-label={ariaLabel ?? label ?? 'Options'}
+      style={{ position: 'fixed', left: pos.left, width: Math.max(pos.width, 240), ...(pos.up ? { bottom: window.innerHeight - pos.top } : { top: pos.top }) }}
+      className="z-[70] rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden" onKeyDown={onKey}>
+      <div className="flex items-center gap-2 px-2.5 py-2 border-b border-gray-100">
+        <Search className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={searchPlaceholder}
+          role="combobox" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={filtered[active] ? `${listId}-${active}` : undefined}
+          className="w-full text-sm bg-transparent text-gray-900 placeholder-gray-400 focus:outline-none" />
+        {query && <button type="button" onClick={() => setQuery('')} className="text-gray-400 hover:text-gray-600" aria-label="Clear search"><X className="w-3.5 h-3.5" /></button>}
+      </div>
+      <ul id={listId} role="listbox" className="max-h-64 overflow-y-auto py-1 text-sm">
+        {filtered.length === 0 && <li className="px-3 py-2 text-gray-500">No matches</li>}
+        {filtered.map((o, i) => {
+          const isSel = o.value === value;
+          return (
+            <li key={o.value || '__empty'} id={`${listId}-${i}`} data-index={i} role="option" aria-selected={isSel}
+              onMouseEnter={() => setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o.value)}
+              className={cn('flex items-center justify-between gap-3 px-3 py-1.5 cursor-pointer', i === active ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900', isSel && 'font-medium')}>
+              <span className="truncate">{o.label ?? o.value}{o.hint && <span className="ml-2 text-xs text-gray-500 font-normal">{o.hint}</span>}</span>
+              {isSel && <Check className="w-4 h-4 text-indigo-600 flex-shrink-0" />}
+            </li>
+          );
+        })}
+      </ul>
+    </div>,
+    document.body,
+  ) : null;
+
+  return (
+    <div className={cn('block', className)}>
+      {label && <label htmlFor={id} className="block text-xs font-medium text-gray-600 mb-1">{label}</label>}
+      <button ref={triggerRef} id={id} type="button" disabled={disabled} aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => (open ? setOpen(false) : openList())}
+        onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openList(); } }}
+        className={cn('w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-left rounded-lg border bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed',
+          error ? 'border-red-300' : 'border-gray-300', selectedLabel ? 'text-gray-900' : 'text-gray-400')}>
+        <span className="truncate">{selectedLabel || placeholder}</span>
+        <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+      </button>
+      {error ? <span className="block text-xs text-red-600 mt-1">{error}</span> : hint ? <span className="block text-xs text-gray-500 mt-1">{hint}</span> : null}
+      {panel}
+    </div>
   );
 }
 
@@ -169,6 +343,15 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
   );
 }
 
+/** Page-level "back" breadcrumb, always placed above the page title. Use for navigating up one level, not for in-page steps. */
+export function BackLink({ href, children, className }: { href: string; children: React.ReactNode; className?: string }) {
+  return (
+    <Link href={href} className={cn('inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-900 rounded-md -ml-1 px-1 py-0.5 mb-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500', className)}>
+      <ArrowLeft className="w-4 h-4" aria-hidden="true" />{children}
+    </Link>
+  );
+}
+
 export function PageHeader({ title, subtitle, actions }: { title: React.ReactNode; subtitle?: React.ReactNode; actions?: React.ReactNode }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
@@ -184,8 +367,8 @@ export function PageHeader({ title, subtitle, actions }: { title: React.ReactNod
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
   return <div className={cn('overflow-x-auto border border-gray-200 rounded-xl bg-white', className)}><table className="min-w-full text-sm">{children}</table></div>;
 }
-export function Th({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <th className={cn('text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-2.5 bg-gray-50 border-b border-gray-200', className)}>{children}</th>;
+export function Th({ children, className, title }: { children?: React.ReactNode; className?: string; title?: string }) {
+  return <th title={title} className={cn('text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-2.5 bg-gray-50 border-b border-gray-200', title && 'cursor-help', className)}>{children}</th>;
 }
 export function Td({ children, className, ...rest }: React.TdHTMLAttributes<HTMLTableCellElement>) {
   return <td className={cn('px-4 py-2.5 border-b border-gray-100 text-gray-700 align-middle', className)} {...rest}>{children}</td>;

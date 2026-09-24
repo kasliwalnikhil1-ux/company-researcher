@@ -1,12 +1,10 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useSender } from '@/lib/outreach/queries';
-import { Avatar, Badge, ErrorBox, HealthBar, PageLoader, StatusPill, useToast } from '@/components/outreach/ui';
+import { Avatar, BackLink, Badge, ErrorBox, HealthBar, PageLoader, StatusPill, useToast } from '@/components/outreach/ui';
 import { PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import SenderOverview from '@/components/outreach/senders/SenderOverview';
 import ScheduleEditor from '@/components/outreach/senders/ScheduleEditor';
@@ -47,21 +45,27 @@ function SenderDetail() {
     }
   }, [connected, id, router, tab]);
 
+  // A connect that turned out to be an already-connected account was folded into that sender; follow it.
+  const mergedInto = sender.data?.deleted_at && typeof sender.data.status_reason === 'string' && sender.data.status_reason.startsWith('merged_into:') ? sender.data.status_reason.slice('merged_into:'.length) : null;
+  useEffect(() => {
+    if (mergedInto) router.replace(`/outreach/senders/${mergedInto}${connected != null ? `?connected=${connected}` : ''}`);
+  }, [mergedInto, connected, router]);
+
   const selectTab = (t: Tab) => { setTab(t); router.replace(`/outreach/senders/${id}${t !== 'Overview' ? `?tab=${t}` : ''}`); };
 
   if (role === 'client_viewer') return <ErrorBox message="Client viewers cannot open sender pages." />;
-  if (sender.isLoading) return <PageLoader />;
+  if (sender.isLoading || mergedInto) return <PageLoader />;
   if (sender.isError) return <ErrorBox message={(sender.error as Error).message} />;
   const s = sender.data as SenderV2 | undefined;
-  if (!s || s.workspace_id !== workspace?.id) return <div><ErrorBox message="Sender not found in this workspace." /><Link href="/outreach/senders" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Back to senders</Link></div>;
+  if (!s || s.workspace_id !== workspace?.id) return <div><BackLink href="/outreach/senders">Back to senders</BackLink><ErrorBox message="Sender not found in this workspace." /></div>;
 
   const visibleTabs = TABS.filter((t) => t !== 'Danger' || isManager);
 
   return (
     <div>
+      <BackLink href="/outreach/senders">Back to senders</BackLink>
       <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
         <div className="flex items-center gap-3 min-w-0">
-          <Link href="/outreach/senders" className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100" aria-label="Back to senders"><ArrowLeft className="w-4 h-4" /></Link>
           <Avatar src={s.picture_url} name={s.display_name} size={10} />
           <div className="min-w-0">
             <h1 className="text-xl font-bold text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</h1>

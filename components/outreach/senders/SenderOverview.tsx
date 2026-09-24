@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, RefreshCw, Save, ShieldCheck, XCircle, CalendarClock } from 'lucide-react';
@@ -20,9 +20,12 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   const [reloginLink, setReloginLink] = useState<string | null>(null);
   const [code, setCode] = useState('');
   const [showCode, setShowCode] = useState(false);
-  const [country, setCountry] = useState(sender.proxy_country ?? '');
-  const [form, setForm] = useState({ display_name: sender.display_name ?? '', client_id: sender.client_id ?? '', owner_email: sender.owner_email ?? '' });
-  useEffect(() => { setForm({ display_name: sender.display_name ?? '', client_id: sender.client_id ?? '', owner_email: sender.owner_email ?? '' }); setCountry(sender.proxy_country ?? ''); }, [sender.id, sender.display_name, sender.client_id, sender.owner_email, sender.proxy_country]);
+  const serverForm = { display_name: sender.display_name ?? '', client_id: sender.client_id ?? '', owner_email: sender.owner_email ?? '' };
+  const serverFormKey = `${sender.id}|${serverForm.display_name}|${serverForm.client_id}|${serverForm.owner_email}`;
+  const [form, setForm] = useState(serverForm);
+  const [formKey, setFormKey] = useState(serverFormKey);
+  // Reset the draft when the server copy changes (different sender, or a save came back). Done during render, not in an effect.
+  if (formKey !== serverFormKey) { setFormKey(serverFormKey); setForm(serverForm); }
 
   const upcoming = useActions({ sender_id: sender.id, status: ['queued', 'reserved'], upcoming: true, limit: 20 });
   const recent = useActions({ sender_id: sender.id, status: ['sent', 'failed'], limit: 20 });
@@ -58,16 +61,6 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
     finally { setBusy(null); }
   }
 
-  async function saveProxy() {
-    if (!country) return;
-    setBusy('proxy');
-    try {
-      await callFn('sender-update-proxy', { sender_id: sender.id, country });
-      notify(`Proxy country changed to ${country}. Every change is audited.`); invalidate();
-    } catch (e) { notify(parseError(e).message, 'error'); }
-    finally { setBusy(null); }
-  }
-
   const needsRelogin = sender.status === 'credentials';
   const checkpointHint = /checkpoint|otp|2fa|in_app|validation|captcha|phone/i.test(sender.status_reason ?? '');
   const breakdown = HEALTH_KEYS.map((k) => ({ ...k, value: typeof sender.health_breakdown?.[k.key] === 'number' ? Math.round(sender.health_breakdown[k.key]) : null }));
@@ -86,10 +79,10 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2" title="Connection" actions={canManage ? (
           <div className="flex flex-wrap gap-1.5">
-            <Button size="sm" variant="secondary" onClick={() => manage('refresh_profile', {}, 'Profile refreshed.')} loading={busy === 'refresh_profile'} disabled={!!busy || !sender.unipile_account_id} title="Pull name, picture, connections and premium flags"><RefreshCw className="w-3.5 h-3.5" /> Refresh profile</Button>
-            <Button size="sm" variant="secondary" onClick={() => manage('resync', {}, 'Resync requested.')} loading={busy === 'resync'} disabled={!!busy || !sender.unipile_account_id} title="Ask the connector to resync the account">Resync</Button>
-            <Button size="sm" variant="secondary" onClick={() => manage('recompute_health')} loading={busy === 'recompute_health'} disabled={!!busy}><Activity className="w-3.5 h-3.5" /> Recompute health</Button>
-            <Button size="sm" variant="secondary" onClick={() => manage('plan_now')} loading={busy === 'plan_now'} disabled={!!busy || sender.status !== 'ok'} title="Top up today's plan now instead of waiting for the nightly planner"><CalendarClock className="w-3.5 h-3.5" /> Plan now</Button>
+            <Button size="sm" variant="secondary" onClick={() => manage('refresh_profile', {}, 'Profile refreshed.')} loading={busy === 'refresh_profile'} disabled={!!busy || !sender.unipile_account_id} title="Update this sender's details shown here (name, photo, connections count, Premium / Sales Navigator / Recruiter). Use after you change your LinkedIn profile. Does not touch the inbox."><RefreshCw className="w-3.5 h-3.5" /> Refresh profile</Button>
+            <Button size="sm" variant="secondary" onClick={() => manage('resync', {}, 'Conversations are being refreshed. New messages arrive over the next few minutes.')} loading={busy === 'resync'} disabled={!!busy || !sender.unipile_account_id} title="Re-import this account's conversations from LinkedIn so the inbox catches up. Use when messages look missing or stale, or after reconnecting. New messages arrive over the next few minutes; you do not need to press it again."><RefreshCw className="w-3.5 h-3.5" /> Refresh conversations</Button>
+            <Button size="sm" variant="secondary" onClick={() => manage('recompute_health')} loading={busy === 'recompute_health'} disabled={!!busy}><Activity className="w-3.5 h-3.5" /> Recheck health</Button>
+            <Button size="sm" variant="secondary" onClick={() => manage('plan_now')} loading={busy === 'plan_now'} disabled={!!busy || sender.status !== 'ok'} title="Schedule this sender's remaining actions for today right now, from its active sequences, within its schedule and daily limits. Runs automatically every 20 minutes anyway; use this after enrolling leads, changing the schedule or reconnecting when you do not want to wait. Safe to press more than once."><CalendarClock className="w-3.5 h-3.5" /> Schedule today’s actions</Button>
           </div>
         ) : undefined}>
           <div className="flex flex-wrap items-center gap-3">
@@ -176,22 +169,14 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
               {!sender.is_premium && !sender.has_sales_nav && !sender.has_recruiter && <span className="text-gray-400">Basic</span>}
             </dd></div>
             <div className="flex justify-between gap-3"><dt className="text-gray-500">Timezone</dt><dd className="text-gray-900">{sender.timezone}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-gray-500">Extension token</dt><dd className="text-gray-900">{sender.extension_token_issued_at ? `issued ${timeAgo(sender.extension_token_issued_at)}` : 'not issued'}</dd></div>
           </dl>
-          <div className="mt-4 pt-4 border-t border-gray-100">
-            <div className="text-xs font-medium text-gray-600 mb-1 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Proxy country</div>
-            {canManage ? (
-              <div className="flex gap-2">
-                <Select value={country} onChange={(e) => setCountry(e.target.value)} aria-label="Proxy country" disabled={!sender.unipile_account_id}>
-                  <option value="">Select country…</option>
-                  {!!country && !COUNTRIES.some((c) => c.code === country) && <option value={country}>{country}</option>}
-                  {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name} ({c.code})</option>)}
-                </Select>
-                <Button size="sm" variant="secondary" onClick={saveProxy} loading={busy === 'proxy'} disabled={!country || country === (sender.proxy_country ?? '') || !!busy || !sender.unipile_account_id}>Save</Button>
-              </div>
-            ) : <div className="text-sm text-gray-900">{sender.proxy_country ?? '—'}</div>}
-            <div className="text-[11px] text-gray-400 mt-1">Pinned at connect. Keep it in the country where the owner really is; changes are audited.</div>
-          </div>
+          {isLinkedIn && (
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <div className="text-xs font-medium text-gray-600 mb-1 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Proxy</div>
+              <div className="text-sm text-gray-900">{sender.proxy_country ? `${COUNTRIES.find((c) => c.code === sender.proxy_country)?.name ?? sender.proxy_country} (${sender.proxy_country})` : 'Pinned at connect'}</div>
+              <div className="text-[11px] text-gray-400 mt-1">{sender.proxy_country ? 'Set from this app. ' : 'Fixed IP near wherever the owner opened the sign-in link. '}{canManage ? 'Change it only if the owner really is somewhere else, under the Danger tab.' : 'Only managers can change it.'}</div>
+            </div>
+          )}
         </Card>
 
         <Card className="lg:col-span-2" title="Details" actions={canManage ? <Button size="sm" onClick={saveDetails} loading={busy === 'details'} disabled={!!busy}><Save className="w-3.5 h-3.5" /> Save</Button> : undefined}>

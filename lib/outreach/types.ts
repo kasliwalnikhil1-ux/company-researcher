@@ -99,6 +99,7 @@ export interface Sender {
   connections_count: number | null;
   status: SenderStatus;
   status_reason: string | null;
+  deleted_at: string | null;
   proxy_country: string | null;
   user_agent: string | null;
   timezone: string;

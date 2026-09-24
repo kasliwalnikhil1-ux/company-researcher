@@ -4,11 +4,10 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { qk, useClients } from '@/lib/outreach/queries';
-import { Button, Card, EmptyState, ErrorBox, Input, Select } from '@/components/outreach/ui';
+import { BackLink, Button, Card, EmptyState, ErrorBox, Input, Select } from '@/components/outreach/ui';
 
 export default function NewSequencePage() {
   const { workspace, isManager, suspended } = useWorkspace();
@@ -38,7 +37,7 @@ export default function NewSequencePage() {
 
   return (
     <div className="max-w-lg mx-auto">
-      <Link href="/outreach/sequences" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-4"><ArrowLeft className="w-4 h-4" /> Sequences</Link>
+      <BackLink href="/outreach/sequences">Back to sequences</BackLink>
       <Card title="New sequence">
         <form onSubmit={create} className="space-y-4">
           <Input label="Name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Founders — invite + 2 follow-ups" autoFocus required />

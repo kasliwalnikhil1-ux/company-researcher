@@ -1,7 +1,6 @@
 'use client';
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BarChart3, Building2, Globe, Inbox, MessageSquare, Send } from 'lucide-react';
@@ -9,7 +8,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useChats, useMessages } from '@/lib/outreach/queries';
-import { Avatar, Button, Card, EmptyState, ErrorBox, fmtDate, IntentBadge, PageLoader, Spinner, StatusPill, Table, Td, Textarea, Th, timeAgo, useToast } from '@/components/outreach/ui';
+import { Avatar, BackLink, Button, Card, EmptyState, ErrorBox, fmtDate, IntentBadge, PageLoader, Spinner, StatusPill, Table, Td, Textarea, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/outreach/types';
 import {
@@ -168,9 +167,9 @@ function ClientViewerPage() {
 
   return (
     <div style={accent ? ({ '--outreach-accent': accent } as React.CSSProperties) : undefined}>
+      {!isViewer && <BackLink href="/outreach/clients">Back to clients</BackLink>}
       <header className="flex flex-wrap items-center justify-between gap-4 mb-5 pb-5 border-b border-gray-200">
         <div className="flex items-center gap-3 min-w-0">
-          {!isViewer && <Link href="/outreach/clients" className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100" aria-label="Back to clients"><ArrowLeft className="w-4 h-4" /></Link>}
           {logo ? <img src={logo} alt={productName || 'Logo'} referrerPolicy="no-referrer" className="h-10 w-auto max-w-[160px] object-contain" /> : (
             <div className="w-10 h-10 rounded-xl text-white flex items-center justify-center flex-shrink-0" style={{ background: ACCENT }}><Building2 className="w-5 h-5" /></div>
           )}

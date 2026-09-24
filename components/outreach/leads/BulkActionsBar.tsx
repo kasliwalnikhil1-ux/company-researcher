@@ -85,8 +85,8 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
           <BulkBtn onClick={() => open('set_list')}>Set list</BulkBtn>
           <BulkBtn onClick={() => open('set_stage')}>Set stage</BulkBtn>
           {(clients.data?.length ?? 0) > 0 && <BulkBtn onClick={() => open('set_client')}>Set client</BulkBtn>}
-          <BulkBtn onClick={() => open('set_dnc')}><ShieldOff className="w-3.5 h-3.5" /> Mark DNC</BulkBtn>
-          <BulkBtn onClick={() => open('clear_dnc')}><ShieldCheck className="w-3.5 h-3.5" /> Clear DNC</BulkBtn>
+          <BulkBtn onClick={() => open('set_dnc')} title="Mark as do not contact — exclude these leads from every sequence"><ShieldOff className="w-3.5 h-3.5" /> Mark DNC</BulkBtn>
+          <BulkBtn onClick={() => open('clear_dnc')} title="Clear do not contact — make these leads eligible for outreach again"><ShieldCheck className="w-3.5 h-3.5" /> Clear DNC</BulkBtn>
           <BulkBtn onClick={openEnrich}><Sparkles className="w-3.5 h-3.5" /> Enrich</BulkBtn>
           <BulkBtn onClick={toAiReview}><Wand2 className="w-3.5 h-3.5" /> Generate AI lines</BulkBtn>
           <BulkBtn onClick={onEnroll}><GitBranch className="w-3.5 h-3.5" /> Enrol in sequence</BulkBtn>
@@ -149,6 +149,6 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
   );
 }
 
-function BulkBtn({ children, onClick, danger }: { children: React.ReactNode; onClick: () => void; danger?: boolean }) {
-  return <button type="button" onClick={onClick} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap ${danger ? 'bg-red-500/90 hover:bg-red-500' : 'bg-white/15 hover:bg-white/25'}`}>{children}</button>;
+function BulkBtn({ children, onClick, danger, title }: { children: React.ReactNode; onClick: () => void; danger?: boolean; title?: string }) {
+  return <button type="button" onClick={onClick} title={title} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap ${danger ? 'bg-red-500/90 hover:bg-red-500' : 'bg-white/15 hover:bg-white/25'}`}>{children}</button>;
 }

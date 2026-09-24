@@ -3,7 +3,7 @@
 import { Copy, Trash2, X, AlertTriangle, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, Input, Toggle } from '@/components/outreach/ui';
-import type { GraphIssue } from '@/lib/outreach/graph';
+import { humanizeIssue, type GraphIssue } from '@/lib/outreach/graph';
 import { EXECUTABLE_TYPES, NODE_CATALOG } from '@/lib/outreach/nodes';
 import type { GraphNode } from '@/lib/outreach/types';
 import {
@@ -16,7 +16,7 @@ import AiRouteForm from './AiRouteForm';
 
 function TypeForm(props: FormProps) {
   switch (props.node.type) {
-    case 'start': return <p className="text-xs text-gray-500">Every enrollment begins here. Connect the exit to the first step.</p>;
+    case 'start': return <p className="text-xs text-gray-500">Every lead begins here. Use the + below it to add the first step.</p>;
     case 'end': return <EndForm {...props} />;
     case 'send_invite': return <SendInviteForm {...props} />;
     case 'send_message': return <SendMessageForm {...props} />;
@@ -81,28 +81,28 @@ export default function NodeConfigPanel({ node, issues, readOnly, onChange, onDe
     <aside className={cn('flex flex-col bg-white border-l border-gray-200 h-full', className)} aria-label="Step settings">
       <div className={cn('flex items-center gap-2 px-3 py-2 text-white', meta.color)}>
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold truncate">{meta.label}</div>
-          <div className="text-[10px] opacity-80 font-mono truncate">{node.id}</div>
+          <div className="text-xs font-semibold truncate">{node.label && node.label !== meta.label ? node.label : meta.label}</div>
+          {node.label && node.label !== meta.label && <div className="text-[10px] opacity-80 truncate">{meta.label}</div>}
         </div>
         <button onClick={onClose} className="p-1 rounded-md hover:bg-white/20" aria-label="Close panel"><X className="w-4 h-4" /></button>
       </div>
       <fieldset disabled={readOnly} className="flex-1 overflow-y-auto p-3 space-y-4 min-w-0">
         {(errors.length > 0 || warnings.length > 0) && (
           <div className="space-y-1">
-            {errors.map((i, idx) => <div key={`e${idx}`} className="flex items-start gap-1.5 text-xs text-red-700 bg-red-50 rounded-md px-2 py-1.5"><XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{i.message}</div>)}
-            {warnings.map((i, idx) => <div key={`w${idx}`} className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded-md px-2 py-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{i.message}</div>)}
+            {errors.map((i, idx) => <div key={`e${idx}`} className="flex items-start gap-1.5 text-xs text-red-700 bg-red-50 rounded-md px-2 py-1.5"><XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{humanizeIssue(i.message)}</div>)}
+            {warnings.map((i, idx) => <div key={`w${idx}`} className="flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 rounded-md px-2 py-1.5"><AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{humanizeIssue(i.message)}</div>)}
           </div>
         )}
         <Input label="Label" value={node.label ?? ''} onChange={(e) => onChange({ ...node, label: e.target.value })} placeholder={meta.label} />
         {executable && (
           <div>
-            <div className="text-xs font-medium text-gray-600 mb-1">Execution mode</div>
+            <div className="text-xs font-medium text-gray-600 mb-1">How this step runs</div>
             <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
               {(['auto', 'manual'] as const).map((m) => (
                 <button key={m} type="button" onClick={() => onChange({ ...node, mode: m === 'auto' ? undefined : m })} className={cn('px-3 py-1.5 capitalize', (node.mode ?? 'auto') === m ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>{m}</button>
               ))}
             </div>
-            <p className="text-xs text-gray-500 mt-1">{node.mode === 'manual' ? 'Creates a task; the action runs when a teammate completes it.' : 'Runs automatically inside the sender schedule and budgets.'}</p>
+            <p className="text-xs text-gray-500 mt-1">{node.mode === 'manual' ? 'Creates a task; the action runs when a teammate completes it.' : 'Runs on its own, within the sender’s working hours and daily limits.'}</p>
           </div>
         )}
         {canPreDelay && (

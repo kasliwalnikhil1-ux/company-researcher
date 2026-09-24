@@ -89,7 +89,7 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
   }, [branded, brandingQuery.data]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-screen bg-gray-50">
+    <div className="flex-1 flex flex-col min-h-[calc(100dvh-3.5rem)] md:min-h-screen bg-gray-50">
       {/* The workspace switcher + nav live under "Outreach" in the main sidebar; clients get their brand + help links in a slim bar here. */}
       {branded && (branding.support_email || branding.help_url || branding.docs_url) && (
         <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-2 flex items-center justify-between gap-3">

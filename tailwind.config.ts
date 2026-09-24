@@ -6,6 +6,8 @@ const config: Config = {
     "./pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./components/**/*.{js,ts,jsx,tsx,mdx}",
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
+    // step colours (bg-slate-700 etc.) live in the node catalogue
+    "./lib/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
   	extend: {

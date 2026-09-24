@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Contact, Lock, Plus } from 'lucide-react';
@@ -11,6 +11,7 @@ import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Select, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
 import { PROVIDER_LABELS, STATUS_OPTIONS, isFuture, scheduleSummary } from '@/components/outreach/senders/helpers';
 import type { Sender } from '@/lib/outreach/types';
+import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 type Usage = { used: number; reserved: number; cap: number };
 
@@ -43,8 +44,13 @@ export default function SendersPage() {
   const clients = useClients(ws);
   const dash = useDashboard(ws);
   const dry = useRunningDryAlerts(ws);
-  const [status, setStatus] = useState('');
-  const [client, setClient] = useState('');
+  // Status and client filters are remembered per workspace in this browser.
+  const { filters: listFilters, patch: patchListFilters } = usePersistedFilters('senders', ws, { status: '', client: '' }, {
+    sanitize: (raw, d) => { const v = sanitizeLike(raw, d); if (v.status && !STATUS_OPTIONS.some((o) => o.value === v.status)) v.status = ''; return v; },
+  });
+  const { status, client } = listFilters;
+  const setStatus = (v: string) => patchListFilters({ status: v });
+  const setClient = (v: string) => patchListFilters({ client: v });
 
   const todayById = useMemo(() => {
     const m = new Map<string, Record<string, { used: number; reserved: number; cap: number }>>();

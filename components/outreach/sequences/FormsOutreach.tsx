@@ -73,7 +73,7 @@ export function SendInmailForm({ node, cfg, set, patch }: FormProps) {
         <option value="recruiter">Recruiter</option>
       </Select>
       <Toggle checked={!!cfg.open_profile_only} onChange={(v) => set('open_profile_only', v)} label="Only send to open profiles (free InMail)" />
-      <Note>When the sender has no InMail credits the enrollment takes the <span className="font-medium">no credit</span> branch.</Note>
+      <Note>When the sender has no InMail credits left, the lead takes the <span className="font-medium">no credit</span> branch.</Note>
     </div>
   );
 }
@@ -240,7 +240,7 @@ export function ManualTaskForm({ cfg, set }: FormProps) {
     <div className="space-y-3">
       <TemplateField label="Task title" value={cfg.title ?? ''} onChange={(v) => set('title', v)} multiline={false} max={200} placeholder="Call {{first_name}} at {{company}}" />
       <TemplateField label="Instructions" value={cfg.body ?? ''} onChange={(v) => set('body', v)} rows={4} />
-      <Note>The enrollment waits until a teammate completes the task, then continues to the next step.</Note>
+      <Note>The lead waits here until a teammate marks the task done, then moves on to the next step.</Note>
     </div>
   );
 }
@@ -262,7 +262,7 @@ export function AiDraftApprovalForm({ cfg, set }: FormProps) {
 export function EndForm({ cfg, set }: FormProps) {
   return (
     <div className="space-y-3">
-      <Input label="Completion reason (optional)" value={cfg.reason ?? ''} onChange={(e) => set('reason', e.target.value)} placeholder="e.g. no_connect, nurtured" hint="Stored on the enrollment as the exit reason; useful for reporting." />
+      <Input label="Completion reason (optional)" value={cfg.reason ?? ''} onChange={(e) => set('reason', e.target.value)} placeholder="e.g. no_connect, nurtured" hint="Saved with the lead as the reason the sequence ended; handy in reports." />
     </div>
   );
 }

@@ -1,16 +1,32 @@
-// Platform setup (owner): check configuration and register the platform-level Unipile webhooks pointing at outreach-unipile-webhook.
+// Platform setup (localhost + platform admin only): check configuration and register the platform-level Unipile webhooks
+// pointing at outreach-unipile-webhook. Deployment secrets and connector webhooks are operator concerns, so a workspace
+// owner (a customer) is NOT enough: the caller's email must be in OUTREACH_PLATFORM_ADMIN_EMAILS (comma-separated;
+// default nkjaipur21@gmail.com) AND the request must come from a localhost origin, i.e. the app running from a local
+// checkout. The web app only renders the card on localhost (lib/outreach/platformAdmin.ts); this is the API-side mirror.
 import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, FUNCTIONS_BASE, audit } from "../_shared/outreach/supabase.ts";
 import { unipile, unipileConfigured, unipileBase } from "../_shared/outreach/unipile.ts";
 import { aiConfigured, AI_MODEL } from "../_shared/outreach/ai.ts";
 
 const WEBHOOK_SECRET = Deno.env.get("UNIPILE_WEBHOOK_SECRET") ?? "";
 const NAME = "capitalxai-outreach";
+const PLATFORM_ADMIN_EMAILS = (Deno.env.get("OUTREACH_PLATFORM_ADMIN_EMAILS") ?? "nkjaipur21@gmail.com")
+  .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+
+function isLocalOrigin(req: Request): boolean {
+  const src = req.headers.get("origin") || req.headers.get("referer") || "";
+  try {
+    const h = new URL(src).hostname.toLowerCase();
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h.endsWith(".localhost");
+  } catch { return false; }
+}
 
 serve("unipile-setup", async (req) => {
   const user = await requireUser(req);
   const body = await readJson<{ workspace_id: string; action?: "status" | "register" }>(req);
   const m = await membership(user.id, body.workspace_id ?? "");
   requireRole(m, "owner");
+  if (!user.email || !PLATFORM_ADMIN_EMAILS.includes(user.email.trim().toLowerCase())) throw new HttpError(403, "E_FORBIDDEN", "platform admin required");
+  if (!isLocalOrigin(req)) throw new HttpError(403, "E_FORBIDDEN", "platform setup is only available from a local checkout");
   const status = {
     unipile: unipileConfigured(), unipile_dsn: unipileConfigured() ? unipileBase().replace(/^https?:\/\//, "") : null,
     webhook_secret: !!WEBHOOK_SECRET, cookie_key: !!Deno.env.get("OUTREACH_COOKIE_KEY"), cron_secret: !!Deno.env.get("OUTREACH_CRON_SECRET"),

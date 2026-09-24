@@ -1,23 +1,34 @@
 'use client';
 
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState, type DragEvent } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState, type MouseEvent } from 'react';
 import {
-  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position, useReactFlow, MarkerType, applyNodeChanges, applyEdgeChanges,
-  type Node, type Edge, type Connection, type NodeProps, type NodeChange, type EdgeChange, type NodeTypes, type OnSelectionChangeParams, type IsValidConnection,
+  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position, useReactFlow, MarkerType, applyNodeChanges, applyEdgeChanges, BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
+  type Node, type Edge, type Connection, type NodeProps, type EdgeProps, type NodeChange, type EdgeChange, type NodeTypes, type EdgeTypes, type OnSelectionChangeParams, type IsValidConnection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Clock, Hand } from 'lucide-react';
+import { Check, Clock, Hand, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { Graph, GraphNode, NodeStats, NodeType } from '@/lib/outreach/types';
+import type { Graph, GraphNode, NodeStats } from '@/lib/outreach/types';
 import { NODE_CATALOG, exitLabel, nodeExits } from '@/lib/outreach/nodes';
-import { formatDelay, nodeSummary, NODE_W, usesNext, type Lookup } from './helpers';
+import { exitTone, formatDelay, layoutPositions, nodeSummary, NODE_W, openExits, usesNext, type ExitTone, type Lookup } from './helpers';
+import { StepIcon } from './StepPicker';
 
 export type IssueLevel = 'error' | 'warning';
 export type StatKind = 'failed' | 'skipped';
 /** One step's figures, summed over its variants (sumNodeStats in lib/outreach/graph.ts). */
 export type StepStats = Omit<NodeStats, 'variant_id'>;
-export type OutreachNodeData = { node: GraphNode; summary: string; stats: StepStats | null; issue: IssueLevel | null; onStat?: (nodeId: string, kind: StatKind) => void };
+/** "Add a step here": on exit `handle` of `source`; `target` is set when the exit already leads to a step (insert between). */
+export type AddHere = (source: string, handle: string, target: string | null) => void;
+export type OutreachNodeData = {
+  node: GraphNode; summary: string; stats: StepStats | null; issue: IssueLevel | null;
+  /** Exits with nothing connected yet: each gets a "+" under the step. */
+  open: string[];
+  onStat?: (nodeId: string, kind: StatKind) => void;
+  onAdd?: AddHere;
+};
 export type OutreachRFNode = Node<OutreachNodeData, 'outreach'>;
+export type OutreachEdgeData = { handle: string; label: string | null; tone: ExitTone; onAdd?: AddHere };
+export type OutreachRFEdge = Edge<OutreachEdgeData, 'outreach'>;
 
 const STAT_CHIPS: Array<{ key: keyof StepStats; label: string; cls: string; open?: StatKind }> = [
   { key: 'queued', label: 'queued', cls: 'bg-gray-100 text-gray-700' },
@@ -29,32 +40,100 @@ const STAT_CHIPS: Array<{ key: keyof StepStats; label: string; cls: string; open
 ];
 const chipValue = (stats: StepStats, key: keyof StepStats): number => Number(stats[key] ?? 0) || 0;
 
-const HANDLE_CLS = '!w-3 !h-3 !border-2 !border-white';
+const HANDLE_CLS = '!w-2.5 !h-2.5 !border-2 !border-white';
+const EDGE_COLOR = '#9ca3af';
+const handleColor = (exit: string): string => {
+  const tone = exitTone(exit);
+  return tone === 'negative' ? '!bg-rose-400' : tone === 'positive' ? '!bg-emerald-500' : '!bg-indigo-500';
+};
+/** Horizontal position of exit `i` of `k` along the bottom edge. */
+const exitLeft = (i: number, k: number): string => `${((i + 0.5) / k) * 100}%`;
+
+const PILL_CLS: Record<ExitTone, string> = {
+  positive: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  negative: 'bg-rose-50 text-rose-600 border-rose-200',
+  neutral: 'bg-white text-gray-600 border-gray-200',
+};
+
+function BranchPill({ label, tone, className }: { label: string; tone: ExitTone; className?: string }) {
+  const Icon = tone === 'positive' ? Check : tone === 'negative' ? X : null;
+  return (
+    <span className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 shadow-sm whitespace-nowrap', PILL_CLS[tone], className)}>
+      {Icon && <Icon className="w-3 h-3" strokeWidth={2.5} />}
+      {label}
+    </span>
+  );
+}
+
+/** The square "+" that sits on a line: the one way to add the next step (HeyReach-style). */
+function AddButton({ title, onClick, className }: { title: string; onClick: (e: MouseEvent<HTMLButtonElement>) => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      className={cn(
+        'nodrag nopan inline-flex items-center justify-center w-7 h-7 rounded-lg border border-gray-300 bg-white text-gray-500 shadow-sm',
+        'hover:border-indigo-500 hover:text-indigo-600 hover:bg-indigo-50 hover:scale-110 focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-transform',
+        className,
+      )}
+    >
+      <Plus className="w-4 h-4" strokeWidth={2.25} />
+    </button>
+  );
+}
+
+/** A branch with nothing after it yet: a short line down from the step, its name, and a "+". */
+function AddStub({ left, label, tone, title, onClick }: { left: string; label: string | null; tone: ExitTone; title: string; onClick: () => void }) {
+  return (
+    <div className="absolute flex flex-col items-center pointer-events-none" style={{ top: '100%', left, transform: 'translateX(-50%)' }}>
+      <span className="block h-4 w-px bg-gray-300" />
+      {label && <BranchPill label={label} tone={tone} className="mb-1.5 max-w-[120px] overflow-hidden text-ellipsis" />}
+      <AddButton title={title} onClick={(e) => { e.stopPropagation(); onClick(); }} className="pointer-events-auto" />
+    </div>
+  );
+}
 
 export const OutreachNode = memo(function OutreachNode({ data, selected }: NodeProps<OutreachRFNode>) {
-  const { node, summary, stats, issue, onStat } = data;
+  const { node, summary, stats, issue, open, onStat, onAdd } = data;
   const meta = NODE_CATALOG[node.type];
   // ab_split and ai_route get their exits from the step config, so always ask the node
   const exits = nodeExits(node);
   const single = usesNext(node);
   const hasDelay = !!node.delay && node.delay.amount > 0;
+  const title = node.label || meta.label;
+  const isStart = node.type === 'start';
   return (
     <div
       className={cn(
-        'rounded-xl border bg-white shadow-sm text-left transition-shadow',
+        'relative rounded-xl border bg-white shadow-sm text-left transition-shadow',
         selected ? 'border-indigo-500 ring-2 ring-indigo-200 shadow-md' : issue === 'error' ? 'border-red-400' : issue === 'warning' ? 'border-amber-400' : 'border-gray-200',
       )}
       style={{ width: NODE_W }}
     >
-      {node.type !== 'start' && <Handle type="target" position={Position.Left} className={cn(HANDLE_CLS, '!bg-gray-400')} />}
-      <div className={cn('px-3 py-1.5 rounded-t-xl text-white text-xs font-semibold flex items-center justify-between gap-2', meta.color)}>
-        <span className="truncate">{node.label || meta.label}</span>
-        <span className="flex items-center gap-1 flex-shrink-0">
-          {hasDelay && <span title={`Waits ${formatDelay(node.delay)} before this step`} className="inline-flex items-center gap-0.5 text-[10px] bg-white/25 rounded px-1"><Clock className="w-3 h-3" />{formatDelay(node.delay)}</span>}
-          {node.mode === 'manual' && <span title="Manual: creates a task and waits for completion" className="inline-flex items-center gap-0.5 text-[10px] bg-white/25 rounded px-1"><Hand className="w-3 h-3" />manual</span>}
-        </span>
+      {!isStart && <Handle type="target" position={Position.Top} className={cn(HANDLE_CLS, '!bg-gray-400')} />}
+      {/* delay strip: "Wait 3 days, then" */}
+      <div className={cn('px-3 py-1.5 rounded-t-xl text-[11px] flex items-center gap-1.5 border-b', isStart ? 'bg-gray-900 text-white border-gray-900' : 'bg-gray-50 text-gray-500 border-gray-100')}>
+        {isStart ? (
+          <span className="font-semibold text-xs">Sequence start</span>
+        ) : hasDelay ? (
+          <><Clock className="w-3 h-3" /> Wait <span className="font-medium text-indigo-600">{formatDelay(node.delay)}</span>, then</>
+        ) : (
+          <><Clock className="w-3 h-3" /> No delay</>
+        )}
+        {node.mode === 'manual' && <span title="Manual: creates a task and waits for completion" className="ml-auto inline-flex items-center gap-0.5 text-[10px] bg-white rounded px-1 border border-gray-200"><Hand className="w-3 h-3" />manual</span>}
       </div>
-      <div className="px-3 py-2 text-xs text-gray-600 min-h-[34px] break-words">{summary || <span className="text-gray-400">{meta.description}</span>}</div>
+      {!isStart && (
+        <div className="flex items-center gap-3 px-3 py-2.5">
+          <StepIcon type={node.type} className="w-9 h-9" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-gray-900 truncate">{title}</div>
+            <div className="text-xs text-gray-500 leading-4 break-words line-clamp-2">{summary || meta.description}</div>
+          </div>
+        </div>
+      )}
       {stats && STAT_CHIPS.some((c) => chipValue(stats, c.key) > 0) && (
         <div className="px-3 pb-2 flex flex-wrap gap-1">
           {STAT_CHIPS.filter((c) => chipValue(stats, c.key) > 0).map((c) => {
@@ -67,65 +146,99 @@ export const OutreachNode = memo(function OutreachNode({ data, selected }: NodeP
           })}
         </div>
       )}
-      {single && <Handle type="source" position={Position.Right} id={exits[0]} className={cn(HANDLE_CLS, '!bg-indigo-500')} />}
-      {!single && exits.length > 0 && (
-        <div className="border-t border-gray-100 py-1">
-          {exits.map((e) => (
-            <div key={e} className="relative px-3 py-0.5 text-[11px] text-gray-500 text-right leading-4">
-              <span className="block truncate pl-2" title={exitLabel(node, e)}>{exitLabel(node, e)}</span>
-              <Handle type="source" position={Position.Right} id={e} className={cn(HANDLE_CLS, e === 'error' || e === 'bounced' || e === 'no_credit' || e === 'no_email' ? '!bg-red-400' : e === 'false' || e === 'no_connect' ? '!bg-amber-400' : '!bg-indigo-500')} style={{ top: '50%' }} />
-            </div>
-          ))}
-        </div>
-      )}
+      {exits.map((e, i) => {
+        const left = exitLeft(i, exits.length);
+        const label = single ? null : exitLabel(node, e);
+        return (
+          <span key={e}>
+            <Handle type="source" position={Position.Bottom} id={e} className={cn(HANDLE_CLS, single ? '!bg-indigo-500' : handleColor(e))} style={{ left }} />
+            {onAdd && open.includes(e) && (
+              <AddStub left={left} label={label} tone={exitTone(e)} title={label ? `Add a step on the “${label}” branch` : `Add a step after ${title}`} onClick={() => onAdd(node.id, e, null)} />
+            )}
+          </span>
+        );
+      })}
     </div>
   );
 });
 
-export const nodeTypes: NodeTypes = { outreach: OutreachNode };
+/** Smooth-step line down to the next step, with the branch name as a pill and a "+" to insert a step in between. */
+export const OutreachEdge = memo(function OutreachEdge({ id, source, target, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd, style }: EdgeProps<OutreachRFEdge>) {
+  const [path, labelX, labelY] = getSmoothStepPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, borderRadius: 14 });
+  const label = data?.label ?? null;
+  const tone = data?.tone ?? 'neutral';
+  const onAdd = data?.onAdd;
+  return (
+    <>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={selected ? { ...style, stroke: '#6366f1', strokeWidth: 2 } : style} />
+      {(label || onAdd) && (
+        <EdgeLabelRenderer>
+          <div
+            className="absolute flex flex-col items-center gap-1 nodrag nopan pointer-events-auto"
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+          >
+            {label && <BranchPill label={label} tone={tone} />}
+            {onAdd && <AddButton title={label ? `Add a step on the “${label}” branch` : 'Add a step here'} onClick={(e) => { e.stopPropagation(); onAdd(source, data!.handle, target); }} />}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+});
 
-export function deriveEdges(graph: Graph, readOnly: boolean): Edge[] {
-  const edges: Edge[] = [];
+export const nodeTypes: NodeTypes = { outreach: OutreachNode };
+export const edgeTypes: EdgeTypes = { outreach: OutreachEdge };
+
+const MARKER = { type: MarkerType.ArrowClosed, width: 16, height: 16, color: EDGE_COLOR } as const;
+const EDGE_STYLE = { stroke: EDGE_COLOR, strokeWidth: 1.5 } as const;
+
+export function deriveEdges(graph: Graph, readOnly: boolean, onAdd?: AddHere): OutreachRFEdge[] {
+  const edges: OutreachRFEdge[] = [];
+  const add = readOnly ? undefined : onAdd;
   for (const n of Object.values(graph.nodes)) {
     const exits = nodeExits(n);
     if (usesNext(n)) {
       if (!n.next || !graph.nodes[n.next]) continue;
-      edges.push({ id: `${n.id}::${exits[0]}::${n.next}`, source: n.id, sourceHandle: exits[0], target: n.next, type: 'smoothstep', deletable: !readOnly, data: { handle: exits[0] }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color: '#6366f1' }, style: { stroke: '#6366f1', strokeWidth: 1.5 } });
+      edges.push({ id: `${n.id}::${exits[0]}::${n.next}`, source: n.id, sourceHandle: exits[0], target: n.next, type: 'outreach', deletable: !readOnly, data: { handle: exits[0], label: null, tone: 'neutral', onAdd: add }, markerEnd: MARKER, style: EDGE_STYLE });
     } else if (exits.length > 0) {
       // a call task made outside the builder (API, connector) keeps its fallback only in the top-level `next`
       const branches = exits.includes('next') && !('next' in (n.branches ?? {})) && n.next ? { ...(n.branches ?? {}), next: n.next } : n.branches ?? {};
       for (const [b, t] of Object.entries(branches)) {
         if (!t || !graph.nodes[t] || !exits.includes(b)) continue;
-        const negative = ['false', 'no_connect', 'error', 'bounced', 'no_credit', 'no_email'].includes(b);
-        const color = negative ? '#f59e0b' : '#6366f1';
-        edges.push({ id: `${n.id}::${b}::${t}`, source: n.id, sourceHandle: b, target: t, type: 'smoothstep', label: exitLabel(n, b), labelStyle: { fontSize: 10, fill: '#6b7280' }, labelBgStyle: { fill: '#fff' }, labelBgPadding: [4, 2], deletable: !readOnly, data: { handle: b }, markerEnd: { type: MarkerType.ArrowClosed, width: 18, height: 18, color }, style: { stroke: color, strokeWidth: 1.5 } });
+        edges.push({ id: `${n.id}::${b}::${t}`, source: n.id, sourceHandle: b, target: t, type: 'outreach', deletable: !readOnly, data: { handle: b, label: exitLabel(n, b), tone: exitTone(b), onAdd: add }, markerEnd: MARKER, style: EDGE_STYLE });
       }
     }
   }
   return edges;
 }
 
-/** Edges are fully derived from the graph, so identity only has to change when the wiring does. */
-function sameEdges(a: Edge[], b: Edge[]): boolean {
-  return a.length === b.length && a.every((e, i) => e.id === b[i].id && e.deletable === b[i].deletable);
+/** Edges are derived from the graph, so identity only has to change when the wiring or a branch name does. */
+function sameEdges(a: OutreachRFEdge[], b: OutreachRFEdge[]): boolean {
+  return a.length === b.length && a.every((e, i) => e.id === b[i].id && e.deletable === b[i].deletable && e.data?.label === b[i].data?.label && !!e.data?.onAdd === !!b[i].data?.onAdd);
 }
 
-export function deriveNodes(graph: Graph, opts: { stats: Record<string, StepStats>; issues: Record<string, IssueLevel>; selectedId: string | null; readOnly: boolean; lookup: Lookup; onStat?: (nodeId: string, kind: StatKind) => void }, prev: OutreachRFNode[]): OutreachRFNode[] {
+/**
+ * Nodes for React Flow. Positions come from the tree layout, not from the graph: an older sequence laid out
+ * left-to-right shows up as a tree straight away, without touching the draft.
+ */
+export function deriveNodes(graph: Graph, opts: { stats: Record<string, StepStats>; issues: Record<string, IssueLevel>; selectedId: string | null; readOnly: boolean; lookup: Lookup; onStat?: (nodeId: string, kind: StatKind) => void; onAdd?: AddHere }, prev: OutreachRFNode[]): OutreachRFNode[] {
   const prevMap = new Map(prev.map((n) => [n.id, n]));
+  const positions = layoutPositions(graph);
   return Object.values(graph.nodes).map((gn) => {
     const old = prevMap.get(gn.id);
-    const position = old?.dragging ? old.position : gn.position;
     return {
       id: gn.id,
       type: 'outreach',
-      position,
-      dragging: old?.dragging,
+      position: positions[gn.id] ?? gn.position,
       measured: old?.measured,
       selected: gn.id === opts.selectedId,
       deletable: gn.type !== 'start' && !opts.readOnly,
-      draggable: !opts.readOnly,
+      draggable: false,
       connectable: !opts.readOnly,
-      data: { node: gn, summary: nodeSummary(gn, opts.lookup, graph.nodes), stats: opts.stats[gn.id] ?? null, issue: opts.issues[gn.id] ?? null, onStat: opts.onStat },
+      data: {
+        node: gn, summary: nodeSummary(gn, opts.lookup, graph.nodes), stats: opts.stats[gn.id] ?? null, issue: opts.issues[gn.id] ?? null,
+        open: opts.readOnly ? [] : openExits(gn, graph.nodes), onStat: opts.onStat, onAdd: opts.readOnly ? undefined : opts.onAdd,
+      },
     };
   });
 }
@@ -138,7 +251,6 @@ export function deriveNodes(graph: Graph, opts: { stats: Record<string, StepStat
  * every handler we hand to React Flow keeps a stable identity (latest logic via ref).
  */
 const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
-const SNAP_GRID: [number, number] = [20, 20];
 const PRO_OPTIONS = { hideAttribution: true };
 const DELETE_KEYS = ['Backspace', 'Delete'];
 const MINIMAP_CLS = '!bg-white !border !border-gray-200 !rounded-lg hidden md:block';
@@ -157,7 +269,6 @@ function useEvent<T extends (...args: never[]) => unknown>(fn: T): T {
 export interface CanvasHandle {
   focusNode: (id: string) => void;
   fitView: () => void;
-  centerPosition: () => { x: number; y: number };
 }
 
 export interface CanvasProps {
@@ -168,42 +279,41 @@ export interface CanvasProps {
   readOnly: boolean;
   lookup: Lookup;
   onSelect: (id: string | null) => void;
-  onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void;
   onConnect: (source: string, handle: string, target: string) => void;
   onDisconnect: (source: string, handle: string) => void;
   onRequestDelete: (ids: string[]) => void;
-  onAddNode: (type: NodeType, position: { x: number; y: number }) => void;
+  /** A "+" on a line or under a step was clicked: open the step picker for that spot. */
+  onAddHere?: AddHere;
   /** A Failed / Skipped badge on a step was clicked. */
   onOpenStat?: (nodeId: string, kind: StatKind) => void;
   className?: string;
 }
 
 const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(props, ref) {
-  const { graph, stats, issues, selectedId, readOnly, lookup, onSelect, onMoveNodes, onConnect, onDisconnect, onRequestDelete, onAddNode, onOpenStat } = props;
-  const rf = useReactFlow<OutreachRFNode, Edge>();
-  const wrapper = useRef<HTMLDivElement>(null);
+  const { graph, stats, issues, selectedId, readOnly, lookup, onSelect, onConnect, onDisconnect, onRequestDelete, onAddHere, onOpenStat } = props;
+  const rf = useReactFlow<OutreachRFNode, OutreachRFEdge>();
   const [nodes, setNodes] = useState<OutreachRFNode[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
-  const edgesRef = useRef<Edge[]>([]);
+  const [edges, setEdges] = useState<OutreachRFEdge[]>([]);
+  const edgesRef = useRef<OutreachRFEdge[]>([]);
   edgesRef.current = edges;
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
   const openStat = useEvent((nodeId: string, kind: StatKind) => onOpenStat?.(nodeId, kind));
   const hasStatHandler = !!onOpenStat;
-  useEffect(() => { setNodes((prev) => deriveNodes(graph, { stats, issues, selectedId, readOnly, lookup, onStat: hasStatHandler ? openStat : undefined }, prev)); }, [graph, stats, issues, selectedId, readOnly, lookup, hasStatHandler, openStat]);
-  useEffect(() => { setEdges((prev) => { const next = deriveEdges(graph, readOnly); return sameEdges(prev, next) ? prev : next; }); }, [graph, readOnly]);
+  const addHere = useEvent<AddHere>((source, handle, target) => onAddHere?.(source, handle, target));
+  const hasAddHandler = !!onAddHere;
+  useEffect(() => {
+    setNodes((prev) => deriveNodes(graph, { stats, issues, selectedId, readOnly, lookup, onStat: hasStatHandler ? openStat : undefined, onAdd: hasAddHandler ? addHere : undefined }, prev));
+  }, [graph, stats, issues, selectedId, readOnly, lookup, hasStatHandler, openStat, hasAddHandler, addHere]);
+  useEffect(() => {
+    setEdges((prev) => { const next = deriveEdges(graph, readOnly, hasAddHandler ? addHere : undefined); return sameEdges(prev, next) ? prev : next; });
+  }, [graph, readOnly, hasAddHandler, addHere]);
 
   const select = useEvent((id: string | null) => onSelect(id));
   useImperativeHandle(ref, () => ({
     focusNode: (id) => { select(id); rf.fitView({ nodes: [{ id }], duration: 300, maxZoom: 1.1, padding: 0.6 }); },
     fitView: () => { rf.fitView({ duration: 300, padding: 0.2 }); },
-    centerPosition: () => {
-      const r = wrapper.current?.getBoundingClientRect();
-      if (!r) return { x: 200, y: 200 };
-      const p = rf.screenToFlowPosition({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
-      return { x: p.x - NODE_W / 2, y: p.y - 40 };
-    },
   }), [rf, select]);
 
   const onNodesChange = useEvent((changes: NodeChange<OutreachRFNode>[]) => {
@@ -213,14 +323,14 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
     if (removes.length && !readOnly) onRequestDelete(removes);
   });
 
-  const onEdgesChange = useEvent((changes: EdgeChange<Edge>[]) => {
+  const onEdgesChange = useEvent((changes: EdgeChange<OutreachRFEdge>[]) => {
     const removes = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);
     const rest = changes.filter((c) => c.type !== 'remove');
     if (rest.length) setEdges((es) => applyEdgeChanges(rest, es));
     if (readOnly) return;
     for (const id of removes) {
       const e = edgesRef.current.find((x) => x.id === id);
-      if (e) onDisconnect(e.source, (e.data?.handle as string) ?? e.sourceHandle ?? 'next');
+      if (e) onDisconnect(e.source, e.data?.handle ?? e.sourceHandle ?? 'next');
     }
   });
 
@@ -229,58 +339,40 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
     onConnect(c.source, c.sourceHandle ?? 'next', c.target);
   });
 
-  const isValidConnection = useEvent<IsValidConnection<Edge>>((c) => !!c.source && !!c.target && c.source !== c.target && c.target !== graph.start);
+  const isValidConnection = useEvent<IsValidConnection<OutreachRFEdge>>((c) => !!c.source && !!c.target && c.source !== c.target && c.target !== graph.start);
 
-  // Node deletion may need a confirmation (in-flight enrollments), so take it over from React Flow: returning false
+  // Node deletion may need a confirmation (in-flight leads), so take it over from React Flow: returning false
   // stops the built-in removal (which would also drop the node's edges before the user has decided).
-  const onBeforeDelete = useEvent(async ({ nodes: delNodes }: { nodes: OutreachRFNode[]; edges: Edge[] }) => {
+  const onBeforeDelete = useEvent(async ({ nodes: delNodes }: { nodes: OutreachRFNode[]; edges: OutreachRFEdge[] }) => {
     if (readOnly) return false;
     if (delNodes.length > 0) { onRequestDelete(delNodes.map((n) => n.id)); return false; }
     return true; // pure edge deletion → handled by onEdgesChange remove
   });
 
-  const onSelectionChange = useEvent(({ nodes: sel }: OnSelectionChangeParams<OutreachRFNode, Edge>) => {
+  const onSelectionChange = useEvent(({ nodes: sel }: OnSelectionChangeParams<OutreachRFNode, OutreachRFEdge>) => {
     const id = sel[0]?.id ?? null;
     if (id !== selectedIdRef.current) onSelect(id);
   });
 
-  const onNodeDragStop = useEvent((_e: unknown, _node: OutreachRFNode, dragged: OutreachRFNode[]) => {
-    const positions: Record<string, { x: number; y: number }> = {};
-    for (const n of dragged.length ? dragged : [_node]) positions[n.id] = n.position;
-    onMoveNodes(positions);
-  });
-
-  const onDragOver = useEvent((e: DragEvent) => { if (readOnly) return; e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
-  const onDrop = useEvent((e: DragEvent) => {
-    if (readOnly) return;
-    e.preventDefault();
-    const type = e.dataTransfer.getData('application/outreach-node') as NodeType;
-    if (!type || !NODE_CATALOG[type]) return;
-    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-    onAddNode(type, { x: p.x - NODE_W / 2, y: p.y - 20 });
-  });
-
   return (
-    <div ref={wrapper} className={cn('h-full w-full', props.className)} onDragOver={onDragOver} onDrop={onDrop}>
-      <ReactFlow<OutreachRFNode, Edge>
+    <div className={cn('h-full w-full', props.className)}>
+      <ReactFlow<OutreachRFNode, OutreachRFEdge>
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         isValidConnection={isValidConnection}
         onBeforeDelete={onBeforeDelete}
         onSelectionChange={onSelectionChange}
-        onNodeDragStop={onNodeDragStop}
         fitView
         fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.15}
         maxZoom={1.75}
-        snapToGrid
-        snapGrid={SNAP_GRID}
         deleteKeyCode={readOnly ? null : DELETE_KEYS}
-        nodesDraggable={!readOnly}
+        nodesDraggable={false}
         nodesConnectable={!readOnly}
         elementsSelectable
         selectNodesOnDrag={false}

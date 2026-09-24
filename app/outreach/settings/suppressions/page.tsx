@@ -14,6 +14,7 @@ import BlacklistUpload from '@/components/outreach/settings/BlacklistUpload';
 import { sk, useBlacklist } from '@/components/outreach/settings/hooks';
 import type { AddSuppressionsResult, BlacklistKind, BlacklistRow, BlacklistScope } from '@/components/outreach/settings/types';
 import { cn } from '@/lib/utils';
+import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const KINDS: Array<{ value: BlacklistKind; label: string; placeholder: string; hint: string; tone: 'blue' | 'purple' | 'indigo' | 'amber' }> = [
   { value: 'domain', label: 'Domain', placeholder: 'competitor.com', hint: 'Blocks every lead whose work or personal email is at this domain.', tone: 'blue' },
@@ -72,9 +73,21 @@ export default function BlacklistsSettingsPage() {
   const [toDelete, setToDelete] = useState<BlacklistRow | null>(null);
 
   // what is shown
-  const [fScope, setFScope] = useState<'all' | BlacklistScope>('all');
-  const [fKind, setFKind] = useState<'all' | BlacklistKind>('all');
-  const [fSource, setFSource] = useState<'all' | 'manual' | 'csv' | 'crm' | 'unsubscribe'>('all');
+  // Scope, kind and source filters are remembered per workspace in this browser; the search is not.
+  type ShownFilters = { fScope: 'all' | BlacklistScope; fKind: 'all' | BlacklistKind; fSource: 'all' | 'manual' | 'csv' | 'crm' | 'unsubscribe' };
+  const { filters: shownFilters, patch: patchShown } = usePersistedFilters<ShownFilters>('suppressions', ws, { fScope: 'all', fKind: 'all', fSource: 'all' }, {
+    sanitize: (raw, d) => {
+      const v = sanitizeLike(raw, d);
+      if (!['all', 'workspace', 'client', 'sequence'].includes(v.fScope)) v.fScope = 'all';
+      if (v.fKind !== 'all' && !KINDS.some((k) => k.value === v.fKind)) v.fKind = 'all';
+      if (!['all', 'manual', 'csv', 'crm', 'unsubscribe'].includes(v.fSource)) v.fSource = 'all';
+      return v;
+    },
+  });
+  const { fScope, fKind, fSource } = shownFilters;
+  const setFScope = (v: ShownFilters['fScope']) => patchShown({ fScope: v });
+  const setFKind = (v: ShownFilters['fKind']) => patchShown({ fKind: v });
+  const setFSource = (v: ShownFilters['fSource']) => patchShown({ fSource: v });
   const [shown, setShown] = useState(PAGE);
 
   const clientName = useMemo(() => new Map((clients.data ?? []).map((c) => [c.id, c.name])), [clients.data]);

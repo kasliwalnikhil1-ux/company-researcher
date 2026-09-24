@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -9,7 +10,6 @@ import { parseError } from '@/lib/outreach/api';
 import { Button, Card } from '@/components/outreach/ui';
 import { Plus, X } from 'lucide-react';
 import { chipStyle, type ToastFn } from '../helpers';
-import { ManageTaxonomyModal } from '../ManageTaxonomy';
 
 export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagIds: string[]; toast: ToastFn }) {
   const { workspace, canWrite } = useWorkspace();
@@ -17,7 +17,6 @@ export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagI
   const tags = useTags(workspace?.id);
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [manage, setManage] = useState(false);
   const current = (tags.data ?? []).filter((t) => tagIds.includes(t.id));
   const available = (tags.data ?? []).filter((t) => !tagIds.includes(t.id));
 
@@ -42,7 +41,7 @@ export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagI
   };
 
   return (
-    <Card title="Tags" actions={canWrite ? <Button size="sm" variant="ghost" onClick={() => setManage(true)}>Manage</Button> : undefined}>
+    <Card title="Tags" actions={canWrite ? <Link href="/outreach/leads?tab=tags"><Button size="sm" variant="ghost">Manage tags</Button></Link> : undefined}>
       <div className="flex flex-wrap items-center gap-1.5">
         {current.map((t) => (
           <span key={t.id} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-xs font-medium border" style={chipStyle(t.color)}>
@@ -58,7 +57,7 @@ export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagI
               <>
                 <div className="fixed inset-0 z-20" onClick={() => setAdding(false)} />
                 <div role="menu" className="absolute left-0 top-full mt-1 z-30 w-52 max-h-64 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg py-1">
-                  {available.length === 0 ? <div className="px-3 py-2 text-xs text-gray-500">{tags.data?.length ? 'All tags applied' : 'No tags yet — create one via Manage.'}</div> : available.map((t) => (
+                  {available.length === 0 ? <div className="px-3 py-2 text-xs text-gray-500">{tags.data?.length ? 'All tags applied' : 'No tags yet — create one under Leads › Tags.'}</div> : available.map((t) => (
                     <button key={t.id} role="menuitem" type="button" disabled={busy === t.id} onClick={() => add(t.id)} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: t.color ?? '#6b7280' }} /> <span className="truncate">{t.name}</span>
                     </button>
@@ -69,7 +68,6 @@ export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagI
           </div>
         )}
       </div>
-      {manage && <ManageTaxonomyModal kind="tags" open onClose={() => setManage(false)} toast={toast} />}
     </Card>
   );
 }

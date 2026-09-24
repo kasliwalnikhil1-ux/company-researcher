@@ -11,6 +11,7 @@ import { factLines, ik, useAiBatches, useAiRealtime, useAiReviewList, type AiBat
 import { Badge, Button, EmptyState, ErrorBox, Modal, PageHeader, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import { GenerateLinesModal } from './GenerateLinesModal';
+import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const PAGE_SIZE = 50;
 const BLANK_COPY = 'Nothing usable on the profile — the fallback will be used';
@@ -124,7 +125,10 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
   const { workspace, canWrite, isManager, role } = useWorkspace();
   const ws = workspace?.id ?? null;
 
-  const [status, setStatus] = useState('generated');
+  // The status filter is remembered per workspace in this browser.
+  const { filters: reviewFilters, patch: patchReviewFilters, ready: filtersReady } = usePersistedFilters('ai-review', ws, { status: 'generated' });
+  const status = reviewFilters.status;
+  const setStatus = (v: string) => patchReviewFilters({ status: v });
   const [page, setPage] = useState(0);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -135,7 +139,7 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
 
   useAiRealtime(ws);
   const batchesQ = useAiBatches(ws);
-  const listQ = useAiReviewList(ws, { batch: batchId, status, page, pageSize: PAGE_SIZE });
+  const listQ = useAiReviewList(filtersReady ? ws : null, { batch: batchId, status, page, pageSize: PAGE_SIZE });
 
   useEffect(() => { setPage(0); setChecked(new Set()); setDrafts({}); }, [batchId, status, ws]);
   useEffect(() => { setChecked(new Set()); }, [page]);
@@ -232,7 +236,7 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
             )}
           </div>
 
-          {listQ.isLoading ? <Spinner /> : listQ.error ? <ErrorBox message={parseError(listQ.error).message} /> : rows.length === 0 ? (
+          {!filtersReady || listQ.isLoading ? <Spinner /> : listQ.error ? <ErrorBox message={parseError(listQ.error).message} /> : rows.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-xl">
               <EmptyState icon={<Sparkles className="w-6 h-6" />} title={status === 'generated' ? 'Nothing to review' : 'No lines here'}
                 description={status === 'generated' ? (batch?.status === 'generating' ? 'Lines are still being written. They appear here as they finish.' : 'Every line in this view has been handled. Pick another status to see them.') : 'No line has this status. Try another filter.'}

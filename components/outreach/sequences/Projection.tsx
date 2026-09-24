@@ -36,9 +36,9 @@ export function ProjectionView({ row, leadCount }: { row: ProjectionRow; leadCou
           </tbody>
         </Table>
       ) : (
-        <p className="text-xs text-gray-500">This sequence has no executable steps, so it only depends on waits and delays.</p>
+        <p className="text-xs text-gray-500">This sequence has no sending steps, so its length only depends on waits and delays.</p>
       )}
-      <p className="text-xs text-gray-500">Capacity uses each sender's current warm-up level, health multiplier, manual caps and schedule days, plus the weekly invitation ceiling. Real throughput also depends on acceptance rates and replies.</p>
+      <p className="text-xs text-gray-500">Capacity comes from each sender’s warm-up level, account health, the limits you set and their working days, plus LinkedIn’s weekly invitation ceiling. Real speed also depends on how many leads accept and reply.</p>
     </div>
   );
 }
@@ -65,7 +65,7 @@ export function ProjectionModal({ open, onClose, sequenceId, defaultCount = 1000
       <div className="space-y-4">
         <div className="flex items-end gap-2">
           <Input type="number" min={1} max={100000} label="Number of leads" value={count} onChange={(e) => setCount(Number(e.target.value) || 0)} className="max-w-[160px]" onKeyDown={(e) => { if (e.key === 'Enter') run(); }} />
-          <span className="text-xs text-gray-500 pb-2.5">Estimated with the saved graph and the current sender pool.</span>
+          <span className="text-xs text-gray-500 pb-2.5">Estimated from the saved sequence and the current sender pool.</span>
         </div>
         {error && <ErrorBox message={error} />}
         {busy && !result && <Spinner className="py-6" />}

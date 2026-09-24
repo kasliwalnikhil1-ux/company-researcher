@@ -6,8 +6,8 @@ import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, KeyRound, Linkedin, M
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients } from '@/lib/outreach/queries';
 import { callFn, parseError } from '@/lib/outreach/api';
-import { Button, Card, ErrorBox, Input, PageHeader, Select, Toggle, useToast } from '@/components/outreach/ui';
-import { browserTimezone, copyText, timezoneOptions } from '@/components/outreach/senders/helpers';
+import { BackLink, Button, Card, ErrorBox, Input, PageHeader, SearchableSelect, Select, Toggle, useToast } from '@/components/outreach/ui';
+import { browserTimezone, copyText, timezoneChoices } from '@/components/outreach/senders/helpers';
 import { cn } from '@/lib/utils';
 import type { Provider } from '@/lib/outreach/types';
 import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
@@ -15,15 +15,15 @@ import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
 type ConnectMethod = 'credentials' | 'browser';
 
 const CONNECT_METHODS: Array<{ id: ConnectMethod; label: string; description: string; icon: React.ReactNode }> = [
-  { id: 'credentials', label: 'Sign in with LinkedIn', description: 'The owner enters their LinkedIn email and password on the hosted page, plus any 2FA code. Works in any browser.', icon: <KeyRound className="w-4 h-4" /> },
-  { id: 'browser', label: 'Use the signed-in browser', description: 'The owner installs a small browser extension and approves the LinkedIn account already logged in on their computer. No password is typed anywhere. Chrome, Firefox, Edge or Safari.', icon: <MonitorSmartphone className="w-4 h-4" /> },
+  { id: 'credentials', label: 'Sign in with LinkedIn', description: 'The account owner signs in with their LinkedIn email and password, plus any code LinkedIn asks for. Works in any browser.', icon: <KeyRound className="w-4 h-4" /> },
+  { id: 'browser', label: 'Use the browser they’re already signed in on', description: 'The account owner installs a small browser add-on and approves the LinkedIn account already open on their computer. No password is typed anywhere.', icon: <MonitorSmartphone className="w-4 h-4" /> },
 ];
 
 const PROVIDERS: Array<{ id: Provider; label: string; description: string; icon: React.ReactNode }> = [
-  { id: 'LINKEDIN', label: 'LinkedIn', description: 'Invitations, messages, profile views, InMail. Warms up from level 0.', icon: <Linkedin className="w-5 h-5" /> },
-  { id: 'GMAIL', label: 'Gmail', description: 'Google Workspace or personal Gmail via OAuth. Used for email steps.', icon: <Mail className="w-5 h-5" /> },
-  { id: 'OUTLOOK', label: 'Outlook', description: 'Microsoft 365 / Outlook.com via OAuth. Used for email steps.', icon: <Mail className="w-5 h-5" /> },
-  { id: 'IMAP', label: 'IMAP / SMTP', description: 'Any other mailbox with IMAP and SMTP credentials.', icon: <Mail className="w-5 h-5" /> },
+  { id: 'LINKEDIN', label: 'LinkedIn', description: 'Connection requests, messages, profile views and InMail. Activity starts low and ramps up safely.', icon: <Linkedin className="w-5 h-5" /> },
+  { id: 'GMAIL', label: 'Gmail', description: 'Google Workspace or personal Gmail. Used for email steps.', icon: <Mail className="w-5 h-5" /> },
+  { id: 'OUTLOOK', label: 'Outlook', description: 'Microsoft 365 or Outlook.com. Used for email steps.', icon: <Mail className="w-5 h-5" /> },
+  { id: 'IMAP', label: 'Other email', description: 'Any other inbox, using the mail server details from your email provider.', icon: <Mail className="w-5 h-5" /> },
 ];
 
 const LEGAL_LINKS = [
@@ -51,16 +51,16 @@ export default function ConnectSenderPage() {
   const [result, setResult] = useState<{ link: string; sender_id: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const tzList = useMemo(() => timezoneOptions(), []);
+  const tzList = useMemo(() => timezoneChoices(), []);
   const recruiterEnabled = !!(workspace?.settings as Record<string, unknown> | undefined)?.recruiter_enabled;
   const emailOk = !ownerEmail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail);
 
   if (!isManager || !canWrite) {
     return (
       <div>
-        <PageHeader title="Connect sender" />
-        <ErrorBox message={canWrite ? 'Only owners and managers can connect senders.' : 'This workspace is read-only right now, so new senders cannot be connected.'} />
-        <Link href="/outreach/senders" className="inline-block mt-4 text-sm text-indigo-600 hover:underline">Back to senders</Link>
+        <BackLink href="/outreach/senders">Back to senders</BackLink>
+        <PageHeader title="Connect an account" />
+        <ErrorBox message={canWrite ? 'Only owners and managers can connect accounts.' : 'This workspace is read-only right now, so new accounts cannot be connected.'} />
       </div>
     );
   }
@@ -83,17 +83,21 @@ export default function ConnectSenderPage() {
       if (mode === 'redirect') { window.location.href = r.link; return; }
       const ok = await copyText(r.link);
       setCopied(ok);
-      toast.show(ok ? 'Link copied — it expires in 15 minutes.' : 'Could not copy automatically; copy the link below.', ok ? 'success' : 'error');
+      toast.show(ok ? 'Link copied. It expires in 15 minutes.' : 'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
     } catch (e) {
       setError(parseError(e).message);
     } finally { setLaunching(null); }
   }
 
-  const steps = ['Provider', 'Details', 'Launch'];
+  const steps = ['Account', 'Details', 'Sign in'];
+  const providerLabel = PROVIDERS.find((p) => p.id === provider)?.label ?? 'LinkedIn';
+  const heading = provider === 'LINKEDIN' ? 'Connect your LinkedIn account' : provider === 'IMAP' ? 'Connect your email inbox' : `Connect your ${providerLabel} inbox`;
+  const subtitle = provider === 'LINKEDIN' ? 'Connect your account to start outreach and manage conversations here.' : 'Connect your inbox to send and receive email from your sequences here.';
 
   return (
     <div className="max-w-6xl">
-      <PageHeader title="Connect sender" subtitle="Add a LinkedIn account or mailbox through a secure hosted login" actions={<Link href="/outreach/senders"><Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /> Senders</Button></Link>} />
+      <BackLink href="/outreach/senders">Back to senders</BackLink>
+      <PageHeader title={heading} subtitle={subtitle} />
 
       <ol className="flex items-center gap-2 mb-6 text-sm">
         {steps.map((label, i) => {
@@ -109,7 +113,7 @@ export default function ConnectSenderPage() {
       </ol>
 
       {step === 1 && (
-        <Card title="1. Choose what to connect">
+        <Card title="1. What would you like to connect?">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
             {PROVIDERS.map((p) => (
               <button key={p.id} type="button" onClick={() => setProvider(p.id)} aria-pressed={provider === p.id}
@@ -122,7 +126,7 @@ export default function ConnectSenderPage() {
           <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
             <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
             <span>
-              I have the account owner&apos;s consent and agree to the{' '}
+              I have the account owner&apos;s permission and agree to the{' '}
               {LEGAL_LINKS.map((l, i) => (
                 <span key={l.href}>
                   <a href={l.href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline">{l.label}</a>
@@ -136,24 +140,21 @@ export default function ConnectSenderPage() {
       )}
 
       {step === 2 && (
-        <Card title="2. Sender details">
+        <Card title="2. Account details">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
-            <Input label="Display name" placeholder={provider === 'LINKEDIN' ? 'e.g. Jane (Sales)' : 'e.g. jane@acme.com'} value={displayName} onChange={(e) => setDisplayName(e.target.value)} hint="Shown in tables and the inbox. The real profile name is pulled in after connection." />
+            <Input label="Display name" placeholder={provider === 'LINKEDIN' ? 'e.g. Jane (Sales)' : 'e.g. jane@acme.com'} value={displayName} onChange={(e) => setDisplayName(e.target.value)} hint="Shown in lists and the inbox. The real profile name is filled in once the account is connected." />
             <Input label="Owner email" type="email" placeholder="owner@company.com" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} error={emailOk ? undefined : 'Enter a valid email address'}
-              hint="The person who owns this account — they will log in themselves; you never see their password. Re-login reminders and pairing instructions are emailed here." />
+              hint="The person who owns this account. They sign in themselves. We email them here if the account ever needs to be signed in again." />
             <div>
-              <Select label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-                {!tzList.includes(timezone) && <option value={timezone}>{timezone}</option>}
-                {tzList.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-              </Select>
-              <div className="text-xs text-gray-500 mt-1">Actions are scheduled inside the sender's local working hours (default Mon–Fri 09:00–18:00). Pick the timezone where the account owner actually works; you can refine the windows later.</div>
+              <SearchableSelect label="Timezone" value={timezone} onChange={setTimezone} options={tzList} searchPlaceholder="Search city, region or GMT offset…" />
+              <div className="text-xs text-gray-500 mt-1">Outreach is sent during the account owner&apos;s working hours (Mon–Fri, 9am–6pm by default). Choose where they actually work. You can change the hours later.</div>
             </div>
             <div>
               <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-                <option value="">No client — shared across the workspace</option>
+                <option value="">No client (shared across the workspace)</option>
                 {(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
-              <div className="text-xs text-gray-500 mt-1">Assign the sender to a client to keep it inside that client's campaigns and reports. Leave empty to share it across the workspace.</div>
+              <div className="text-xs text-gray-500 mt-1">Assign this account to a client to keep it inside that client&apos;s campaigns and reports. Leave empty to share it across the workspace.</div>
             </div>
             {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (
               <div className="md:col-span-2">
@@ -167,14 +168,14 @@ export default function ConnectSenderPage() {
                     </button>
                   ))}
                 </div>
-                <div className="text-xs text-gray-500 mt-2">Both methods end with the same result: the account is connected and the owner can revoke access at any time. Re-logins later use the same method.</div>
+                <div className="text-xs text-gray-500 mt-2">Both options connect the account the same way, and the owner can disconnect it at any time.</div>
               </div>
             )}
             {provider === 'LINKEDIN' && recruiterEnabled && (
               <div className="md:col-span-2 flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
                 <div>
-                  <div className="text-sm font-medium text-gray-900">Enable LinkedIn Recruiter features</div>
-                  <div className="text-xs text-gray-500">Only for accounts with a Recruiter seat. Leaves the Recruiter product enabled in the hosted login.</div>
+                  <div className="text-sm font-medium text-gray-900">This account has a LinkedIn Recruiter seat</div>
+                  <div className="text-xs text-gray-500">Turn this on only if the account pays for LinkedIn Recruiter.</div>
                 </div>
                 <Toggle checked={recruiter} onChange={setRecruiter} />
               </div>
@@ -188,37 +189,37 @@ export default function ConnectSenderPage() {
       )}
 
       {step === 3 && (
-        <Card title="3. Launch hosted login">
+        <Card title="3. Sign in to connect">
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-5">
-            <dt className="text-gray-500">Provider</dt><dd className="text-gray-900 font-medium">{PROVIDERS.find((p) => p.id === provider)?.label}</dd>
-            <dt className="text-gray-500">Client</dt><dd className="text-gray-900">{clientId ? clients.data?.find((c) => c.id === clientId)?.name ?? '—' : 'None'}</dd>
-            <dt className="text-gray-500">Display name</dt><dd className="text-gray-900">{displayName || <span className="text-gray-400">auto</span>}</dd>
-            <dt className="text-gray-500">Owner email</dt><dd className="text-gray-900">{ownerEmail || <span className="text-gray-400">not set</span>}</dd>
+            <dt className="text-gray-500">Account type</dt><dd className="text-gray-900 font-medium">{PROVIDERS.find((p) => p.id === provider)?.label}</dd>
+            {clientId && (<><dt className="text-gray-500">Client</dt><dd className="text-gray-900">{clients.data?.find((c) => c.id === clientId)?.name ?? '—'}</dd></>)}
+            {displayName && (<><dt className="text-gray-500">Display name</dt><dd className="text-gray-900">{displayName}</dd></>)}
+            {ownerEmail && (<><dt className="text-gray-500">Owner email</dt><dd className="text-gray-900">{ownerEmail}</dd></>)}
             <dt className="text-gray-500">Timezone</dt><dd className="text-gray-900">{timezone}</dd>
             {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (<><dt className="text-gray-500">Sign-in</dt><dd className="text-gray-900">{CONNECT_METHODS.find((m) => m.id === connectMethod)?.label}</dd></>)}
             {provider === 'LINKEDIN' && recruiterEnabled && (<><dt className="text-gray-500">Recruiter</dt><dd className="text-gray-900">{recruiter ? 'Enabled' : 'Disabled'}</dd></>)}
           </dl>
           <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 text-sm text-gray-700 space-y-1.5 mb-5">
-            <p>Clicking <strong>Open hosted login</strong> creates a one-time link that opens a secure hosted login page. {provider !== 'LINKEDIN' ? 'The mailbox owner authorises access there via OAuth.' : connectMethod === 'browser' ? 'The account owner is guided to install the browser extension (or confirms it is already installed) and approves access to the LinkedIn account signed in on that browser. If the page cannot detect the extension automatically, it shows a one-time code to paste into the extension under “Link a profile”.' : 'The account owner signs in to LinkedIn there (including any 2FA / verification code).'} Credentials never touch this app.</p>
-            <p>The link <strong>expires in 15 minutes</strong>. When the login succeeds you are redirected back to the new sender's page; if it fails you can generate a fresh link from there.</p>
-            <p>If someone else owns the account, use <strong>Copy link</strong> and send it to them instead of opening it yourself — the proxy is pinned to the country of whoever opens the link.</p>
+            <p>You’ll be taken to a secure sign-in page. {provider !== 'LINKEDIN' ? 'Sign in to your inbox and allow access, then return here to finish connecting.' : connectMethod === 'browser' ? 'Install the browser add-on if asked, approve the LinkedIn account already open in that browser, then return here to finish connecting. If the page cannot find the add-on on its own, it shows a short code to paste into the add-on under “Link a profile”.' : 'Complete any verification LinkedIn asks for, then return here to finish connecting.'}</p>
+            <p>The link <strong>expires in 15 minutes</strong>. Once the sign-in is done you’ll land on the new account’s page. If something goes wrong, you can create a fresh link from there.</p>
+            <p>Connecting someone else’s account? Use <strong>Copy sign-in link</strong> and send it to the account owner so they can sign in themselves. The proxy is pinned to the country of whoever opens the link.</p>
           </div>
           {error && <ErrorBox message={error} className="mb-4" />}
           {result && (
             <div className="mb-4">
-              <div className="text-xs font-medium text-gray-600 mb-1">Hosted login link (valid 15 minutes)</div>
+              <div className="text-xs font-medium text-gray-600 mb-1">Sign-in link (valid for 15 minutes)</div>
               <div className="flex gap-2">
-                <input readOnly value={result.link} onFocus={(e) => e.currentTarget.select()} className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-gray-50 text-gray-700" aria-label="Hosted login link" />
+                <input readOnly value={result.link} onFocus={(e) => e.currentTarget.select()} className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-gray-50 text-gray-700" aria-label="Sign-in link" />
                 <Button variant="secondary" onClick={() => launch('copy')} loading={launching === 'copy'}>{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} Copy</Button>
               </div>
-              <div className="text-xs text-gray-500 mt-1">Sender created as <Link href={`/outreach/senders/${result.sender_id}`} className="text-indigo-600 hover:underline">connecting</Link>; it turns green once the login completes.</div>
+              <div className="text-xs text-gray-500 mt-1">The account now shows as <Link href={`/outreach/senders/${result.sender_id}`} className="text-indigo-600 hover:underline">connecting</Link>. It becomes active once the sign-in is complete.</div>
             </div>
           )}
           <div className="flex flex-wrap justify-between gap-2">
             <Button variant="secondary" onClick={() => setStep(2)} disabled={!!result}><ArrowLeft className="w-4 h-4" /> Back</Button>
             <div className="flex gap-2">
-              {!result && <Button variant="secondary" onClick={() => launch('copy')} loading={launching === 'copy'} disabled={!!launching}><Copy className="w-4 h-4" /> Copy link to send to the sender owner</Button>}
-              <Button onClick={() => launch('redirect')} loading={launching === 'redirect'} disabled={!!launching}><ExternalLink className="w-4 h-4" /> Open hosted login</Button>
+              {!result && <Button variant="secondary" onClick={() => launch('copy')} loading={launching === 'copy'} disabled={!!launching}><Copy className="w-4 h-4" /> Copy sign-in link</Button>}
+              <Button onClick={() => launch('redirect')} loading={launching === 'redirect'} disabled={!!launching}><ExternalLink className="w-4 h-4" /> {provider === 'LINKEDIN' ? 'Connect LinkedIn' : `Connect ${PROVIDERS.find((p) => p.id === provider)?.label ?? 'inbox'}`}</Button>
             </div>
           </div>
         </Card>

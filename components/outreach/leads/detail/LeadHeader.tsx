@@ -76,7 +76,7 @@ export function LeadHeader({ lead: leadRow, onEnroll, toast }: { lead: Lead; onE
         {canWrite && (
           <div className="flex flex-wrap md:flex-col gap-2 md:items-stretch">
             <Button onClick={onEnroll} disabled={lead.do_not_contact} title={lead.do_not_contact ? 'Clear do-not-contact first' : 'Enrol in a sequence'}><GitBranch className="w-4 h-4" /> Enrol</Button>
-            <Button variant="secondary" onClick={() => setConfirm('dnc')}>{lead.do_not_contact ? <><ShieldCheck className="w-4 h-4" /> Clear DNC</> : <><ShieldOff className="w-4 h-4" /> Mark DNC</>}</Button>
+            <Button variant="secondary" onClick={() => setConfirm('dnc')} title={lead.do_not_contact ? 'Clear do not contact — make this lead eligible for outreach again' : 'Mark as do not contact — exclude this lead from every sequence'}>{lead.do_not_contact ? <><ShieldCheck className="w-4 h-4" /> Clear DNC</> : <><ShieldOff className="w-4 h-4" /> Mark DNC</>}</Button>
             <Button variant="ghost" className="text-red-600" onClick={() => setConfirm('delete')}><Trash2 className="w-4 h-4" /> Delete</Button>
           </div>
         )}

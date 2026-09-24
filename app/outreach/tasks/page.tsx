@@ -14,6 +14,7 @@ import { useClients, useMembers, useTasks } from '@/lib/outreach/queries';
 import type { Lead, Sender, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import TaskDrawer, { TASK_KINDS, memberName, parseCallBody, taskKindLabel, taskKindTone } from '@/components/outreach/tasks/TaskDrawer';
+import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 type TaskRow = Task & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 
@@ -27,10 +28,17 @@ function TasksPageInner() {
   const toast = useToast();
   const userId = user?.id ?? null;
 
-  const [tab, setTab] = useState<'open' | 'completed'>('open');
-  const [kind, setKind] = useState<string>(() => params.get('kind') ?? '');
-  const [mine, setMine] = useState(false);
-  const [clientId, setClientId] = useState('');
+  // Tab, kind, assignee and client filters are remembered per workspace in this browser; ?kind= in the URL wins.
+  const urlKind = params.get('kind');
+  const { filters: taskFilters, patch: patchTaskFilters, ready: filtersReady } = usePersistedFilters<{ tab: 'open' | 'completed'; kind: string; mine: boolean; clientId: string }>('tasks', ws, { tab: 'open', kind: '', mine: false, clientId: '' }, {
+    overrides: urlKind ? { kind: urlKind } : null,
+    sanitize: (raw, d) => { const v = sanitizeLike(raw, d); if (v.tab !== 'open' && v.tab !== 'completed') v.tab = 'open'; if (v.kind && !(TASK_KINDS as readonly string[]).includes(v.kind)) v.kind = ''; return v; },
+  });
+  const { tab, kind, mine, clientId } = taskFilters;
+  const setTab = (v: 'open' | 'completed') => patchTaskFilters({ tab: v });
+  const setKind = (v: string) => patchTaskFilters({ kind: v });
+  const setMine = (v: boolean) => patchTaskFilters({ mine: v });
+  const setClientId = (v: string) => patchTaskFilters({ clientId: v });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkAssignee, setBulkAssignee] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -40,7 +48,7 @@ function TasksPageInner() {
   useEffect(() => { const t = params.get('task'); if (t) setOpenTask(t); }, [params]);
   const closeDrawer = () => { setOpenTask(null); if (params.get('task')) router.replace('/outreach/tasks'); };
 
-  const tasksQ = useTasks(ws, { open: tab === 'open', kind: kind || null, assigned_to: mine ? userId : null });
+  const tasksQ = useTasks(filtersReady ? ws : null, { open: tab === 'open', kind: kind || null, assigned_to: mine ? userId : null });
   const membersQ = useMembers(ws);
   const clientsQ = useClients(ws);
 
@@ -116,7 +124,7 @@ function TasksPageInner() {
         )}
       </div>
 
-      {tasksQ.isLoading && <Spinner className="min-h-[50vh]" />}
+      {(!filtersReady || tasksQ.isLoading) && <Spinner className="min-h-[50vh]" />}
       {tasksQ.error && <ErrorBox message={parseError(tasksQ.error).message} />}
       {tasksQ.data && rows.length === 0 && (
         <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />

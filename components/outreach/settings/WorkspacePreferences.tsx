@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Save } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
-import { Button, Card, Input, Select, useToast } from '@/components/outreach/ui';
+import { Button, Card, Input, SearchableSelect, useToast } from '@/components/outreach/ui';
+import { timezoneChoices } from '@/components/outreach/senders/helpers';
 import { SettingRow, Switch } from './shared';
 import { CURRENCIES, isValidTimezone, nowIn, saveWorkspaceSettings, timezoneOptions } from './workspaceSettings';
 
@@ -22,7 +23,7 @@ export function RegionalCard() {
   const [busy, setBusy] = useState(false);
   useEffect(() => setForm(saved), [saved]);
 
-  const zones = useMemo(() => timezoneOptions(saved.timezone), [saved.timezone]);
+  const zones = useMemo(() => timezoneChoices(timezoneOptions(saved.timezone)), [saved.timezone]);
   const costNum = form.cost.trim() === '' ? null : Number(form.cost);
   const costError = costNum != null && (!Number.isFinite(costNum) || costNum < 0 || costNum > 100000) ? 'Enter a number between 0 and 100,000' : undefined;
   const tzError = !isValidTimezone(form.timezone) ? 'Unknown timezone' : undefined;
@@ -46,16 +47,12 @@ export function RegionalCard() {
       <form onSubmit={save} className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <Select label="Timezone" value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })} disabled={!editable}>
-              {zones.map((z) => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}
-            </Select>
-            <span className="block text-xs text-gray-500 mt-1">{tzError ?? `Reports and "today" use this timezone. It is ${nowIn(form.timezone)} there now.`}</span>
+            <SearchableSelect label="Timezone" value={form.timezone} onChange={(tz) => setForm({ ...form, timezone: tz })} options={zones} disabled={!editable}
+              searchPlaceholder="Search city, region or GMT offset…" error={tzError} hint={`Reports and "today" use this timezone. It is ${nowIn(form.timezone)} there now.`} />
           </div>
           <div>
-            <Select label="Currency" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })} disabled={!editable}>
-              {[...new Set([form.currency, ...CURRENCIES])].map((c) => <option key={c} value={c}>{c}</option>)}
-            </Select>
-            <span className="block text-xs text-gray-500 mt-1">Used for deal values and the cost report.</span>
+            <SearchableSelect label="Currency" value={form.currency} onChange={(c) => setForm({ ...form, currency: c })} options={CURRENCIES} disabled={!editable}
+              searchPlaceholder="Search currency code…" hint="Used for deal values and the cost report." />
           </div>
           <Input label={`Default monthly cost per sender (${form.currency})`} inputMode="decimal" placeholder="e.g. 99" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} error={costError}
             hint="Covers the seat, LinkedIn plan and tools. A sender can carry its own cost; this fills the gaps in the cost report." disabled={!editable} />

@@ -14,6 +14,7 @@ import {
 import { ChartSkeleton, ExportButton, KpiTile, MetricLabel, Refreshing, RetryError, Section, TableSkeleton, TilesSkeleton } from './primitives';
 import { IntentBar, IntentLegend, IntentStackChart } from './charts';
 import type { TabProps } from './OverviewTab';
+import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const GROUPS: Array<{ key: IntentGroup; label: string; column: string }> = [
   { key: 'sequence', label: 'Sequence', column: 'Sequence' }, { key: 'step', label: 'Step', column: 'Step' },
@@ -27,8 +28,15 @@ function NumberLink({ value, onClick, busy, label }: { value: number; onClick: (
 
 export default function RepliesTab({ ws, client, range, onNotice }: TabProps & { onNotice: (message: string, type?: 'success' | 'error') => void }) {
   const router = useRouter();
-  const [group, setGroup] = useState<IntentGroup>('sequence');
-  const [filters, setFilters] = useState<ReportFilters>({});
+  // Grouping and filters are remembered per workspace in this browser.
+  const { filters: remembered, setFilters: setRemembered, patch: patchRemembered } = usePersistedFilters<{ group: IntentGroup } & ReportFilters>('reports-replies', ws,
+    { group: 'sequence', sequence_id: undefined, sender_id: undefined, node_id: undefined, channel: undefined, variant_id: undefined },
+    { sanitize: (raw, d) => { const v = sanitizeLike(raw, d); if (!GROUPS.some((g) => g.key === v.group)) v.group = 'sequence'; return v; } });
+  const group = remembered.group;
+  const setGroup = (g: IntentGroup) => patchRemembered({ group: g });
+  const pickFilters = (v: ReportFilters): ReportFilters => ({ sequence_id: v.sequence_id, sender_id: v.sender_id, node_id: v.node_id, channel: v.channel, variant_id: v.variant_id });
+  const filters = useMemo(() => pickFilters(remembered), [remembered]);
+  const setFilters = (next: (f: ReportFilters) => ReportFilters) => setRemembered((v) => ({ ...v, ...next(pickFilters(v)) }));
   const [opening, setOpening] = useState(false);
   const sequences = useSequences(ws); const senders = useSenders(ws);
   const scope = { ws, client, range };

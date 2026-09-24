@@ -10,7 +10,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { SEQUENCE_ASSIGNMENTS, type EnrollResult } from '@/lib/outreach/types';
 import { useClients, useLeads, useLists, useSenders, useSequence, useStages, useTags, type LeadFilters } from '@/lib/outreach/queries';
-import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, Input, PageLoader, Select, Spinner, StatusPill, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
+import { Avatar, BackLink, Badge, Button, Card, EmptyState, ErrorBox, Input, PageLoader, Select, Spinner, StatusPill, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
 import { ProjectionView } from '@/components/outreach/sequences/Projection';
 import EnrollmentsTable from '@/components/outreach/sequences/EnrollmentsTable';
 import { fetchLeadIds, projectSequence, useEffectiveCaps, type ProjectionRow } from '@/components/outreach/sequences/hooks';
@@ -133,7 +133,7 @@ export default function EnrollPage() {
   return (
     <div className="space-y-6">
       <div>
-        <Link href={`/outreach/sequences/${id}`} className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-800 mb-3"><ArrowLeft className="w-4 h-4" /> Back to builder</Link>
+        <BackLink href={`/outreach/sequences/${id}`}>Back to builder</BackLink>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-bold text-gray-900">Enrol leads</h1>
           <span className="text-gray-400">·</span>

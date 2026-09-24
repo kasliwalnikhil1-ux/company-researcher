@@ -36,16 +36,16 @@ export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Seq
       else await rpc('resume_enrollment', { p_id: id });
       qc.invalidateQueries({ queryKey: ['outreach', 'enrollments'] });
       qc.invalidateQueries({ queryKey: ['outreach', sequence.workspace_id, 'sequence_summary'] });
-      toast.show(kind === 'exit' ? 'Enrollment exited' : kind === 'pause' ? 'Enrollment paused' : 'Enrollment resumed');
+      toast.show(kind === 'exit' ? 'Lead taken out of the sequence' : kind === 'pause' ? 'Lead paused' : 'Lead resumed');
     } catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   };
 
   const rows = q.data ?? [];
   return (
-    <Card title={view === 'failed' ? 'Failed and skipped leads' : `Enrollments${q.data ? ` (${rows.length}${rows.length === 200 ? '+' : ''})` : ''}`} actions={
+    <Card title={view === 'failed' ? 'Failed and skipped leads' : `Leads in this sequence${q.data ? ` (${rows.length}${rows.length === 200 ? '+' : ''})` : ''}`} actions={
       <>
-        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs" role="tablist" aria-label="Enrollment view">
+        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs" role="tablist" aria-label="Which leads to show">
           <button type="button" role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={cn('px-3 py-1', view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>Enrollments</button>
           <button type="button" role="tab" aria-selected={view === 'failed'} onClick={() => setView('failed')} className={cn('px-3 py-1 tabular-nums', view === 'failed' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>Failed{failedCount.data ? ` (${failedCount.data.toLocaleString()})` : ''}</button>
         </div>
@@ -61,7 +61,7 @@ export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Seq
       {view === 'failed' ? (
         <FailedLeadsPanel sequenceId={sequence.id} kind={failedKind} onKindChange={setFailedKind} graph={sequence.graph} canWrite={canWrite} />
       ) : q.isLoading ? <Spinner /> : q.error ? <ErrorBox message={parseError(q.error).message} /> : rows.length === 0 ? (
-        <EmptyState title="No enrollments" description={filter === 'live' ? 'No leads are currently live in this sequence.' : 'Nothing matches this filter.'} />
+        <EmptyState title="No leads here" description={filter === 'live' ? 'No leads are currently live in this sequence.' : 'Nothing matches this filter.'} />
       ) : (
         <Table className="border-0">
           <thead><tr><Th>Lead</Th><Th>Sender</Th><Th>Status</Th><Th>Current step</Th><Th>Entered</Th><Th>Waits until</Th><Th className="text-right">Actions</Th></tr></thead>

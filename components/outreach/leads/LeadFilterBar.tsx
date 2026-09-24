@@ -6,9 +6,9 @@ import type { IntelLeadFilters, TimeInRole } from '@/lib/outreach/intel';
 import type { Client, List, Stage, Tag } from '@/lib/outreach/types';
 import { Button, Input, Modal, Select } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
-import { Bookmark, BookmarkPlus, Search, Settings2, SlidersHorizontal, X } from 'lucide-react';
+import { Bookmark, BookmarkPlus, Search, SlidersHorizontal, X } from 'lucide-react';
 import type { ToastFn } from './helpers';
-import type { TaxonomyKind } from './ManageTaxonomy';
+import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 export type ViewFilters = Pick<LeadFilters, 'search' | 'client_id' | 'list_id' | 'stage_id' | 'tag_id' | 'dnc'> & IntelLeadFilters;
 export interface SavedView { id: string; name: string; filters: ViewFilters }
@@ -19,6 +19,8 @@ export const EMPTY_FILTERS: ViewFilters = {
 };
 const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as (keyof ViewFilters)[];
 const PROFILE_KEYS: (keyof ViewFilters)[] = ['enriched', 'replied', 'posted_30d', 'min_followers', 'time_in_role', 'past_company', 'skill', 'language'];
+const BOOL_KEYS: (keyof ViewFilters)[] = ['dnc', 'enriched', 'replied', 'posted_30d'];
+const TIME_IN_ROLE_VALUES: TimeInRole[] = ['lt6', '6to12', '1to3', 'gt3'];
 const isSet = (v: unknown) => v != null && v !== '' && v !== false;
 
 function storageKey(ws: string) { return `outreach-lead-views:${ws}`; }
@@ -47,6 +49,37 @@ export function useSavedViews(ws: string | undefined) {
   return { views, save, remove };
 }
 
+// ---------------------------------------------------------------------------
+// Remembered filters (per workspace, this browser). The search text is not remembered.
+// ---------------------------------------------------------------------------
+
+/** Only accepts known keys with the right shape, so a stale or hand-edited entry cannot break the page. */
+function sanitizeStored(raw: unknown): ViewFilters {
+  const out: ViewFilters = { ...EMPTY_FILTERS };
+  if (!raw || typeof raw !== 'object') return out;
+  const r = raw as Record<string, unknown>;
+  const o = out as Record<string, unknown>;
+  for (const k of FILTER_KEYS) {
+    if (k === 'search') continue;
+    const v = r[k];
+    if (v == null) continue;
+    if (BOOL_KEYS.includes(k)) { if (typeof v === 'boolean') o[k] = v; }
+    else if (k === 'min_followers') { if (typeof v === 'number' && Number.isFinite(v) && v > 0) out.min_followers = v; }
+    else if (k === 'time_in_role') { if (typeof v === 'string' && TIME_IN_ROLE_VALUES.includes(v as TimeInRole)) out.time_in_role = v as TimeInRole; }
+    else if (typeof v === 'string' && v.trim()) o[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Lead filters that survive navigation: stored in localStorage per workspace and restored when the page opens again.
+ * `ready` is false until the stored filters for the current workspace have been read, so the list is not fetched unfiltered first.
+ */
+export function usePersistedLeadFilters(ws: string | undefined) {
+  const { filters, setFilters, ready } = usePersistedFilters<ViewFilters>('leads', ws, EMPTY_FILTERS, { sanitize: sanitizeStored, omit: ['search'] });
+  return { filters, setFilters, ready };
+}
+
 export function isFilterEmpty(f: ViewFilters): boolean {
   return FILTER_KEYS.every((k) => (k === 'dnc' || k === 'enriched' || k === 'replied' ? f[k] == null : !isSet(f[k])));
 }
@@ -69,16 +102,15 @@ function DebouncedInput({ value, onCommit, ...rest }: { value: string; onCommit:
   return <input {...rest} value={v} onChange={(e) => setV(e.target.value)} />;
 }
 
-export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags, ws, canWrite, onManage, toast }: {
+export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags, ws, toast }: {
   filters: ViewFilters; onChange: (f: ViewFilters) => void;
   clients?: Client[]; lists?: List[]; stages?: Stage[]; tags?: Tag[];
-  ws: string | undefined; canWrite: boolean; onManage: (k: TaxonomyKind) => void; toast: ToastFn;
+  ws: string | undefined; toast: ToastFn;
 }) {
   const { views, save, remove } = useSavedViews(ws);
   const [search, setSearch] = useState(filters.search ?? '');
   const [saveOpen, setSaveOpen] = useState(false);
   const [viewName, setViewName] = useState('');
-  const [manageOpen, setManageOpen] = useState(false);
   const profileCount = PROFILE_KEYS.filter((k) => (k === 'enriched' || k === 'replied' ? filters[k] != null : isSet(filters[k]))).length;
   const [moreOpen, setMoreOpen] = useState(false);
   useEffect(() => { if (profileCount > 0) setMoreOpen(true); }, [profileCount]);
@@ -134,28 +166,13 @@ export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags,
           <option value="">All tags</option>
           {tags?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
-        <select aria-label="Do not contact" value={filters.dnc == null ? '' : filters.dnc ? 'yes' : 'no'} onChange={(e) => set('dnc', e.target.value === '' ? null : e.target.value === 'yes')} className={sel}>
+        <select aria-label="Do not contact" title="DNC = Do not contact. Filter leads by whether they are excluded from outreach" value={filters.dnc == null ? '' : filters.dnc ? 'yes' : 'no'} onChange={(e) => set('dnc', e.target.value === '' ? null : e.target.value === 'yes')} className={sel}>
           <option value="">DNC: any</option>
           <option value="yes">DNC: yes</option>
           <option value="no">DNC: no</option>
         </select>
         <Button variant={profileCount > 0 ? 'primary' : 'secondary'} size="sm" aria-expanded={moreOpen} aria-controls="lead-profile-filters" onClick={() => setMoreOpen((o) => !o)} title="Filter on replies and enriched profile data"><SlidersHorizontal className="w-3.5 h-3.5" /> Profile filters{profileCount > 0 ? ` (${profileCount})` : ''}</Button>
         {!isFilterEmpty(filters) && <Button variant="ghost" size="sm" onClick={() => onChange(EMPTY_FILTERS)}><X className="w-3.5 h-3.5" /> Clear</Button>}
-        {canWrite && (
-          <div className="relative ml-auto">
-            <Button variant="secondary" size="sm" title="Manage lists, stages and tags" aria-haspopup="menu" aria-expanded={manageOpen} onClick={() => setManageOpen((o) => !o)}><Settings2 className="w-3.5 h-3.5" /> Manage</Button>
-            {manageOpen && (
-              <>
-                <div className="fixed inset-0 z-20" onClick={() => setManageOpen(false)} />
-                <div role="menu" className="absolute right-0 top-full mt-1 z-30 w-40 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
-                  {(['lists', 'stages', 'tags'] as TaxonomyKind[]).map((k) => (
-                    <button key={k} role="menuitem" type="button" onClick={() => { setManageOpen(false); onManage(k); }} className="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 capitalize">{k}</button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
       </div>
       {moreOpen && (
         <div id="lead-profile-filters" className="rounded-xl border border-gray-200 bg-white p-3">
