@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useStandup } from '@/lib/crm/queries';
 import { SCORE_KEYS, fmtMoney, type AttentionDeal, type TodayMeeting } from '@/lib/crm/types';
-import { Badge, Button, Card, EmptyState, ErrorBox, Spinner, StageBadge, fmtDate, fmtTime, daysAgo, todayISO, addDaysISO } from '@/components/crm/ui';
+import { addDaysISO, Badge, Button, Card, daysAgo, EmptyState, ErrorBox, fmtDate, fmtTime, PageLoader, StageBadge, todayISO } from '@/components/crm/ui';
 import { CommitmentForm, NextStepModal } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 import { AlertTriangle, ChevronLeft, ChevronRight, ClipboardCheck, RefreshCw } from 'lucide-react';
@@ -142,7 +142,7 @@ export default function StandupPage() {
   const day = s?.scoreboard?.day?.totals; const wk = s?.scoreboard?.trailing_7d?.totals;
   const channelRows = useMemo(() => (s?.scoreboard?.day?.channels ?? []).filter((c) => SCORE_KEYS.some((k) => (c[k.key] as number) > 0)), [s]);
 
-  if (q.isLoading) return <Spinner />;
+  if (q.isLoading) return <PageLoader />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
   if (!s) return <EmptyState title="No data" />;
   // Next steps: the standup day / the rest of its week (to Sunday) / the week after. Overdue ones live under Slipping.

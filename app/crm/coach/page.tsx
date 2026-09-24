@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCoachingList } from '@/lib/crm/queries';
 import { RATING_LABELS, READINESS_LABELS, STAGE_LABELS, type CoachRollupRow, type CoachingListRow, type ReadinessStage } from '@/lib/crm/types';
-import { Badge, Card, CompanyLogo, EmptyState, ErrorBox, Input, PageHeader, Select, Spinner, Table, Td, Th, TimeRangeFilter, fmtDate, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { Badge, Card, CompanyLogo, EmptyState, ErrorBox, fmtDate, Input, PageHeader, Select, Spinner, Table, Td, Th, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
 import { LensDots, ReadinessBadge, ScoreRing } from '@/components/crm/coaching';
 import { TranscriptModal } from '@/components/crm/transcript';
 import { GraduationCap, Search, Sparkles } from 'lucide-react';
@@ -71,7 +71,7 @@ export default function CoachPage() {
       </div>
 
       {q.isError && <ErrorBox message={(q.error as Error).message} />}
-      {q.isLoading && <Spinner className="py-16" />}
+      {q.isLoading && <Spinner className="min-h-[50vh]" />}
 
       {d && (
         <>

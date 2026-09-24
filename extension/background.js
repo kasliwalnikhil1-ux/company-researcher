@@ -1,4 +1,4 @@
-// CapitalxAI Outreach Session Sync — background service worker (Manifest V3, no build step).
+// GrowthxAI Outreach Session Sync — background service worker (Manifest V3, no build step).
 //
 // What it does:
 //   * every 180 minutes (alarm) and whenever the LinkedIn `li_at` / `li_a` cookie changes (debounced 60 s)

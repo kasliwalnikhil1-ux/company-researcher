@@ -1,6 +1,6 @@
 // supabase/functions/outreach-mcp/index.ts
 //
-// Remote MCP server ("Claude connector") for the CapitalxAI Outreach platform.
+// Remote MCP server ("Claude connector") for the GrowthxAI Outreach platform.
 // Same transport/auth skeleton as capitalxai-mcp:
 //
 //   MCP endpoint:        POST/GET/DELETE  /outreach-mcp/mcp        (Streamable HTTP)
@@ -40,7 +40,7 @@ const RESOURCE_URL = `${FUNCTION_BASE}/mcp`;
 const PRM_URL = `${FUNCTION_BASE}/.well-known/oauth-protected-resource`;
 const AUTH_SERVER_URL = `${SUPABASE_URL}/auth/v1`;
 
-const APP_NAME = "CapitalxAI Outreach";
+const APP_NAME = "GrowthxAI Outreach";
 const APP_URL = WEB_ORIGIN;
 const APP_LOGO_URL = `${APP_URL}/logo.png`;
 
@@ -58,7 +58,7 @@ function unauthorized(): Response {
   });
 }
 
-const INSTRUCTIONS = `CapitalxAI Outreach: multi-sender LinkedIn/email outreach. You act with exactly the permissions of the connected member; caps, working hours, warm-up, health, the reply stop and blacklists are database rules you cannot bypass. When something is not sending, call why_not_sending (the platform's own diagnosis; alerts_list shows stalls it already noticed) instead of escalating volume.
+const INSTRUCTIONS = `GrowthxAI Outreach: multi-sender LinkedIn/email outreach. You act with exactly the permissions of the connected member; caps, working hours, warm-up, health, the reply stop and blacklists are database rules you cannot bypass. When something is not sending, call why_not_sending (the platform's own diagnosis; alerts_list shows stalls it already noticed) instead of escalating volume.
 
 Numbers come from one source: dashboard and every report_* tool call the same database functions as the app, so quote them as returned, never recompute a rate, and use metric_definitions when asked what a number means.
 

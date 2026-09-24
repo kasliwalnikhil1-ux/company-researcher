@@ -100,7 +100,7 @@ function BrandingForm() {
             <Input label="From address for client emails" type="email" value={form.email_from_address} onChange={(e) => set('email_from_address', e.target.value)} placeholder="reports@agency.com" error={errs.email_from_address} hint="The domain must be verified with our email provider first. Until then we send from our own address with your from-name." disabled={ro} />
           </div>
           <div className="border border-gray-200 rounded-lg px-3">
-            <SettingRow title="Hide the platform name from clients" description="The words CapitalxAI never appear in the portal, on the invitation page or in client emails. Set a product name too, otherwise clients see the workspace name." control={<Switch label="Hide the platform name from clients" checked={form.hide_platform_name} onChange={(v) => set('hide_platform_name', v)} disabled={ro} />} />
+            <SettingRow title="Hide the platform name from clients" description="The words GrowthxAI never appear in the portal, on the invitation page or in client emails. Set a product name too, otherwise clients see the workspace name." control={<Switch label="Hide the platform name from clients" checked={form.hide_platform_name} onChange={(v) => set('hide_platform_name', v)} disabled={ro} />} />
           </div>
           {saveError && <ErrorBox message={saveError} />}
           <div className="flex items-center justify-end gap-2">

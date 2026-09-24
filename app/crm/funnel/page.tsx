@@ -4,7 +4,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useChannelCosts, useFunnel } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, type DealStage, type FunnelChannel } from '@/lib/crm/types';
-import { Button, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, fmtDate, todayISO } from '@/components/crm/ui';
+import { Button, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, Select, Table, Td, Th, todayISO } from '@/components/crm/ui';
 import { useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 import { ChevronDown, ChevronRight, Pencil } from 'lucide-react';
@@ -121,7 +121,7 @@ export default function FunnelPage() {
     return { leads: sum('leads'), won, cost, cac: cost != null && won > 0 ? cost / won : null, ltv: customers > 0 ? revenue / customers : null, revenue, mrr: sum('won_value_monthly_usd') };
   }, [rows]);
 
-  if (q.isLoading) return <Spinner />;
+  if (q.isLoading) return <PageLoader />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
 
   const num = 'text-right tabular-nums whitespace-nowrap';

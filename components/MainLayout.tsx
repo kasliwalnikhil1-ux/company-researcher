@@ -15,6 +15,7 @@ import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
 import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
+import { SidebarCollapsedContext } from '@/contexts/SidebarContext';
 
 // User IDs allowed to access /research when primaryUse is "fundraising"
 const RESEARCH_ALLOWED_USER_IDS = new Set([
@@ -225,8 +226,10 @@ export default function MainLayout({ children, subnav }: { children: React.React
     return pathname === path;
   };
 
-  // Mobile-only section sub-nav (Outreach / Sales CRM), collapsible via the arrow on the parent item.
-  const subnavToggle = isMobile && subnav ? (
+  // Section sub-nav (Outreach / Sales CRM), collapsible via the arrow on the parent item.
+  // A collapsed desktop sidebar has no room for the arrow: the sub-nav shows icon-only instead.
+  const sidebarCollapsed = isCollapsed && !isMobile;
+  const subnavToggle = subnav && !sidebarCollapsed ? (
     <button
       type="button"
       onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsSubnavOpen((o) => !o); }}
@@ -237,7 +240,9 @@ export default function MainLayout({ children, subnav }: { children: React.React
       <ChevronDown className={`w-4 h-4 transition-transform ${isSubnavOpen ? '' : '-rotate-90'}`} />
     </button>
   ) : null;
-  const subnavBody = isMobile && isSubnavOpen ? subnav : null;
+  const subnavBody = subnav && (isSubnavOpen || sidebarCollapsed)
+    ? <SidebarCollapsedContext.Provider value={sidebarCollapsed}>{subnav}</SidebarCollapsedContext.Provider>
+    : null;
 
   const toggleSidebar = () => {
     setIsCollapsed(!isCollapsed);

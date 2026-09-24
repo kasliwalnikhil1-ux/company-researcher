@@ -7,7 +7,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { qk, useLead, useSequences } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
-import { Button, Card, EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
+import { Button, Card, EmptyState, ErrorBox, PageLoader, useToast } from '@/components/outreach/ui';
 import { ArrowLeft, UserX } from 'lucide-react';
 import { EnrollModal } from '@/components/outreach/leads/EnrollModal';
 import { LeadHeader } from '@/components/outreach/leads/detail/LeadHeader';
@@ -35,7 +35,7 @@ export default function LeadDetailPage() {
 
   const back = <Link href="/outreach/leads" className="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-700 mb-3"><ArrowLeft className="w-4 h-4" /> Leads</Link>;
 
-  if (lead.isLoading) return <div>{back}<Spinner /></div>;
+  if (lead.isLoading) return <div>{back}<PageLoader className="min-h-[calc(100dvh-9rem)] md:min-h-[calc(100dvh-5.5rem)]" /></div>;
   if (lead.error) {
     const err = parseError(lead.error);
     return <div>{back}{/PGRST116|not found|0 rows/i.test(err.message) || err.code === 'E_NOT_FOUND'

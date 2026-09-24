@@ -2,10 +2,10 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, KeyRound, Puzzle, RefreshCw } from 'lucide-react';
-import { parseError, rpc } from '@/lib/outreach/api';
+import { Check, ClipboardPaste, Copy, KeyRound, Puzzle, RefreshCw } from 'lucide-react';
+import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
-import { Badge, Button, Card, Modal, fmtDate, timeAgo } from '@/components/outreach/ui';
+import { Badge, Button, Card, Input, Modal, Textarea, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { copyText } from './helpers';
 import type { Sender } from '@/lib/outreach/types';
@@ -37,6 +37,8 @@ export default function ExtensionSetup({ sender, isManager, canWrite, notify }: 
 
   return (
     <div className="space-y-6">
+      {isLinkedIn && <PasteCookie sender={sender} canEdit={canEdit} cookieOptIn={cookieOptIn} notify={notify} />}
+
       <Card title={<span className="flex items-center gap-2"><Puzzle className="w-4 h-4" /> Chrome extension (cookie sync)</span>}>
         <div className="text-sm text-gray-700 space-y-2">
           <p>The optional Chrome extension runs in the account owner's own browser and keeps this sender connected without repeated hosted logins. Every few hours (and whenever LinkedIn rotates the session cookie) it reads the <code className="text-xs bg-gray-100 px-1 rounded">li_at</code> / <code className="text-xs bg-gray-100 px-1 rounded">li_a</code> cookies plus the browser user-agent and posts them to this workspace, where they are encrypted at rest. If LinkedIn ever drops the session, the reconnect worker retries with the latest cookie automatically.</p>
@@ -90,5 +92,46 @@ export default function ExtensionSetup({ sender, isManager, canWrite, notify }: 
         <p className="text-sm text-gray-700">The current token stops working immediately and the extension must be paired again with the new one. Existing stored cookies are kept.</p>
       </Modal>
     </div>
+  );
+}
+
+/** Manual alternative to the extension: paste the li_at cookie copied from the owner's browser. */
+function PasteCookie({ sender, canEdit, cookieOptIn, notify }: { sender: Sender; canEdit: boolean; cookieOptIn: boolean; notify: Notify }) {
+  const qc = useQueryClient();
+  const [liAt, setLiAt] = useState('');
+  const [liA, setLiA] = useState('');
+  const [ua, setUa] = useState(() => (typeof navigator !== 'undefined' ? navigator.userAgent : ''));
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await callFn<{ ok: boolean; reconnect: { ok: boolean; reason?: string } | null }>('sender-manage', { sender_id: sender.id, action: 'set_cookie', li_at: liAt, li_a: liA || undefined, user_agent: ua });
+      setLiAt(''); setLiA('');
+      if (!r.reconnect) notify('Session cookie saved. It will be used if this sender disconnects.');
+      else if (r.reconnect.ok) notify('Session cookie saved. Reconnecting the sender now.');
+      else notify(`Cookie saved, but the reconnect did not start (${r.reconnect.reason ?? 'unknown reason'}).`, 'error');
+      qc.invalidateQueries({ queryKey: qk.sender(sender.id) });
+    } catch (e) { notify(parseError(e).message, 'error'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Card title={<span className="flex items-center gap-2"><ClipboardPaste className="w-4 h-4" /> Paste session cookie</span>}>
+      <div className="text-sm text-gray-700 space-y-2">
+        <p>No extension needed. In the browser where the account owner is logged in to LinkedIn as <strong>{sender.public_identifier ?? 'this sender'}</strong>, copy the value of the <code className="text-xs bg-gray-100 px-1 rounded">li_at</code> cookie for <code className="text-xs bg-gray-100 px-1 rounded">linkedin.com</code> (with a cookie editor extension, or DevTools → Application → Cookies) and paste it below. It is encrypted at rest and used to reconnect this sender.</p>
+        <p className="text-gray-500">A pasted cookie does not refresh itself. If the owner logs out of LinkedIn or LinkedIn ends the session, paste a new one.</p>
+      </div>
+      {!canEdit && <p className="mt-4 text-xs text-gray-400">Only managers can save session cookies.</p>}
+      {canEdit && !cookieOptIn && <p className="mt-4 text-xs text-amber-700">Cookie mode is switched off for this workspace. Enable “Cookie-mode opt-in” under Settings → Workspace to save session cookies.</p>}
+      {canEdit && cookieOptIn && (
+        <div className="mt-4 space-y-3">
+          <Textarea label="li_at cookie value" rows={3} className="font-mono text-xs" value={liAt} onChange={(e) => setLiAt(e.target.value)} placeholder="AQEDA…" autoComplete="off" spellCheck={false} />
+          <Input label="li_a cookie value (optional)" hint="Only Sales Navigator / Recruiter accounts have it." className="font-mono text-xs" value={liA} onChange={(e) => setLiA(e.target.value)} autoComplete="off" spellCheck={false} />
+          <Input label="Browser user-agent" hint="Pre-filled with this browser. If the cookie was copied from another browser, paste that browser’s user-agent instead (search “what is my user agent” there)." className="font-mono text-xs" value={ua} onChange={(e) => setUa(e.target.value)} spellCheck={false} />
+          <div className="flex justify-end"><Button loading={busy} disabled={!liAt.trim() || !ua.trim()} onClick={save}>Save cookie</Button></div>
+        </div>
+      )}
+    </Card>
   );
 }

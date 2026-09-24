@@ -10,7 +10,7 @@ import { parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph } from '@/lib/outreach/graph';
 import { qk, useLists, useMembers, useSenders, useSequence, useSequenceVersions, useStages, useTags, useWebhooks, useSequences } from '@/lib/outreach/queries';
 import type { SequenceVersion } from '@/lib/outreach/types';
-import { Badge, Button, EmptyState, ErrorBox, fmtDate, Modal, PageHeader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
+import { Badge, Button, EmptyState, ErrorBox, fmtDate, Modal, PageHeader, PageLoader, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import MiniCanvas from '@/components/outreach/sequences/MiniCanvas';
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
 import { diffGraphs, formatGraphError, nodeCount, nodeTitle, type Lookup } from '@/components/outreach/sequences/helpers';
@@ -90,7 +90,7 @@ export default function SequenceVersionsPage() {
     finally { setBusy(false); }
   };
 
-  if (seq.isLoading || versions.isLoading) return <Spinner />;
+  if (seq.isLoading || versions.isLoading) return <PageLoader />;
   if (seq.error) return <ErrorBox message={parseError(seq.error).message} />;
   if (!seq.data) return <EmptyState title="Sequence not found" action={<Link href="/outreach/sequences"><Button variant="secondary">Back to sequences</Button></Link>} />;
   const head = seq.data.graph;

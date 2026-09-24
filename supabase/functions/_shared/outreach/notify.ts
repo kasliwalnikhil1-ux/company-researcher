@@ -4,8 +4,8 @@
 import { admin, log, WEB_ORIGIN, audit } from "./supabase.ts";
 
 const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
-const FROM = Deno.env.get("OUTREACH_EMAIL_FROM") ?? Deno.env.get("EMAIL_FROM") ?? "CapitalxAI Outreach <no-reply@capitalxai.com>";
-const PLATFORM_NAME = "CapitalxAI Outreach";
+const FROM = Deno.env.get("OUTREACH_EMAIL_FROM") ?? Deno.env.get("EMAIL_FROM") ?? "GrowthxAI Outreach <no-reply@capitalxai.com>";
+const PLATFORM_NAME = "GrowthxAI Outreach";
 
 export function emailConfigured(): boolean { return !!RESEND_KEY; }
 

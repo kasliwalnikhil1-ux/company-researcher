@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { DEFAULT_ACCENT, brandingForInvite, contrastOn, isHexColor, isHttpsUrl, productName, type Branding } from '@/lib/outreach/branding';
-import { Badge, Button, Card, ErrorBox, Spinner } from '@/components/outreach/ui';
+import { Badge, Button, Card, ErrorBox, PageLoader } from '@/components/outreach/ui';
 
 type Preview = { workspace_name: string; email: string; role: string; expired: boolean; accepted: boolean };
 const ROLE_LABEL: Record<string, string> = { owner: 'owner', manager: 'manager', member: 'member', client_viewer: 'client' };
@@ -68,7 +68,7 @@ export default function InvitePage() {
   }
 
   if (!token) return <ErrorBox message="This invitation link is incomplete. Open the link from your email again." />;
-  if (preview.isLoading || brandingQuery.isLoading) return <Spinner />;
+  if (preview.isLoading || brandingQuery.isLoading) return <PageLoader />;
   const inv = preview.data;
   const mismatch = !!inv && !!user?.email && inv.email.toLowerCase() !== user.email.toLowerCase();
   const primaryStyle = accent ? { background: accent, color: contrastOn(accent) } : undefined;

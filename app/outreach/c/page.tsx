@@ -10,7 +10,7 @@ import { Building2 } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
-import { Card, EmptyState, ErrorBox, PageHeader, Spinner } from '@/components/outreach/ui';
+import { Card, EmptyState, ErrorBox, PageHeader, PageLoader } from '@/components/outreach/ui';
 import type { Client } from '@/lib/outreach/types';
 
 export default function ClientPortalIndex() {
@@ -32,7 +32,7 @@ export default function ClientPortalIndex() {
   const only = clients.data?.length === 1 ? clients.data[0] : null;
   useEffect(() => { if (only) router.replace(`/outreach/c/${only.id}`); }, [only, router]);
 
-  if (!ws || clients.isLoading || only) return <div className="flex justify-center py-24"><Spinner /></div>;
+  if (!ws || clients.isLoading || only) return <PageLoader />;
   if (clients.isError) return <div className="p-6"><ErrorBox message={parseError(clients.error).message} /></div>;
 
   return (

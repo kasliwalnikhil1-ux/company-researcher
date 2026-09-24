@@ -8,7 +8,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { useSenders } from '@/lib/outreach/queries';
-import { Badge, Button, Card, ErrorBox, PageHeader, Select, Spinner, Stat, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
+import { Badge, Button, Card, ErrorBox, fmtDate, PageHeader, PageLoader, Select, Spinner, Stat, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { cn } from '@/lib/utils';
 
@@ -53,7 +53,7 @@ function BillingInner() {
     catch (e) { toast.show(parseError(e).message, 'error'); setBusy(null); }
   }
 
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
   if (!isOwner) return <div><PageHeader title="Settings" subtitle={workspace.name} /><SettingsTabs /><ErrorBox message="Only the workspace owner can view billing." /></div>;
   const suspended = workspace.plan === 'suspended';
   const pastDue = workspace.stripe_status === 'past_due' || workspace.stripe_status === 'unpaid' || !!workspace.past_due_since;
@@ -117,5 +117,5 @@ function BillingInner() {
 }
 
 export default function BillingSettingsPage() {
-  return <Suspense fallback={<Spinner />}><BillingInner /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><BillingInner /></Suspense>;
 }

@@ -3,13 +3,12 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, Plus, AlertTriangle, LifeBuoy, BookOpen, Mail, HelpCircle } from 'lucide-react';
+import { AlertTriangle, LifeBuoy, BookOpen, Mail, HelpCircle } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useOutreachRealtime } from '@/lib/outreach/queries';
 import { applyAccent, isHexColor, isHttpsUrl, productName, useBranding, type Branding } from '@/lib/outreach/branding';
-import { cn } from '@/lib/utils';
-import { useOutreachNav, CountBadge, NewWorkspaceModal, aiReviewCountKey } from './OutreachNav';
+import { aiReviewCountKey } from './OutreachNav';
 
 /** Keeps the "AI review" badge fresh: `outreach_ai_values` is in the realtime publication. */
 function useAiReviewRealtime(ws: string | null | undefined, enabled: boolean) {
@@ -72,12 +71,9 @@ function HelpMenu({ branding }: { branding: Branding }) {
 }
 
 export default function OutreachShell({ children }: { children: React.ReactNode }) {
-  const { workspace, workspaces, switchWorkspace, suspended, isClientViewer } = useWorkspace();
+  const { workspace, suspended, isClientViewer } = useWorkspace();
   useOutreachRealtime(workspace?.id);
   useAiReviewRealtime(workspace?.id, !isClientViewer);
-  const nav = useOutreachNav();
-  const [wsOpen, setWsOpen] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
 
   // White-label: clients see the agency's name, logo, colour and help links. The team keeps the normal look.
   const brandingQuery = useBranding(isClientViewer ? workspace?.id : null);
@@ -92,63 +88,11 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
     return () => { document.title = prev; };
   }, [branded, brandingQuery.data]);
 
-  const activeStyle = accent ? { color: accent, background: `${accent}14` } : undefined;
-  const canSwitch = !branded || workspaces.length > 1;
-
   return (
     <div className="flex-1 flex flex-col min-h-screen bg-gray-50">
-      {/* Desktop top bar. On mobile the workspace switcher + nav live under "Outreach" in the main sidebar. */}
-      <div className="hidden md:block bg-white border-b border-gray-200 px-4 md:px-6">
-        <div className="flex items-center gap-4 h-12">
-          <div className="relative">
-            {branded ? (
-              <button type="button" disabled={!canSwitch} onClick={() => setWsOpen((o) => !o)} aria-haspopup={canSwitch ? 'menu' : undefined} aria-expanded={canSwitch ? wsOpen : undefined}
-                className={cn('flex items-center gap-2 text-sm font-semibold text-gray-900 rounded-lg px-2 py-1', canSwitch && 'hover:bg-gray-100')}>
-                {brandingQuery.isLoading ? <span className="w-24 h-5 rounded bg-gray-100 animate-pulse" /> : <><BrandMark branding={branding} fallback={workspace?.name ?? 'P'} /><span className="max-w-[200px] truncate">{productName({ ...branding, hide_platform_name: true, workspace_name: branding.workspace_name ?? workspace?.name })}</span></>}
-                {canSwitch && <ChevronDown className="w-4 h-4 text-gray-400" />}
-              </button>
-            ) : (
-              <button type="button" onClick={() => setWsOpen((o) => !o)} aria-haspopup="menu" aria-expanded={wsOpen} className="flex items-center gap-2 text-sm font-semibold text-gray-900 hover:bg-gray-100 rounded-lg px-2 py-1">
-                <span className="w-6 h-6 rounded-md bg-indigo-600 text-white text-xs flex items-center justify-center">{(workspace?.name ?? 'W')[0]}</span>
-                <span className="max-w-[180px] truncate">{workspace?.name ?? 'Workspace'}</span>
-                <ChevronDown className="w-4 h-4 text-gray-400" />
-              </button>
-            )}
-            {wsOpen && canSwitch && (
-              <>
-                <div className="fixed inset-0 z-20" onClick={() => setWsOpen(false)} />
-                <div role="menu" className="absolute z-30 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg py-1">
-                  {workspaces.map((w) => (
-                    <button key={w.id} role="menuitem" onClick={() => { switchWorkspace(w.id); setWsOpen(false); }} className={cn('w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between', w.id === workspace?.id && 'bg-indigo-50 text-indigo-700')}>
-                      <span className="truncate">{w.name}</span>
-                      <span className="text-xs text-gray-400">{w.role.replace('_', ' ')}</span>
-                    </button>
-                  ))}
-                  {!branded && (
-                    <div className="border-t border-gray-100 mt-1 pt-1">
-                      <button role="menuitem" onClick={() => { setWsOpen(false); setCreateOpen(true); }} className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"><Plus className="w-4 h-4" /> New workspace</button>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
-          <nav className="flex items-center gap-1 overflow-x-auto flex-1" aria-label="Outreach">
-            {nav.map((n) => (
-              <Link key={n.href} href={n.href} aria-current={n.active ? 'page' : undefined} style={n.active ? activeStyle : undefined}
-                className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
-                <n.icon className="w-4 h-4" />
-                {n.label}
-                <CountBadge count={n.count} />
-              </Link>
-            ))}
-          </nav>
-          {branded && <HelpMenu branding={branding} />}
-        </div>
-      </div>
-      {/* Mobile: the main sidebar carries the nav, so the help links sit in a slim bar here. */}
+      {/* The workspace switcher + nav live under "Outreach" in the main sidebar; clients get their brand + help links in a slim bar here. */}
       {branded && (branding.support_email || branding.help_url || branding.docs_url) && (
-        <div className="md:hidden bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between gap-3">
+        <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-2 flex items-center justify-between gap-3">
           <span className="flex items-center gap-2 text-sm font-semibold text-gray-900 min-w-0"><BrandMark branding={branding} fallback={workspace?.name ?? 'P'} /><span className="truncate">{productName({ ...branding, hide_platform_name: true, workspace_name: branding.workspace_name ?? workspace?.name })}</span></span>
           <HelpMenu branding={branding} />
         </div>
@@ -169,7 +113,6 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
       <div className="flex-1 overflow-auto">
         <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto w-full">{children}</div>
       </div>
-      <NewWorkspaceModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>
   );
 }

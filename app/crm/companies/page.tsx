@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCompanies, type CompanyFilters } from '@/lib/crm/queries';
 import { fmtMoney } from '@/lib/crm/types';
-import { Button, CompanyLogo, EmptyState, ErrorBox, Input, PageHeader, Pagination, Select, Spinner, StageBadge, Table, Td, Th, DayTag, TimeRangeFilter, calendarDaysAgo, fmtDate, logoDomain, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { Button, calendarDaysAgo, CompanyLogo, DayTag, EmptyState, ErrorBox, fmtDate, Input, logoDomain, PageHeader, Pagination, Select, Spinner, StageBadge, Table, Td, Th, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
 import { CompanyModal } from '@/components/crm/forms';
 import { Plus } from 'lucide-react';
 
@@ -50,7 +50,7 @@ export default function CompaniesPage() {
             <Button size="sm" onClick={() => setCreate(true)}><Plus className="w-3.5 h-3.5" /> New company</Button>
           </div>
         } />
-      {list.isLoading && <Spinner />}
+      {list.isLoading && <Spinner className="min-h-[50vh]" />}
       {list.isError && <ErrorBox message={(list.error as Error).message} />}
       {rows && total === 0 && !list.isPlaceholderData && (filtered
         ? <EmptyState title="No matching companies" description="Try a different search or clear the filters." />

@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCompanyBrief } from '@/lib/crm/queries';
 import { fmtMoney, READINESS_LABELS, STAGE_LABELS, type Capture, type Contact, type Deal } from '@/lib/crm/types';
-import { Badge, Button, Card, CompanyLogo, EmptyState, ErrorBox, Flags, Spinner, StageBadge, fmtDate, daysAgo, logoDomain } from '@/components/crm/ui';
+import { Badge, Button, Card, CompanyLogo, daysAgo, EmptyState, ErrorBox, Flags, fmtDate, logoDomain, PageLoader, StageBadge } from '@/components/crm/ui';
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
 import { TranscriptModal, fmtDuration, type TranscriptTab } from '@/components/crm/transcript';
 import { RecordingModal, UploadRecordingButton } from '@/components/crm/recording';
@@ -39,7 +39,7 @@ export default function CompanyPage() {
     return [...acts, ...meets, ...hist].sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime());
   }, [b]);
 
-  if (q.isLoading) return <Spinner />;
+  if (q.isLoading) return <PageLoader />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
   if (!b) return <EmptyState title="Company not found" />;
   const c = b.company;

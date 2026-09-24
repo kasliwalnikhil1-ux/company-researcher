@@ -7,7 +7,7 @@ import { CalendarClock, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients } from '@/lib/outreach/queries';
-import { Button, PageHeader, Spinner, useToast } from '@/components/outreach/ui';
+import { Button, PageHeader, PageLoader, useToast } from '@/components/outreach/ui';
 import { isIsoDay, presetRange, validRange, type DateRange } from '@/lib/outreach/reports';
 import RangePicker from '@/components/outreach/reports/RangePicker';
 import OverviewTab from '@/components/outreach/reports/OverviewTab';
@@ -57,7 +57,7 @@ function ReportsPage() {
 
   const showToast = toast.show;
   const notice = useCallback((m: string, t?: 'success' | 'error') => showToast(m, t), [showToast]);
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
   const props = { ws, client, range };
 
   return (
@@ -81,7 +81,7 @@ function ReportsPage() {
         </div>
       </div>
 
-      <div role="tablist" aria-label="Report" className="flex gap-1 border-b border-gray-200 mb-6 overflow-x-auto">
+      <div role="tablist" aria-label="Report" className="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
         {tabs.map((t) => (
           <button key={t.key} role="tab" type="button" aria-selected={tab === t.key} onClick={() => setParams({ tab: t.key === 'overview' ? null : t.key })}
             className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors', tab === t.key ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>{t.label}</button>
@@ -105,5 +105,5 @@ function ReportsPage() {
 }
 
 export default function Page() {
-  return <Suspense fallback={<Spinner />}><ReportsPage /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><ReportsPage /></Suspense>;
 }

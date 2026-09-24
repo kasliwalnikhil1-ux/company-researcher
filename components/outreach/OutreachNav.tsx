@@ -9,6 +9,7 @@ import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Buildin
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useDashboard } from '@/lib/outreach/queries';
+import { useSidebarCollapsed } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Modal, Input, Button } from './ui';
 
@@ -88,13 +89,28 @@ export function NewWorkspaceModal({ open, onClose }: { open: boolean; onClose: (
 
 const NEW_WORKSPACE = '__new__';
 
-/** Mobile-only: Outreach workspace switcher + sub-nav, rendered under "Outreach" in the main sidebar. */
+/** Outreach workspace switcher + sub-nav, rendered under "Outreach" in the main sidebar. */
 export function OutreachSidebarNav() {
   const { workspace, workspaces, switchWorkspace, role } = useWorkspace();
   const items = useOutreachNav();
+  const collapsed = useSidebarCollapsed();
   const isClientViewer = role === 'client_viewer';
   const [createOpen, setCreateOpen] = useState(false);
   if (!workspace) return null;
+
+  if (collapsed) {
+    return (
+      <div className="space-y-1 py-1 border-y border-gray-100">
+        {items.map((n) => (
+          <Link key={n.href} href={n.href} title={n.label} aria-label={n.label} aria-current={n.active ? 'page' : undefined}
+            className={cn('relative flex items-center justify-center py-2 rounded-lg', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50')}>
+            <n.icon className="w-4 h-4" />
+            {n.count > 0 && <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-indigo-600" />}
+          </Link>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="ml-6 pl-3 border-l border-gray-200 space-y-1 py-1">
@@ -111,7 +127,7 @@ export function OutreachSidebarNav() {
         {!isClientViewer && <option value={NEW_WORKSPACE}>+ New workspace</option>}
       </select>
       {items.map((n) => (
-        <Link key={n.href} href={n.href} className={cn('flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
+        <Link key={n.href} href={n.href} aria-current={n.active ? 'page' : undefined} className={cn('flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
           <n.icon className="w-4 h-4" />
           <span className="flex-1">{n.label}</span>
           <CountBadge count={n.count} />

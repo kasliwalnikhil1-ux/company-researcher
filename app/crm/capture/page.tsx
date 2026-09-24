@@ -6,7 +6,7 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useMeeting, useMeetings } from '@/lib/crm/queries';
 import { fmtMoney, type Meeting } from '@/lib/crm/types';
-import { Badge, Button, Card, EmptyState, ErrorBox, Input, Select, Spinner, StageBadge, Textarea, fmtDate, addDaysISO, todayISO } from '@/components/crm/ui';
+import { addDaysISO, Badge, Button, Card, EmptyState, ErrorBox, fmtDate, Input, PageLoader, Select, StageBadge, Textarea, todayISO } from '@/components/crm/ui';
 import { useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 import { CheckCircle2, UserX } from 'lucide-react';
@@ -22,7 +22,7 @@ function MeetingPicker({ onPick }: { onPick: (id: string) => void }) {
   // Computed once per mount: these go into the query key, so a fresh Date.now() each render would make a new query every render and never leave isLoading.
   const [range] = useState(() => ({ from: new Date(Date.now() - 14 * 86400_000).toISOString(), to: new Date(Date.now() + 1 * 86400_000).toISOString() }));
   const q = useMeetings({ ...range, status: 'scheduled' });
-  if (q.isLoading) return <Spinner />;
+  if (q.isLoading) return <PageLoader />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
   const rows = (q.data ?? []).slice().sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
   const past = rows.filter((m) => new Date(m.scheduled_at).getTime() < Date.now());
@@ -73,7 +73,7 @@ function CaptureForm({ meetingId }: { meetingId: string }) {
     return () => window.removeEventListener('keydown', onKey);
   }); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (q.isLoading) return <Spinner />;
+  if (q.isLoading) return <PageLoader />;
   if (q.isError) return <ErrorBox message={(q.error as Error).message} />;
   if (!m) return <EmptyState title="Meeting not found" action={<Button size="sm" variant="secondary" onClick={() => router.push('/crm/capture')}>Pick another</Button>} />;
 
@@ -199,5 +199,5 @@ function CaptureInner() {
 }
 
 export default function CapturePage() {
-  return <Suspense fallback={<Spinner />}><CaptureInner /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><CaptureInner /></Suspense>;
 }

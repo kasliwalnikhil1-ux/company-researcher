@@ -119,7 +119,7 @@ export function hubspotProvider(env: ProviderEnv): CrmProvider {
             if (stageProp && missing.includes(stageProp) && !triedCreateProperty) {
               triedCreateProperty = true;
               try {
-                await call(tokens, "/crm/v3/properties/contacts", { json: { groupName: "contactinformation", name: stageProp, label: "Outreach stage", type: "string", fieldType: "text", description: "Stage of this person in CapitalxAI Outreach" } });
+                await call(tokens, "/crm/v3/properties/contacts", { json: { groupName: "contactinformation", name: stageProp, label: "Outreach stage", type: "string", fieldType: "text", description: "Stage of this person in GrowthxAI Outreach" } });
                 continue; // property exists now: retry with it
               } catch { /* no schema scope or no permission: the value goes in a note */ }
             }

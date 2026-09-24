@@ -82,7 +82,7 @@ export default function LeadsPage() {
 
         {canWrite && <BulkActionsBar selected={selectedIds} onClear={() => setSelected(new Set())} onEnroll={() => setEnrollOpen(true)} toast={toast.show} />}
 
-        {leads.isLoading ? <Spinner /> : leads.error ? <ErrorBox message={parseError(leads.error).message} /> : rows.length === 0 ? (
+        {leads.isLoading ? <Spinner className="min-h-[50vh]" /> : leads.error ? <ErrorBox message={parseError(leads.error).message} /> : rows.length === 0 ? (
           <div className="bg-white border border-gray-200 rounded-xl">
             {isFilterEmpty(filters) ? (
               <EmptyState icon={<Users className="w-6 h-6" />} title="No leads yet" description="Import a LinkedIn search, upload a CSV, or add leads one by one."

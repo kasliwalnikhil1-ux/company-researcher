@@ -265,7 +265,7 @@ function NewFundingsContent() {
 
       {/* Loading */}
       {loading && (
-        <div className="flex items-center justify-center py-20">
+        <div className="flex items-center justify-center py-20 min-h-[50vh]">
           <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
         </div>
       )}

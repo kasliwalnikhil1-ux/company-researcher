@@ -566,7 +566,7 @@ function SenderProfilesContent() {
 
       {/* Loading state */}
       {loading && profiles.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-3">
+        <div className="flex flex-col items-center justify-center py-24 gap-3 min-h-[50vh]">
           <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
           <p className="text-sm text-gray-500">Loading sender profiles...</p>
         </div>

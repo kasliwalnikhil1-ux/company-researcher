@@ -6,7 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useSender } from '@/lib/outreach/queries';
-import { Avatar, Badge, ErrorBox, HealthBar, Spinner, StatusPill, useToast } from '@/components/outreach/ui';
+import { Avatar, Badge, ErrorBox, HealthBar, PageLoader, StatusPill, useToast } from '@/components/outreach/ui';
 import { PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import SenderOverview from '@/components/outreach/senders/SenderOverview';
 import ScheduleEditor from '@/components/outreach/senders/ScheduleEditor';
@@ -49,7 +49,7 @@ function SenderDetail() {
   const selectTab = (t: Tab) => { setTab(t); router.replace(`/outreach/senders/${id}${t !== 'Overview' ? `?tab=${t}` : ''}`); };
 
   if (role === 'client_viewer') return <ErrorBox message="Client viewers cannot open sender pages." />;
-  if (sender.isLoading) return <Spinner />;
+  if (sender.isLoading) return <PageLoader />;
   if (sender.isError) return <ErrorBox message={(sender.error as Error).message} />;
   const s = sender.data as SenderV2 | undefined;
   if (!s || s.workspace_id !== workspace?.id) return <div><ErrorBox message="Sender not found in this workspace." /><Link href="/outreach/senders" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Back to senders</Link></div>;
@@ -82,8 +82,8 @@ function SenderDetail() {
 
       <RunningDryCallout sender={s} canWrite={canWrite} />
 
-      <div className="border-b border-gray-200 mb-6 overflow-x-auto">
-        <nav className="flex gap-1 -mb-px" role="tablist">
+      <div className="border-b border-gray-200 mb-6">
+        <nav className="flex flex-wrap gap-1 -mb-px" role="tablist">
           {visibleTabs.map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} onClick={() => selectTab(t)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800', t === 'Danger' && tab !== t && 'text-red-500 hover:text-red-700')}>{t}</button>
           ))}
@@ -105,5 +105,5 @@ function SenderDetail() {
 }
 
 export default function SenderDetailPage() {
-  return <Suspense fallback={<Spinner />}><SenderDetail /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><SenderDetail /></Suspense>;
 }

@@ -124,6 +124,11 @@ export function Spinner({ className }: { className?: string }) {
   return <div className={cn('flex items-center justify-center py-12', className)}><Loader2 className="w-6 h-6 text-indigo-500 animate-spin" /></div>;
 }
 
+/** Whole-page loader: fills the visible height (minus the shell's padding and the mobile top bar) so the spinner sits in the middle of the screen instead of at the top. */
+export function PageLoader({ className }: { className?: string }) {
+  return <div className={cn('flex items-center justify-center min-h-[calc(100dvh-6.5rem)] md:min-h-[calc(100dvh-3rem)]', className)}><Loader2 className="w-7 h-7 text-indigo-500 animate-spin" /></div>;
+}
+
 export function ErrorBox({ message, className }: { message: string; className?: string }) {
   return <div className={cn('flex items-start gap-2 p-3 rounded-md bg-red-50 text-red-700 text-sm', className)}><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span className="whitespace-pre-wrap">{message}</span></div>;
 }

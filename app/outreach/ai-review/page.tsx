@@ -4,7 +4,7 @@ import { Suspense, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import AiReviewView from '@/components/outreach/ai/AiReviewView';
 import { readSelection } from '@/lib/outreach/intel';
-import { Spinner } from '@/components/outreach/ui';
+import { PageLoader } from '@/components/outreach/ui';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,5 +31,5 @@ function AiReviewPageInner() {
 }
 
 export default function AiReviewPage() {
-  return <Suspense fallback={<Spinner />}><AiReviewPageInner /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><AiReviewPageInner /></Suspense>;
 }

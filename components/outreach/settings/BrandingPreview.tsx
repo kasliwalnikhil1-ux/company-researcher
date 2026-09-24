@@ -52,7 +52,7 @@ export default function BrandingPreview({ branding, clientName = 'Acme Inc' }: {
             <div className="flex items-center gap-2"><Logo b={branding} size={22} /><span className="text-sm font-semibold text-gray-900">{name}</span></div>
             <p className="text-xs text-gray-600 mt-2">Hi, here is how {clientName} did last week: 58 replies, 9 meetings booked.</p>
             <span className="inline-block mt-2 text-xs font-medium rounded-md px-2.5 py-1" style={{ background: accent, color: on }}>View the report</span>
-            <p className="text-[10px] text-gray-400 mt-3">{branding.support_email ? `Questions? ${branding.support_email}` : 'Questions? Reply to this email.'}{!branding.hide_platform_name && <> · Sent with CapitalxAI Outreach</>}</p>
+            <p className="text-[10px] text-gray-400 mt-3">{branding.support_email ? `Questions? ${branding.support_email}` : 'Questions? Reply to this email.'}{!branding.hide_platform_name && <> · Sent with GrowthxAI Outreach</>}</p>
           </div>
         </div>
       </div>

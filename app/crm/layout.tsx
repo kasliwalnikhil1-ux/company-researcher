@@ -6,11 +6,11 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { CrmProvider, useCrm } from '@/contexts/CrmContext';
 import CrmShell, { CrmSidebarNav } from '@/components/crm/Shell';
-import { Spinner, ErrorBox, EmptyState } from '@/components/crm/ui';
+import { EmptyState, ErrorBox, PageLoader } from '@/components/crm/ui';
 
 function Gate({ children }: { children: React.ReactNode }) {
   const { loading, error, isMember } = useCrm();
-  if (loading) return <Spinner className="py-24" />;
+  if (loading) return <PageLoader className="min-h-[calc(100dvh-3.5rem)] md:min-h-screen" />;
   if (error) return <div className="p-6"><ErrorBox message={error} /></div>;
   if (!isMember) {
     return (
@@ -26,13 +26,14 @@ export default function CrmLayout({ children }: { children: React.ReactNode }) {
   const [qc] = useState(() => new QueryClient({ defaultOptions: { queries: { staleTime: 10_000, retry: 1, refetchOnWindowFocus: true } } }));
   return (
     <ProtectedRoute>
-      <MainLayout subnav={<CrmSidebarNav />}>
-        <QueryClientProvider client={qc}>
-          <CrmProvider>
+      <QueryClientProvider client={qc}>
+        {/* CrmProvider wraps MainLayout so the sidebar nav can show who is signed in. */}
+        <CrmProvider>
+          <MainLayout subnav={<CrmSidebarNav />}>
             <Gate>{children}</Gate>
-          </CrmProvider>
-        </QueryClientProvider>
-      </MainLayout>
+          </MainLayout>
+        </CrmProvider>
+      </QueryClientProvider>
     </ProtectedRoute>
   );
 }

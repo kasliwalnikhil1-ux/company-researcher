@@ -24,7 +24,7 @@ export interface Branding {
 }
 export interface HostBranding extends Branding { workspace_id: string; client_id: string | null; portal_only: true }
 
-export const PLATFORM_NAME = 'CapitalxAI Outreach';
+export const PLATFORM_NAME = 'GrowthxAI Outreach';
 export const DEFAULT_ACCENT = '#4f46e5';
 export const brandingKey = (ws: string) => ['outreach', ws, 'branding'] as const;
 

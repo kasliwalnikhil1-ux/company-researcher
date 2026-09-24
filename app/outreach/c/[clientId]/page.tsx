@@ -9,7 +9,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useChats, useMessages } from '@/lib/outreach/queries';
-import { Avatar, Button, Card, EmptyState, ErrorBox, IntentBadge, Spinner, StatusPill, Table, Td, Th, Textarea, fmtDate, timeAgo, useToast } from '@/components/outreach/ui';
+import { Avatar, Button, Card, EmptyState, ErrorBox, fmtDate, IntentBadge, PageLoader, Spinner, StatusPill, Table, Td, Textarea, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/outreach/types';
 import {
@@ -21,7 +21,7 @@ import { ActivityOverTime, HeadlineTiles, hasActivity } from '@/components/outre
 import { ACCENT, ChartSkeleton, CountRate, ExportButton, KpiTile, MetricLabel, Refreshing, RetryError, Section, TableSkeleton, TilesSkeleton } from '@/components/outreach/reports/primitives';
 import { IntentLegend, IntentStackChart } from '@/components/outreach/reports/charts';
 
-const PLATFORM_NAME = 'CapitalxAI';
+const PLATFORM_NAME = 'GrowthxAI';
 
 function ClientReport({ ws, clientId, range }: { ws: string; clientId: string; range: DateRange }) {
   const report = useReportClient(clientId, range);
@@ -153,7 +153,7 @@ function ClientViewerPage() {
   }
 
   if (!clientId) return <ErrorBox message="Missing client." />;
-  if (client.isLoading) return <Spinner />;
+  if (client.isLoading) return <PageLoader />;
   if (client.isError) return <ErrorBox message={(client.error as Error).message} />;
   if (!client.data || !ws || client.data.workspace_id !== ws) return <ErrorBox message="This client is not available in the current workspace." />;
   const c = client.data;
@@ -257,5 +257,5 @@ function ClientViewerPage() {
 }
 
 export default function Page() {
-  return <Suspense fallback={<Spinner />}><ClientViewerPage /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><ClientViewerPage /></Suspense>;
 }

@@ -1,6 +1,6 @@
-# CapitalxAI Outreach Session Sync (Chrome extension)
+# GrowthxAI Outreach Session Sync (Chrome extension)
 
-A tiny Manifest V3 extension (plain JavaScript, no build step) that keeps a LinkedIn **sender** connected to CapitalxAI Outreach. When LinkedIn ends the session Unipile holds for a sender, the backend can reconnect it silently using the session cookie this extension syncs — instead of asking the account holder to log in again.
+A tiny Manifest V3 extension (plain JavaScript, no build step) that keeps a LinkedIn **sender** connected to GrowthxAI Outreach. When LinkedIn ends the session Unipile holds for a sender, the backend can reconnect it silently using the session cookie this extension syncs — instead of asking the account holder to log in again.
 
 It is installed **by the person who owns the LinkedIn account**, in the Chrome profile where they are logged in to LinkedIn.
 
@@ -31,7 +31,7 @@ The backend accepts one sync per sender every 10 minutes; the extension backs of
 
 ## Pair it with a sender
 
-1. In CapitalxAI Outreach open **Senders → (the sender) → Extension** tab.
+1. In GrowthxAI Outreach open **Senders → (the sender) → Extension** tab.
 2. Click **Generate pairing token**. The token is shown **once**; generating a new one invalidates the previous one. (Managers and owners can do this.)
 3. Click the extension icon, paste the token into **Pairing token**, click **Save**, then **Sync now**.
 4. The popup shows the sender name returned by the backend and the status `Synced`.

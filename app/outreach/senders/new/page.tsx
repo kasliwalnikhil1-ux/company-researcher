@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, KeyRound, Linkedin, Mail, MonitorSmartphone, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, KeyRound, Linkedin, Mail, MonitorSmartphone } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients } from '@/lib/outreach/queries';
 import { callFn, parseError } from '@/lib/outreach/api';
@@ -26,12 +26,10 @@ const PROVIDERS: Array<{ id: Provider; label: string; description: string; icon:
   { id: 'IMAP', label: 'IMAP / SMTP', description: 'Any other mailbox with IMAP and SMTP credentials.', icon: <Mail className="w-5 h-5" /> },
 ];
 
-const LEGAL_POINTS = [
-  'This product is not affiliated with, endorsed by, or sponsored by LinkedIn.',
-  'Automating actions on a LinkedIn account breaches LinkedIn\'s User Agreement. LinkedIn may restrict or permanently close accounts that automate activity.',
-  'The account holder bears the restriction risk. Keep volumes conservative, let the warm-up run, and never share one account across several people.',
-  'A session token for the account is held on the account holder\'s behalf so we can act as them. It is revocable at any time from the sender page (Disable) or by logging out of LinkedIn.',
-  'No identity rental: you may only connect accounts whose owner has agreed to this use. Do not connect purchased, borrowed or fabricated accounts.',
+const LEGAL_LINKS = [
+  { label: 'Terms of Service', href: 'https://growthxai.com/legal/terms/' },
+  { label: 'Acceptable Use Policy', href: 'https://growthxai.com/legal/acceptable-use/' },
+  { label: 'Disclosure', href: 'https://growthxai.com/legal/disclosure/' },
 ];
 
 export default function ConnectSenderPage() {
@@ -94,7 +92,7 @@ export default function ConnectSenderPage() {
   const steps = ['Provider', 'Details', 'Launch'];
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-6xl">
       <PageHeader title="Connect sender" subtitle="Add a LinkedIn account or mailbox through a secure hosted login" actions={<Link href="/outreach/senders"><Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /> Senders</Button></Link>} />
 
       <ol className="flex items-center gap-2 mb-6 text-sm">
@@ -112,7 +110,7 @@ export default function ConnectSenderPage() {
 
       {step === 1 && (
         <Card title="1. Choose what to connect">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mb-5">
             {PROVIDERS.map((p) => (
               <button key={p.id} type="button" onClick={() => setProvider(p.id)} aria-pressed={provider === p.id}
                 className={cn('text-left p-4 rounded-xl border transition-colors', provider === p.id ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-gray-200 hover:bg-gray-50')}>
@@ -121,35 +119,42 @@ export default function ConnectSenderPage() {
               </button>
             ))}
           </div>
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <div className="flex items-center gap-2 text-sm font-semibold text-amber-900 mb-2"><ShieldAlert className="w-4 h-4" /> Please read before connecting</div>
-            <ul className="list-disc pl-5 space-y-1 text-sm text-amber-900">{LEGAL_POINTS.map((t) => <li key={t}>{t}</li>)}</ul>
-            <label className="flex items-start gap-2 mt-3 text-sm text-gray-800 cursor-pointer">
-              <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
-              <span>I have read the notice above, I have the account owner's consent, and I understand the account holder bears the restriction risk.</span>
-            </label>
-          </div>
+          <label className="flex items-start gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+            <span>
+              I have the account owner&apos;s consent and agree to the{' '}
+              {LEGAL_LINKS.map((l, i) => (
+                <span key={l.href}>
+                  <a href={l.href} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 underline">{l.label}</a>
+                  {i < LEGAL_LINKS.length - 2 ? ', ' : i === LEGAL_LINKS.length - 2 ? ', and ' : '.'}
+                </span>
+              ))}
+            </span>
+          </label>
           <div className="flex justify-end mt-5"><Button disabled={!acknowledged} onClick={() => setStep(2)}>Continue <ArrowRight className="w-4 h-4" /></Button></div>
         </Card>
       )}
 
       {step === 2 && (
         <Card title="2. Sender details">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}>
-              <option value="">No client — shared across the workspace</option>
-              {(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             <Input label="Display name" placeholder={provider === 'LINKEDIN' ? 'e.g. Jane (Sales)' : 'e.g. jane@acme.com'} value={displayName} onChange={(e) => setDisplayName(e.target.value)} hint="Shown in tables and the inbox. The real profile name is pulled in after connection." />
-            <div className="md:col-span-2">
-              <Input label="Owner email" type="email" placeholder="owner@company.com" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} error={emailOk ? undefined : 'Enter a valid email address'}
-                hint="The person who owns this account — they will log in themselves; you never see their password. Re-login reminders and pairing instructions are emailed here." />
+            <Input label="Owner email" type="email" placeholder="owner@company.com" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} error={emailOk ? undefined : 'Enter a valid email address'}
+              hint="The person who owns this account — they will log in themselves; you never see their password. Re-login reminders and pairing instructions are emailed here." />
+            <div>
+              <Select label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                {!tzList.includes(timezone) && <option value={timezone}>{timezone}</option>}
+                {tzList.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+              </Select>
+              <div className="text-xs text-gray-500 mt-1">Actions are scheduled inside the sender's local working hours (default Mon–Fri 09:00–18:00). Pick the timezone where the account owner actually works; you can refine the windows later.</div>
             </div>
-            <Select label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
-              {!tzList.includes(timezone) && <option value={timezone}>{timezone}</option>}
-              {tzList.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-            </Select>
-            <div className="text-xs text-gray-500 md:pt-6">Actions are scheduled inside the sender's local working hours (default Mon–Fri 09:00–18:00). Pick the timezone where the account owner actually works; you can refine the windows later.</div>
+            <div>
+              <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}>
+                <option value="">No client — shared across the workspace</option>
+                {(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+              <div className="text-xs text-gray-500 mt-1">Assign the sender to a client to keep it inside that client's campaigns and reports. Leave empty to share it across the workspace.</div>
+            </div>
             {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (
               <div className="md:col-span-2">
                 <div className="text-sm font-medium text-gray-900 mb-2">How will the account owner sign in?</div>

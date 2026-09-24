@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "CapitalxAI Outreach Session Sync",
+  "name": "GrowthxAI Outreach Session Sync",
   "version": "1.0.0",
-  "description": "Keeps your LinkedIn sender connected to CapitalxAI Outreach by syncing your own session cookie to your workspace backend.",
+  "description": "Keeps your LinkedIn sender connected to GrowthxAI Outreach by syncing your own session cookie to your workspace backend.",
   "permissions": ["cookies", "alarms", "storage"],
   "host_permissions": ["https://www.linkedin.com/*"],
   "background": {
@@ -10,7 +10,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "CapitalxAI Outreach Session Sync",
+    "default_title": "GrowthxAI Outreach Session Sync",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

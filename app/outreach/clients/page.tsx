@@ -8,7 +8,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { qk, useClients, useSenders, useSequences } from '@/lib/outreach/queries';
-import { Button, Card, EmptyState, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
+import { Button, Card, EmptyState, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, Select, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import { browserTimezone, slugify, timezoneOptions } from '@/components/outreach/senders/helpers';
 import type { Client } from '@/lib/outreach/types';
 import { fmtInt, fmtRate, presetRange, useReportClients } from '@/lib/outreach/reports';
@@ -66,7 +66,7 @@ export default function ClientsPage() {
     finally { setBusy(false); }
   }
 
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
   if (!isManager) return <div><PageHeader title="Clients" /><ErrorBox message="Only owners and managers can manage clients." /></div>;
 
   return (
@@ -74,7 +74,7 @@ export default function ClientsPage() {
       <PageHeader title="Clients" subtitle="Optional partitions for agencies: scope senders, leads, sequences and viewers per client"
         actions={<Button onClick={() => setEditing('new')} disabled={!canWrite}><Plus className="w-4 h-4" /> New client</Button>} />
 
-      {clients.isLoading ? <Spinner /> : clients.isError ? <ErrorBox message={(clients.error as Error).message} /> : !clients.data?.length ? (
+      {clients.isLoading ? <Spinner className="min-h-[50vh]" /> : clients.isError ? <ErrorBox message={(clients.error as Error).message} /> : !clients.data?.length ? (
         <Card><EmptyState icon={<Building2 className="w-6 h-6" />} title="No clients yet" description="Clients are optional. Create one per customer if you run outreach for several companies; you can then invite a client viewer who only sees their own inbox and stats." action={<Button onClick={() => setEditing('new')} disabled={!canWrite}>Create client</Button>} /></Card>
       ) : (
         <Table>

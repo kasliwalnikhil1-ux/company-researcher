@@ -12,7 +12,7 @@ import { supabase } from '@/utils/supabase/client';
 import { parseError } from '@/lib/outreach/api';
 import { useClients, useMembers, useTasks } from '@/lib/outreach/queries';
 import type { Lead, Sender, Task } from '@/lib/outreach/types';
-import { Avatar, Badge, Button, EmptyState, ErrorBox, PageHeader, Spinner, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import TaskDrawer, { TASK_KINDS, memberName, parseCallBody, taskKindLabel, taskKindTone } from '@/components/outreach/tasks/TaskDrawer';
 
 type TaskRow = Task & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
@@ -116,7 +116,7 @@ function TasksPageInner() {
         )}
       </div>
 
-      {tasksQ.isLoading && <Spinner />}
+      {tasksQ.isLoading && <Spinner className="min-h-[50vh]" />}
       {tasksQ.error && <ErrorBox message={parseError(tasksQ.error).message} />}
       {tasksQ.data && rows.length === 0 && (
         <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
@@ -183,5 +183,5 @@ function TasksPageInner() {
 }
 
 export default function TasksPage() {
-  return <Suspense fallback={<Spinner />}><TasksPageInner /></Suspense>;
+  return <Suspense fallback={<PageLoader />}><TasksPageInner /></Suspense>;
 }

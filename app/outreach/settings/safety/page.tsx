@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { ShieldCheck } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useCeilings, useSenders, useWarmupCaps } from '@/lib/outreach/queries';
-import { Badge, Card, ErrorBox, PageHeader, Spinner, StatusPill, Table, Td, Th } from '@/components/outreach/ui';
+import { Badge, Card, ErrorBox, PageHeader, PageLoader, Spinner, StatusPill, Table, Td, Th } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { ACTION_LABELS, BUDGET_ACTION_TYPES } from '@/components/outreach/senders/helpers';
 import type { ActionType } from '@/lib/outreach/types';
@@ -30,7 +30,7 @@ export default function SafetySettingsPage() {
   const capTypes = useMemo(() => { const set = new Set<ActionType>((warmup.data ?? []).map((w) => w.action_type)); return BUDGET_ACTION_TYPES.filter((t) => set.has(t)); }, [warmup.data]);
   const withCaps = useMemo(() => (senders.data ?? []).filter((s) => s.status !== 'disabled'), [senders.data]);
 
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
 
   return (
     <div>

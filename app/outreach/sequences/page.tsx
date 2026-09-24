@@ -178,7 +178,7 @@ export default function SequencesPage() {
         )}
       </div>
 
-      {seqs.isLoading ? <Spinner /> : seqs.error ? <ErrorBox message={parseError(seqs.error).message} /> : rows.length === 0 ? (
+      {seqs.isLoading ? <Spinner className="min-h-[50vh]" /> : seqs.error ? <ErrorBox message={parseError(seqs.error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<GitBranch className="w-6 h-6" />} title={seqs.data?.length ? 'No sequences match these filters' : 'No sequences yet'}
           description={seqs.data?.length ? 'Try a different status, client or search.' : 'Build your first flow: invitation, wait for connection, follow-up messages, and CRM updates.'}
           action={canManage && !seqs.data?.length ? <Button onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4" /> New sequence</Button> : undefined} />

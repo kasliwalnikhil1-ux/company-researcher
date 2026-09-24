@@ -8,7 +8,7 @@ import { RunningDryBadge } from '@/components/outreach/senders/RunningDry';
 import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/senders/insights';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
-import { Avatar, Badge, Button, EmptyState, ErrorBox, HealthBar, PageHeader, Select, Spinner, StatusPill, Table, Td, Th, timeAgo, fmtDate } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Select, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
 import { PROVIDER_LABELS, STATUS_OPTIONS, isFuture, scheduleSummary } from '@/components/outreach/senders/helpers';
 import type { Sender } from '@/lib/outreach/types';
 
@@ -66,7 +66,7 @@ export default function SendersPage() {
         <div className="text-xs text-gray-500 pb-2 ml-auto">{rows.length} of {senders.data?.length ?? 0} senders</div>
       </div>
 
-      {senders.isLoading ? <Spinner /> : senders.isError ? <ErrorBox message={(senders.error as Error).message} /> : rows.length === 0 ? (
+      {senders.isLoading ? <Spinner className="min-h-[50vh]" /> : senders.isError ? <ErrorBox message={(senders.error as Error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<Contact className="w-6 h-6" />} title={senders.data?.length ? 'No senders match these filters' : 'No senders connected'}
           description={senders.data?.length ? 'Try clearing the status or client filter.' : 'Connect a LinkedIn account or mailbox to start sending. The account owner logs in through a hosted page; you never handle their password.'}
           action={isManager && canWrite && !senders.data?.length ? <Link href="/outreach/senders/new"><Button>Connect sender</Button></Link> : undefined} />

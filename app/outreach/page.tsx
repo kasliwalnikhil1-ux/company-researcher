@@ -7,7 +7,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSequences } from '@/lib/outreach/queries';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
 import { MetricLabel } from '@/components/outreach/reports/primitives';
-import { Button, Card, EmptyState, ErrorBox, PageHeader, Spinner, Stat, StatusPill, Badge } from '@/components/outreach/ui';
+import { Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
 import { healthTileClasses, healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import { cn } from '@/lib/utils';
 
@@ -119,7 +119,7 @@ export default function OutreachDashboardPage() {
   const allDone = steps.sender && steps.leads && steps.sequence;
   const isViewer = role === 'client_viewer';
 
-  if (dash.isLoading) return <Spinner />;
+  if (dash.isLoading) return <PageLoader />;
   if (dash.isError) return <ErrorBox message={(dash.error as Error).message} />;
   if (!d) return <EmptyState title="No dashboard data" />;
   const w = d.last_7_days;

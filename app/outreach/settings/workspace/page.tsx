@@ -7,7 +7,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useAudit } from '@/lib/outreach/queries';
-import { Badge, Button, Card, ErrorBox, Input, PageHeader, Spinner, Table, Td, Th, fmtDate, useToast } from '@/components/outreach/ui';
+import { Badge, Button, Card, ErrorBox, fmtDate, Input, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { copyText } from '@/components/outreach/settings/shared';
 import { BehaviourCard, RegionalCard } from '@/components/outreach/settings/WorkspacePreferences';
@@ -66,7 +66,7 @@ export default function WorkspaceSettingsPage() {
     finally { setBusy(null); }
   }
 
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
   const trialDaysLeft = workspace.trial_ends_at ? Math.ceil((new Date(workspace.trial_ends_at).getTime() - Date.now()) / 86_400_000) : null;
 
   return (

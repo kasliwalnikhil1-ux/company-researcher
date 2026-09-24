@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk, useClients, useInvitations, useMembers } from '@/lib/outreach/queries';
-import { Badge, Button, Card, EmptyState, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, Toggle, fmtDate, useToast } from '@/components/outreach/ui';
+import { Badge, Button, Card, EmptyState, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, Select, Spinner, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { copyText } from '@/components/outreach/senders/helpers';
 import type { Client, Invitation, Member, Role } from '@/lib/outreach/types';
@@ -108,7 +108,7 @@ export default function MembersSettingsPage() {
 
   const inviteLink = (token: string) => `${typeof window !== 'undefined' ? window.location.origin : ''}/outreach/invite/${token}`;
 
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
   if (!isOwner) return <div><PageHeader title="Settings" subtitle={workspace.name} /><SettingsTabs /><ErrorBox message="Only the workspace owner can manage members and invitations." /></div>;
   const pending = (invitations.data ?? []).filter((i) => !i.accepted_at);
   const clientList = clients.data ?? [];

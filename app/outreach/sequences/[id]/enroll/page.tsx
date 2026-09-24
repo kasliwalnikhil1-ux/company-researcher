@@ -10,7 +10,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { SEQUENCE_ASSIGNMENTS, type EnrollResult } from '@/lib/outreach/types';
 import { useClients, useLeads, useLists, useSenders, useSequence, useStages, useTags, type LeadFilters } from '@/lib/outreach/queries';
-import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, Input, Select, Spinner, StatusPill, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, Input, PageLoader, Select, Spinner, StatusPill, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
 import { ProjectionView } from '@/components/outreach/sequences/Projection';
 import EnrollmentsTable from '@/components/outreach/sequences/EnrollmentsTable';
 import { fetchLeadIds, projectSequence, useEffectiveCaps, type ProjectionRow } from '@/components/outreach/sequences/hooks';
@@ -123,7 +123,7 @@ export default function EnrollPage() {
 
   const reset = () => { setSelected(new Set()); setResult(null); setProjection(null); setIncludeReplied(false); setAiBatches([]); setAiError(null); setPartialError(null); setStep(1); };
 
-  if (seq.isLoading) return <Spinner />;
+  if (seq.isLoading) return <PageLoader />;
   if (seq.error) return <ErrorBox message={parseError(seq.error).message} />;
   if (!seq.data) return <EmptyState title="Sequence not found" action={<Link href="/outreach/sequences"><Button variant="secondary">Back to sequences</Button></Link>} />;
   const s = seq.data;

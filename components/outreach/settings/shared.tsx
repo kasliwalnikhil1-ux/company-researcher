@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { Button, ErrorBox, Modal, PageHeader, Spinner } from '@/components/outreach/ui';
+import { Button, ErrorBox, Modal, PageHeader, PageLoader } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import type { Role } from '@/lib/outreach/types';
 import SettingsTabs, { roleAtLeast } from './SettingsTabs';
@@ -54,7 +54,7 @@ export function CopyField({ label, value, secret, hint, mono = true }: { label?:
 /** Page frame shared by every settings screen: header, tabs and the role gate. */
 export function SettingsFrame({ children, min, deniedMessage }: { children: React.ReactNode; min?: Role; deniedMessage?: string }) {
   const { workspace, role } = useWorkspace();
-  if (!workspace) return <Spinner />;
+  if (!workspace) return <PageLoader />;
   const allowed = !min || roleAtLeast(role, min);
   return (
     <div>

@@ -12,7 +12,7 @@ import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph, sumNodeStats, validateGraph, type GraphIssue } from '@/lib/outreach/graph';
 import { qk, useClients, useLeads, useLists, useNodeStats, useSenders, useSequence, useSequences, useStages, useTags, useWebhooks } from '@/lib/outreach/queries';
 import type { Graph, GraphNode, NodeType, Tag } from '@/lib/outreach/types';
-import { Button, EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
+import { Button, EmptyState, ErrorBox, PageLoader, useToast } from '@/components/outreach/ui';
 import Canvas, { type CanvasHandle, type IssueLevel, type StatKind } from './Canvas';
 import NodePalette from './NodePalette';
 import NodeConfigPanel from './NodeConfigPanel';
@@ -439,7 +439,7 @@ export default function Builder({ id }: { id: string }) {
     sampleLead, customKeys, createTag, focusNode,
   } : null), [draft, sequence, ws, readOnly, senders, poolSenders, lookup, sampleLead, customKeys, createTag, focusNode]);
 
-  if (seqQ.isLoading || (sequence && !draft)) return <Spinner className="py-24" />;
+  if (seqQ.isLoading || (sequence && !draft)) return <PageLoader />;
   if (seqQ.error) return <div className="p-6"><ErrorBox message={parseError(seqQ.error).message} /></div>;
   if (!sequence || !draft || !ctx || !live || !publishDraft) return <EmptyState title="Sequence not found" description="It may have been deleted or belongs to another workspace." action={<Link href="/outreach/sequences"><Button variant="secondary">Back to sequences</Button></Link>} />;
   if (ws && sequence.workspace_id !== ws) return <EmptyState title="Sequence belongs to another workspace" description="Switch workspace to edit it." action={<Link href="/outreach/sequences"><Button variant="secondary">Back to sequences</Button></Link>} />;

@@ -28,8 +28,8 @@ export default function SettingsTabs() {
   const { role } = useWorkspace();
   const on = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   return (
-    <div className="border-b border-gray-200 mb-6 overflow-x-auto">
-      <nav className="flex gap-1 -mb-px" aria-label="Settings sections">
+    <div className="border-b border-gray-200 mb-6">
+      <nav className="flex flex-wrap gap-1 -mb-px" aria-label="Settings sections">
         {SETTINGS_TABS.filter((t) => roleAtLeast(role, t.min)).map((t) => {
           const active = on(t.href) || (t.also ?? []).some(on);
           return (

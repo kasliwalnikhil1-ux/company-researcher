@@ -6,7 +6,7 @@ import { DndContext, DragOverlay, PointerSensor, useDraggable, useDroppable, use
 import { useCrm } from '@/contexts/CrmContext';
 import { usePipeline, type PipelineFilters } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, fmtUsd, stageRank, type DealStage, type PipelineDeal } from '@/lib/crm/types';
-import { Badge, Button, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, PageHeader, Select, Spinner, TimeRangeFilter, calendarDaysAgo, fmtDate, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { Badge, Button, calendarDaysAgo, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, fmtDate, PageHeader, Select, Spinner, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
 import { NextStepModal, StageModal, useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 
@@ -99,7 +99,7 @@ export default function PipelinePage() {
             <Badge tone="gray" title="Legend"><span className="text-red-700">stale</span> · <span className="text-amber-700">stuck</span> · <span className="text-pink-700">slipping</span></Badge>
           </div>
         } />
-      {q.isLoading && <Spinner />}
+      {q.isLoading && <Spinner className="min-h-[50vh]" />}
       {q.isError && <ErrorBox message={(q.error as Error).message} />}
       {q.data && stages.every((s) => s.count === 0) && <EmptyState title="No deals match" description="Create a deal from a company page." action={<Link href="/crm/companies"><Button size="sm">Companies</Button></Link>} />}
       {q.data && (
