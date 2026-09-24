@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, Linkedin, Mail, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, KeyRound, Linkedin, Mail, MonitorSmartphone, ShieldAlert } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients } from '@/lib/outreach/queries';
 import { callFn, parseError } from '@/lib/outreach/api';
@@ -10,6 +10,14 @@ import { Button, Card, ErrorBox, Input, PageHeader, Select, Toggle, useToast } f
 import { browserTimezone, copyText, timezoneOptions } from '@/components/outreach/senders/helpers';
 import { cn } from '@/lib/utils';
 import type { Provider } from '@/lib/outreach/types';
+import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
+
+type ConnectMethod = 'credentials' | 'browser';
+
+const CONNECT_METHODS: Array<{ id: ConnectMethod; label: string; description: string; icon: React.ReactNode }> = [
+  { id: 'credentials', label: 'Sign in with LinkedIn', description: 'The owner enters their LinkedIn email and password on the hosted page, plus any 2FA code. Works in any browser.', icon: <KeyRound className="w-4 h-4" /> },
+  { id: 'browser', label: 'Use the signed-in browser', description: 'The owner installs a small browser extension and approves the LinkedIn account already logged in on their computer. No password is typed anywhere. Chrome, Firefox, Edge or Safari.', icon: <MonitorSmartphone className="w-4 h-4" /> },
+];
 
 const PROVIDERS: Array<{ id: Provider; label: string; description: string; icon: React.ReactNode }> = [
   { id: 'LINKEDIN', label: 'LinkedIn', description: 'Invitations, messages, profile views, InMail. Warms up from level 0.', icon: <Linkedin className="w-5 h-5" /> },
@@ -33,6 +41,8 @@ export default function ConnectSenderPage() {
   const toast = useToast();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [provider, setProvider] = useState<Provider>('LINKEDIN');
+  const [connectMethodChoice, setConnectMethod] = useState<ConnectMethod>('credentials');
+  const connectMethod: ConnectMethod = BROWSER_SIGNIN_ENABLED ? connectMethodChoice : 'credentials';
   const [acknowledged, setAcknowledged] = useState(false);
   const [clientId, setClientId] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -62,6 +72,7 @@ export default function ConnectSenderPage() {
     const r = await callFn<{ link: string; sender_id: string }>('sender-connect', {
       workspace_id: ws, provider, client_id: clientId || null, owner_email: ownerEmail.trim() || null, display_name: displayName.trim() || null,
       recruiter: provider === 'LINKEDIN' && recruiterEnabled ? recruiter : false, timezone,
+      connect_method: provider === 'LINKEDIN' ? connectMethod : 'credentials',
     });
     setResult(r);
     return r;
@@ -84,7 +95,7 @@ export default function ConnectSenderPage() {
 
   return (
     <div className="max-w-3xl">
-      <PageHeader title="Connect sender" subtitle="Add a LinkedIn account or mailbox through Unipile's hosted login" actions={<Link href="/outreach/senders"><Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /> Senders</Button></Link>} />
+      <PageHeader title="Connect sender" subtitle="Add a LinkedIn account or mailbox through a secure hosted login" actions={<Link href="/outreach/senders"><Button variant="ghost" size="sm"><ArrowLeft className="w-4 h-4" /> Senders</Button></Link>} />
 
       <ol className="flex items-center gap-2 mb-6 text-sm">
         {steps.map((label, i) => {
@@ -139,6 +150,21 @@ export default function ConnectSenderPage() {
               {tzList.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
             </Select>
             <div className="text-xs text-gray-500 md:pt-6">Actions are scheduled inside the sender's local working hours (default Mon–Fri 09:00–18:00). Pick the timezone where the account owner actually works; you can refine the windows later.</div>
+            {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (
+              <div className="md:col-span-2">
+                <div className="text-sm font-medium text-gray-900 mb-2">How will the account owner sign in?</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {CONNECT_METHODS.map((m) => (
+                    <button key={m.id} type="button" onClick={() => setConnectMethod(m.id)} aria-pressed={connectMethod === m.id}
+                      className={cn('text-left p-4 rounded-xl border transition-colors', connectMethod === m.id ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' : 'border-gray-200 hover:bg-gray-50')}>
+                      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">{m.icon} {m.label}</div>
+                      <div className="text-xs text-gray-500 mt-1">{m.description}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="text-xs text-gray-500 mt-2">Both methods end with the same result: the account is connected and the owner can revoke access at any time. Re-logins later use the same method.</div>
+              </div>
+            )}
             {provider === 'LINKEDIN' && recruiterEnabled && (
               <div className="md:col-span-2 flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
                 <div>
@@ -164,10 +190,11 @@ export default function ConnectSenderPage() {
             <dt className="text-gray-500">Display name</dt><dd className="text-gray-900">{displayName || <span className="text-gray-400">auto</span>}</dd>
             <dt className="text-gray-500">Owner email</dt><dd className="text-gray-900">{ownerEmail || <span className="text-gray-400">not set</span>}</dd>
             <dt className="text-gray-500">Timezone</dt><dd className="text-gray-900">{timezone}</dd>
+            {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (<><dt className="text-gray-500">Sign-in</dt><dd className="text-gray-900">{CONNECT_METHODS.find((m) => m.id === connectMethod)?.label}</dd></>)}
             {provider === 'LINKEDIN' && recruiterEnabled && (<><dt className="text-gray-500">Recruiter</dt><dd className="text-gray-900">{recruiter ? 'Enabled' : 'Disabled'}</dd></>)}
           </dl>
           <div className="rounded-lg bg-gray-50 border border-gray-200 p-4 text-sm text-gray-700 space-y-1.5 mb-5">
-            <p>Clicking <strong>Open hosted login</strong> creates a one-time link that opens Unipile's hosted login page. {provider === 'LINKEDIN' ? 'The account owner signs in to LinkedIn there (including any 2FA / verification code).' : 'The mailbox owner authorises access there via OAuth.'} Credentials never touch this app.</p>
+            <p>Clicking <strong>Open hosted login</strong> creates a one-time link that opens a secure hosted login page. {provider !== 'LINKEDIN' ? 'The mailbox owner authorises access there via OAuth.' : connectMethod === 'browser' ? 'The account owner is guided to install the browser extension (or confirms it is already installed) and approves access to the LinkedIn account signed in on that browser. If the page cannot detect the extension automatically, it shows a one-time code to paste into the extension under “Link a profile”.' : 'The account owner signs in to LinkedIn there (including any 2FA / verification code).'} Credentials never touch this app.</p>
             <p>The link <strong>expires in 15 minutes</strong>. When the login succeeds you are redirected back to the new sender's page; if it fails you can generate a fresh link from there.</p>
             <p>If someone else owns the account, use <strong>Copy link</strong> and send it to them instead of opening it yourself — the proxy is pinned to the country of whoever opens the link.</p>
           </div>

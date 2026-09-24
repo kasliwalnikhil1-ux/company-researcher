@@ -7,7 +7,7 @@ import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, RefreshCw, 
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk, useActions } from '@/lib/outreach/queries';
 import { Badge, Button, Card, EmptyState, Input, Select, StatusPill, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
-import { ACTION_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isFuture } from './helpers';
+import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isFuture } from './helpers';
 import { cn } from '@/lib/utils';
 import type { Client, Sender } from '@/lib/outreach/types';
 
@@ -87,7 +87,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
         <Card className="lg:col-span-2" title="Connection" actions={canManage ? (
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => manage('refresh_profile', {}, 'Profile refreshed.')} loading={busy === 'refresh_profile'} disabled={!!busy || !sender.unipile_account_id} title="Pull name, picture, connections and premium flags"><RefreshCw className="w-3.5 h-3.5" /> Refresh profile</Button>
-            <Button size="sm" variant="secondary" onClick={() => manage('resync', {}, 'Resync requested.')} loading={busy === 'resync'} disabled={!!busy || !sender.unipile_account_id} title="Ask Unipile to resync the account">Resync</Button>
+            <Button size="sm" variant="secondary" onClick={() => manage('resync', {}, 'Resync requested.')} loading={busy === 'resync'} disabled={!!busy || !sender.unipile_account_id} title="Ask the connector to resync the account">Resync</Button>
             <Button size="sm" variant="secondary" onClick={() => manage('recompute_health')} loading={busy === 'recompute_health'} disabled={!!busy}><Activity className="w-3.5 h-3.5" /> Recompute health</Button>
             <Button size="sm" variant="secondary" onClick={() => manage('plan_now')} loading={busy === 'plan_now'} disabled={!!busy || sender.status !== 'ok'} title="Top up today's plan now instead of waiting for the nightly planner"><CalendarClock className="w-3.5 h-3.5" /> Plan now</Button>
           </div>
@@ -100,7 +100,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           </div>
           <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 mt-4 text-sm">
             <div><dt className="text-xs text-gray-500">Provider</dt><dd className="text-gray-900">{PROVIDER_LABELS[sender.provider]}</dd></div>
-            <div><dt className="text-xs text-gray-500">Auth method</dt><dd className="text-gray-900 capitalize">{sender.auth_method}</dd></div>
+            <div><dt className="text-xs text-gray-500">Auth method</dt><dd className="text-gray-900">{AUTH_METHOD_LABELS[sender.auth_method] ?? sender.auth_method}</dd></div>
             <div><dt className="text-xs text-gray-500">Connected</dt><dd className="text-gray-900">{fmtDate(sender.connected_at)}</dd></div>
             <div><dt className="text-xs text-gray-500">Last sync</dt><dd className="text-gray-900" title={fmtDate(sender.last_synced_at)}>{timeAgo(sender.last_synced_at)}</dd></div>
             <div><dt className="text-xs text-gray-500">Last OK</dt><dd className="text-gray-900">{timeAgo(sender.last_ok_at)}</dd></div>
@@ -112,7 +112,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           {needsRelogin && canManage && (
             <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
               <div className="text-sm font-semibold text-red-900 flex items-center gap-2"><KeyRound className="w-4 h-4" /> This account needs a fresh login</div>
-              <p className="text-sm text-red-800 mt-1">LinkedIn invalidated the session. All actions are held until the owner logs in again. Sending a re-login link emails the owner{sender.owner_email ? ` (${sender.owner_email})` : ''} a hosted login page — you can also copy the link and pass it on.</p>
+              <p className="text-sm text-red-800 mt-1">LinkedIn invalidated the session. All actions are held until the owner logs in again. Sending a re-login link emails the owner{sender.owner_email ? ` (${sender.owner_email})` : ''} a hosted login page{sender.auth_method === 'browser' ? ' that reconnects through their browser extension, with no password prompt' : ''} — you can also copy the link and pass it on.</p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <Button onClick={() => manage('reconnect_link')} loading={busy === 'reconnect_link'} disabled={!!busy}><ExternalLink className="w-4 h-4" /> Send re-login link</Button>
                 {sender.auth_method === 'cookie' && <Button variant="secondary" onClick={() => manage('reconnect_cookie')} loading={busy === 'reconnect_cookie'} disabled={!!busy}>Retry cookie reconnect</Button>}

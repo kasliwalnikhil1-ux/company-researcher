@@ -92,15 +92,15 @@ export default function WorkspaceSettingsPage() {
               {setup.isLoading ? <Spinner /> : setup.isError ? <ErrorBox message={parseError(setup.error).message} /> : setup.data ? (
                 <>
                   <div className="divide-y divide-gray-100">
-                    <StatusRow ok={setup.data.status.unipile} label="Unipile API" hint={setup.data.status.unipile_dsn ?? 'UNIPILE_DSN / UNIPILE_API_KEY'} />
-                    <StatusRow ok={setup.data.status.webhook_secret} label="Unipile webhook secret" hint="UNIPILE_WEBHOOK_SECRET" />
+                    <StatusRow ok={setup.data.status.unipile} label="Account connector API" hint={setup.data.status.unipile ? 'Connected' : 'Not configured on this deployment. Contact support.'} />
+                    <StatusRow ok={setup.data.status.webhook_secret} label="Connector webhook secret" hint={setup.data.status.webhook_secret ? 'Set' : 'Not set on this deployment. Contact support.'} />
                     <StatusRow ok={setup.data.status.cookie_key} label="Cookie encryption key" hint="OUTREACH_COOKIE_KEY" />
                     {setup.data.status.cron_secret != null && <StatusRow ok={setup.data.status.cron_secret} label="Cron secret" hint="OUTREACH_CRON_SECRET" />}
                     <StatusRow ok={setup.data.status.ai} label="Gemini (AI classify / drafts)" hint={setup.data.status.ai_model ?? 'GEMINI_API_KEY'} />
                     <StatusRow ok={setup.data.status.resend} label="Resend (email notifications)" hint="RESEND_API_KEY. Optional: reconnect and invite links can be copied from the app instead" optional />
                     <StatusRow ok={setup.data.status.stripe} label="Stripe (billing)" hint="STRIPE_SECRET_KEY. Optional: billing and trial limits are off while it is unset" optional />
                   </div>
-                  {setup.data.status.unipile_error && <ErrorBox className="mt-3" message={`Unipile: ${setup.data.status.unipile_error}`} />}
+                  {setup.data.status.unipile_error && <ErrorBox className="mt-3" message={`Connector: ${setup.data.status.unipile_error}`} />}
                   <div className="mt-4">
                     <div className="text-xs font-medium text-gray-600 mb-1">Inbound webhook URL</div>
                     <div className="flex gap-2">
@@ -109,7 +109,7 @@ export default function WorkspaceSettingsPage() {
                     </div>
                   </div>
                   <div className="mt-4 flex items-center justify-between">
-                    <div className="text-sm font-medium text-gray-900">Registered Unipile webhooks</div>
+                    <div className="text-sm font-medium text-gray-900">Registered connector webhooks</div>
                     <Button size="sm" onClick={registerWebhooks} loading={busy === 'register'} disabled={!setup.data.status.unipile || !setup.data.status.webhook_secret || !canWrite}>Register webhooks</Button>
                   </div>
                   {setup.data.webhooks.length === 0 ? <div className="text-sm text-gray-500 mt-2">None registered yet. Click “Register webhooks” to create the account_status, messaging, users, email and email_tracking hooks.</div> : (

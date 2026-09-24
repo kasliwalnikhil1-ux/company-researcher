@@ -1,7 +1,7 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { Session, User } from '@supabase/supabase-js';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { AuthError, Session, User } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 
@@ -27,11 +27,75 @@ function clearInvalidAuthStorage(): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Two-factor authentication (Supabase MFA, TOTP)
+//
+// A user who has enrolled an authenticator app signs in at AAL1 and must verify
+// a 6-digit code to reach AAL2 before the app is usable. If they do not verify
+// within the grace period, they are signed out. The deadline is persisted in
+// localStorage so refreshing the page cannot reset the clock.
+// ---------------------------------------------------------------------------
+export const AAL1_GRACE_PERIOD_MS = 15 * 60 * 1000; // 15 minutes
+export const AAL1_DEADLINE_STORAGE_KEY = 'mfa_aal1_deadline';
+export const MFA_CHALLENGE_PATH = '/mfa-challenge';
+
+type AalLevel = 'aal1' | 'aal2' | null;
+
+export type MfaFactor = {
+  id: string;
+  status: 'verified' | 'unverified';
+  friendly_name?: string | null;
+};
+
+const readAal1Deadline = (): number | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(AAL1_DEADLINE_STORAGE_KEY);
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeAal1Deadline = (deadline: number | null) => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (deadline === null) {
+      window.localStorage.removeItem(AAL1_DEADLINE_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(AAL1_DEADLINE_STORAGE_KEY, String(deadline));
+    }
+  } catch {
+    // ignore
+  }
+};
+
+const getErrorMessage = (error: unknown): string => {
+  if (!error) return '';
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  if (typeof (error as { message?: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return '';
+};
+
+const toAuthError = (error: unknown, fallback: string): AuthError => {
+  if (error instanceof AuthError) return error;
+  return new AuthError(getErrorMessage(error) || fallback);
+};
+
 type AuthContextType = {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  /** True when the account has 2FA enrolled and this session has not verified it yet. */
+  mfaRequired: boolean;
+  /** True only during the first MFA level check after a fresh sign-in. */
+  mfaCheckLoading: boolean;
+  signIn: (email: string, password: string) => Promise<{ mfaRequired: boolean }>;
   signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   signOutAll: () => Promise<void>;
@@ -39,6 +103,15 @@ type AuthContextType = {
   resetPassword: (email: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   updatePassword: (newPassword: string) => Promise<void>;
+  // MFA
+  mfaListFactors: () => Promise<{ data: { totp: MfaFactor[] } | null; error: AuthError | null }>;
+  mfaEnrollTotp: (friendlyName?: string) => Promise<{
+    data: { id: string; totp: { qr_code: string; secret: string; uri: string } } | null;
+    error: AuthError | null;
+  }>;
+  mfaChallengeAndVerify: (factorId: string, code: string) => Promise<{ error: AuthError | null }>;
+  mfaUnenroll: (factorId: string) => Promise<{ error: AuthError | null }>;
+  mfaGetAal: () => Promise<{ currentLevel: AalLevel; nextLevel: AalLevel; error: AuthError | null }>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -59,10 +132,26 @@ export function isEmailAllowed(email: string | null | undefined): boolean {
   return ALLOWED_EMAILS.has(email.trim().toLowerCase());
 }
 
+/**
+ * Reads the session's authenticator assurance level straight from the client
+ * (no network call) and says whether a 2FA challenge is still outstanding.
+ */
+export async function checkMfaRequired(): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (error || !data) return false;
+    return data.nextLevel === 'aal2' && data.currentLevel !== 'aal2';
+  } catch {
+    return false;
+  }
+}
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [mfaRequired, setMfaRequired] = useState(false);
+  const [mfaCheckLoading, setMfaCheckLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -94,7 +183,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       try {
-        // Keep session updated for token refresh, etc.
+        // Keep session updated for token refresh, MFA verification, etc.
         setSession((prev) => {
           const prevToken = prev?.access_token ?? null;
           const nextToken = newSession?.access_token ?? null;
@@ -181,6 +270,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, []);
 
+  const signOut = useCallback(async () => {
+    writeAal1Deadline(null);
+    await supabase.auth.signOut();
+    router.push('/login');
+  }, [router]);
+
   const signIn = async (email: string, password: string) => {
     if (!isEmailAllowed(email)) {
       throw new Error(NOT_AUTHORIZED_MESSAGE);
@@ -190,7 +285,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       password,
     });
     if (error) throw error;
-    router.push('/');
+    // Password accepted. If the account has an authenticator app enrolled the
+    // session is only AAL1 and the caller must send the user to the challenge.
+    const needsMfa = await checkMfaRequired();
+    return { mfaRequired: needsMfa };
   };
 
   const signUp = async (email: string, password: string) => {
@@ -209,12 +307,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
-  };
-
   const signOutAll = async () => {
+    writeAal1Deadline(null);
     await supabase.auth.signOut({ scope: 'global' });
     router.push('/login');
   };
@@ -260,10 +354,151 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (error) throw error;
   };
 
-  const value = {
+  // ---- MFA -----------------------------------------------------------------
+
+  const mfaListFactors = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.auth.mfa.listFactors();
+      if (error) return { data: null, error };
+      return { data: { totp: (data?.totp ?? []) as MfaFactor[] }, error: null };
+    } catch (error) {
+      return { data: null, error: toAuthError(error, 'Failed to list MFA factors.') };
+    }
+  }, []);
+
+  const mfaEnrollTotp = useCallback(async (friendlyName?: string) => {
+    try {
+      const { data, error } = await supabase.auth.mfa.enroll({
+        factorType: 'totp',
+        ...(friendlyName ? { friendlyName } : {}),
+      });
+      if (error || !data) {
+        return { data: null, error: error ?? new AuthError('Failed to enroll MFA factor.') };
+      }
+      return {
+        data: {
+          id: data.id,
+          totp: { qr_code: data.totp.qr_code, secret: data.totp.secret, uri: data.totp.uri },
+        },
+        error: null,
+      };
+    } catch (error) {
+      return { data: null, error: toAuthError(error, 'Failed to enroll MFA factor.') };
+    }
+  }, []);
+
+  const mfaChallengeAndVerify = useCallback(async (factorId: string, code: string) => {
+    try {
+      const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
+      return { error: error ?? null };
+    } catch (error) {
+      return { error: toAuthError(error, 'Failed to verify code.') };
+    }
+  }, []);
+
+  const mfaUnenroll = useCallback(async (factorId: string) => {
+    try {
+      const { error } = await supabase.auth.mfa.unenroll({ factorId });
+      return { error: error ?? null };
+    } catch (error) {
+      return { error: toAuthError(error, 'Failed to disable two-factor authentication.') };
+    }
+  }, []);
+
+  const mfaGetAal = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      if (error) return { currentLevel: null, nextLevel: null, error };
+      return {
+        currentLevel: (data?.currentLevel ?? null) as AalLevel,
+        nextLevel: (data?.nextLevel ?? null) as AalLevel,
+        error: null,
+      };
+    } catch (error) {
+      return { currentLevel: null, nextLevel: null, error: toAuthError(error, 'Failed to read MFA level.') };
+    }
+  }, []);
+
+  // Recompute the MFA requirement whenever the access token changes (fresh
+  // sign-in, MFA verification, token refresh). Keyed on the token string, not
+  // the session object, so tab-focus re-emits do not flip the gating spinner.
+  // The spinner is only shown for the first check after a sign-in; later
+  // checks run in the background so mounted pages keep their in-memory state.
+  const sessionAccessToken = session?.access_token ?? null;
+  const mfaInitialCheckDoneRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!sessionAccessToken) {
+      setMfaRequired(false);
+      setMfaCheckLoading(false);
+      mfaInitialCheckDoneRef.current = false;
+      return;
+    }
+    if (!mfaInitialCheckDoneRef.current) {
+      setMfaCheckLoading(true);
+    }
+    checkMfaRequired()
+      .then((required) => {
+        if (cancelled) return;
+        setMfaRequired(required);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        mfaInitialCheckDoneRef.current = true;
+        setMfaCheckLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionAccessToken]);
+
+  // Enforce the AAL1 grace period: a user with 2FA who has not verified within
+  // 15 minutes of signing in is signed out. Only clear the persisted deadline
+  // once MFA is known to be satisfied or the user is signed out, never while
+  // the session/AAL is still resolving, otherwise a refresh would restart the
+  // clock.
+  useEffect(() => {
+    if (loading) return;
+
+    if (!session) {
+      writeAal1Deadline(null);
+      return;
+    }
+
+    if (mfaCheckLoading) return;
+
+    if (!mfaRequired) {
+      writeAal1Deadline(null);
+      return;
+    }
+
+    let deadline = readAal1Deadline();
+    if (!deadline || deadline <= Date.now()) {
+      deadline = Date.now() + AAL1_GRACE_PERIOD_MS;
+      writeAal1Deadline(deadline);
+    }
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      signOut().catch(() => {});
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      signOut().catch(() => {});
+    }, remaining);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [loading, session, mfaRequired, mfaCheckLoading, signOut]);
+
+  const value: AuthContextType = {
     user,
     session,
     loading,
+    mfaRequired,
+    mfaCheckLoading,
     signIn,
     signUp,
     signOut,
@@ -272,6 +507,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     resetPassword,
     signInWithGoogle,
     updatePassword,
+    mfaListFactors,
+    mfaEnrollTotp,
+    mfaChallengeAndVerify,
+    mfaUnenroll,
+    mfaGetAal,
   };
 
   return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;

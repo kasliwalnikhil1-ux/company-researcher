@@ -4,9 +4,27 @@ import { log } from "./supabase.ts";
 
 const DSN = (Deno.env.get("UNIPILE_DSN") ?? "").replace(/\/+$/, "");
 const API_KEY = Deno.env.get("UNIPILE_API_KEY") ?? "";
+// White-label hosted-auth domain (optional): a CNAME such as auth.yourapp.com -> account.unipile.com, validated by Unipile support.
+// When set, every hosted-auth URL is rewritten to this host before it reaches a user, so the provider is never visible.
+const HOSTED_AUTH_DOMAIN = (Deno.env.get("OUTREACH_HOSTED_AUTH_DOMAIN") ?? "").replace(/^https?:\/\//, "").replace(/\/+$/, "").trim();
+// Name shown by the browser extension (UniLogin) when a user approves access; also the tab label.
+export const APP_NAME = (Deno.env.get("OUTREACH_APP_NAME") ?? "Outreach").trim().slice(0, 60);
 
 export function unipileConfigured(): boolean { return !!DSN && !!API_KEY; }
 export function unipileBase(): string { return DSN.startsWith("http") ? DSN : `https://${DSN}`; }
+export function hostedAuthDomain(): string | null { return HOSTED_AUTH_DOMAIN || null; }
+
+/** Rewrite the hosted-auth URL onto the white-label domain when one is configured (docs: "Custom Domain URL"). */
+export function hostedAuthUrl(url: string): string {
+  if (!HOSTED_AUTH_DOMAIN) return url;
+  try { const u = new URL(url); u.host = HOSTED_AUTH_DOMAIN; return u.toString(); } catch { return url; }
+}
+
+/** Options for the "signed-in browser" connection method (UniLogin): the wizard connects the LinkedIn account already
+ *  logged in to the user's browser through a store extension; we receive an account id, never cookies. */
+export function hostedBrowserOptions(): Pick<HostedLinkInput, "unilogin" | "disabled_options"> {
+  return { unilogin: { publisher_name: APP_NAME, tab_name: `Connect to ${APP_NAME}`.slice(0, 60) }, disabled_options: ["credentials_auth", "cookie_auth"] };
+}
 
 export class UnipileError extends Error {
   status: number;
@@ -95,11 +113,16 @@ export interface HostedLinkInput {
   bypass_success_screen?: boolean;
   proxy?: { protocol: string; host: string; port: number; username?: string; password?: string };
   sync_limit?: unknown;
+  /** Present (even empty) = offer the browser-extension sign-in (UniLogin) after credentials/cookies. */
+  unilogin?: { publisher_name?: string; tab_name?: string; track_last_visited_page?: boolean };
 }
 
 export const unipile = {
   hosted: {
-    link: (input: HostedLinkInput) => request<{ object: string; url: string }>("/hosted/accounts/link", { method: "POST", body: { ...input, api_url: unipileBase() } }),
+    link: async (input: HostedLinkInput) => {
+      const r = await request<{ object: string; url: string }>("/hosted/accounts/link", { method: "POST", body: { ...input, api_url: unipileBase() } });
+      return { ...r, url: hostedAuthUrl(r.url) };
+    },
   },
   accounts: {
     list: () => request<{ items: any[] }>("/accounts", { query: { limit: 250 } }),

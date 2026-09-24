@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, checkMfaRequired, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { supabase } from '@/utils/supabase/client';
 import { Lock } from 'lucide-react';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
@@ -43,6 +43,13 @@ export default function ResetPassword() {
           } else {
             // Clear hash from URL without reloading
             window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            // Supabase refuses a password change on an AAL1 session when the
+            // account has 2FA, so verify the authenticator code first and
+            // return here afterwards.
+            if (await checkMfaRequired()) {
+              router.replace(`${MFA_CHALLENGE_PATH}?next=${encodeURIComponent('/reset-password')}`);
+              return;
+            }
             setError(null);
             setCanReset(true);
           }
@@ -54,6 +61,10 @@ export default function ResetPassword() {
         // No tokens in hash; maybe session was already restored by Supabase
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
+          if (await checkMfaRequired()) {
+            router.replace(`${MFA_CHALLENGE_PATH}?next=${encodeURIComponent('/reset-password')}`);
+            return;
+          }
           setCanReset(true);
           setError(null);
         } else {
@@ -65,6 +76,7 @@ export default function ResetPassword() {
     };
 
     establishSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -244,6 +244,8 @@ curl -s -X POST "$BASE/outreach-worker-tick" -H "x-cron-secret: $OUTREACH_CRON_S
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | same | injected by the platform | never put in `.env.local` |
 | `UNIPILE_DSN`, `UNIPILE_API_KEY` | same | secrets | DSN with or without `https://` |
 | `UNIPILE_WEBHOOK_SECRET` | same | secrets | `unipile-auth` header check in `outreach-unipile-webhook`; sent by `outreach-unipile-setup` when registering |
+| — | `OUTREACH_HOSTED_AUTH_DOMAIN` | secrets | optional white-label host for hosted-auth links (e.g. `auth.yourapp.com`, CNAME → `account.unipile.com`, validated by Unipile support). When set, every connect / re-login URL is rewritten to it (§9.10) |
+| — | `OUTREACH_APP_NAME` | secrets | optional, default `Outreach`. Shown by the browser-extension sign-in (UniLogin) as the publisher name and tab label (≤60 chars) |
 | `CRON_SECRET` | `OUTREACH_CRON_SECRET` | secrets **and** Vault `outreach_cron_secret` | must match |
 | `VAULT_COOKIE_KEY_ID` (pgsodium) | `OUTREACH_COOKIE_KEY` (base64 32 bytes, AES-256-GCM in `crypto.ts`) | secrets | Vault is used for the cron secret only |
 | `ANTHROPIC_API_KEY` | `GEMINI_API_KEY` (Gemini replaces Claude here, matching the rest of the app) | secrets | optional |
@@ -694,6 +696,27 @@ The customer wants clients to open `reports.agency.com` instead of our app's add
 
 6. A browser session belongs to one origin, so a client signs in once on the custom domain. Password sign-in needs nothing more. If clients use a magic link or a social login, add `https://<hostname>/**` to Supabase → Authentication → URL Configuration → Redirect URLs, or the link sends them back to the main app.
 7. Limit: 10 domains per workspace.
+
+### 9.10 Hosted auth: sign-in methods and the white-label login domain
+
+Connecting a sender always goes through Unipile's **Hosted Auth Wizard** (docs: <https://developer.unipile.com/docs/hosted-auth>). `outreach-sender-connect` creates the link (`type: create`, `name` = our sender id, `notify_url` = `outreach-sender-notify?sid=<id>`, 15-minute expiry); `reconnectLink()` in `_shared/outreach/inbound.ts` creates re-login links (`type: reconnect` + `reconnect_account`, 24 h). The notify callback carries `{status: CREATION_SUCCESS | RECONNECTED, account_id, name}` and is what binds the Unipile account to the sender row.
+
+**Two LinkedIn sign-in methods** exist on the connect page (`connect_method` in the request body). The browser method is **switched off in the UI** by the hard-coded toggle `BROWSER_SIGNIN_ENABLED` in `lib/outreach/features.ts` until Unipile confirms it for our account (Sept 2026); the backend accepts it regardless, so flipping that one constant (and un-commenting the `BROWSER_SIGNIN` blocks in outreach-app-docs) re-enables it.
+
+| Method | Hosted-auth options sent | Stored `auth_method` |
+|---|---|---|
+| Sign in with LinkedIn (default) | none | `credentials` (or `cookie` if the account later reports a cookie connection) |
+| Use the signed-in browser (UniLogin) | `unilogin: {publisher_name, tab_name}` + `disabled_options: ["credentials_auth", "cookie_auth"]` | `browser` (migration 019; never overwritten by the account-status sync) |
+
+With the browser method the wizard connects the LinkedIn account already logged in to the owner's browser through the UniLogin store extension (Chrome / Firefox automatic handoff; Edge / Safari ZIP; one-time code fallback when detection fails or a custom domain is used). We receive an account id, never cookies. Re-login links for `browser` senders send the same options, so the owner is not asked for a password. Mailboxes always use OAuth and ignore `connect_method`.
+
+**White-label login domain** (removes the provider's name from the address bar; requires an active Unipile subscription):
+
+1. Create a DNS record: `CNAME auth.<yourapp>.com → account.unipile.com`. Check propagation (`dig auth.<yourapp>.com CNAME` or whatsmydns.net) — Unipile cannot issue the certificate until it resolves publicly.
+2. Ask Unipile support to validate `https://auth.<yourapp>.com`; they finish the configuration and issue the TLS certificate.
+3. Set the secret `OUTREACH_HOSTED_AUTH_DOMAIN=auth.<yourapp>.com` and redeploy every function that creates links (`sender-connect`, `sender-manage`, `worker-reconnect`, `worker-tick`, `process-inbound`). `hostedAuthUrl()` in `_shared/outreach/unipile.ts` swaps the host of every returned link; nothing else changes. Note: on a custom domain the browser-extension method falls back to the one-time code instead of the automatic handoff (Unipile limitation).
+
+Unipile itself must never appear in customer-facing copy (app UI, marketing site, client docs, emails): say "hosted login", "the connector" or "the connected account" instead.
 
 ### 9.8 Custom tracking domains (email opens and clicks)
 

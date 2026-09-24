@@ -15,7 +15,7 @@ serve("sender-manage", async (req) => {
   requireRole(m, "manager");
   switch (body.action) {
     case "reconnect_link": {
-      if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Unipile not configured");
+      if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
       const link = await reconnectLink(s);
       await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, null, "user");
       return json({ link });

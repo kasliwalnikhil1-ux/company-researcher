@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
-import { isEmailAllowed } from '@/contexts/AuthContext';
+import { isEmailAllowed, checkMfaRequired, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { popPendingOAuthConsent } from '@/lib/oauthConsent';
 
 export default function AuthCallback() {
@@ -27,8 +27,13 @@ export default function AuthCallback() {
             router.push('/login?error=not_authorized');
             return;
           }
-          // Successfully authenticated; finish a pending OAuth consent if one
-          // started this login, otherwise go home.
+          // Successfully authenticated. A 2FA account must verify its code
+          // first (the challenge page resumes a pending OAuth consent);
+          // otherwise finish a pending consent or go home.
+          if (await checkMfaRequired()) {
+            router.replace(MFA_CHALLENGE_PATH);
+            return;
+          }
           router.push(popPendingOAuthConsent() ?? '/');
         } catch (error) {
           console.error('Error in auth callback:', error);
@@ -42,6 +47,10 @@ export default function AuthCallback() {
             if (!isEmailAllowed(session.user?.email)) {
               await supabase.auth.signOut();
               router.push('/login?error=not_authorized');
+              return;
+            }
+            if (await checkMfaRequired()) {
+              router.replace(MFA_CHALLENGE_PATH);
               return;
             }
             router.push(popPendingOAuthConsent() ?? '/');

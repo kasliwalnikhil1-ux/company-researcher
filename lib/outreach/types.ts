@@ -2,7 +2,7 @@
 
 export type Role = 'owner' | 'manager' | 'member' | 'client_viewer';
 export type Provider = 'LINKEDIN' | 'GMAIL' | 'OUTLOOK' | 'IMAP';
-export type AuthMethod = 'credentials' | 'cookie' | 'oauth';
+export type AuthMethod = 'credentials' | 'cookie' | 'oauth' | 'browser';
 export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paused' | 'disabled';
 export type Relation = 'none' | 'pending_out' | 'pending_in' | 'first' | 'blocked' | 'invalid';
 export type ActionType =

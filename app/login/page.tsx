@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
+import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
 import { popPendingOAuthConsent } from '@/lib/oauthConsent';
@@ -113,7 +113,13 @@ export default function Login() {
 
     try {
       if (isLogin) {
-        await signIn(email, password);
+        const { mfaRequired } = await signIn(email, password);
+        if (mfaRequired) {
+          // Account has an authenticator app: the code must be entered before
+          // anything else (the challenge page resumes a pending OAuth consent).
+          router.replace(MFA_CHALLENGE_PATH);
+          return;
+        }
         // Finish a pending OAuth consent (e.g. Claude connector) instead of landing in the app.
         router.push(popPendingOAuthConsent() ?? '/');
       } else {

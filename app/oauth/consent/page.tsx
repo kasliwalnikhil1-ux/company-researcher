@@ -7,6 +7,7 @@ import { Loader2, ShieldCheck } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
 import { PENDING_OAUTH_CONSENT_KEY } from '@/lib/oauthConsent';
+import { checkMfaRequired, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 
 // supabase-js ships these methods at runtime (OAuth 2.1 server, v2.110+),
 // but the generated typings can lag behind, so the shape is pinned here
@@ -91,6 +92,17 @@ function OAuthConsentInner() {
           `${window.location.pathname}${window.location.search}`
         );
         router.replace('/login');
+        return;
+      }
+
+      // Signed in but the account's authenticator code has not been entered
+      // for this session: verify first, then come back here to finish consent.
+      if (await checkMfaRequired()) {
+        sessionStorage.setItem(
+          PENDING_OAUTH_CONSENT_KEY,
+          `${window.location.pathname}${window.location.search}`
+        );
+        router.replace(MFA_CHALLENGE_PATH);
         return;
       }
 

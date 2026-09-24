@@ -1,6 +1,6 @@
 // Inbound Unipile event processing (F2 handlers).
 import { admin, log, rpc, emitEvent, audit, randInt } from "./supabase.ts";
-import { unipile, unipileConfigured, distanceToRelation, invitationPending } from "./unipile.ts";
+import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending, hostedBrowserOptions } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
 import { healthForSender } from "./health.ts";
 import { fillChatPicture } from "./avatars.ts";
@@ -61,8 +61,11 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
     try {
       const acc = await unipile.accounts.get(sender.unipile_account_id);
       const method = acc?.connection_params?.im?.connection_method;
-      if (method === "cookies") patch.auth_method = "cookie";
-      else if (method === "credentials") patch.auth_method = "credentials";
+      // "browser" (extension sign-in) is chosen at connect time and is not reported here; keep it.
+      if (sender.auth_method !== "browser") {
+        if (method === "cookies") patch.auth_method = "cookie";
+        else if (method === "credentials") patch.auth_method = "credentials";
+      }
       const proxyHost = acc?.connection_params?.im?.proxy?.host;
       if (proxyHost && !sender.proxy_country) patch.proxy_ip_hint = null;
     } catch { /* ignore */ }
@@ -157,17 +160,44 @@ export async function handleAccountStatus(payload: any): Promise<void> {
   }
 }
 
+/** True when the sender's account id is still known to the configured DSN. */
+async function accountExistsOnDsn(accountId: string): Promise<boolean> {
+  try { await unipile.accounts.get(accountId); return true; }
+  catch (e) {
+    if (e instanceof UnipileError && (e.status === 404 || e.status === 401 || e.status === 403)) return false;
+    throw e;
+  }
+}
+
+/**
+ * Hosted-auth link for an existing sender. Normally a `reconnect` link for its account; when the account is no
+ * longer on the configured DSN (account deleted, or the platform moved to a new Unipile account) it falls back
+ * to a `create` link bound to the same sender row via `name`, so the hosted-auth notify re-binds the new
+ * account id and the sender keeps its chats, lead state and enrollments.
+ */
 export async function reconnectLink(sender: Sender): Promise<string | null> {
-  if (!sender.unipile_account_id) return null;
   const { FUNCTIONS_BASE, WEB_ORIGIN } = await import("./supabase.ts");
-  const r = await unipile.hosted.link({
-    type: "reconnect",
-    reconnect_account: sender.unipile_account_id,
+  const common = {
     expiresOn: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     notify_url: `${FUNCTIONS_BASE}outreach-sender-notify?sid=${sender.id}`,
     name: sender.id,
     success_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=1`,
     failure_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=0`,
+    // Senders connected through the browser extension reconnect the same way (no password prompt).
+    ...(sender.auth_method === "browser" ? hostedBrowserOptions() : {}),
+  };
+  const stillThere = sender.unipile_account_id ? await accountExistsOnDsn(sender.unipile_account_id) : false;
+  if (stillThere) {
+    const r = await unipile.hosted.link({ type: "reconnect", reconnect_account: sender.unipile_account_id, ...common });
+    return r.url;
+  }
+  const providers = sender.provider === "LINKEDIN" ? ["LINKEDIN"] : sender.provider === "GMAIL" ? ["GOOGLE"] : sender.provider === "OUTLOOK" ? ["OUTLOOK"] : ["MAIL"];
+  const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).maybeSingle();
+  const recruiter = !!(ws?.settings?.recruiter_enabled) && !!sender.has_recruiter;
+  await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "reconnect", data: { method: "fresh_bind", reason: sender.unipile_account_id ? "account_not_on_dsn" : "no_account", previous_account_id: sender.unipile_account_id } });
+  const r = await unipile.hosted.link({
+    type: "create", providers, ...common,
+    disabled_features: sender.provider === "LINKEDIN" && !recruiter ? ["linkedin_recruiter"] : undefined,
   });
   return r.url;
 }

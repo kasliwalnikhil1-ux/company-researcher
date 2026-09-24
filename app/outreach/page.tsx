@@ -142,7 +142,7 @@ export default function OutreachDashboardPage() {
         <Card className="mb-6" title={emptyWorkspace ? 'Welcome — let’s get you set up' : 'Finish setting up'}>
           <p className="text-sm text-gray-500 mb-4">Three steps take you from an empty workspace to a live campaign. Senders warm up gradually, so connecting them early pays off.</p>
           <div className="grid gap-3">
-            <ChecklistItem done={steps.sender} title="1. Connect a sender" description="Link a LinkedIn account (or a Gmail/Outlook mailbox) through Unipile's hosted login. The account owner logs in themselves." href="/outreach/senders/new" cta={isManager ? 'Connect' : 'View'} />
+            <ChecklistItem done={steps.sender} title="1. Connect a sender" description="Link a LinkedIn account (or a Gmail/Outlook mailbox) through a secure hosted login. The account owner logs in themselves." href="/outreach/senders/new" cta={isManager ? 'Connect' : 'View'} />
             <ChecklistItem done={steps.leads} title="2. Import leads" description="Paste a LinkedIn search URL, upload a CSV, or pull a sender's existing connections." href="/outreach/leads/import" cta="Import" />
             <ChecklistItem done={steps.sequence} title="3. Build a sequence" description="Design the steps (profile view → invite → message) on the canvas, pick a sender pool, and activate." href="/outreach/sequences/new" cta={isManager ? 'Build' : 'View'} />
           </div>

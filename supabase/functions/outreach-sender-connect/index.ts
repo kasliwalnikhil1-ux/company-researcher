@@ -1,15 +1,16 @@
-// F10 — Create a Unipile Hosted Auth link for a new sender (manager+).
+// F10 — Create a Hosted Auth Wizard link for a new sender (manager+). connect_method "browser" (LinkedIn only) offers the
+// extension-based sign-in (UniLogin) instead of a password login; the sender is stored with auth_method = browser.
 import { admin, json, serve, requireUser, membership, requireRole, readJson, rateLimit, HttpError, FUNCTIONS_BASE, WEB_ORIGIN, audit } from "../_shared/outreach/supabase.ts";
-import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
+import { unipile, unipileConfigured, hostedBrowserOptions } from "../_shared/outreach/unipile.ts";
 
 serve("sender-connect", async (req) => {
   const user = await requireUser(req);
   await rateLimit(`user:${user.id}:sender-connect`, 20, 60);
-  const body = await readJson<{ workspace_id: string; provider: "LINKEDIN" | "GMAIL" | "OUTLOOK" | "IMAP"; client_id?: string | null; owner_email?: string | null; display_name?: string | null; recruiter?: boolean; timezone?: string }>(req);
+  const body = await readJson<{ workspace_id: string; provider: "LINKEDIN" | "GMAIL" | "OUTLOOK" | "IMAP"; client_id?: string | null; owner_email?: string | null; display_name?: string | null; recruiter?: boolean; timezone?: string; connect_method?: "credentials" | "browser" }>(req);
   if (!body.workspace_id || !body.provider) throw new HttpError(400, "E_PAYLOAD_INVALID", "workspace_id and provider required");
   const m = await membership(user.id, body.workspace_id);
   requireRole(m, "manager");
-  if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Unipile is not configured (UNIPILE_DSN / UNIPILE_API_KEY)");
+  if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
   const { data: ws } = await admin.from("outreach_workspaces").select("plan, settings, trial_ends_at").eq("id", body.workspace_id).single();
   // Trial limits only apply when billing is actually configured; self-hosted / pre-billing installs are unlimited.
   if (ws?.plan === "trial" && Deno.env.get("STRIPE_SECRET_KEY")) {
@@ -20,9 +21,10 @@ serve("sender-connect", async (req) => {
   const ua = req.headers.get("user-agent");
   const provider = body.provider;
   const isLinkedIn = provider === "LINKEDIN";
+  const browser = isLinkedIn && body.connect_method === "browser";
   const { data: sender, error } = await admin.from("outreach_senders").insert({
     workspace_id: body.workspace_id, client_id: body.client_id ?? null, owner_email: body.owner_email ?? null, owner_user_id: user.id,
-    provider, auth_method: isLinkedIn ? "credentials" : "oauth", display_name: body.display_name ?? (isLinkedIn ? "LinkedIn sender" : `${provider} mailbox`),
+    provider, auth_method: browser ? "browser" : isLinkedIn ? "credentials" : "oauth", display_name: body.display_name ?? (isLinkedIn ? "LinkedIn sender" : `${provider} mailbox`),
     status: "connecting", proxy_ip_hint: ip, user_agent: ua, timezone: body.timezone ?? "UTC", warmup_level: isLinkedIn ? 0 : 3,
   }).select("*").single();
   if (error) throw new HttpError(500, "E_INTERNAL", error.message);
@@ -38,8 +40,9 @@ serve("sender-connect", async (req) => {
       failure_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=0`,
       disabled_features: isLinkedIn && !recruiter ? ["linkedin_recruiter"] : undefined,
       bypass_success_screen: false,
+      ...(browser ? hostedBrowserOptions() : {}),
     });
-    await audit(body.workspace_id, "sender.connect_link", "sender", sender.id, { provider, ip }, "user");
+    await audit(body.workspace_id, "sender.connect_link", "sender", sender.id, { provider, ip, connect_method: browser ? "browser" : "default" }, "user");
     return json({ link: link.url, sender_id: sender.id });
   } catch (e) {
     await admin.from("outreach_senders").delete().eq("id", sender.id);

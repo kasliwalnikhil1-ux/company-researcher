@@ -1,4 +1,4 @@
-import type { ActionType, Provider, Schedule, ScheduleWindow, SenderStatus } from '@/lib/outreach/types';
+import type { ActionType, Provider, Schedule, ScheduleWindow, SenderStatus, AuthMethod } from '@/lib/outreach/types';
 
 export const WEEKDAYS: Array<{ key: keyof Schedule; label: string; short: string }> = [
   { key: 'mon', label: 'Monday', short: 'Mon' },
@@ -24,6 +24,9 @@ export const ACTION_LABELS: Record<ActionType, string> = {
 };
 
 export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP' };
+/** How the sender was connected: password login on the hosted page, cookies from the Chrome extension, OAuth (mailboxes),
+ *  or the hosted page's browser-extension sign-in that reuses the LinkedIn session already open on the owner's computer. */
+export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = { credentials: 'Password login', cookie: 'Cookie (extension)', oauth: 'OAuth', browser: 'Signed-in browser' };
 
 export const STATUS_OPTIONS: Array<{ value: SenderStatus; label: string }> = [
   { value: 'ok', label: 'Connected' }, { value: 'connecting', label: 'Connecting' }, { value: 'credentials', label: 'Re-login needed' },

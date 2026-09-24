@@ -38,7 +38,7 @@ export default function DangerZone({ sender, isManager, canWrite, notify }: { se
     setBusy('disable'); setError(null);
     try {
       const r = await callFn<{ ok: boolean; unipile_deleted: boolean }>('sender-disable', { sender_id: sender.id, delete_unipile: deleteUnipile, purge_secrets: purge });
-      notify(deleteUnipile ? (r.unipile_deleted ? 'Sender disabled and Unipile account deleted.' : 'Sender disabled. Unipile deletion failed and was logged.') : 'Sender disabled.');
+      notify(deleteUnipile ? (r.unipile_deleted ? 'Sender disabled and the connected account deleted.' : 'Sender disabled. Deleting the connected account failed and was logged.') : 'Sender disabled.');
       invalidate(); setOpen(false);
       router.push('/outreach/senders');
     } catch (e) { setError(parseError(e).message); }
@@ -70,7 +70,7 @@ export default function DangerZone({ sender, isManager, canWrite, notify }: { se
       <Card title={<span className="flex items-center gap-2 text-red-700"><AlertTriangle className="w-4 h-4" /> Disable sender</span>} className="border-red-200">
         <div className="text-sm text-gray-700 space-y-1.5">
           <p>Disabling cancels every queued action, exits all live enrollments with <code className="text-xs bg-gray-100 px-1 rounded">exited_sender_disabled</code>, and stops all syncing. Chats and history stay readable.</p>
-          <p>Optionally delete the Unipile account (revokes the held session token) and purge stored cookies / pairing tokens. Deleting the Unipile account cannot be undone; you would reconnect from scratch.</p>
+          <p>Optionally delete the connected account (revokes the held session token) and purge stored cookies / pairing tokens. Deleting the connected account cannot be undone; you would reconnect from scratch.</p>
         </div>
         <div className="mt-4">
           <Button variant="danger" onClick={() => { setOpen(true); setConfirmText(''); setError(null); }} disabled={isDisabled}><Power className="w-4 h-4" /> {isDisabled ? 'Already disabled' : 'Disable sender…'}</Button>
@@ -83,7 +83,7 @@ export default function DangerZone({ sender, isManager, canWrite, notify }: { se
           <p className="text-sm text-gray-700">You are about to disable <strong>{sender.display_name ?? 'this sender'}</strong>. Queued actions are cancelled and live enrollments exit immediately.</p>
           <label className="flex items-start gap-2 text-sm text-gray-800">
             <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-red-600 focus:ring-red-500" checked={deleteUnipile} onChange={(e) => { setDeleteUnipile(e.target.checked); if (e.target.checked) setPurge(true); }} />
-            <span><span className="font-medium">Delete the Unipile account</span><br /><span className="text-gray-500">Revokes the session token held on the owner's behalf and removes the account from Unipile. Permanent.</span></span>
+            <span><span className="font-medium">Delete the connected account</span><br /><span className="text-gray-500">Revokes the session token held on the owner's behalf and removes the account from the connector. Permanent.</span></span>
           </label>
           <label className="flex items-start gap-2 text-sm text-gray-800">
             <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-red-600 focus:ring-red-500" checked={purge} disabled={deleteUnipile} onChange={(e) => setPurge(e.target.checked)} />
