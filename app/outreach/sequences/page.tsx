@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, Copy, ExternalLink, GitBranch, MoreHorizontal, Plus, Search, Trash2, UserX } from 'lucide-react';
+import { AlertTriangle, Archive, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -17,6 +17,7 @@ import { Avatar, Badge, Button, EmptyState, ErrorBox, Input, Modal, PageHeader, 
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
 import { useFailedCounts, useSequenceSummary } from '@/components/outreach/sequences/hooks';
 import FailedLeadsDrawer from '@/components/outreach/sequences/FailedLeadsDrawer';
+import TemplatePicker from '@/components/outreach/sequences/TemplatePicker';
 import { WhyNotSendingDialog } from '@/components/outreach/sequences/WhyNotSendingDialog';
 import { fmtInt, type SequenceExt } from '@/components/outreach/sequences/publishTypes';
 import { formatGraphError, nodeCount, senderName, STATUS_TONE } from '@/components/outreach/sequences/helpers';
@@ -86,6 +87,41 @@ function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequen
   );
 }
 
+/** One "New sequence" button; the dropdown offers a ready-made template or a blank canvas. */
+function NewSequenceMenu({ onTemplate, onBlank }: { onTemplate: () => void; onBlank: () => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    const onDown = (e: MouseEvent) => { if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('mousedown', onDown);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onDown); };
+  }, [open]);
+
+  const choose = (fn: () => void) => { setOpen(false); fn(); };
+
+  return (
+    <div ref={rootRef} className="relative inline-block">
+      <Button onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}><Plus className="w-4 h-4" /> New sequence <ChevronDown className="w-4 h-4 -mr-1" /></Button>
+      {open && (
+        <div role="menu" className="absolute right-0 mt-1 z-40 w-64 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
+          <button type="button" role="menuitem" onClick={() => choose(onTemplate)} className={cn(MENU_ITEM, 'items-start')}>
+            <LayoutTemplate className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span><span className="block font-medium text-gray-900">Start from a template</span><span className="block text-xs text-gray-500">Connect, follow up, rotate senders, nurture</span></span>
+          </button>
+          <button type="button" role="menuitem" onClick={() => choose(onBlank)} className={cn(MENU_ITEM, 'items-start')}>
+            <FilePlus2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span><span className="block font-medium text-gray-900">Build from scratch</span><span className="block text-xs text-gray-500">An empty canvas with just a start and an end</span></span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SequencesPage() {
   const { workspace, isManager, canWrite, suspended } = useWorkspace();
   const ws = workspace?.id ?? null;
@@ -110,6 +146,7 @@ export default function SequencesPage() {
   const setClient = (v: string) => patchListFilters({ client: v });
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newClient, setNewClient] = useState('');
   const [creating, setCreating] = useState(false);
@@ -165,7 +202,7 @@ export default function SequencesPage() {
   return (
     <div>
       <PageHeader title="Sequences" subtitle="Multi-step LinkedIn and email flows run by your sender pool."
-        actions={canManage && <Button onClick={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }}><Plus className="w-4 h-4" /> New sequence</Button>} />
+        actions={canManage && <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} />} />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -186,8 +223,8 @@ export default function SequencesPage() {
 
       {seqs.isLoading ? <Spinner className="min-h-[50vh]" /> : seqs.error ? <ErrorBox message={parseError(seqs.error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<GitBranch className="w-6 h-6" />} title={seqs.data?.length ? 'No sequences match these filters' : 'No sequences yet'}
-          description={seqs.data?.length ? 'Try a different status, client or search.' : 'Build your first flow: invitation, wait for connection, follow-up messages, and CRM updates.'}
-          action={canManage && !seqs.data?.length ? <Button onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4" /> New sequence</Button> : undefined} />
+          description={seqs.data?.length ? 'Try a different status, client or search.' : 'Start from a ready-made flow (connect, follow up, rotate senders, nurture) or build your own: invitation, wait for connection, follow-up messages, and CRM updates.'}
+          action={canManage && !seqs.data?.length ? <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} /> : undefined} />
       ) : (
         <Table>
           <thead>
@@ -256,6 +293,8 @@ export default function SequencesPage() {
           </Select>
         </div>
       </Modal>
+
+      <TemplatePicker open={templateOpen} onClose={() => setTemplateOpen(false)} />
 
       <ConfirmModal open={confirm?.kind === 'archive'} title="Archive sequence" confirmLabel="Archive" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
         body={<p>Archiving “{confirm?.s.name}” takes all {summaryMap[confirm?.s.id ?? '']?.live ?? 0} leads currently in it out of the sequence and stops sending. The steps and history are kept.</p>} />
