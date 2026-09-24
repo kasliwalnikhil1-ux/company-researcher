@@ -710,7 +710,7 @@ Connecting a sender always goes through Unipile's **Hosted Auth Wizard** (docs: 
 
 With the browser method the wizard connects the LinkedIn account already logged in to the owner's browser through the UniLogin store extension (Chrome / Firefox automatic handoff; Edge / Safari ZIP; one-time code fallback when detection fails or a custom domain is used). We receive an account id, never cookies. Re-login links for `browser` senders send the same options, so the owner is not asked for a password. Mailboxes always use OAuth and ignore `connect_method`.
 
-**White-label login domain** (removes the provider's name from the address bar; requires an active Unipile subscription):
+**White-label login domain** (removes the provider's name from the address bar; requires an active Unipile subscription). Ours is **`auth.growthxai.com`** (CNAME to `account.unipile.com` live and serving a valid certificate as of 2026-09-24; the secret `OUTREACH_HOSTED_AUTH_DOMAIN` is what switches the rewrite on):
 
 1. Create a DNS record: `CNAME auth.<yourapp>.com → account.unipile.com`. Check propagation (`dig auth.<yourapp>.com CNAME` or whatsmydns.net) — Unipile cannot issue the certificate until it resolves publicly.
 2. Ask Unipile support to validate `https://auth.<yourapp>.com`; they finish the configuration and issue the TLS certificate.
