@@ -119,18 +119,12 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const SIGNUP_USER_EXISTS_MESSAGE =
   'An account with this email already exists. Please sign in instead.';
 
-const ALLOWED_EMAILS = new Set<string>([
-  'kasliwalnikhil1@gmail.com',
-  'nkjaipur21@gmail.com',
-]);
-
 export const NOT_AUTHORIZED_MESSAGE =
   'This email is not authorized to access the app. Please contact the administrator.';
 
-export function isEmailAllowed(email: string | null | undefined): boolean {
-  if (!email) return false;
-  return ALLOWED_EMAILS.has(email.trim().toLowerCase());
-}
+// Who may use the app is no longer a hardcoded email list. Every account has a status in the database
+// (pending | active | blocked, see migrations/platform/001_admin.sql) that admins manage from /admin;
+// components/ProtectedRoute shows a "waiting for approval" screen until the account is active.
 
 /**
  * Reads the session's authenticator assurance level straight from the client
@@ -278,9 +272,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [router]);
 
   const signIn = async (email: string, password: string) => {
-    if (!isEmailAllowed(email)) {
-      throw new Error(NOT_AUTHORIZED_MESSAGE);
-    }
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -293,9 +284,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signUp = async (email: string, password: string) => {
-    if (!isEmailAllowed(email)) {
-      throw new Error(NOT_AUTHORIZED_MESSAGE);
-    }
     const { data, error } = await supabase.auth.signUp({
       email,
       password,

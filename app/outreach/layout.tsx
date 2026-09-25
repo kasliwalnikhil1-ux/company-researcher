@@ -7,10 +7,19 @@ import MainLayout from '@/components/MainLayout';
 import { OutreachWorkspaceProvider, useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import OutreachShell from '@/components/outreach/Shell';
 import { OutreachSidebarNav } from '@/components/outreach/OutreachNav';
-import { ErrorBox, PageLoader } from '@/components/outreach/ui';
+import { EmptyState, ErrorBox, PageLoader } from '@/components/outreach/ui';
+import { useAccess } from '@/contexts/AccessContext';
 
 function Gate({ children }: { children: React.ReactNode }) {
   const { loading, error, workspace } = useWorkspace();
+  const access = useAccess();
+  if (!access.loading && !access.has('outreach', true)) {
+    return (
+      <div className="p-6">
+        <EmptyState title="Outreach is not enabled for your account" description="An administrator has switched off the outreach product for this account. Contact support if you need it turned on." />
+      </div>
+    );
+  }
   if (loading) return <PageLoader className="min-h-[calc(100dvh-3.5rem)] md:min-h-screen" />;
   if (error) return <div className="p-6"><ErrorBox message={error} /></div>;
   if (!workspace) return <div className="p-6"><ErrorBox message="No workspace available." /></div>;

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/contexts/AccessContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
 import { getValidAccessToken } from '@/lib/api';
@@ -215,7 +216,9 @@ export default function AdminStatsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const isAllowed = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
+  const access = useAccess();
+  // Admins are the platform_admins table (managed from /admin); the hardcoded ids stay as a fallback while access loads.
+  const isAllowed = access.isAdmin || (access.loading && ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? ''));
 
   const fetchStats = useCallback(async () => {
     try {

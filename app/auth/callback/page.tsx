@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
-import { isEmailAllowed, checkMfaRequired, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
+import { checkMfaRequired, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { popPendingOAuthConsent } from '@/lib/oauthConsent';
 
 export default function AuthCallback() {
@@ -16,18 +16,13 @@ export default function AuthCallback() {
       
       if (code) {
         try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
             console.error('Error exchanging code for session:', error);
             router.push('/login?error=auth_failed');
             return;
           }
-          if (!isEmailAllowed(data.session?.user?.email)) {
-            await supabase.auth.signOut();
-            router.push('/login?error=not_authorized');
-            return;
-          }
-          // Successfully authenticated. A 2FA account must verify its code
+          // Successfully authenticated (account approval is handled by ProtectedRoute). A 2FA account must verify its code
           // first (the challenge page resumes a pending OAuth consent);
           // otherwise finish a pending consent or go home.
           if (await checkMfaRequired()) {
@@ -44,11 +39,6 @@ export default function AuthCallback() {
         try {
           const { data: { session } } = await supabase.auth.getSession();
           if (session) {
-            if (!isEmailAllowed(session.user?.email)) {
-              await supabase.auth.signOut();
-              router.push('/login?error=not_authorized');
-              return;
-            }
             if (await checkMfaRequired()) {
               router.replace(MFA_CHALLENGE_PATH);
               return;

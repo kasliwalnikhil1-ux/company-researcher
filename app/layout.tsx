@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import { Analytics } from '@vercel/analytics/next';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { AccessProvider } from '@/contexts/AccessContext';
 import { MessageTemplatesProvider } from '@/contexts/MessageTemplatesContext';
 import { CompaniesProvider } from '@/contexts/CompaniesContext';
 import { OwnerProvider } from '@/contexts/OwnerContext';
@@ -87,20 +88,22 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <AuthProvider>
-          <OnboardingProvider>
-            <CountryProvider>
-              <OwnerProvider>
-                <MessageTemplatesProvider>
-                  <CompaniesProvider>
-                    <PricingModalProvider>
-                      {children}
-                      <Analytics />
-                    </PricingModalProvider>
-                  </CompaniesProvider>
-                </MessageTemplatesProvider>
-              </OwnerProvider>
-            </CountryProvider>
-          </OnboardingProvider>
+          <AccessProvider>
+            <OnboardingProvider>
+              <CountryProvider>
+                <OwnerProvider>
+                  <MessageTemplatesProvider>
+                    <CompaniesProvider>
+                      <PricingModalProvider>
+                        {children}
+                        <Analytics />
+                      </PricingModalProvider>
+                    </CompaniesProvider>
+                  </MessageTemplatesProvider>
+                </OwnerProvider>
+              </CountryProvider>
+            </OnboardingProvider>
+          </AccessProvider>
         </AuthProvider>
       </body>
     </html>

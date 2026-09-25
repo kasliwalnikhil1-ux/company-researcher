@@ -46,7 +46,9 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 });
     }
 
-    if (!ALLOWED_USER_IDS.has(user.id)) {
+    // Admins are the platform_admins table (managed from /admin). The hardcoded ids stay as a fallback.
+    const { data: isAdmin } = await authClient.rpc('platform_is_admin');
+    if (!isAdmin && !ALLOWED_USER_IDS.has(user.id)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

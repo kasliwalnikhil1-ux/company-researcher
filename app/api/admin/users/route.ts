@@ -1,27 +1,24 @@
 // /app/api/admin/users/route.ts
-// Admin user management: list all accounts, update plan/credits/status,
-// and ban/unban accounts. Service role, restricted to ADMIN_USER_IDS.
+// The parts of account administration that need the GoTrue admin API (service role): create an account,
+// ban / unban, issue a password-recovery link, delete an account. Everything else (status, features, plan,
+// credits, outreach, CRM) is a `platform_admin_*` SQL RPC called from the browser with the admin's own session
+// (see migrations/platform/001_admin.sql and lib/platform/access.ts).
+//
+// Who is an admin: the `platform_admins` table, checked through the caller's own token (`platform_is_admin`).
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const ADMIN_USER_IDS = new Set([
-  '2793f3da-9340-44f4-b285-b7836bfb8591',
-  'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
-]);
-
-const ALLOWED_PLANS = new Set(['free', 'basic', 'pro']);
-const ALLOWED_STATUSES = new Set(['active', 'inactive', 'cancelled', 'past_due']);
-const ALLOWED_BILLING_CYCLES = new Set(['monthly', 'quarterly', 'yearly']);
-
 // ~100 years — effectively permanent until unbanned
 const BAN_DURATION = '876000h';
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getSupabaseServiceClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
   if (!url || !key) return null;
-  return createClient(url, key);
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
 function getSupabaseAuthClient(accessToken: string) {
@@ -30,207 +27,167 @@ function getSupabaseAuthClient(accessToken: string) {
   if (!url || !key) return null;
   return createClient(url, key, {
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
-async function authenticateAdmin(req: NextRequest): Promise<
-  | { ok: true; adminId: string }
-  | { ok: false; response: NextResponse }
-> {
+type Admin = { id: string; email: string | null };
+
+async function authenticateAdmin(req: NextRequest): Promise<{ ok: true; admin: Admin } | { ok: false; response: NextResponse }> {
   const authHeader = req.headers.get('Authorization');
   const token = authHeader?.replace(/^Bearer\s+/i, '');
-
-  if (!token) {
-    return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
-  }
+  if (!token) return { ok: false, response: NextResponse.json({ error: 'Authentication required' }, { status: 401 }) };
 
   const authClient = getSupabaseAuthClient(token);
-  if (!authClient) {
-    return { ok: false, response: NextResponse.json({ error: 'Auth not configured' }, { status: 500 }) };
-  }
+  if (!authClient) return { ok: false, response: NextResponse.json({ error: 'Auth not configured' }, { status: 500 }) };
 
   const { data: { user }, error: authError } = await authClient.auth.getUser(token);
-  if (authError || !user) {
-    return { ok: false, response: NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 }) };
-  }
+  if (authError || !user) return { ok: false, response: NextResponse.json({ error: 'Invalid or expired session' }, { status: 401 }) };
 
-  if (!ADMIN_USER_IDS.has(user.id)) {
-    return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
+  const { data: isAdmin, error: adminError } = await authClient.rpc('platform_is_admin');
+  if (adminError) {
+    console.error('platform_is_admin error:', adminError);
+    return { ok: false, response: NextResponse.json({ error: 'Could not verify admin access' }, { status: 500 }) };
   }
+  if (!isAdmin) return { ok: false, response: NextResponse.json({ error: 'Forbidden' }, { status: 403 }) };
 
-  return { ok: true, adminId: user.id };
+  return { ok: true, admin: { id: user.id, email: user.email ?? null } };
 }
 
-async function listAllAuthUsers(serviceClient: SupabaseClient) {
-  const users: {
-    id: string;
-    email: string | null;
-    created_at: string;
-    last_sign_in_at: string | null;
-    banned_until: string | null;
-  }[] = [];
-
-  let page = 1;
-  const perPage = 1000;
-  // Paginate until a short page is returned
-  for (;;) {
-    const { data, error } = await serviceClient.auth.admin.listUsers({ page, perPage });
-    if (error) throw error;
-    for (const u of data.users) {
-      users.push({
-        id: u.id,
-        email: u.email ?? null,
-        created_at: u.created_at,
-        last_sign_in_at: u.last_sign_in_at ?? null,
-        banned_until: (u as { banned_until?: string | null }).banned_until ?? null,
-      });
-    }
-    if (data.users.length < perPage) break;
-    page += 1;
-  }
-
-  return users;
+async function audit(service: SupabaseClient, admin: Admin, action: string, target: { id: string | null; email: string | null }, details: Record<string, unknown> = {}) {
+  const { error } = await service.from('platform_audit_log').insert({
+    admin_id: admin.id, admin_email: admin.email, target_user_id: target.id, target_email: target.email, action, details,
+  });
+  if (error) console.error('platform_audit_log insert error:', error);
 }
 
-// ─── GET: list all accounts with their settings ─────────────────────
-export async function GET(req: NextRequest) {
+async function targetEmail(service: SupabaseClient, userId: string): Promise<string | null> {
+  const { data } = await service.auth.admin.getUserById(userId);
+  return data?.user?.email ?? null;
+}
+
+function describe(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// ─── POST: create an account ────────────────────────────────────────
+// { email, password?, note? }
+// With a password the account is created confirmed and usable at once; without one an invitation email is sent
+// (needs the project's SMTP) and a copyable invite link is returned as well.
+export async function POST(req: NextRequest) {
   try {
     const auth = await authenticateAdmin(req);
     if (!auth.ok) return auth.response;
+    const service = getSupabaseServiceClient();
+    if (!service) return NextResponse.json({ error: 'Service role not configured' }, { status: 500 });
 
-    const serviceClient = getSupabaseServiceClient();
-    if (!serviceClient) {
-      return NextResponse.json({ error: 'Service role not configured' }, { status: 500 });
+    const body = await req.json().catch(() => null);
+    const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const password = typeof body?.password === 'string' && body.password.length > 0 ? body.password : null;
+    const note = typeof body?.note === 'string' ? body.note.trim() : '';
+    if (!EMAIL_RE.test(email)) return NextResponse.json({ error: 'A valid email is required' }, { status: 400 });
+    if (password !== null && password.length < 8) return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
+
+    let userId: string | null = null;
+    let inviteLink: string | null = null;
+
+    if (password) {
+      const { data, error } = await service.auth.admin.createUser({ email, password, email_confirm: true });
+      if (error) return NextResponse.json({ error: error.message }, { status: error.status === 422 ? 409 : 500 });
+      userId = data.user?.id ?? null;
+    } else {
+      const redirectTo = process.env.NEXT_PUBLIC_APP_URL ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/auth/callback` : undefined;
+      const { data, error } = await service.auth.admin.generateLink({ type: 'invite', email, options: { redirectTo } });
+      if (error) return NextResponse.json({ error: error.message }, { status: error.status === 422 ? 409 : 500 });
+      userId = data.user?.id ?? null;
+      inviteLink = data.properties?.action_link ?? null;
+      // generateLink creates the account but sends nothing: try the built-in invite mail as well (no-op without SMTP).
+      await service.auth.admin.inviteUserByEmail(email, { redirectTo }).catch(() => undefined);
     }
+    if (!userId) return NextResponse.json({ error: 'Account was not created' }, { status: 500 });
 
-    const [authUsers, settingsRes] = await Promise.all([
-      listAllAuthUsers(serviceClient),
-      serviceClient
-        .from('user_settings')
-        .select('id, plan, billing_cycle, renewal_date, last_billed_at, status, credits_remaining'),
-    ]);
-
-    if (settingsRes.error) {
-      console.error('user_settings fetch error:', settingsRes.error);
-      return NextResponse.json({ error: settingsRes.error.message }, { status: 500 });
-    }
-
-    const settingsById = new Map(
-      (settingsRes.data ?? []).map((s) => [s.id as string, s])
+    // Admin-created accounts are approved from the start.
+    const { error: accessError } = await service.from('platform_user_access').upsert(
+      { user_id: userId, status: 'active', approved_at: new Date().toISOString(), approved_by: auth.admin.id, updated_by: auth.admin.id, updated_at: new Date().toISOString(), note: note || null },
+      { onConflict: 'user_id' },
     );
+    if (accessError) console.error('platform_user_access upsert error:', accessError);
 
-    const users = authUsers.map((u) => {
-      const s = settingsById.get(u.id);
-      return {
-        id: u.id,
-        email: u.email,
-        created_at: u.created_at,
-        last_sign_in_at: u.last_sign_in_at,
-        banned: !!(u.banned_until && new Date(u.banned_until) > new Date()),
-        plan: s?.plan ?? null,
-        billing_cycle: s?.billing_cycle ?? null,
-        renewal_date: s?.renewal_date ?? null,
-        last_billed_at: s?.last_billed_at ?? null,
-        status: s?.status ?? null,
-        credits_remaining: s?.credits_remaining ?? null,
-      };
-    });
-
-    users.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
-
-    return NextResponse.json({ users });
+    await audit(service, auth.admin, 'account.created', { id: userId, email }, { method: password ? 'password' : 'invite', note: note || undefined });
+    return NextResponse.json({ userId, email, inviteLink });
   } catch (err) {
-    console.error('Admin users GET error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Admin users POST error:', err);
+    return NextResponse.json({ error: describe(err) }, { status: 500 });
   }
 }
 
-// ─── PATCH: update a user's plan/credits/status or ban/unban ────────
+// ─── PATCH: ban / unban, recovery link ──────────────────────────────
+// { userId, banned: boolean }  |  { userId, action: 'recovery_link' }
 export async function PATCH(req: NextRequest) {
   try {
     const auth = await authenticateAdmin(req);
     if (!auth.ok) return auth.response;
-
-    const serviceClient = getSupabaseServiceClient();
-    if (!serviceClient) {
-      return NextResponse.json({ error: 'Service role not configured' }, { status: 500 });
-    }
+    const service = getSupabaseServiceClient();
+    if (!service) return NextResponse.json({ error: 'Service role not configured' }, { status: 500 });
 
     const body = await req.json().catch(() => null);
-    const userId = typeof body?.userId === 'string' ? body.userId : null;
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
-    }
+    const userId = typeof body?.userId === 'string' && UUID_RE.test(body.userId) ? body.userId : null;
+    if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+    const email = await targetEmail(service, userId);
+    if (email === null) return NextResponse.json({ error: 'No such account' }, { status: 404 });
 
-    // ── Access control: ban / unban ──
     if (typeof body?.banned === 'boolean') {
-      if (userId === auth.adminId && body.banned) {
-        return NextResponse.json({ error: 'You cannot ban your own account' }, { status: 400 });
-      }
-      const { error: banError } = await serviceClient.auth.admin.updateUserById(userId, {
-        ban_duration: body.banned ? BAN_DURATION : 'none',
-      });
-      if (banError) {
-        console.error('Ban update error:', banError);
-        return NextResponse.json({ error: banError.message }, { status: 500 });
-      }
+      if (userId === auth.admin.id && body.banned) return NextResponse.json({ error: 'You cannot ban your own account' }, { status: 400 });
+      const { error } = await service.auth.admin.updateUserById(userId, { ban_duration: body.banned ? BAN_DURATION : 'none' });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      await audit(service, auth.admin, body.banned ? 'account.banned' : 'account.unbanned', { id: userId, email });
+      return NextResponse.json({ success: true, banned: body.banned });
     }
 
-    // ── Settings updates (whitelisted fields only) ──
-    const updates: Record<string, unknown> = {};
-
-    if (body?.plan !== undefined) {
-      if (typeof body.plan !== 'string' || !ALLOWED_PLANS.has(body.plan)) {
-        return NextResponse.json({ error: `Invalid plan. Allowed: ${[...ALLOWED_PLANS].join(', ')}` }, { status: 400 });
-      }
-      updates.plan = body.plan;
+    if (body?.action === 'recovery_link') {
+      const redirectTo = process.env.NEXT_PUBLIC_APP_URL ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/reset-password` : undefined;
+      const { data, error } = await service.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo } });
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      await audit(service, auth.admin, 'account.recovery_link', { id: userId, email });
+      return NextResponse.json({ link: data.properties?.action_link ?? null });
     }
 
-    if (body?.credits_remaining !== undefined) {
-      const credits = Number(body.credits_remaining);
-      if (!Number.isFinite(credits) || credits < 0) {
-        return NextResponse.json({ error: 'credits_remaining must be a non-negative number' }, { status: 400 });
-      }
-      updates.credits_remaining = Math.floor(credits);
-    }
-
-    if (body?.status !== undefined) {
-      if (typeof body.status !== 'string' || !ALLOWED_STATUSES.has(body.status)) {
-        return NextResponse.json({ error: `Invalid status. Allowed: ${[...ALLOWED_STATUSES].join(', ')}` }, { status: 400 });
-      }
-      updates.status = body.status;
-    }
-
-    if (body?.billing_cycle !== undefined) {
-      if (typeof body.billing_cycle !== 'string' || !ALLOWED_BILLING_CYCLES.has(body.billing_cycle)) {
-        return NextResponse.json({ error: `Invalid billing_cycle. Allowed: ${[...ALLOWED_BILLING_CYCLES].join(', ')}` }, { status: 400 });
-      }
-      updates.billing_cycle = body.billing_cycle;
-    }
-
-    if (body?.renewal_date !== undefined) {
-      if (body.renewal_date !== null && Number.isNaN(Date.parse(body.renewal_date))) {
-        return NextResponse.json({ error: 'renewal_date must be a valid date or null' }, { status: 400 });
-      }
-      updates.renewal_date = body.renewal_date;
-    }
-
-    if (Object.keys(updates).length > 0) {
-      const { error: upsertError } = await serviceClient
-        .from('user_settings')
-        .upsert({ id: userId, ...updates }, { onConflict: 'id' });
-
-      if (upsertError) {
-        console.error('user_settings upsert error:', upsertError);
-        return NextResponse.json({ error: upsertError.message }, { status: 500 });
-      }
-    } else if (typeof body?.banned !== 'boolean') {
-      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
-    }
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ error: 'Nothing to do' }, { status: 400 });
   } catch (err) {
     console.error('Admin users PATCH error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: describe(err) }, { status: 500 });
+  }
+}
+
+// ─── DELETE: remove an account (and, through the foreign keys, everything it owns) ──
+// { userId, confirmEmail }
+export async function DELETE(req: NextRequest) {
+  try {
+    const auth = await authenticateAdmin(req);
+    if (!auth.ok) return auth.response;
+    const service = getSupabaseServiceClient();
+    if (!service) return NextResponse.json({ error: 'Service role not configured' }, { status: 500 });
+
+    const body = await req.json().catch(() => null);
+    const userId = typeof body?.userId === 'string' && UUID_RE.test(body.userId) ? body.userId : null;
+    const confirmEmail = typeof body?.confirmEmail === 'string' ? body.confirmEmail.trim().toLowerCase() : '';
+    if (!userId) return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+    if (userId === auth.admin.id) return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 });
+
+    const email = await targetEmail(service, userId);
+    if (email === null) return NextResponse.json({ error: 'No such account' }, { status: 404 });
+    if (confirmEmail !== email.toLowerCase()) return NextResponse.json({ error: 'Type the account email to confirm' }, { status: 400 });
+
+    const { data: isTargetAdmin } = await service.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle();
+    if (isTargetAdmin) return NextResponse.json({ error: 'Remove admin access first' }, { status: 400 });
+
+    // Write the audit row first: the account row (and its FK-linked rows) disappears with the delete.
+    await audit(service, auth.admin, 'account.deleted', { id: userId, email });
+    const { error } = await service.auth.admin.deleteUser(userId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Admin users DELETE error:', err);
+    return NextResponse.json({ error: describe(err) }, { status: 500 });
   }
 }

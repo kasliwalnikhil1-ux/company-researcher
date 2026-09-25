@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/contexts/AccessContext';
 import { useMessageTemplates } from '@/contexts/MessageTemplatesContext';
 import { supabase } from '@/utils/supabase/client';
 import { getValidAccessToken } from '@/lib/api';
@@ -43,6 +44,7 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
 
 export default function MainLayout({ children, subnav }: { children: React.ReactNode; subnav?: React.ReactNode }) {
   const { user, signOut } = useAuth();
+  const access = useAccess();
   const whitelabel = useWhitelabel();
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const { onboarding, loading: onboardingLoading, fetchOnboarding } = useOnboarding();
@@ -61,44 +63,60 @@ export default function MainLayout({ children, subnav }: { children: React.React
     [onboarding]
   );
 
+  // What this account may see. Admin-set switches (contexts/AccessContext) win; when the admin left a switch on
+  // "Default" the app's own rule applies (onboarding choice, or the internal-team allowlists above).
   const routeAccess = useMemo(() => {
     const isFundraising = primaryUse === 'fundraising';
     const isB2B = primaryUse === 'b2b';
-    const canAccessResearch = RESEARCH_ALLOWED_USER_IDS.has(user?.id ?? '');
-    const canAccessPersonalization = PERSONALIZATION_ALLOWED_USER_IDS.has(user?.id ?? '');
-    const canAccessMeData = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
-    const canAccessResetAccount = isFundraising && RESET_ACCOUNT_ALLOWED_USER_IDS.has(user?.id ?? '');
-    const canAccessAdminStats = ME_DATA_ALLOWED_USER_IDS.has(user?.id ?? '');
+    const uid = user?.id ?? '';
+    const { has, isAdmin, crmMember } = access;
+    const fundraisingOn = has('fundraising', true);
+    const outreachOn = has('outreach', true);
+    const canAccessResearch = has('research', RESEARCH_ALLOWED_USER_IDS.has(uid));
+    const b2bOn = has('b2b', isB2B);
+    const canAccessPersonalization = has('personalization', PERSONALIZATION_ALLOWED_USER_IDS.has(uid));
+    const canAccessMeData = ME_DATA_ALLOWED_USER_IDS.has(uid);   // internal data tools stay on the hardcoded list
+    const canAccessResetAccount = isFundraising && RESET_ACCOUNT_ALLOWED_USER_IDS.has(uid);
+    const canAccessLinkedInInbox = has('linkedin_inbox', canAccessMeData);
+    const canAccessSenderProfiles = has('sender_profiles', canAccessMeData);
+    const canAccessInvestors = fundraisingOn && isFundraising;
+    const defaultRoute = canAccessInvestors ? '/investors' : canAccessResearch ? '/' : outreachOn ? '/outreach' : crmMember ? '/crm' : '/account';
     return {
       showResearch: canAccessResearch,
-      showCompanies: isB2B,
-      showInvestors: isFundraising,
-      showEnrich: isB2B,
+      showCompanies: b2bOn,
+      showInvestors: canAccessInvestors,
+      showEnrich: b2bOn,
       showPersonalization: canAccessPersonalization,
       showMeData: canAccessMeData,
-      showAdminStats: canAccessAdminStats,
-      showAdmin: canAccessAdminStats,
-      showLinkedInInbox: canAccessMeData,
-      showSenderProfiles: canAccessMeData,
+      showAdminStats: isAdmin,
+      showAdmin: isAdmin,
+      showLinkedInInbox: canAccessLinkedInInbox,
+      showSenderProfiles: canAccessSenderProfiles,
+      showOutreach: outreachOn,
+      showCrm: crmMember,
       canAccessResearch,
-      canAccessCompanies: isB2B,
-      canAccessInvestors: isFundraising,
-      canAccessEnrich: isB2B,
+      canAccessCompanies: b2bOn,
+      canAccessInvestors,
+      canAccessEnrich: b2bOn,
       canAccessPersonalization,
       canAccessMeData,
-      canAccessAdminStats,
-      canAccessAdmin: canAccessAdminStats,
-      canAccessLinkedInInbox: canAccessMeData,
-      canAccessSenderProfiles: canAccessMeData,
+      canAccessAdminStats: isAdmin,
+      canAccessAdmin: isAdmin,
+      canAccessLinkedInInbox,
+      canAccessSenderProfiles,
       canAccessResetAccount,
-      defaultRoute: isFundraising ? '/investors' : '/',
+      canAccessOutreach: outreachOn,
+      canAccessCrm: crmMember,
+      fundraisingOn,
+      defaultRoute,
     };
-  }, [primaryUse, user?.id]);
+  }, [primaryUse, user?.id, access]);
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
   // me-data, me-data-prospects, and data-pipelines are accessible irrespective of onboarding
   const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines' || pathname === '/admin-stats' || pathname === '/admin' || pathname === '/linkedin-conversations' || pathname === '/sender-profiles' || pathname.startsWith('/outreach') || pathname.startsWith('/crm');
-  const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute;
+  // Onboarding belongs to the fundraising / B2B products: an account that may use neither is not asked to complete it.
+  const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute && !access.loading && (routeAccess.fundraisingOn || routeAccess.showCompanies || routeAccess.canAccessResearch);
 
   // Detect mobile screen size
   useEffect(() => {
@@ -128,8 +146,18 @@ export default function MainLayout({ children, subnav }: { children: React.React
 
   // Route guard: redirect users from inaccessible routes based on primaryUse
   useEffect(() => {
-    if (onboardingLoading || !onboarding?.completed) return;
     if (pathname === '/login' || pathname === '/signup' || pathname === '/auth/callback' || pathname.startsWith('/reset-password')) return;
+    // An account with neither the researcher nor fundraising has no home page: send it to what it may use
+    // (this runs before onboarding, which belongs to those two products).
+    if (pathname === '/' && !access.loading && !routeAccess.canAccessResearch && !routeAccess.fundraisingOn && routeAccess.defaultRoute !== '/') {
+      router.replace(routeAccess.defaultRoute);
+      return;
+    }
+    if (pathname.startsWith('/outreach') && !access.loading && !routeAccess.canAccessOutreach) {
+      router.replace(routeAccess.defaultRoute.startsWith('/outreach') ? '/account' : routeAccess.defaultRoute);
+      return;
+    }
+    if (onboardingLoading || !onboarding?.completed) return;
 
     if (pathname === '/' && routeAccess.canAccessInvestors && !routeAccess.canAccessResearch) {
       router.replace('/investors');
@@ -179,7 +207,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
       router.replace(routeAccess.defaultRoute);
       return;
     }
-  }, [pathname, onboardingLoading, onboarding?.completed, routeAccess, router]);
+  }, [pathname, onboardingLoading, onboarding?.completed, routeAccess, router, access.loading]);
 
   const handleSignOut = async () => {
     try {
@@ -405,35 +433,43 @@ export default function MainLayout({ children, subnav }: { children: React.React
               </>
             )}
 
-            <Link
-              href="/outreach"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                pathname.startsWith('/outreach')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Outreach"
-            >
-              <Linkedin className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Outreach</span>}
-              {pathname.startsWith('/outreach') && subnavToggle}
-            </Link>
-            {pathname.startsWith('/outreach') && subnavBody}
+            {routeAccess.showOutreach && (
+              <>
+                <Link
+                  href="/outreach"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    pathname.startsWith('/outreach')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Outreach"
+                >
+                  <Linkedin className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>Outreach</span>}
+                  {pathname.startsWith('/outreach') && subnavToggle}
+                </Link>
+                {pathname.startsWith('/outreach') && subnavBody}
+              </>
+            )}
 
-            <Link
-              href="/crm"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                pathname.startsWith('/crm')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Sales CRM"
-            >
-              <Briefcase className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Sales CRM</span>}
-              {pathname.startsWith('/crm') && subnavToggle}
-            </Link>
-            {pathname.startsWith('/crm') && subnavBody}
+            {(routeAccess.showCrm || pathname.startsWith('/crm')) && (
+              <>
+                <Link
+                  href="/crm"
+                  className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    pathname.startsWith('/crm')
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-gray-700 hover:bg-gray-50'
+                  }`}
+                  title="Sales CRM"
+                >
+                  <Briefcase className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                  {(!isCollapsed || isMobile) && <span>Sales CRM</span>}
+                  {pathname.startsWith('/crm') && subnavToggle}
+                </Link>
+                {pathname.startsWith('/crm') && subnavBody}
+              </>
+            )}
 
             {routeAccess.showLinkedInInbox && (
               <Link

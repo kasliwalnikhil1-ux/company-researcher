@@ -5,6 +5,7 @@ import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { getValidAccessToken } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/contexts/AccessContext';
 import {
   Users,
   Plus,
@@ -260,7 +261,9 @@ export default function SenderProfilesPage() {
 function SenderProfilesContent() {
   const MAX_PAGINATION_LIMIT = 1000;
   const { user } = useAuth();
-  const canManageProfiles = MANAGE_PROFILES_ALLOWED_USER_IDS.has(user?.id ?? '');
+  const access = useAccess();
+  // Internal-team default; an admin can switch "sender_profiles" on for any account from /admin.
+  const canManageProfiles = access.has('sender_profiles', MANAGE_PROFILES_ALLOWED_USER_IDS.has(user?.id ?? ''));
 
   // List state
   const [profiles, setProfiles] = useState<SenderProfile[]>([]);

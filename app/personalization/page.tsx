@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/contexts/AccessContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase/client';
@@ -27,6 +28,7 @@ import {
   DEFAULT_JOBS_RESEARCH_SCHEMA,
 } from './investorAnalyzeDefault';
 
+/** Internal-team default; an admin can switch the "personalization" feature on for any account from /admin. */
 const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
   '2793f3da-9340-44f4-b285-b7836bfb8591',
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
@@ -35,14 +37,14 @@ const PERSONALIZATION_ALLOWED_USER_IDS = new Set([
 export default function PersonalizationPage() {
   const { user } = useAuth();
   const router = useRouter();
+  const access = useAccess();
+  const canAccess = !!user && access.has('personalization', PERSONALIZATION_ALLOWED_USER_IDS.has(user.id));
 
   useEffect(() => {
-    if (user && !PERSONALIZATION_ALLOWED_USER_IDS.has(user.id)) {
+    if (user && !access.loading && !canAccess) {
       router.replace('/');
     }
-  }, [user, router]);
-
-  const canAccess = user && PERSONALIZATION_ALLOWED_USER_IDS.has(user.id);
+  }, [user, access.loading, canAccess, router]);
 
   return (
     <ProtectedRoute>

@@ -7,6 +7,7 @@ import { getValidAccessToken } from '@/lib/api';
 import { Loader2, Search, DollarSign, Calendar, Globe, Users, Briefcase, Sparkles, ExternalLink, Plus, Trash2, X, CheckCircle2, AlertCircle, Lightbulb, ChevronLeft, ChevronRight, Upload, FileText, Linkedin } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAccess } from '@/contexts/AccessContext';
 import { useOwner } from '@/contexts/OwnerContext';
 import { usePricingModal } from '@/contexts/PricingModalContext';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -156,7 +157,9 @@ function NewFundingsContent() {
   const { isFreePlan, plan } = useOwner();
   const { openPricingModal, openROIModal } = usePricingModal();
   const isLimitedPlan = isFreePlan || plan === 'basic';
-  const canAddFunding = ADD_FUNDING_ALLOWED_USER_IDS.has(user?.id ?? '');
+  const access = useAccess();
+  // Internal-team default; an admin can switch "new_fundings_add" on for any account from /admin.
+  const canAddFunding = access.has('new_fundings_add', ADD_FUNDING_ALLOWED_USER_IDS.has(user?.id ?? ''));
   const [fundings, setFundings] = useState<NewFunding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
