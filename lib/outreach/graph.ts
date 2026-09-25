@@ -1,6 +1,6 @@
 // Client-side graph validation mirroring outreach_validate_graph() in SQL (011_engine_v2.sql). The server is authoritative.
 import { z } from 'zod';
-import type { AbBranch, AiRouteOption, Graph, GraphNode, MessageVariant, NodeStats, NodeType } from './types';
+import type { AbBranch, AiRouteOption, ConditionRule, Graph, GraphNode, MessageVariant, NodeStats, NodeType } from './types';
 import { AI_ROUTE_ELSE, CALL_OUTCOMES, MAX_VARIANTS } from './types';
 import { NODE_CATALOG, TEXT_LIMITS, VARIANT_TEXT_KEY, nodeExits } from './nodes';
 import { spintaxInfo } from './render';
@@ -74,6 +74,53 @@ export function humanizeIssue(message: string | null | undefined): string {
   return text.replace(/\bnodes?\b/g, 'step').replace(/\benrol+ments?\b/gi, 'lead').replace(/\bpayload\b/gi, 'content').replace(/\bgraph\b/gi, 'sequence');
 }
 
+export type ConnectionFact = 'connected' | 'not_connected';
+
+/** What one condition rule tells us when it holds (`t`) or fails (`f`). Only connection facts are of interest here. */
+function ruleFacts(r: ConditionRule | null | undefined): { t: ConnectionFact | null; f: ConnectionFact | null } {
+  if (!r || typeof r !== 'object') return { t: null, f: null };
+  const v = String(r.value ?? '');
+  if (r.field === 'relation') {
+    if (r.op === 'eq' && v === 'first') return { t: 'connected', f: 'not_connected' };
+    if (r.op === 'neq' && v === 'first') return { t: 'not_connected', f: 'connected' };
+    if (r.op === 'eq' && v !== 'first') return { t: 'not_connected', f: null };   // "pending" or "none" → certainly not connected
+    if (r.op === 'neq' && v !== 'first') return { t: null, f: 'not_connected' };
+  }
+  if (r.field === 'accepted' && r.op === 'eq') return v === 'true' ? { t: 'connected', f: null } : { t: null, f: 'connected' };
+  return { t: null, f: null };
+}
+
+/**
+ * What a branch of a step proves about the lead's LinkedIn connection. "Already connected?" → true means the lead is a
+ * connection (a message can go out; an invitation is pointless); its false branch means the lead is not.
+ * Also covers "Wait for connection". null when the branch says nothing about it.
+ */
+export function branchConnectionFact(n: GraphNode | null | undefined, exit: string): ConnectionFact | null {
+  if (!n) return null;
+  if (n.type === 'wait_connection') return exit === 'connected' ? 'connected' : exit === 'no_connect' ? 'not_connected' : null;
+  if (n.type !== 'condition' || (exit !== 'true' && exit !== 'false')) return null;
+  const rules: ConditionRule[] = Array.isArray(n.config?.rules) ? n.config.rules : [];
+  if (!rules.length) return null;
+  const all = (n.config?.match ?? 'all') !== 'any';
+  // true exit under "match all" (or a single rule): every rule holds. false exit under "match any" (or a single rule): every rule fails.
+  const every = exit === 'true' ? all || rules.length === 1 : !all || rules.length === 1;
+  if (!every) return null;
+  let fact: ConnectionFact | null = null;
+  for (const r of rules) {
+    const f = exit === 'true' ? ruleFacts(r).t : ruleFacts(r).f;
+    if (!f) continue;
+    if (fact && fact !== f) return null;   // contradictory rules: say nothing
+    fact = f;
+  }
+  return fact;
+}
+
+/** True when some branch of the step proves the lead is connected (a valid path for a message). */
+export function provesConnection(n: GraphNode): boolean {
+  return ['send_invite', 'wait_connection', 'send_inmail'].includes(n.type)
+    || (n.type === 'condition' && (branchConnectionFact(n, 'true') === 'connected' || branchConnectionFact(n, 'false') === 'connected'));
+}
+
 const TEXT_STEPS: NodeType[] = ['send_invite', 'send_message', 'send_inmail', 'send_email', 'comment_latest_post'];
 const WHAT: Partial<Record<NodeType, string>> = { send_invite: 'invite note', send_message: 'message', comment_latest_post: 'comment', send_inmail: 'InMail body' };
 
@@ -102,7 +149,7 @@ export function validateGraph(graph: Graph, opts: { hasFreeSender?: boolean; has
     if (n.next && !nodes[n.next]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'This step leads to a step that no longer exists. Connect it again' });
     for (const [b, t] of Object.entries(n.branches ?? {})) if (t && !nodes[t]) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: `The “${b.replace(/_/g, ' ')}” branch leads to a step that no longer exists. Connect it again` });
     if (n.type === 'end' || n.type === 'send_to_sequence' || (!n.next && !n.branches && n.type !== 'start')) hasTerminal = true;
-    if (['send_invite', 'wait_connection', 'send_inmail'].includes(n.type)) hasConnectPath = true;
+    if (provesConnection(n)) hasConnectPath = true;   // an invite / wait / InMail, or an "Already connected?" check
     const c = n.config ?? {};
 
     // every text the step can send: the base copy plus each variant; the longest spintax combination is what counts

@@ -4,7 +4,7 @@
 # Usage:
 #   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... OUTREACH_CRON_SECRET=<secret> ./scripts/outreach-apply-migrations.sh [files...]
 #
-# Defaults to applying 001..019 in order (every file is idempotent). Afterwards run ./scripts/outreach-smoke.sh. The cron secret must match the edge function secret OUTREACH_CRON_SECRET.
+# Defaults to applying 001..020 in order (every file is idempotent). Afterwards run ./scripts/outreach-smoke.sh. The cron secret must match the edge function secret OUTREACH_CRON_SECRET.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -21,7 +21,7 @@ if [ ${#FILES[@]} -eq 0 ]; then
          migrations/outreach/013_reports.sql migrations/outreach/014_intelligence.sql migrations/outreach/015_platform.sql migrations/outreach/016_seed_cron_v2.sql migrations/outreach/017_hardening.sql
          # 018 closes internal helpers to signed-in users; it must follow 017, which re-grants whatever they could already execute.
          migrations/outreach/018_scope_hardening.sql
-         migrations/outreach/019_browser_auth.sql)
+         migrations/outreach/019_browser_auth.sql migrations/outreach/020_condition_connect_path.sql)
 fi
 
 for f in "${FILES[@]}"; do

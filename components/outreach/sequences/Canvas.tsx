@@ -371,6 +371,12 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
         fitViewOptions={FIT_VIEW_OPTIONS}
         minZoom={0.15}
         maxZoom={1.75}
+        // Trackpad and mouse wheel move the canvas (two-finger scroll = pan). Pinch, Ctrl/⌘ + wheel and the
+        // +/− controls zoom. Click-and-drag still pans.
+        panOnScroll
+        zoomOnScroll={false}
+        zoomOnPinch
+        zoomOnDoubleClick={false}
         deleteKeyCode={readOnly ? null : DELETE_KEYS}
         nodesDraggable={false}
         nodesConnectable={!readOnly}

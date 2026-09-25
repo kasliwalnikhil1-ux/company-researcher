@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, RefreshCw, Save, ShieldCheck, XCircle, CalendarClock } from 'lucide-react';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
+import { reasonText } from '@/lib/outreach/reasons';
 import { qk, useActions } from '@/lib/outreach/queries';
 import { Badge, Button, Card, EmptyState, Input, Select, StatusPill, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isFuture } from './helpers';
@@ -220,7 +221,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
                   <Td>{a.lead_id ? <Link className="text-indigo-600 hover:underline" href={`/outreach/leads/${a.lead_id}`}>{a.outreach_leads?.full_name ?? a.outreach_leads?.public_identifier ?? 'Lead'}</Link> : <span className="text-gray-400">—</span>}</Td>
                   <Td>
                     <Badge tone={a.status === 'sent' ? 'green' : 'red'}>{a.status}</Badge>
-                    {a.error_code && <span className="ml-2 text-xs text-red-600" title={a.decision ?? undefined}>{a.error_code}</span>}
+                    {a.error_code && <span className="ml-2 text-xs text-red-600">{reasonText(a.error_code, a.decision)}</span>}
                   </Td>
                 </tr>
               ))}</tbody>

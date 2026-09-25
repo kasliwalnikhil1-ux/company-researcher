@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { ChevronDown, ChevronRight, Contact } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { reasonText } from '@/lib/outreach/reasons';
 import { Badge, Button, EmptyState, HealthBar, StatusPill, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
 import { csvFileName, downloadCsv, fmtDay, fmtInt, fmtRate, totalsCsvColumns, useReportSender, useReportSenders, type DateRange, type SenderReport, type SenderRow } from '@/lib/outreach/reports';
 import { CountRate, DetailRow, ExportButton, MetricLabel, Refreshing, RetryError, Skeleton, SortTh, TableSkeleton, useElementWidth, useSort } from './primitives';
@@ -17,7 +18,7 @@ const future = (v: string | null) => !!v && new Date(v).getTime() > Date.now();
 function restrictionText(e: SenderReport['restrictions'][number]): string {
   const d = e.data as Record<string, string | undefined>;
   if (e.kind === 'checkpoint') return 'LinkedIn asked for verification';
-  if (e.kind === 'reject') return d.decision === 'sender_cap_hit' || d.limit_hit ? 'LinkedIn’s own limit was hit' : `LinkedIn refused an action${d.error_code ? ` (${String(d.error_code).replace(/_/g, ' ').toLowerCase()})` : ''}`;
+  if (e.kind === 'reject') return d.decision === 'sender_cap_hit' || d.limit_hit ? 'LinkedIn’s own limit was hit' : `LinkedIn refused an action${d.error_code ? `: ${reasonText(d.error_code, d.decision)}` : ''}`;
   if (d.paused_until) return `Rested until ${fmtDate(d.paused_until)}`;
   if (d.to === 'credentials') return 'Disconnected: login needed';
   if (d.to === 'error') return 'Provider error';

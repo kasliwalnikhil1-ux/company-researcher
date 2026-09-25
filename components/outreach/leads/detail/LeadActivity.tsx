@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSenders } from '@/lib/outreach/queries';
 import { parseError, rpc } from '@/lib/outreach/api';
+import { decisionText, reasonText } from '@/lib/outreach/reasons';
 import type { Action, Chat, Task } from '@/lib/outreach/types';
 import { Badge, Card, EmptyState, ErrorBox, IntentBadge, Spinner, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
@@ -102,7 +103,7 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
                 <span className={cn('absolute -left-[11px] w-[22px] h-[22px] rounded-full flex items-center justify-center ring-4 ring-white', tone)}><TimelineIcon kind={row.kind} held={held} /></span>
                 <div className="text-sm text-gray-900">{row.title}{isMsg && d.intent ? <span className="ml-2 inline-block align-middle"><IntentBadge intent={d.intent as Chat['intent']} /></span> : null}</div>
                 {isMsg && typeof d.text === 'string' && d.text && <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{d.text}</p>}
-                {row.kind === 'action' && (d.decision || d.error_code) ? <p className="text-xs text-gray-500 mt-0.5">{[d.decision, d.error_code].filter(Boolean).join(' · ')}</p> : null}
+                {row.kind === 'action' && (d.decision || d.error_code) ? <p className="text-xs text-gray-500 mt-0.5">{d.error_code ? reasonText(String(d.error_code), d.decision ? String(d.decision) : null) : decisionText(String(d.decision))}</p> : null}
                 {row.kind === 'enrollment' && (d.reason_text || d.reason) ? <p className="text-xs text-gray-500 mt-0.5">{String(d.reason_text || d.reason)}</p> : null}
                 {held && <p className="text-xs text-gray-500 mt-0.5">The sequence waits until someone resumes it or exits the lead.</p>}
                 {row.kind === 'ai_route' && (
@@ -146,7 +147,7 @@ export function LeadRecentActions({ actions }: { actions: Action[] }) {
                 </span>
                 <span className="flex-1 min-w-0">
                   <span className="text-gray-900">{a.action_type.replace(/_/g, ' ')}</span>
-                  <span className="text-xs text-gray-500"> · {sender ? (sender.display_name ?? sender.public_identifier ?? 'Sender') : '—'}{a.attempt > 1 ? ` · attempt ${a.attempt}` : ''}{a.error_code ? ` · ${a.error_code}` : ''}{a.decision ? ` · ${a.decision}` : ''}</span>
+                  <span className="text-xs text-gray-500"> · {sender ? (sender.display_name ?? sender.public_identifier ?? 'Sender') : '—'}{a.attempt > 1 ? ` · attempt ${a.attempt}` : ''}{a.error_code ? ` · ${reasonText(a.error_code, a.decision)}` : a.decision ? ` · ${decisionText(a.decision)}` : ''}</span>
                 </span>
                 <Badge tone={ACTION_TONE[a.status]}>{a.status}</Badge>
                 <span className="text-xs text-gray-400 whitespace-nowrap hidden sm:inline">{upcoming ? `for ${fmtDate(a.scheduled_for)}` : fmtDate(a.executed_at ?? a.scheduled_for)}</span>

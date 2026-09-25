@@ -3,6 +3,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { useOwner } from '@/contexts/OwnerContext';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 const STORAGE_KEY = 'book-demo-button-condensed';
@@ -12,6 +13,7 @@ export const CALENDLY_URL = 'https://calendly.com/founders-capitalxai/20min';
 export function BookDemoButton() {
   const { user } = useAuth();
   const { isFreePlan, isLoading } = useOwner();
+  const pathname = usePathname();
   const [isCondensed, setIsCondensed] = useState(true);
 
   useEffect(() => {
@@ -38,7 +40,9 @@ export function BookDemoButton() {
     window.open(CALENDLY_URL, '_blank');
   };
 
-  if (isLoading || !isFreePlan || !user) {
+  // The Outreach app keeps its own controls in the bottom-right corner (step panel footer with Delete,
+  // canvas minimap, drawers), so a floating button there would sit on top of them.
+  if (isLoading || !isFreePlan || !user || pathname?.startsWith('/outreach')) {
     return null;
   }
 

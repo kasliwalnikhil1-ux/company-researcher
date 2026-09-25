@@ -25,7 +25,6 @@ function Cause({ c }: { c: WhyCause }) {
             {c.partial && <span>Other senders in the pool keep sending.</span>}
             {c.sender_id && <Link href={`/outreach/senders/${c.sender_id}`} className="text-indigo-600 hover:underline">Open {c.sender || 'sender'}</Link>}
             {c.task_id && <Link href="/outreach/tasks" className="text-indigo-600 hover:underline">Open tasks</Link>}
-            <span className="font-mono opacity-70">{c.code}</span>
           </div>
         </div>
       </div>

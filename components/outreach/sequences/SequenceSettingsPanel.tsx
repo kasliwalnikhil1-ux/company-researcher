@@ -42,6 +42,10 @@ export default function SequenceSettingsPanel({ draft, clients, onChange, disabl
         <p className="flex items-start gap-1.5 text-xs text-gray-600 bg-gray-50 rounded-lg px-2.5 py-2"><Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" /> This sequence has leads. Changes here take effect when you publish.</p>
       )}
 
+      <Section title="AI brief">
+        <Textarea label="Brief for AI (context for drafts and checks)" value={draft.brief} onChange={(e) => onChange({ brief: e.target.value })} rows={4} placeholder="Who we are, who we target, the offer, the tone." />
+      </Section>
+
       <Section title="When a lead replies">
         <Toggle checked={stop} onChange={(v) => set({ stop_on_reply: v })} label="Stop the sequence for that lead" disabled={disabled} />
         {stop ? (
@@ -84,7 +88,6 @@ export default function SequenceSettingsPanel({ draft, clients, onChange, disabl
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
         <Input type="number" min={0} max={90} label="Withdraw pending invitations after (days)" value={s.withdraw_after_days ?? 21} onChange={(e) => set({ withdraw_after_days: clampInt(e.target.value, 0, 90, 21) })} hint="0 turns automatic withdrawal off." />
-        <Textarea label="Brief for AI (context for drafts and checks)" value={draft.brief} onChange={(e) => onChange({ brief: e.target.value })} rows={4} placeholder="Who we are, who we target, the offer, the tone." />
       </Section>
     </fieldset>
   );

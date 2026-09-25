@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, History as HistoryIcon } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
@@ -16,9 +16,12 @@ import Canvas, { type CanvasHandle, type IssueLevel, type StatKind } from './Can
 import StepPicker, { type StepPickerTarget } from './StepPicker';
 import { allowedNext } from './allowedNext';
 import NodeConfigPanel from './NodeConfigPanel';
-import TopBar, { type DraftIndicator, type StatusAction } from './TopBar';
+import TopBar, { BUILDER_TABS, type BuilderTab, type DraftIndicator, type StatusAction } from './TopBar';
+import { SendersTab, SettingsTab, TabPage } from './TabPanels';
+import EnrolPanel from './EnrolPanel';
+import VersionsPanel from './VersionsPanel';
 import ValidationBar from './ValidationBar';
-import { ConfirmModal, Drawer, QaModal, UnsavedModal, type QaState } from './Modals';
+import { ConfirmModal, QaModal, UnsavedModal, type QaState } from './Modals';
 import { BuilderContext, type BuilderCtx } from './context';
 import { draftFromSequence, saveArgs, type Draft } from './draft';
 import { clearLocalDraft, readLocalDraft, stableStringify, useDraftAutosave, writeLocalDraft, type LocalDraftCopy } from './DraftAutosave';
@@ -41,6 +44,8 @@ const META_FIELDS: Array<[keyof Meta, string]> = [
 const metaOf = (d: Draft): Meta => { const { graph: _g, ...meta } = d; return meta; };
 const cloneGraph = (g: Graph): Graph => JSON.parse(JSON.stringify(g)) as Graph;
 const validGraph = (g: unknown): g is Graph => !!g && typeof g === 'object' && typeof (g as Graph).nodes === 'object' && !!(g as Graph).start && !!(g as Graph).nodes[(g as Graph).start];
+const isTab = (v: string | null): v is BuilderTab => !!v && (BUILDER_TABS as string[]).includes(v);
+/** The tab survives a reload through `?tab=`; Steps is the default and keeps the address clean. */
 
 export default function Builder({ id }: { id: string }) {
   const { workspace, isManager, canWrite, suspended } = useWorkspace();
@@ -71,7 +76,11 @@ export default function Builder({ id }: { id: string }) {
   const [unsaved, setUnsaved] = useState<{ href: string; draftFailed: boolean; busy?: boolean } | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [whyOpen, setWhyOpen] = useState(false);
-  const [rulesOpen, setRulesOpen] = useState(false);
+  // `?tab=` picks the section, so a reload and the old /enroll and /versions links land on the right tab.
+  const urlTab = useSearchParams().get('tab');
+  const [tab, setTabState] = useState<BuilderTab>(() => (isTab(urlTab) ? urlTab : 'steps'));
+  const [seenUrlTab, setSeenUrlTab] = useState(urlTab);
+  if (urlTab !== seenUrlTab) { setSeenUrlTab(urlTab); if (isTab(urlTab)) setTabState(urlTab); }
   const [failedView, setFailedView] = useState<{ nodeId: string | null; kind: StatKind } | null>(null);
   const [localOffer, setLocalOffer] = useState<LocalDraftCopy<Meta> | null>(null);
   const canvasRef = useRef<CanvasHandle>(null);
@@ -112,7 +121,16 @@ export default function Builder({ id }: { id: string }) {
   draftRef.current = draft;
   // Delete / Backspace reach React Flow even while a dialog is open; a step must never vanish behind one.
   const overlayOpen = useRef(false);
-  overlayOpen.current = !!(qa || confirm || unsaved || publishOpen || whyOpen || rulesOpen || failedView);
+  overlayOpen.current = !!(qa || confirm || unsaved || publishOpen || whyOpen || failedView);
+
+  const setTab = useCallback((t: BuilderTab) => {
+    setTabState(t);
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (t === 'steps') params.delete('tab'); else params.set('tab', t);
+    const qs = params.toString();
+    window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`);
+  }, []);
 
   // Load / reload the local draft from the server row. Local edits are never overwritten by a refetch.
   useEffect(() => {
@@ -172,7 +190,13 @@ export default function Builder({ id }: { id: string }) {
   const updateGraph = useCallback((fn: (g: Graph) => Graph) => setDraft((d) => (d ? { ...d, graph: fn(d.graph) } : d)), []);
   const patchDraft = useCallback((patch: Partial<Draft>) => setDraft((d) => (d ? { ...d, ...patch } : d)), []);
   const onSelect = useCallback((nid: string | null) => setSelectedId(nid), []);
-  const focusNode = useCallback((nid: string) => { setSelectedId(nid); canvasRef.current?.focusNode(nid); }, []);
+  // A step can be focused from any tab (publish dialog, QA): the canvas is shown first and gets a moment to mount.
+  const focusNode = useCallback((nid: string) => {
+    setSelectedId(nid);
+    if (canvasRef.current) { canvasRef.current.focusNode(nid); return; }
+    setTab('steps');
+    setTimeout(() => canvasRef.current?.focusNode(nid), 350);
+  }, [setTab]);
   // The tree is laid out again after every change to the wiring, so steps always sit under the step they follow.
   const onConnect = useCallback((s: string, h: string, t: string) => updateGraph((g) => autoLayout(connectNodes(g, s, h, t))), [updateGraph]);
   const onDisconnect = useCallback((s: string, h: string) => updateGraph((g) => autoLayout(disconnectNodes(g, s, h))), [updateGraph]);
@@ -428,7 +452,7 @@ export default function Builder({ id }: { id: string }) {
     if (on('failed')) setFailedView({ nodeId: node || null, kind: 'failed' });
     // focusNode also selects the step; the short wait lets React Flow measure the nodes first.
     // No cleanup on purpose: the ref is null-safe, and clearing here would drop the focus under React strict mode.
-    if (known) { setSelectedId(node); setTimeout(() => canvasRef.current?.focusNode(node!), 350); }
+    if (known) { setTabState('steps'); params.delete('tab'); setSelectedId(node); setTimeout(() => canvasRef.current?.focusNode(node!), 350); }
     for (const k of ['why', 'failed', 'node']) params.delete(k);
     const qs = params.toString();
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`);
@@ -466,10 +490,9 @@ export default function Builder({ id }: { id: string }) {
         <TopBar
           sequence={sequence} draft={draft} dirty={dirty} saving={saving} version={sequence.head_version} readOnly={readOnly} canManage={canManage}
           publishMode={publishMode} modeKnown={modeKnown} canDiscard={dirty || !!autosave.savedAt} indicator={indicator}
-          senders={senders} clients={clientsQ.data ?? []} inflight={inflightQ.data} failedCount={failedQ.data}
-          onChange={patchDraft} onSave={save} onPublish={openPublish} onDiscard={() => setConfirm({ kind: 'discard' })} onPoolApplied={onPoolApplied} onStatus={onStatus}
-          onWhy={() => setWhyOpen(true)} onAutoEnrol={() => setRulesOpen(true)} onFailed={() => setFailedView({ nodeId: null, kind: 'failed' })}
-          onFit={() => canvasRef.current?.fitView()}
+          inflight={inflightQ.data} failedCount={failedQ.data} tab={tab} onTab={setTab}
+          onChange={patchDraft} onSave={save} onPublish={openPublish} onDiscard={() => setConfirm({ kind: 'discard' })} onStatus={onStatus}
+          onWhy={() => setWhyOpen(true)} onFailed={() => setFailedView({ nodeId: null, kind: 'failed' })}
           onNavigate={navigate}
         />
 
@@ -489,7 +512,27 @@ export default function Builder({ id }: { id: string }) {
           </div>
         )}
 
-        <div className="flex-1 flex min-h-0 relative">
+        {tab === 'senders' && (
+          <SendersTab sequenceId={sequence.id} draft={draft} senders={senders} readOnly={readOnly} publishMode={publishMode} dirty={dirty} onChange={patchDraft} onPoolApplied={onPoolApplied} onSave={save} />
+        )}
+        {tab === 'settings' && <SettingsTab draft={draft} clients={clientsQ.data ?? []} readOnly={readOnly} publishMode={publishMode} onChange={patchDraft} />}
+        {tab === 'leads' && (
+          <TabPage title="Leads" subtitle="Who is in this sequence, where each lead has got to, and add more leads by hand." wide>
+            <EnrolPanel id={sequence.id} onOpenBuilder={() => setTab('steps')} />
+          </TabPage>
+        )}
+        {tab === 'versions' && (
+          <TabPage title="Versions" wide>
+            {/* a restored version replaces the server draft: the next refetch loads it, even over local edits */}
+            <VersionsPanel id={sequence.id} onRestored={() => { loadedKey.current = null; setTab('steps'); }} />
+          </TabPage>
+        )}
+        {tab === 'auto' && (
+          <TabPage title="Auto-enrol" subtitle="Rules that add new matching leads to this sequence on their own, every day." wide>
+            {ws && <AutoEnrolRules sequenceId={sequence.id} workspaceId={ws} canManage={canManage && sequence.status !== 'archived'} sequenceActive={sequence.status === 'active'} />}
+          </TabPage>
+        )}
+        {tab === 'steps' && <div className="flex-1 flex min-h-0 relative" role="tabpanel">
           <div className="flex-1 min-w-0 relative">
             <Canvas
               ref={canvasRef}
@@ -511,8 +554,8 @@ export default function Builder({ id }: { id: string }) {
               />
             </div>
           )}
-        </div>
-        <ValidationBar errors={validation.errors} warnings={validation.warnings} graph={draft.graph} onFocus={focusNode} />
+        </div>}
+        {tab === 'steps' && <ValidationBar errors={validation.errors} warnings={validation.warnings} graph={draft.graph} onFocus={focusNode} />}
 
         <StepPicker open={!!picker && !readOnly} target={picker} nodes={draft.graph.nodes} allowed={pickerAllowed} onPick={onPickStep} onClose={closePicker} />
         <QaModal qa={qa} graph={draft.graph} onClose={() => setQa(null)} onActivate={confirmActivate} onFocus={focusNode} />
@@ -526,9 +569,6 @@ export default function Builder({ id }: { id: string }) {
           nodeLabel={failedNode ? nodeTitle(failedNode) : undefined} initialKind={failedView?.kind ?? 'failed'} graph={live.graph} canWrite={canWrite}
           counts={failedStats ? { failed: Number(failedStats.failed ?? 0), skipped: Number(failedStats.skipped ?? 0) } : undefined}
         />
-        <Drawer open={rulesOpen} onClose={() => setRulesOpen(false)} title="Auto-enrol rules" subtitle={sequence.name} width="max-w-3xl">
-          {rulesOpen && ws && <AutoEnrolRules sequenceId={sequence.id} workspaceId={ws} canManage={canManage && sequence.status !== 'archived'} sequenceActive={sequence.status === 'active'} />}
-        </Drawer>
 
         <ConfirmModal
           open={confirm?.kind === 'discard'} title="Discard draft" confirmLabel="Discard draft" danger busy={confirm?.busy} onClose={() => setConfirm(null)} onConfirm={discardDraft}
