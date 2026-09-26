@@ -9,6 +9,7 @@ import { qk } from '@/lib/outreach/queries';
 import type { Chat, Message, Sender } from '@/lib/outreach/types';
 import { Button } from '@/components/outreach/ui';
 import { fmtBytes } from './hooks';
+import { isMailProvider, messageMaxLength } from '@/lib/outreach/channels';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
@@ -37,7 +38,9 @@ function bookingTitle(typed: string): string {
 
 export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent }: ComposeProps) {
   const qc = useQueryClient();
-  const isEmail = chat.provider !== 'LINKEDIN';
+  const isEmail = isMailProvider(chat.provider);
+  // Instagram direct messages stop at 1000 characters, WhatsApp at 4096; LinkedIn and email are not limited here.
+  const maxLength = messageMaxLength(chat.provider);
   const [text, setText] = useState('');
   const [subject, setSubject] = useState(() => defaultSubject(chat));
   const [files, setFiles] = useState<File[]>([]);
@@ -136,6 +139,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
         onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(false); } }}
         placeholder={`Reply as ${sender?.display_name ?? 'sender'}… (${typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter to send)`}
         aria-label="Reply"
+        maxLength={maxLength}
         rows={3}
         className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 resize-y min-h-[72px] max-h-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"
       />
@@ -156,6 +160,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} aria-label="Attach files" />
           <Button type="button" variant="ghost" size="sm" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip className="w-4 h-4" /> Attach</Button>
           <span className="text-[11px] text-gray-400 hidden sm:inline">Replies don't count against outbound caps.</span>
+          {maxLength && <span className={`text-[11px] tabular-nums ${text.length >= maxLength ? 'text-red-600 font-medium' : 'text-gray-400'}`}>{text.length}/{maxLength}</span>}
         </div>
         <div className="flex items-center gap-2">
           {bookingLink && !interested && (

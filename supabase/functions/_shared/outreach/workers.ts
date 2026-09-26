@@ -368,6 +368,10 @@ async function runCsvImport(job: Row): Promise<void> {
       if (!v) continue;
       if (field.startsWith("custom.")) { lead.custom[field.slice(7)] = v; flat[field] = v; }
       else if (field === "linkedin_url" || field === "public_identifier") lead.public_identifier = inboundInternal.pubIdFromUrl(v) ?? v.replace(/^in\//, "").toLowerCase();
+      // Channels: an Instagram handle / WhatsApp number column becomes an identity (verified: the operator supplied it). upsert_lead normalises
+      // and rejects a phone without a country code (E_PAYLOAD_INVALID), which surfaces as a row error rather than a guessed number.
+      else if (field === "instagram_handle") (lead.identities ??= []).push({ provider: "INSTAGRAM", identifier: v, verified: true, source: "import" });
+      else if (field === "whatsapp_phone") (lead.identities ??= []).push({ provider: "WHATSAPP", identifier: v, verified: true, source: "import" });
       else { lead[field] = v; flat[field] = v; }
     }
     const email = lead.email_work ?? lead.email_personal ?? lead.email ?? null;
@@ -580,13 +584,17 @@ export async function runClassify(limit = 20): Promise<Row> {
         const { data: enr } = await admin.from("outreach_enrollments").select("outreach_sequences(brief, name)").eq("lead_id", chat.lead_id).eq("sender_id", chat.sender_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
         brief = (enr as any)?.outreach_sequences?.brief ?? (enr as any)?.outreach_sequences?.name ?? null;
       }
+      // Voice notes: the transcript stands in for the text. A note that is still being transcribed leaves the queue now;
+      // transcribeVoiceNote() re-queues the message once the transcript is stored.
+      const body = String(msg.text ?? "").trim() || String(msg.transcript ?? "").trim();
+      if (!body && msg.transcript_status === "pending") { await admin.from("outreach_ai_classify_queue").delete().eq("id", item.id); return; }
       let result: { intent: string; confidence: number; summary: string; return_date?: string | null };
-      if (aiConfigured() && (msg.text ?? "").trim()) {
+      if (aiConfigured() && body) {
         // sentAt lets the classifier turn "back on Monday" into a date (item 1: an out-of-office resumes on the return date).
-        const input = { workspaceId: msg.workspace_id, text: msg.text ?? "", previousOutbound: (prev ?? []).map((p) => p.text ?? "").filter(Boolean).reverse(), brief, channel: chat?.provider ?? "LINKEDIN", sentAt: msg.sent_at as string | null };
+        const input = { workspaceId: msg.workspace_id, text: body, previousOutbound: (prev ?? []).map((p) => p.text ?? "").filter(Boolean).reverse(), brief, channel: chat?.provider ?? "LINKEDIN", sentAt: msg.sent_at as string | null };
         result = await classifyMessage(input);
       } else {
-        result = { intent: "unclear", confidence: 0, summary: (msg.text ?? "").slice(0, 140) };
+        result = { intent: "unclear", confidence: 0, summary: body.slice(0, 140) };
       }
       await admin.from("outreach_messages").update({ intent: result.intent, intent_confidence: result.confidence, summary: result.summary, classified_at: new Date().toISOString() }).eq("id", msg.id);
       await admin.from("outreach_chats").update({ intent: result.intent }).eq("id", msg.chat_id);

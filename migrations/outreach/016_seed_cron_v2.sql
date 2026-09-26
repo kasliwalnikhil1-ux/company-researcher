@@ -4,16 +4,14 @@
 -- =============================================================================
 
 -- Every LinkedIn call is budgeted (plan §3 checklist): posts are their own bucket, ~100/day per Unipile's limits page.
-insert into outreach_platform_ceilings(action_type, per_day, per_week) values
+select outreach__seed_linkedin_ceilings((select jsonb_agg(jsonb_build_array(t, d, w)) from (values
   ('post_fetch', 100, null), ('follow', 50, null), ('find_email', 100000, null)
-on conflict (action_type) do update set per_day = excluded.per_day, per_week = excluded.per_week;
+) x(t, d, w)));
 
-insert into outreach_warmup_caps(level, action_type, per_day)
-select l, t::outreach_action_type_t, v from (values
+select outreach__seed_linkedin_warmup((select jsonb_agg(jsonb_build_array(l, t, v)) from (values
   (0,'post_fetch',5),(1,'post_fetch',10),(2,'post_fetch',15),(3,'post_fetch',20),(4,'post_fetch',30),(5,'post_fetch',30),   -- in line with `like`
   (0,'follow',0),(1,'follow',3),(2,'follow',5),(3,'follow',8),(4,'follow',12),(5,'follow',15)
-) x(l,t,v)
-on conflict (level, action_type) do update set per_day = excluded.per_day;
+) x(l, t, v)));
 
 insert into outreach_flags(key, value) values ('portal_cname_target', to_jsonb('cname.vercel-dns.com'::text)) on conflict (key) do nothing;
 

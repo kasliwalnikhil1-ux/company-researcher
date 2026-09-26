@@ -1,12 +1,14 @@
 // Planner (F4): builds budgets and jittered action slots for a sender-local day.
 // The payload it queues carries the UNRENDERED template + variant_id; execute.ts renders at send time.
 import { admin, log, rpc, localParts, zonedToUtc, addDays, rand, randInt } from "./supabase.ts";
+import { capabilitiesFor, CHANNEL_PROVIDERS, isDailyScoped, isHourlyMetered, minGapRange, type ChannelCapabilities } from "./channels.ts";
 
 type Row = Record<string, any>;
 
 interface Window { start: number; end: number } // epoch ms
 
 const MIN_GAP_GLOBAL = 20_000;
+const HOUR = 3600_000;
 const PEAKS = [{ m: 10.5 * 60, sd: 75 }, { m: 15 * 60, sd: 80 }];
 const TROUGH = [12.5 * 60, 13.5 * 60];
 
@@ -47,10 +49,42 @@ function sampleSlot(day: string, tz: string, windows: Window[]): number | null {
   return Math.floor(t);
 }
 
-function fits(t: number, taken: number[], sameType: number[], gapType: number): boolean {
-  for (const x of taken) if (Math.abs(x - t) < MIN_GAP_GLOBAL) return false;
+function fits(t: number, taken: number[], sameType: number[], gapType: number, gapGlobal = MIN_GAP_GLOBAL): boolean {
+  for (const x of taken) if (Math.abs(x - t) < gapGlobal) return false;
   for (const x of sameType) if (Math.abs(x - t) < gapType) return false;
   return true;
+}
+
+// ---- per-hour bucketing (Instagram: at most `cap` metered actions per UTC hour, the same hour the SQL ledger reserves in)
+const hourStartOf = (t: number): number => Math.floor(t / HOUR) * HOUR;
+
+/** The UTC hours that overlap the working windows (and are not already over). */
+function hoursFor(windows: Window[], notBefore: number | null): number[] {
+  const out = new Set<number>();
+  for (const w of windows) {
+    for (let h = hourStartOf(w.start); h < w.end; h += HOUR) {
+      if (notBefore && h + HOUR <= notBefore) continue;
+      out.add(h);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+/**
+ * A slot for an hourly-capped provider: the hour with the most room left (ties at random, so demand spreads across the
+ * day instead of filling the morning), a random minute inside the part of that hour that lies in a window, seconds never :00.
+ */
+function sampleHourlySlot(hours: number[], windows: Window[], counts: Map<number, number>, cap: number, earliest: number): number | null {
+  const open = hours.filter((h) => (counts.get(h) ?? 0) < cap && h + HOUR > earliest);
+  if (!open.length) return null;
+  const least = Math.min(...open.map((h) => counts.get(h) ?? 0));
+  const pool = open.filter((h) => (counts.get(h) ?? 0) === least);
+  const h = pool[randInt(0, pool.length - 1)];
+  const spans = windows.map((w) => ({ start: Math.max(w.start, h, earliest), end: Math.min(w.end, h + HOUR) })).filter((s) => s.end - s.start > 60_000);
+  if (!spans.length) return null;
+  const s = spans[randInt(0, spans.length - 1)];
+  const t = Math.floor(s.start + rand(0, s.end - s.start));
+  return hourStartOf(t) + Math.floor((t - hourStartOf(t)) / 60_000) * 60_000 + randInt(1, 59) * 1000;
 }
 
 export interface PlanResult { sender_id: string; day: string; kind: string; planned: number; unplanned: number; skipped?: string }
@@ -65,10 +99,18 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
   const day = kind === "nightly" ? addDays(nowLp.date, 1) : nowLp.date;
   const fromMs = kind === "topup" ? Date.now() + 5 * 60_000 : null;
 
+  // post-connect quiet period (WhatsApp: 24 h after every connect / reconnect): no outbound is planned while it runs
+  if (sender.outreach_allowed_from && new Date(sender.outreach_allowed_from).getTime() > Date.now()) {
+    log({ fn: "planner", sender_id: sender.id, day, kind, skipped: "quiet_period", until: sender.outreach_allowed_from });
+    return { sender_id: sender.id, day, kind, planned: 0, unplanned: 0, skipped: "quiet_period" };
+  }
   if (kind === "nightly") {
     const { data: existing } = await admin.from("outreach_plans").select("sender_id").eq("sender_id", sender.id).eq("day", day).eq("kind", "nightly").maybeSingle();
     if (existing) return { sender_id: sender.id, day, kind, planned: 0, unplanned: 0, skipped: "already_planned" };
   }
+  const provider: string = String(sender.provider ?? "LINKEDIN").toUpperCase();
+  const caps: ChannelCapabilities = await capabilitiesFor(provider);
+  const hourly = caps.ledger.hourly;
   const budgets = await rpc<Row[]>("plan_budgets", { p_sender: sender.id, p_day: day });
   // LinkedIn windows. With none, email steps can still be planned: they follow the MAILBOX's schedule, not this sender's.
   const windows = windowsFor(day, tz, sender.schedule, fromMs);
@@ -84,9 +126,24 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
   const byType: Record<string, number[]> = {};
   for (const q of queued ?? []) (byType[q.action_type] ??= []).push(new Date(q.scheduled_for).getTime());
   const capacity: Record<string, number> = {};
-  for (const b of budgets) capacity[b.action_type] = Math.max(0, b.cap - b.used - b.reserved - (byType[b.action_type]?.length ?? 0));
+  for (const b of budgets) if (b.action_type) capacity[b.action_type] = Math.max(0, b.cap - b.used - b.reserved - (byType[b.action_type]?.length ?? 0));
+  // the descriptor's gap: LinkedIn [90, 400] s as before; Instagram [60, 240]; WhatsApp at least [20, 90] (the claim enforces the 10–20 s floor)
+  const [gapLo, gapHi] = minGapRange(caps);
   const gapFor: Record<string, number> = {};
-  const gap = (t: string) => (gapFor[t] ??= randInt(90, 400) * 1000);
+  const gap = (t: string) => (gapFor[t] ??= randInt(gapLo, gapHi) * 1000);
+  const gapGlobal = provider === "LINKEDIN" ? MIN_GAP_GLOBAL : Math.max(MIN_GAP_GLOBAL, gapLo * 1000);
+  // daily `all_metered` scope (Instagram): the day total no per-type cap may sum past. plan_budgets returns it as a scoped row.
+  const dayScope = caps.ledger.daily_scope ? budgets.find((b) => (b.scope ?? b.action_type) === caps.ledger.daily_scope!.scope && (b.window ?? "day") === "day") ?? null : null;
+  let totalRoom = dayScope ? Math.max(0, Number(dayScope.cap ?? 0) - Number(dayScope.used ?? 0) - Number(dayScope.reserved ?? 0) - (queued ?? []).filter((q) => isDailyScoped(caps, q.action_type)).length) : Infinity;
+  // hourly scope (Instagram: 10 metered actions per hour): what is already queued in each UTC hour counts
+  const hourCounts = new Map<number, number>();
+  if (hourly) for (const q of queued ?? []) if (isHourlyMetered(caps, q.action_type)) { const h = hourStartOf(new Date(q.scheduled_for).getTime()); hourCounts.set(h, (hourCounts.get(h) ?? 0) + 1); }
+  const hours = hourly ? hoursFor(windows, fromMs) : [];
+  const hourRoom = (t: number, type: string): boolean => !hourly || !isHourlyMetered(caps, type) || (hourCounts.get(hourStartOf(t)) ?? 0) < hourly.cap;
+  const takeSlot = (t: number, type: string): void => {
+    if (hourly && isHourlyMetered(caps, type)) { const h = hourStartOf(t); hourCounts.set(h, (hourCounts.get(h) ?? 0) + 1); }
+    if (dayScope && isDailyScoped(caps, type)) totalRoom--;
+  };
 
   // planner_demand (011) returns node.config already variant-resolved, plus variant_id and needs_posts
   const demand = await rpc<Row[]>("planner_demand", { p_sender: sender.id, p_until: new Date(horizon).toISOString() });
@@ -115,11 +172,13 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
   }
 
   for (const d of demand) {
-    const type: string = d.action_type;
+    const type: string = d.action_type;   // may be `new_chat` (no chat exists yet) or `message` (into an existing chat): the SQL decides
     const nodeType: string = d.node?.type ?? "";
     const cfg: Row = d.node?.config ?? {};
     const earliest = Math.max(new Date(d.earliest).getTime(), fromMs ?? 0);
     const readsPostsItself = type === "like" || type === "comment";   // these list posts at execution, behind the same post_fetch budget
+    // posts exist on LinkedIn and Instagram only; WhatsApp never prefetches them
+    const needsPosts = !!d.needs_posts && provider !== "WHATSAPP";
 
     // ---- email steps: mailbox rotation (sticky per contact) and the mailbox's own schedule / timezone
     let mbox: MailboxPlan | null = null;
@@ -130,36 +189,43 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
       if (!mbox.windows.length) { unplanned++; continue; }          // that mailbox does not send on this day: not a throttle
       if (mbox.capacity <= 0) { unplanned++; throttled.set(d.sequence_id, `Daily email cap reached on ${mbox.row.display_name ?? "mailbox"}`); continue; }
     } else {
-      if (!hasWindow) continue;                                     // no LinkedIn window today
+      if (!hasWindow) continue;                                     // no working window today
       if (earliest > dayEnd) continue;                              // due after today's last window: the next plan takes it
       if ((capacity[type] ?? 0) <= 0) { unplanned++; throttled.set(d.sequence_id, `Daily ${type} cap reached on ${who}`); continue; }
+      // Instagram: the day's action total and the working hours with room left
+      const needed = 1 + (d.needs_profile ? 1 : 0) + (needsPosts && !readsPostsItself ? 1 : 0);
+      if (dayScope && isDailyScoped(caps, type) && totalRoom < needed) { unplanned++; throttled.set(d.sequence_id, `Daily action total reached on ${who}`); continue; }
+      if (hourly && isHourlyMetered(caps, type) && !hours.some((h) => (hourCounts.get(h) ?? 0) < hourly.cap && h + HOUR > earliest)) { unplanned++; throttled.set(d.sequence_id, `Hourly cap (${hourly.cap} actions an hour) reached on ${who} for today's working hours`); continue; }
     }
     if (d.needs_profile && (!hasWindow || (capacity["profile_view"] ?? 0) <= 0)) { unplanned++; throttled.set(d.sequence_id, `Daily profile_view cap reached on ${who}`); continue; }
     // posts are fetched only when something will use them, and every fetch is budgeted (plan checklist + item 13)
-    if (d.needs_posts && (capacity["post_fetch"] ?? 0) <= 0) { unplanned++; throttled.set(d.sequence_id, `Daily post_fetch cap reached on ${who}`); continue; }
+    if (needsPosts && (capacity["post_fetch"] ?? 0) <= 0) { unplanned++; throttled.set(d.sequence_id, `Daily post_fetch cap reached on ${who}`); continue; }
 
     // ---- slot for the step itself
     const slotDay = mbox ? mbox.day : day, slotTz = mbox ? mbox.tz : tz, slotWindows = mbox ? mbox.windows : windows;
     const slotTaken = mbox ? mbox.taken : taken, slotSame = mbox ? mbox.emails : (byType[type] ?? []);
+    const slotGapGlobal = mbox ? MIN_GAP_GLOBAL : gapGlobal;
+    const bucketed = !mbox && !!hourly && isHourlyMetered(caps, type);
     let slot: number | null = null;
     for (let i = 0; i < 25; i++) {
-      const t = sampleSlot(slotDay, slotTz, slotWindows);
+      const t = bucketed ? sampleHourlySlot(hours, slotWindows, hourCounts, hourly!.cap, earliest) : sampleSlot(slotDay, slotTz, slotWindows);
       if (t == null) break;
       if (t < earliest) continue;
       if (d.needs_profile && t - dayStart < 5 * 60_000) continue;
-      if (!fits(t, slotTaken, slotSame, gap(type))) continue;
+      if (!fits(t, slotTaken, slotSame, gap(type), slotGapGlobal)) continue;
       slot = t; break;
     }
     if (slot == null) { unplanned++; continue; }
     const stepSlot: number = slot;
 
-    // ---- a LinkedIn read 5–40 minutes before the step, inside the LinkedIn sender's windows
+    // ---- a profile / posts read 5–40 minutes before the step, inside the sender's windows (and, on Instagram, in an hour with room)
     const before = (sameType: string): number | null => {
       for (let i = 0; i < 15; i++) {
         const t = stepSlot - randInt(5, 40) * 60_000;
         if (!windows.some((w) => t >= w.start && t <= w.end)) continue;
         if (fromMs && t < fromMs) continue;
-        if (!fits(t, taken, byType[sameType] ?? [], gap(sameType))) continue;
+        if (!hourRoom(t, sameType)) continue;
+        if (!fits(t, taken, byType[sameType] ?? [], gap(sameType), gapGlobal)) continue;
         return t;
       }
       return null;
@@ -172,7 +238,7 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
     // Text that uses the lead's posts ({{enrich.recent_post}}, an AI line that needs posts) but has no profile prefetch due:
     // a posts-only read (action type post_fetch, own budget, no profile view spent). Skipped when posts were read in the last 3 days.
     let postsSlot: number | null = null;
-    if (d.needs_posts && prefetchSlot == null && !readsPostsItself && hasWindow) {
+    if (needsPosts && prefetchSlot == null && !readsPostsItself && hasWindow) {
       const { data: prof } = await admin.from("outreach_lead_profiles").select("posts_fetched_at").eq("lead_id", d.lead_id).maybeSingle();
       const fresh = !!prof?.posts_fetched_at && Date.now() - new Date(prof.posts_fetched_at).getTime() < 3 * 86400_000;
       if (!fresh) postsSlot = before("post_fetch");                // no slot → the step goes without posts and the template fallback covers it
@@ -188,13 +254,13 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
     if (d.subtask) { payload.subtask = true; payload.subtask_index = d.node?.subtask_index ?? 0; payload.subtask_type = d.node?.type; delete payload.subtasks; }
 
     // AI-drafted copy → approval task instead of auto-send (FR-AI-02)
-    if (cfg.ai?.brief && !d.subtask && ["invite", "message", "comment"].includes(type)) {
+    if (cfg.ai?.brief && !d.subtask && ["invite", "message", "new_chat", "comment"].includes(type)) {
       const { data: existingTask } = await admin.from("outreach_tasks").select("id").eq("enrollment_id", d.enrollment_id).eq("node_id", d.node_id).is("completed_at", null).maybeSingle();
       if (!existingTask) {
         if (!leadNames.has(d.lead_id)) { const { data } = await admin.from("outreach_leads").select("full_name").eq("id", d.lead_id).maybeSingle(); leadNames.set(d.lead_id, data?.full_name ?? "lead"); }
         await admin.from("outreach_tasks").insert({
           workspace_id: sender.workspace_id, kind: "review_ai_draft", lead_id: d.lead_id, sender_id: sender.id, enrollment_id: d.enrollment_id, node_id: d.node_id,
-          title: `Review AI ${type === "invite" ? "invite note" : type} for ${leadNames.get(d.lead_id)}`, body: cfg.ai.brief, draft_kind: type === "invite" ? "invite_note" : type, due_at: new Date(stepSlot).toISOString(),
+          title: `Review AI ${type === "invite" ? "invite note" : type === "new_chat" ? "message" : type} for ${leadNames.get(d.lead_id)}`, body: cfg.ai.brief, draft_kind: type === "invite" ? "invite_note" : type === "new_chat" ? "message" : type, due_at: new Date(stepSlot).toISOString(),
         });
         await admin.from("outreach_enrollments").update({ status: "waiting_task" }).eq("id", d.enrollment_id).eq("status", "active");
       }
@@ -203,14 +269,14 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
 
     if (prefetchSlot != null) {
       // notify:false → never shows up as a profile visit. needs_posts → the executor lists posts right after the profile (post_fetch budget).
-      await rpc("queue_action", { p_enrollment: d.enrollment_id, p_node_id: d.node_id, p_type: "profile_view", p_scheduled_for: new Date(prefetchSlot).toISOString(), p_payload: { prefetch: true, notify: false, ...(d.needs_posts ? { needs_posts: true } : {}) } });
-      taken.push(prefetchSlot); (byType["profile_view"] ??= []).push(prefetchSlot); capacity["profile_view"]--;
+      await rpc("queue_action", { p_enrollment: d.enrollment_id, p_node_id: d.node_id, p_type: "profile_view", p_scheduled_for: new Date(prefetchSlot).toISOString(), p_payload: { prefetch: true, notify: false, ...(needsPosts ? { needs_posts: true } : {}) } });
+      taken.push(prefetchSlot); (byType["profile_view"] ??= []).push(prefetchSlot); capacity["profile_view"]--; takeSlot(prefetchSlot, "profile_view");
     }
     if (postsSlot != null) {
       await rpc("queue_action", { p_enrollment: d.enrollment_id, p_node_id: d.node_id, p_type: "post_fetch", p_scheduled_for: new Date(postsSlot).toISOString(), p_payload: { prefetch: true } });
-      taken.push(postsSlot); (byType["post_fetch"] ??= []).push(postsSlot);
+      taken.push(postsSlot); (byType["post_fetch"] ??= []).push(postsSlot); takeSlot(postsSlot, "post_fetch");
     }
-    if (d.needs_posts && (prefetchSlot != null || postsSlot != null || readsPostsItself)) capacity["post_fetch"]--;
+    if (needsPosts && (prefetchSlot != null || postsSlot != null || readsPostsItself)) capacity["post_fetch"]--;
 
     if (mbox) {
       // the action lives on the mailbox sender: insert directly (queue_action would use the enrollment's LinkedIn sender)
@@ -220,7 +286,7 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
       mbox.taken.push(stepSlot); mbox.emails.push(stepSlot); mbox.capacity--;
     } else {
       await rpc("queue_action", { p_enrollment: d.enrollment_id, p_node_id: d.node_id, p_type: type, p_scheduled_for: new Date(stepSlot).toISOString(), p_payload: payload });
-      taken.push(stepSlot); (byType[type] ??= []).push(stepSlot); capacity[type]--;
+      taken.push(stepSlot); (byType[type] ??= []).push(stepSlot); capacity[type]--; takeSlot(stepSlot, type);
     }
     planned++;
   }
@@ -230,7 +296,7 @@ export async function planSender(sender: Row, kind: "nightly" | "topup"): Promis
   const touched = new Set(demand.map((d) => d.sequence_id));
   for (const seqId of touched) if (!throttled.has(seqId)) await admin.from("outreach_sequences").update({ throttled_reason: null }).eq("id", seqId).not("throttled_reason", "is", null);
   await admin.from("outreach_plans").upsert({ sender_id: sender.id, day, kind, actions: planned }, { onConflict: "sender_id,day,kind" });
-  log({ fn: "planner", sender_id: sender.id, day, kind, planned, unplanned, demand: demand.length, no_window: !hasWindow });
+  log({ fn: "planner", sender_id: sender.id, provider, day, kind, planned, unplanned, demand: demand.length, no_window: !hasWindow, ...(hourly ? { hourly_cap: hourly.cap, hours: hours.length } : {}) });
   return { sender_id: sender.id, day, kind, planned, unplanned, ...(hasWindow || planned > 0 ? {} : { skipped: "no_window" }) };
 }
 
@@ -239,9 +305,9 @@ async function sha(s: string): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Select senders to plan for this run. */
+/** Select senders to plan for this run: every chat provider (LinkedIn, Instagram, WhatsApp). Mailboxes are planned through mailbox rotation. */
 export async function selectSenders(kind: "nightly" | "topup"): Promise<Row[]> {
-  const { data } = await admin.from("outreach_senders").select("*").eq("status", "ok").is("deleted_at", null).eq("provider", "LINKEDIN");
+  const { data } = await admin.from("outreach_senders").select("*").eq("status", "ok").is("deleted_at", null).in("provider", CHANNEL_PROVIDERS);
   const out: Row[] = [];
   for (const s of data ?? []) {
     const lp = localParts(s.timezone ?? "UTC");

@@ -16,6 +16,10 @@ import { Avatar, Badge, Button, EnrollmentBadge, ErrorBox, Spinner, Toggle, fmtD
 import type { ChatDetail, ConvertKind } from './Thread';
 import { CreateTaskModal, ReenrolModal, ConfirmModal, type CreateTaskInput } from './LeadActions';
 import { memberLabel } from './hooks';
+import { activeConsentByChannel, useLeadConsent, useLeadIdentities } from '@/lib/outreach/channels';
+import { IdentityList } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
+import { ConsentBadge, ConsentGrantModal, ConsentRevokeModal } from '@/components/outreach/leads/detail/LeadConsentCard';
+import type { LeadConsent } from '@/lib/outreach/types';
 
 export interface LeadPanelProps {
   chat: ChatDetail;
@@ -54,6 +58,11 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const seqQ = useSequences(workspaceId);
   const sendersQ = useSenders(workspaceId);
   const tasksQ = useTasks(workspaceId, { lead_id: leadId ?? null, open: true });
+  const identitiesQ = useLeadIdentities(leadId);
+  const consentQ = useLeadConsent(leadId, workspaceId);
+  const activeConsent = useMemo(() => activeConsentByChannel(consentQ.data), [consentQ.data]);
+  const [consentOpen, setConsentOpen] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<LeadConsent | null>(null);
 
   const [taskOpen, setTaskOpen] = useState(false);
   const [reenrolOpen, setReenrolOpen] = useState(false);
@@ -239,6 +248,30 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
               </div>
             )}
 
+            <Section title="Handles and numbers">
+              {identitiesQ.isLoading ? <div className="text-xs text-gray-400">Loading…</div> : <IdentityList identities={identitiesQ.data} />}
+            </Section>
+
+            {(chat.provider === 'WHATSAPP' || activeConsent.WHATSAPP || activeConsent.INSTAGRAM) && (
+              <Section title="Consent" action={canWrite && <button type="button" onClick={() => setConsentOpen(true)} className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-1"><Plus className="w-3 h-3" /> Record consent</button>}>
+                {consentQ.isLoading ? <div className="text-xs text-gray-400">Loading…</div> : (
+                  <div className="space-y-1.5">
+                    {(['WHATSAPP', 'INSTAGRAM'] as const).map((ch) => {
+                      const c = activeConsent[ch];
+                      if (!c && ch !== chat.provider) return null;
+                      return (
+                        <div key={ch} className="flex items-center justify-between gap-2">
+                          {c ? <ConsentBadge consent={c} /> : <Badge tone="gray">No WhatsApp consent recorded</Badge>}
+                          {c && canWrite && <button type="button" onClick={() => setRevokeTarget(c)} className="text-[11px] text-red-600 hover:underline">Revoke</button>}
+                        </div>
+                      );
+                    })}
+                    {chat.provider === 'WHATSAPP' && !activeConsent.WHATSAPP && <p className="text-[11px] text-gray-500">Replying here is always allowed. A sequence cannot start a new WhatsApp conversation until a basis is recorded.</p>}
+                  </div>
+                )}
+              </Section>
+            )}
+
             <Section title={`Relation · ${senderName}`}>
               {state ? (
                 <div className="space-y-1 text-xs text-gray-600">
@@ -355,6 +388,8 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
           <ReenrolModal open={reenrolOpen} onClose={() => setReenrolOpen(false)} sequences={seqQ.data} senderId={chat.sender_id} senderName={senderName} onEnrol={enrol} />
           <ConfirmModal open={dncOpen} onClose={() => setDncOpen(false)} title="Mark as do-not-contact?" danger confirmLabel="Mark do-not-contact" onConfirm={async () => { await updateLead({ do_not_contact: true }, 'Lead marked do-not-contact'); }} message={<>No sender will contact <span className="font-medium">{lead.full_name ?? 'this lead'}</span> again. Live enrollments are exited by the engine. You can still reply manually here.</>} />
           <ConfirmModal open={!!exitTarget} onClose={() => setExitTarget(null)} title="Exit enrollment?" danger confirmLabel="Exit" onConfirm={async () => { if (exitTarget) await run('exit', () => rpc('exit_enrollment', { p_id: exitTarget.id, p_reason: 'manual' }), 'Enrollment exited'); }} message={<>The lead leaves <span className="font-medium">{activeSeq?.name ?? 'the sequence'}</span> now. Queued actions for this enrollment are cancelled.</>} />
+          <ConsentGrantModal open={consentOpen} onClose={() => setConsentOpen(false)} leadId={lead.id} ws={workspaceId} defaultChannel={chat.provider === 'INSTAGRAM' ? 'INSTAGRAM' : 'WHATSAPP'} toast={toast} />
+          <ConsentRevokeModal consent={revokeTarget} onClose={() => setRevokeTarget(null)} leadId={lead.id} ws={workspaceId} toast={toast} />
         </>
       )}
     </div>

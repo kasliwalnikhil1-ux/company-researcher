@@ -12,8 +12,10 @@ import { recordReject } from "./health.ts";
 import { notifySender } from "./notify.ts";
 import { reconnectLink } from "./inbound.ts";
 import { unsubscribeToken } from "./crypto.ts";
-import { enrichBackoff, fetchPosts, fetchPostsBudgeted, saveProfile, sectionsFor, storedPosts, tomorrowMorning } from "./enrich.ts";
+import { enrichBackoff, fetchPosts, fetchPostsBudgeted, postsToRows, saveProfile, sectionsFor, storedPosts, tomorrowMorning } from "./enrich.ts";
 import { findEmail, companyDomainOf, finderConfigured } from "./finder.ts";
+import { applyProfileChange } from "./profile.ts";
+import { attendeeIdFor, commentLimit, isNotOnWhatsApp, messageLimit, phoneDigits, PROVIDER_WARNING_RE, type LeadIdentity } from "./channels.ts";
 
 type Row = Record<string, any>;
 
@@ -21,6 +23,8 @@ export type ExecResult = { ok: true; response: unknown; branch?: string | null }
 
 const LIMITS = { invite_note: 300, invite_note_free: 200, message: 8000, comment: 1250, inmail_subject: 200, inmail_body: 1900 };
 const VOICE_BUCKET = "outreach-attachments";
+/** Action types that address a lead through its channel identity (Instagram / WhatsApp senders resolve it once per action). */
+const IDENTITY_TYPES = new Set(["new_chat", "message", "follow", "unfollow", "like", "comment", "identifier_check", "profile_view", "post_fetch"]);
 
 /** Node config with the enrollment's variant merged over it. Mirrors SQL outreach_node_config_for (text / note / subject / html + variant_id). */
 async function resolveNodeConfig(enrollmentId: string, node: Row, payload: Row): Promise<Row> {
@@ -142,12 +146,150 @@ async function budgetedProfile(sender: Row, lead: Row, lss: Row | null, opts: Fe
   }
 }
 
-async function ensureChatRow(sender: Row, lead: Row | null, unipileChatId: string, subject?: string | null): Promise<Row> {
-  const { data } = await admin.from("outreach_chats").upsert({
+interface ChatRowOpts { identity?: LeadIdentity | null; attendeeId?: string | null; isRequest?: boolean }
+
+/**
+ * The outreach_chats row for a connector chat id (provider = the sender's). `isRequest` (an Instagram chat we just
+ * created lands in the recipient's Requests tab) is set on the INSERT of a new row only; an existing row keeps its flag.
+ */
+async function ensureChatRow(sender: Row, lead: Row | null, unipileChatId: string, subject?: string | null, opts: ChatRowOpts = {}): Promise<Row> {
+  const channel = sender.provider === "INSTAGRAM" || sender.provider === "WHATSAPP";
+  if (!channel) {
+    // LinkedIn / mail: unchanged upsert
+    const { data } = await admin.from("outreach_chats").upsert({
+      workspace_id: sender.workspace_id, client_id: sender.client_id, sender_id: sender.id, lead_id: lead?.id ?? null, unipile_chat_id: unipileChatId, provider: sender.provider,
+      attendee_provider_id: lead?.provider_id ?? lead?.email_work ?? null, attendee_public_identifier: lead?.public_identifier ?? null, attendee_name: lead?.full_name ?? null, attendee_picture_url: lead?.picture_url ?? null, subject: subject ?? null,
+    }, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
+    return data!;
+  }
+  const { data: existing } = await admin.from("outreach_chats").select("*").eq("sender_id", sender.id).eq("unipile_chat_id", unipileChatId).maybeSingle();
+  const attendeeProviderId = opts.attendeeId ?? opts.identity?.provider_id ?? null;
+  const attendeePub = opts.identity?.identifier ?? null;
+  if (existing) {
+    const patch: Record<string, unknown> = {};
+    if (!existing.lead_id && lead?.id) patch.lead_id = lead.id;
+    if (!existing.attendee_name && lead?.full_name) patch.attendee_name = lead.full_name;
+    if (!existing.attendee_public_identifier && attendeePub) patch.attendee_public_identifier = attendeePub;
+    if (subject && !existing.subject) patch.subject = subject;
+    if (Object.keys(patch).length) { const { data } = await admin.from("outreach_chats").update(patch).eq("id", existing.id).select("*").single(); return data ?? { ...existing, ...patch }; }
+    return existing;
+  }
+  const row: Record<string, unknown> = {
     workspace_id: sender.workspace_id, client_id: sender.client_id, sender_id: sender.id, lead_id: lead?.id ?? null, unipile_chat_id: unipileChatId, provider: sender.provider,
-    attendee_provider_id: lead?.provider_id ?? lead?.email_work ?? null, attendee_public_identifier: lead?.public_identifier ?? null, attendee_name: lead?.full_name ?? null, attendee_picture_url: lead?.picture_url ?? null, subject: subject ?? null,
-  }, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
+    attendee_provider_id: attendeeProviderId, attendee_public_identifier: attendeePub, attendee_name: lead?.full_name ?? null, attendee_picture_url: lead?.picture_url ?? null, subject: subject ?? null,
+  };
+  if (opts.isRequest) row.is_request = true;
+  const { data, error } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
+  if (error && opts.isRequest) {
+    // the is_request column is added by 025; keep sending even while the migration is pending
+    delete row.is_request;
+    const { data: again } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
+    return again!;
+  }
   return data!;
+}
+
+/** Instagram: the recipient answered / we replied → the thread is no longer a message request. */
+async function clearRequestFlag(chatId: string): Promise<void> {
+  await admin.from("outreach_chats").update({ is_request: false }).eq("id", chatId).eq("is_request", true).then(({ error }) => { if (error) log({ fn: "execute", warn: `is_request: ${error.message}` }); });
+}
+
+// ---- channel identities (Instagram / WhatsApp)
+
+/** The usable identity of a lead on the sender's provider (outreach_lead_identity: verified rows only; LinkedIn falls back to the lead). */
+async function leadIdentity(lead: Row, provider: string): Promise<LeadIdentity | null> {
+  const r = await rpc<Row | null>("lead_identity", { p_lead: lead.id, p_provider: provider });
+  if (!r || typeof r !== "object") return null;
+  return { id: r.id ?? null, identifier: r.identifier ?? null, provider_id: r.provider_id ?? null, verified: r.verified !== false, is_valid: r.is_valid ?? null };
+}
+
+/** Store the outcome of a provider read on the identity (validity + the messaging id). */
+async function setIdentityCheck(identity: LeadIdentity | null, valid: boolean, providerId: string | null): Promise<void> {
+  if (!identity?.id) return;
+  await rpc("identity_set_check", { p_id: identity.id, p_valid: valid, p_provider_id: providerId }).catch((e) => log({ fn: "execute", warn: `identity_set_check: ${String((e as any)?.message ?? e)}` }));
+}
+
+/** Instagram profile response → lead fields (name, picture, profile URL) + the identity's messaging id + follow-back relation. */
+async function applyInstagramProfile(sender: Row, lead: Row, identity: LeadIdentity | null, prof: Row, lss: Row | null): Promise<{ lead: Row; messagingId: string | null; followedBy: boolean }> {
+  const messagingId = prof.provider_messaging_id ? String(prof.provider_messaging_id) : prof.provider_id ? String(prof.provider_id) : null;
+  const handle = prof.public_identifier ? String(prof.public_identifier).toLowerCase() : identity?.identifier ?? null;
+  const name = String(prof.full_name ?? prof.name ?? "").trim();
+  const parts = name.split(/\s+/).filter(Boolean);
+  const patch: Record<string, unknown> = { last_profile_fetch_at: new Date().toISOString() };
+  if (name && !lead.full_name) { patch.full_name = name; patch.first_name = lead.first_name ?? parts[0] ?? null; patch.last_name = lead.last_name ?? (parts.slice(1).join(" ") || null); }
+  if (prof.profile_picture_url && !lead.picture_url) patch.picture_url = prof.profile_picture_url;
+  if (handle && !lead.profile_url && sender.provider === "INSTAGRAM") patch.profile_url = `https://www.instagram.com/${handle}`;
+  const { data } = await admin.from("outreach_leads").update(patch).eq("id", lead.id).select("*").single();
+  await setIdentityCheck(identity, true, messagingId);
+  const followedBy = prof.relationship_status?.followed_by === true;
+  if (followedBy && lss?.relation !== "first" && lss?.relation !== "blocked" && lss?.relation !== "invalid") {
+    // they follow us back: the relation change is what advances a "wait for follow back" step (outreach_trg_relation)
+    const now = new Date().toISOString();
+    await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, updated_at: now }).eq("lead_id", lead.id).eq("sender_id", sender.id);
+  }
+  return { lead: data ?? { ...lead, ...patch }, messagingId, followedBy };
+}
+
+/**
+ * Instagram messaging needs the profile's messaging id. When the identity has none yet: a budgeted profile read
+ * (reserve profile_view → GET /users/{handle} → consume) that also stores the id on the identity. null = no budget today.
+ */
+async function ensureInstagramMessagingId(sender: Row, lead: Row, identity: LeadIdentity, lss: Row | null): Promise<{ identity: LeadIdentity; lead: Row } | null> {
+  if (identity.provider_id) return { identity, lead };
+  const ident = identity.identifier;
+  if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram handle", null);
+  const day = await rpc<string>("sender_local_date", { p_sender: sender.id, p_at: new Date().toISOString() });
+  const reserved = await rpc<boolean>("reserve_budget", { p_sender: sender.id, p_day: day, p_type: "profile_view" }).catch(() => false);
+  if (!reserved) return null;
+  try {
+    const prof = await unipile.users.profile(sender.unipile_account_id, ident);
+    await rpc("consume_budget", { p_sender: sender.id, p_day: day, p_type: "profile_view" }).catch((e) => log({ fn: "execute", warn: `consume profile_view: ${String(e)}` }));
+    const r = await applyInstagramProfile(sender, lead, identity, prof, lss);
+    return { identity: { ...identity, provider_id: r.messagingId }, lead: r.lead };
+  } catch (e) {
+    await rpc("release_budget", { p_sender: sender.id, p_day: day, p_type: "profile_view" }).catch(() => null);
+    throw e;
+  }
+}
+
+/** Instagram posts of a lead (GET /users/{id}/posts, the post_fetch endpoint). NO budget handling: the caller owns the reservation. */
+async function fetchInstagramPosts(sender: Row, lead: Row, identity: LeadIdentity, limit = 5): Promise<Row[]> {
+  const ident = identity.provider_id ?? identity.identifier;
+  if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram identifier", null);
+  const res = await unipile.users.posts(sender.unipile_account_id, String(ident), limit);
+  const rows = postsToRows(res.items ?? []).slice(0, 5);
+  await rpc("save_lead_posts", { p_lead: lead.id, p_posts: rows, p_sender: sender.id }).catch((e) => log({ fn: "execute", lead_id: lead.id, error: `save_lead_posts: ${String((e as any)?.message ?? e)}` }));
+  return rows;
+}
+
+/** Instagram posts behind the post_fetch budget: reserve → list → consume (release on failure). */
+async function fetchInstagramPostsBudgeted(sender: Row, lead: Row, identity: LeadIdentity): Promise<{ ok: true; posts: Row[] } | { ok: false; reason: "no_budget" }> {
+  const day = await rpc<string>("sender_local_date", { p_sender: sender.id, p_at: new Date().toISOString() });
+  const reserved = await rpc<boolean>("reserve_budget", { p_sender: sender.id, p_day: day, p_type: "post_fetch" }).catch(() => false);
+  if (!reserved) return { ok: false, reason: "no_budget" };
+  try {
+    const posts = await fetchInstagramPosts(sender, lead, identity, 5);
+    await rpc("consume_budget", { p_sender: sender.id, p_day: day, p_type: "post_fetch" }).catch((e) => log({ fn: "execute", warn: `consume post_fetch: ${String(e)}` }));
+    return { ok: true, posts };
+  } catch (e) {
+    await rpc("release_budget", { p_sender: sender.id, p_day: day, p_type: "post_fetch" }).catch(() => null);
+    throw e;
+  }
+}
+
+/** One extra like / follow beyond the claimed action: reserve → call → consume (release on failure). false = no budget left (stop quietly). */
+async function budgeted(sender: Row, type: string, call: () => Promise<unknown>): Promise<boolean> {
+  const day = await rpc<string>("sender_local_date", { p_sender: sender.id, p_at: new Date().toISOString() });
+  const reserved = await rpc<boolean>("reserve_budget", { p_sender: sender.id, p_day: day, p_type: type }).catch(() => false);
+  if (!reserved) return false;
+  try {
+    await call();
+    await rpc("consume_budget", { p_sender: sender.id, p_day: day, p_type: type }).catch((e) => log({ fn: "execute", warn: `consume ${type}: ${String(e)}` }));
+    return true;
+  } catch (e) {
+    await rpc("release_budget", { p_sender: sender.id, p_day: day, p_type: type }).catch(() => null);
+    throw e;
+  }
 }
 
 async function recordOutbound(sender: Row, lead: Row | null, chat: Row, text: string | null, html: string | null, unipileMessageId: string | null, actionId: string, isInviteNote = false, attachments: unknown[] = []) {
@@ -162,20 +304,31 @@ async function recordOutbound(sender: Row, lead: Row | null, chat: Row, text: st
  * The lead's latest own post, for like / comment steps. Uses what the prefetch already stored when it is under a day old;
  * otherwise lists posts behind the post_fetch budget. "no_budget" → the caller retries tomorrow morning (never a skip).
  */
-async function latestPost(sender: Row, lead: Row, maxAgeDays: number): Promise<{ id: string; text: string; url: string | null } | null | "no_budget"> {
+type PostRef = { id: string; text: string; url: string | null };
+
+/** The lead's recent own posts (newest first) that are inside max_age_days. Instagram lists through the identity, LinkedIn through the lead. */
+async function recentPosts(sender: Row, lead: Row, identity: LeadIdentity | null, maxAgeDays: number): Promise<PostRef[] | "no_budget"> {
   let rows = await storedPosts(lead.id, 24);
   if (rows === null) {
-    const res = await fetchPostsBudgeted(sender, lead, 5);
-    if (!res.ok) return res.reason === "no_budget" ? "no_budget" : null;
-    rows = res.posts;
+    if (sender.provider === "INSTAGRAM") {
+      if (!identity) return [];
+      const res = await fetchInstagramPostsBudgeted(sender, lead, identity);
+      if (!res.ok) return "no_budget";
+      rows = res.posts;
+    } else {
+      const res = await fetchPostsBudgeted(sender, lead, 5);
+      if (!res.ok) return res.reason === "no_budget" ? "no_budget" : [];
+      rows = res.posts;
+    }
   }
   const cutoff = Date.now() - maxAgeDays * 86400000;
+  const out: PostRef[] = [];
   for (const p of rows) {
     if (!p?.id) continue;
     const t = p.date ? Date.parse(p.date) : NaN;
-    if (isNaN(t) || t >= cutoff) return { id: String(p.id), text: String(p.text ?? ""), url: p.url ?? null };
+    if (isNaN(t) || t >= cutoff) out.push({ id: String(p.id), text: String(p.text ?? ""), url: p.url ?? null });
   }
-  return null;
+  return out;
 }
 
 // ---- email helpers (item 20)
@@ -215,10 +368,12 @@ export async function executeAction(action: Row): Promise<ExecResult> {
   const cfg: Row = { ...nodeCfg, ...payload };
   const nodeType: string = payload.subtask ? (payload.subtask_type ?? node?.type ?? "") : (node?.type ?? "");
   const isPrefetch = !!payload.prefetch;
-  const isVoice = type === "message" && (nodeType === "send_voice_note" || cfg.voice === true);
+  const provider: string = String(sender.provider ?? "LINKEDIN").toUpperCase();
+  const isChannel = provider === "INSTAGRAM" || provider === "WHATSAPP";
+  const isVoice = (type === "message" || type === "new_chat") && (nodeType === "send_voice_note" || cfg.voice === true);
   const hasBranch = (b: string) => !!node?.branches && node.branches[b] != null;
   const branchOrSkip = (name: string, reason: string): Decision => (hasBranch(name) ? { kind: "branch", name, reason } : { kind: "skip_node", reason });
-  const baseCtx = { actionType: type, attempt: action.attempt ?? 1, senderTimezone: sender.timezone ?? "UTC", hasBranch };
+  const baseCtx = { actionType: type, attempt: action.attempt ?? 1, senderTimezone: sender.timezone ?? "UTC", hasBranch, provider };
   const later = (reason: string, code: string): ExecResult => ({ ok: false, decision: { kind: "retry", at: tomorrowMorning(sender.timezone ?? "UTC"), reason }, code });
 
   // ---- pre-checks (PRD F3 step 2)
@@ -231,7 +386,7 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     const why = await rpc<string | null>("enrollment_suppression_reason", { p_enrollment: enrollment.id });
     if (why) return { ok: false, decision: { kind: "suppressed", reason: why }, code: String(why).slice(0, 120) };
     // item 1: the database decides whether a reply blocks this enrollment (any sender, any channel; honours scope, OOO resume, re-enrol)
-    if (!cfg.send_always && !isPrefetch && ["message", "inmail", "email", "invite"].includes(type)) {
+    if (!cfg.send_always && !isPrefetch && ["message", "new_chat", "inmail", "email", "invite"].includes(type)) {
       const blocked = await rpc<boolean>("enrollment_reply_blocked", { p_enrollment: enrollment.id, p_action_sender: sender.id });
       if (blocked) return { ok: false, decision: { kind: "replied", reason: "replied" }, code: "E_REPLIED" };
     }
@@ -248,9 +403,16 @@ export async function executeAction(action: Row): Promise<ExecResult> {
   }
 
   let l: Row | null = lead;
+  // Instagram / WhatsApp: the lead is addressed through its channel identity (outreach_lead_identities), resolved once per action.
+  let identity: LeadIdentity | null = null;
+  if (isChannel && l && IDENTITY_TYPES.has(type)) {
+    identity = await leadIdentity(l, provider);
+    if (!identity) return { ok: false, decision: { kind: "fail_enrollment", reason: "no_identity" }, code: "E_NO_IDENTITY" };
+    if (lss?.relation === "blocked") return { ok: false, decision: { kind: "fail_enrollment", reason: "relation_blocked" }, code: "E_RELATION_INVALID" };
+  }
   try {
-    if (type === "message" && lss?.relation !== "first" && !cfg.send_always) {
-      // verify with a live, budgeted profile fetch (may have been accepted without note / stale state)
+    if ((type === "message" || type === "new_chat") && provider === "LINKEDIN" && lss?.relation !== "first" && !cfg.send_always) {
+      // LinkedIn only: verify with a live, budgeted profile fetch (may have been accepted without note / stale state)
       let relation = lss?.relation ?? "none";
       if (l && (l.provider_id || l.public_identifier)) {
         const r = await budgetedProfile(sender, l, lss, { source: "step" });
@@ -263,7 +425,7 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     // render context, built at send time from the database (same function the builder preview calls)
     let rctx: RenderContext = { lead: l ?? {}, sender };
     let unsubscribeUrl: string | null = null;
-    const needsText = ["invite", "message", "inmail", "reply", "comment", "email", "call_api"].includes(type) && !isPrefetch;
+    const needsText = ["invite", "message", "new_chat", "inmail", "reply", "comment", "email", "call_api"].includes(type) && !isPrefetch;
     if (l && needsText) {
       const json = await rpc<Row>("render_context", { p_lead: l.id, p_sender: sender.id, p_enrollment: enrollment?.id ?? null });
       unsubscribeUrl = `${FUNCTIONS_BASE}outreach-unsubscribe?l=${l.id}&t=${await unsubscribeToken(l.id)}`;
@@ -278,6 +440,38 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     switch (type) {
       case "profile_view": {
         if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
+        if (provider === "INSTAGRAM") {
+          // GET /users/{handle|id}: name + picture on the lead, the messaging id on the identity, followed_by → relation 'first'
+          const ident = identity!.provider_id ?? identity!.identifier;
+          if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram handle", null);
+          const prof = await unipile.users.profile(sender.unipile_account_id, String(ident));
+          const r = await applyInstagramProfile(sender, l, identity, prof, lss);
+          let posts: number | string | null = null;
+          if (cfg.needs_posts === true && r.messagingId) {
+            try { const pr = await fetchInstagramPostsBudgeted(sender, r.lead, { ...identity!, provider_id: r.messagingId }); posts = pr.ok ? pr.posts.length : pr.reason; }
+            catch (e) { posts = "error"; log({ fn: "execute", action_id: action.id, warn: `posts after profile: ${String((e as any)?.message ?? e)}` }); }
+          }
+          return { ok: true, response: { provider_id: r.messagingId, followed_by: r.followedBy, following: prof.relationship_status?.following ?? null, followers_count: prof.followers_count ?? null, is_private: prof.is_private ?? null, posts } };
+        }
+        if (provider === "WHATSAPP") {
+          // GET /users/{digits}: "is this number on WhatsApp?" as a profile read (name + picture); never spends a new_chat
+          const digits = phoneDigits(identity!.identifier);
+          if (!digits) throw new UnipileError(422, "errors/invalid_recipient", "lead has no phone number", null);
+          try {
+            const prof = await unipile.users.profile(sender.unipile_account_id, digits);
+            const patch: Record<string, unknown> = { last_profile_fetch_at: new Date().toISOString() };
+            if (prof.name && !l.full_name) patch.full_name = String(prof.name);
+            if (prof.profile_picture_url && !l.picture_url) patch.picture_url = prof.profile_picture_url;
+            await admin.from("outreach_leads").update(patch).eq("id", l.id);
+            await setIdentityCheck(identity, true, prof.id ? String(prof.id) : prof.provider_id ? String(prof.provider_id) : null);
+            return { ok: true, response: { valid: true, provider_id: prof.id ?? prof.provider_id ?? null, is_business: prof.is_business ?? null } };
+          } catch (e) {
+            if (!isNotOnWhatsApp(e)) throw e;
+            await setIdentityCheck(identity, false, null);
+            await admin.from("outreach_lead_sender_state").update({ relation: "invalid", updated_at: new Date().toISOString() }).eq("lead_id", l.id).eq("sender_id", sender.id);
+            return { ok: false, decision: branchOrSkip("invalid", "not_on_whatsapp"), code: "E_IDENTIFIER_INVALID" };
+          }
+        }
         const isRefresh = nodeType === "refresh_profile" || cfg.refresh === true;
         if (isRefresh) {
           // item 13 freshness: skip when enriched within N days; a never-enriched lead is ALWAYS refreshed
@@ -299,14 +493,57 @@ export async function executeAction(action: Row): Promise<ExecResult> {
       case "post_fetch": {
         // queued by the planner when a step's text needs {{enrich.recent_post}} / an AI line and no profile prefetch is due.
         // The claim already reserved this action's post_fetch budget, so the call is made directly.
+        if (provider === "INSTAGRAM") {
+          if (!l || !(identity?.provider_id ?? identity?.identifier)) return { ok: false, decision: { kind: "skip_node", reason: "no_provider_id" }, code: "no_provider_id" };
+          const rows = await fetchInstagramPosts(sender, l, identity!, 5);
+          return { ok: true, response: { posts: rows.length } };
+        }
+        if (provider === "WHATSAPP") return { ok: false, decision: { kind: "skip_node", reason: "unsupported_post_fetch" }, code: "unsupported_post_fetch" };
         if (!l?.provider_id) return { ok: false, decision: { kind: "skip_node", reason: "no_provider_id" }, code: "no_provider_id" };
         const rows = await fetchPosts(sender, l, 5);
         return { ok: true, response: { posts: rows.length } };
       }
-      case "follow":
-        // Unipile has no follow endpoint (checked 20 Sep 2026: POST /linkedin/user/{id} only offers recruiter pipeline actions and saveLead;
+      case "follow": {
+        if (provider === "INSTAGRAM") {
+          // POST /users/invite with the user id or the username as provider_id
+          if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
+          const ident = identity!.provider_id ?? identity!.identifier;
+          if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram handle", null);
+          const r = await unipile.users.follow(sender.unipile_account_id, String(ident));
+          await emitEvent(sender.workspace_id, "lead.followed", { lead_id: l.id, sender_id: sender.id, provider });
+          return { ok: true, response: { followed: true, identifier: ident, result: r?.object ?? null } };
+        }
+        // Unipile has no follow endpoint for LinkedIn (checked 20 Sep 2026: POST /linkedin/user/{id} only offers recruiter pipeline actions and saveLead;
         // /users/following is read-only). The step is skipped so the sequence carries on; wire it here when the endpoint exists.
         return { ok: false, decision: { kind: "skip_node", reason: "unsupported_follow" }, code: "unsupported_follow" };
+      }
+      case "unfollow":
+        // no unfollow endpoint on any provider: the step is skipped so the sequence carries on
+        return { ok: false, decision: { kind: "skip_node", reason: "unsupported_unfollow" }, code: "unsupported_unfollow" };
+      case "identifier_check": {
+        // WhatsApp "is this number on?": its own action type and budget; NEVER spends a new_chat
+        if (provider !== "WHATSAPP") return { ok: false, decision: { kind: "skip_node", reason: "unsupported_identifier_check" }, code: "unsupported_identifier_check" };
+        if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
+        const digits = phoneDigits(identity!.identifier);
+        if (!digits) return { ok: false, decision: branchOrSkip("invalid", "no_phone"), code: "E_IDENTIFIER_INVALID" };
+        try {
+          const prof = await unipile.users.profile(sender.unipile_account_id, digits);
+          const pid = prof.id ? String(prof.id) : prof.provider_id ? String(prof.provider_id) : null;
+          await setIdentityCheck(identity, true, pid);
+          const patch: Record<string, unknown> = {};
+          if (prof.name && !l.full_name) patch.full_name = String(prof.name);
+          if (prof.profile_picture_url && !l.picture_url) patch.picture_url = prof.profile_picture_url;
+          if (Object.keys(patch).length) await admin.from("outreach_leads").update(patch).eq("id", l.id);
+          if (lss?.relation === "invalid") await admin.from("outreach_lead_sender_state").update({ relation: "none", updated_at: new Date().toISOString() }).eq("lead_id", l.id).eq("sender_id", sender.id);
+          return { ok: true, response: { valid: true, provider_id: pid, is_business: prof.is_business ?? null }, branch: hasBranch("valid") ? "valid" : null };
+        } catch (e) {
+          if (!isNotOnWhatsApp(e)) throw e;
+          await setIdentityCheck(identity, false, null);
+          await admin.from("outreach_lead_sender_state").update({ relation: "invalid", updated_at: new Date().toISOString() }).eq("lead_id", l.id).eq("sender_id", sender.id);
+          await emitEvent(sender.workspace_id, "lead.identifier_invalid", { lead_id: l.id, sender_id: sender.id, provider, code: e instanceof UnipileError ? e.code : String(e) });
+          return { ok: false, decision: branchOrSkip("invalid", "not_on_whatsapp"), code: "E_IDENTIFIER_INVALID" };
+        }
+      }
       case "find_email": {
         if (!l) return { ok: false, decision: branchOrSkip("not_found", "no_lead"), code: "no_lead" };
         if (l.email_work && l.email_status === "verified") return { ok: false, decision: branchOrSkip("found", "already_verified"), code: "already_verified" };
@@ -347,15 +584,50 @@ export async function executeAction(action: Row): Promise<ExecResult> {
         return { ok: true, response: { withdrawn: true } };
       }
       case "message":
+      case "new_chat":
       case "inmail":
       case "reply": {
+        // `message` = into a chat that already exists; `new_chat` = creating the conversation (every provider, LinkedIn included).
+        // The planner decides which one a step spends; the executor never turns a `message` into a chat start.
         if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
-        let chatId = lss?.unipile_chat_id ?? null;
+        let chatId: string | null = lss?.unipile_chat_id ?? null;
+        let existingChat: Row | null = null;
+        if (!chatId && type !== "inmail") {
+          const { data: c } = await admin.from("outreach_chats").select("*").eq("sender_id", sender.id).eq("lead_id", l.id).not("unipile_chat_id", "is", null).order("last_message_at", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+          if (c) { existingChat = c; chatId = c.unipile_chat_id; }
+        }
+        if (type === "message" && !chatId) return { ok: false, decision: branchOrSkip("no_chat", "no_chat"), code: "no_chat" };
         let messageId: string | null = null;
         let subject: string | null = null;
+        let attendeeId: string | null = l.provider_id ?? null;
+        let createdChat = false;
+
+        if (isChannel) {
+          if (provider === "WHATSAPP") {
+            // consent is re-checked at SEND time (the planner checked it at plan time); replies into an existing chat are never gated
+            if (type === "new_chat" && !chatId) {
+              const consent = await rpc<boolean>("lead_has_consent", { p_lead: l.id, p_channel: "WHATSAPP" });
+              if (!consent) return { ok: false, decision: branchOrSkip("no_consent", "no_consent"), code: "E_NO_CONSENT" };
+              if (identity!.is_valid === false) return { ok: false, decision: branchOrSkip("invalid", "not_on_whatsapp"), code: "E_IDENTIFIER_INVALID" };
+            }
+          } else if (provider === "INSTAGRAM") {
+            if (isVoice) return { ok: false, decision: { kind: "skip_node", reason: "unsupported_voice_note" }, code: "unsupported_voice_note" };
+            if (!chatId) {
+              const r = await ensureInstagramMessagingId(sender, l, identity!, lss);
+              if (!r) return later("no_profile_view_budget", "E_BUDGET_PROFILE_VIEW");
+              identity = r.identity; l = r.lead;
+              rctx = { ...rctx, lead: { ...rctx.lead, ...l } };
+            }
+          }
+          attendeeId = attendeeIdFor(provider, identity);
+          if (!chatId && !attendeeId) throw new UnipileError(422, "errors/invalid_recipient", "lead has no usable identity on this channel", null);
+        }
+        const chatOpts = (): ChatRowOpts => ({ identity, attendeeId, isRequest: provider === "INSTAGRAM" && createdChat });
+        const startChat = (fields: { text?: string; subject?: string; voice_message?: Blob; linkedin?: Record<string, unknown> }) =>
+          unipile.chats.start({ account_id: sender.unipile_account_id, attendees_ids: [attendeeId!], ...fields, ...(provider === "LINKEDIN" ? { linkedin: fields.linkedin ?? { api: "classic" } } : {}) });
 
         if (isVoice) {
-          // item 25: one real recording per (sequence, step, sender), sent through Unipile's voice_message field (LinkedIn prefers .m4a)
+          // item 25: one real recording per (sequence, step, sender), sent through Unipile's voice_message field (LinkedIn prefers .m4a; WhatsApp accepts it too)
           if (!enrollment) return { ok: false, decision: { kind: "skip_node", reason: "no_voice_clip" }, code: "no_voice_clip" };
           const { data: clip } = await admin.from("outreach_voice_clips").select("path, mime, duration_s").eq("sequence_id", enrollment.sequence_id).eq("node_id", action.node_id).eq("sender_id", sender.id).maybeSingle();
           if (!clip?.path) return { ok: false, decision: { kind: "skip_node", reason: "no_voice_clip" }, code: "no_voice_clip" };
@@ -364,18 +636,20 @@ export async function executeAction(action: Row): Promise<ExecResult> {
           if (dlErr || !blob) { log({ fn: "execute", action_id: action.id, warn: `voice clip download failed: ${dlErr?.message ?? "empty"}` }); return { ok: false, decision: { kind: "skip_node", reason: "no_voice_clip" }, code: "no_voice_clip" }; }
           const file = new File([blob], `voice-note.${extFor(clip.mime, objectPath)}`, { type: clip.mime || "audio/mp4" });
           if (chatId) { const r = await unipile.chats.send(chatId, { account_id: sender.unipile_account_id, voice_message: file }); messageId = r.message_id ?? null; }
-          else { const r = await unipile.chats.start({ account_id: sender.unipile_account_id, attendees_ids: [l.provider_id], voice_message: file, linkedin: { api: "classic" } }); chatId = r.chat_id ?? null; messageId = r.message_id ?? null; }
+          else { const r = await startChat({ voice_message: file }); chatId = r.chat_id ?? null; messageId = r.message_id ?? null; createdChat = !!chatId; }
           if (chatId) {
-            const chat = await ensureChatRow(sender, l, chatId, null);
+            const chat = await ensureChatRow(sender, l, chatId, null, chatOpts());
             await recordOutbound(sender, l, chat, "[Voice note]", null, messageId, action.id, false, [{ type: "audio", voice_note: true, storage_path: objectPath, mime: clip.mime, duration_s: clip.duration_s ?? null }]);
-            await emitEvent(sender.workspace_id, "message.sent", { lead_id: l.id, sender_id: sender.id, chat_id: chat.id, type: "voice_note" });
+            if (provider === "INSTAGRAM" && !createdChat && (existingChat?.is_request || chat.is_request) && chat.last_direction === "in") await clearRequestFlag(chat.id);
+            await emitEvent(sender.workspace_id, "message.sent", { lead_id: l.id, sender_id: sender.id, chat_id: chat.id, type: "voice_note", new_chat: createdChat });
           }
-          return { ok: true, response: { chat_id: chatId, message_id: messageId, voice: true } };
+          return { ok: true, response: { chat_id: chatId, message_id: messageId, voice: true, new_chat: createdChat } };
         }
 
-        const text = renderTemplate(cfg.text ?? "", rctx).trim().slice(0, type === "inmail" ? LIMITS.inmail_body : LIMITS.message);
+        const text = renderTemplate(cfg.text ?? "", rctx).trim().slice(0, type === "inmail" ? LIMITS.inmail_body : messageLimit(provider));
         if (!text) return { ok: false, decision: { kind: "fail_enrollment", reason: "empty_text" }, code: "E_PAYLOAD_INVALID" };
         if (type === "inmail") {
+          if (provider !== "LINKEDIN") return { ok: false, decision: { kind: "skip_node", reason: "unsupported_inmail" }, code: "unsupported_inmail" };
           if (cfg.open_profile_only && l.is_open_profile === false) return { ok: false, decision: branchOrSkip("no_credit", "not_open_profile"), code: "not_open_profile" };
           subject = renderTemplate(cfg.subject ?? "", rctx).slice(0, LIMITS.inmail_subject);
           const r = await unipile.chats.start({ account_id: sender.unipile_account_id, attendees_ids: [l.provider_id], text, subject: subject || undefined, linkedin: { api: cfg.api ?? "classic", inmail: true } });
@@ -384,32 +658,53 @@ export async function executeAction(action: Row): Promise<ExecResult> {
           const r = await unipile.chats.send(chatId, { account_id: sender.unipile_account_id, text });
           messageId = r.message_id ?? null;
         } else {
-          const r = await unipile.chats.start({ account_id: sender.unipile_account_id, attendees_ids: [l.provider_id], text, linkedin: { api: "classic" } });
-          chatId = r.chat_id ?? null; messageId = r.message_id ?? null;
+          const r = await startChat({ text });
+          chatId = r.chat_id ?? null; messageId = r.message_id ?? null; createdChat = !!chatId;
         }
         if (chatId) {
-          const chat = await ensureChatRow(sender, l, chatId, subject);
+          const chat = await ensureChatRow(sender, l, chatId, subject, chatOpts());
           await recordOutbound(sender, l, chat, text, null, messageId, action.id);
-          await emitEvent(sender.workspace_id, "message.sent", { lead_id: l.id, sender_id: sender.id, chat_id: chat.id, type });
+          // an Instagram request THEY sent us is accepted by our answer; a request WE sent stays one until they reply
+          if (provider === "INSTAGRAM" && !createdChat && (existingChat?.is_request || chat.is_request) && chat.last_direction === "in") await clearRequestFlag(chat.id);
+          await emitEvent(sender.workspace_id, "message.sent", { lead_id: l.id, sender_id: sender.id, chat_id: chat.id, type, new_chat: createdChat });
         }
-        return { ok: true, response: { chat_id: chatId, message_id: messageId, variant_id: cfg.variant_id ?? null } };
+        return { ok: true, response: { chat_id: chatId, message_id: messageId, variant_id: cfg.variant_id ?? null, new_chat: createdChat } };
       }
       case "like":
       case "comment": {
         if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
-        if (!l.provider_id) {
+        if (provider === "WHATSAPP") return { ok: false, decision: { kind: "skip_node", reason: `unsupported_${type}` }, code: `unsupported_${type}` };
+        if (provider === "LINKEDIN" && !l.provider_id) {
           const r = await budgetedProfile(sender, l, lss, { source: "step" });
           if (!r) return later("no_profile_view_budget", "E_BUDGET_PROFILE_VIEW");
           l = r.lead;
         }
-        const post = await latestPost(sender, l!, cfg.max_age_days ?? 90);
-        if (post === "no_budget") return later("no_post_fetch_budget", "E_BUDGET_POST_FETCH");   // tomorrow morning, not a skip
+        const posts = await recentPosts(sender, l!, identity, cfg.max_age_days ?? 90);
+        if (posts === "no_budget") return later("no_post_fetch_budget", "E_BUDGET_POST_FETCH");   // tomorrow morning, not a skip
+        const post = posts[0];
         if (!post) return { ok: false, decision: { kind: "skip_node", reason: "no_recent_post" }, code: "no_recent_post" };
         if (type === "like") {
+          // like_recent_posts: up to cfg.count (≤ 3) recent posts. The first like is the claimed action; every extra like
+          // reserves and consumes its own `like` budget and the loop stops quietly when none is left.
+          const count = Math.max(1, Math.min(3, Number(cfg.count ?? 1) || 1));
+          const liked: string[] = [];
           await unipile.posts.react({ account_id: sender.unipile_account_id, post_id: post.id, reaction_type: cfg.reaction ?? "like" });
-          return { ok: true, response: { post_id: post.id, share_url: post.url } };
+          liked.push(post.id);
+          let budgetOut = false;
+          for (const extra of posts.slice(1, count)) {
+            try {
+              const ok = await budgeted(sender, "like", () => unipile.posts.react({ account_id: sender.unipile_account_id, post_id: extra.id, reaction_type: cfg.reaction ?? "like" }));
+              if (!ok) { budgetOut = true; break; }
+              liked.push(extra.id);
+            } catch (e) {
+              // an extra like that the provider refuses (already reacted, post gone) never fails the step
+              log({ fn: "execute", action_id: action.id, warn: `extra like: ${String((e as any)?.message ?? e)}` });
+              if (e instanceof UnipileError && (e.status === 429 || e.status === 401 || e.status === 403 || e.status >= 500)) throw e;
+            }
+          }
+          return { ok: true, response: { post_id: post.id, share_url: post.url, liked, requested: count, budget_out: budgetOut } };
         }
-        const text = renderTemplate(cfg.text ?? "", { ...rctx, lead: { ...rctx.lead, post: post.text } }).trim().slice(0, LIMITS.comment);
+        const text = renderTemplate(cfg.text ?? "", { ...rctx, lead: { ...rctx.lead, post: post.text } }).trim().slice(0, commentLimit(provider));
         if (!text) return { ok: false, decision: { kind: "skip_node", reason: "empty_text" }, code: "E_PAYLOAD_INVALID" };
         const r = await unipile.posts.comment(post.id, { account_id: sender.unipile_account_id, text });
         return { ok: true, response: { post_id: post.id, comment_id: r.comment_id ?? null } };
@@ -463,6 +758,9 @@ export async function executeAction(action: Row): Promise<ExecResult> {
         await emitEvent(sender.workspace_id, "email.sent", { lead_id: l.id, sender_id: sender.id, tracking_id: r.tracking_id });
         return { ok: true, response: { tracking_id: r.tracking_id, provider_id: r.provider_id, to, bcc: !!bcc, custom_tracking_domain: tracking?.custom_domain ?? null, variant_id: cfg.variant_id ?? null } };
       }
+      case "profile_edit":
+        // Profile Studio (PRD §7): pre-snapshot → one PATCH → provisional applied; outreach-worker-profile verifies ≥60 s later.
+        return await applyProfileChange(action, sender);
       case "call_api": {
         const url = renderTemplate(cfg.url ?? "", rctx);
         if (!url) return { ok: false, decision: branchOrSkip("error", "no_url"), code: "E_PAYLOAD_INVALID" };
@@ -494,6 +792,18 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     }
     const decision = handleUnipileError(e, baseCtx);
     const code = e instanceof UnipileError ? `${e.status}:${e.code}` : String((e as any)?.message ?? e).slice(0, 120);
+    if (isChannel && e instanceof UnipileError) {
+      // block signal: the recipient blocked this account (WhatsApp / Instagram). Recorded before the lead is marked invalid.
+      if (e.code === "blocked_recipient" && (type === "new_chat" || type === "message") && lead) {
+        await rpc("record_block", { p_sender: sender.id, p_lead: lead.id, p_code: code, p_action: action.id }).catch((err) => log({ fn: "execute", warn: `record_block: ${String((err as any)?.message ?? err)}` }));
+      }
+      // Instagram "We suspect automated behavior": surfaced verbatim, one level down, 48 h pause (the operator may resume)
+      if (provider === "INSTAGRAM" && e.status === 403 && PROVIDER_WARNING_RE.test(`${e.message ?? ""} ${JSON.stringify(e.body ?? "")}`)) {
+        const text = String(e.message || (e.body as any)?.detail || (e.body as any)?.title || "We suspect automated behavior on your account").slice(0, 500);
+        await rpc("sender_provider_warning", { p_sender: sender.id, p_text: text }).catch((err) => log({ fn: "execute", warn: `sender_provider_warning: ${String((err as any)?.message ?? err)}` }));
+        return { ok: false, decision: { kind: "sender_pause", hours: 48, reason: "provider_warning" }, code };
+      }
+    }
     if (isRejectCode(e)) {
       const paused = await recordReject(sender.id);
       if (paused) return { ok: false, decision: { kind: "sender_pause", hours: 24, reason: "reject_burst" }, code };

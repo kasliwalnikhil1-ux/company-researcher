@@ -4,8 +4,12 @@
 // Item 20: a person's one-to-one email reply is sent WITHOUT open / link tracking unless
 //          coalesce(sender.track_replies, workspace.settings.track_replies, false) is true.
 // Item 24: {booking: true} appends the sender's booking link with the lead id; the link is never rewritten by tracking.
-import { admin, membership, requireRole, clientVisible, HttpError, emitEvent, sha256Hex, type Role } from "./supabase.ts";
+import { admin, membership, requireRole, clientVisible, HttpError, emitEvent, sha256Hex, log, type Role } from "./supabase.ts";
 import { unipile, UnipileError } from "./unipile.ts";
+import { messageLimit } from "./channels.ts";
+
+const CHAT_PROVIDERS = ["LINKEDIN", "INSTAGRAM", "WHATSAPP"];
+const CHANNEL_LABEL: Record<string, string> = { INSTAGRAM: "Instagram", WHATSAPP: "WhatsApp" };
 
 export interface ReplyInput {
   userId: string;
@@ -55,6 +59,11 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     if (!text) text = "Here is my calendar, pick any time that suits you:";
     text = `${text}\n\n${bookingUrl}`;
   }
+  // Instagram 1000 / WhatsApp 4096 characters; replies into an existing chat are never gated by consent (consent gates new chats only)
+  if (sender.provider === "INSTAGRAM" || sender.provider === "WHATSAPP") {
+    const limit = messageLimit(sender.provider);
+    if (text.length > limit) throw new HttpError(400, "E_PAYLOAD_INVALID", `${CHANNEL_LABEL[sender.provider]} messages can be up to ${limit} characters (this one is ${text.length})`);
+  }
 
   const key = await sha256Hex(`reply|${chat.id}|${input.userId}|${Date.now()}|${Math.random()}`);
   const { data: action } = await admin.from("outreach_actions").insert({
@@ -71,7 +80,7 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
   try {
     let messageId: string | null = null;
     let html: string | null = null;
-    if (sender.provider === "LINKEDIN") {
+    if (CHAT_PROVIDERS.includes(sender.provider)) {
       const r = await unipile.chats.send(chat.unipile_chat_id, { account_id: sender.unipile_account_id, text, attachments });
       messageId = r.message_id ?? null;
     } else {
@@ -89,6 +98,11 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     const { data: msg } = await admin.from("outreach_messages").insert({ workspace_id: chat.workspace_id, chat_id: chat.id, unipile_message_id: messageId, direction: "out", text, html, sent_at: new Date().toISOString(), action_id: action.id, sent_by: input.userId, attachments: (input.attachments ?? []).map((p) => ({ id: p, storage: true, name: p.split("/").pop() })) }).select("*").single();
     await admin.from("outreach_actions").update({ status: "sent", executed_at: new Date().toISOString(), response: { message_id: messageId } }).eq("id", action.id);
     await admin.from("outreach_chats").update({ unread: false, unread_count: 0, archived: false }).eq("id", chat.id);
+    // Instagram: answering a message request accepts it; the thread is no longer a request
+    if (sender.provider === "INSTAGRAM" && chat.is_request) {
+      const { error: reqErr } = await admin.from("outreach_chats").update({ is_request: false }).eq("id", chat.id);
+      if (reqErr) log({ fn: "reply", warn: `is_request: ${reqErr.message}` });
+    }
     if (chat.lead_id) await admin.from("outreach_lead_sender_state").update({ last_outbound_at: new Date().toISOString(), unipile_chat_id: chat.unipile_chat_id }).eq("lead_id", chat.lead_id).eq("sender_id", sender.id);
     await emitEvent(chat.workspace_id, "message.sent", { id: msg?.id, chat_id: chat.id, lead_id: chat.lead_id, sender_id: sender.id, by: input.userId, reply: true });
     return msg;

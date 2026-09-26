@@ -173,8 +173,11 @@ export default function Builder({ id }: { id: string }) {
   const poolSenders = useMemo(() => (draft?.pool ?? []).map((pid) => senders.find((s) => s.id === pid)).filter(Boolean) as typeof senders, [draft?.pool, senders]);
   const hasFreeSender = poolSenders.some((s) => s.provider === 'LINKEDIN' && !s.is_premium);
   const hasMailbox = poolSenders.some((s) => s.provider !== 'LINKEDIN');
+  // the providers in the pool: channel steps need an account of their channel, messages take their channel from it
+  const poolProviders = useMemo(() => Array.from(new Set(poolSenders.map((s) => s.provider))), [poolSenders]);
+  const channelIndependent = draft?.settings?.channel_independent_continuation === true;
 
-  const validation = useMemo(() => (draft ? validateGraph(draft.graph, { hasFreeSender, hasMailbox, strict: true }) : { errors: [] as GraphIssue[], warnings: [] as GraphIssue[] }), [draft, hasFreeSender, hasMailbox]);
+  const validation = useMemo(() => (draft ? validateGraph(draft.graph, { hasFreeSender, hasMailbox, strict: true, poolProviders, channelIndependent }) : { errors: [] as GraphIssue[], warnings: [] as GraphIssue[] }), [draft, hasFreeSender, hasMailbox, poolProviders, channelIndependent]);
   const issues = useMemo(() => {
     const m: Record<string, IssueLevel> = {};
     for (const w of validation.warnings) if (w.node_id) m[w.node_id] = 'warning';
@@ -205,7 +208,7 @@ export default function Builder({ id }: { id: string }) {
   const [picker, setPicker] = useState<StepPickerTarget | null>(null);
   const onAddHere = useCallback((source: string, handle: string, target: string | null) => { if (!readOnly) setPicker({ source, handle, target }); }, [readOnly]);
   const closePicker = useCallback(() => setPicker(null), []);
-  const pickerAllowed = useMemo(() => (picker && draft ? allowedNext(draft.graph, picker.source, picker.handle) : null), [picker, draft]);
+  const pickerAllowed = useMemo(() => (picker && draft ? allowedNext(draft.graph, picker.source, picker.handle, poolProviders) : null), [picker, draft, poolProviders]);
   const onPickStep = useCallback((type: NodeType) => {
     const d = draftRef.current;
     if (!d || !picker) return;

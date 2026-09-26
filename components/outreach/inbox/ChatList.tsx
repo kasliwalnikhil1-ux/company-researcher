@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Search, Linkedin, Mail, Inbox, X, Filter } from 'lucide-react';
+import { Search, Inbox, X, Filter } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel } from '@/lib/outreach/channels';
+import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import type { ChatFilters } from '@/lib/outreach/queries';
 import type { Chat, Client, Lead, Sender, Sequence } from '@/lib/outreach/types';
 import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/components/outreach/ui';
@@ -124,10 +126,8 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
           </MiniSelect>
           <MiniSelect title="Channel" value={filters.provider ?? ''} onChange={(v) => onFilters({ provider: v || null })}>
             <option value="">All channels</option>
-            <option value="LINKEDIN">LinkedIn</option>
-            <option value="GMAIL">Gmail</option>
-            <option value="OUTLOOK">Outlook</option>
-            <option value="IMAP">IMAP</option>
+            {CHANNEL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
+            {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
           </MiniSelect>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -165,11 +165,12 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                     <div className="flex-1 min-w-0 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <span className={cn('text-sm truncate', c.unread ? 'font-semibold text-gray-900' : 'font-medium text-gray-800')}>{name}</span>
-                        {c.provider === 'LINKEDIN' ? <Linkedin className="w-3 h-3 text-[#0a66c2] flex-shrink-0" aria-label="LinkedIn" /> : <Mail className="w-3 h-3 text-emerald-600 flex-shrink-0" aria-label="Email" />}
+                        <span title={channelLabel(c.provider)} className="flex-shrink-0"><ProviderLogo provider={c.provider} className="w-3 h-3 rounded-[2px]" /></span>
                         <span className="ml-auto text-[11px] text-gray-400 flex-shrink-0 tabular-nums">{timeAgo(c.last_message_at)}</span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5">
                         {c.outreach_senders?.display_name && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[45%]">{c.outreach_senders.display_name}</span>}
+                        {c.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: the person has not accepted the conversation yet, so they may not have seen it">Request</span>}
                         {c.intent && c.intent !== 'unclassified' && <IntentBadge intent={c.intent} />}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">

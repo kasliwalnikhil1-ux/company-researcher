@@ -7,10 +7,27 @@ export interface HealthInputs {
   invites_14d: number; accepted_14d: number; messages_14d: number; replies_14d: number; daily_actions_14d: number[];
   today_actions: number; idle_days_before_today: number; health_score: number; health_high_since: string | null;
   warmup_level: number; warmup_locked_until: string | null; is_premium: boolean;
+  // channels (026): only read for INSTAGRAM / WHATSAPP senders; a LinkedIn breakdown never contains the two categories below
+  provider?: string; blocks_30d?: number; new_chats_14d?: number; new_chats_replied_14d?: number;
+  new_chats_all?: number; new_chats_replied_all?: number; days_connected?: number; inbound_conversations?: number;
+  account_age_attested?: boolean; disconnect_within_24h_of_outreach?: boolean; provider_warning?: boolean;
 }
 
 export function scoreHealth(i: HealthInputs): { score: number; breakdown: Record<string, number> } {
   const b: Record<string, number> = {};
+  const provider = String(i.provider ?? "LINKEDIN").toUpperCase();
+  if (provider === "INSTAGRAM" || provider === "WHATSAPP") {
+    // block_signals: 0 blocks → 100, −30 per detected block in 30 days, floor 0
+    b.block_signals = Math.max(0, 100 - 30 * Number(i.blocks_30d ?? 0));
+  }
+  if (provider === "WHATSAPP") {
+    // new_chat_reply_rate: the governor's input, surfaced as a health category (≥ 25 new chats in 14 days; fewer → 100)
+    const n = Number(i.new_chats_14d ?? 0);
+    if (n >= 25) {
+      const rate = Number(i.new_chats_replied_14d ?? 0) / n;
+      b.new_chat_reply_rate = rate >= 0.5 ? 100 : rate >= 0.4 ? 85 : rate >= 0.25 ? 60 : 30;
+    } else b.new_chat_reply_rate = 100;
+  }
   b.session_stability = Math.max(0, 100 - 25 * i.disconnects_14d) - (i.currently_ok ? 0 : 20);
   b.session_stability = Math.max(0, b.session_stability);
   const rr = i.actions_14d > 0 ? i.rejects_14d / i.actions_14d : 0;
@@ -67,13 +84,28 @@ export async function healthForSender(senderId: string, trigger: string): Promis
     patch.paused_until = null; patch.status_reason = null;
   }
 
-  // level-up: ≥85 for 14 consecutive days and onboarding lock passed
+  // WhatsApp: the new-chat governor (PRD §7.4) owns the level, promotion nightly and demotion any time; no LinkedIn level-up rule
+  if (trigger === "nightly" && s.provider === "WHATSAPP") {
+    try {
+      const g = await rpc<Record<string, unknown>>("wa_governor", { p_sender: senderId });
+      log({ fn: "health", sender_id: senderId, wa_governor: g });
+      if (g && g.level_after != null && g.level_before != null && g.level_after !== g.level_before) {
+        if (Number(g.level_after) > Number(g.level_before)) await notifySender(senderId, "level_up", { level: Number(g.level_after) });
+        await emitEvent(s.workspace_id, "sender.warmup", { id: senderId, ...g });
+      }
+    } catch (e) { log({ fn: "health", sender_id: senderId, warn: `wa_governor: ${String((e as any)?.message ?? e)}` }); }
+  }
+  // level-up: ≥85 for 14 consecutive days and onboarding lock passed (LinkedIn max 1 for free accounts; Instagram levels 0–5)
   const highSince = (patch.health_high_since as string | null) ?? null;
-  if (trigger === "nightly" && highSince && score >= 85) {
+  if (trigger === "nightly" && highSince && score >= 85 && s.provider !== "WHATSAPP") {
     const days = (Date.parse(today) - Date.parse(highSince)) / 86400000;
     const locked = s.warmup_locked_until && s.warmup_locked_until >= today;
     const maxLevel = s.is_premium || s.provider !== "LINKEDIN" ? 5 : 1;
-    if (days >= 14 && !locked && s.warmup_level < maxLevel) {
+    // Profile Studio (PRD §10.2): a critical profile QA failure (no photo, under 150 connections) caps warm-up promotion.
+    const { data: qa } = await admin.from("outreach_profile_qa").select("checks").eq("sender_id", senderId).maybeSingle();
+    const qaCritical = ((qa?.checks ?? []) as Array<{ severity?: string; pass?: boolean | null; code?: string }>).filter((c) => c.severity === "critical" && c.pass === false).map((c) => c.code);
+    if (qaCritical.length && days >= 14 && !locked && s.warmup_level < maxLevel) log({ fn: "health", sender_id: senderId, level_up_blocked: qaCritical });
+    if (days >= 14 && !locked && s.warmup_level < maxLevel && !qaCritical.length) {
       patch.warmup_level = s.warmup_level + 1;
       patch.health_high_since = today;
       await notifySender(senderId, "level_up", { level: s.warmup_level + 1 });

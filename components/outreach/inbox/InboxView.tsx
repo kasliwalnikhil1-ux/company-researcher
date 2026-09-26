@@ -228,6 +228,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
             onEditMessage={editMessage}
             onDeleteMessage={deleteMessage}
             onError={(m) => toast.show(m, 'error')}
+            onNotice={(m) => toast.show(m)}
           />
         )}
       </main>

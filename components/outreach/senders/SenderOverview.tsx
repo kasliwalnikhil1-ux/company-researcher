@@ -14,6 +14,54 @@ import type { Client, Sender } from '@/lib/outreach/types';
 
 type Notify = (message: string, type?: 'success' | 'error') => void;
 
+/** WhatsApp: the number-age attestation (PRD §7.4). Level 0 cannot be promoted until it is recorded. */
+function AccountAgeAttestation({ sender, canManage, notify, onDone }: { sender: Sender; canManage: boolean; notify: Notify; onDone: () => void }) {
+  const [months, setMonths] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const n = Number(months);
+  const ok = months !== '' && Number.isInteger(n) && n >= 6;
+  const attested = !!sender.account_age_attested_at && typeof sender.account_age_months === 'number';
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await callFn('sender-manage', { sender_id: sender.id, action: 'attest_account_age', months: n });
+      notify('Number age recorded.');
+      setEditing(false); setMonths('');
+      onDone();
+    } catch (err) { notify(parseError(err).message, 'error'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-100">
+      <div className="text-xs font-medium text-gray-600 mb-1 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Number age</div>
+      {attested && !editing ? (
+        <>
+          <div className="text-sm text-gray-900">Number age attested: {sender.account_age_months} months on {fmtDate(sender.account_age_attested_at, false)}</div>
+          <div className="text-[11px] text-gray-400 mt-1">Fresh numbers get restricted quickly, so the first governor level needs this on record. {canManage && <button type="button" onClick={() => setEditing(true)} className="text-indigo-600 hover:underline">Update</button>}</div>
+        </>
+      ) : (
+        <>
+          {!attested && <div className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Not attested yet. The number stays at level 0 (2 new conversations a day) until someone confirms it is at least 6 months old with real conversations on it.</div>}
+          {canManage ? (
+            <form onSubmit={submit} className="flex flex-col sm:flex-row sm:items-end gap-2 mt-2">
+              <div className="flex-1"><Input label="Months in use" type="number" min={6} step={1} inputMode="numeric" placeholder="e.g. 18" value={months} onChange={(e) => setMonths(e.target.value)} error={months !== '' && !ok ? 'A whole number of at least 6' : undefined} /></div>
+              <div className="flex gap-2">
+                {editing && <Button type="button" variant="secondary" onClick={() => { setEditing(false); setMonths(''); }} disabled={busy}>Cancel</Button>}
+                <Button type="submit" loading={busy} disabled={!ok}>Attest number age</Button>
+              </div>
+            </form>
+          ) : <div className="text-[11px] text-gray-400 mt-1">Only managers can attest.</div>}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SenderOverview({ sender, clients, isManager, canWrite, connected, notify }: { sender: Sender; clients: Client[]; isManager: boolean; canWrite: boolean; connected: string | null; notify: Notify }) {
   const qc = useQueryClient();
   const canManage = isManager && canWrite;
@@ -67,6 +115,11 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   const breakdown = HEALTH_KEYS.map((k) => ({ ...k, value: typeof sender.health_breakdown?.[k.key] === 'number' ? Math.round(sender.health_breakdown[k.key]) : null }));
   const locked = isFuture(sender.warmup_locked_until);
   const isLinkedIn = sender.provider === 'LINKEDIN';
+  const isInstagram = sender.provider === 'INSTAGRAM';
+  const isWhatsApp = sender.provider === 'WHATSAPP';
+  const maxLevel = isWhatsApp ? 4 : 5;
+  const channelName = PROVIDER_LABELS[sender.provider];
+  const profileHref = isLinkedIn && sender.public_identifier ? `https://www.linkedin.com/in/${sender.public_identifier}` : isInstagram && sender.public_identifier ? `https://www.instagram.com/${sender.public_identifier.replace(/^@/, '')}/` : null;
 
   return (
     <div className="space-y-6">
@@ -89,7 +142,8 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           <div className="flex flex-wrap items-center gap-3">
             <StatusPill status={sender.status} reason={sender.status_reason} />
             {sender.status_reason && <span className="text-sm text-gray-600">{sender.status_reason}</span>}
-            {isFuture(sender.paused_until) && <Badge tone="amber">auto-paused until {fmtDate(sender.paused_until)}</Badge>}
+            {isFuture(sender.paused_until) && <Badge tone="amber">{sender.provider_warning ? 'paused after a warning until' : 'auto-paused until'} {fmtDate(sender.paused_until)}</Badge>}
+            {isFuture(sender.outreach_allowed_from) && <Badge tone="blue">quiet period: outreach starts {fmtDate(sender.outreach_allowed_from)}</Badge>}
             {isFuture(sender.invite_blocked_until) && <Badge tone="amber">invites blocked until {fmtDate(sender.invite_blocked_until, false)}</Badge>}
           </div>
           <dl className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 mt-4 text-sm">
@@ -106,7 +160,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           {needsRelogin && canManage && (
             <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
               <div className="text-sm font-semibold text-red-900 flex items-center gap-2"><KeyRound className="w-4 h-4" /> This account needs a fresh login</div>
-              <p className="text-sm text-red-800 mt-1">LinkedIn invalidated the session. All actions are held until the owner logs in again. Sending a re-login link emails the owner{sender.owner_email ? ` (${sender.owner_email})` : ''} a hosted login page{sender.auth_method === 'browser' ? ' that reconnects through their browser extension, with no password prompt' : ''} — you can also copy the link and pass it on.</p>
+              <p className="text-sm text-red-800 mt-1">{channelName} ended the session. All actions are held until the owner signs in again. Sending a re-login link emails the owner{sender.owner_email ? ` (${sender.owner_email})` : ''} a hosted login page{sender.auth_method === 'browser' ? ' that reconnects through their browser extension, with no password prompt' : ''} — you can also copy the link and pass it on.</p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <Button onClick={() => manage('reconnect_link')} loading={busy === 'reconnect_link'} disabled={!!busy}><ExternalLink className="w-4 h-4" /> Send re-login link</Button>
                 {sender.auth_method === 'cookie' && <Button variant="secondary" onClick={() => manage('reconnect_cookie')} loading={busy === 'reconnect_cookie'} disabled={!!busy}>Retry cookie reconnect</Button>}
@@ -162,15 +216,19 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card title="Profile">
           <dl className="space-y-3 text-sm">
-            <div className="flex justify-between gap-3"><dt className="text-gray-500">Warm-up level</dt><dd className="flex items-center gap-2"><Badge tone="indigo">Level {sender.warmup_level} / 5</Badge>{locked && <span className="inline-flex items-center gap-1 text-xs text-gray-500" title="Onboarding gate: new or small accounts stay at level 0 for at least 28 days"><Lock className="w-3 h-3" /> until {fmtDate(sender.warmup_locked_until, false)}</span>}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-gray-500">Connections</dt><dd className="text-gray-900 tabular-nums">{sender.connections_count == null ? 'unknown' : sender.connections_count.toLocaleString()}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-gray-500">Profile</dt><dd className="text-gray-900 truncate">{sender.public_identifier ? <a className="text-indigo-600 hover:underline" href={`https://www.linkedin.com/in/${sender.public_identifier}`} target="_blank" rel="noreferrer">{sender.public_identifier}</a> : '—'}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-gray-500">Plans</dt><dd className="flex flex-wrap gap-1 justify-end">
-              {sender.is_premium && <Badge tone="amber">Premium</Badge>}{sender.has_sales_nav && <Badge tone="blue">Sales Navigator</Badge>}{sender.has_recruiter && <Badge tone="purple">Recruiter</Badge>}
-              {!sender.is_premium && !sender.has_sales_nav && !sender.has_recruiter && <span className="text-gray-400">Basic</span>}
-            </dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-gray-500">Warm-up level</dt><dd className="flex items-center gap-2"><Badge tone="indigo">Level {sender.warmup_level} / {maxLevel}</Badge>{locked && <span className="inline-flex items-center gap-1 text-xs text-gray-500" title="Onboarding gate: new or small accounts stay at level 0 for at least 28 days"><Lock className="w-3 h-3" /> until {fmtDate(sender.warmup_locked_until, false)}</span>}</dd></div>
+            {isLinkedIn && <div className="flex justify-between gap-3"><dt className="text-gray-500">Connections</dt><dd className="text-gray-900 tabular-nums">{sender.connections_count == null ? 'unknown' : sender.connections_count.toLocaleString()}</dd></div>}
+            {isInstagram && sender.connections_count != null && <div className="flex justify-between gap-3"><dt className="text-gray-500">Followers</dt><dd className="text-gray-900 tabular-nums">{sender.connections_count.toLocaleString()}</dd></div>}
+            <div className="flex justify-between gap-3"><dt className="text-gray-500">{isWhatsApp ? 'Number' : isInstagram ? 'Handle' : 'Profile'}</dt><dd className="text-gray-900 truncate">{profileHref ? <a className="text-indigo-600 hover:underline" href={profileHref} target="_blank" rel="noreferrer">{sender.public_identifier}</a> : sender.public_identifier || '—'}</dd></div>
+            {isLinkedIn && (
+              <div className="flex justify-between gap-3"><dt className="text-gray-500">Plans</dt><dd className="flex flex-wrap gap-1 justify-end">
+                {sender.is_premium && <Badge tone="amber">Premium</Badge>}{sender.has_sales_nav && <Badge tone="blue">Sales Navigator</Badge>}{sender.has_recruiter && <Badge tone="purple">Recruiter</Badge>}
+                {!sender.is_premium && !sender.has_sales_nav && !sender.has_recruiter && <span className="text-gray-400">Basic</span>}
+              </dd></div>
+            )}
             <div className="flex justify-between gap-3"><dt className="text-gray-500">Timezone</dt><dd className="text-gray-900">{sender.timezone}</dd></div>
           </dl>
+          {isWhatsApp && <AccountAgeAttestation sender={sender} canManage={canManage} notify={notify} onDone={invalidate} />}
           {isLinkedIn && (
             <div className="mt-4 pt-4 border-t border-gray-100">
               <div className="text-xs font-medium text-gray-600 mb-1 flex items-center gap-1"><ShieldCheck className="w-3.5 h-3.5" /> Proxy</div>

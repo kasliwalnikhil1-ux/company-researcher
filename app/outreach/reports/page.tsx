@@ -17,12 +17,14 @@ import SequencesTab from '@/components/outreach/reports/SequencesTab';
 import SendersTab from '@/components/outreach/reports/SendersTab';
 import ClientsTab from '@/components/outreach/reports/ClientsTab';
 import CostTab from '@/components/outreach/reports/CostTab';
+import ChannelsTab from '@/components/outreach/reports/ChannelsTab';
+import ConsentTab from '@/components/outreach/reports/ConsentTab';
 import SchedulesDrawer from '@/components/outreach/reports/SchedulesDrawer';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const TABS = [
   { key: 'overview', label: 'Overview' }, { key: 'funnel', label: 'Funnel' }, { key: 'replies', label: 'Replies' }, { key: 'sequences', label: 'Sequences' },
-  { key: 'senders', label: 'Senders' }, { key: 'clients', label: 'Clients' }, { key: 'cost', label: 'Cost' },
+  { key: 'senders', label: 'Senders' }, { key: 'channels', label: 'Channels' }, { key: 'consent', label: 'Consent' }, { key: 'clients', label: 'Clients' }, { key: 'cost', label: 'Cost' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -106,6 +108,8 @@ function ReportsPage() {
         {tab === 'replies' && <RepliesTab {...props} onNotice={notice} />}
         {tab === 'sequences' && <SequencesTab {...props} canPromote={isManager} />}
         {tab === 'senders' && <SendersTab {...props} />}
+        {tab === 'channels' && <ChannelsTab {...props} />}
+        {tab === 'consent' && <ConsentTab {...props} />}
         {tab === 'clients' && <ClientsTab ws={ws} range={range} onFilterClient={(id) => setParams({ client: id, tab: null })} />}
         {tab === 'cost' && <CostTab {...props} onNotice={notice} />}
       </div>

@@ -4,6 +4,14 @@
 // compiles it to the graph shape the engine executes (lib/outreach/types.ts:
 // {version:1, start, nodes:{id:{id,type,config,delay?,next?,branches?,position}}}).
 // Compilation errors are returned as field-level messages, never thrown.
+//
+// Channels (instagram-whatsapp-channels-PRD §9, CHANNELS-BUILD-CONTRACT §3/§5): a step may carry
+// `channel: 'INSTAGRAM' | 'WHATSAPP' | 'LINKEDIN'`, or the whole list is compiled with
+// compileSteps(input, {channel}). `follow` / `comment` compile to the LinkedIn node types unless the
+// channel is Instagram; `message` gets `new_chat_allowed`; a WhatsApp message that may start a new
+// chat gets a `require_consent` step inserted above it when none is there (recorded in `notes`).
+// The database validator (outreach_validate_graph) remains the authority; the compiler only
+// spares the agent a round-trip.
 
 import { McpError } from "./ctx.ts";
 
@@ -16,16 +24,25 @@ export interface GraphNode {
 }
 export type Step = Record<string, unknown>;
 export interface CompileIssue { step_path: string; field?: string; code: string; message: string }
+export type Channel = "LINKEDIN" | "INSTAGRAM" | "WHATSAPP";
+export interface CompileOptions { channel?: Channel | string | null }
 
-// step verb → node type
+// step verb → node type (channel-neutral). `follow` and `comment` are resolved per channel in resolveType().
 const VERBS: Record<string, string> = {
   visit_profile: "visit_profile", visit: "visit_profile",
   refresh_profile: "refresh_profile", follow: "follow_profile", follow_profile: "follow_profile",
+  unfollow: "unfollow",
   like_post: "like_latest_post", like: "like_latest_post",
+  like_posts: "like_recent_posts", like_recent: "like_recent_posts", like_recent_posts: "like_recent_posts",
   comment_post: "comment_latest_post", comment: "comment_latest_post",
   endorse: "endorse_skills",
   invite: "send_invite", connect: "send_invite",
   wait_connection: "wait_connection",
+  wait_follow_back: "wait_follow_back",
+  check_identifier: "check_identifier", check_number: "check_identifier",
+  require_consent: "require_consent", check_consent: "require_consent",
+  wait_for_reply: "wait_for_reply", wait_reply: "wait_for_reply",
+  channel_switch: "channel_switch", switch_channel: "channel_switch",
   withdraw: "withdraw_invite",
   message: "send_message", inmail: "send_inmail", email: "send_email",
   delay: "delay", wait: "delay",
@@ -36,9 +53,12 @@ const VERBS: Record<string, string> = {
   ai_draft: "ai_draft_approval",
   end: "end",
 };
+// node types an agent may name directly (besides the VERBS values)
+const CHANNEL_TYPES = new Set(["follow", "comment_post"]);
 
 const TERMINAL = new Set(["end", "send_to_sequence"]);
-export const TEXT_LIMITS = { invite_note: 300, invite_note_free: 200, message: 8000, comment: 1250, inmail_subject: 200, inmail_body: 1900 } as const;
+export const TEXT_LIMITS = { invite_note: 300, invite_note_free: 200, message: 8000, comment: 1250, inmail_subject: 200, inmail_body: 1900, ig_message: 1000, wa_message: 4096, ig_comment: 2200 } as const;
+const CHANNELS: Channel[] = ["LINKEDIN", "INSTAGRAM", "WHATSAPP"];
 
 /** "2h" | "3d" | "30m" | "0d" | {amount, unit} → NodeDelay */
 export function parseWait(v: unknown): { amount: number; unit: "minutes" | "hours" | "days" } | null {
@@ -52,6 +72,21 @@ export function parseWait(v: unknown): { amount: number; unit: "minutes" | "hour
   if (!m) return null;
   const n = Number(m[1]); const u = m[2].toLowerCase()[0];
   return { amount: n, unit: u === "m" ? "minutes" : u === "h" ? "hours" : "days" };
+}
+
+function channelOf(v: unknown): Channel | null {
+  const c = String(v ?? "").trim().toUpperCase();
+  return (CHANNELS as string[]).includes(c) ? (c as Channel) : null;
+}
+
+/** Verb → node type, with the channel rule for follow / comment (LinkedIn keeps its own node types). */
+function resolveType(verb: string, channel: Channel | null): string | null {
+  const ig = channel === "INSTAGRAM";
+  if (verb === "follow" || verb === "follow_profile") return ig ? "follow" : "follow_profile";
+  if (verb === "comment" || verb === "comment_post") return ig ? "comment_post" : "comment_latest_post";
+  if (VERBS[verb]) return VERBS[verb];
+  if (Object.values(VERBS).includes(verb) || CHANNEL_TYPES.has(verb)) return verb;
+  return null;
 }
 
 /**
@@ -69,10 +104,19 @@ function compileVariants(s: Step, field: "note" | "text" | "html", p: string, er
   });
 }
 
-export function compileSteps(input: unknown): { graph: Graph | null; errors: CompileIssue[] } {
+interface Env { channel: Channel | null; guarded: boolean }
+
+/**
+ * Compile a step list. `opts.channel` is the sequence-level channel (a step's own `channel` wins).
+ * `notes` lists what the compiler added on its own (a "Check consent" step above a WhatsApp message);
+ * callers that ignore it keep working.
+ */
+export function compileSteps(input: unknown, opts: CompileOptions = {}): { graph: Graph | null; errors: CompileIssue[]; notes: string[] } {
   const errors: CompileIssue[] = [];
+  const notes: string[] = [];
   const steps = Array.isArray(input) ? input : (input as { steps?: unknown })?.steps;
-  if (!Array.isArray(steps) || steps.length === 0) return { graph: null, errors: [{ step_path: "steps", code: "E_STEPS_EMPTY", message: "steps must be a non-empty array" }] };
+  if (!Array.isArray(steps) || steps.length === 0) return { graph: null, errors: [{ step_path: "steps", code: "E_STEPS_EMPTY", message: "steps must be a non-empty array" }], notes };
+  if (opts.channel != null && opts.channel !== "" && !channelOf(opts.channel)) return { graph: null, errors: [{ step_path: "channel", code: "E_CONFIG", message: "channel must be LINKEDIN, INSTAGRAM or WHATSAPP" }], notes };
 
   const nodes: Record<string, GraphNode> = {};
   let counter = 0;
@@ -81,18 +125,23 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
   nodes[END] = { id: END, type: "end", config: {}, position: { x: 80, y: 600 } };
 
   const newId = (type: string) => `${type.replace(/^send_|_latest_post$|_skills$|_approval$|_invite$/g, "").replace(/[^a-z_]/g, "") || "n"}_${++counter}`;
+  const asList = (v: unknown, fallback: Step[]): Step[] => (Array.isArray(v) ? (v as Step[]) : fallback);
 
   /** Compile a chain; returns the first node id (or `tail` when empty) after wiring the chain's last node to `tail`. */
-  function chain(list: unknown[], path: string, x: number, y: number, tail: string): string {
+  function chain(list: unknown[], path: string, x: number, y: number, tail: string, env: Env): string {
     let first: string | null = null;
     let prevId: string | null = null;
     let cx = x;
+    const channel = env.channel; // a channel_switch changes it for the continuation through branchy()'s nextEnv
+    let guarded = env.guarded;
     for (let i = 0; i < list.length; i++) {
       const s = list[i] as Step;
       const p = `${path}[${i}]`;
       if (!s || typeof s !== "object") { errors.push({ step_path: p, code: "E_STEP_INVALID", message: "step must be an object with a `do` field" }); continue; }
       const verb = String(s.do ?? s.type ?? "").trim();
-      const type = VERBS[verb] ?? (Object.values(VERBS).includes(verb) ? verb : null);
+      if (s.channel != null && s.channel !== "" && !channelOf(s.channel)) { errors.push({ step_path: p, field: "channel", code: "E_CONFIG", message: "channel must be LINKEDIN, INSTAGRAM or WHATSAPP" }); continue; }
+      const stepChannel: Channel | null = channelOf(s.channel) ?? channel;
+      const type = resolveType(verb, stepChannel);
       if (!type) { errors.push({ step_path: p, field: "do", code: "E_UNKNOWN_STEP", message: `unknown step "${verb}". Allowed: ${Object.keys(VERBS).join(", ")}` }); continue; }
 
       if (type === "end") { if (prevId) nodes[prevId].next = END; return first ?? END; }
@@ -101,17 +150,49 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
       const node: GraphNode = { id, type, config: {}, position: { x: cx, y } };
       const wait = parseWait(s.wait ?? s.after);
       if ((s.wait ?? s.after) != null && !wait) errors.push({ step_path: p, field: "wait", code: "E_WAIT_INVALID", message: `wait must look like "2h", "3d", "30m"` });
+      const setDelay = () => { if (wait && type !== "delay") node.delay = { ...wait, jitter_pct: 20 }; };
+      /**
+       * Wire a node with named exits and a continuation: the steps after it flow from every branch that does not end.
+       * Branch-only nodes (wait_connection, require_consent, …) have no `next`; `nextIsCont` (channel_switch) makes the
+       * continuation the primary exit and the branches the alternatives.
+       */
+      const branchy = (branches: Record<string, Step[]>, dy: number[], nextEnv: Partial<Env> = {}, branchEnv: Record<string, Partial<Env>> = {}, nextIsCont = false): string => {
+        nodes[id] = node;
+        setDelay();
+        if (prevId) nodes[prevId].next = id;
+        if (!first) first = id;
+        const rest = list.slice(i + 1);
+        const cont = rest.length ? chain(rest, `${path}[${i + 1}..]`, cx + 220, y, tail, { channel, guarded, ...nextEnv }) : tail;
+        node.branches = {};
+        Object.entries(branches).forEach(([name, stepsOf], k) => {
+          node.branches![name] = chain(stepsOf, `${p}.${name}`, cx + 220, y + (dy[k] ?? 0), cont, { channel, guarded, ...(branchEnv[name] ?? {}) });
+        });
+        if (nextIsCont) node.next = cont;
+        return first!;
+      };
 
       switch (type) {
         case "visit_profile": node.config = { notify: s.notify !== false }; break;
         case "refresh_profile": node.config = { only_if_stale_days: Math.max(1, Math.min(365, Number(s.only_if_stale_days ?? 90))) }; break;
         case "follow_profile": node.config = {}; break;
+        case "follow": case "unfollow": node.config = {}; break;
         case "like_latest_post": node.config = { max_age_days: Number(s.max_age_days ?? 90), reaction: String(s.reaction ?? "like") }; break;
+        case "like_recent_posts": {
+          const count = Number(s.count ?? 2);
+          if (!Number.isInteger(count) || count < 1 || count > 3) errors.push({ step_path: p, field: "count", code: "E_LIKE_COUNT", message: "like_recent_posts likes 1 to 3 posts (each like is a metered action)" });
+          node.config = { count: Math.max(1, Math.min(3, Number.isFinite(count) ? count : 2)), max_age_days: Number(s.max_age_days ?? 30) }; break;
+        }
         case "comment_latest_post": {
           const t = String(s.text ?? "");
           if (!t) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "comment needs text" });
           if (t.length > TEXT_LIMITS.comment) errors.push({ step_path: p, field: "text", code: "E_TEXT_TOO_LONG", message: `comment exceeds ${TEXT_LIMITS.comment} characters` });
           node.config = { text: t, max_age_days: Number(s.max_age_days ?? 90) }; break;
+        }
+        case "comment_post": {
+          const t = String(s.text ?? "");
+          if (!t && !s.ai) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "comment needs text (or ai:true for a person-approved AI draft)" });
+          if (t.length > TEXT_LIMITS.ig_comment) errors.push({ step_path: p, field: "text", code: "E_TEXT_TOO_LONG", message: `Instagram comment exceeds ${TEXT_LIMITS.ig_comment} characters` });
+          node.config = { text: t, ai: !!s.ai, max_age_days: Number(s.max_age_days ?? 30) }; break;
         }
         case "endorse_skills": node.config = { count: Math.max(1, Math.min(5, Number(s.count ?? 1))) }; break;
         case "send_invite": {
@@ -124,10 +205,28 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
         case "withdraw_invite": node.config = {}; break;
         case "send_message": {
           const t = String(s.text ?? "");
+          const limit = stepChannel === "INSTAGRAM" ? TEXT_LIMITS.ig_message : stepChannel === "WHATSAPP" ? TEXT_LIMITS.wa_message : TEXT_LIMITS.message;
           if (!t && !Array.isArray(s.variants)) errors.push({ step_path: p, field: "text", code: "E_TEXT_REQUIRED", message: "message needs text (or variants)" });
-          if (t.length > TEXT_LIMITS.message) errors.push({ step_path: p, field: "text", code: "E_TEXT_TOO_LONG", message: `message exceeds ${TEXT_LIMITS.message} characters` });
+          if (t.length > limit) errors.push({ step_path: p, field: "text", code: "E_TEXT_TOO_LONG", message: `message exceeds ${limit} characters${stepChannel && stepChannel !== "LINKEDIN" ? ` (${stepChannel} limit)` : ""}` });
+          const newChat = s.new_chat !== false && s.new_chat_allowed !== false;
           node.config = { text: t, send_always: !!s.send_always };
+          // the engine defaults new_chat_allowed to true; write it only when stated or on a channel where it matters, so
+          // re-compiling an existing LinkedIn sequence does not show every message step as changed in publish_impact
+          if (s.new_chat != null || s.new_chat_allowed != null || stepChannel === "INSTAGRAM" || stepChannel === "WHATSAPP") node.config.new_chat_allowed = newChat;
+          // the step's own channel, or the list-level one for Instagram / WhatsApp (LinkedIn steps stay as they always were)
+          if (channelOf(s.channel) || stepChannel === "INSTAGRAM" || stepChannel === "WHATSAPP") node.config.channel = stepChannel;
           { const vs = compileVariants(s, "text", p, errors); if (vs) node.config.variants = vs; }
+          // WhatsApp gate: a message that may start a new chat needs a recorded consent basis; add the check when none is above it
+          if (stepChannel === "WHATSAPP" && newChat && !guarded) {
+            const cid = newId("require_consent");
+            nodes[cid] = { id: cid, type: "require_consent", label: "Check consent", config: { bases: [] }, position: { x: cx, y }, branches: { has_consent: id, no_consent: END } };
+            if (prevId) nodes[prevId].next = cid;
+            if (!first) first = cid;
+            prevId = null; // the message hangs off the has_consent branch, not off the previous node
+            guarded = true;
+            cx += 220; node.position = { x: cx, y };
+            notes.push(`Added a "Check consent" step (${cid}) above ${p}: WhatsApp messages that may start a new chat need a recorded consent basis (any basis). Leads without one take the no_consent exit and end.`);
+          }
           break;
         }
         case "send_inmail": {
@@ -166,36 +265,50 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
         }
         case "wait_connection": {
           node.config = { window_days: Math.max(1, Math.min(30, Number(s.window_days ?? 14))), subtasks: [] };
-          const connected = Array.isArray(s.connected) ? s.connected : [];
-          const noConnect = Array.isArray(s.no_connect) ? s.no_connect : [{ do: "withdraw" }, { do: "end" }];
+          const connected = asList(s.connected, []);
           if (connected.length === 0) errors.push({ step_path: p, field: "connected", code: "E_BRANCH_REQUIRED", message: "wait_connection needs a `connected` branch (steps to run once the invite is accepted)" });
-          nodes[id] = node;
-          if (prevId) nodes[prevId].next = id;
-          if (!first) first = id;
-          // steps after wait_connection (if any) are the continuation both branches flow into
-          const rest = list.slice(i + 1);
-          const cont = rest.length ? chain(rest, `${path}[${i + 1}..]`, cx + 220, y, tail) : tail;
-          const c1 = chain(connected, `${p}.connected`, cx + 220, y - 140, cont);
-          const c2 = chain(noConnect, `${p}.no_connect`, cx + 220, y + 140, cont);
-          node.branches = { connected: c1, no_connect: c2 };
-          return first;
+          return branchy({ connected, no_connect: asList(s.no_connect, [{ do: "withdraw" }, { do: "end" }]) }, [-140, 140]);
+        }
+        case "wait_follow_back": {
+          // Instagram: the followers list is read 1–3 times a day per sender (followers_poll); detection lag up to ~12 h, first message ≥ 2 h after
+          const poll = Number(s.poll_budget ?? 2);
+          if (!Number.isInteger(poll) || poll < 1 || poll > 3) errors.push({ step_path: p, field: "poll_budget", code: "E_CONFIG", message: "poll_budget is 1 to 3 followers-list reads a day" });
+          node.config = { window_days: Math.max(1, Math.min(30, Number(s.window_days ?? 5))), poll_budget: Math.max(1, Math.min(3, Number.isFinite(poll) ? poll : 2)) };
+          const followedBack = asList(s.followed_back, []), noFollowBack = asList(s.no_follow_back, []);
+          if (!followedBack.length && !noFollowBack.length && i === list.length - 1) errors.push({ step_path: p, field: "followed_back", code: "E_BRANCH_REQUIRED", message: "wait_follow_back needs a `followed_back` and/or `no_follow_back` branch, or steps after it" });
+          return branchy({ followed_back: followedBack, no_follow_back: noFollowBack }, [-140, 140]);
+        }
+        case "check_identifier": {
+          // WhatsApp: is the number on WhatsApp? Never consumes a new_chat; an invalid number flags the lead
+          node.config = {};
+          return branchy({ valid: asList(s.valid, []), invalid: asList(s.invalid, [{ do: "end" }]) }, [-140, 140]);
+        }
+        case "require_consent": {
+          const bases = asList(s.bases, []).map((b) => String(b));
+          const bad = bases.filter((b) => !["inbound", "form_optin", "existing_customer", "linkedin_reply", "explicit_share", "imported_attested"].includes(b));
+          if (bad.length) errors.push({ step_path: p, field: "bases", code: "E_CONFIG", message: `unknown consent basis ${bad.join(", ")}; allowed: inbound, form_optin, existing_customer, linkedin_reply, explicit_share, imported_attested (empty = any)` });
+          node.config = { bases };
+          return branchy({ has_consent: asList(s.has_consent, []), no_consent: asList(s.no_consent, [{ do: "end" }]) }, [-140, 140], { guarded: true }, { has_consent: { guarded: true } });
+        }
+        case "wait_for_reply": {
+          node.config = { window_hours: Math.max(1, Math.min(24 * 60, Number(s.window_hours ?? 96))) };
+          return branchy({ replied: asList(s.replied, [{ do: "end" }]), no_reply: asList(s.no_reply, []) }, [-140, 140]);
+        }
+        case "channel_switch": {
+          const to = channelOf(s.to_channel ?? s.to);
+          if (!to) errors.push({ step_path: p, field: "to_channel", code: "E_CONFIG", message: "channel_switch needs to_channel: INSTAGRAM | WHATSAPP | LINKEDIN" });
+          node.config = { to_channel: to ?? "WHATSAPP", require_identity: s.require_identity !== false };
+          // steps after the switch run on the new channel (a WhatsApp message there gets the consent check like any other)
+          return branchy({ unavailable: asList(s.unavailable, [{ do: "end" }]) }, [140], { channel: to ?? channel, guarded: false }, {}, true);
         }
         case "condition": {
           const rules = Array.isArray(s.rules) ? s.rules : (s.field ? [{ field: s.field, op: s.op ?? "eq", value: s.value }] : []);
           if (rules.length === 0) errors.push({ step_path: p, code: "E_CONFIG", message: "condition needs rules [{field, op, value}] or field/op/value" });
           node.config = { rules, match: String(s.match ?? "all") };
-          nodes[id] = node;
-          if (prevId) nodes[prevId].next = id;
-          if (!first) first = id;
-          const rest = list.slice(i + 1);
-          const cont = rest.length ? chain(rest, `${path}[${i + 1}..]`, cx + 220, y, tail) : tail;
-          const t = chain(Array.isArray(s.true) ? s.true : [], `${p}.true`, cx + 220, y - 140, cont);
-          const f = chain(Array.isArray(s.false) ? s.false : [], `${p}.false`, cx + 220, y + 140, cont);
-          node.branches = { true: t, false: f };
-          return first;
+          return branchy({ true: asList(s.true, []), false: asList(s.false, []) }, [-140, 140]);
         }
       }
-      if (wait && type !== "delay") node.delay = { ...wait, jitter_pct: 20 };
+      setDelay();
       // engine: primary exit is `next`; named alternative exits live in `branches`
       if (type === "send_inmail") node.branches = { no_credit: END };
       if (type === "send_email") node.branches = { bounced: END, no_email: END };
@@ -212,8 +325,8 @@ export function compileSteps(input: unknown): { graph: Graph | null; errors: Com
     return first ?? tail;
   }
 
-  nodes.start.next = chain(steps, "steps", 300, 200, END);
-  return { graph: errors.length ? null : { version: 1, start: "start", nodes }, errors };
+  nodes.start.next = chain(steps, "steps", 300, 200, END, { channel: channelOf(opts.channel), guarded: false });
+  return { graph: errors.length ? null : { version: 1, start: "start", nodes }, errors, notes };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,21 +342,31 @@ export function renderGraph(graph: Graph, stats?: Record<string, any>): string {
     const c = n.config ?? {};
     const ab = Array.isArray(c.variants) && c.variants.length ? ` [A/B: ${(c.variants as Array<Record<string, unknown>>).map((v) => `${v.label ?? v.id} ${v.weight ?? 1}`).join(" / ")}]` : "";
     const q = (s: unknown, max = 90) => (s ? `"${String(s).replace(/\s+/g, " ").slice(0, max)}${String(s).length > max ? "…" : ""}"` : "");
+    const ch = c.channel ? ` [${String(c.channel).toLowerCase()}]` : "";
     switch (n.type) {
       case "send_invite": return `invite${c.note ? ` note ${q(c.note)}` : ab ? "" : " (no note)"}${ab}`;
-      case "send_message": return `message ${q(c.text)}${c.send_always ? " [send_always]" : ""}${ab}`;
+      case "send_message": return `message${ch} ${q(c.text)}${c.send_always ? " [send_always]" : ""}${c.new_chat_allowed === false ? " [existing chat only]" : ""}${ab}`;
       case "send_inmail": return `inmail ${q(c.subject, 40)} ${q(c.text)}${ab}`;
       case "send_email": return `email ${q(c.subject, 60)}${ab}`;
       case "ab_split": return `A/B split ${(Array.isArray(c.branches) ? (c.branches as Array<Record<string, unknown>>) : []).map((b) => `${b.label ?? b.id} ${b.weight ?? 1}`).join(" / ")}`;
       case "ai_route": return `AI routing: ${(Array.isArray(c.routes) ? (c.routes as Array<Record<string, unknown>>) : []).map((r) => r.label ?? r.id).join(" | ")} | else`;
       case "call_task": return `call task ${q(c.title, 60)} (connected / voicemail / no_answer / wrong_number)`;
-      case "send_voice_note": return "voice note (one recorded clip per sender)";
+      case "send_voice_note": return `voice note${ch} (one recorded clip per sender)`;
       case "find_email": return "find email (found / not_found)";
       case "refresh_profile": return `refresh profile (if older than ${c.only_if_stale_days ?? 90}d)`;
       case "follow_profile": return "follow";
+      case "follow": return "follow (Instagram, metered)";
+      case "unfollow": return "unfollow";
+      case "like_recent_posts": return `like ${c.count ?? 1} recent post(s)${c.max_age_days ? ` (≤ ${c.max_age_days}d old)` : ""}`;
       case "comment_latest_post": return `comment ${q(c.text)}`;
+      case "comment_post": return `comment on a recent post (public) ${c.ai ? "[AI draft, person approves]" : q(c.text)}`;
       case "delay": return `delay ${c.amount} ${c.unit}${c.jitter_pct ? ` ±${c.jitter_pct}%` : ""}`;
       case "wait_connection": return `wait for connection (window ${c.window_days ?? 14}d)`;
+      case "wait_follow_back": return `wait for follow-back (window ${c.window_days ?? 5}d, ${c.poll_budget ?? 2} followers reads/day) (followed_back / no_follow_back)`;
+      case "check_identifier": return "check the number is on WhatsApp (valid / invalid)";
+      case "require_consent": return `check consent${Array.isArray(c.bases) && c.bases.length ? ` (${(c.bases as string[]).join(", ")})` : " (any basis)"} (has_consent / no_consent)`;
+      case "wait_for_reply": return `wait for a reply (window ${c.window_hours ?? 96}h) (replied / no_reply)`;
+      case "channel_switch": return `switch to ${String(c.to_channel ?? "?").toLowerCase()}${c.require_identity === false ? "" : " (needs a verified identity)"} (next / unavailable)`;
       case "condition": return `condition ${JSON.stringify(c.rules ?? [])} match=${c.match ?? "all"}`;
       case "ai_draft_approval": return `AI draft (${c.kind}) + human approval — brief ${q(c.brief, 60)}`;
       case "manual_task": return `manual task ${q(c.title, 60)}`;
@@ -332,6 +455,69 @@ export const TEMPLATES: Array<{ key: string; name: string; category: string; des
       { do: "email", subject: "{{first_name|Hi}} — <topic>", text: "Hi {{first_name|there}},\n\n<why them, one line>.\n\n<ask, one line>.\n\n{{sender.first_name}}" },
       { do: "email", wait: "3d", subject: "Re: <topic>", text: "Hi {{first_name|there}}, <proof point>. Worth a short call?" },
       { do: "email", wait: "4d", subject: "Re: <topic>", text: "Closing the loop — if this is not a priority now, no problem. <one-line leave-behind>." },
+    ],
+  },
+  {
+    key: "instagram_ladder", name: "Instagram engagement ladder", category: "instagram",
+    description: "The default Instagram sequence: follow → 1 day → like 2 recent posts → 2 days → wait for a follow-back (5 days) → followed back: message; no follow-back: comment on a post, 3 days, message → wait 96 h for a reply → no reply: one more message after 5 days. Instagram is a low-volume, high-touch channel: 10 actions an hour, a daily total per level (level 0 cannot message at all), roughly 40 leads in flight per sender at level 2. A message after a follow and a comment converts several times better than a cold one; a cold DM as the first step lands in Requests and the validator warns.",
+    steps: [
+      { do: "follow", channel: "INSTAGRAM" },
+      { do: "like_posts", wait: "1d", count: 2, max_age_days: 30 },
+      { do: "delay", wait: "2d" },
+      { do: "wait_follow_back", window_days: 5, poll_budget: 2,
+        followed_back: [
+          { do: "message", channel: "INSTAGRAM", new_chat: true, text: "Thanks for the follow back, {{first_name|hey}}. I liked your recent post on <topic>. Quick question: <one open question about their work>?" },
+        ],
+        no_follow_back: [
+          { do: "comment", channel: "INSTAGRAM", text: "<one specific, genuine sentence about this post — no pitch, no link>" },
+          { do: "message", wait: "3d", channel: "INSTAGRAM", new_chat: true, text: "{{first_name|Hey}}, I've been following your posts on <topic>. <one specific observation>. Curious how you approach <problem>?" },
+        ] },
+      { do: "wait_for_reply", window_hours: 96,
+        replied: [{ do: "end" }],
+        no_reply: [
+          { do: "message", wait: "5d", channel: "INSTAGRAM", text: "No worries if this isn't the moment, {{first_name|hey}}. <one-line leave-behind, no link>." },
+          { do: "end" },
+        ] },
+    ],
+  },
+  {
+    key: "linkedin_to_whatsapp", name: "LinkedIn first, WhatsApp through the inbox", category: "cross_channel",
+    description: "The canonical cross-channel pattern: visit → invite → connected: message → wait 96 h for a reply → no reply: second message after 7 days; not accepted: withdraw. WhatsApp is never run in parallel: it is reached THROUGH the inbox once a LinkedIn reply produced consent (they shared their number, or agreed to be contacted). Record it with consent_grant (basis explicit_share or linkedin_reply, evidence: the message) and add the number with identity_add; then enrol the lead in whatsapp_consented_followup. WhatsApp reaches only people who agreed.",
+    steps: [
+      { do: "visit_profile" },
+      { do: "invite", note: "Hi {{first_name|there}} — I follow work in {{company|your space}} and would like to connect." },
+      { do: "wait_connection", window_days: 14,
+        connected: [
+          { do: "message", wait: "1d", text: "Thanks for connecting, {{first_name|there}}. Quick question: how are you handling <problem> at {{company|your company}} today?" },
+          { do: "wait_for_reply", window_hours: 96,
+            replied: [{ do: "end" }],
+            no_reply: [
+              { do: "message", wait: "7d", text: "{{first_name|Hi}}, one concrete example in case it is useful: <one-line proof point>. Happy to continue here or on WhatsApp if that is easier for you." },
+              { do: "end" },
+            ] },
+        ],
+        no_connect: [{ do: "withdraw" }, { do: "end" }] },
+    ],
+  },
+  {
+    key: "whatsapp_consented_followup", name: "WhatsApp follow-up (consented leads only)", category: "whatsapp",
+    description: "For leads with a recorded consent basis and a verified number: check consent → check the number is on WhatsApp → first message (new chat) → wait 72 h for a reply → no reply: one follow-up after 3 days. Leads without consent or with a number that is not on WhatsApp end without a message. WhatsApp reaches only people who agreed: new chats are metered by the sender's governor level (2/5/10/20/35 a day), a freshly connected number waits 24 h, and a reply on any channel stops the lead everywhere.",
+    steps: [
+      { do: "require_consent", channel: "WHATSAPP", bases: [],
+        has_consent: [
+          { do: "check_identifier", channel: "WHATSAPP",
+            valid: [
+              { do: "message", channel: "WHATSAPP", new_chat: true, text: "Hi {{first_name|there}}, {{sender.first_name}} here — we spoke on LinkedIn about <topic>. <one specific line>. Is this a good place to continue?" },
+              { do: "wait_for_reply", window_hours: 72,
+                replied: [{ do: "end" }],
+                no_reply: [
+                  { do: "message", wait: "3d", channel: "WHATSAPP", text: "{{first_name|Hi}}, no rush — if it is easier, <one concrete offer>. Reply STOP any time and I will not write again." },
+                  { do: "end" },
+                ] },
+            ],
+            invalid: [{ do: "end" }] },
+        ],
+        no_consent: [{ do: "end" }] },
     ],
   },
 ];

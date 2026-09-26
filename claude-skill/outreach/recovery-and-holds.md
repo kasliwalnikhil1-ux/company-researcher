@@ -2,7 +2,7 @@
 
 ## What happens when a lead replies
 
-- **Lead-wide stop (default).** A reply to any sender, on LinkedIn or email, ends every live enrolment of that lead in the workspace and cancels queued touches on every sender. `stop_on_reply_scope: "sender"` restores the old per-sender behaviour; `send_always` steps and `stop_on_reply: false` still win.
+- **Lead-wide stop (default).** A reply to any sender, on LinkedIn, Instagram, WhatsApp or email, ends every live enrolment of that lead in the workspace and cancels queued touches on every sender and every channel. `stop_on_reply_scope: "sender"` restores the old per-sender behaviour; `send_always` steps and `stop_on_reply: false` still win. A `wait_for_reply` step is the exception: the lead advances on its `replied` exit instead of leaving. A WhatsApp STOP-style reply also revokes consent and adds a suppression.
 - **`on_reply: "exit"` (default).** The lead leaves cleanly (`exited_replied`), the reply gets an intent, interested / question replies create a follow-up task. Continue in the inbox.
 - **`on_reply: "hold"`.** The lead is paused for a person to decide. It shows on the dashboard attention list (`held_leads`), stops counting toward sender load after 14 days and the hold ends by itself after `hold_max_days` (30).
 - **Out-of-office.** An `ooo` reply does not end the sequence: the lead re-opens after the return date the auto-reply names, else after `ooo_resume_days` (7).
@@ -34,4 +34,4 @@ Never resume a held lead on your own judgement.
 
 Failures that fix themselves need nothing from you: when a sender reconnects, its leads that failed with a disconnect or network reason in the last 7 days re-queue automatically.
 
-Good matches: disconnected sender, LinkedIn temporary error, rate limit → `retry` once the sender is healthy. "No usable text for this lead", "no recent post", "no InMail credit" → `skip`. Profile gone, cannot be invited, blacklisted → `exit`.
+Good matches: disconnected sender, LinkedIn temporary error, rate limit → `retry` once the sender is healthy. "No usable text for this lead", "no recent post", "no InMail credit" → `skip`. Profile gone, cannot be invited, blacklisted, number not on WhatsApp (`not_on_whatsapp` / `E_IDENTIFIER_INVALID`), consent revoked → `exit`. "No recorded WhatsApp consent" is not a failure to recover: ask the human whether a basis exists ([channels-pipeline.md](channels-pipeline.md)).

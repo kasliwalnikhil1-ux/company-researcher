@@ -10,10 +10,11 @@ declare
      "m1":{"id":"m1","type":"send_message","config":{"text":"Hi {{first_name}}","send_always":true},"next":"end","position":{"x":0,"y":0}},
      "end":{"id":"end","type":"end","config":{},"position":{"x":0,"y":0}}}}';
 begin
-  select id into u_owner  from auth.users order by created_at limit 1;
-  select id into u_member from auth.users order by created_at limit 1 offset 1;
-  select id into u_viewer from auth.users order by created_at limit 1 offset 2;
-  if u_viewer is null then raise exception 'SMOKE FAIL: this test needs three app users'; end if;
+  -- three ACTIVE accounts (the platform admin layer gates outreach_role_in on platform_can_use)
+  select user_id into u_owner  from platform_user_access where status = 'active' order by created_at limit 1;
+  select user_id into u_member from platform_user_access where status = 'active' order by created_at limit 1 offset 1;
+  select user_id into u_viewer from platform_user_access where status = 'active' order by created_at limit 1 offset 2;
+  if u_viewer is null then raise exception 'SMOKE FAIL: this test needs three active app users'; end if;
 
   insert into outreach_workspaces(name, slug, created_by) values ('smoke4', 'smoke4-' || encode(gen_random_bytes(4),'hex'), u_owner) returning id into ws;
   perform outreach_seed_workspace_defaults(ws);

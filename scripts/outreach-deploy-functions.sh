@@ -72,6 +72,8 @@ CRON_FUNCS=(
   outreach-crm-sync          # CRM push / pull (every 5 min)
   outreach-worker-reports    # weekly sender report, digests, client reports (hourly; sends at 08:00 workspace time)
   outreach-domain-check      # DNS checks for portal + tracking domains (every 30 min)
+  outreach-worker-profile    # Profile Studio: verify applied changes, owner emails, experiments (every 5 min); weekly drift + QA
+  outreach-worker-channels   # Instagram / WhatsApp: followers poll (35 * * * *), identifier check (*/30), block detect (55 * * * *), transcribe (* * * * *), wa_governor
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
@@ -90,6 +92,7 @@ USER_FUNCS=(
   outreach-mcp               # remote MCP connector (OAuth bearer checked in code; .well-known must be public)
   outreach-workspace-secrets # stores the workspace's own AI / finder keys (encrypted); owner JWT
   outreach-api               # public REST API: the API key is checked in code (outreach_api_authenticate)
+  outreach-profile           # Profile Studio: user actions (JWT) + the owner's public token pages (authority / approve / revert)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")
 

@@ -1,13 +1,40 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User } from 'lucide-react';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';
 import type { ThreadAttributionRow } from '@/lib/outreach/intel';
 import { Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
+import { isMailProvider } from '@/lib/outreach/channels';
+
+export function isVoiceNote(att: MessageAttachment): boolean {
+  const mime = att.mimetype ?? att.type ?? '';
+  return !!att.voice_note || mime.startsWith('audio/');
+}
+
+function fmtDuration(s: number | null | undefined): string | null {
+  if (typeof s !== 'number' || !Number.isFinite(s) || s <= 0) return null;
+  const m = Math.floor(s / 60); const r = Math.round(s % 60);
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+/** Voice note (WhatsApp / Instagram): inline player fed by the attachment proxy, loaded on mount. */
+function VoiceNote({ messageId, att, mine }: { messageId: string; att: MessageAttachment; mine: boolean }) {
+  const { url, loading, error, load } = useAttachmentUrl(messageId, att.id);
+  useEffect(() => { if (!url && !loading && !error) void load(); }, [url, loading, error, load]);
+  const dur = fmtDuration(att.duration_s);
+  return (
+    <div className={cn('rounded-lg px-2 py-1.5 min-w-[220px] max-w-full', mine ? 'bg-white/15' : 'bg-gray-50 border border-gray-200')}>
+      <div className={cn('flex items-center gap-1.5 text-[11px] mb-1', mine ? 'text-white/80' : 'text-gray-500')}><Mic className="w-3 h-3" /> Voice note{dur ? ` · ${dur}` : ''}</div>
+      {url ? <audio controls preload="metadata" src={url} className="w-full h-8" aria-label="Voice note" />
+        : error ? <div className="text-[11px] text-red-600">{error}</div>
+          : <div className={cn('inline-flex items-center gap-1 text-[11px]', mine ? 'text-white/80' : 'text-gray-500')}><Loader2 className="w-3 h-3 animate-spin" /> Loading…</div>}
+    </div>
+  );
+}
 
 function AttachmentChip({ messageId, att, mine }: { messageId: string; att: MessageAttachment; mine: boolean }) {
   const { url, loading, error, load } = useAttachmentUrl(messageId, att.id);
@@ -95,8 +122,13 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   const [draft, setDraft] = useState(m.text ?? '');
   const [busy, setBusy] = useState<'edit' | 'delete' | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const isEmail = provider !== 'LINKEDIN';
+  const isEmail = isMailProvider(provider);
   const safeHtml = useMemo(() => (isEmail && m.html && !m.text ? sanitizeHtml(m.html) : ''), [isEmail, m.html, m.text]);
+  const voiceNotes = useMemo(() => (m.attachments ?? []).filter((a) => isVoiceNote(a as MessageAttachment)) as MessageAttachment[], [m.attachments]);
+  const otherAttachments = useMemo(() => (m.attachments ?? []).filter((a) => !isVoiceNote(a as MessageAttachment)) as MessageAttachment[], [m.attachments]);
+  const reactions = Array.isArray(m.reactions) ? m.reactions.filter((r) => r && typeof r.emoji === 'string' && r.emoji) : [];
+  const transcriptPending = voiceNotes.length > 0 && m.transcript_status === 'pending';
+  const transcriptFailed = voiceNotes.length > 0 && m.transcript_status === 'failed';
 
   const save = async () => {
     if (!draft.trim() || draft === m.text) { setEditing(false); return; }
@@ -125,12 +157,28 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
         ) : (
           <span className={cn(deleted && 'line-through')}>{m.text || (m.attachments?.length ? '' : <em className="opacity-70">(empty message)</em>)}</span>
         )}
-        {!!m.attachments?.length && (
+        {voiceNotes.length > 0 && (
+          <div className={cn('space-y-1.5', m.text ? 'mt-2' : '')}>
+            {voiceNotes.map((a) => <VoiceNote key={a.id} messageId={m.id} att={a} mine={mine} />)}
+            {m.transcript
+              ? <div className={cn('text-xs italic border-l-2 pl-2', mine ? 'text-white/85 border-white/40' : 'text-gray-600 border-gray-300')}>{m.transcript}</div>
+              : transcriptPending ? <div className={cn('text-[11px] inline-flex items-center gap-1', mine ? 'text-white/70' : 'text-gray-400')}><Loader2 className="w-3 h-3 animate-spin" /> Transcribing…</div>
+                : transcriptFailed ? <div className={cn('text-[11px]', mine ? 'text-white/70' : 'text-gray-400')}>Could not transcribe this voice note.</div> : null}
+          </div>
+        )}
+        {otherAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {m.attachments.map((a) => <AttachmentChip key={a.id} messageId={m.id} att={a as MessageAttachment} mine={mine} />)}
+            {otherAttachments.map((a) => <AttachmentChip key={a.id} messageId={m.id} att={a} mine={mine} />)}
           </div>
         )}
       </div>
+      {reactions.length > 0 && (
+        <div className={cn('flex flex-wrap gap-1 -mt-1.5 relative z-[1]', mine ? 'justify-end mr-2' : 'ml-2')} aria-label="Reactions">
+          {reactions.map((r, i) => (
+            <span key={`${r.emoji}-${i}`} className="inline-flex items-center rounded-full bg-white border border-gray-200 shadow-sm px-1.5 py-px text-xs" title={[r.by, r.at ? fmtDate(r.at) : null].filter(Boolean).join(' · ') || undefined}>{r.emoji}</span>
+          ))}
+        </div>
+      )}
       {!mine && m.summary && (
         <div className="flex items-start gap-1 text-xs text-gray-500 mt-1 max-w-full">
           <Sparkles className="w-3 h-3 mt-0.5 text-fuchsia-500 flex-shrink-0" />
@@ -142,6 +190,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
         <span title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : fmtDate(m.sent_at)}</span>
         {m.edited_at && !deleted && <span>· edited</span>}
         {deleted && <span>· deleted</span>}
+        {mine && m.read_at && !pending && <span className="inline-flex items-center gap-0.5 text-sky-600" title={`Seen ${fmtDate(m.read_at)}`}><CheckCheck className="w-3 h-3" /> Seen</span>}
         {isEmail && mine && (m.opens > 0 || m.clicks > 0) && (
           <>
             <span className="inline-flex items-center gap-0.5" title="Opens"><Eye className="w-3 h-3" />{m.opens}</span>

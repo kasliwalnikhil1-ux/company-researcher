@@ -54,6 +54,13 @@ export default function SequenceSettingsPanel({ draft, clients, onChange, disabl
             <Radio name="reply-scope" checked={scope === 'sender'} onSelect={() => set({ stop_on_reply_scope: 'sender' })} title="Only stop the sender they replied to" help="Other senders and mailboxes keep going. Rarely what you want." />
           </div>
         ) : <p className="text-xs text-amber-700">Leads keep getting steps after they reply.</p>}
+        <div className="pt-1 space-y-1">
+          <Toggle checked={s.channel_independent_continuation === true} onChange={(v) => set({ channel_independent_continuation: v })} label="Keep going on the other channels" disabled={disabled} />
+          <p className="text-xs text-gray-500">Off: a reply on any channel stops the lead on every channel. On: only the channel they replied on stops.</p>
+          {s.channel_independent_continuation === true && (
+            <p className="text-xs text-amber-700">A reply on one channel will not stop this lead on the others, so two accounts can end up talking to the same person at once. Leave this off unless each channel is a separate conversation on purpose.</p>
+          )}
+        </div>
       </Section>
 
       {stop && (

@@ -26,6 +26,9 @@ const MAX_BYTES = 50 * 1024 * 1024;
 
 type CsvMode = 'upsert' | 'update_only';
 // Same list as outreach-imports-create / outreach_update_lead_fields. Custom fields (custom.<key>) can always be updated.
+// The CSV itself is uploaded to storage and the header→field mapping goes to outreach-imports-create; the import worker turns
+// `instagram_handle` / `whatsapp_phone` columns into `identities: [{provider, identifier}]` on the upsert_lead payload (new leads
+// and upserts; they are not offered in update-only mode).
 const UPDATABLE = new Set(['first_name', 'last_name', 'full_name', 'headline', 'company', 'title', 'location', 'email_work', 'email_personal', 'phone']);
 const isUpdatable = (field: string) => UPDATABLE.has(field) || field.startsWith('custom.');
 function fieldLabel(field: string): string {

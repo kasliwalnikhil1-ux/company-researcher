@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import {
-  ArrowRightCircle, AtSign, Award, Bot, Clock, ClipboardList, Eye, Flag, GitBranch, List, Mail, MessageCircle, MessageSquare, Mic, Milestone, Phone, Play, RefreshCw, RotateCw, Route,
-  Search, Shuffle, Sparkles, Split, Tag, Tags, ThumbsUp, UserCheck, UserPlus, UserRoundPlus, Users, UserX, Webhook,
+  ArrowLeftRight, ArrowRightCircle, AtSign, Award, Bot, Clock, ClipboardList, Eye, Flag, GitBranch, Heart, List, Mail, MessageCircle, MessageSquare, MessageSquareReply, Mic, Milestone,
+  Phone, PhoneCall, Play, RefreshCw, RotateCw, Route, Search, ShieldCheck, Shuffle, Sparkles, Split, Tag, Tags, ThumbsUp, UserCheck, UserPlus, UserRoundMinus, UserRoundPlus, Users, UserX, Webhook,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { GraphNode, NodeType } from '@/lib/outreach/types';
@@ -20,6 +20,8 @@ export const STEP_ICONS: Record<NodeType, ComponentType<{ className?: string }>>
   add_tag: Tag, remove_tag: Tags, change_list: List, change_stage: Milestone,
   call_webhook: Webhook, call_api: Shuffle, send_to_sequence: ArrowRightCircle,
   manual_task: ClipboardList, call_task: Phone, ai_draft_approval: Sparkles, ai_route: Route,
+  follow: UserRoundPlus, unfollow: UserRoundMinus, like_recent_posts: Heart, comment_post: MessageCircle, wait_follow_back: Users,
+  check_identifier: PhoneCall, require_consent: ShieldCheck, wait_for_reply: MessageSquareReply, channel_switch: ArrowLeftRight,
 };
 
 // Soft tint for the icon box per step colour (bg-xxx-600 → text/border/bg of the same hue). Tailwind only ships classes it can see, so they are spelt out.
@@ -28,6 +30,7 @@ const TINTS: Record<string, string> = {
   indigo: 'text-indigo-600 border-indigo-200 bg-indigo-50', blue: 'text-blue-600 border-blue-200 bg-blue-50', emerald: 'text-emerald-600 border-emerald-200 bg-emerald-50',
   amber: 'text-amber-600 border-amber-200 bg-amber-50', teal: 'text-teal-600 border-teal-200 bg-teal-50', purple: 'text-purple-600 border-purple-200 bg-purple-50',
   slate: 'text-slate-600 border-slate-200 bg-slate-50', fuchsia: 'text-fuchsia-600 border-fuchsia-200 bg-fuchsia-50',
+  rose: 'text-rose-600 border-rose-200 bg-rose-50', green: 'text-green-600 border-green-200 bg-green-50',
 };
 export function stepTint(type: NodeType): string {
   const hue = NODE_CATALOG[type]?.color.replace(/^bg-/, '').replace(/-\d+$/, '') ?? 'gray';
@@ -46,6 +49,9 @@ export function StepIcon({ type, className }: { type: NodeType; className?: stri
 /** Plain-language names and order of the picker's categories (the catalogue groups underneath stay as they are). */
 const CATEGORIES: Array<{ label: string; groups: NodeGroup[] }> = [
   { label: 'LinkedIn actions', groups: ['Outreach', 'Social'] },
+  // shown even when the pool has no account of the channel: the steps are greyed out with the reason
+  { label: 'Instagram actions', groups: ['Instagram'] },
+  { label: 'WhatsApp actions', groups: ['WhatsApp'] },
   { label: 'Conditions and timing', groups: ['Logic'] },
   { label: 'Update the lead', groups: ['CRM'] },
   { label: 'Team and AI', groups: ['Flow', 'AI'] },
@@ -64,12 +70,21 @@ const BLURB: Partial<Record<NodeType, string>> = {
   send_invite: 'Send a connection request, with or without a note',
   wait_connection: 'Wait to see whether the lead accepts. Branches on the answer',
   withdraw_invite: 'Take back a connection request that was not accepted',
-  send_message: 'Send a LinkedIn message to a connected lead',
-  send_voice_note: 'Send a recorded voice message on LinkedIn',
+  send_message: 'Send a direct message on LinkedIn, Instagram or WhatsApp',
+  send_voice_note: 'Send a recorded voice message on LinkedIn or WhatsApp',
   send_inmail: 'Message a lead you are not connected with',
   send_email: 'Send an email from a connected mailbox',
   find_email: 'Look up the lead’s work email',
+  follow: 'Follow the lead on Instagram. The usual first touch there',
+  unfollow: 'Stop following the lead, for example after the conversation ended',
+  like_recent_posts: 'Like one to three of the lead’s recent posts',
+  comment_post: 'Leave a public comment on the lead’s latest post',
+  wait_follow_back: 'Wait a few days to see whether the lead follows back. Branches on the answer',
+  check_identifier: 'Check whether the lead’s number is on WhatsApp, without starting a chat',
+  require_consent: 'Only continue with leads who agreed to hear from you on WhatsApp',
   delay: 'Pause for a while before the next step',
+  wait_for_reply: 'Give the lead a few days to answer. Branches on whether they did',
+  channel_switch: 'Carry on with the same lead on another channel, with the account that works it there',
   condition: 'Take a different path depending on the lead',
   ab_split: 'Send some leads one way and the rest another, to compare',
   rotate_sender: 'Start again from an earlier step with the next sender',

@@ -15,15 +15,17 @@ export const DEFAULT_SCHEDULE: Schedule = {
 };
 
 /** Action types that have a daily budget a human cares about (ordered for display). */
-export const BUDGET_ACTION_TYPES: ActionType[] = ['invite', 'message', 'profile_view', 'inmail', 'like', 'comment', 'endorse', 'follow', 'search_page', 'post_fetch', 'withdraw', 'email'];
+export const BUDGET_ACTION_TYPES: ActionType[] = ['invite', 'message', 'new_chat', 'profile_view', 'inmail', 'like', 'comment', 'endorse', 'follow', 'unfollow', 'search_page', 'post_fetch', 'withdraw', 'email', 'profile_edit', 'identifier_check', 'followers_poll'];
 
 export const ACTION_LABELS: Record<ActionType, string> = {
   profile_view: 'Profile views', invite: 'Invitations', withdraw: 'Withdrawals', message: 'Messages', inmail: 'InMails', like: 'Likes', comment: 'Comments',
   endorse: 'Endorsements', search_page: 'Search pages', email: 'Emails', reply: 'Replies', relations_poll: 'Relation polls', call_api: 'API calls',
-  post_fetch: 'Post fetches', follow: 'Follows', find_email: 'Email lookups',
+  post_fetch: 'Post fetches', follow: 'Follows', find_email: 'Email lookups', profile_edit: 'Profile edits',
+  // Channels (024): Instagram / WhatsApp
+  unfollow: 'Unfollows', new_chat: 'New conversations', identifier_check: 'Number checks', followers_poll: 'Follower checks', story_react: 'Story reactions',
 };
 
-export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP' };
+export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP' };
 /** How the sender was connected: password login on the hosted page, cookies from the Chrome extension, OAuth (mailboxes),
  *  or the hosted page's browser-extension sign-in that reuses the LinkedIn session already open on the owner's computer. */
 export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = { credentials: 'Password login', cookie: 'Cookie (extension)', oauth: 'OAuth', browser: 'Signed-in browser' };

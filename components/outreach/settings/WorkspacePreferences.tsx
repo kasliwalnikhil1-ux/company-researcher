@@ -80,6 +80,8 @@ const TOGGLES: ToggleDef[] = [
     description: 'When someone who is not yet a lead messages one of your senders, a lead is created so the conversation shows up in the inbox with a profile.' },
   { key: 'recruiter_enabled', defaultValue: false, label: 'Recruiter features',
     description: 'Lets the connect wizard keep LinkedIn Recruiter on for senders with a Recruiter seat. Off by default because Recruiter automation carries extra risk.' },
+  { key: 'profile_owner_permission', defaultValue: false, label: 'Require the account owner’s permission for profile edits',
+    description: 'Off by default: senders’ LinkedIn profiles can be edited from the Profile tab without a sign-off, and the owner is not emailed. Turn it on when senders belong to clients or their employees: each field then needs the owner’s permission (granted from a link they receive), changes can wait for their one-click approval, and every applied change emails them a revert link.' },
   { key: 'cookie_mode_opt_in', defaultValue: true, label: 'Cookie-mode opt-in',
     description: 'Lets the Chrome extension keep senders connected by syncing their LinkedIn session cookie. Cookies are encrypted at rest and every access is logged.' },
 ];

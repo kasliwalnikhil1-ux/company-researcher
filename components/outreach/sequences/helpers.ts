@@ -1,6 +1,7 @@
 // Pure helpers for the sequence builder: graph mutations, layout, summaries, diffs.
 import type { Graph, GraphNode, List, NodeDelay, NodeType, OutboundWebhook, Sender, Sequence, SequenceStatus, Stage, Tag } from '@/lib/outreach/types';
-import { NODE_CATALOG, newNode, nodeExits } from '@/lib/outreach/nodes';
+import { CONSENT_BASIS_LABELS, NODE_CATALOG, newNode, nodeExits } from '@/lib/outreach/nodes';
+import { PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import { parseError } from '@/lib/outreach/api';
 import { humanizeIssue } from '@/lib/outreach/graph';
 
@@ -63,7 +64,21 @@ export function nodeSummary(node: GraphNode, lookup: Lookup = {}, nodes: Record<
     case 'send_invite': return truncate(c.note) || (c.ai ? 'AI-drafted note (needs approval)' : 'Invitation without a note');
     case 'wait_connection': { const st = Array.isArray(c.subtasks) ? c.subtasks.length : 0; return `Up to ${c.window_days ?? 14} days${st ? ` · ${st} subtask${st === 1 ? '' : 's'}` : ''}`; }
     case 'withdraw_invite': return 'Withdraw the pending invitation';
-    case 'send_message': return truncate(c.text) || (c.ai ? 'AI-drafted message (needs approval)' : 'No message text');
+    case 'send_message': {
+      const text = truncate(c.text) || (c.ai ? 'AI-drafted message (needs approval)' : 'No message text');
+      return c.channel && PROVIDER_LABELS[c.channel as keyof typeof PROVIDER_LABELS] ? `${PROVIDER_LABELS[c.channel as keyof typeof PROVIDER_LABELS]} · ${text}` : text;
+    }
+    case 'send_voice_note': return c.channel && PROVIDER_LABELS[c.channel as keyof typeof PROVIDER_LABELS] ? `Voice note on ${PROVIDER_LABELS[c.channel as keyof typeof PROVIDER_LABELS]}` : 'One recorded clip per sender';
+    // channels
+    case 'follow': return 'Follow the lead on Instagram';
+    case 'unfollow': return 'Stop following the lead';
+    case 'like_recent_posts': { const n = Math.min(3, Math.max(1, Number(c.count) || 1)); return `Like ${n} recent post${n === 1 ? '' : 's'} · newer than ${c.max_age_days ?? 60}d`; }
+    case 'comment_post': return truncate(c.text) || (c.ai ? 'AI-drafted comment (needs approval)' : 'No comment text');
+    case 'wait_follow_back': return `Up to ${c.window_days ?? 5} days`;
+    case 'check_identifier': return 'Is the number on WhatsApp?';
+    case 'require_consent': { const bases: string[] = Array.isArray(c.bases) ? c.bases : []; return bases.length ? bases.map((b) => CONSENT_BASIS_LABELS[b as keyof typeof CONSENT_BASIS_LABELS] ?? b).join(', ') : 'Any recorded consent'; }
+    case 'wait_for_reply': { const h = Number(c.window_hours) || 96; return h % 24 === 0 ? `Up to ${h / 24} day${h === 24 ? '' : 's'}` : `Up to ${h} hour${h === 1 ? '' : 's'}`; }
+    case 'channel_switch': return `Carry on with the lead on ${PROVIDER_LABELS[c.to_channel as keyof typeof PROVIDER_LABELS] ?? c.to_channel ?? '…'}`;
     case 'send_inmail': return truncate(c.subject) || truncate(c.text) || `InMail (${c.api || 'classic'})`;
     case 'send_email': return `${truncate(c.subject, 40) || 'No subject'} · to ${c.to || 'any'} email`;
     case 'delay': return formatDelay(c as NodeDelay) || 'No delay';
@@ -144,8 +159,8 @@ export function addNode(g: Graph, type: NodeType, position: { x: number; y: numb
 // Exits: tone + "add here" insertion
 // ---------------------------------------------------------------------------
 export type ExitTone = 'positive' | 'negative' | 'neutral';
-const POSITIVE_EXITS = new Set(['true', 'connected', 'found']);
-const NEGATIVE_EXITS = new Set(['false', 'no_connect', 'error', 'bounced', 'no_credit', 'no_email', 'not_found', 'wrong_number']);
+const POSITIVE_EXITS = new Set(['true', 'connected', 'found', 'followed_back', 'has_consent', 'valid', 'replied']);
+const NEGATIVE_EXITS = new Set(['false', 'no_connect', 'error', 'bounced', 'no_credit', 'no_email', 'not_found', 'wrong_number', 'no_follow_back', 'no_consent', 'invalid', 'no_reply', 'no_chat', 'unavailable']);
 
 /** How a branch pill is coloured: the success path green, the failure path red, everything else neutral. */
 export function exitTone(exit: string): ExitTone {

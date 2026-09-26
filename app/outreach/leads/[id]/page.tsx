@@ -18,6 +18,8 @@ import { LeadRelations } from '@/components/outreach/leads/detail/LeadRelations'
 import { LeadEnrollments } from '@/components/outreach/leads/detail/LeadEnrollments';
 import { LeadChats, LeadRecentActions, LeadTasks, LeadTimeline } from '@/components/outreach/leads/detail/LeadActivity';
 import { EnrichmentCard } from '@/components/outreach/leads/detail/EnrichmentCard';
+import { LeadIdentitiesCard } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
+import { LeadConsentCard } from '@/components/outreach/leads/detail/LeadConsentCard';
 import { QueuedActions } from '@/components/outreach/leads/detail/QueuedActions';
 import { HeldNotice } from '@/components/outreach/leads/detail/HeldNotice';
 import { leadName } from '@/components/outreach/leads/helpers';
@@ -69,6 +71,8 @@ export default function LeadDetailPage() {
         </div>
         <div className="space-y-4 min-w-0">
           <EnrichmentCard lead={l} toast={toast.show} />
+          <LeadIdentitiesCard leadId={l.id} ws={workspace?.id} canWrite={canWrite} toast={toast.show} />
+          <LeadConsentCard leadId={l.id} ws={workspace?.id} canWrite={canWrite} toast={toast.show} />
           <LeadEditForm lead={l} toast={toast.show} />
           <LeadTagsEditor leadId={l.id} tagIds={tagIds} toast={toast.show} />
           <LeadCustomFields leadId={l.id} custom={l.custom ?? {}} toast={toast.show} />

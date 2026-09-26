@@ -33,7 +33,8 @@ export async function loadSequence(ctx: Ctx, id: string, cols = "*"): Promise<Ro
 }
 
 const graphInput = {
-  steps: z.array(z.record(z.string(), z.unknown())).optional().describe('Compact step list, e.g. [{"do":"visit_profile"},{"do":"invite","note":"Hi {{first_name|there}}…"},{"do":"wait_connection","window_days":14,"connected":[{"do":"message","wait":"1d","text":"…"}],"no_connect":[{"do":"withdraw"},{"do":"end"}]}]. Verbs: visit_profile, refresh_profile, like_post, comment_post, endorse, follow, invite, wait_connection, withdraw, message, inmail, email, delay, condition, tag, untag, list, stage, webhook, api, send_to_sequence, manual_task, ai_draft, end. `wait` like "2h"/"3d" delays that step. A/B test: add variants [{id,label,text,subject?,weight}] (2–5) to invite / message / inmail / email. Text: {{first_name|fallback}}, {{company}}, {{sender.first_name}}, {{sender.booking_link}}, {{custom.key}}, {{enrich.about|…}}, {{enrich.recent_post}}, {{ai.<key>|fallback}} (only a person-approved line is used, else the fallback), {{unsubscribe_link}}, spintax {Hi|Hello|Hey}, {{#if company}}at {{company}}{{/if}}.'),
+  steps: z.array(z.record(z.string(), z.unknown())).optional().describe('Compact step list, e.g. [{"do":"visit_profile"},{"do":"invite","note":"Hi {{first_name|there}}…"},{"do":"wait_connection","window_days":14,"connected":[{"do":"message","wait":"1d","text":"…"}],"no_connect":[{"do":"withdraw"},{"do":"end"}]}]. Verbs: visit_profile, refresh_profile, like_post, comment_post, endorse, follow, invite, wait_connection, withdraw, message, inmail, email, delay, condition, tag, untag, list, stage, webhook, api, send_to_sequence, manual_task, ai_draft, end. Channel steps (a step may carry channel: INSTAGRAM | WHATSAPP | LINKEDIN, or pass `channel` for the whole list): follow / unfollow, like_posts (count ≤ 3), comment (Instagram: public, no pitch), wait_follow_back (window_days, poll_budget; branches followed_back / no_follow_back), check_identifier (WhatsApp: branches valid / invalid), require_consent (bases[]; branches has_consent / no_consent), wait_for_reply (window_hours; branches replied / no_reply), channel_switch (to_channel; branch unavailable), message with new_chat (default true; a WhatsApp message that may start a new chat gets a require_consent step added above it, reported in `notes`). `wait` like "2h"/"3d" delays that step. A/B test: add variants [{id,label,text,subject?,weight}] (2–5) to invite / message / inmail / email. Text: {{first_name|fallback}}, {{company}}, {{sender.first_name}}, {{sender.booking_link}}, {{custom.key}}, {{enrich.about|…}}, {{enrich.recent_post}}, {{ai.<key>|fallback}} (only a person-approved line is used, else the fallback), {{unsubscribe_link}}, spintax {Hi|Hello|Hey}, {{#if company}}at {{company}}{{/if}}.'),
+  channel: z.enum(["LINKEDIN", "INSTAGRAM", "WHATSAPP"]).optional().describe("Channel of the whole step list (a step's own channel wins): follow / comment compile to the Instagram steps, messages get the channel and WhatsApp messages the consent check"),
   graph: z.record(z.string(), z.unknown()).optional().describe("Canonical graph JSON (advanced; prefer steps). Needed for ab_split, ai_route, call_task, find_email and voice-note steps."),
   from_template: z.string().optional().describe("Template key from sequence_templates"),
 };
@@ -49,10 +50,10 @@ const publishInput = {
   confirmation_token: z.string().optional(),
 };
 
-function graphFrom(a: { steps?: unknown; graph?: unknown; from_template?: string }): { graph: Graph | null; errors: Row[]; source: string } {
+function graphFrom(a: { steps?: unknown; graph?: unknown; from_template?: string; channel?: string }): { graph: Graph | null; errors: Row[]; source: string; notes?: string[] } {
   if (a.graph) return { graph: a.graph as Graph, errors: [], source: "graph" };
-  if (a.steps) { const c = compileSteps(a.steps); return { graph: c.graph, errors: c.errors, source: "steps" }; }
-  if (a.from_template) { const t = templateByKey(a.from_template); const c = compileSteps(t.steps); return { graph: c.graph, errors: c.errors, source: `template:${t.key}` }; }
+  if (a.steps) { const c = compileSteps(a.steps, { channel: a.channel }); return { graph: c.graph, errors: c.errors, source: "steps", notes: c.notes.length ? c.notes : undefined }; }
+  if (a.from_template) { const t = templateByKey(a.from_template); const c = compileSteps(t.steps, { channel: a.channel }); return { graph: c.graph, errors: c.errors, source: `template:${t.key}`, notes: c.notes.length ? c.notes : undefined }; }
   return { graph: null, errors: [], source: "none" };
 }
 
@@ -183,9 +184,9 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
     description: "Run the platform's graph validation (blocking errors + warnings: limits, missing branches, relation prerequisites, reachability, A/B variants, a missing unsubscribe link on email steps) on an existing sequence, its saved draft (draft:true) or on steps/graph you are about to create. Texts that use spintax {a|b|c} are reported under `spintax` with the number of combinations and the LONGEST result: the longest combination is what counts against LinkedIn's limits (an over-length invitation note fails every request). With ai:true (managers) also runs the LLM copy QA (pitch-in-first-touch, generic openers, short delays…). Call before every create/update/activate.",
     input: { sequence_id: z.string().optional(), draft: z.boolean().optional().describe("With sequence_id: validate the saved draft instead of the live graph"), ...graphInput, pool: z.array(z.string()).optional().describe("Sender ids (affects invite-note limits / mailbox checks)"), ai: z.boolean().optional() },
   }, async (a) => {
-    let graph: Graph | null = null, pool = a.pool ?? [], compile: Row[] = [], ws: string | null = null, brief: string | null = null;
+    let graph: Graph | null = null, pool = a.pool ?? [], compile: Row[] = [], ws: string | null = null, brief: string | null = null, compilerNotes: string[] | undefined;
     if (a.sequence_id) { const s = await loadSequence(ctx, a.sequence_id, "workspace_id, graph, draft_graph, sender_pool, brief"); graph = a.draft && s.draft_graph ? s.draft_graph : s.graph; pool = a.pool ?? s.sender_pool ?? []; ws = s.workspace_id; brief = s.brief; }
-    else { const g = graphFrom(a); graph = g.graph; compile = g.errors; }
+    else { const g = graphFrom(a); graph = g.graph; compile = g.errors; compilerNotes = g.notes; }
     if (compile.length) return { ok: false, compile_errors: compile, next: "Fix the listed steps and validate again." };
     if (!graph) throw new McpError("E_PAYLOAD_INVALID", "sequence_id, steps, graph or from_template required");
     const [v, spintax] = await Promise.all([validate(ctx, graph, pool, true), spintaxReport(ctx, graph)]);
@@ -195,7 +196,7 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
       try { const r = await callFn<Row>(ctx, "ai-sequence-qa", a.sequence_id && !a.draft ? { sequence_id: a.sequence_id } : { graph, workspace_id: wsId, pool, brief }); ai = { available: r.ai_available, warnings: (r.warnings ?? []).filter((w: Row) => String(w.code).startsWith("W_") && !v.warnings.some((x) => x.code === w.code && x.node_id === w.node_id)), errors: r.errors }; }
       catch (e) { ai = { available: false, error: e instanceof Error ? e.message : String(e) }; }
     }
-    return { ok: v.errors.length === 0 && !(ai?.errors?.length), errors: v.errors, warnings: v.warnings, spintax: spintax.length ? { texts: spintax, note: "combinations = how many different texts the step can produce; longest_chars is checked against the channel limit. The choice is seeded per lead, so the preview is exactly what gets sent." } : undefined, ai_qa: ai, rendered: renderGraph(graph) };
+    return { ok: v.errors.length === 0 && !(ai?.errors?.length), errors: v.errors, warnings: v.warnings, compiler_notes: compilerNotes, spintax: spintax.length ? { texts: spintax, note: "combinations = how many different texts the step can produce; longest_chars is checked against the channel limit. The choice is seeded per lead, so the preview is exactly what gets sent." } : undefined, ai_qa: ai, rendered: renderGraph(graph) };
   });
 
   tool(server, ctx, {
@@ -230,7 +231,7 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
     if (v.warnings.length && !a.allow_warnings) return { created: false, warnings: v.warnings, rendered: renderGraph(g.graph), next: "Review the warnings with the user; call again with allow_warnings:true to create anyway, or fix the steps." };
     const id = await urpc<string>(ctx, "create_sequence", { p_workspace: ws.id, p_name: a.name, p_client_id: a.client_id ?? null });
     const version = await urpc<number>(ctx, "save_sequence", { p_id: id, p_graph: g.graph, p_pool: pool.length ? pool : null, p_settings: a.settings ?? null, p_brief: a.brief ?? null, p_assignment: a.assignment ?? null });
-    return { created: true, sequence_id: id, version, status: "draft", source: g.source, warnings: v.warnings, pool: await poolInfo(ctx, pool), rendered: renderGraph(g.graph), next: pool.length ? "sequence_project → enroll_preview → enroll_commit; then sequence_activate (confirmation) when ready." : "Add senders with sequence_update(pool) before activating." };
+    return { created: true, sequence_id: id, version, status: "draft", source: g.source, warnings: v.warnings, compiler_notes: g.notes, pool: await poolInfo(ctx, pool), rendered: renderGraph(g.graph), next: pool.length ? "sequence_project → enroll_preview → enroll_commit; then sequence_activate (confirmation) when ready." : "Add senders with sequence_update(pool) before activating." };
   });
 
   tool(server, ctx, {
@@ -254,7 +255,7 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
       if (v.errors.length) return { updated: false, errors: v.errors, warnings: v.warnings };
       if (g.graph && v.warnings.length && !a.allow_warnings) return { updated: false, warnings: v.warnings, next: "Call again with allow_warnings:true or fix the steps." };
       const version = await urpc<number>(ctx, "save_sequence", { p_id: s.id, p_graph: graph, p_pool: a.pool ?? null, p_settings: settings, p_name: a.name ?? null, p_brief: a.brief ?? null, p_assignment: a.assignment ?? null });
-      return { updated: true, sequence_id: s.id, version, previous_version: s.head_version, graph_changed: !!g.graph, warnings: v.warnings, pool: a.pool ? await poolInfo(ctx, a.pool) : undefined, rendered: g.graph ? renderGraph(graph) : undefined };
+      return { updated: true, sequence_id: s.id, version, previous_version: s.head_version, graph_changed: !!g.graph, warnings: v.warnings, compiler_notes: g.notes, pool: a.pool ? await poolInfo(ctx, a.pool) : undefined, rendered: g.graph ? renderGraph(graph) : undefined };
     }
     return await publishFlow(ctx, "sequence_update", s, g.graph, a as Row, { settings, name: a.name ?? null, brief: a.brief ?? null, assignment: a.assignment ?? null });
   });
@@ -278,7 +279,7 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
     if (g.errors.length) return { saved: false, compile_errors: g.errors };
     if (!g.graph) throw new McpError("E_PAYLOAD_INVALID", "steps, graph or from_template required");
     const r = await urpc<Row>(ctx, "save_draft", { p_id: a.sequence_id, p_graph: g.graph });
-    return { saved: true, ...r, rendered: renderGraph(g.graph), next: "sequence_validate(sequence_id, draft:true) → sequence_publish_impact → sequence_publish." };
+    return { saved: true, ...r, compiler_notes: g.notes, rendered: renderGraph(g.graph), next: "sequence_validate(sequence_id, draft:true) → sequence_publish_impact → sequence_publish." };
   });
 
   tool(server, ctx, {

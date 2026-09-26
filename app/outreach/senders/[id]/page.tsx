@@ -16,11 +16,15 @@ import SenderInsights from '@/components/outreach/senders/SenderInsights';
 import SenderActivityReport from '@/components/outreach/senders/SenderActivityReport';
 import SenderSettings from '@/components/outreach/senders/SenderSettings';
 import SenderDiagnosis from '@/components/outreach/senders/SenderDiagnosis';
+import ProfileStudio from '@/components/outreach/profile/ProfileStudio';
+import { QaScoreBadge } from '@/components/outreach/profile/QaCard';
 import RunningDryCallout from '@/components/outreach/senders/RunningDry';
+import { ProviderWarningBanner, QuietPeriodBadge } from '@/components/outreach/senders/ProviderWarningBanner';
+import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import type { SenderV2 } from '@/components/outreach/senders/insights';
 import { cn } from '@/lib/utils';
 
-const TABS = ['Overview', 'Insights', 'Activity', 'Schedule', 'Budgets', 'Events', 'Settings', 'Session', 'Danger'] as const;
+const TABS = ['Overview', 'Profile', 'Insights', 'Activity', 'Schedule', 'Budgets', 'Events', 'Settings', 'Session', 'Danger'] as const;
 type Tab = (typeof TABS)[number];
 
 function SenderDetail() {
@@ -59,7 +63,8 @@ function SenderDetail() {
   const s = sender.data as SenderV2 | undefined;
   if (!s || s.workspace_id !== workspace?.id) return <div><BackLink href="/outreach/senders">Back to senders</BackLink><ErrorBox message="Sender not found in this workspace." /></div>;
 
-  const visibleTabs = TABS.filter((t) => t !== 'Danger' || isManager);
+  // Profile Studio and the browser-session tab are LinkedIn features; other channels do not have them.
+  const visibleTabs = TABS.filter((t) => (t !== 'Danger' || isManager) && ((t !== 'Profile' && t !== 'Session') || s.provider === 'LINKEDIN'));
 
   return (
     <div>
@@ -70,7 +75,7 @@ function SenderDetail() {
           <div className="min-w-0">
             <h1 className="text-xl font-bold text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</h1>
             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
-              <span>{PROVIDER_LABELS[s.provider]}</span>
+              <span className="inline-flex items-center gap-1"><ProviderLogo provider={s.provider} className="w-3.5 h-3.5" /> {PROVIDER_LABELS[s.provider]}</span>
               {s.public_identifier && <span>· {s.public_identifier}</span>}
               {s.client_id && clients.data && <span>· {clients.data.find((c) => c.id === s.client_id)?.name ?? 'client'}</span>}
               <span>· {s.timezone}</span>
@@ -80,11 +85,14 @@ function SenderDetail() {
         <div className="flex flex-wrap items-center gap-3">
           {s.status !== 'disabled' && <SenderDiagnosis senderId={s.id} senderName={s.display_name} />}
           <StatusPill status={s.status} reason={s.status_reason} />
+          <QuietPeriodBadge sender={s} />
           <Badge tone="indigo">Level {s.warmup_level}</Badge>
           <HealthBar score={s.health_score} />
+          {s.provider === 'LINKEDIN' && <button onClick={() => selectTab('Profile')} title="Profile quality score. Open the Profile tab."><QaScoreBadge score={s.profile_qa_score} /></button>}
         </div>
       </div>
 
+      <ProviderWarningBanner sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />
       <RunningDryCallout sender={s} canWrite={canWrite} />
 
       <div className="border-b border-gray-200 mb-6">
@@ -96,6 +104,7 @@ function SenderDetail() {
       </div>
 
       {tab === 'Overview' && <SenderOverview sender={s} clients={clients.data ?? []} isManager={isManager} canWrite={canWrite} connected={connected} notify={toast.show} />}
+      {tab === 'Profile' && <ProfileStudio sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Insights' && <SenderInsights sender={s} />}
       {tab === 'Activity' && <SenderActivityReport sender={s} workspaceTimezone={typeof workspace?.settings?.timezone === 'string' ? workspace.settings.timezone : null} />}
       {tab === 'Settings' && <SenderSettings sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} workspaceSettings={workspace?.settings} />}

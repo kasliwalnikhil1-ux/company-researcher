@@ -29,9 +29,12 @@ Definitions worth knowing (full text: `metric_definitions`):
 | "How is this sender doing?" | `report_sender` (totals, health trend, restrictions, failures in plain words) · `sender_insights` for advice |
 | "What does a reply cost us?" | `report_cost` (needs a monthly cost per sender; return only when deal values exist) |
 | "Email opens and bounces?" | `report_deliverability` |
+| "How do Instagram / WhatsApp compare to LinkedIn?" | `report_channels` (per channel: senders, actions, new_chats, replies, `replies_per_100_actions`, interested, blocks, reply_rate). Lower volume, higher conversion is the expected shape; the answer to a low ceiling is better targeting, not more senders |
+| "Who did we contact on WhatsApp and on what basis?" | `report_consent` (contacted leads by basis with evidence and attester; `alert: true` when `imported_attested`, the weakest basis, exceeds 30 %). This is the artefact if a client's number is challenged |
+| "Did anyone block us?" | `report_blocks` (per sender, each block with the five preceding actions) |
 | "Raw data" | `report_export` ⚠ (CSV, signed link, personal data) |
 
-Filters on overview / funnel / intents: `client_id`, `sequence_id`, `sender_id`; plus `node_id`, `channel` (overview, intents), `list_id`, `tag_id` (funnel).
+Filters on overview / funnel / intents: `client_id`, `sequence_id`, `sender_id`; plus `node_id`, `channel` (overview, intents), `list_id`, `tag_id` (funnel). `by_channel` in `report_overview` may include `instagram` and `whatsapp`; totals gain `new_chats` (conversations that did not exist yet, counted on every channel), `blocks`, `identifier_checks`, `followers_polls`, and `touches` includes new chats.
 
 ## Client write-up (agencies)
 

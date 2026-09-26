@@ -1,14 +1,22 @@
 // Shared types for the Outreach platform (mirrors migrations/outreach/*.sql, including 009–016)
 
 export type Role = 'owner' | 'manager' | 'member' | 'client_viewer';
-export type Provider = 'LINKEDIN' | 'GMAIL' | 'OUTLOOK' | 'IMAP';
+export type Provider = 'LINKEDIN' | 'INSTAGRAM' | 'WHATSAPP' | 'GMAIL' | 'OUTLOOK' | 'IMAP';
+/** Providers that are outreach channels (not mailboxes). */
+export const CHANNEL_PROVIDERS: Provider[] = ['LINKEDIN', 'INSTAGRAM', 'WHATSAPP'];
+export const MAIL_PROVIDERS: Provider[] = ['GMAIL', 'OUTLOOK', 'IMAP'];
 export type AuthMethod = 'credentials' | 'cookie' | 'oauth' | 'browser';
 export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paused' | 'disabled';
+/** For Instagram, `first` means "follows the sender back"; for WhatsApp, `invalid` means "number is not on WhatsApp". */
 export type Relation = 'none' | 'pending_out' | 'pending_in' | 'first' | 'blocked' | 'invalid';
 export type ActionType =
   | 'profile_view' | 'invite' | 'withdraw' | 'message' | 'inmail' | 'like' | 'comment'
   | 'endorse' | 'search_page' | 'email' | 'reply' | 'relations_poll' | 'call_api'
-  | 'post_fetch' | 'follow' | 'find_email';
+  | 'post_fetch' | 'follow' | 'find_email' | 'profile_edit'
+  // 024_channel_enums: `new_chat` = a conversation that did not exist yet (metered on every channel)
+  | 'unfollow' | 'new_chat' | 'identifier_check' | 'followers_poll' | 'story_react';
+export type ConsentBasis = 'inbound' | 'form_optin' | 'existing_customer' | 'linkedin_reply' | 'explicit_share' | 'imported_attested';
+export const CONSENT_BASES: ConsentBasis[] = ['inbound', 'form_optin', 'existing_customer', 'linkedin_reply', 'explicit_share', 'imported_attested'];
 export type ActionStatus = 'queued' | 'reserved' | 'sent' | 'skipped' | 'failed' | 'cancelled';
 export type EnrollmentStatus =
   | 'active' | 'waiting_connection' | 'waiting_delay' | 'waiting_task' | 'paused' | 'completed'
@@ -23,7 +31,7 @@ export type JobStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'c
 export type TaskKind = 'manual_node' | 'follow_up' | 'review_ai_draft' | 'reconnect' | 'reply_hold' | 'call';
 export type EnrichStatus = 'none' | 'waiting' | 'done' | 'failed';
 export type EmailStatus = 'verified' | 'unverified' | 'invalid';
-export type ReplyChannel = 'linkedin' | 'email';
+export type ReplyChannel = 'linkedin' | 'email' | 'instagram' | 'whatsapp';
 /** Why an enrollment sits in `waiting_task` without a task (set at enrol time or by the AI routing step). */
 export type WaitReason = 'enrichment' | 'ai_review' | 'ai_route';
 export type CallOutcome = 'connected' | 'voicemail' | 'no_answer' | 'wrong_number';
@@ -132,8 +140,67 @@ export interface Sender {
   track_replies: boolean | null;
   enrich_empty_streak: number;
   enrich_backoff_until: string | null;
+  // Profile Studio (022)
+  profile_qa_score: number | null;
+  profile_identity_unverified: boolean;
+  profile_snapshot_at: string | null;
+  // Channels (025): quiet period after (re)connecting, provider warning pause, WhatsApp account-age attestation
+  outreach_allowed_from: string | null;
+  provider_warning: { text: string; at: string; level_before: number; paused_until: string | null } | null;
+  account_age_attested_at: string | null;
+  account_age_attested_by: string | null;
+  account_age_months: number | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One row of outreach_sender_budgets_scoped: an hourly (Instagram) or daily "all actions" ledger. */
+export interface SenderBudgetScoped { sender_id: string; window: 'hour' | 'day'; window_start: string; scope: string; cap: number; used: number; reserved: number }
+
+/** outreach_channel_capabilities: what a channel can do and how it is metered. */
+export interface ChannelCapabilities {
+  provider: Provider;
+  identifier_kind: 'slug' | 'handle' | 'phone_e164' | 'email';
+  has_connection_graph: boolean;
+  connection_is_permission: boolean;
+  acceptance_webhook: boolean;
+  can_validate_identifier: boolean;
+  supports: { invite: boolean; inmail: boolean; follow: boolean; post_react: boolean; post_comment: boolean; profile_view: boolean; voice_note: boolean; attachment: boolean; embed_video: boolean; search_people: 'full' | 'partial' | 'none' };
+  ledger: { hourly: { scope: string; cap: number; types: ActionType[] } | null; daily_scope: { scope: string; types: ActionType[] } | null; min_gap_seconds: [number, number]; post_connect_quiet_hours: number };
+  consent: { required_for_first_contact: boolean; accepted_bases: ConsentBasis[] };
+}
+
+/** outreach_lead_identities: one lead, one identity per channel. */
+export interface LeadIdentity {
+  id: string;
+  workspace_id?: string;
+  lead_id?: string;
+  provider: Provider;
+  identifier: string;
+  provider_id: string | null;
+  verified: boolean;
+  source: string | null;
+  /** WhatsApp: result of the "is this number on WhatsApp" check. null = not checked yet. */
+  is_valid: boolean | null;
+  last_checked_at: string | null;
+  created_at: string;
+}
+
+/** outreach_lead_consent: a recorded basis for contacting a lead on a channel. */
+export interface LeadConsent {
+  id: string;
+  lead_id: string;
+  lead_name?: string | null;
+  channel: Provider;
+  basis: ConsentBasis;
+  evidence: Record<string, unknown>;
+  attested_by: string | null;
+  attested_by_email?: string | null;
+  obtained_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+  revoked_reason: string | null;
+  created_at?: string;
 }
 
 export interface SenderBudget {
@@ -266,6 +333,8 @@ export const SEQUENCE_ASSIGNMENTS: Array<{ value: SequenceAssignment; label: str
 
 /** Keys the engine reads (docs/outreach/PLAN-BUILD-CONTRACT.md, item 1). Unknown keys are kept as they are. */
 export interface SequenceSettings {
+  /** Profile Studio: the template pool senders' profiles should match (advisory). */
+  profile_template_id?: string;
   stop_on_reply?: boolean;
   stop_on_reply_scope?: 'lead' | 'sender';
   on_reply?: 'exit' | 'hold';
@@ -275,6 +344,8 @@ export interface SequenceSettings {
   wait_for_enrichment?: boolean;
   hold_for_ai_review?: boolean;
   withdraw_after_days?: number;
+  /** Channels: a reply on one channel does not stop the lead on the others (off by default; the validator warns). */
+  channel_independent_continuation?: boolean;
   [k: string]: unknown;
 }
 
@@ -287,6 +358,8 @@ export interface Sequence {
   head_version: number;
   graph: Graph;
   sender_pool: string[];
+  /** Kept in sync from sender_pool by a trigger: {"LINKEDIN": [ids], "INSTAGRAM": [ids], "WHATSAPP": [ids], ...}. */
+  sender_pools: Partial<Record<Provider, string[]>>;
   assignment: SequenceAssignment;
   use_sender_schedule: boolean;
   settings: SequenceSettings;
@@ -330,6 +403,10 @@ export interface Enrollment {
   wait_reason: WaitReason | null;
   /** The auto-enrol rule that created this enrollment, if any. */
   rule_id: string | null;
+  /** Channels (025): the channel the lead is currently worked on; changed by a "Switch channel" step. */
+  current_channel: Provider | null;
+  /** Which sender serves each channel for this lead: {"LINKEDIN": senderId, "WHATSAPP": senderId}. */
+  channel_sender_map: Partial<Record<Provider, string>>;
   created_at: string;
   completed_at: string | null;
 }
@@ -381,6 +458,8 @@ export interface Chat {
   assigned_to: string | null;
   intent: Intent;
   archived: boolean;
+  /** Instagram: the conversation sits in the recipient's message requests (not accepted yet). */
+  is_request: boolean;
   created_at: string;
 }
 
@@ -392,9 +471,14 @@ export interface Message {
   direction: Direction;
   text: string | null;
   html: string | null;
-  attachments: Array<{ id: string; name?: string; type?: string; size?: number; unipile_message_id?: string }>;
+  attachments: Array<{ id: string; name?: string; type?: string; size?: number; unipile_message_id?: string; voice_note?: boolean; duration_s?: number | null; mimetype?: string }>;
   sent_at: string;
   is_invite_note: boolean;
+  /** Channels (025): reactions received, read receipt, voice-note transcript. */
+  reactions: Array<{ emoji: string; by?: string | null; at?: string | null }>;
+  read_at: string | null;
+  transcript: string | null;
+  transcript_status: 'pending' | 'done' | 'failed' | null;
   intent: Intent | null;
   intent_confidence: number | null;
   summary: string | null;
@@ -436,8 +520,9 @@ export interface Task {
 
 export interface OutboundWebhook { id: string; workspace_id: string; url: string; secret: string; events: string[]; active: boolean; failures: number; created_at: string }
 export interface AuditRow { id: number; workspace_id: string; actor: string | null; actor_type: string; action: string; entity: string | null; entity_id: string | null; diff: unknown; at: string }
-export interface PlatformCeiling { action_type: ActionType; per_day: number; per_week: number | null }
-export interface WarmupCap { level: number; action_type: ActionType; per_day: number }
+/** Since 025 both tables carry a `provider` column (older rows = LINKEDIN); filter by the sender's provider before showing them. */
+export interface PlatformCeiling { provider: Provider; action_type: ActionType; per_day: number; per_week: number | null }
+export interface WarmupCap { provider: Provider; level: number; action_type: ActionType; per_day: number }
 
 // ---------------------------------------------------------------------------
 // Sequence graph
@@ -447,7 +532,9 @@ export type NodeType =
   | 'wait_connection' | 'withdraw_invite' | 'send_message' | 'send_inmail' | 'send_email' | 'delay' | 'condition'
   | 'rotate_sender' | 'change_sender' | 'add_tag' | 'remove_tag' | 'change_list' | 'change_stage' | 'call_webhook'
   | 'call_api' | 'send_to_sequence' | 'manual_task' | 'ai_draft_approval'
-  | 'refresh_profile' | 'follow_profile' | 'send_voice_note' | 'find_email' | 'call_task' | 'ab_split' | 'ai_route';
+  | 'refresh_profile' | 'follow_profile' | 'send_voice_note' | 'find_email' | 'call_task' | 'ab_split' | 'ai_route'
+  // Channels (Instagram / WhatsApp, Sept 2026): see docs/outreach/CHANNELS-BUILD-CONTRACT.md §3
+  | 'follow' | 'unfollow' | 'like_recent_posts' | 'comment_post' | 'wait_follow_back' | 'check_identifier' | 'require_consent' | 'wait_for_reply' | 'channel_switch';
 
 export interface NodeDelay { amount: number; unit: 'minutes' | 'hours' | 'days'; jitter_pct?: number }
 

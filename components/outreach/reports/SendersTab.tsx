@@ -11,7 +11,7 @@ import { CountRate, DetailRow, ExportButton, MetricLabel, Refreshing, RetryError
 import { MiniBar, SERIES, Sparkline } from './charts';
 import type { TabProps } from './OverviewTab';
 
-const PROVIDERS: Record<string, string> = { LINKEDIN: 'LinkedIn', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'Email (IMAP)' };
+const PROVIDERS: Record<string, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'Email (IMAP)' };
 const color = (key: string) => SERIES.find((s) => s.key === key)?.color ?? '#4f46e5';
 const future = (v: string | null) => !!v && new Date(v).getTime() > Date.now();
 
@@ -96,7 +96,7 @@ export default function SendersTab({ ws, client, range }: TabProps) {
 
   if (q.isLoading) return <TableSkeleton cols={9} />;
   if (q.isError) return <RetryError error={q.error} onRetry={() => q.refetch()} />;
-  if (!q.data?.length) return <div className="bg-white border border-gray-200 rounded-xl"><EmptyState icon={<Contact className="w-6 h-6" />} title="No senders to report on" description={client ? 'This client has no senders yet. Clear the client filter to see every sender.' : 'Connect a LinkedIn account or a mailbox. Its numbers show up here once it sends.'} /></div>;
+  if (!q.data?.length) return <div className="bg-white border border-gray-200 rounded-xl"><EmptyState icon={<Contact className="w-6 h-6" />} title="No senders to report on" description={client ? 'This client has no senders yet. Clear the client filter to see every sender.' : 'Connect a LinkedIn, Instagram or WhatsApp account, or a mailbox. Its numbers show up here once it sends.'} /></div>;
 
   const exportCsv = () => downloadCsv<SenderRow>(csvFileName('senders', range), [
     { header: 'Sender', value: (r) => r.name }, { header: 'Provider', value: (r) => PROVIDERS[r.provider] ?? r.provider }, { header: 'Status', value: (r) => r.status }, { header: 'Health', value: (r) => r.health }, { header: 'Warm-up level', value: (r) => r.level },

@@ -28,6 +28,21 @@ const DECISIONS: Record<string, string> = {
   sender_cap_hit: 'LinkedIn’s own limit was hit',
   sender_cap_hit_cascade: 'Held back after LinkedIn’s limit was hit',
   budget_deferred: 'Waiting for tomorrow’s allowance',
+  // channels (docs/outreach/CHANNELS-BUILD-CONTRACT.md §3)
+  hourly_deferred: 'Waiting for the next hour’s allowance',
+  no_chat: 'No conversation exists yet, and this step may not start one',
+  not_on_whatsapp: 'The number is not on WhatsApp',
+  followed_back: 'They followed back',
+  no_follow_back: 'They did not follow back',
+  has_consent: 'They agreed to hear from you',
+  no_consent: 'No recorded consent',
+  valid: 'The number is on WhatsApp',
+  invalid: 'The number is not on WhatsApp',
+  no_reply: 'No reply in time',
+  unavailable: 'The other channel was not available for this lead',
+  consent_revoked: 'They withdrew their consent',
+  stop_request: 'They asked to stop',
+  blocked: 'They blocked the account',
 };
 
 /** What the engine decided, in words. `not_connected:branch` → "Not connected yet (took a branch)". */
@@ -79,7 +94,35 @@ export function reasonText(code: string | null | undefined, decision?: string | 
   if (c === 'E_SENDER_PAUSED' || c === 'E_HEALTH_PAUSED') return 'The sender is paused';
   if (c === 'E_NO_SCHEDULE') return 'The sender has no working hours set';
   if (c === 'E_NO_MAILBOX') return 'There is no email mailbox in the sender pool';
+  // channels (docs/outreach/CHANNELS-BUILD-CONTRACT.md §3 and §6)
+  if (c === 'E_NO_CONSENT' || c === 'no_consent') return 'No recorded WhatsApp consent for this lead, so nothing was sent';
+  if (c === 'E_NO_IDENTITY' || c === 'no_identity') return 'No handle or number on file for this channel';
+  if (c === 'E_IDENTITY_CONFLICT') return 'This handle or number already belongs to another lead';
+  if (c === 'E_IDENTIFIER_INVALID' || c === 'not_on_whatsapp') return 'The number is not on WhatsApp';
+  if (c === 'E_HOURLY_CAP') return 'This hour’s allowance for the account is used up';
+  if (c === 'E_QUIET_PERIOD') return 'The account connected recently and waits 24 hours before any outreach';
+  if (c === 'E_MIN_GAP') return 'Held a moment: actions on this account are spaced out';
+  if (c === 'E_PROVIDER_WARNING') return 'Paused after the platform warned the account about automated activity';
+  if (c === 'E_ACCOUNT_TOO_NEW') return 'WhatsApp numbers need at least 6 months of real use before outreach';
+  if (c === 'E_NO_CONSENT_GUARD') return 'A WhatsApp message needs a “Check consent” step before it';
+  if (c === 'E_LIKE_COUNT') return 'A step can like at most 3 recent posts';
+  if (c === 'E_NO_CHANNEL_SENDER') return 'The sender pool has no account for this step’s channel';
+  if (c === 'no_chat') return 'No conversation exists yet, and this step may not start one';
+  if (c === 'consent_revoked') return 'They withdrew their consent';
+  if (c === 'stop_request') return 'They asked to stop';
+  if (c === 'blocked' || has('blocked_recipient')) return 'They blocked the account';
+  if (c === 'unsupported_unfollow') return 'Unfollowing is not available on this channel yet';
+  if (c === 'unsupported_follow') return 'Following is not available on this channel';
+  if (has('account_restricted')) return 'The platform restricted the account for now';
   if (c === 'E_SEQUENCE_NOT_ACTIVE') return 'The sequence is not active';
   if (c === 'E_PLATFORM_PAUSED' || c === 'E_PLAN_SUSPENDED') return 'Sending is paused for this workspace';
+  if (c === 'E_NO_PROFILE_AUTHORITY') return 'The account owner had not given permission for this part of the profile';
+  if (c === 'E_PROFILE_CEILING') return 'The limit for this kind of profile change was used up';
+  if (c === 'E_EXPERIMENT_LOCK') return 'The field was locked by an experiment';
+  if (c === 'E_PROFILE_STATE') return 'The profile change was no longer eligible';
+  if (c.startsWith('E_PROFILE_IMAGE_REJECTED')) return 'LinkedIn rejected the image';
+  if (c.startsWith('E_PROFILE_ID_UNRESOLVED')) return 'LinkedIn did not recognise an id in the change';
+  if (c.startsWith('E_PROFILE_REJECTED') || c.startsWith('E_PROFILE_FORBIDDEN')) return 'LinkedIn rejected the profile change';
+  if (c === 'profile_edit_retry_exhausted') return 'LinkedIn kept refusing; the change was not retried again';
   return c.replace(/^E_/, '').replace(/[_:]/g, ' ').toLowerCase().replace(/^\w/, (m) => m.toUpperCase());
 }

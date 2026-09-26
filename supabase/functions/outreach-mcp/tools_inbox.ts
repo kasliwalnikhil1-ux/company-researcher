@@ -6,7 +6,15 @@ import { type Ctx, tool, z, wsParam, resolveWs, requireRole, urpc, unwrap, McpEr
 
 type Row = Record<string, any>;
 const INTENTS = ["interested", "question", "not_now", "not_interested", "ooo", "wrong_person", "unclear", "unclassified"] as const;
-const CHAT_COLS = "id, workspace_id, client_id, sender_id, lead_id, provider, attendee_name, attendee_public_identifier, subject, last_message_at, last_message_preview, last_direction, unread, unread_count, assigned_to, intent, archived";
+const CHAT_COLS = "id, workspace_id, client_id, sender_id, lead_id, provider, attendee_name, attendee_public_identifier, subject, last_message_at, last_message_preview, last_direction, unread, unread_count, assigned_to, intent, archived, is_request";
+const CHANNELS = ["LINKEDIN", "INSTAGRAM", "WHATSAPP", "GMAIL", "OUTLOOK", "IMAP"] as const;
+/** Per-channel reply limits (CHANNELS-BUILD-CONTRACT §5 TEXT_LIMITS); the platform enforces them again at send. */
+const REPLY_LIMITS: Record<string, number> = { INSTAGRAM: 1000, WHATSAPP: 4096 };
+const DEFAULT_REPLY_LIMIT = 8000;
+/** Untrusted-content source label per channel ("linkedin_message", "whatsapp_message", …). */
+const srcFor = (provider: string | null | undefined) => `${String(provider ?? "linkedin").toLowerCase()}_message`;
+/** A voice note carries its transcript instead of text; the classifier reads the same. */
+const bodyOf = (m: Row): string => (m.text && String(m.text).trim()) ? String(m.text) : (m.transcript ? `[voice note] ${m.transcript}` : "");
 
 async function loadChat(ctx: Ctx, chatId: string): Promise<Row> {
   const { data, error } = await ctx.user.from("outreach_chats").select(`${CHAT_COLS}, outreach_leads(id, full_name, first_name, headline, company, title, location, do_not_contact, unsubscribed, public_identifier, profile_url, email_work, email_personal, custom), outreach_senders(id, display_name, status, timezone, public_identifier)`).eq("id", chatId).maybeSingle();
@@ -16,9 +24,30 @@ async function loadChat(ctx: Ctx, chatId: string): Promise<Row> {
 }
 
 async function loadThread(ctx: Ctx, chatId: string, limit = 30): Promise<Row[]> {
-  const { data, error } = await ctx.user.from("outreach_messages").select("id, direction, text, sent_at, is_invite_note, intent, intent_confidence, summary, edited_at, deleted_at, attachments").eq("chat_id", chatId).order("sent_at", { ascending: false }).limit(limit);
+  const { data, error } = await ctx.user.from("outreach_messages").select("id, direction, text, sent_at, is_invite_note, intent, intent_confidence, summary, edited_at, deleted_at, attachments, reactions, read_at, transcript, transcript_status").eq("chat_id", chatId).order("sent_at", { ascending: false }).limit(limit);
   if (error) throw new Error(error.message);
   return (data ?? []).reverse();
+}
+
+/** Voice note / reactions / read receipt fields of one message line (Instagram & WhatsApp; empty on LinkedIn). */
+function mediaOf(m: Row): Row {
+  const voice = Array.isArray(m.attachments) && m.attachments.some((x: Row) => x?.voice_note || x?.type === "audio" || String(x?.mimetype ?? "").startsWith("audio/"));
+  const reactions = Array.isArray(m.reactions) && m.reactions.length ? m.reactions.map((r: Row) => (r?.by ? `${r.emoji} (${r.by})` : r?.emoji)).filter(Boolean) : undefined;
+  return {
+    voice_note: voice || undefined,
+    transcript: voice ? (m.transcript ? untrusted("voice_note_transcript", m.transcript, 1500) : m.transcript_status === "failed" ? { status: "failed" } : { status: m.transcript_status ?? "pending" }) : undefined,
+    reactions,
+    seen: m.direction === "out" && m.read_at ? m.read_at : undefined,
+  };
+}
+
+/** The active WhatsApp consent of the lead behind a chat (one RPC; a failure never hides the thread). */
+async function consentFor(ctx: Ctx, chat: Row): Promise<Row | undefined> {
+  if (chat.provider !== "WHATSAPP" || !chat.lead_id) return undefined;
+  const rows = await urpc<Row[]>(ctx, "consent_list", { p_ws: chat.workspace_id, p_lead: chat.lead_id, p_channel: "WHATSAPP", p_limit: 1 }).catch(() => null);
+  const c = Array.isArray(rows) ? rows[0] : undefined;
+  if (!c) return { recorded: false, note: "No recorded WhatsApp consent basis. Replying in this existing chat is allowed; a new chat from a sequence would not be planned until a human states a basis (consent_grant)." };
+  return { recorded: true, id: c.id, basis: c.basis, weakest_basis: c.basis === "imported_attested" ? true : undefined, obtained_at: c.obtained_at, expires_at: c.expires_at, evidence: c.evidence && Object.keys(c.evidence).length ? c.evidence : undefined, attested_by_email: c.attested_by_email };
 }
 
 async function briefFor(ctx: Ctx, chat: Row): Promise<string | null> {
@@ -63,7 +92,7 @@ function contactsFor(chat: Row, thread: Row[]): Row {
   // what the prospect wrote: "please contact my colleague Aastha on +91 …", "write to karin@…", each with the sentence around it
   const mentioned: Row[] = [], seen = new Set<string>();
   for (const m of thread.filter((m) => m.direction === "in" && !m.deleted_at)) {
-    const text = m.text ?? "";
+    const text = bodyOf(m);
     const hits: Array<{ type: string; value: string; at: number }> = [];
     for (const x of text.matchAll(EMAIL_RE)) hits.push({ type: "email", value: x[0].toLowerCase(), at: x.index ?? 0 });
     for (const x of text.matchAll(PHONE_RE)) { const d = x[0].replace(/\D/g, "").length; if (d >= 8 && d <= 15) hits.push({ type: "phone", value: x[0].trim(), at: x.index ?? 0 }); }
@@ -71,7 +100,7 @@ function contactsFor(chat: Row, thread: Row[]): Row {
       const key = h.value.replace(/[^\da-z@.+]/gi, "");
       if (own.has(h.value) || own.has(key) || seen.has(key)) continue;
       seen.add(key);
-      mentioned.push({ type: h.type, value: h.value, at: m.sent_at, context: untrusted("linkedin_message", text.slice(Math.max(0, h.at - 140), h.at + h.value.length + 40).replace(/\s+/g, " ").trim(), 220) });
+      mentioned.push({ type: h.type, value: h.value, at: m.sent_at, context: untrusted(srcFor(chat.provider), text.slice(Math.max(0, h.at - 140), h.at + h.value.length + 40).replace(/\s+/g, " ").trim(), 220) });
     }
   }
   const linkedin = l.profile_url ?? (l.public_identifier || chat.attendee_public_identifier ? `https://www.linkedin.com/in/${l.public_identifier ?? chat.attendee_public_identifier}` : undefined);
@@ -81,18 +110,20 @@ function contactsFor(chat: Row, thread: Row[]): Row {
 }
 
 /** The prospect's latest inbound messages (since our last message), verbatim. */
-function theirWords(thread: Row[], max = 1500): Row | undefined {
+function theirWords(thread: Row[], max = 1500, source = "linkedin_message"): Row | undefined {
   const live = thread.filter((m) => !m.deleted_at);
   const lastOut = live.map((m) => m.direction).lastIndexOf("out");
   const tail = live.slice(lastOut + 1).filter((m) => m.direction === "in");
   const msgs = tail.length ? tail : [...live].reverse().filter((m) => m.direction === "in").slice(0, 1);
   if (!msgs.length) return undefined;
-  return untrusted("linkedin_message", msgs.map((m) => m.text ?? "").join("\n\n"), max);
+  return untrusted(source, msgs.map((m) => bodyOf(m)).join("\n\n"), max);
 }
 
 const chatLine = (c: Row) => ({
   id: c.id, lead_id: c.lead_id, lead: c.outreach_leads?.full_name ?? c.attendee_name, company: c.outreach_leads?.company, headline: short(c.outreach_leads?.headline, 80),
   sender: c.outreach_senders?.display_name, sender_id: c.sender_id, channel: c.provider, intent: c.intent, unread: c.unread ? c.unread_count || true : undefined,
+  // Instagram message request: our message sits in their Requests tab, not yet accepted; it is not a delivered conversation
+  request: c.is_request ? true : undefined,
   last_at: c.last_message_at, last_from: c.last_direction === "in" ? "prospect" : c.last_direction === "out" ? "sender" : undefined, assigned_to: c.assigned_to, archived: c.archived || undefined,
   preview: untrusted("message_preview", c.last_message_preview, 160),
 });
@@ -108,15 +139,15 @@ async function makeDrafts(ctx: Ctx, chatId: string, guidance: string | undefined
   const brief = await briefFor(ctx, chat);
   const out = await draftReply({
     workspaceId: ws.id, channel: chat.provider, variants,
-    thread: thread.filter((m) => !m.deleted_at).map((m) => ({ direction: m.direction, text: m.text ?? "", at: m.sent_at })),
+    thread: thread.filter((m) => !m.deleted_at).map((m) => ({ direction: m.direction, text: bodyOf(m), at: m.sent_at })),
     lead: chat.outreach_leads ?? { full_name: chat.attendee_name }, sender: chat.outreach_senders ?? {}, brief, guidance,
   });
   const expires = new Date(Date.now() + 30 * 60_000).toISOString();
   const rows = out.map((v, i) => ({ token: randomToken(), user_id: ctx.userId, workspace_id: ws.id, chat_id: chat.id, last_message_id: lastIn.id, draft_text: v.text, rationale: v.rationale, variant: i + 1, expires_at: expires }));
   await admin.from("outreach_agent_drafts").insert(rows);
   return {
-    chat_id: chat.id, lead: chat.outreach_leads?.full_name ?? chat.attendee_name, company: chat.outreach_leads?.company, sender: chat.outreach_senders?.display_name, intent: chat.intent,
-    replying_to: untrusted("linkedin_message", lastIn.text, 600), their_words: theirWords(thread), last_from_them_at: lastIn.sent_at, contacts: contactsFor(chat, thread), drafts: rows.map((r) => ({ draft_token: r.token, variant: r.variant, text: r.draft_text, rationale: r.rationale })), expires_in_seconds: 1800,
+    chat_id: chat.id, lead: chat.outreach_leads?.full_name ?? chat.attendee_name, company: chat.outreach_leads?.company, sender: chat.outreach_senders?.display_name, channel: chat.provider, intent: chat.intent,
+    replying_to: untrusted(srcFor(chat.provider), bodyOf(lastIn), 600), their_words: theirWords(thread, 1500, srcFor(chat.provider)), last_from_them_at: lastIn.sent_at, contacts: contactsFor(chat, thread), drafts: rows.map((r) => ({ draft_token: r.token, variant: r.variant, text: r.draft_text, rationale: r.rationale })), expires_in_seconds: 1800,
   };
 }
 
@@ -129,7 +160,7 @@ async function verifyDraft(ctx: Ctx, token: string): Promise<VerifiedDraft> {
   if (new Date(d.expires_at).getTime() < Date.now()) throw new McpError("E_DRAFT_EXPIRED", "draft expired (30 min)");
   const chat = await loadChat(ctx, d.chat_id);
   const { data: latest } = await ctx.user.from("outreach_messages").select("id, text, sent_at").eq("chat_id", d.chat_id).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
-  if (latest && latest.id !== d.last_message_id) throw new McpError("E_DRAFT_STALE", "the prospect sent a new message after this draft", "Re-read the thread (inbox_thread), draft a new reply and get it approved again.", { new_message: untrusted("linkedin_message", latest.text, 600), at: latest.sent_at });
+  if (latest && latest.id !== d.last_message_id) throw new McpError("E_DRAFT_STALE", "the prospect sent a new message after this draft", "Re-read the thread (inbox_thread), draft a new reply and get it approved again.", { new_message: untrusted(srcFor(chat.provider), latest.text, 600), at: latest.sent_at });
   return { draft: d, chat };
 }
 
@@ -138,7 +169,7 @@ async function verifyAuthored(ctx: Ctx, chatId: string, replyTo: string): Promis
   const chat = await loadChat(ctx, chatId);
   const { data: latest } = await ctx.user.from("outreach_messages").select("id, text, sent_at").eq("chat_id", chatId).eq("direction", "in").order("sent_at", { ascending: false }).limit(1).maybeSingle();
   if (!latest) throw new McpError("E_PAYLOAD_INVALID", "no inbound message on this thread — nothing to reply to");
-  if (latest.id !== replyTo) throw new McpError("E_DRAFT_STALE", "the prospect sent a new message after this draft was written", "Re-read the thread (inbox_thread), rewrite the reply and get it approved again.", { new_message: untrusted("linkedin_message", latest.text, 600), at: latest.sent_at });
+  if (latest.id !== replyTo) throw new McpError("E_DRAFT_STALE", "the prospect sent a new message after this draft was written", "Re-read the thread (inbox_thread), rewrite the reply and get it approved again.", { new_message: untrusted(srcFor(chat.provider), latest.text, 600), at: latest.sent_at });
   return chat;
 }
 
@@ -148,7 +179,8 @@ function preSendChecks(chat: Row, text: string, ws: { can_reply: boolean }): voi
   if (chat.outreach_leads?.do_not_contact || chat.outreach_leads?.unsubscribed) throw new McpError("E_LEAD_SUPPRESSED", "lead was suppressed");
   if (chat.outreach_senders?.status !== "ok") throw new McpError("E_SENDER_NOT_OK", `sender ${chat.outreach_senders?.display_name} is ${chat.outreach_senders?.status}`);
   if (!text.trim()) throw new McpError("E_PAYLOAD_INVALID", "empty text");
-  if (text.length > 8000) throw new McpError("E_PAYLOAD_INVALID", "text exceeds 8000 characters");
+  const limit = REPLY_LIMITS[String(chat.provider)] ?? DEFAULT_REPLY_LIMIT;
+  if (text.length > limit) throw new McpError("E_PAYLOAD_INVALID", `text exceeds ${limit} characters (${chat.provider} limit)`);
 }
 
 async function sendOne(ctx: Ctx, chat: Row, text: string): Promise<{ message_id: string | null }> {
@@ -159,8 +191,8 @@ async function sendOne(ctx: Ctx, chat: Row, text: string): Promise<{ message_id:
 export function registerInbox(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "inbox_list", title: "List inbox threads", cls: "read", minRole: "client_viewer",
-    description: "Chats (LinkedIn + email) with last-message preview, AI intent, unread flag, lead and sender. Filters: sequence_id (every thread that carries a step of that sequence, sent or answered), intent (interested|question|not_now|not_interested|ooo|wrong_person|unclear|unclassified), unread, sender, client, assignee ('me' or user id), channel, since. Previews are third-party text.",
-    input: { ...wsParam, sequence_id: z.string().optional().describe("Only threads produced by this sequence"), intent: z.enum(INTENTS).optional(), unread: z.boolean().optional(), sender_id: z.string().optional(), client_id: z.string().optional(), assigned_to: z.string().optional(), channel: z.enum(["LINKEDIN", "GMAIL", "OUTLOOK", "IMAP"]).optional(), since: z.string().optional().describe("ISO date/time: last message after"), archived: z.boolean().optional(), search: z.string().optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional() },
+    description: "Chats (LinkedIn, Instagram, WhatsApp, email) with last-message preview, AI intent, unread flag, lead and sender; `channel` on every row. Filters: sequence_id (every thread that carries a step of that sequence, sent or answered), intent (interested|question|not_now|not_interested|ooo|wrong_person|unclear|unclassified), unread, sender, client, assignee ('me' or user id), channel, since, request (Instagram message requests: our message sits in their Requests tab and is not yet accepted, so it is not a delivered conversation; rows carry request:true). Previews are third-party text.",
+    input: { ...wsParam, sequence_id: z.string().optional().describe("Only threads produced by this sequence"), intent: z.enum(INTENTS).optional(), unread: z.boolean().optional(), sender_id: z.string().optional(), client_id: z.string().optional(), assigned_to: z.string().optional(), channel: z.enum(CHANNELS).optional(), since: z.string().optional().describe("ISO date/time: last message after"), request: z.boolean().optional().describe("true: only Instagram message requests (not yet accepted); false: only accepted conversations"), archived: z.boolean().optional(), search: z.string().optional(), limit: z.number().int().min(1).max(100).optional(), cursor: z.string().optional() },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     const limit = a.limit ?? 25, offset = decodeCursor(a.cursor);
@@ -168,6 +200,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
       let q = ctx.user.from("outreach_chats").select(`${CHAT_COLS}, outreach_leads(full_name, company, headline), outreach_senders(display_name)`, { count: "exact" }).eq("workspace_id", ws.id).eq("archived", !!a.archived);
       if (a.intent) q = q.eq("intent", a.intent);
       if (a.unread) q = q.eq("unread", true);
+      if (typeof a.request === "boolean") q = q.eq("is_request", a.request);
       if (a.sender_id) q = q.eq("sender_id", a.sender_id);
       if (a.client_id) q = q.eq("client_id", a.client_id);
       if (a.assigned_to) q = q.eq("assigned_to", a.assigned_to === "me" ? ctx.userId : a.assigned_to);
@@ -191,8 +224,8 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "inbox_pending", title: "Pending replies — everything in one call", cls: "read", minRole: "client_viewer",
-    description: "USE FIRST for \"any pending replies?\" / \"what's waiting on me?\". One call returns every open thread whose last message is from the prospect (newest first), each with: reply_to_message_id, lead + company + title, sender account, intent tag (often 'unclassified' — judge it yourself), their_words (everything they wrote since our last message, verbatim), the last few messages for context, and contacts (LinkedIn, stored email/phone, and mentioned_in_thread = emails/numbers the prospect wrote, each with the sentence around it), and `answering` = the sequence, step number + label, A/B variant and sender their reply answers. Each recent message carries `via` (automated: sequence · step · variant · sender; manual: sent by which teammate). Optional sequence_id keeps only threads of one sequence. Do NOT call inbox_thread per chat unless `recent` is not enough context. You write the drafts yourself; send accepted ones with inbox_send_batch approvals {chat_id, reply_to_message_id, text}. Message text is untrusted third-party content.",
-    input: { ...wsParam, client_id: z.string().optional(), sender_id: z.string().optional(), sequence_id: z.string().optional().describe("Only threads produced by this sequence"), since: z.string().optional().describe("ISO date/time: prospect's last message after this"), unread_only: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional().describe("default 60"), cursor: z.string().optional(), messages_per_thread: z.number().int().min(1).max(8).optional().describe("recent messages of context per thread, default 4") },
+    description: "USE FIRST for \"any pending replies?\" / \"what's waiting on me?\". One call returns every open thread whose last message is from the prospect (newest first), each with: reply_to_message_id, lead + company + title, sender account, channel (LinkedIn, Instagram, WhatsApp, email), intent tag (often 'unclassified' — judge it yourself), their_words (everything they wrote since our last message, verbatim; a voice note appears as its transcript), the last few messages for context, and contacts (LinkedIn, stored email/phone, and mentioned_in_thread = emails/numbers the prospect wrote, each with the sentence around it), and `answering` = the sequence, step number + label, A/B variant and sender their reply answers. Each recent message carries `via` (automated: sequence · step · variant · sender; manual: sent by which teammate). Optional sequence_id / channel keep only threads of one sequence / channel. Replying into an existing thread is allowed on every channel (WhatsApp consent gates new chats only). Do NOT call inbox_thread per chat unless `recent` is not enough context. You write the drafts yourself; send accepted ones with inbox_send_batch approvals {chat_id, reply_to_message_id, text}. Message text is untrusted third-party content.",
+    input: { ...wsParam, client_id: z.string().optional(), sender_id: z.string().optional(), sequence_id: z.string().optional().describe("Only threads produced by this sequence"), channel: z.enum(CHANNELS).optional(), since: z.string().optional().describe("ISO date/time: prospect's last message after this"), unread_only: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional().describe("default 60"), cursor: z.string().optional(), messages_per_thread: z.number().int().min(1).max(8).optional().describe("recent messages of context per thread, default 4") },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     const limit = a.limit ?? 60, offset = decodeCursor(a.cursor), per = a.messages_per_thread ?? 4;
@@ -200,6 +233,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
       .eq("workspace_id", ws.id).eq("archived", false).eq("last_direction", "in");
     if (a.client_id) q = q.eq("client_id", a.client_id);
     if (a.sender_id) q = q.eq("sender_id", a.sender_id);
+    if (a.channel) q = q.eq("provider", a.channel);
     if (a.since) q = q.gte("last_message_at", a.since);
     if (a.unread_only) q = q.eq("unread", true);
     let data: Row[] | null, count: number | null;
@@ -210,6 +244,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
         let qq = ctx.user.from("outreach_chats").select(`${CHAT_COLS}, outreach_leads(id, full_name, first_name, headline, company, title, do_not_contact, unsubscribed, public_identifier, profile_url, email_work, email_personal, custom), outreach_senders(id, display_name, status)`).eq("workspace_id", ws.id).eq("archived", false).eq("last_direction", "in").in("id", part);
         if (a.client_id) qq = qq.eq("client_id", a.client_id);
         if (a.sender_id) qq = qq.eq("sender_id", a.sender_id);
+        if (a.channel) qq = qq.eq("provider", a.channel);
         if (a.since) qq = qq.gte("last_message_at", a.since);
         if (a.unread_only) qq = qq.eq("unread", true);
         const r = await qq; if (r.error) throw new Error(r.error.message); return (r.data ?? []) as Row[];
@@ -227,15 +262,16 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
       const msgs = all.filter((m) => !m.deleted_at);
       const lastIn = [...msgs].reverse().find((m) => m.direction === "in");
       // we never wrote on this thread → someone pitching / inviting us, not a prospect replying: keep it to one compact line
-      if (!msgs.some((m) => m.direction === "out")) return { chat_id: c.id, cold_inbound: true, lead: c.outreach_leads?.full_name ?? c.attendee_name, title: short(c.outreach_leads?.title ?? c.outreach_leads?.headline, 60), sender: c.outreach_senders?.display_name, last_from_them_at: lastIn?.sent_at ?? c.last_message_at, reply_to_message_id: lastIn?.id, their_words: theirWords(msgs, 220) };
+      const src = srcFor(c.provider);
+      if (!msgs.some((m) => m.direction === "out")) return { chat_id: c.id, cold_inbound: true, lead: c.outreach_leads?.full_name ?? c.attendee_name, title: short(c.outreach_leads?.title ?? c.outreach_leads?.headline, 60), sender: c.outreach_senders?.display_name, channel: c.provider === "LINKEDIN" ? undefined : c.provider, last_from_them_at: lastIn?.sent_at ?? c.last_message_at, reply_to_message_id: lastIn?.id, their_words: theirWords(msgs, 220, src) };
       const contacts = contactsFor(c, msgs);
       return {
         chat_id: c.id, reply_to_message_id: lastIn?.id, lead: c.outreach_leads?.full_name ?? c.attendee_name, title: short(c.outreach_leads?.title ?? c.outreach_leads?.headline, 80), company: c.outreach_leads?.company,
-        sender: c.outreach_senders?.display_name, sender_ok: c.outreach_senders?.status === "ok" ? undefined : c.outreach_senders?.status, channel: c.provider, intent: c.intent, unread: c.unread || undefined,
+        sender: c.outreach_senders?.display_name, sender_ok: c.outreach_senders?.status === "ok" ? undefined : c.outreach_senders?.status, channel: c.provider, request: c.is_request || undefined, intent: c.intent, unread: c.unread || undefined,
         suppressed: c.outreach_leads?.do_not_contact || c.outreach_leads?.unsubscribed || undefined,
-        last_from_them_at: lastIn?.sent_at ?? c.last_message_at, their_words: theirWords(msgs), contacts,
+        last_from_them_at: lastIn?.sent_at ?? c.last_message_at, their_words: theirWords(msgs, 1500, src), contacts,
         answering: attrOf(lastIn ? attr.get(lastIn.id) : undefined)?.replying_to,
-        recent: msgs.slice(-per).map((m) => ({ from: m.direction === "in" ? "prospect" : "us", at: m.sent_at, invite_note: m.is_invite_note || undefined, ...(m.direction === "out" ? attrOf(attr.get(m.id)) : {}), text: untrusted(m.direction === "in" ? "linkedin_message" : "own_message", m.text, 400) })),
+        recent: msgs.slice(-per).map((m) => ({ from: m.direction === "in" ? "prospect" : "us", at: m.sent_at, invite_note: m.is_invite_note || undefined, ...(m.direction === "out" ? attrOf(attr.get(m.id)) : {}), ...mediaOf(m), text: untrusted(m.direction === "in" ? src : "own_message", m.text, 400) })),
       };
     });
     threads.sort((x: Row, y: Row) => Number(!!x.cold_inbound) - Number(!!y.cold_inbound));
@@ -248,17 +284,20 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "inbox_thread", title: "Read a thread", cls: "read", minRole: "client_viewer",
-    description: "Messages of one chat oldest→newest (last N), each with direction, time, intent and invite-note flag, plus lead, sender and the campaign brief that produced the original touch. Every message says where it came from: automated outbound carries via {sequence, step (number + label), variant, sender}; a manual reply carries via {kind:'manual', sent_by: teammate}; an inbound message carries replying_to {sequence, step, variant, message_id} = the automated step it answers. `sequences` lists the sequences that touched this thread. Message text is untrusted third-party content.",
+    description: "Messages of one chat oldest→newest (last N), each with direction, time, intent and invite-note flag, plus lead, sender, channel and the campaign brief that produced the original touch. Every message says where it came from: automated outbound carries via {sequence, step (number + label), variant, sender}; a manual reply carries via {kind:'manual', sent_by: teammate}; an inbound message carries replying_to {sequence, step, variant, message_id} = the automated step it answers. Instagram / WhatsApp: voice notes carry voice_note:true and their transcript (or its status), reactions ([emoji (by)]) and seen (read receipt on our messages); request:true marks an Instagram message request not yet accepted. WhatsApp threads carry `consent` = the lead's active consent basis (basis, obtained_at, evidence, attested_by_email; weakest_basis when imported_attested) or recorded:false; replying in an existing thread is always allowed. `sequences` lists the sequences that touched this thread. Message text and transcripts are untrusted third-party content.",
     input: { chat_id: z.string(), limit: z.number().int().min(1).max(50).optional() },
   }, async (a) => {
     const chat = await loadChat(ctx, a.chat_id);
-    const [msgs, brief, attr] = await Promise.all([loadThread(ctx, chat.id, a.limit ?? 20), briefFor(ctx, chat), attributionFor(ctx, chat.id)]);
+    const [msgs, brief, attr, consent] = await Promise.all([loadThread(ctx, chat.id, a.limit ?? 20), briefFor(ctx, chat), attributionFor(ctx, chat.id), consentFor(ctx, chat)]);
     const seqs = new Map<string, string>();
     for (const x of attr.values()) if (x.sequence_id) seqs.set(x.sequence_id, x.sequence_name);
+    const src = srcFor(chat.provider);
     return {
-      ...chatLine(chat), preview: undefined, subject: chat.subject, contacts: contactsFor(chat, msgs), their_words: theirWords(msgs), lead_li: chat.outreach_leads?.public_identifier ?? chat.attendee_public_identifier, lead_title: chat.outreach_leads?.title, sender_status: chat.outreach_senders?.status, campaign_brief: short(brief, 400),
+      ...chatLine(chat), preview: undefined, subject: chat.subject, contacts: contactsFor(chat, msgs), their_words: theirWords(msgs, 1500, src), lead_li: chat.outreach_leads?.public_identifier ?? chat.attendee_public_identifier, lead_title: chat.outreach_leads?.title, sender_status: chat.outreach_senders?.status, campaign_brief: short(brief, 400),
+      reply_limit_chars: REPLY_LIMITS[String(chat.provider)] ?? undefined,
+      consent,
       sequences: [...seqs].map(([id, name]) => ({ id, name })),
-      messages: msgs.map((m) => ({ id: m.id, from: m.direction === "in" ? "prospect" : "sender", at: m.sent_at, ...attrOf(attr.get(m.id)), invite_note: m.is_invite_note || undefined, intent: m.intent ?? undefined, summary: m.summary ?? undefined, edited: !!m.edited_at || undefined, deleted: !!m.deleted_at || undefined, attachments: m.attachments?.length || undefined, text: m.deleted_at ? undefined : untrusted(m.direction === "in" ? "linkedin_message" : "own_message", m.text, 1500) })),
+      messages: msgs.map((m) => ({ id: m.id, from: m.direction === "in" ? "prospect" : "sender", at: m.sent_at, ...attrOf(attr.get(m.id)), invite_note: m.is_invite_note || undefined, intent: m.intent ?? undefined, summary: m.summary ?? undefined, edited: !!m.edited_at || undefined, deleted: !!m.deleted_at || undefined, attachments: m.attachments?.length || undefined, ...mediaOf(m), text: m.deleted_at ? undefined : untrusted(m.direction === "in" ? src : "own_message", m.text, 1500) })),
     };
   });
 
@@ -288,7 +327,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "inbox_send_reply", title: "Send a reply (confirmation required)", cls: "gated", minRole: "client_viewer",
-    description: "Send one reply on a chat as the connected sender — this puts text on LinkedIn/email immediately. Two-step confirmation. Pass draft_token when sending an AI draft (staleness is checked at send: if the prospect wrote again, E_DRAFT_STALE). Replies do not consume the outbound ledger but are logged and audited.",
+    description: "Send one reply on a chat as the connected sender — this puts text on LinkedIn / Instagram / WhatsApp / email immediately. Two-step confirmation. Pass draft_token when sending an AI draft (staleness is checked at send: if the prospect wrote again, E_DRAFT_STALE). Replies into an existing thread do not consume the outbound ledger and need no consent (WhatsApp consent gates new chats only); they are logged and audited. Limits: Instagram 1000, WhatsApp 4096, else 8000 characters.",
     input: { chat_id: z.string(), text: z.string().min(1).max(8000), draft_token: z.string().optional(), reply_to_message_id: z.string().optional().describe("For a reply you wrote yourself: the inbound message it answers (staleness check)"), confirmation_token: z.string().optional() },
     annotations: { openWorldHint: true, destructiveHint: false },
   }, async (a) => {

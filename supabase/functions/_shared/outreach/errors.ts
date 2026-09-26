@@ -13,14 +13,25 @@ export type Decision =
   | { kind: "branch"; name: string; reason: string }
   // clean exits, not failures: fail_action maps them to exited_replied / exited_suppressed and records no sender reject
   | { kind: "replied"; reason: string }
-  | { kind: "suppressed"; reason: string };
+  | { kind: "suppressed"; reason: string }
+  // terminal, no enrollment effect: the action is cancelled (profile edits whose change row already records the outcome)
+  | { kind: "cancel"; reason: string };
 
 export interface ErrorCtx {
   actionType: string;
   attempt: number;
   senderTimezone: string;
   hasBranch: (name: string) => boolean;
+  /** The sender's provider (LINKEDIN when absent). Only the Instagram / WhatsApp rows below read it: the LinkedIn table is unchanged. */
+  provider?: string;
 }
+
+/** Instagram's "We suspect automated behavior on your account" notice, surfaced as a 403 by the connector (one regex, shared with channels.ts). */
+import { PROVIDER_WARNING_RE } from "./channels.ts";
+export { PROVIDER_WARNING_RE };
+
+/** Codes that mean "this number is not on WhatsApp" on an identifier check. */
+const NOT_ON_WHATSAPP = new Set(["invalid_recipient", "user_unreachable", "invalid_account"]);
 
 function nextMondayLocal(tz: string): Date {
   const lp = localParts(tz);
@@ -37,6 +48,21 @@ export function handleUnipileError(err: unknown, ctx: ErrorCtx): Decision {
   if (e.network || e.status === 0) {
     if (ctx.attempt >= 3) return { kind: "fail_enrollment", reason: "network_timeout_max" };
     return { kind: "retry", at: new Date(Date.now() + 10 * 60_000), reason };
+  }
+
+  const provider = String(ctx.provider ?? "LINKEDIN").toUpperCase();
+  // ---- channel rows (Instagram / WhatsApp only; nothing below changes a LinkedIn decision)
+  if (ctx.actionType === "identifier_check" && (e.status === 404 || (e.status === 422 && NOT_ON_WHATSAPP.has(code)))) {
+    // "is this number on WhatsApp?" answered no: the executor has already flagged the identity; the step takes its `invalid` exit
+    return ctx.hasBranch("invalid") ? { kind: "branch", name: "invalid", reason } : { kind: "skip_node", reason: "not_on_whatsapp" };
+  }
+  if (provider === "INSTAGRAM" && e.status === 403 && PROVIDER_WARNING_RE.test(`${e.message ?? ""} ${JSON.stringify(e.body ?? "")}`)) {
+    // provider warning: the executor records it (outreach_sender_provider_warning: level −1, 48 h pause) before returning this
+    return { kind: "sender_pause", hours: 48, reason: "provider_warning" };
+  }
+  if ((provider === "INSTAGRAM" || provider === "WHATSAPP") && e.status === 422 && code === "blocked_recipient") {
+    // the recipient blocked this account: block signal (recorded by the executor) + the lead is invalid for this sender
+    return { kind: "mark_lead_invalid", reason };
   }
 
   if (e.status === 422) {
@@ -78,7 +104,8 @@ export function handleUnipileError(err: unknown, ctx: ErrorCtx): Decision {
     }
   }
   if (e.status === 404) {
-    if (ctx.actionType === "profile_view" || ctx.actionType === "invite" || ctx.actionType === "message" || ctx.actionType === "inmail") return { kind: "mark_lead_invalid", reason };
+    // new_chat is the explicit form of what used to be a first `message`: same outcome as before on every provider
+    if (ctx.actionType === "profile_view" || ctx.actionType === "invite" || ctx.actionType === "message" || ctx.actionType === "inmail" || ctx.actionType === "new_chat") return { kind: "mark_lead_invalid", reason };
     return { kind: "skip_node", reason };
   }
   if (e.status === 429) return { kind: "retry", at: new Date(Date.now() + rand(30, 90) * 60_000), reason };

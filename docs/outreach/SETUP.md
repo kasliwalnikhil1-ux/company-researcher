@@ -764,3 +764,8 @@ select s.display_name, b.day, b.used, b.cap from outreach_sender_budgets b join 
 ```
 
 The database side is done, and the code in the repo reserves `post_fetch` before every call to Unipile's posts endpoint (`execute.ts` for like and comment steps, `enrich.ts` for enrichment and for AI drafts). The claim "every LinkedIn call is budgeted" becomes true for the running system when `outreach-worker-tick`, `outreach-ai-draft` and `outreach-worker-enrich` are redeployed. The last query proves it: it returns rows after like steps, comment steps or AI drafts have run. No rows while those steps are running means the deployed code is still the old one.
+
+## Profile Studio (25 Sep 2026)
+
+Sender profile editing with owner permission, ceilings, rollback, templates, experiments and QA. Operator notes: `docs/outreach/PROFILE-STUDIO.md`.
+Migrations 021–023 (021 in its own call), functions `outreach-profile` + `outreach-worker-profile`, cron `outreach-profile-tick` (*/5 min) and `outreach-profile-weekly` (Mon 03:35 UTC), storage bucket `outreach-profile-assets`. No new secrets: owner emails go through Resend when `RESEND_API_KEY` is set; without it, approval and permission links are shown to the operator and audited.

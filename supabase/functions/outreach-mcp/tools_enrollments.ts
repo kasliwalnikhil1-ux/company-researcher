@@ -19,6 +19,9 @@ const EXCLUDED_MEANING: Record<string, string> = {
   replied_recently: "replied to someone in this workspace in the last 90 days (include_replied:true enrols them anyway)",
   already_enrolled: "already live with every available sender of the pool",
   no_fresh_sender: "assignment rule 'fresh_sender': every pool sender already contacted this lead",
+  // Instagram & WhatsApp channels: a sender only fits a lead when the lead has a verified identity for that channel
+  no_identity: "no verified Instagram handle / WhatsApp number for the channel of the pool sender (identity_add records one, unverified; a person verifies it in the app or an inbound message proves it)",
+  no_consent: "WhatsApp: no recorded consent basis for this lead; ask the human what the basis is and record it with consent_grant, never invent one",
 };
 const RULE_EFFECT_MEANING: Record<string, string> = {
   moved_to_fresh_sender: "moved to a sender that never contacted them (fresh_sender rule)",
@@ -36,7 +39,7 @@ function storedSplit(assignment: Row | null | undefined): string {
 export function registerEnrollments(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "enroll_preview", title: "Preview enrollment (mandatory before commit)", cls: "read", minRole: "member",
-    description: "Dry-run an enrollment with the platform's own plan (the commit runs the same plan, so they cannot disagree): eligible vs excluded with reasons (not_in_workspace, suppressed:<scope>_blacklist:<kind> / do_not_contact / unsubscribed, replied_recently, already_enrolled, no_fresh_sender), `replied_recently` = the leads who answered anyone in the last 90 days with names and dates (excluded unless include_replied:true: ask the human before including them), the per-sender split under the sequence's assignment rule (round_robin | least_loaded | fixed | fresh_sender | same_sender) with `rule_effects` = how many leads the rule moved or flagged, the projected days and warnings. Returns a preview_token (15 min) that enroll_commit requires. Pick leads by ids (≤1000) or by the same filters as leads_search (≤1000).",
+    description: "Dry-run an enrollment with the platform's own plan (the commit runs the same plan, so they cannot disagree): eligible vs excluded with reasons (not_in_workspace, suppressed:<scope>_blacklist:<kind> / do_not_contact / unsubscribed, replied_recently, already_enrolled, no_fresh_sender, no_identity = no verified handle / number for the pool sender's channel, no_consent = WhatsApp without a recorded consent basis: ask the human, never invent one), `replied_recently` = the leads who answered anyone in the last 90 days with names and dates (excluded unless include_replied:true: ask the human before including them), the per-sender split under the sequence's assignment rule (round_robin | least_loaded | fixed | fresh_sender | same_sender) with `rule_effects` = how many leads the rule moved or flagged, the projected days and warnings. Returns a preview_token (15 min) that enroll_commit requires. Pick leads by ids (≤1000) or by the same filters as leads_search (≤1000).",
     input: { sequence_id: z.string(), lead_ids: z.array(z.string()).max(1000).optional(), filters: z.object(leadFilterShape).optional(), sender_id: z.string().optional().describe("Force one pool sender instead of the sequence's assignment rule"), max_leads: z.number().int().min(1).max(1000).optional().describe("Cap when using filters (default 200)"), include_replied: z.boolean().optional().describe("Default false: leads who replied in the last 90 days are left out. true only after the human looked at replied_recently and said yes.") },
   }, async (a) => {
     const seq = await loadSequence(ctx, a.sequence_id, "id, name, workspace_id, status");

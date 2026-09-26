@@ -44,7 +44,7 @@ serve("unipile-setup", async (req) => {
     const headers = [{ key: "Content-Type", value: "application/json" }, { key: "Unipile-Auth", value: WEBHOOK_SECRET }];
     const specs: Array<{ source: string; events?: string[] }> = [
       { source: "account_status", events: ["creation_success", "creation_fail", "deleted", "reconnected", "sync_success", "stopped", "ok", "connecting", "error", "credentials", "permissions"] },
-      { source: "messaging", events: ["message_received", "message_edited", "message_deleted"] },
+      { source: "messaging", events: ["message_received", "message_edited", "message_deleted", "message_reaction", "message_read", "message_delivered"] },
       { source: "users", events: ["new_relation"] },
       { source: "email", events: ["mail_received", "mail_sent"] },
       { source: "email_tracking", events: ["mail_opened", "mail_link_clicked"] },
@@ -52,7 +52,14 @@ serve("unipile-setup", async (req) => {
     const created: string[] = [];
     for (const spec of specs) {
       const existing = ours.find((w) => w.source === spec.source);
-      if (existing) continue;
+      if (existing) {
+        // a webhook registered before new events were added (reactions / read receipts) is replaced so it carries them all
+        const have: string[] = Array.isArray(existing.events) ? existing.events.map(String) : [];
+        const missing = (spec.events ?? []).filter((ev) => !have.includes(ev));
+        if (!missing.length || !existing.id) continue;
+        try { await unipile.webhooks.delete(String(existing.id)); created.push(`${spec.source}:replaced (added ${missing.join(", ")})`); }
+        catch (e) { created.push(`${spec.source}:ERROR replacing ${String((e as any)?.message ?? e)}`); continue; }
+      }
       try {
         const r = await unipile.webhooks.create({ request_url: status.webhook_url, source: spec.source, events: spec.events, name: `${NAME}-${spec.source}`, headers, format: "json" });
         created.push(`${spec.source}:${r.webhook_id}`);

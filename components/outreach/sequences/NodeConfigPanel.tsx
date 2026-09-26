@@ -12,6 +12,7 @@ import {
 } from './FormsOutreach';
 import { CallApiForm, CallWebhookForm, ChangeListForm, ChangeSenderForm, ChangeStageForm, ConditionForm, DelayEditor, DelayForm, RotateSenderForm, SendToSequenceForm, TagForm } from './FormsLogic';
 import { AbSplitForm, CallTaskForm, FindEmailForm, FollowProfileForm, RefreshProfileForm, SendVoiceNoteForm } from './FormsSteps';
+import { ChannelSwitchForm, CheckIdentifierForm, CommentPostForm, FollowForm, LikeRecentPostsForm, RequireConsentForm, UnfollowForm, WaitFollowBackForm, WaitForReplyForm } from './FormsChannels';
 import AiRouteForm from './AiRouteForm';
 
 function TypeForm(props: FormProps) {
@@ -48,6 +49,16 @@ function TypeForm(props: FormProps) {
     case 'send_voice_note': return <SendVoiceNoteForm {...props} />;
     case 'ab_split': return <AbSplitForm {...props} />;
     case 'ai_route': return <AiRouteForm node={props.node} cfg={props.cfg} update={props.update} />;
+    // channels (Instagram / WhatsApp)
+    case 'follow': return <FollowForm />;
+    case 'unfollow': return <UnfollowForm />;
+    case 'like_recent_posts': return <LikeRecentPostsForm {...props} />;
+    case 'comment_post': return <CommentPostForm {...props} />;
+    case 'wait_follow_back': return <WaitFollowBackForm {...props} />;
+    case 'check_identifier': return <CheckIdentifierForm />;
+    case 'require_consent': return <RequireConsentForm {...props} />;
+    case 'wait_for_reply': return <WaitForReplyForm {...props} />;
+    case 'channel_switch': return <ChannelSwitchForm {...props} />;
     default: return null;
   }
 }

@@ -5,24 +5,55 @@
 --   __CRON_SECRET__          random secret shared with edge functions (OUTREACH_CRON_SECRET)
 -- =============================================================================
 
+-- Seeding helpers for the LinkedIn ceiling / warm-up rows. Since 025 both tables are keyed by provider, so a plain
+-- `on conflict (action_type)` stops matching; these pick the right conflict target either way, which keeps every seed file
+-- (004, 016, 022) safe to re-run before and after 025. Internal: revoked from signed-in users.
+create or replace function outreach__seed_linkedin_ceilings(p jsonb) returns void
+language plpgsql set search_path = public, extensions as $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'outreach_platform_ceilings' and column_name = 'provider') then
+    execute $q$insert into outreach_platform_ceilings(provider, action_type, per_day, per_week)
+      select 'LINKEDIN', (x->>0)::outreach_action_type_t, (x->>1)::int, (x->>2)::int from jsonb_array_elements($1) x
+      on conflict (provider, action_type) do update set per_day = excluded.per_day, per_week = excluded.per_week$q$ using p;
+  else
+    execute $q$insert into outreach_platform_ceilings(action_type, per_day, per_week)
+      select (x->>0)::outreach_action_type_t, (x->>1)::int, (x->>2)::int from jsonb_array_elements($1) x
+      on conflict (action_type) do update set per_day = excluded.per_day, per_week = excluded.per_week$q$ using p;
+  end if;
+end $$;
+
+create or replace function outreach__seed_linkedin_warmup(p jsonb) returns void
+language plpgsql set search_path = public, extensions as $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'outreach_warmup_caps' and column_name = 'provider') then
+    execute $q$insert into outreach_warmup_caps(provider, level, action_type, per_day)
+      select 'LINKEDIN', (x->>0)::smallint, (x->>1)::outreach_action_type_t, (x->>2)::int from jsonb_array_elements($1) x
+      on conflict (provider, level, action_type) do update set per_day = excluded.per_day$q$ using p;
+  else
+    execute $q$insert into outreach_warmup_caps(level, action_type, per_day)
+      select (x->>0)::smallint, (x->>1)::outreach_action_type_t, (x->>2)::int from jsonb_array_elements($1) x
+      on conflict (level, action_type) do update set per_day = excluded.per_day$q$ using p;
+  end if;
+end $$;
+revoke execute on function outreach__seed_linkedin_ceilings(jsonb) from public, anon, authenticated;
+revoke execute on function outreach__seed_linkedin_warmup(jsonb) from public, anon, authenticated;
+
 -- Platform ceilings (immutable; service-role editable only)
-insert into outreach_platform_ceilings(action_type, per_day, per_week) values
+select outreach__seed_linkedin_ceilings((select jsonb_agg(jsonb_build_array(t, d, w)) from (values
   ('invite',80,150),('profile_view',100,null),('message',100,null),('inmail',50,null),
   ('like',100,null),('comment',100,null),('endorse',50,null),('search_page',50,null),
   ('withdraw',20,null),('email',150,null),('reply',100000,null),('relations_poll',3,null),('call_api',100000,null)
-on conflict (action_type) do update set per_day = excluded.per_day, per_week = excluded.per_week;
+) x(t, d, w)));
 
 -- Warmup cap table (levels 0..5)
-insert into outreach_warmup_caps(level, action_type, per_day)
-select l, t::outreach_action_type_t, v from (values
+select outreach__seed_linkedin_warmup((select jsonb_agg(jsonb_build_array(l, t, v)) from (values
   (0,'invite',4),(0,'message',5),(0,'profile_view',10),(0,'like',5),(0,'comment',0),(0,'inmail',0),(0,'search_page',5),(0,'endorse',0),(0,'withdraw',2),(0,'email',20),
   (1,'invite',9),(1,'message',10),(1,'profile_view',20),(1,'like',10),(1,'comment',3),(1,'inmail',5),(1,'search_page',10),(1,'endorse',3),(1,'withdraw',4),(1,'email',40),
   (2,'invite',15),(2,'message',20),(2,'profile_view',30),(2,'like',15),(2,'comment',5),(2,'inmail',10),(2,'search_page',20),(2,'endorse',5),(2,'withdraw',6),(2,'email',60),
   (3,'invite',25),(3,'message',35),(3,'profile_view',40),(3,'like',20),(3,'comment',8),(3,'inmail',20),(3,'search_page',40),(3,'endorse',8),(3,'withdraw',8),(3,'email',80),
   (4,'invite',35),(4,'message',50),(4,'profile_view',50),(4,'like',30),(4,'comment',10),(4,'inmail',30),(4,'search_page',60),(4,'endorse',10),(4,'withdraw',10),(4,'email',100),
   (5,'invite',45),(5,'message',60),(5,'profile_view',60),(5,'like',30),(5,'comment',10),(5,'inmail',40),(5,'search_page',80),(5,'endorse',10),(5,'withdraw',10),(5,'email',120)
-) x(l,t,v)
-on conflict (level, action_type) do update set per_day = excluded.per_day;
+) x(l, t, v)));
 
 -- Global flags
 insert into outreach_flags(key, value) values

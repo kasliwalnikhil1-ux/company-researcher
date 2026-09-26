@@ -2,8 +2,9 @@
 
 import { PenLine, Plus, Trash2 } from 'lucide-react';
 import { Button, Input, Select, Textarea, Toggle } from '@/components/outreach/ui';
-import { TEXT_LIMITS } from '@/lib/outreach/nodes';
-import type { GraphNode, MessageVariant } from '@/lib/outreach/types';
+import { NODE_CATALOG, TEXT_LIMITS, messageTextLimit, syncNodeBranches } from '@/lib/outreach/nodes';
+import { CHANNEL_PROVIDERS, type GraphNode, type MessageVariant, type Provider } from '@/lib/outreach/types';
+import { PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import TemplateField from './TemplateField';
 import VariantEditor from './VariantEditor';
 import { Callout, Note } from './FormsShared';
@@ -52,12 +53,56 @@ export function SendInviteForm({ node, cfg, set, patch }: FormProps) {
   );
 }
 
-export function SendMessageForm({ node, cfg, set, patch }: FormProps) {
+const channelName = (p: Provider) => (PROVIDER_LABELS as Partial<Record<Provider, string>>)[p] ?? p;
+
+/** The channels of the pool a message / voice-note step can go out on, and the one it is pinned to (empty = the account working the lead). */
+export function useMessageChannels(node: GraphNode, cfg: FormProps['cfg']): { poolChannels: Provider[]; channel: Provider | ''; effective: Provider[] } {
+  const { poolSenders } = useBuilder();
+  const supported = NODE_CATALOG[node.type]?.channels ?? CHANNEL_PROVIDERS;
+  const poolChannels = CHANNEL_PROVIDERS.filter((p) => supported.includes(p) && poolSenders.some((s) => s.provider === p));
+  const channel: Provider | '' = typeof cfg.channel === 'string' && (supported as string[]).includes(cfg.channel) ? (cfg.channel as Provider) : '';
+  const effective = channel ? [channel] : poolChannels.length ? poolChannels : ['LINKEDIN' as Provider];
+  return { poolChannels, channel, effective };
+}
+
+/**
+ * Channel choice and the "new conversation" switch shared by "Send message" and "Send voice note". The channel select only
+ * appears when the pool has more than one channel; turning new conversations off adds the "no chat" exit to the step.
+ */
+export function MessageChannelFields({ node, cfg, patch, update, what = 'message' }: Pick<FormProps, 'node' | 'cfg' | 'patch' | 'update'> & { what?: string }) {
+  const { poolChannels, channel, effective } = useMessageChannels(node, cfg);
+  const newChat = cfg.new_chat_allowed !== false;
+  const setNewChat = (v: boolean) => update(syncNodeBranches({ ...node, config: { ...cfg, new_chat_allowed: v } }));
+  const onWhatsApp = effective.includes('WHATSAPP');
   return (
     <div className="space-y-3">
-      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="text" label="Message" max={TEXT_LIMITS.message} rows={8} placeholder="Hi {{first_name|there}}, …" />
+      {poolChannels.length > 1 && (
+        <Select label="Channel" value={channel} onChange={(e) => patch({ channel: e.target.value || undefined })}>
+          <option value="">The account working the lead ({poolChannels.map(channelName).join(' or ')})</option>
+          {poolChannels.map((p) => <option key={p} value={p}>{channelName(p)} only</option>)}
+        </Select>
+      )}
+      <Toggle checked={newChat} onChange={setNewChat} label="Start a new conversation if none exists yet" />
+      <Note>
+        A new conversation is counted separately from {what}s in an existing one, with its own daily allowance{onWhatsApp ? ', and on WhatsApp it only happens for leads with a recorded consent' : ''}.
+        {newChat ? '' : ' Leads with no conversation yet take the “no chat” exit, or skip this step when nothing is connected there.'}
+      </Note>
+    </div>
+  );
+}
+
+export function SendMessageForm({ node, cfg, set, patch, update }: FormProps) {
+  const { effective } = useMessageChannels(node, cfg);
+  const max = messageTextLimit(effective);
+  const owner = effective.includes('INSTAGRAM') ? 'Instagram' : effective.includes('WHATSAPP') ? 'WhatsApp' : 'LinkedIn';
+  const onLinkedIn = effective.includes('LINKEDIN');
+  return (
+    <div className="space-y-3">
+      <MessageChannelFields node={node} cfg={cfg} patch={patch} update={update} />
+      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="text" label="Message" max={max} rows={8} placeholder="Hi {{first_name|there}}, …"
+        hint={max < TEXT_LIMITS.message ? `${owner} allows ${max.toLocaleString('en-US')} characters.` : undefined} />
       <Toggle checked={!!cfg.send_always} onChange={(v) => set('send_always', v)} label="Send even after the lead replied" />
-      <Note>Messages require a 1st-degree connection. Without “send always”, the step is skipped when the lead already replied (stop-on-reply).</Note>
+      <Note>{onLinkedIn ? 'On LinkedIn, messages require a 1st-degree connection. ' : ''}Without “send always”, the step is skipped when the lead already replied (stop-on-reply).</Note>
       <AiBriefField cfg={cfg} set={set} what="message" />
     </div>
   );

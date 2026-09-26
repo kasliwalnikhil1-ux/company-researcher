@@ -143,6 +143,13 @@ export const unipile = {
     invitationsSent: (accountId: string, cursor?: string, limit = 100) => request<{ items: any[]; cursor: string | null }>("/users/invite/sent", { query: { account_id: accountId, cursor, limit }, accountId }),
     relations: (accountId: string, cursor?: string, limit = 100) => request<{ items: any[]; cursor: string | null }>("/users/relations", { query: { account_id: accountId, cursor, limit }, accountId }),
     posts: (accountId: string, identifier: string, limit = 5) => request<{ items: any[]; cursor: string | null }>(`/users/${encodeURIComponent(identifier)}/posts`, { query: { account_id: accountId, limit }, accountId }),
+    // Instagram: the account's own followers / following, newest first, at most 25 per page. Items {id, username, name, profile_picture_url, is_private, is_verified}.
+    followers: (accountId: string, q: { user_id?: string; cursor?: string; limit?: number } = {}) => request<{ items: any[]; cursor: string | null }>("/users/followers", { query: { account_id: accountId, limit: 25, ...q }, accountId }),
+    following: (accountId: string, q: { user_id?: string; cursor?: string; limit?: number } = {}) => request<{ items: any[]; cursor: string | null }>("/users/following", { query: { account_id: accountId, limit: 25, ...q }, accountId }),
+    // Instagram: following someone is POST /users/invite with the user's id or username as provider_id (LinkedIn has no follow endpoint).
+    follow: (accountId: string, identifier: string) => request<any>("/users/invite", { method: "POST", body: { account_id: accountId, provider_id: identifier }, accountId, retries: 0 }),
+    // Edit own profile (Profile Studio). The multipart body comes ONLY from profile_serialiser.ts; never retried (identity endpoint).
+    editProfile: (accountId: string, form: FormData) => request<{ object: string }>("/users/me/edit", { method: "PATCH", form, accountId, retries: 0, timeoutMs: 60000 }),
   },
   linkedin: {
     endorse: (body: { account_id: string; profile_id: string; skill_endorsement_id: number }) => request<any>("/linkedin/profile/endorse", { method: "POST", body, accountId: body.account_id, retries: 0 }),

@@ -69,8 +69,14 @@ export const LEAD_FIELDS: Array<{ value: string; label: string }> = [
   { value: 'email_work', label: 'Work email' },
   { value: 'email_personal', label: 'Personal email' },
   { value: 'phone', label: 'Phone' },
+  // Channels: become identities ({provider, identifier}) on the lead; the engine normalises them (E.164, lower-case handle).
+  { value: 'instagram_handle', label: 'Instagram handle' },
+  { value: 'whatsapp_phone', label: 'WhatsApp number (with country code)' },
   { value: 'custom', label: 'Custom field…' },
 ];
+
+/** CSV mapping fields that are identities, and the channel each one belongs to. */
+export const IDENTITY_FIELDS: Record<string, 'INSTAGRAM' | 'WHATSAPP'> = { instagram_handle: 'INSTAGRAM', whatsapp_phone: 'WHATSAPP' };
 
 const GUESSES: Array<[RegExp, string]> = [
   [/linkedin|profile.?url|li.?url/i, 'linkedin_url'],
@@ -84,6 +90,8 @@ const GUESSES: Array<[RegExp, string]> = [
   [/location|city|country|region/i, 'location'],
   [/work.?e-?mail|business.?e-?mail|^e-?mail$|^email.?address$/i, 'email_work'],
   [/personal.?e-?mail|private.?e-?mail|home.?e-?mail/i, 'email_personal'],
+  [/insta|ig.?handle/i, 'instagram_handle'],
+  [/whatsapp|wa.?number/i, 'whatsapp_phone'],
   [/^(phone|mobile|cell|tel)(.?(number|no))?$|telephone/i, 'phone'],
 ];
 

@@ -1,9 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, Linkedin, Mail, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat } from 'lucide-react';
+import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
+import { channelLabel } from '@/lib/outreach/channels';
+import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
+import { ConsentChip } from './ConsentChip';
 import type { Chat, Intent, Lead, Member, Message, Sender } from '@/lib/outreach/types';
 import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, StatusPill } from '@/components/outreach/ui';
 import MessageBubble from './MessageBubble';
@@ -34,6 +37,8 @@ export interface ThreadProps {
   onEditMessage: (id: string, text: string) => Promise<void>;
   onDeleteMessage: (id: string) => Promise<void>;
   onError: (msg: string) => void;
+  /** Success toasts (consent recorded / revoked). Optional so older callers keep working. */
+  onNotice?: (msg: string) => void;
 }
 
 function Menu({ button, children, align = 'right', disabled }: { button: (open: boolean) => React.ReactNode; children: (close: () => void) => React.ReactNode; align?: 'left' | 'right'; disabled?: boolean }) {
@@ -119,8 +124,10 @@ export default function Thread(p: ThreadProps) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
-            {chat.provider === 'LINKEDIN' ? <Linkedin className="w-3.5 h-3.5 text-[#0a66c2]" aria-label="LinkedIn" /> : <Mail className="w-3.5 h-3.5 text-emerald-600" aria-label="Email" />}
+            <span title={channelLabel(chat.provider)}><ProviderLogo provider={chat.provider} className="w-3.5 h-3.5 rounded-[3px]" /></span>
+            {chat.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: not accepted yet, so it may not have been seen">Message request</span>}
             {lead && <Link href={`/outreach/leads/${lead.id}`} className="text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-3.5 h-3.5" /></Link>}
+            {chat.provider === 'WHATSAPP' && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
           </div>
           <div className="text-xs text-gray-500 truncate">
             {[lead?.headline, lead?.company].filter(Boolean).join(' · ') || chat.subject || chat.attendee_public_identifier || '—'}

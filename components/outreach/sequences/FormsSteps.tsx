@@ -14,7 +14,7 @@ import VoiceClipRecorder from './VoiceClipRecorder';
 import { normalisedPercents } from './VariantEditor';
 import { Callout, Note } from './FormsShared';
 import { useBuilder } from './context';
-import type { FormProps } from './FormsOutreach';
+import { MessageChannelFields, useMessageChannels, type FormProps } from './FormsOutreach';
 
 export function RefreshProfileForm({ cfg, set }: FormProps) {
   const days = Number(cfg.only_if_stale_days ?? 90) || 90;
@@ -69,13 +69,16 @@ export function CallTaskForm({ node, cfg, set, update }: FormProps) {
   );
 }
 
-export function SendVoiceNoteForm({ node, cfg, set }: FormProps) {
+export function SendVoiceNoteForm({ node, cfg, set, patch, update }: FormProps) {
   const { workspaceId, sequenceId, poolSenders, readOnly } = useBuilder();
-  const linkedin = poolSenders.filter((s) => s.provider === 'LINKEDIN');
+  const { effective } = useMessageChannels(node, cfg);
+  const senders = poolSenders.filter((s) => effective.includes(s.provider));
+  const onLinkedIn = effective.includes('LINKEDIN');
   return (
     <div className="space-y-3">
-      <Note>Sends a recorded voice message on LinkedIn. It needs a 1st-degree connection and counts against the message budget.</Note>
-      <VoiceClipRecorder workspaceId={workspaceId} sequenceId={sequenceId} nodeId={node.id} senders={linkedin} readOnly={readOnly} />
+      <Note>Sends a recorded voice message{effective.includes('WHATSAPP') && onLinkedIn ? ' on LinkedIn or WhatsApp' : effective.includes('WHATSAPP') ? ' on WhatsApp' : ' on LinkedIn'}. {onLinkedIn ? 'On LinkedIn it needs a 1st-degree connection. ' : ''}It counts against the message budget.</Note>
+      <MessageChannelFields node={node} cfg={cfg} patch={patch} update={update} what="voice note" />
+      <VoiceClipRecorder workspaceId={workspaceId} sequenceId={sequenceId} nodeId={node.id} senders={senders} readOnly={readOnly} />
       <Callout tone="warn">Senders without a clip skip this step. Each sender records in their own voice, up to 60 seconds.</Callout>
       <Note>There is no AI voice cloning, on purpose: a cloned voice puts the account and your reputation at risk. One real recording per sender is the feature. The same clip goes to every lead, so keep it general (“Hi, thanks for connecting…”).</Note>
       <Toggle checked={!!cfg.send_always} onChange={(v) => set('send_always', v)} label="Send even after the lead replied" />
