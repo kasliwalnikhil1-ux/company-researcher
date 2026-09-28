@@ -24,7 +24,6 @@ export const SETTINGS_TABS: Array<{ href: string; label: string; min: Role; also
   { href: '/outreach/settings/api', label: 'API & webhooks', min: 'manager', also: ['/outreach/settings/webhooks'] },
   { href: '/outreach/settings/integrations', label: 'Integrations', min: 'manager' },
   { href: '/outreach/settings/branding', label: 'White-label', min: 'owner' },
-  { href: '/outreach/settings/billing', label: 'Billing', min: 'owner' },
   { href: '/outreach/settings/admin', label: 'Admin', min: 'member', localOnly: true },
 ];
 

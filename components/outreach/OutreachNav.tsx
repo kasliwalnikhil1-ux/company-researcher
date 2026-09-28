@@ -5,18 +5,18 @@ import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, Settings, BarChart3, Sparkles, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, CreditCard, Settings, BarChart3, Sparkles, type LucideIcon } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useDashboard } from '@/lib/outreach/queries';
-import { useSidebarCollapsed } from '@/contexts/SidebarContext';
+import { useSidebarCollapsed, useSidebarFlat } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Modal, Input, Button } from './ui';
 
 type NavBadge = 'unread' | 'tasks_open' | 'ai_review';
-interface NavItem { href: string; label: string; icon: LucideIcon; exact?: boolean; prefix?: string; badge?: NavBadge; manager?: boolean; writer?: boolean }
+interface NavItem { href: string; label: string; icon: LucideIcon; exact?: boolean; prefix?: string; badge?: NavBadge; manager?: boolean; owner?: boolean; writer?: boolean }
 
-const NAV: NavItem[] = [
+export const OUTREACH_NAV: NavItem[] = [
   { href: '/outreach', label: 'Dashboard', icon: LayoutDashboard, exact: true },
   { href: '/outreach/inbox', label: 'Inbox', icon: Inbox, badge: 'unread' },
   { href: '/outreach/senders', label: 'Senders', icon: Contact },
@@ -26,6 +26,7 @@ const NAV: NavItem[] = [
   { href: '/outreach/ai-review', label: 'AI review', icon: Sparkles, badge: 'ai_review', writer: true },
   { href: '/outreach/reports', label: 'Reports', icon: BarChart3 },
   { href: '/outreach/clients', label: 'Clients', icon: Building2, manager: true },
+  { href: '/outreach/billing', label: 'Billing', icon: CreditCard, owner: true },
   { href: '/outreach/settings/workspace', label: 'Settings', icon: Settings, prefix: '/outreach/settings', writer: true },
 ];
 
@@ -51,7 +52,7 @@ export function useAiReviewCount(ws: string | null | undefined, enabled = true) 
 /** Outreach sub-nav items visible to the current role, with active state and badge counts. */
 export function useOutreachNav() {
   const pathname = usePathname();
-  const { workspace, isManager, role } = useWorkspace();
+  const { workspace, isManager, isOwner, role } = useWorkspace();
   const dash = useDashboard(workspace?.id);
   const isClientViewer = role === 'client_viewer';
   const aiReview = useAiReviewCount(workspace?.id, !isClientViewer);
@@ -61,8 +62,8 @@ export function useOutreachNav() {
     // the dashboard carries the same number; use it while the direct count is loading or unavailable
     ai_review: Number(aiReview.data ?? (dash.data as any)?.ai_lines_awaiting ?? 0),
   };
-  return NAV
-    .filter((n) => (!n.manager || isManager) && !(isClientViewer && (n.writer || CLIENT_VIEWER_HIDDEN.includes(n.href))))
+  return OUTREACH_NAV
+    .filter((n) => (!n.manager || isManager) && (!n.owner || isOwner) &&!(isClientViewer && (n.writer || CLIENT_VIEWER_HIDDEN.includes(n.href))))
     .map((n) => ({
       ...n,
       active: n.exact ? pathname === n.href : pathname.startsWith(n.prefix ?? n.href),
@@ -89,22 +90,26 @@ export function NewWorkspaceModal({ open, onClose }: { open: boolean; onClose: (
 
 const NEW_WORKSPACE = '__new__';
 
-/** Outreach workspace switcher + sub-nav, rendered under "Outreach" in the main sidebar. */
+/**
+ * Outreach workspace switcher + sub-nav, rendered under "Outreach" in the main sidebar.
+ * On GrowthxAI (SidebarFlatContext) the items are the main menu itself, styled as top-level items.
+ */
 export function OutreachSidebarNav() {
   const { workspace, workspaces, switchWorkspace, role } = useWorkspace();
   const items = useOutreachNav();
   const collapsed = useSidebarCollapsed();
+  const flat = useSidebarFlat();
   const isClientViewer = role === 'client_viewer';
   const [createOpen, setCreateOpen] = useState(false);
   if (!workspace) return null;
 
   if (collapsed) {
     return (
-      <div className="space-y-1 py-1 border-y border-gray-100">
+      <div className={flat ? 'space-y-2' : 'space-y-1 py-1 border-y border-gray-100'}>
         {items.map((n) => (
           <Link key={n.href} href={n.href} title={n.label} aria-label={n.label} aria-current={n.active ? 'page' : undefined}
-            className={cn('relative flex items-center justify-center py-2 rounded-lg', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50')}>
-            <n.icon className="w-4 h-4" />
+            className={cn('relative flex items-center justify-center rounded-lg', flat ? 'px-2 py-2.5' : 'py-2', n.active ? 'bg-indigo-50 text-indigo-700' : flat ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-500 hover:bg-gray-50')}>
+            <n.icon className={flat ? 'w-5 h-5' : 'w-4 h-4'} />
             {n.count > 0 && <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-indigo-600" />}
           </Link>
         ))}
@@ -113,7 +118,7 @@ export function OutreachSidebarNav() {
   }
 
   return (
-    <div className="ml-6 pl-3 border-l border-gray-200 space-y-1 py-1">
+    <div className={flat ? 'space-y-2' : 'ml-6 pl-3 border-l border-gray-200 space-y-1 py-1'}>
       <select
         value={workspace.id}
         onChange={(e) => {
@@ -127,8 +132,8 @@ export function OutreachSidebarNav() {
         {!isClientViewer && <option value={NEW_WORKSPACE}>+ New workspace</option>}
       </select>
       {items.map((n) => (
-        <Link key={n.href} href={n.href} aria-current={n.active ? 'page' : undefined} className={cn('flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium', n.active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
-          <n.icon className="w-4 h-4" />
+        <Link key={n.href} href={n.href} aria-current={n.active ? 'page' : undefined} className={cn('flex items-center rounded-lg text-sm font-medium', flat ? 'gap-3 px-4 py-2.5' : 'gap-2 px-3 py-2', n.active ? 'bg-indigo-50 text-indigo-700' : flat ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-600 hover:bg-gray-50')}>
+          <n.icon className={flat ? 'w-5 h-5' : 'w-4 h-4'} />
           <span className="flex-1">{n.label}</span>
           <CountBadge count={n.count} />
         </Link>

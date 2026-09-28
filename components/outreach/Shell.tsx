@@ -102,12 +102,12 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           {isClientViewer
             ? <span>This workspace is paused. Your data is safe and read-only for now.{branding.support_email ? <> Questions: <a className="underline font-medium" href={`mailto:${branding.support_email}`}>{branding.support_email}</a></> : null}</span>
-            : <span>This workspace is suspended for non-payment. Senders are paused and the workspace is read-only. They resume on their own once billing is fixed. <Link href="/outreach/settings/billing" className="underline font-medium">Update billing</Link></span>}
+            : <span>This workspace is suspended for non-payment. Senders are paused and the workspace is read-only. They resume on their own once billing is fixed. <Link href="/outreach/billing" className="underline font-medium">Update billing</Link></span>}
         </div>
       )}
       {workspace?.stripe_status === 'past_due' && !suspended && !isClientViewer && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-sm px-6 py-2 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>Payment is past due. The workspace becomes read-only 7 days after the failed payment. <Link href="/outreach/settings/billing" className="underline font-medium">Update billing</Link></span>
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>Payment is past due. The workspace becomes read-only 7 days after the failed payment. <Link href="/outreach/billing" className="underline font-medium">Update billing</Link></span>
         </div>
       )}
       <div className="flex-1 overflow-auto">

@@ -107,7 +107,7 @@ export default function TrackingDomainCard() {
 
           {upsell && (
             <Note tone="indigo">
-              <strong>Custom tracking domains are part of the Agency and white-label plans.</strong> Each domain is approved by hand by the email provider, so we offer it where it matters most. <Link href="/outreach/settings/billing" className="underline font-medium">See plans</Link>
+              <strong>Custom tracking domains are part of the Agency and white-label plans.</strong> Each domain is approved by hand by the email provider, so we offer it where it matters most. <Link href="/outreach/billing" className="underline font-medium">See plans</Link>
             </Note>
           )}
           {error && <ErrorBox message={error} />}

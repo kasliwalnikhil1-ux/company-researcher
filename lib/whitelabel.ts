@@ -20,6 +20,8 @@ export interface LegalLink {
 }
 
 export interface WhitelabelConfig {
+  /** Which product this domain sells. Decides which sidebar items MainLayout shows. */
+  product: 'capitalxai' | 'growthxai';
   /** Sidebar title shown in MainLayout */
   sidebarTitle: string;
   /** Title shown on login / signup / reset-password pages (e.g. "CapitalxAI CRM") */
@@ -70,6 +72,7 @@ export interface WhitelabelConfig {
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_CONFIG: WhitelabelConfig = {
+  product: 'capitalxai',
   sidebarTitle: 'CapitalxAI',
   pageTitle: 'CapitalxAI CRM',
   companyName: 'ResourcePlan Solution Private Limited',
@@ -97,6 +100,7 @@ export const DEFAULT_CONFIG: WhitelabelConfig = {
 // ---------------------------------------------------------------------------
 
 const GROWTHXAI: Partial<WhitelabelConfig> = {
+  product: 'growthxai',
   sidebarTitle: 'GrowthxAI',
   pageTitle: 'GrowthxAI Outreach',
   companyName: 'ResourcePlan Solution Private Limited',

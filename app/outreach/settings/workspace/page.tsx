@@ -67,7 +67,7 @@ export default function WorkspaceSettingsPage() {
             <div className="flex items-center gap-2"><span className="text-2xl font-bold text-gray-900">{PLAN_LABEL[workspace.plan] ?? workspace.plan}</span>{workspace.stripe_status && <Badge tone={workspace.stripe_status === 'active' || workspace.stripe_status === 'trialing' ? 'green' : 'amber'}>{workspace.stripe_status}</Badge>}</div>
             {workspace.plan === 'trial' && <div className="text-sm text-gray-600 mt-2">Trial ends {fmtDate(workspace.trial_ends_at, false)}{trialDaysLeft != null && <span className="text-gray-400"> ({trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : 'expired'})</span>}. Up to 3 senders, no card required.</div>}
             {workspace.past_due_since && <div className="text-sm text-amber-700 mt-2">Payment past due since {fmtDate(workspace.past_due_since, false)}.</div>}
-            {isOwner && <a href="/outreach/settings/billing" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Manage billing</a>}
+            {isOwner && <a href="/outreach/billing" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Manage billing</a>}
           </Card>
 
           {isManager && (

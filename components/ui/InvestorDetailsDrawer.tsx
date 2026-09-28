@@ -2065,7 +2065,7 @@ const InvestorDetailsDrawer: React.FC<InvestorDetailsDrawerProps> = ({
                           onChange={(e) => {
                             const val = e.target.value;
                             if (val === '__add_owners__') {
-                              router.push('/account');
+                              router.push('/settings');
                               return;
                             }
                             handlePipelineFieldChange('owner', val || null);

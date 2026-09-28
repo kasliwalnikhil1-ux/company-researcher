@@ -89,7 +89,7 @@ serve("stripe-webhook", async (req) => {
     const { count } = await admin.from("outreach_senders").select("id", { count: "exact", head: true }).eq("workspace_id", ws!.id).is("deleted_at", null).neq("status", "disabled");
     const params: Record<string, string> = {
       mode: "subscription", "line_items[0][price]": price, "line_items[0][quantity]": String(Math.max(1, count ?? 1)),
-      success_url: `${WEB_ORIGIN}/outreach/settings/billing?checkout=success`, cancel_url: `${WEB_ORIGIN}/outreach/settings/billing?checkout=cancel`,
+      success_url: `${WEB_ORIGIN}/outreach/billing?checkout=success`, cancel_url: `${WEB_ORIGIN}/outreach/billing?checkout=cancel`,
       client_reference_id: ws!.id, "metadata[workspace_id]": ws!.id, "subscription_data[metadata][workspace_id]": ws!.id,
     };
     if (ws!.stripe_customer_id) params.customer = ws!.stripe_customer_id; else if (user.email) params.customer_email = user.email;
@@ -98,7 +98,7 @@ serve("stripe-webhook", async (req) => {
   }
   if (body.action === "portal") {
     if (!ws!.stripe_customer_id) throw new HttpError(400, "E_NO_CUSTOMER", "no billing account yet");
-    const portal = await stripeRequest("POST", "/billing_portal/sessions", { customer: ws!.stripe_customer_id, return_url: `${WEB_ORIGIN}/outreach/settings/billing` });
+    const portal = await stripeRequest("POST", "/billing_portal/sessions", { customer: ws!.stripe_customer_id, return_url: `${WEB_ORIGIN}/outreach/billing` });
     return json({ url: portal.url });
   }
   throw new HttpError(400, "E_PAYLOAD_INVALID");

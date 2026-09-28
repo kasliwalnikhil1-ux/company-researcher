@@ -136,7 +136,7 @@ export default function TrackingDomainCard({ sender, canManage, notify }: { send
               {upsell && (
                 <div role="note" className="flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
                   <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-indigo-600" aria-hidden />
-                  <div><span className="first-letter:uppercase inline-block">{upsell}.</span> <Link href="/outreach/settings/billing" className="font-medium underline">See plans</Link></div>
+                  <div><span className="first-letter:uppercase inline-block">{upsell}.</span> <Link href="/outreach/billing" className="font-medium underline">See plans</Link></div>
                 </div>
               )}
             </form>

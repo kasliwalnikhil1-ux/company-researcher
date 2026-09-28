@@ -11,12 +11,13 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Linkedin, Briefcase } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Linkedin, Briefcase, SlidersHorizontal } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
 import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
-import { SidebarCollapsedContext } from '@/contexts/SidebarContext';
+import { SidebarCollapsedContext, SidebarFlatContext } from '@/contexts/SidebarContext';
+import { OUTREACH_NAV } from './outreach/OutreachNav';
 
 // User IDs allowed to access /research when primaryUse is "fundraising"
 const RESEARCH_ALLOWED_USER_IDS = new Set([
@@ -46,6 +47,8 @@ export default function MainLayout({ children, subnav }: { children: React.React
   const { user, signOut } = useAuth();
   const access = useAccess();
   const whitelabel = useWhitelabel();
+  // GrowthxAI sells outreach: its sidebar is the Outreach menu + Sales CRM. The fundraising items are CapitalxAI only.
+  const isGrowthxai = whitelabel.product === 'growthxai';
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const { onboarding, loading: onboardingLoading, fetchOnboarding } = useOnboarding();
   const { refreshTemplates } = useMessageTemplates();
@@ -404,7 +407,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
               </Link>
             )}
 
-            {routeAccess.showInvestors && (
+            {!isGrowthxai && routeAccess.showInvestors && (
               <>
                 <Link
                   href="/investors"
@@ -433,7 +436,28 @@ export default function MainLayout({ children, subnav }: { children: React.React
               </>
             )}
 
-            {routeAccess.showOutreach && (
+            {isGrowthxai && routeAccess.showOutreach && (
+              pathname.startsWith('/outreach') && subnav ? (
+                <SidebarFlatContext.Provider value={true}>
+                  <SidebarCollapsedContext.Provider value={sidebarCollapsed}>{subnav}</SidebarCollapsedContext.Provider>
+                </SidebarFlatContext.Provider>
+              ) : (
+                // Outside /outreach there is no workspace loaded: plain links, the role-filtered menu takes over inside.
+                OUTREACH_NAV.map((n) => (
+                  <Link
+                    key={n.href}
+                    href={n.href}
+                    className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors text-gray-700 hover:bg-gray-50`}
+                    title={n.label}
+                  >
+                    <n.icon className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                    {(!isCollapsed || isMobile) && <span>{n.label}</span>}
+                  </Link>
+                ))
+              )
+            )}
+
+            {!isGrowthxai && routeAccess.showOutreach && pathname.startsWith('/outreach') && (
               <>
                 <Link
                   href="/outreach"
@@ -516,18 +540,20 @@ export default function MainLayout({ children, subnav }: { children: React.React
               </Link>
             )}
             
-            <Link
-              href="/templates"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/templates')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Templates"
-            >
-              <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Message Templates</span>}
-            </Link>
+            {!isGrowthxai && (
+              <Link
+                href="/templates"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/templates')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Templates"
+              >
+                <FileText className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Message Templates</span>}
+              </Link>
+            )}
             
             {routeAccess.showPersonalization && (
               <Link
@@ -544,57 +570,80 @@ export default function MainLayout({ children, subnav }: { children: React.React
               </Link>
             )}
 
-            <Link
-              href="/company-profile"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/company-profile')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Company Profile"
-            >
-              <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Company Profile</span>}
-            </Link>
+            {!isGrowthxai && (
+              <Link
+                href="/company-profile"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/company-profile')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Company Profile"
+              >
+                <Building2 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Company Profile</span>}
+              </Link>
+            )}
 
-            <Link
-              href="/account"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/account')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Account & Security"
-            >
-              <UserCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Account</span>}
-            </Link>
+            {!isGrowthxai && (
+              <Link
+                href="/account"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/account')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Account & Security"
+              >
+                <UserCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Account</span>}
+              </Link>
+            )}
 
-            <Link
-              href="/analytics"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/analytics')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Analytics"
-            >
-              <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Analytics</span>}
-            </Link>
+            {!isGrowthxai && (
+              <Link
+                href="/analytics"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/analytics')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Analytics"
+              >
+                <BarChart3 className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Analytics</span>}
+              </Link>
+            )}
 
-            <Link
-              href="/usage"
-              className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive('/usage')
-                  ? 'bg-indigo-50 text-indigo-700'
-                  : 'text-gray-700 hover:bg-gray-50'
-              }`}
-              title="Plan & billing"
-            >
-              <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Plan & billing</span>}
-            </Link>
+            {!isGrowthxai && (
+              <Link
+                href="/usage"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/usage')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Plan & billing"
+              >
+                <CreditCard className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Plan & billing</span>}
+              </Link>
+            )}
+
+            {!isGrowthxai && (
+              <Link
+                href="/settings"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                  isActive('/settings')
+                    ? 'bg-indigo-50 text-indigo-700'
+                    : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                title="Settings"
+              >
+                <SlidersHorizontal className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Settings</span>}
+              </Link>
+            )}
 
             {routeAccess.showMeData && (
               <Link

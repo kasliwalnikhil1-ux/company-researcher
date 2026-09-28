@@ -3224,7 +3224,7 @@ function InvestorsContent() {
                 onChange={(e) => {
                   const val = e.target.value;
                   if (val === '__add_owners__') {
-                    router.push('/account');
+                    router.push('/settings');
                     return;
                   }
                   setAssignOwner(val);
