@@ -303,9 +303,11 @@ export const addDaysISO = (n: number, from = todayISO()) => { const d = new Date
 
 export function useToast() {
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const show = React.useCallback((message: string, type: 'success' | 'error' = 'success') => {
+  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const show = React.useCallback((message: string, type: 'success' | 'error' = 'success', ms?: number) => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), type === 'error' ? 6000 : 2500);
+    clearTimeout(timer.current); // a newer toast gets its full time, not the rest of the old one's
+    timer.current = setTimeout(() => setToast(null), ms ?? (type === 'error' ? 6000 : 2500));
   }, []);
   const node = toast ? (
     <div className="fixed bottom-4 right-4 z-[60]">

@@ -258,12 +258,22 @@ export function DraftEmailButtons({ brief, meeting, timezone }: { brief: Company
     const copied = navigator.clipboard?.writeText(prompt).then(() => true).catch(() => false) ?? Promise.resolve(false);
     window.open(target.href(inUrl ? q : ''), '_blank', 'noopener,noreferrer');
     const note = missed ? ' The transcript could not be loaded, so it is not included.' : '';
-    void copied.then((ok) => show(
-      ok
-        ? `${target.name} opened, prompt copied${transcript ? ' with the full transcript' : ''}. ${inUrl ? 'If the message box is empty, paste it.' : 'Paste it into the message box.'}${note}`
-        : `${target.name} opened, but the prompt could not be copied. ${inUrl ? 'If the message box is empty, reopen it from this tab.' : 'Try again from this tab.'}${note}`,
-      ok && !missed ? 'success' : 'error',
-    ));
+    void copied.then((ok) => {
+      const message = ok
+        ? `Copied to clipboard: the ${KIND_LABEL[kind].replace('Draft ', '')} prompt${transcript ? ' with the full transcript' : ''}. ${inUrl ? `If ${target.name}'s message box is empty, paste it.` : `Paste it into ${target.name}'s message box.`}${note}`
+        : `${target.name} opened, but the prompt could not be copied. ${inUrl ? 'If the message box is empty, reopen it from this tab.' : 'Try again from this tab.'}${note}`;
+      const type = ok && !missed ? 'success' : 'error';
+      show(message, type, 5000);
+      // The chat tab takes focus straight away, so the toast would time out unseen: show it again
+      // when the seller comes back to this tab.
+      if (document.visibilityState === 'visible') return;
+      const onBack = () => {
+        if (document.visibilityState !== 'visible') return;
+        document.removeEventListener('visibilitychange', onBack);
+        show(message, type, 5000);
+      };
+      document.addEventListener('visibilitychange', onBack);
+    });
   };
 
   return (
