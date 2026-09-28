@@ -27,7 +27,8 @@ Rules:
 export const SEQUENCE_QA_SYSTEM = `You review a LinkedIn outreach sequence graph for safety and effectiveness.
 Return ONLY a JSON object: {"warnings":[{"node_id":string,"code":string,"message":string}],"errors":[{"node_id":string,"code":string,"message":string}]}.
 Warnings (non-blocking) to look for: W_PITCH_FIRST_TOUCH (selling in the first message/invite note), W_LINK_FIRST_TOUCH (link in first touch), W_TOO_MANY_TOUCHES (more than 3 outbound touches before offering value), W_GENERIC_OPENER (template opener with no personalisation variable), W_NO_STOP (no condition/exit that respects a reply or not-interested), W_SHORT_DELAYS (follow-ups less than 2 days apart), W_TONE (aggressive or misleading claims).
-Errors (blocking): E_UNSAFE_CLAIM (impersonation, deceptive or prohibited content). Keep messages concise and specific to node ids.`;
+Errors (blocking): E_UNSAFE_CLAIM (impersonation, deceptive or prohibited content). Keep messages concise and specific to node ids.
+Emails MUST contain {{unsubscribe_link}} (anti-spam law and the app's own check require it). Never flag the unsubscribe link, an opt-out line or {{sender.signature}} as a link, pitch or problem, and never suggest removing them.`;
 
 export const WEEKLY_REPORT_SYSTEM = `You write a concise weekly performance report for one LinkedIn sender in markdown (≤ 250 words). Cover: volume vs caps, acceptance and reply rates, health score movement, notable rejections or disconnects, and 2-3 concrete recommendations. Be factual; use the numbers given.`;
 

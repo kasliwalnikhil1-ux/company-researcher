@@ -183,8 +183,13 @@ export const unipile = {
   },
   mails: {
     // custom_headers: Unipile only accepts names starting with X- plus List-Unsubscribe, List-Unsubscribe-Post, Reply-To, Content-Type.
-    send: (fields: { account_id: string; to: Array<{ identifier: string; display_name?: string }>; cc?: Array<{ identifier: string; display_name?: string }>; bcc?: Array<{ identifier: string; display_name?: string }>; subject?: string; body: string; reply_to?: string; tracking_options?: Record<string, unknown>; from?: Record<string, unknown>; custom_headers?: Array<{ name: string; value: string }> }) =>
-      request<{ tracking_id: string; provider_id: string | null }>("/emails", { method: "POST", form: form(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
+    // attachments: files, one repeated `attachments` part each (multipart). Pass File objects so the name survives.
+    send: (fields: { account_id: string; to: Array<{ identifier: string; display_name?: string }>; cc?: Array<{ identifier: string; display_name?: string }>; bcc?: Array<{ identifier: string; display_name?: string }>; subject?: string; body: string; reply_to?: string; tracking_options?: Record<string, unknown>; from?: Record<string, unknown>; custom_headers?: Array<{ name: string; value: string }>; attachments?: Blob[] }) => {
+      const { attachments, ...rest } = fields;
+      const f = form(rest);
+      for (const a of attachments ?? []) f.append("attachments", a);
+      return request<{ tracking_id: string; provider_id: string | null }>("/emails", { method: "POST", form: f, accountId: fields.account_id, retries: 0, timeoutMs: attachments?.length ? 90000 : 30000 });
+    },
     list: (accountId: string, q: Record<string, unknown> = {}) => request<{ items: any[]; cursor: string | null }>("/emails", { query: { account_id: accountId, limit: 50, ...q }, accountId }),
     get: (emailId: string, accountId?: string) => request<any>(`/emails/${encodeURIComponent(emailId)}`, { query: { account_id: accountId } }),
     attachment: (emailId: string, attachmentId: string, accountId?: string) => request<Response>(`/emails/${encodeURIComponent(emailId)}/attachments/${encodeURIComponent(attachmentId)}`, { raw: true, query: { account_id: accountId }, timeoutMs: 60000 }),

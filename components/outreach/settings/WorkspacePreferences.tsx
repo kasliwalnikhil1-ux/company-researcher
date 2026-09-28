@@ -55,7 +55,7 @@ export function RegionalCard() {
               searchPlaceholder="Search currency code…" hint="Used for deal values and the cost report." />
           </div>
           <Input label={`Default monthly cost per sender (${form.currency})`} inputMode="decimal" placeholder="e.g. 99" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} error={costError}
-            hint="Covers the seat, LinkedIn plan and tools. A sender can carry its own cost; this fills the gaps in the cost report." disabled={!editable} />
+            hint="To calculate cost per reply, per interested lead and per meeting." disabled={!editable} />
         </div>
         <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-gray-400">{editable ? 'Senders keep their own timezone for sending hours. This one is only for counting.' : 'Only the workspace owner can change these.'}</span>

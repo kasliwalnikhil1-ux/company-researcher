@@ -10,6 +10,7 @@ import VariantEditor from './VariantEditor';
 import { Callout, Note } from './FormsShared';
 import { useBuilder } from './context';
 import { senderName } from './helpers';
+import { EmailAttachments } from './EmailAttachments';
 
 export interface FormProps {
   node: GraphNode;
@@ -232,6 +233,7 @@ export function SendEmailForm({ node, cfg, set, patch }: FormProps) {
         <Button type="button" variant="secondary" size="sm" disabled={hasSignature} onClick={() => addToBodies('{{sender.signature}}', 'sender.signature')} title="Adds {{sender.signature}}: the signature saved on the mailbox that sends the email"><PenLine className="w-3.5 h-3.5" aria-hidden /> Insert signature</Button>
         {noUnsubscribe && <Button type="button" variant="secondary" size="sm" onClick={() => addToBodies('<p><a href="{{unsubscribe_link}}">Unsubscribe</a></p>', 'unsubscribe_link')}>Add unsubscribe link</Button>}
       </div>
+      <EmailAttachments nodeId={node.id} value={cfg.attachments} onChange={(v) => set('attachments', v)} />
       {noUnsubscribe && <Callout tone="warn">This email has no <span className="font-mono">{'{{unsubscribe_link}}'}</span>. Cold email with no way to opt out hurts deliverability and breaks anti-spam rules in most countries.{variants.length > 0 ? ' Add the link to every variant.' : ''}</Callout>}
       <Note>Signatures are saved per mailbox under Senders. A mailbox without one leaves the spot empty. The unsubscribe and booking links are never rewritten for click tracking.</Note>
       <div className="grid grid-cols-2 gap-2">

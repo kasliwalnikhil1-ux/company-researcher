@@ -20,7 +20,7 @@ const EXCLUDED_MEANING: Record<string, string> = {
   already_enrolled: "already live with every available sender of the pool",
   no_fresh_sender: "assignment rule 'fresh_sender': every pool sender already contacted this lead",
   // Instagram & WhatsApp channels: a sender only fits a lead when the lead has a verified identity for that channel
-  no_identity: "no verified Instagram handle / WhatsApp number for the channel of the pool sender (identity_add records one, unverified; a person verifies it in the app or an inbound message proves it)",
+  no_identity: "(also no_identity:instagram | no_identity:whatsapp) only for Instagram / WhatsApp pool senders: no verified Instagram handle / WhatsApp number for that channel (identity_add records one, unverified; a person verifies it in the app or an inbound message proves it)",
   no_consent: "WhatsApp: no recorded consent basis for this lead; ask the human what the basis is and record it with consent_grant, never invent one",
 };
 const RULE_EFFECT_MEANING: Record<string, string> = {
@@ -28,7 +28,7 @@ const RULE_EFFECT_MEANING: Record<string, string> = {
   kept_with_previous_sender: "kept with the sender who last spoke to them (same_sender rule)",
   contacted_before_by_this_sender: "were contacted before by the sender they are assigned to",
 };
-const explainReason = (k: string) => EXCLUDED_MEANING[k] ?? (k.startsWith("suppressed:") ? `blacklisted (${k.slice(11).replace(/_/g, " ")}): workspace, client or sequence scope` : undefined);
+const explainReason = (k: string) => EXCLUDED_MEANING[k] ?? (k.startsWith("no_identity:") ? EXCLUDED_MEANING.no_identity : undefined) ?? (k.startsWith("suppressed:") ? `blacklisted (${k.slice(11).replace(/_/g, " ")}): workspace, client or sequence scope` : undefined);
 
 /** Old previews stored {senderName: count}; new ones store {include_replied, senders:[{name,leads}], …}. */
 function storedSplit(assignment: Row | null | undefined): string {

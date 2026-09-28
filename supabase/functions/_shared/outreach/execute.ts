@@ -194,6 +194,27 @@ async function clearRequestFlag(chatId: string): Promise<void> {
   await admin.from("outreach_chats").update({ is_request: false }).eq("id", chatId).eq("is_request", true).then(({ error }) => { if (error) log({ fn: "execute", warn: `is_request: ${error.message}` }); });
 }
 
+// ---- email step attachments
+
+/**
+ * The files attached to an email step (config.attachments = [{path, name, mime, size}], uploaded by the builder to
+ * outreach-attachments/<ws>/sequence-files/...). A file that is gone fails the step rather than sending the email without it.
+ */
+async function stepAttachments(workspaceId: string, list: unknown): Promise<{ ok: true; files: Blob[]; stored: Row[] } | { ok: false }> {
+  const items: Row[] = Array.isArray(list) ? list.filter((a) => a && typeof a.path === "string") : [];
+  const files: Blob[] = [], stored: Row[] = [];
+  for (const a of items.slice(0, 5)) {
+    const path = String(a.path).replace(new RegExp(`^/?${VOICE_BUCKET}/`), "");
+    if (!path.startsWith(`${workspaceId}/sequence-files/`)) return { ok: false };   // never another workspace's file
+    const { data: blob, error } = await admin.storage.from(VOICE_BUCKET).download(path);
+    if (error || !blob) { log({ fn: "execute", warn: `email attachment ${path}: ${error?.message ?? "empty"}` }); return { ok: false }; }
+    const name = String(a.name || path.split("/").pop() || "attachment");
+    files.push(new File([blob], name, { type: a.mime || blob.type || "application/octet-stream" }));
+    stored.push({ id: path, storage: true, name, size: blob.size, type: a.mime ?? blob.type ?? null });
+  }
+  return { ok: true, files, stored };
+}
+
 // ---- channel identities (Instagram / WhatsApp)
 
 /** The usable identity of a lead on the sender's provider (outreach_lead_identity: verified rows only; LinkedIn falls back to the lead). */
@@ -254,7 +275,7 @@ async function ensureInstagramMessagingId(sender: Row, lead: Row, identity: Lead
 
 /** Instagram posts of a lead (GET /users/{id}/posts, the post_fetch endpoint). NO budget handling: the caller owns the reservation. */
 async function fetchInstagramPosts(sender: Row, lead: Row, identity: LeadIdentity, limit = 5): Promise<Row[]> {
-  const ident = identity.provider_id ?? identity.identifier;
+  const ident = identity.identifier ?? identity.provider_id;   // username first: provider_id is the messaging id (chat start only)
   if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram identifier", null);
   const res = await unipile.users.posts(sender.unipile_account_id, String(ident), limit);
   const rows = postsToRows(res.items ?? []).slice(0, 5);
@@ -441,8 +462,9 @@ export async function executeAction(action: Row): Promise<ExecResult> {
       case "profile_view": {
         if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
         if (provider === "INSTAGRAM") {
-          // GET /users/{handle|id}: name + picture on the lead, the messaging id on the identity, followed_by → relation 'first'
-          const ident = identity!.provider_id ?? identity!.identifier;
+          // GET /users/{handle|id}: name + picture on the lead, the messaging id on the identity, followed_by → relation 'first'.
+          // Username first: identity.provider_id holds the MESSAGING id after a read, which only the chat start accepts.
+          const ident = identity!.identifier ?? identity!.provider_id;
           if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram handle", null);
           const prof = await unipile.users.profile(sender.unipile_account_id, String(ident));
           const r = await applyInstagramProfile(sender, l, identity, prof, lss);
@@ -494,7 +516,7 @@ export async function executeAction(action: Row): Promise<ExecResult> {
         // queued by the planner when a step's text needs {{enrich.recent_post}} / an AI line and no profile prefetch is due.
         // The claim already reserved this action's post_fetch budget, so the call is made directly.
         if (provider === "INSTAGRAM") {
-          if (!l || !(identity?.provider_id ?? identity?.identifier)) return { ok: false, decision: { kind: "skip_node", reason: "no_provider_id" }, code: "no_provider_id" };
+          if (!l || !(identity?.identifier ?? identity?.provider_id)) return { ok: false, decision: { kind: "skip_node", reason: "no_provider_id" }, code: "no_provider_id" };
           const rows = await fetchInstagramPosts(sender, l, identity!, 5);
           return { ok: true, response: { posts: rows.length } };
         }
@@ -505,9 +527,10 @@ export async function executeAction(action: Row): Promise<ExecResult> {
       }
       case "follow": {
         if (provider === "INSTAGRAM") {
-          // POST /users/invite with the user id or the username as provider_id
+          // POST /users/invite with the username (or the numeric user id) as provider_id. Never the messaging id stored on the
+          // identity after a profile read: the provider rejects it on this route ("provider_messaging_id dont work on this route").
           if (!l) throw new UnipileError(422, "errors/invalid_recipient", "no lead", null);
-          const ident = identity!.provider_id ?? identity!.identifier;
+          const ident = identity!.identifier ?? identity!.provider_id;
           if (!ident) throw new UnipileError(422, "errors/invalid_recipient", "lead has no Instagram handle", null);
           const r = await unipile.users.follow(sender.unipile_account_id, String(ident));
           await emitEvent(sender.workspace_id, "lead.followed", { lead_id: l.id, sender_id: sender.id, provider });
@@ -751,10 +774,12 @@ export async function executeAction(action: Row): Promise<ExecResult> {
         // RFC 8058 one-click unsubscribe. Unipile's send-email accepts these two header names in custom_headers.
         const headers = unsubscribeUrl ? [{ name: "List-Unsubscribe", value: `<${unsubscribeUrl}>` }, { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }] : undefined;
         const bcc = sender.bcc_address && String(sender.bcc_address).toLowerCase() !== String(to).toLowerCase() ? [{ identifier: String(sender.bcc_address) }] : undefined;
-        const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: l.full_name ?? undefined }], bcc, subject: subject || undefined, body: html, reply_to: replyTo, tracking_options: tracking, custom_headers: headers });
+        const files = await stepAttachments(sender.workspace_id, cfg.attachments);
+        if (!files.ok) return { ok: false, decision: { kind: "fail_enrollment", reason: "attachment_missing" }, code: "E_ATTACHMENT_MISSING" };
+        const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: l.full_name ?? undefined }], bcc, subject: subject || undefined, body: html, reply_to: replyTo, tracking_options: tracking, custom_headers: headers, attachments: files.files });
         const threadKey = replyTo ? (lss?.unipile_chat_id ?? r.provider_id ?? r.tracking_id) : (r.provider_id ?? r.tracking_id);
         const chat = await ensureChatRow(sender, l, threadKey, subject);
-        await recordOutbound(sender, l, chat, html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), html, r.provider_id ?? r.tracking_id, action.id);
+        await recordOutbound(sender, l, chat, html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), html, r.provider_id ?? r.tracking_id, action.id, false, files.stored);
         await emitEvent(sender.workspace_id, "email.sent", { lead_id: l.id, sender_id: sender.id, tracking_id: r.tracking_id });
         return { ok: true, response: { tracking_id: r.tracking_id, provider_id: r.provider_id, to, bcc: !!bcc, custom_tracking_domain: tracking?.custom_domain ?? null, variant_id: cfg.variant_id ?? null } };
       }

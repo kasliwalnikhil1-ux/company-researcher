@@ -1,0 +1,740 @@
+Deploying 42 function(s) to project ktwqkvjuzsunssudqnrt (--no-verify-jwt)
+
+== outreach-unipile-webhook
+Uploading asset (outreach-unipile-webhook): supabase/functions/outreach-unipile-webhook/index.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-unipile-webhook): supabase/functions/_shared/outreach/notify.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-unipile-webhook
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-sender-notify
+Uploading asset (outreach-sender-notify): supabase/functions/outreach-sender-notify/index.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-sender-notify): supabase/functions/_shared/outreach/notify.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-sender-notify
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-cookie-sync
+Uploading asset (outreach-cookie-sync): supabase/functions/outreach-cookie-sync/index.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-cookie-sync): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-cookie-sync
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-stripe-webhook
+Uploading asset (outreach-stripe-webhook): supabase/functions/outreach-stripe-webhook/index.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-stripe-webhook): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-stripe-webhook
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-booking-webhook
+Uploading asset (outreach-booking-webhook): supabase/functions/outreach-booking-webhook/index.ts
+Uploading asset (outreach-booking-webhook): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-booking-webhook
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-unsubscribe
+Uploading asset (outreach-unsubscribe): supabase/functions/outreach-unsubscribe/index.ts
+Uploading asset (outreach-unsubscribe): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-unsubscribe): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-unsubscribe
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-crm-oauth
+Uploading asset (outreach-crm-oauth): supabase/functions/outreach-crm-oauth/index.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/worker.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/types.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/store.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/mapping.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/engine.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/http.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/pull.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/index.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/salesforce.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/pipedrive.ts
+Uploading asset (outreach-crm-oauth): supabase/functions/_shared/outreach/crm/hubspot.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-crm-oauth
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-process-inbound
+Uploading asset (outreach-process-inbound): supabase/functions/outreach-process-inbound/index.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-process-inbound): supabase/functions/_shared/outreach/notify.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-process-inbound
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-tick
+Uploading asset (outreach-worker-tick): supabase/functions/outreach-worker-tick/index.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/drafts.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/enrich.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/execute.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/profile.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/profile_serialiser.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/finder.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/render.ts
+Uploading asset (outreach-worker-tick): supabase/functions/_shared/outreach/errors.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-tick
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-planner
+Uploading asset (outreach-worker-planner): supabase/functions/outreach-worker-planner/index.ts
+Uploading asset (outreach-worker-planner): supabase/functions/_shared/outreach/planner.ts
+Uploading asset (outreach-worker-planner): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-planner): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-planner
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-health
+Uploading asset (outreach-worker-health): supabase/functions/outreach-worker-health/index.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-health): supabase/functions/_shared/outreach/health.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-health
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-reconnect
+Uploading asset (outreach-worker-reconnect): supabase/functions/outreach-worker-reconnect/index.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-reconnect): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-reconnect
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-imports
+Uploading asset (outreach-worker-imports): supabase/functions/outreach-worker-imports/index.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-imports): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-imports
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-withdraw
+Uploading asset (outreach-worker-withdraw): supabase/functions/outreach-worker-withdraw/index.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-withdraw): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-withdraw
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-relations-poll
+Uploading asset (outreach-worker-relations-poll): supabase/functions/outreach-worker-relations-poll/index.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-relations-poll): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-relations-poll
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-outbound-webhooks
+Uploading asset (outreach-outbound-webhooks): supabase/functions/outreach-outbound-webhooks/index.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-outbound-webhooks): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-outbound-webhooks
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-billing-sync
+Uploading asset (outreach-billing-sync): supabase/functions/outreach-billing-sync/index.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-billing-sync): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-billing-sync
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-ai-classify
+Uploading asset (outreach-ai-classify): supabase/functions/outreach-ai-classify/index.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-ai-classify): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-ai-classify
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-ai-draft
+Uploading asset (outreach-ai-draft): supabase/functions/outreach-ai-draft/index.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/drafts.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/enrich.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-ai-draft): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-ai-draft
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-enrich
+Uploading asset (outreach-worker-enrich): supabase/functions/outreach-worker-enrich/index.ts
+Uploading asset (outreach-worker-enrich): supabase/functions/_shared/outreach/enrich.ts
+Uploading asset (outreach-worker-enrich): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-enrich): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-enrich
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-ai-variables
+Uploading asset (outreach-ai-variables): supabase/functions/outreach-ai-variables/index.ts
+Uploading asset (outreach-ai-variables): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-ai-variables): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-ai-variables): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-ai-variables): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-ai-variables): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-ai-variables
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-crm-sync
+Uploading asset (outreach-crm-sync): supabase/functions/outreach-crm-sync/index.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/worker.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/types.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/store.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/mapping.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/engine.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/http.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/pull.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/index.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/salesforce.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/pipedrive.ts
+Uploading asset (outreach-crm-sync): supabase/functions/_shared/outreach/crm/hubspot.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-crm-sync
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-reports
+Uploading asset (outreach-worker-reports): supabase/functions/outreach-worker-reports/index.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/reports_email.ts
+Uploading asset (outreach-worker-reports): supabase/functions/_shared/outreach/notify.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-reports
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-domain-check
+Uploading asset (outreach-domain-check): supabase/functions/outreach-domain-check/index.ts
+Uploading asset (outreach-domain-check): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-domain-check
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-profile
+Uploading asset (outreach-worker-profile): supabase/functions/outreach-worker-profile/index.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/profile.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/enrich.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/profile_serialiser.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/execute.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/finder.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/render.ts
+Uploading asset (outreach-worker-profile): supabase/functions/_shared/outreach/errors.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-profile
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-worker-channels
+Uploading asset (outreach-worker-channels): supabase/functions/outreach-worker-channels/index.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/channel_workers.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/transcribe.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-worker-channels): supabase/functions/_shared/outreach/channels.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-worker-channels
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-sender-connect
+Uploading asset (outreach-sender-connect): supabase/functions/outreach-sender-connect/index.ts
+Uploading asset (outreach-sender-connect): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-sender-connect): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-sender-connect
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-sender-update-proxy
+Uploading asset (outreach-sender-update-proxy): supabase/functions/outreach-sender-update-proxy/index.ts
+Uploading asset (outreach-sender-update-proxy): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-sender-update-proxy): supabase/functions/_shared/outreach/supabase.ts
+unexpected deploy status 500: {"message":"Function deploy failed due to an internal error"}
+Try rerunning the command with --debug to troubleshoot the error.
+   FAILED (continuing)
+
+== outreach-sender-disable
+Uploading asset (outreach-sender-disable): supabase/functions/outreach-sender-disable/index.ts
+Uploading asset (outreach-sender-disable): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-sender-disable): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-sender-disable
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-sender-manage
+Uploading asset (outreach-sender-manage): supabase/functions/outreach-sender-manage/index.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/channel_workers.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/transcribe.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-sender-manage): supabase/functions/_shared/outreach/planner.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-sender-manage
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-send-reply
+Uploading asset (outreach-send-reply): supabase/functions/outreach-send-reply/index.ts
+Uploading asset (outreach-send-reply): supabase/functions/_shared/outreach/reply.ts
+Uploading asset (outreach-send-reply): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-send-reply): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-send-reply): supabase/functions/_shared/outreach/unipile.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-send-reply
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-edit-message
+Uploading asset (outreach-edit-message): supabase/functions/outreach-edit-message/index.ts
+Uploading asset (outreach-edit-message): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-edit-message): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-edit-message
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-attachment-proxy
+Uploading asset (outreach-attachment-proxy): supabase/functions/outreach-attachment-proxy/index.ts
+Uploading asset (outreach-attachment-proxy): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-attachment-proxy): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-attachment-proxy
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-ai-sequence-qa
+Uploading asset (outreach-ai-sequence-qa): supabase/functions/outreach-ai-sequence-qa/index.ts
+Uploading asset (outreach-ai-sequence-qa): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-ai-sequence-qa): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-ai-sequence-qa): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-ai-sequence-qa): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-ai-sequence-qa): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-ai-sequence-qa
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-imports-create
+Uploading asset (outreach-imports-create): supabase/functions/outreach-imports-create/index.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/unipile_sources.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/workers.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-imports-create): supabase/functions/_shared/outreach/crypto.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-imports-create
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-exports-create
+Uploading asset (outreach-exports-create): supabase/functions/outreach-exports-create/index.ts
+Uploading asset (outreach-exports-create): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-exports-create
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-invite-member
+Uploading asset (outreach-invite-member): supabase/functions/outreach-invite-member/index.ts
+Uploading asset (outreach-invite-member): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-invite-member): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-invite-member
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-unipile-setup
+Uploading asset (outreach-unipile-setup): supabase/functions/outreach-unipile-setup/index.ts
+Uploading asset (outreach-unipile-setup): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-unipile-setup): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-unipile-setup): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-unipile-setup): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-unipile-setup): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-unipile-setup): supabase/functions/_shared/outreach/unipile.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-unipile-setup
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-mcp
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/index.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/resources_prompts.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_diag.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/ctx.ts
+Uploading asset (outreach-mcp): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/steps.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_channels.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_profile.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_intel.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_sequences.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_leads.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_tasks_reports.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_inbox.ts
+Uploading asset (outreach-mcp): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-mcp): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-mcp): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-mcp): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_enrollments.ts
+Uploading asset (outreach-mcp): supabase/functions/outreach-mcp/tools_senders.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-mcp
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-workspace-secrets
+Uploading asset (outreach-workspace-secrets): supabase/functions/outreach-workspace-secrets/index.ts
+Uploading asset (outreach-workspace-secrets): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-workspace-secrets): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-workspace-secrets): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-workspace-secrets): supabase/functions/_shared/outreach/supabase.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-workspace-secrets
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-api
+Uploading asset (outreach-api): supabase/functions/outreach-api/index.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_reports.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/dispatch.ts
+Uploading asset (outreach-api): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_senders.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_inbox.ts
+Uploading asset (outreach-api): supabase/functions/_shared/outreach/reply.ts
+Uploading asset (outreach-api): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-api): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_sequences.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_enrollments.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_leads.ts
+Uploading asset (outreach-api): supabase/functions/outreach-api/routes_platform.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-api
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+== outreach-profile
+Uploading asset (outreach-profile): supabase/functions/outreach-profile/index.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/ai.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/llm.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/prompts.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/crypto.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/supabase.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/profile.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/notify.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/enrich.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/unipile.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/profile_serialiser.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/execute.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/channels.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/finder.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/inbound.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/avatars.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/health.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/render.ts
+Uploading asset (outreach-profile): supabase/functions/_shared/outreach/errors.ts
+Deployed Functions on project ktwqkvjuzsunssudqnrt: outreach-profile
+You can inspect your deployment in the Dashboard: https://supabase.com/dashboard/project/ktwqkvjuzsunssudqnrt/functions
+A new version of Supabase CLI is available: v2.118.0 (currently installed v2.19.5)
+We recommend updating regularly for new features and bug fixes: https://supabase.com/docs/guides/cli/getting-started#updating-the-supabase-cli
+   ok
+
+================ summary ================
+project:   ktwqkvjuzsunssudqnrt
+base URL:  https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/
+deployed:  41
+   + outreach-unipile-webhook
+   + outreach-sender-notify
+   + outreach-cookie-sync
+   + outreach-stripe-webhook
+   + outreach-booking-webhook
+   + outreach-unsubscribe
+   + outreach-crm-oauth
+   + outreach-process-inbound
+   + outreach-worker-tick
+   + outreach-worker-planner
+   + outreach-worker-health
+   + outreach-worker-reconnect
+   + outreach-worker-imports
+   + outreach-worker-withdraw
+   + outreach-worker-relations-poll
+   + outreach-outbound-webhooks
+   + outreach-billing-sync
+   + outreach-ai-classify
+   + outreach-ai-draft
+   + outreach-worker-enrich
+   + outreach-ai-variables
+   + outreach-crm-sync
+   + outreach-worker-reports
+   + outreach-domain-check
+   + outreach-worker-profile
+   + outreach-worker-channels
+   + outreach-sender-connect
+   + outreach-sender-disable
+   + outreach-sender-manage
+   + outreach-send-reply
+   + outreach-edit-message
+   + outreach-attachment-proxy
+   + outreach-ai-sequence-qa
+   + outreach-imports-create
+   + outreach-exports-create
+   + outreach-invite-member
+   + outreach-unipile-setup
+   + outreach-mcp
+   + outreach-workspace-secrets
+   + outreach-api
+   + outreach-profile
+failed:    1
+   - outreach-sender-update-proxy
+elapsed:   177s
+
+Re-run only the failed ones with:
+   ./scripts/outreach-deploy-functions.sh outreach-sender-update-proxy
+exit=1

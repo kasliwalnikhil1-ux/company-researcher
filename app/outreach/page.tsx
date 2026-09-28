@@ -7,8 +7,9 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSequences } from '@/lib/outreach/queries';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
 import { MetricLabel } from '@/components/outreach/reports/primitives';
-import { Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
 import { healthTileClasses, healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
+import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn } from '@/lib/utils';
 
 type DashSender = DashboardV2['senders'][number];
@@ -18,9 +19,12 @@ function HealthTile({ s }: { s: DashSender }) {
   return (
     <Link href={`/outreach/senders/${s.id}`} className={cn('block rounded-xl border p-4 hover:shadow-sm transition-shadow', healthTileClasses(s.health_score))}>
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</div>
-          <div className="text-xs text-gray-500">{PROVIDER_LABELS[s.provider] ?? s.provider} · Level {s.warmup_level}</div>
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Avatar src={s.picture_url} name={s.display_name} size={10} />
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</div>
+            <div className="text-xs text-gray-500 flex items-center gap-1"><ProviderLogo provider={s.provider} className="w-3 h-3" /> {PROVIDER_LABELS[s.provider] ?? s.provider} · Level {s.warmup_level}</div>
+          </div>
         </div>
         <div className={cn('text-2xl font-bold tabular-nums', healthTextClass(s.health_score))}>{s.health_score}</div>
       </div>

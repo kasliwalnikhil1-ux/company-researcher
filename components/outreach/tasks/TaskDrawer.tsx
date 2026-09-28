@@ -9,6 +9,7 @@ import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { useLead, useMessages, useSender } from '@/lib/outreach/queries';
 import { NODE_CATALOG, TEXT_LIMITS } from '@/lib/outreach/nodes';
 import { renderTemplate } from '@/lib/outreach/render';
+import { enrollmentStatusText } from '@/lib/outreach/reasons';
 import type { Graph, Member, Message, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, ErrorBox, IntentBadge, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
@@ -271,7 +272,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
                     <div className="text-xs text-gray-500">
                       Sequence <Link href={`/outreach/sequences/${enrollmentQ.data.sequence_id}`} className="text-indigo-600 hover:underline">{enrollmentQ.data.outreach_sequences?.name ?? 'sequence'}</Link>
                       {node && <> · step <span className="text-gray-700">{node.label || NODE_CATALOG[node.type]?.label || node.type}</span></>}
-                      {enrollmentQ.data.status !== 'waiting_task' && <> · enrollment is <span className="text-gray-700">{enrollmentQ.data.status.replace(/_/g, ' ')}</span></>}
+                      {enrollmentQ.data.status !== 'waiting_task' && <> · enrollment is <span className="text-gray-700">{enrollmentStatusText(enrollmentQ.data.status).toLowerCase()}</span></>}
                     </div>
                   )}
                   {completed ? (

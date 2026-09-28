@@ -45,8 +45,9 @@ async function markFollowedBack(sender: Row, leadId: string, follower: Row): Pro
   const now = new Date().toISOString();
   await admin.from("outreach_lead_sender_state").upsert({ lead_id: leadId, sender_id: sender.id }, { onConflict: "lead_id,sender_id", ignoreDuplicates: true });
   await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, updated_at: now }).eq("lead_id", leadId).eq("sender_id", sender.id);
-  // the identity now has the user id; the profile picture fills an empty lead picture
-  if (follower.id) await admin.from("outreach_lead_identities").update({ provider_id: String(follower.id), verified: true }).eq("workspace_id", sender.workspace_id).eq("provider", "INSTAGRAM").eq("lead_id", leadId).is("provider_id", null);
+  // a follow back proves the handle; provider_id is NOT set from the follower id: on Instagram it holds the messaging id,
+  // which only a profile read returns and which is the only id a new chat accepts. The profile picture fills an empty lead picture.
+  await admin.from("outreach_lead_identities").update({ verified: true }).eq("workspace_id", sender.workspace_id).eq("provider", "INSTAGRAM").eq("lead_id", leadId).eq("verified", false);
   if (follower.profile_picture_url) await admin.from("outreach_leads").update({ picture_url: follower.profile_picture_url }).eq("id", leadId).is("picture_url", null);
   await emitEvent(sender.workspace_id, "lead.followed_back", { lead_id: leadId, sender_id: sender.id, username: follower.username ?? null });
   return true;

@@ -304,3 +304,26 @@ export const WA_GOVERNOR_LEVELS: Array<{ level: number; new_chats: number; promo
   { level: 4, new_chats: 35, promotion: 'Reply rate of 50% or more and no blocks in the last 30 days (top level)' },
 ];
 export const WA_GOVERNOR_DEMOTION = 'Drops one level straight away when the 14-day reply rate falls below 25%, a block is detected, or the number disconnects within 24 hours of outreach.';
+
+// Windows-1252 characters 0x80–0x9F → their byte (the rest of Latin-1 maps to itself).
+const CP1252: Record<string, number> = { '€': 0x80, '‚': 0x82, 'ƒ': 0x83, '„': 0x84, '…': 0x85, '†': 0x86, '‡': 0x87, 'ˆ': 0x88, '‰': 0x89, 'Š': 0x8a, '‹': 0x8b, 'Œ': 0x8c, 'Ž': 0x8e,
+  '‘': 0x91, '’': 0x92, '“': 0x93, '”': 0x94, '•': 0x95, '–': 0x96, '—': 0x97, '˜': 0x98, '™': 0x99, 'š': 0x9a, '›': 0x9b, 'œ': 0x9c, 'ž': 0x9e, 'Ÿ': 0x9f };
+const MOJIBAKE_RE = /[ÃÂâð][\u0080-¿Œ-ƒˆ˜–-™\udc80-\udcff]/;
+
+/**
+ * Instagram texts sometimes arrive as UTF-8 read as Windows-1252 ("â€œmathâ€" for “math”). Undo that when the text looks
+ * like it and decodes cleanly; anything else comes back unchanged. Same as fixMojibake() in _shared/outreach/inbound.ts,
+ * which repairs new messages on the way in; this one covers messages stored before that.
+ */
+export function fixMojibake<T extends string | null | undefined>(s: T): T {
+  if (!s || !MOJIBAKE_RE.test(s)) return s;
+  const bytes: number[] = [];
+  for (const ch of s as string) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x100) bytes.push(c);
+    else if (CP1252[ch] !== undefined) bytes.push(CP1252[ch]);
+    else if (c >= 0xdc80 && c <= 0xdcff) bytes.push(c - 0xdc00);
+    else return s;
+  }
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes)) as T; } catch { return s; }
+}

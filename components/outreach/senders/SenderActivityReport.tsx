@@ -5,6 +5,7 @@ import { ShieldAlert } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
 import { Badge, Button, Card, EmptyState, ErrorBox, Input, Spinner, Stat, fmtDate } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
+import { reasonText } from '@/lib/outreach/reasons';
 import { localDate } from './helpers';
 import { addDays, fmtDay, isMailbox, num, pct, useSenderReport, type ReportTotals, type SenderRestriction, type SenderV2 } from './insights';
 
@@ -16,7 +17,7 @@ function restrictionText(r: SenderRestriction): { title: string; detail: string 
   const d = r.data ?? {};
   const s = (k: string) => (d[k] == null ? null : String(d[k]));
   if (r.kind === 'checkpoint') return { title: d.solved ? 'LinkedIn verification completed' : 'LinkedIn asked for verification', detail: null, tone: 'amber' };
-  if (r.kind === 'reject') return { title: 'LinkedIn rejected an action', detail: [s('action_type')?.replace(/_/g, ' '), s('reason') ?? s('message') ?? s('code')].filter(Boolean).join(' · ') || null, tone: 'red' };
+  if (r.kind === 'reject') return { title: 'LinkedIn rejected an action', detail: [s('action_type')?.replace(/_/g, ' '), s('code') ? reasonText(s('code')) : (s('reason') ?? s('message'))].filter(Boolean).join(' · ') || null, tone: 'red' };
   if (d.paused_until) return { title: `Rested until ${fmtDate(s('paused_until'))}`, detail: s('reason') ?? s('status_reason'), tone: 'amber' };
   const to = s('to') ?? s('status');
   return { title: `Sender ${STATUS_WORDS[to ?? ''] ?? `changed to ${to ?? 'another status'}`}`, detail: s('reason') ?? s('status_reason'), tone: to === 'paused' ? 'amber' : 'red' };

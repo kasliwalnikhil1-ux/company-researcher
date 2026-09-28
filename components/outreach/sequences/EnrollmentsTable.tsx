@@ -9,6 +9,7 @@ import { parseError, rpc } from '@/lib/outreach/api';
 import { useEnrollments } from '@/lib/outreach/queries';
 import { LIVE_ENROLLMENT_STATUSES, type EnrollmentStatus, type Sequence } from '@/lib/outreach/types';
 import { Avatar, Button, Card, EmptyState, EnrollmentBadge, ErrorBox, fmtDate, Select, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
+import { enrollmentStatusText, exitReasonText } from '@/lib/outreach/reasons';
 import { nodeTitle } from './helpers';
 import { useFailedCount } from './hooks';
 import { FailedLeadsPanel } from './FailedLeadsDrawer';
@@ -53,7 +54,7 @@ export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Seq
           <Select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Filter enrollments" className="!py-1 !text-xs w-auto">
             <option value="live">Live</option>
             <option value="all">All</option>
-            {ALL_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+            {ALL_STATUSES.map((s) => <option key={s} value={s}>{enrollmentStatusText(s)}</option>)}
           </Select>
         )}
       </>
@@ -78,7 +79,7 @@ export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Seq
                     </Link>
                   </Td>
                   <Td className="text-gray-600">{e.outreach_senders?.display_name ?? '—'}</Td>
-                  <Td><EnrollmentBadge status={e.status} />{e.exit_reason && <span className="block text-[11px] text-gray-400 mt-0.5">{e.exit_reason}</span>}</Td>
+                  <Td><EnrollmentBadge status={e.status} />{e.exit_reason && <span className="block text-[11px] text-gray-400 mt-0.5">{exitReasonText(e.exit_reason)}</span>}</Td>
                   <Td className="text-gray-600">{e.current_node_id ? nodeTitle(sequence.graph.nodes[e.current_node_id]) : '—'}</Td>
                   <Td className="text-gray-500 whitespace-nowrap" title={e.node_entered_at}>{timeAgo(e.node_entered_at)}</Td>
                   <Td className="text-gray-500 whitespace-nowrap">{e.wait_until ? fmtDate(e.wait_until) : '—'}</Td>

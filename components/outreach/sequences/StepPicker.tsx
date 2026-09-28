@@ -47,11 +47,13 @@ export function StepIcon({ type, className }: { type: NodeType; className?: stri
 }
 
 /** Plain-language names and order of the picker's categories (the catalogue groups underneath stay as they are). */
-const CATEGORIES: Array<{ label: string; groups: NodeGroup[] }> = [
+// `channel`: steps that work on several channels (Send message, Send voice note) are listed under every channel they
+// support, so an Instagram or WhatsApp user finds messaging under their own channel too.
+const CATEGORIES: Array<{ label: string; groups: NodeGroup[]; channel?: 'INSTAGRAM' | 'WHATSAPP' }> = [
   { label: 'LinkedIn actions', groups: ['Outreach', 'Social'] },
   // shown even when the pool has no account of the channel: the steps are greyed out with the reason
-  { label: 'Instagram actions', groups: ['Instagram'] },
-  { label: 'WhatsApp actions', groups: ['WhatsApp'] },
+  { label: 'Instagram actions', groups: ['Instagram'], channel: 'INSTAGRAM' },
+  { label: 'WhatsApp actions', groups: ['WhatsApp'], channel: 'WHATSAPP' },
   { label: 'Conditions and timing', groups: ['Logic'] },
   { label: 'Update the lead', groups: ['CRM'] },
   { label: 'Team and AI', groups: ['Flow', 'AI'] },
@@ -102,6 +104,12 @@ const BLURB: Partial<Record<NodeType, string>> = {
   ai_route: 'Describe each path in plain words and let AI pick one per lead',
 };
 
+/** The one-liner for a multi-channel step when it is listed under a single channel. */
+const CHANNEL_BLURB: Partial<Record<'INSTAGRAM' | 'WHATSAPP', Partial<Record<NodeType, string>>>> = {
+  INSTAGRAM: { send_message: 'Send a direct message on Instagram' },
+  WHATSAPP: { send_message: 'Send a WhatsApp message', send_voice_note: 'Send a recorded voice message on WhatsApp' },
+};
+
 /** Where the new step will be wired in. */
 export interface StepPickerTarget {
   source: string;
@@ -134,7 +142,8 @@ function PickerPanel({ target, nodes, allowed, onPick, onClose }: PanelProps) {
     const needle = q.trim().toLowerCase();
     return CATEGORIES.map((c) => ({
       label: c.label,
-      items: Object.values(NODE_CATALOG).filter((m) => c.groups.includes(m.group) && m.type !== 'start')
+      channel: c.channel,
+      items: Object.values(NODE_CATALOG).filter((m) => (c.groups.includes(m.group) || (!!c.channel && !!m.channels?.includes(c.channel))) && m.type !== 'start')
         .filter((m) => !needle || m.label.toLowerCase().includes(needle) || (BLURB[m.type] ?? m.description).toLowerCase().includes(needle) || m.type.includes(needle)),
     })).filter((c) => c.items.length > 0);
   }, [q]);
@@ -167,7 +176,7 @@ function PickerPanel({ target, nodes, allowed, onPick, onClose }: PanelProps) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {c.items.map((m) => {
                   const reason = allowed?.[m.type] ?? null;
-                  const blurb = BLURB[m.type] ?? m.description;
+                  const blurb = (c.channel ? CHANNEL_BLURB[c.channel]?.[m.type] : null) ?? BLURB[m.type] ?? m.description;
                   return (
                     <button
                       key={m.type}

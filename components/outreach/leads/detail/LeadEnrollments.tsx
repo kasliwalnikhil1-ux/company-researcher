@@ -10,6 +10,7 @@ import { NODE_CATALOG } from '@/lib/outreach/nodes';
 import { LIVE_ENROLLMENT_STATUSES, type Enrollment } from '@/lib/outreach/types';
 import { Button, Card, EmptyState, EnrollmentBadge, Modal, fmtDate } from '@/components/outreach/ui';
 import { GitBranch, LogOut, Pause, Play } from 'lucide-react';
+import { exitReasonText } from '@/lib/outreach/reasons';
 import type { ToastFn } from '../helpers';
 
 export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { leadId: string; enrollments: Enrollment[]; onEnroll: () => void; toast: ToastFn }) {
@@ -33,7 +34,7 @@ export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { lead
     const seq = sequences.data?.find((s) => s.id === e.sequence_id);
     if (!seq || !e.current_node_id) return null;
     const node = seq.graph?.nodes?.[e.current_node_id];
-    if (!node) return e.current_node_id;
+    if (!node) return null;   // never show a raw step id
     return node.label || NODE_CATALOG[node.type]?.label || node.type;
   };
 
@@ -58,7 +59,7 @@ export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { lead
                     <span>Sender: {sender ? (sender.display_name ?? sender.public_identifier ?? 'Sender') : '—'}</span>
                     {label && live && <span>Step: <span className="text-gray-700">{label}</span></span>}
                     {e.wait_until && live && <span>Waiting until {fmtDate(e.wait_until)}</span>}
-                    {e.exit_reason && <span>Reason: {e.exit_reason}</span>}
+                    {e.exit_reason && <span>Why it ended: {exitReasonText(e.exit_reason)}</span>}
                     {e.rotation_count > 0 && <span>Rotations: {e.rotation_count}</span>}
                     <span>Started {fmtDate(e.created_at)}</span>
                     {e.completed_at && <span>Ended {fmtDate(e.completed_at)}</span>}

@@ -81,7 +81,10 @@ export async function sequenceQa(input: { workspaceId: string; graph: unknown; b
   const user = `${input.brief ? `Campaign brief: ${input.brief}\n\n` : ""}Sequence graph (JSON):\n${JSON.stringify(input.graph).slice(0, 60000)}`;
   const raw = await call({ purpose: "sequence_qa", workspaceId: input.workspaceId, system: SEQUENCE_QA_SYSTEM, user, maxTokens: 6144, temperature: 0, json: true });
   const j = parseJson<{ warnings?: any[]; errors?: any[] }>(raw);
-  return { warnings: Array.isArray(j.warnings) ? j.warnings : [], errors: Array.isArray(j.errors) ? j.errors : [] };
+  // The builder asks for {{unsubscribe_link}} in every email, so an AI note telling the user the link hurts deliverability
+  // contradicts it. Drop any such note even if the model ignores the prompt.
+  const aboutUnsubscribe = (w: any) => /unsubscribe|opt[\s-]?out/i.test(`${w?.message ?? ""} ${w?.code ?? ""}`);
+  return { warnings: Array.isArray(j.warnings) ? j.warnings.filter((w) => !aboutUnsubscribe(w)) : [], errors: Array.isArray(j.errors) ? j.errors.filter((w) => !aboutUnsubscribe(w)) : [] };
 }
 
 /** Draft 1–3 reply variants for an inbound thread (used by outreach-mcp draft_reply). Never sends. */

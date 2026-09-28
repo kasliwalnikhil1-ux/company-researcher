@@ -79,7 +79,6 @@ export function SendVoiceNoteForm({ node, cfg, set, patch, update }: FormProps) 
       <Note>Sends a recorded voice message{effective.includes('WHATSAPP') && onLinkedIn ? ' on LinkedIn or WhatsApp' : effective.includes('WHATSAPP') ? ' on WhatsApp' : ' on LinkedIn'}. {onLinkedIn ? 'On LinkedIn it needs a 1st-degree connection. ' : ''}It counts against the message budget.</Note>
       <MessageChannelFields node={node} cfg={cfg} patch={patch} update={update} what="voice note" />
       <VoiceClipRecorder workspaceId={workspaceId} sequenceId={sequenceId} nodeId={node.id} senders={senders} readOnly={readOnly} />
-      <Callout tone="warn">Senders without a clip skip this step. Each sender records in their own voice, up to 60 seconds.</Callout>
       <Note>There is no AI voice cloning, on purpose: a cloned voice puts the account and your reputation at risk. One real recording per sender is the feature. The same clip goes to every lead, so keep it general (“Hi, thanks for connecting…”).</Note>
       <Toggle checked={!!cfg.send_always} onChange={(v) => set('send_always', v)} label="Send even after the lead replied" />
     </div>

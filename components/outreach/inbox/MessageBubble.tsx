@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck } from 'lucide-react';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';
 import type { ThreadAttributionRow } from '@/lib/outreach/intel';
 import { Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
-import { isMailProvider } from '@/lib/outreach/channels';
+import { fixMojibake, isMailProvider } from '@/lib/outreach/channels';
 
 export function isVoiceNote(att: MessageAttachment): boolean {
   const mime = att.mimetype ?? att.type ?? '';
@@ -23,8 +23,9 @@ function fmtDuration(s: number | null | undefined): string | null {
 
 /** Voice note (WhatsApp / Instagram): inline player fed by the attachment proxy, loaded on mount. */
 function VoiceNote({ messageId, att, mine }: { messageId: string; att: MessageAttachment; mine: boolean }) {
-  const { url, loading, error, load } = useAttachmentUrl(messageId, att.id);
-  useEffect(() => { if (!url && !loading && !error) void load(); }, [url, loading, error, load]);
+  const { url, loading, error: loadError, load } = useAttachmentUrl(messageId, att.id ?? '');
+  const error = att.id ? loadError : 'This voice note can no longer be played.';
+  useEffect(() => { if (att.id && !url && !loading && !loadError) void load(); }, [att.id, url, loading, loadError, load]);
   const dur = fmtDuration(att.duration_s);
   return (
     <div className={cn('rounded-lg px-2 py-1.5 min-w-[220px] max-w-full', mine ? 'bg-white/15' : 'bg-gray-50 border border-gray-200')}>
@@ -36,9 +37,33 @@ function VoiceNote({ messageId, att, mine }: { messageId: string; att: MessageAt
   );
 }
 
+/** A shared Instagram post or reel: a link to it on Instagram (the file itself is only a preview image). */
+function SharedPost({ link, mine }: { link: NonNullable<MessageAttachment['link']>; mine: boolean }) {
+  const isReel = /\/reel\//.test(link.url);
+  return (
+    <a href={link.url} target="_blank" rel="noopener noreferrer" className={cn('flex items-start gap-2 rounded-lg px-2.5 py-2 max-w-[280px] text-xs no-underline', mine ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100')}>
+      <ExternalLink className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden />
+      <span className="min-w-0">
+        <span className="block font-medium">Shared {isReel ? 'reel' : 'post'}{link.author ? ` from @${link.author}` : ''}</span>
+        {link.text && <span className={cn('block line-clamp-2', mine ? 'text-white/80' : 'text-gray-500')}>{fixMojibake(link.text)}</span>}
+        <span className={cn('block', mine ? 'text-white/70' : 'text-gray-400')}>Open on Instagram</span>
+      </span>
+    </a>
+  );
+}
+
 function AttachmentChip({ messageId, att, mine }: { messageId: string; att: MessageAttachment; mine: boolean }) {
-  const { url, loading, error, load } = useAttachmentUrl(messageId, att.id);
-  const name = att.name ?? att.id.split('/').pop() ?? 'attachment';
+  if (att.link?.url) return <SharedPost link={att.link} mine={mine} />;
+  if (!att.id) {
+    // stored before attachment ids were read: nothing to download, say so instead of failing
+    return <span className={cn('inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-md border', mine ? 'bg-white/15 border-white/30 text-white/80' : 'bg-white border-gray-200 text-gray-500')}><Paperclip className="w-3 h-3" /> {att.name ?? 'Attachment'} (not available)</span>;
+  }
+  return <DownloadChip messageId={messageId} att={att} attachmentId={att.id} mine={mine} />;
+}
+
+function DownloadChip({ messageId, att, attachmentId, mine }: { messageId: string; att: MessageAttachment; attachmentId: string; mine: boolean }) {
+  const { url, loading, error, load } = useAttachmentUrl(messageId, attachmentId);
+  const name = att.name ?? attachmentId.split('/').pop() ?? 'attachment';
   const mime = att.type ?? att.mimetype ?? '';
   const isImage = mime.startsWith('image/');
   const onClick = async () => {
@@ -142,7 +167,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
 
   return (
     <div className={cn('flex flex-col max-w-[85%] md:max-w-[70%]', mine ? 'ml-auto items-end' : 'mr-auto items-start')}>
-      <div className={cn('rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words shadow-sm', mine ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md', deleted && 'opacity-70', pending && 'opacity-60')}>
+      <div className={cn('max-w-full min-w-0 rounded-2xl px-3.5 py-2 text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] shadow-sm', mine ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md', deleted && 'opacity-70', pending && 'opacity-60')}>
         {m.is_invite_note && <div className="mb-1"><Badge tone={mine ? 'indigo' : 'blue'} className={mine ? 'bg-white/20 text-white' : ''}>Invitation note</Badge></div>}
         {isEmail && m.html && !m.text ? (
           <div className="max-w-none [&_a]:underline [&_p]:my-1 [&_img]:max-w-full overflow-x-auto" dangerouslySetInnerHTML={{ __html: safeHtml }} />
@@ -155,11 +180,11 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
             </div>
           </div>
         ) : (
-          <span className={cn(deleted && 'line-through')}>{m.text || (m.attachments?.length ? '' : <em className="opacity-70">(empty message)</em>)}</span>
+          <span className={cn(deleted && 'line-through')}>{fixMojibake(m.text) || (m.attachments?.length ? '' : <em className="opacity-70">(empty message)</em>)}</span>
         )}
         {voiceNotes.length > 0 && (
           <div className={cn('space-y-1.5', m.text ? 'mt-2' : '')}>
-            {voiceNotes.map((a) => <VoiceNote key={a.id} messageId={m.id} att={a} mine={mine} />)}
+            {voiceNotes.map((a, i) => <VoiceNote key={a.id ?? `v${i}`} messageId={m.id} att={a} mine={mine} />)}
             {m.transcript
               ? <div className={cn('text-xs italic border-l-2 pl-2', mine ? 'text-white/85 border-white/40' : 'text-gray-600 border-gray-300')}>{m.transcript}</div>
               : transcriptPending ? <div className={cn('text-[11px] inline-flex items-center gap-1', mine ? 'text-white/70' : 'text-gray-400')}><Loader2 className="w-3 h-3 animate-spin" /> Transcribing…</div>
@@ -168,7 +193,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
         )}
         {otherAttachments.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mt-2">
-            {otherAttachments.map((a) => <AttachmentChip key={a.id} messageId={m.id} att={a} mine={mine} />)}
+            {otherAttachments.map((a, i) => <AttachmentChip key={a.id ?? `a${i}`} messageId={m.id} att={a} mine={mine} />)}
           </div>
         )}
       </div>

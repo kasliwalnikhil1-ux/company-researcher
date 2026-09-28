@@ -99,8 +99,8 @@ export default function DangerZone({ sender, isManager, canWrite, notify }: { se
 
       <Card title={<span className="flex items-center gap-2 text-red-700"><AlertTriangle className="w-4 h-4" /> Disable sender</span>} className="border-red-200">
         <div className="text-sm text-gray-700 space-y-1.5">
-          <p>Disabling cancels every queued action, exits all live enrollments with <code className="text-xs bg-gray-100 px-1 rounded">exited_sender_disabled</code>, and stops all syncing. Chats and history stay readable.</p>
-          <p>Optionally delete the connected account (revokes the held session token) and purge stored cookies / pairing tokens. Deleting the connected account cannot be undone; you would reconnect from scratch.</p>
+          <p>Disabling cancels every planned action, takes this sender&apos;s leads out of their sequences, and stops syncing. Chats and history stay readable.</p>
+          <p>You can also remove the connected account and the saved sign-in. That cannot be undone; you would have to connect the account again from scratch.</p>
         </div>
         <div className="mt-4">
           <Button variant="danger" onClick={() => { setOpen(true); setConfirmText(''); setError(null); }} disabled={isDisabled}><Power className="w-4 h-4" /> {isDisabled ? 'Already disabled' : 'Disable sender…'}</Button>

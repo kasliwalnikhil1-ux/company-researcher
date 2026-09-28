@@ -1,13 +1,14 @@
 'use client';
 
 // Photo / cover tools (PRD §8.1): upload to the private bucket, pick one of the seven filters with a live preview,
-// brightness / contrast / saturation / vignette sliders, crop corners. Nothing here touches LinkedIn: the result is a
+// brightness / contrast / saturation / vignette sliders, and a crop modal shown before upload. Nothing here touches LinkedIn: the result is a
 // storage path in assets and picture_settings in the payload, applied only when the change is submitted and scheduled.
 import { useRef, useState } from 'react';
 import { ImagePlus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/outreach/ui';
 import { FILTER_CSS, IMAGE_RULES, PICTURE_FILTERS, signedAssetUrl, uploadProfileAsset, type PictureFilter, type PictureSettings } from '@/lib/outreach/profile';
 import { cn } from '@/lib/utils';
+import CropModal from './CropModal';
 
 type Notify = (message: string, type?: 'success' | 'error') => void;
 
@@ -18,19 +19,25 @@ export default function PhotoEditor({ kind, ws, senderId, currentUrl, assetPath,
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [localUrl, setLocalUrl] = useState<string | null>(null);
+  const [pending, setPending] = useState<File | null>(null);
   const shown = localUrl ?? currentUrl;
   const s = settings ?? {};
   const patch = (p: Partial<PictureSettings>) => { const next = { ...s, ...p }; for (const k of Object.keys(next) as Array<keyof PictureSettings>) if (next[k] === undefined) delete next[k]; onSettings(Object.keys(next).length ? next : undefined); };
 
-  async function pick(e: React.ChangeEvent<HTMLInputElement>) {
+  function pick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]; e.target.value = '';
     if (!f) return;
+    if (!(IMAGE_RULES.types as readonly string[]).includes(f.type)) { notify('Use a JPG, PNG or WebP image', 'error'); return; }
+    setPending(f);
+  }
+  async function upload(f: File) {
     setBusy(true);
     try {
       const r = await uploadProfileAsset(ws, senderId, f, kind);
       onAsset(r.path);
       const url = (await signedAssetUrl(r.path)) ?? URL.createObjectURL(f);
       setLocalUrl(url); onPreviewUrl(url);
+      setPending(null);
       notify(`${kind === 'photo' ? 'Photo' : 'Cover'} uploaded (${r.width}×${r.height}). It reaches LinkedIn only when you submit the change.`);
     } catch (err) { notify((err as Error).message, 'error'); }
     finally { setBusy(false); }
@@ -88,17 +95,7 @@ export default function PhotoEditor({ kind, ws, senderId, currentUrl, assetPath,
         ))}
       </div>
 
-      <details className="text-xs">
-        <summary className="cursor-pointer text-gray-600">Crop (corner coordinates, 0 to 1)</summary>
-        <div className="grid grid-cols-4 gap-2 mt-2">
-          {(['topLeft', 'bottomRight'] as const).map((corner) => (['x', 'y'] as const).map((axis) => (
-            <label key={`${corner}-${axis}`} className="block text-[11px] text-gray-600">{corner === 'topLeft' ? 'Top-left' : 'Bottom-right'} {axis}
-              <input type="number" min={0} max={1} step={0.01} disabled={disabled} value={s.layout?.[corner]?.[axis] ?? ''} onChange={(e) => { const v = e.target.value === '' ? undefined : Math.max(0, Math.min(1, Number(e.target.value))); const layout = { ...(s.layout ?? {}) }; const c = { x: layout[corner]?.x ?? 0, y: layout[corner]?.y ?? 0, [axis]: v } as { x: number; y: number }; if (v === undefined) delete layout[corner]; else layout[corner] = c; patch({ layout: Object.keys(layout).length ? layout : undefined }); }} className="mt-0.5 w-full px-2 py-1 rounded-md border border-gray-300 text-sm" />
-            </label>
-          )))}
-        </div>
-        <div className="text-[11px] text-gray-500 mt-1">Leave empty to keep LinkedIn&apos;s crop.</div>
-      </details>
+      <CropModal file={pending} kind={kind} onCancel={() => setPending(null)} onConfirm={upload} />
     </div>
   );
 }

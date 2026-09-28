@@ -118,7 +118,7 @@ export type MetricDefinitions = Record<string, string>;
 
 export interface AttentionItem { kind: string; id: string; label: string | null; reason: string | null }
 export interface DashboardV2 {
-  senders: Array<{ id: string; display_name: string | null; provider: Provider; status: SenderStatus; status_reason: string | null; health_score: number; warmup_level: number; client_id: string | null; paused_until: string | null; running_dry: boolean; today: Record<string, { used: number; reserved: number; cap: number }> }>;
+  senders: Array<{ id: string; display_name: string | null; picture_url?: string | null; provider: Provider; status: SenderStatus; status_reason: string | null; health_score: number; warmup_level: number; client_id: string | null; paused_until: string | null; running_dry: boolean; today: Record<string, { used: number; reserved: number; cap: number }> }>;
   attention: AttentionItem[];
   replies_awaiting: number; unread: number; tasks_open: number; drafts_awaiting: number; ai_lines_awaiting: number;
   enrollments_live: number; sent_today: number; queued_today: number; leads_total: number;

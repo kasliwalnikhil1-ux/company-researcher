@@ -30,7 +30,9 @@ export function excludedReasonText(reason: string): string {
   if (reason === 'replied_recently') return 'Replied to someone on your team in the last 90 days';
   if (reason === 'already_enrolled') return 'Already live in a sequence with every sender in the pool';
   if (reason === 'no_fresh_sender') return 'Skipped: every sender has contacted them before';
-  if (reason === 'no_identity') return 'No Instagram handle / WhatsApp number on file for the channel this sequence uses';
+  if (reason === 'no_identity:instagram') return 'No Instagram handle on file, and this sequence sends from Instagram';
+  if (reason === 'no_identity:whatsapp') return 'No WhatsApp number on file, and this sequence sends from WhatsApp';
+  if (reason.startsWith('no_identity')) return 'No Instagram handle or WhatsApp number on file for the account this sequence sends from';
   if (reason === 'no_consent') return 'No recorded WhatsApp consent';
   if (reason.startsWith('suppressed:')) {
     const why = reason.slice('suppressed:'.length);

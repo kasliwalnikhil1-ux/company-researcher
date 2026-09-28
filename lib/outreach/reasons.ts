@@ -45,6 +45,56 @@ const DECISIONS: Record<string, string> = {
   blocked: 'They blocked the account',
 };
 
+/** Where a lead stands in a sequence, in words (enrollment status). */
+export const ENROLLMENT_STATUS_LABEL: Record<string, string> = {
+  active: 'Active',
+  waiting_connection: 'Waiting to connect',
+  waiting_delay: 'Waiting',
+  waiting_task: 'Waiting on a task',
+  paused: 'Paused',
+  completed: 'Finished',
+  exited_replied: 'Stopped: replied',
+  exited_manual: 'Stopped by a teammate',
+  exited_suppressed: 'Stopped: do not contact',
+  exited_sender_disabled: 'Stopped: sender disabled',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+};
+
+export function enrollmentStatusText(status: string | null | undefined): string {
+  if (!status) return '';
+  return ENROLLMENT_STATUS_LABEL[status] ?? status.replace(/_/g, ' ');
+}
+
+const EXIT_REASONS: Record<string, string> = {
+  manual: 'Stopped by a teammate',
+  end_of_graph: 'Reached the end of the sequence',
+  end: 'Reached an end step',
+  meeting_booked: 'A meeting was booked',
+  rotated: 'Moved to another sequence',
+  sent_to_sequence: 'Moved to another sequence',
+  node_missing: 'The next step was removed',
+  node_deleted: 'The step was removed from the sequence',
+  sender_removed_from_pool: 'The sender was taken out of the sequence',
+  sequence_archived: 'The sequence was archived',
+  sender_disabled: 'The sender was disabled',
+  replied: 'The lead replied',
+  hold_expired: 'The lead replied',
+  suppressed: 'On the do-not-contact list',
+  do_not_contact: 'On the do-not-contact list',
+  unsubscribed: 'The lead unsubscribed',
+};
+
+/** Why a lead left a sequence, in words. Free text written on an End step is shown as written. */
+export function exitReasonText(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  const r = String(reason);
+  if (EXIT_REASONS[r]) return EXIT_REASONS[r];
+  if (r.startsWith('recovered:')) return 'Cleaned up after an interrupted step';
+  if (/^[a-z0-9_:]+$/.test(r) || /^E_[A-Z_]+$/.test(r)) return reasonText(r);   // a code, not a sentence someone wrote
+  return r;
+}
+
 /** What the engine decided, in words. `not_connected:branch` → "Not connected yet (took a branch)". */
 export function decisionText(decision: string | null | undefined): string | null {
   if (!decision) return null;
@@ -94,6 +144,7 @@ export function reasonText(code: string | null | undefined, decision?: string | 
   if (c === 'E_SENDER_PAUSED' || c === 'E_HEALTH_PAUSED') return 'The sender is paused';
   if (c === 'E_NO_SCHEDULE') return 'The sender has no working hours set';
   if (c === 'E_NO_MAILBOX') return 'There is no email mailbox in the sender pool';
+  if (c === 'E_ATTACHMENT_MISSING' || c === 'attachment_missing') return 'A file attached to the email step could not be found. Attach it again in the step';
   // channels (docs/outreach/CHANNELS-BUILD-CONTRACT.md §3 and §6)
   if (c === 'E_NO_CONSENT' || c === 'no_consent') return 'No recorded WhatsApp consent for this lead, so nothing was sent';
   if (c === 'E_NO_IDENTITY' || c === 'no_identity') return 'No handle or number on file for this channel';

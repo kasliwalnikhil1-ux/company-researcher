@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Loader2, X, AlertCircle, Inbox, ChevronDown, Check, Search, ArrowLeft } from 'lucide-react';
 import type { SenderStatus, EnrollmentStatus, Intent } from '@/lib/outreach/types';
+import { enrollmentStatusText } from '@/lib/outreach/reasons';
 
 export function Button({ variant = 'primary', size = 'md', loading, className, children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; size?: 'sm' | 'md'; loading?: boolean }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
@@ -28,9 +29,10 @@ export function Card({ className, children, title, actions }: { className?: stri
   return (
     <div className={cn('bg-white border border-gray-200 rounded-xl', className)}>
       {(title || actions) && (
-        <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-          <div className="flex items-center gap-2">{actions}</div>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3 border-b border-gray-100">
+          <h3 className="text-sm font-semibold text-gray-900 shrink-0">{title}</h3>
+          {/* When the actions do not fit beside the title they wrap onto their own row instead of crowding it. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>
         </div>
       )}
       <div className="p-5">{children}</div>
@@ -276,7 +278,7 @@ export function StatusPill({ status, reason }: { status: SenderStatus; reason?: 
 
 export function EnrollmentBadge({ status }: { status: EnrollmentStatus }) {
   const tone: any = status === 'active' ? 'green' : status.startsWith('waiting') ? 'blue' : status === 'paused' ? 'amber' : status === 'completed' ? 'indigo' : status === 'exited_replied' ? 'purple' : status === 'failed' ? 'red' : 'gray';
-  return <Badge tone={tone}>{status.replace(/_/g, ' ')}</Badge>;
+  return <Badge tone={tone}>{enrollmentStatusText(status)}</Badge>;
 }
 
 export function IntentBadge({ intent }: { intent: Intent | null | undefined }) {

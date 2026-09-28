@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { channelLabel } from '@/lib/outreach/channels';
+import { channelLabel, isMailProvider } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { ConsentChip } from './ConsentChip';
 import type { Chat, Intent, Lead, Member, Message, Sender } from '@/lib/outreach/types';
@@ -111,6 +111,14 @@ export default function Thread(p: ThreadProps) {
 
   const assignee = members?.find((m) => m.user_id === chat.assigned_to);
 
+  // Email threads lead with the subject; social threads with who the person is.
+  const who = [lead?.headline, lead?.company].filter(Boolean).join(' · ');
+  const subtitle = isMailProvider(chat.provider) ? (chat.subject || who) : (who || chat.subject);
+  // Skip opaque provider ids (LinkedIn member URNs like "ACoAAA…"); only human-readable handles help here.
+  const rawHandle = chat.attendee_public_identifier;
+  const handle = rawHandle && rawHandle !== name && !/^ACo[A-Za-z0-9_-]{20,}$/i.test(rawHandle) ? rawHandle : null;
+  const secondary = isMailProvider(chat.provider) && chat.subject ? (who || handle) : handle;
+
   // Item 4: one attribution call per thread, fetched again when a message arrives that it does not know yet.
   const lastStoredId = useMemo(() => { const real = (messages ?? []).filter((m) => !m.id.startsWith('temp-')); return real.length ? real[real.length - 1].id : null; }, [messages]);
   const attributionQ = useThreadAttribution(chat.id, lastStoredId);
@@ -118,29 +126,46 @@ export default function Thread(p: ThreadProps) {
   return (
     <div className="flex flex-col h-full min-h-0 bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-3 py-2 flex items-center gap-2 flex-wrap">
-        <button type="button" onClick={p.onBack} className="md:hidden p-1.5 rounded-md hover:bg-gray-100 text-gray-600" aria-label="Back to conversations"><ArrowLeft className="w-4 h-4" /></button>
-        <Avatar src={chat.attendee_picture_url ?? lead?.picture_url} name={name} size={9} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold text-gray-900 truncate">{name}</span>
-            <span title={channelLabel(chat.provider)}><ProviderLogo provider={chat.provider} className="w-3.5 h-3.5 rounded-[3px]" /></span>
-            {chat.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: not accepted yet, so it may not have been seen">Message request</span>}
-            {lead && <Link href={`/outreach/leads/${lead.id}`} className="text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-3.5 h-3.5" /></Link>}
-            {chat.provider === 'WHATSAPP' && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
+      <div className="bg-white border-b border-gray-200 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        {/* Identity: who this conversation is with */}
+        <div className="px-4 md:px-5 pt-3.5 pb-3 flex items-start gap-3">
+          <button type="button" onClick={p.onBack} className="md:hidden -ml-1 mt-2 p-1.5 rounded-md hover:bg-gray-100 text-gray-600" aria-label="Back to conversations"><ArrowLeft className="w-4 h-4" /></button>
+          <div className="relative flex-shrink-0">
+            <Avatar src={chat.attendee_picture_url ?? lead?.picture_url} name={name} size={12} />
+            <span className="absolute -bottom-0.5 -right-0.5 rounded-[4px] bg-white p-px ring-1 ring-white" title={channelLabel(chat.provider)}><ProviderLogo provider={chat.provider} className="w-4 h-4 rounded-[3px]" /></span>
           </div>
-          <div className="text-xs text-gray-500 truncate">
-            {[lead?.headline, lead?.company].filter(Boolean).join(' · ') || chat.subject || chat.attendee_public_identifier || '—'}
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <h2 className="text-lg font-semibold text-gray-900 truncate leading-tight" title={name}>{name}</h2>
+              {lead && <Link href={`/outreach/leads/${lead.id}`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-4 h-4" /></Link>}
+              {chat.is_request && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: not accepted yet, so it may not have been seen">Message request</span>}
+              {chat.archived && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Archived</span>}
+            </div>
+            {subtitle && <p className="text-sm text-gray-600 truncate mt-0.5" title={subtitle}>{subtitle}</p>}
+            <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5 min-w-0">
+              <span className="flex-shrink-0">{channelLabel(chat.provider)}</span>
+              {secondary && <><span aria-hidden>·</span><span className="truncate" title={secondary}>{secondary}</span></>}
+            </div>
+          </div>
+          <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button type="button" onClick={p.onMarkUnread} disabled={!p.canWrite} className="p-2 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title="Mark as unread (u)" aria-label="Mark as unread"><MailOpen className="w-4 h-4" /></button>
+            <button type="button" onClick={() => p.onArchive(!chat.archived)} disabled={!p.canWrite} className="p-2 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title={chat.archived ? 'Unarchive (e)' : 'Archive (e)'} aria-label={chat.archived ? 'Unarchive' : 'Archive'}>{chat.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}</button>
+            <button type="button" onClick={p.onTogglePanel} className="xl:hidden p-2 rounded-md hover:bg-gray-100 text-gray-500" title="Lead details" aria-label="Toggle lead panel"><PanelRight className="w-4 h-4" /></button>
           </div>
         </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
+
+        {/* Toolbar: triage controls */}
+        <div className="px-4 md:px-5 py-2 border-t border-gray-100 bg-gray-50/60 flex items-center gap-2 flex-wrap">
           {sender && (
-            <span className="hidden sm:inline-flex items-center gap-1.5 text-xs text-gray-600 px-2 py-1 rounded-md bg-gray-100" title="Sender">
+            <span className="inline-flex items-center gap-1.5 text-xs text-gray-600 pl-1 pr-2 py-1 rounded-full bg-white border border-gray-200 min-w-0" title="Sender">
               <Avatar src={sender.picture_url} name={sender.display_name} size={4} />
-              <span className="truncate max-w-[120px]">{sender.display_name ?? sender.public_identifier}</span>
+              <span className="text-gray-400">via</span>
+              <span className="truncate max-w-[140px] font-medium text-gray-700">{sender.display_name ?? sender.public_identifier}</span>
               {sender.status !== 'ok' && <StatusPill status={sender.status} reason={sender.status_reason} />}
             </span>
           )}
+          {chat.provider === 'WHATSAPP' && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
+          <span className="flex-1" />
           <Menu disabled={!p.canWrite} button={() => (
             <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 disabled:cursor-default disabled:hover:bg-transparent" title={p.canWrite ? 'Override intent' : 'AI intent'} aria-label="Override intent" disabled={!p.canWrite}>
               <IntentBadge intent={chat.intent} /><ChevronDown className="w-3 h-3 text-gray-400" />
@@ -172,9 +197,6 @@ export default function Thread(p: ThreadProps) {
               )}
             </Menu>
           )}
-          <button type="button" onClick={p.onMarkUnread} disabled={!p.canWrite} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title="Mark as unread (u)" aria-label="Mark as unread"><MailOpen className="w-4 h-4" /></button>
-          <button type="button" onClick={() => p.onArchive(!chat.archived)} disabled={!p.canWrite} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title={chat.archived ? 'Unarchive (e)' : 'Archive (e)'} aria-label={chat.archived ? 'Unarchive' : 'Archive'}>{chat.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}</button>
-          <button type="button" onClick={p.onTogglePanel} className="xl:hidden p-1.5 rounded-md hover:bg-gray-100 text-gray-500" title="Lead details" aria-label="Toggle lead panel"><PanelRight className="w-4 h-4" /></button>
         </div>
       </div>
 

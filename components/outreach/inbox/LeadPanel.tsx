@@ -20,6 +20,7 @@ import { activeConsentByChannel, useLeadConsent, useLeadIdentities } from '@/lib
 import { IdentityList } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
 import { ConsentBadge, ConsentGrantModal, ConsentRevokeModal } from '@/components/outreach/leads/detail/LeadConsentCard';
 import type { LeadConsent } from '@/lib/outreach/types';
+import { cn } from '@/lib/utils';
 
 export interface LeadPanelProps {
   chat: ChatDetail;
@@ -35,6 +36,24 @@ export interface LeadPanelProps {
 
 const RELATION_TONE: Record<Relation, 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { none: 'gray', pending_out: 'blue', pending_in: 'amber', first: 'green', blocked: 'red', invalid: 'red' };
 const RELATION_LABEL: Record<Relation, string> = { none: 'Not connected', pending_out: 'Invite pending', pending_in: 'They invited', first: '1st degree', blocked: 'Blocked', invalid: 'Invalid' };
+
+type PanelTab = 'contact' | 'sequence' | 'organise' | 'tasks';
+// Each tab opens with a one-line guide to what can be done there, like the Leads page tabs.
+const PANEL_TABS: { key: PanelTab; label: string; guide: string }[] = [
+  { key: 'contact', label: 'Contact', guide: 'How to reach this lead, and where each of your senders stands with them.' },
+  { key: 'tasks', label: 'Tasks', guide: 'Follow-ups for you or a teammate. They also show on the Tasks page.' },
+  { key: 'organise', label: 'Organise', guide: 'Tag the lead, set its stage and list, or stop all outreach to them.' },
+  { key: 'sequence', label: 'Sequence', guide: 'Enrol, pause or exit automation, and see what goes out next.' },
+];
+const TAB_STORAGE_KEY = 'outreach.inbox.leadPanelTab';
+
+function readStoredTab(): PanelTab {
+  try {
+    const v = window.localStorage.getItem(TAB_STORAGE_KEY);
+    if (PANEL_TABS.some((t) => t.key === v)) return v as PanelTab;
+  } catch { /* storage blocked */ }
+  return 'contact';
+}
 
 function Section({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -72,6 +91,18 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const [busy, setBusy] = useState<string | null>(null);
   const tagInputRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLSelectElement>(null);
+  // The chosen tab carries over from one conversation to the next in this browser.
+  const [tab, setTabState] = useState<PanelTab>(readStoredTab);
+  const setTab = (t: PanelTab) => {
+    setTabState(t);
+    try { window.localStorage.setItem(TAB_STORAGE_KEY, t); } catch { /* storage blocked */ }
+  };
+  const pendingFocus = useRef<'tag' | 'stage' | null>(null);
+  const focusField = (target: 'tag' | 'stage') => {
+    const el = target === 'tag' ? tagInputRef.current : stageRef.current;
+    el?.scrollIntoView({ block: 'center' });
+    el?.focus();
+  };
 
   const lead: LeadWithIntel | null = leadQ.data?.lead ?? null;
   const senderName = chat.outreach_senders?.display_name ?? 'this sender';
@@ -97,12 +128,21 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
     if (!requestedAction) return;
     if (leadId && leadQ.isLoading) return; // wait for the lead to load
     if (!lead) { toast('Create a lead from this conversation first.', 'error'); onActionHandled(); return; }
-    if (requestedAction === 'task') setTaskOpen(true);
-    else if (requestedAction === 'reenrol') setReenrolOpen(true);
-    else if (requestedAction === 'tag') { tagInputRef.current?.scrollIntoView({ block: 'center' }); tagInputRef.current?.focus(); }
-    else if (requestedAction === 'stage') { stageRef.current?.scrollIntoView({ block: 'center' }); stageRef.current?.focus(); }
+    if (requestedAction === 'task') { setTab('tasks'); setTaskOpen(true); }
+    else if (requestedAction === 'reenrol') { setTab('sequence'); setReenrolOpen(true); }
+    else if (requestedAction === 'tag' || requestedAction === 'stage') {
+      if (tab === 'organise') focusField(requestedAction);
+      else { pendingFocus.current = requestedAction; setTab('organise'); }
+    }
     onActionHandled();
-  }, [requestedAction, lead, leadId, leadQ.isLoading, onActionHandled, toast]);
+  }, [requestedAction, lead, leadId, leadQ.isLoading, onActionHandled, toast, tab]);
+
+  // Focus the tag input / stage picker once the Organise tab has rendered.
+  useEffect(() => {
+    if (tab !== 'organise' || !pendingFocus.current) return;
+    focusField(pendingFocus.current);
+    pendingFocus.current = null;
+  }, [tab]);
 
   const createLead = () => run('create-lead', async () => {
     const attendee = chat.attendee_provider_id ?? '';
@@ -248,6 +288,20 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
               </div>
             )}
 
+            <div role="tablist" aria-label="Lead panel sections" className="sticky top-0 z-10 flex bg-white border-b border-gray-200 px-2">
+              {PANEL_TABS.map((t) => (
+                <button key={t.key} role="tab" type="button" id={`lead-tab-${t.key}`} aria-selected={tab === t.key} aria-controls="lead-tabpanel" onClick={() => setTab(t.key)}
+                  className={cn('flex-1 inline-flex items-center justify-center gap-1 px-2 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors', tab === t.key ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>
+                  {t.label}
+                  {t.key === 'tasks' && !!tasksQ.data?.length && <span className="min-w-[16px] px-1 rounded-full bg-gray-100 text-[10px] text-gray-600 tabular-nums">{tasksQ.data.length}</span>}
+                </button>
+              ))}
+            </div>
+
+            <div role="tabpanel" id="lead-tabpanel" aria-labelledby={`lead-tab-${tab}`}>
+            <p className="px-4 pt-3 text-xs text-gray-500">{PANEL_TABS.find((t) => t.key === tab)?.guide}</p>
+
+            {tab === 'contact' && <>
             <Section title="Handles and numbers">
               {identitiesQ.isLoading ? <div className="text-xs text-gray-400">Loading…</div> : <IdentityList identities={identitiesQ.data} />}
             </Section>
@@ -293,7 +347,9 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                 </div>
               )}
             </Section>
+            </>}
 
+            {tab === 'sequence' && <>
             <Section title="Sequence" action={canWrite && !dnc && <button type="button" onClick={() => setReenrolOpen(true)} className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-1"><Repeat className="w-3 h-3" />{activeEnrollment ? 'Enrol in another' : 'Enrol'}</button>}>
               {activeEnrollment ? (
                 <div className="text-xs text-gray-600 space-y-1.5">
@@ -315,7 +371,9 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
             <Section title="Next scheduled actions">
               <QueuedActions leadId={lead.id} leadName={lead.full_name ?? chat.attendee_name} compact toast={toast} />
             </Section>
+            </>}
 
+            {tab === 'organise' && <>
             <Section title="Tags">
               <div className="flex flex-wrap gap-1.5 mb-2">
                 {leadTags.length === 0 && <span className="text-xs text-gray-400">No tags</span>}
@@ -357,7 +415,9 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                 <Toggle checked={dnc} disabled={!canWrite} onChange={(v) => { if (v) setDncOpen(true); else updateLead({ do_not_contact: false }, 'Lead can be contacted again'); }} />
               </div>
             </Section>
+            </>}
 
+            {tab === 'tasks' && (
             <Section title="Tasks" action={canWrite && <button type="button" onClick={() => setTaskOpen(true)} className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-1"><Plus className="w-3 h-3" /> Create task</button>}>
               {tasksQ.isLoading && <div className="text-xs text-gray-400">Loading…</div>}
               {tasksQ.data && tasksQ.data.length === 0 && <p className="text-xs text-gray-500">No open tasks.</p>}
@@ -378,6 +438,8 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                 })}
               </ul>
             </Section>
+            )}
+            </div>
           </>
         )}
       </div>

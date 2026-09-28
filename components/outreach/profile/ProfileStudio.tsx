@@ -161,12 +161,10 @@ export default function ProfileStudio({ sender, isManager, canWrite, notify }: {
                       <div className="pb-4 pl-6 space-y-3">
                         <p className="text-xs text-gray-500">{GROUP_HELP[g]}{locked ? ` Locked by the experiment “${st?.locked_by?.name}”.` : ''}</p>
                         {g === 'headline' && (<>
-                          <div className="text-xs text-gray-500">Current: <span className="text-gray-800">{doc?.headline ?? '—'}</span></div>
                           <Textarea label="Proposed headline" value={p.headline ?? ''} disabled={dis} counter={{ max: LIMITS.headline, value: (p.headline ?? '').length }} onChange={(e) => setP({ headline: e.target.value === '' ? undefined : e.target.value })} className="min-h-[60px]" placeholder={doc?.headline ?? 'Who you help and how'} />
                           {(p.headline ?? '').length > 120 && <div className="text-[11px] text-amber-700">Over 120 characters: cut in search results. Keep the point in the first 70 for mobile.</div>}
                         </>)}
                         {g === 'about' && (<>
-                          <div className="text-xs text-gray-500">Current: <span className="text-gray-800 whitespace-pre-line line-clamp-3">{doc?.summary ?? (d.snapshot?.sections.includes('about') ? '(empty)' : 'not read yet')}</span></div>
                           <Textarea label="Proposed About" value={p.summary ?? ''} disabled={dis} counter={{ max: LIMITS.summary, value: (p.summary ?? '').length }} onChange={(e) => setP({ summary: e.target.value === '' ? undefined : e.target.value })} className="min-h-[180px]" placeholder={doc?.summary ?? 'Three short paragraphs: who you help, how, proof.'} />
                         </>)}
                         {g === 'photo' && <PhotoEditor kind="photo" ws={ws} senderId={sender.id} currentUrl={doc?.picture_url ?? sender.picture_url} assetPath={draft.assets.picture} settings={p.picture_settings} onAsset={(path) => setA({ picture: path })} onSettings={(s) => setP({ picture_settings: s })} onPreviewUrl={setPreviewPhoto} disabled={dis} notify={notify} />}

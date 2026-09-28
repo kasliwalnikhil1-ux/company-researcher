@@ -185,8 +185,8 @@ begin
     then log := log || E'\nok   7a sender_pools is kept per channel by the trigger'; else fails := fails + 1; log := log || E'\nFAIL 7a ' || (select sender_pools from outreach_sequences where id = q_wa)::text; end if;
   perform set_config('request.jwt.claims', jsonb_build_object('sub', u_member, 'role', 'authenticated', 'email', 'member6@test.local')::text, true);
   j := outreach_enroll_preview(q_wa, array[l2, l3]);
-  if (j->>'eligible')::int = 0 and (j->'excluded'->'no_consent'->>'count')::int = 1 and (j->'excluded'->'no_identity'->>'count')::int = 1
-    then log := log || E'\nok   7b preview: no WhatsApp number → no_identity; no recorded consent → no_consent'; else fails := fails + 1; log := log || E'\nFAIL 7b ' || (j->'excluded')::text; end if;
+  if (j->>'eligible')::int = 0 and (j->'excluded'->'no_consent'->>'count')::int = 1 and (j->'excluded'->'no_identity:whatsapp'->>'count')::int = 1
+    then log := log || E'\nok   7b preview: no WhatsApp number → no_identity:whatsapp (the missing channel is named); no recorded consent → no_consent'; else fails := fails + 1; log := log || E'\nFAIL 7b ' || (j->'excluded')::text; end if;
   perform outreach_consent_grant(l2, 'WHATSAPP', 'linkedin_reply', '{"message_id":"li-9"}');
   select enrolled into n from outreach_enroll_leads(q_wa, array[l2]);
   select id into e1 from outreach_enrollments where sequence_id = q_wa and lead_id = l2;

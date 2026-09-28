@@ -10,7 +10,48 @@ type Sender = Record<string, any>;
 type Row = Record<string, any>;
 
 const CHANNEL = (p: unknown): boolean => p === "INSTAGRAM" || p === "WHATSAPP";
-const isAudio = (a: any): boolean => String(a?.type ?? "").toLowerCase() === "audio" || String(a?.mimetype ?? a?.mime ?? "").toLowerCase().startsWith("audio/");
+const isAudio = (a: any): boolean => String(a?.type ?? a?.attachment_type ?? "").toLowerCase() === "audio" || String(a?.mimetype ?? a?.mime ?? "").toLowerCase().startsWith("audio/");
+
+// Windows-1252 characters 0x80–0x9F → their byte (the rest of Latin-1 maps to itself).
+const CP1252: Record<string, number> = { "€": 0x80, "‚": 0x82, "ƒ": 0x83, "„": 0x84, "…": 0x85, "†": 0x86, "‡": 0x87, "ˆ": 0x88, "‰": 0x89, "Š": 0x8a, "‹": 0x8b, "Œ": 0x8c, "Ž": 0x8e,
+  "‘": 0x91, "’": 0x92, "“": 0x93, "”": 0x94, "•": 0x95, "–": 0x96, "—": 0x97, "˜": 0x98, "™": 0x99, "š": 0x9a, "›": 0x9b, "œ": 0x9c, "ž": 0x9e, "Ÿ": 0x9f };
+const MOJIBAKE_RE = /[ÃÂâð][\u0080-¿Œ-ƒˆ˜–-™\udc80-\udcff]/;
+
+/**
+ * Instagram texts sometimes arrive as UTF-8 that was read as Windows-1252 ("â€œmathâ€" for “math”). Undo that when the
+ * text looks like it and decodes cleanly as UTF-8; anything else is returned unchanged.
+ */
+export function fixMojibake<T extends string | null | undefined>(s: T): T {
+  if (!s || !MOJIBAKE_RE.test(s)) return s;
+  const bytes: number[] = [];
+  for (const ch of s as string) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0x100) bytes.push(c);
+    else if (CP1252[ch] !== undefined) bytes.push(CP1252[ch]);
+    else if (c >= 0xdc80 && c <= 0xdcff) bytes.push(c - 0xdc00);   // an undefined 1252 byte kept as a lone surrogate
+    else return s;
+  }
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes)) as T; } catch { return s; }
+}
+
+/**
+ * One stored attachment from either payload shape: the messages API ({id, type, mimetype, file_name, file_size}) or the
+ * messaging webhook ({attachment_id, attachment_type, attachment_name, attachment_size}). Instagram shares of a post or
+ * reel ("media_share") carry the post link, kept as `link` so the inbox can show it.
+ */
+export function storedAttachment(a: any, unipileMessageId: string | null): Row {
+  const size = a.file_size ?? a.attachment_size ?? (typeof a.size === "number" ? a.size : null);
+  const link = a.post?.url ?? a.cta?.url ?? null;
+  const out: Row = {
+    id: a.id ?? a.attachment_id ?? null, type: a.type ?? a.attachment_type ?? null, mimetype: a.mimetype ?? a.mime ?? null,
+    name: a.file_name ?? a.attachment_name ?? (typeof a.name === "string" ? a.name : null), size: typeof size === "number" ? size : null,
+    unipile_message_id: unipileMessageId,
+  };
+  if (a.unavailable === true || a.attachment_unavailable === true) out.unavailable = true;
+  if (link) out.link = { url: String(link), author: a.post?.author ?? null, text: fixMojibake(a.cta?.text && a.cta.text !== a.post?.author ? String(a.cta.text).slice(0, 300) : null) };
+  if (isAudio(a)) { out.voice_note = true; out.duration_s = a.duration ?? a.duration_s ?? null; }
+  return out;
+}
 
 /**
  * Stop intent in an inbound WhatsApp / Instagram message (multi-language). "STOP" alone, the listed words at the start
@@ -490,7 +531,7 @@ export async function handleMessaging(payload: any): Promise<void> {
   if (!unipileChatId) return;
 
   if (event === "message_edited" || event === "message_deleted") {
-    if (unipileMessageId) await admin.from("outreach_messages").update(event === "message_deleted" ? { deleted_at: new Date().toISOString() } : { text: payload.message ?? undefined, edited_at: new Date().toISOString() }).eq("unipile_message_id", unipileMessageId);
+    if (unipileMessageId) await admin.from("outreach_messages").update(event === "message_deleted" ? { deleted_at: new Date().toISOString() } : { text: fixMojibake(payload.message) ?? undefined, edited_at: new Date().toISOString() }).eq("unipile_message_id", unipileMessageId);
     return;
   }
   if (event === "message_reaction" || event === "message_read" || event === "message_delivered") { await handleMessageState(sender, payload, event); return; }
@@ -550,7 +591,7 @@ export async function handleMessaging(payload: any): Promise<void> {
   const { count: existing } = await admin.from("outreach_messages").select("id", { count: "exact", head: true }).eq("chat_id", chat.id);
   const sentAt = payload.timestamp ? new Date(payload.timestamp).toISOString() : new Date().toISOString();
   // voice notes (type audio / mimetype audio/*) are flagged so the inbox plays them and the transcriber picks them up
-  const attachments = (payload.attachments ?? []).map((a: any) => ({ id: a.id, type: a.type, mimetype: a.mimetype, name: a.file_name ?? a.name ?? null, size: a.file_size ?? null, unipile_message_id: unipileMessageId, ...(isAudio(a) ? { voice_note: true, duration_s: a.duration ?? a.duration_s ?? null } : {}) }));
+  const attachments = (payload.attachments ?? []).map((a: any) => storedAttachment(a, unipileMessageId));
   const hasVoiceNote = attachments.some((a: Row) => a.voice_note === true);
 
   // dedupe by unipile message id (also catches our own sends already recorded by send-reply / tick)
@@ -561,7 +602,7 @@ export async function handleMessaging(payload: any): Promise<void> {
   const isInviteNote = isOut && (existing ?? 0) === 0;
   const insertRow: Row = {
     workspace_id: sender.workspace_id, chat_id: chat.id, unipile_message_id: unipileMessageId ?? null, direction: isOut ? "out" : "in",
-    text: payload.message ?? null, attachments, sent_at: sentAt, is_invite_note: false,
+    text: fixMojibake(payload.message ?? null), attachments, sent_at: sentAt, is_invite_note: false,
   };
   if (hasVoiceNote) insertRow.transcript_status = "pending";
   let { data: msg, error: mErr } = await admin.from("outreach_messages").insert(insertRow).select("id").single();
@@ -735,9 +776,9 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
         const ms = await unipile.chats.messages(c.id, { limit: 30 });
         for (const m of (ms.items ?? []).reverse()) {
           const isOut = m.is_sender === 1 || m.is_sender === true || (ownId && m.sender_id === ownId);
-          const atts = (m.attachments ?? []).map((a: any) => ({ id: a.id, type: a.type, mimetype: a.mimetype, name: a.file_name ?? null, unipile_message_id: m.id, ...(isAudio(a) ? { voice_note: true } : {}) }));
+          const atts = (m.attachments ?? []).map((a: any) => storedAttachment(a, m.id));
           const { data: ins, error } = await admin.from("outreach_messages").insert({
-            workspace_id: sender.workspace_id, chat_id: chat.id, unipile_message_id: m.id, direction: isOut ? "out" : "in", text: m.text ?? null,
+            workspace_id: sender.workspace_id, chat_id: chat.id, unipile_message_id: m.id, direction: isOut ? "out" : "in", text: fixMojibake(m.text ?? null),
             attachments: atts, sent_at: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString(),
           }).select("id").maybeSingle();
           if (!error) {

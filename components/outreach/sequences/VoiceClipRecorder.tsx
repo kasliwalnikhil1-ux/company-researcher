@@ -12,6 +12,7 @@ import { TEXT_LIMITS } from '@/lib/outreach/nodes';
 import type { Sender, VoiceClip } from '@/lib/outreach/types';
 import { Avatar, Button, fmtDate } from '@/components/outreach/ui';
 import { senderName } from './helpers';
+import { Callout } from './FormsShared';
 
 const BUCKET = 'outreach-attachments';
 const MAX_SECONDS = TEXT_LIMITS.voice_note_seconds;
@@ -206,6 +207,10 @@ export default function VoiceClipRecorder({ workspaceId, sequenceId, nodeId, sen
           );
         })}
       </ul>
+      {have < senders.length && (
+        <Callout tone="warn">{senders.length - have === 1 ? `${senders.length === 1 ? 'This sender has' : 'One sender has'} no clip yet and skips this step until one is recorded.` : `${senders.length - have} senders have no clip yet and skip this step until they record one.`}</Callout>
+      )}
+      <p className="text-[11px] text-gray-500">Each sender records in their own voice, up to {MAX_SECONDS} seconds.</p>
     </div>
   );
 }

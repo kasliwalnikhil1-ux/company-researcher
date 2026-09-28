@@ -3,14 +3,18 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
+import { useLocalhostOnly } from '@/lib/outreach/platformAdmin';
 import { cn } from '@/lib/utils';
 import type { Role } from '@/lib/outreach/types';
 
 const ROLE_RANK: Record<Role, number> = { owner: 0, manager: 1, member: 2, client_viewer: 3 };
 export function roleAtLeast(role: Role | null, min: Role): boolean { return !!role && ROLE_RANK[role] <= ROLE_RANK[min]; }
 
-/** `min` is the lowest role that can use the page. `also` lists sibling routes that keep the tab active. */
-export const SETTINGS_TABS: Array<{ href: string; label: string; min: Role; also?: string[] }> = [
+/**
+ * `min` is the lowest role that can use the page. `also` lists sibling routes that keep the tab active.
+ * `localOnly` tabs render only when the app runs on localhost (platform admin; see lib/outreach/platformAdmin.ts).
+ */
+export const SETTINGS_TABS: Array<{ href: string; label: string; min: Role; also?: string[]; localOnly?: boolean }> = [
   { href: '/outreach/settings/workspace', label: 'Workspace', min: 'member' },
   { href: '/outreach/settings/members', label: 'Members', min: 'owner' },
   { href: '/outreach/settings/safety', label: 'Safety', min: 'member' },
@@ -21,16 +25,18 @@ export const SETTINGS_TABS: Array<{ href: string; label: string; min: Role; also
   { href: '/outreach/settings/integrations', label: 'Integrations', min: 'manager' },
   { href: '/outreach/settings/branding', label: 'White-label', min: 'owner' },
   { href: '/outreach/settings/billing', label: 'Billing', min: 'owner' },
+  { href: '/outreach/settings/admin', label: 'Admin', min: 'member', localOnly: true },
 ];
 
 export default function SettingsTabs() {
   const pathname = usePathname();
   const { role } = useWorkspace();
+  const local = useLocalhostOnly();
   const on = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   return (
     <div className="border-b border-gray-200 mb-6">
       <nav className="flex flex-wrap gap-1 -mb-px" aria-label="Settings sections">
-        {SETTINGS_TABS.filter((t) => roleAtLeast(role, t.min)).map((t) => {
+        {SETTINGS_TABS.filter((t) => roleAtLeast(role, t.min) && (!t.localOnly || local)).map((t) => {
           const active = on(t.href) || (t.also ?? []).some(on);
           return (
             <Link key={t.href} href={t.href} aria-current={active ? 'page' : undefined}
