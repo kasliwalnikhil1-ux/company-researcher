@@ -47,7 +47,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
   const { user, signOut } = useAuth();
   const access = useAccess();
   const whitelabel = useWhitelabel();
-  // GrowthxAI sells outreach: its sidebar is the Outreach menu + Sales CRM. The fundraising items are CapitalxAI only.
+  // GrowthxAI sells outreach: its sidebar is the Outreach menu. CRM and the fundraising items are CapitalxAI only.
   const isGrowthxai = whitelabel.product === 'growthxai';
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const { onboarding, loading: onboardingLoading, fetchOnboarding } = useOnboarding();
@@ -257,7 +257,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
     return pathname === path;
   };
 
-  // Section sub-nav (Outreach / Sales CRM), collapsible via the arrow on the parent item.
+  // Section sub-nav (Outreach / CRM), collapsible via the arrow on the parent item.
   // A collapsed desktop sidebar has no room for the arrow: the sub-nav shows icon-only instead.
   const sidebarCollapsed = isCollapsed && !isMobile;
   const subnavToggle = subnav && !sidebarCollapsed ? (
@@ -476,7 +476,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
               </>
             )}
 
-            {(routeAccess.showCrm || pathname.startsWith('/crm')) && (
+            {((!isGrowthxai && routeAccess.showCrm) || pathname.startsWith('/crm')) && (
               <>
                 <Link
                   href="/crm"
@@ -485,10 +485,10 @@ export default function MainLayout({ children, subnav }: { children: React.React
                       ? 'bg-indigo-50 text-indigo-700'
                       : 'text-gray-700 hover:bg-gray-50'
                   }`}
-                  title="Sales CRM"
+                  title="CRM"
                 >
                   <Briefcase className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-                  {(!isCollapsed || isMobile) && <span>Sales CRM</span>}
+                  {(!isCollapsed || isMobile) && <span>CRM</span>}
                   {pathname.startsWith('/crm') && subnavToggle}
                 </Link>
                 {pathname.startsWith('/crm') && subnavBody}

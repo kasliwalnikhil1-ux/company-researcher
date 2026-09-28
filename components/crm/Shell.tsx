@@ -22,7 +22,7 @@ const NAV = [
 
 const isActive = (pathname: string, n: (typeof NAV)[number]) => (n.exact ? pathname === n.href : pathname.startsWith(n.href));
 
-/** CRM screens rendered under "Sales CRM" in the main sidebar. */
+/** CRM screens rendered under "CRM" in the main sidebar. */
 export function CrmSidebarNav() {
   const pathname = usePathname();
   const collapsed = useSidebarCollapsed();
@@ -62,7 +62,7 @@ export default function CrmShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex-1 flex flex-col min-h-screen bg-gray-50">
-      {/* The CRM screens live under "Sales CRM" in the main sidebar. */}
+      {/* The CRM screens live under "CRM" in the main sidebar. */}
       <div className="flex-1 overflow-auto">
         <div className="px-3 md:px-5 py-3 max-w-[1700px] mx-auto w-full">{children}</div>
       </div>
