@@ -97,7 +97,9 @@ export default function NodeConfigPanel({ node, issues, readOnly, onChange, onDe
         </div>
         <button onClick={onClose} className="p-1 rounded-md hover:bg-white/20" aria-label="Close panel"><X className="w-4 h-4" /></button>
       </div>
-      <fieldset disabled={readOnly} className="flex-1 overflow-y-auto p-3 space-y-4 min-w-0">
+      {/* relative: hidden inputs (sr-only file pickers) are positioned against this scroller. Without it they escape to
+          the page, push it taller than the window and make a page scrollbar flicker on and off beside the canvas. */}
+      <fieldset disabled={readOnly} className="relative flex-1 overflow-y-auto p-3 space-y-4 min-w-0">
         {(errors.length > 0 || warnings.length > 0) && (
           <div className="space-y-1">
             {errors.map((i, idx) => <div key={`e${idx}`} className="flex items-start gap-1.5 text-xs text-red-700 bg-red-50 rounded-md px-2 py-1.5"><XCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />{humanizeIssue(i.message)}</div>)}

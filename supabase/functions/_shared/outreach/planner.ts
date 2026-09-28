@@ -1,7 +1,7 @@
 // Planner (F4): builds budgets and jittered action slots for a sender-local day.
 // The payload it queues carries the UNRENDERED template + variant_id; execute.ts renders at send time.
 import { admin, log, rpc, localParts, zonedToUtc, addDays, rand, randInt } from "./supabase.ts";
-import { capabilitiesFor, CHANNEL_PROVIDERS, isDailyScoped, isHourlyMetered, minGapRange, type ChannelCapabilities } from "./channels.ts";
+import { capabilitiesFor, CHANNEL_PROVIDERS, MAIL_PROVIDERS, isDailyScoped, isHourlyMetered, minGapRange, type ChannelCapabilities } from "./channels.ts";
 
 type Row = Record<string, any>;
 
@@ -305,9 +305,11 @@ async function sha(s: string): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Select senders to plan for this run: every chat provider (LinkedIn, Instagram, WhatsApp). Mailboxes are planned through mailbox rotation. */
+/** Select senders to plan for this run: every chat provider (LinkedIn, Instagram, WhatsApp) and every mailbox.
+ *  A mailbox is planned through rotation when the enrollment runs on a chat sender, but an email-only sequence
+ *  enrolls on the mailbox itself, and only planning the mailbox picks those enrollments up. */
 export async function selectSenders(kind: "nightly" | "topup"): Promise<Row[]> {
-  const { data } = await admin.from("outreach_senders").select("*").eq("status", "ok").is("deleted_at", null).in("provider", CHANNEL_PROVIDERS);
+  const { data } = await admin.from("outreach_senders").select("*").eq("status", "ok").is("deleted_at", null).in("provider", [...CHANNEL_PROVIDERS, ...MAIL_PROVIDERS]);
   const out: Row[] = [];
   for (const s of data ?? []) {
     const lp = localParts(s.timezone ?? "UTC");
