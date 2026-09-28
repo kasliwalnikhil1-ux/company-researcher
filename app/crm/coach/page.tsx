@@ -61,7 +61,7 @@ export default function CoachPage() {
 
   return (
     <div className="space-y-3">
-      <PageHeader title="Sales Coach" subtitle="Every coached call: what happened, the one moment to handle better, the next action for that buyer — and what repeats across calls. Claude writes a report after each recording; click a call to read it." />
+      <PageHeader title="Sales Coach" subtitle="Every coached call: what happened, the one moment to handle better, the next action for that buyer — and what repeats across calls. Your assistant (Claude or ChatGPT) writes a report after each recording; click a call to read it." />
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[14rem]"><Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Company, contact, purpose…" className="pl-8" /></div>
@@ -86,7 +86,7 @@ export default function CoachPage() {
             <div className="space-y-3 min-w-0">
               <Card dense title={<>Coached calls <span className="text-gray-400 font-normal">· {calls.length}</span></>}>
                 {calls.length === 0 ? (
-                  <div className="p-4"><EmptyState compact icon={<GraduationCap className="w-5 h-5 text-indigo-500" />} title="No coached calls yet" description="After a recording is captured, Claude coaches it through the crm skill (or ask: “coach the elev8 call”). Reports land here." /></div>
+                  <div className="p-4"><EmptyState compact icon={<GraduationCap className="w-5 h-5 text-indigo-500" />} title="No coached calls yet" description="After a recording is captured, your assistant coaches it with the CRM connector (or ask: “coach the elev8 call”). Reports land here." /></div>
                 ) : (
                   <div className="overflow-x-auto">
                     <Table>
@@ -116,7 +116,7 @@ export default function CoachPage() {
                       <li key={u.meeting_id} className="px-3 py-2 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span className="text-gray-500 tabular-nums">{fmtDate(u.scheduled_at, { time: true })}</span>
                         <Link href={`/crm/companies/${u.company_id}`} className="font-medium text-gray-900 hover:text-indigo-700">{u.company}</Link>{u.contact && <span className="text-gray-500">· {u.contact}</span>}{u.owner && <span className="text-gray-400 text-xs">· {u.owner}</span>}
-                        <span className="ml-auto text-[11px] text-gray-500 flex items-center gap-1"><Sparkles className="w-3 h-3 text-indigo-500" /> In Claude: “coach the {u.company} call”</span>
+                        <span className="ml-auto text-[11px] text-gray-500 flex items-center gap-1"><Sparkles className="w-3 h-3 text-indigo-500" /> Ask your assistant: “coach the {u.company} call”</span>
                       </li>
                     ))}
                   </ul>

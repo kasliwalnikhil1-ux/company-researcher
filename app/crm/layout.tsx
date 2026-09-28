@@ -15,7 +15,7 @@ function Gate({ children }: { children: React.ReactNode }) {
   if (!isMember) {
     return (
       <div className="p-6">
-        <EmptyState title="You are not on the sales CRM team" description="The CRM is for the internal sales team. Ask a current member to add your email in CRM → Settings → Team (or via the Claude connector: add_team_member)." />
+        <EmptyState title="You are not on the sales CRM team" description="The CRM is for the internal sales team. Ask a current member to add your email in CRM → Settings → Team (or via the CRM connector in Claude or ChatGPT: add_team_member)." />
       </div>
     );
   }

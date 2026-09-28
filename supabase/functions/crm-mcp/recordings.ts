@@ -5,17 +5,24 @@
 //   POST /crm-mcp/recording/confirm      → the saved row       verifies the object really arrived, then crm_save_recording
 //   POST /crm-mcp/recording/play-url     → {url}               presigned GET for the player            (JWT only)
 //   POST /crm-mcp/recording/delete       → {deleted}           row + object                            (JWT only)
+//   POST /crm-mcp/recording/transcribe   → {transcript}        server-side transcription (transcribe.ts) of the stored
+//                                                               audio, or of a temporary upload (JWT only)
+//
+// upload-url with purpose "transcribe" takes audio OR video and grants a temporary key (crm/tmp/…) instead: the file is
+// transcribed and deleted, never kept — that is how a video reaches the transcriber without a video ever being stored.
 //
 // Bearer = a Supabase JWT of a CRM member, or a 64-hex upload ticket (crm_ticket_peek — not consumed here; saving the
 // transcript consumes it). The meeting comes from the ticket when there is one, never from the request body.
 import type { Hono } from "npm:hono@4.9.7";
-import { admin, buildCtx, sha256Hex, log, type Ctx } from "./ctx.ts";
-import { MAX_RECORDING_BYTES, PUT_EXPIRES_S, GET_EXPIRES_S, StorageError, deleteObject, headObject, isAudioType, recordingKey, signedUrl } from "./storage.ts";
+import { admin, buildCtx, sha256Hex, log, McpError, type Ctx } from "./ctx.ts";
+import { MAX_RECORDING_BYTES, MAX_TEMP_BYTES, PUT_EXPIRES_S, GET_EXPIRES_S, StorageError, deleteObject, headObject, isAudioType, isMediaType, recordingKey, signedUrl, tempMediaKey } from "./storage.ts";
+import { storedRecording, tempUpload, transcribeToMeeting } from "./transcribe.ts";
 
 type Row = Record<string, any>;
 type Auth = { kind: "member"; ctx: Ctx } | { kind: "ticket"; sha: string; meetingId: string };
 
-const STATUS: Record<string, number> = { E_UNAUTHORIZED: 401, E_FORBIDDEN: 403, E_NOT_FOUND: 404, E_PAYLOAD_INVALID: 400, E_TOO_LARGE: 413, E_STORAGE_NOT_CONFIGURED: 503, E_STORAGE: 502 };
+const STATUS: Record<string, number> = { E_UNAUTHORIZED: 401, E_FORBIDDEN: 403, E_NOT_FOUND: 404, E_PAYLOAD_INVALID: 400, E_TOO_LARGE: 413, E_STORAGE_NOT_CONFIGURED: 503, E_STORAGE: 502,
+  E_TRANSCRIPTION_NOT_CONFIGURED: 503, E_TRANSCRIPTION_FAILED: 502 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 class HttpError extends Error { code: string; constructor(code: string, message: string) { super(message); this.code = code; } }
 
@@ -60,7 +67,7 @@ export function registerRecordingRoutes(app: Hono, cors: Record<string, string>)
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         const m = /^(E_[A-Z_]+)(?::\s*([\s\S]*))?$/.exec(msg.trim());
-        const code = e instanceof HttpError || e instanceof StorageError ? e.code : m?.[1] ?? "E_INTERNAL";
+        const code = e instanceof HttpError || e instanceof StorageError || e instanceof McpError ? e.code : m?.[1] ?? "E_INTERNAL";
         log({ fn: "crm-mcp", route: path, status: "error", code, duration_ms: Date.now() - t0 });
         return reply(STATUS[code] ?? 500, { error: true, code, message: m?.[2] ?? msg });
       }
@@ -68,6 +75,12 @@ export function registerRecordingRoutes(app: Hono, cors: Record<string, string>)
 
   route("/recording/upload-url", true, async (auth, body) => {
     const meetingId = await meetingOf(auth, body);
+    if (body.purpose === "transcribe") {
+      if (!isMediaType(body.content_type)) throw new HttpError("E_PAYLOAD_INVALID", "That is not an audio or video file.");
+      if (Number(body.bytes ?? 0) > MAX_TEMP_BYTES) throw new HttpError("E_TOO_LARGE", `That file is ${Math.round(Number(body.bytes) / 1048576)} MB; the limit for transcription is ${MAX_TEMP_BYTES / 1073741824} GB.`);
+      const key = tempMediaKey(meetingId, body.filename);
+      return { meeting_id: meetingId, key, put_url: await signedUrl("PUT", key, PUT_EXPIRES_S), expires_in: PUT_EXPIRES_S, max_bytes: MAX_TEMP_BYTES, temporary: true };
+    }
     if (!isAudioType(body.content_type)) throw new HttpError("E_PAYLOAD_INVALID", "Only the call audio is stored, not video. Give the video to Claude (“here is the recording”) — it keeps just the audio — or export the audio (m4a / mp3 / wav) and upload that.");
     const bytes = Number(body.bytes ?? 0);
     if (bytes > MAX_RECORDING_BYTES) throw new HttpError("E_TOO_LARGE", `That file is ${Math.round(bytes / 1048576)} MB; the limit is ${MAX_RECORDING_BYTES / 1048576} MB. Upload the audio only (an hour of call audio is about 15 MB).`);
@@ -98,6 +111,14 @@ export function registerRecordingRoutes(app: Hono, cors: Record<string, string>)
     if (error) throw new Error(error.message);
     const rec = data as Row;
     return { url: await signedUrl("GET", rec.storage_key, GET_EXPIRES_S), expires_in: GET_EXPIRES_S, recording: { ...rec, storage_key: undefined } };
+  });
+
+  route("/recording/transcribe", false, async (auth, body) => {
+    if (auth.kind !== "member") throw new HttpError("E_FORBIDDEN", "sign in");
+    const meetingId = await meetingOf(auth, body);
+    const src = body.key ? await tempUpload(meetingId, String(body.key), body.filename) : await storedRecording(auth.ctx, meetingId);
+    const { saved, payload } = await transcribeToMeeting(auth.ctx, meetingId, src, { speakers: body.speakers, language: body.language });
+    return { transcript: { meeting_id: meetingId, turn_count: saved.turn_count, duration_seconds: payload.duration_seconds, speakers: payload.speakers?.length ?? 0 } };
   });
 
   route("/recording/delete", false, async (auth, body) => {

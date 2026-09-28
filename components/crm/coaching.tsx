@@ -290,5 +290,5 @@ function MomentCard({ m, onSeek }: { m: Coaching['moments'][number]; onSeek?: (s
 }
 
 export function NoCoaching({ company }: { company?: string | null }) {
-  return <EmptyState compact icon={<Sparkles className="w-5 h-5 text-indigo-500" />} title="No coaching for this call yet" description={`Ask Claude (with the CRM connector): “coach the ${company ?? ''} call”. It reads the transcript, rates the 12 criteria with timestamped evidence, and saves the report here.`} />;
+  return <EmptyState compact icon={<Sparkles className="w-5 h-5 text-indigo-500" />} title="No coaching for this call yet" description={`Ask your assistant (Claude or ChatGPT, with the CRM connector): “coach the ${company ?? ''} call”. It reads the transcript, rates the 12 criteria with timestamped evidence, and saves the report here.`} />;
 }

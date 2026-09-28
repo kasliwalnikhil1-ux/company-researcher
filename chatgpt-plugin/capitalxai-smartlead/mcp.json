@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "capitalxai-smartlead": {
+      "type": "streamable-http",
+      "url": "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/smartlead-mcp/mcp"
+    }
+  }
+}

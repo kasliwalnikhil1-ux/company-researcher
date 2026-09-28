@@ -1,0 +1,41 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "capitalxai-admin",
+  "version": "2026.9.28",
+  "description": "Research investors and add or update them, record funding rounds, merge duplicates and find verified emails. For CapitalxAI admin accounts only; do not share with other users.",
+  "author": {
+    "name": "CapitalxAI",
+    "url": "https://app.capitalxai.com"
+  },
+  "homepage": "https://app.capitalxai.com",
+  "keywords": [
+    "fundraising",
+    "investors",
+    "admin"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CapitalxAI Admin",
+        "shortDescription": "Maintain the CapitalxAI investor database (admins only)",
+        "longDescription": "Research investors and add or update them, record funding rounds, merge duplicates and find verified emails. For CapitalxAI admin accounts only; do not share with other users.",
+        "developerName": "CapitalxAI",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://app.capitalxai.com",
+        "privacyPolicyURL": "https://capitalxai.com/privacy",
+        "termsOfServiceURL": "https://capitalxai.com/terms",
+        "defaultPrompt": [
+          "Research sequoiacap.com and add it",
+          "Run the new-fundings sweep",
+          "Fill missing emails for 10 people"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

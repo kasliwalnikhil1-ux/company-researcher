@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useCompanyBrief } from '@/lib/crm/queries';
@@ -19,6 +19,8 @@ import { cn } from '@/lib/utils';
 export default function CompanyPage() {
   const params = useParams<{ id: string }>();
   const id = params?.id;
+  // ?meeting=<id> — the link the connector's recording_upload_link hands out: that meeting is highlighted and can take a recording even if it is later today
+  const target = useSearchParams()?.get('meeting');
   const { timezone } = useCrm();
   const q = useCompanyBrief(id);
   const b = q.data;
@@ -120,7 +122,7 @@ export default function CompanyPage() {
               {b.meetings.map((m) => {
                 const past = new Date(m.scheduled_at).getTime() < Date.now();
                 return (
-                  <li key={m.meeting_id} className="px-3 py-2 text-sm">
+                  <li key={m.meeting_id} className={cn('px-3 py-2 text-sm', m.meeting_id === target && 'bg-indigo-50/60')}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-gray-900 tabular-nums">{fmtDate(m.scheduled_at, { time: true, tz: timezone })}</span>
                       <Badge tone={m.status === 'held' ? 'green' : m.status === 'no_show' ? 'red' : m.status === 'cancelled' ? 'gray' : 'blue'}>{m.status.replace('_', '-')}</Badge>
@@ -133,9 +135,9 @@ export default function CompanyPage() {
                           <GraduationCap className="w-3 h-3" /> Coach · {m.coaching.execution_score ?? '—'}<span className="font-normal opacity-70">/100</span>{m.coaching.readiness?.stage && <span className="font-normal opacity-70"> · {READINESS_LABELS[m.coaching.readiness.stage]}</span>}
                         </Button>
                       )}
-                      {m.transcript && !m.coaching && <span className="text-[11px] text-gray-400" title="Ask Claude to coach this call">not coached yet</span>}
+                      {m.transcript && !m.coaching && <span className="text-[11px] text-gray-400" title="Ask your assistant (Claude or ChatGPT) to coach this call">not coached yet</span>}
                       {m.recording && !m.transcript && <Button size="xs" variant="secondary" onClick={() => setRecordingFor(m.meeting_id)}><Headphones className="w-3 h-3" /> Recording{m.recording.duration_seconds ? ` · ${fmtDuration(m.recording.duration_seconds)}` : ''}</Button>}
-                      {!m.recording && !m.transcript && m.status !== 'cancelled' && past && <UploadRecordingButton meetingId={m.meeting_id} />}
+                      {!m.recording && !m.transcript && m.status !== 'cancelled' && (past || m.meeting_id === target) && <UploadRecordingButton meetingId={m.meeting_id} />}
                     </div>
                     {m.notes && <div className="text-xs text-gray-500 mt-0.5">{m.notes}</div>}
                     {m.capture && <CaptureDetail capture={m.capture} />}

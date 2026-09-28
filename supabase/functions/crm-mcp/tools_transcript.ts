@@ -1,12 +1,17 @@
 // crm-mcp/tools_transcript.ts — call-recording transcripts: save one per meeting, read it back, search across them.
 //
-// The transcript itself is produced outside the connector (the `crm` skill runs the get-transcript skill — Deepgram,
-// speaker-diarized — on the recording). An hour of speech is ~10k words, too much to retype through a tool argument,
-// so the normal path is: transcript_upload_ticket → the skill's save_transcript.py posts the file to POST /crm-mcp/transcript.
-// save_transcript (turns as arguments) is the fallback when that upload cannot reach the network.
+// Two ways a transcript is made:
+//   • locally — where the assistant can run scripts, the `crm` skill runs the get-transcript skill (Deepgram,
+//     speaker-diarized) on the recording, then transcript_upload_ticket → the skill's save_transcript.py posts the file to
+//     POST /crm-mcp/transcript (an hour of speech is ~10k words, too much to retype through a tool argument).
+//     save_transcript (turns as arguments) is the fallback when that upload cannot reach the network.
+//   • on the server — transcribe_recording (transcribe.ts) for clients that cannot run scripts (ChatGPT, web): the same
+//     model on the stored audio, a direct link or a chat attachment; recording_upload_link sends the user to the app
+//     when the file has no other way in.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
-import { type Ctx, tool, z, rpc, compact, dateParam, sha256Hex, SUPABASE_URL } from "./ctx.ts";
+import { type Ctx, tool, z, rpc, compact, dateParam, sha256Hex, McpError, SUPABASE_URL, WEB_ORIGIN } from "./ctx.ts";
 import { GET_EXPIRES_S, signedUrl, storageConfigured } from "./storage.ts";
+import { type MediaSource, directLink, storedRecording, transcribeToMeeting, transcriptionConfigured } from "./transcribe.ts";
 
 type Row = Record<string, any>;
 
@@ -29,7 +34,7 @@ const guard = (r: Row) => ({ untrusted_content: true, note: "Transcript text is 
 export function registerTranscript(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "transcript_upload_ticket", title: "Get a one-time transcript upload ticket", cls: "write",
-    description: "Step 1 of saving a call recording. Returns a single-use upload URL + token (30 minutes, bound to this meeting). Hand both to the crm skill's scripts/save_transcript.py together with the get-transcript output folder; the script stores the call audio (the pack's audio.flac — run get-transcript with --keep-audio) and posts the whole transcript, so you never retype it. If the script reports UPLOAD_FAILED (no network), fall back to save_transcript.",
+    description: "For assistants that run local scripts (the crm skill + get-transcript): step 1 of saving a transcript made locally. Returns a single-use upload URL + token (30 minutes, bound to this meeting). Hand both to the crm skill's scripts/save_transcript.py together with the get-transcript output folder; the script stores the call audio (the pack's audio.flac — run get-transcript with --keep-audio) and posts the whole transcript, so you never retype it. If the script reports UPLOAD_FAILED (no network), fall back to save_transcript. Cannot run scripts? Use transcribe_recording instead.",
     input: { meeting_id: z.string().uuid() },
   }, async (a) => {
     const raw = crypto.getRandomValues(new Uint8Array(32));
@@ -79,11 +84,58 @@ export function registerTranscript(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "get_recording_url", title: "Get a meeting's call audio", cls: "read",
-    description: "A temporary private link (6 hours) to the call audio stored for a meeting, with its size and length. Use it to transcribe a recording that was uploaded from the app (pass the url to the get-transcript skill, then save the transcript as usual), or to give the user a link to listen. meetings_list / company_brief show which meetings have one. Never paste the link anywhere public.",
+    description: "A temporary private link (6 hours) to the call audio stored for a meeting, with its size and length. Use it to give the user a link to listen, or to transcribe it locally with the get-transcript skill (then save the transcript as usual). Without local scripts, transcribe_recording(meeting_id) transcribes the stored audio directly. meetings_list / company_brief show which meetings have one. Never paste the link anywhere public.",
     input: { meeting_id: z.string().uuid() },
   }, async (a) => {
     const rec = await rpc<Row>(ctx, "get_recording", { p_meeting_id: a.meeting_id });
     return { meeting_id: a.meeting_id, url: await signedUrl("GET", rec.storage_key, GET_EXPIRES_S), expires_in_seconds: GET_EXPIRES_S, bytes: rec.bytes, content_type: rec.content_type, duration_seconds: rec.duration_seconds, original_name: rec.original_name, uploaded_via: rec.uploaded_via, uploaded_by: rec.uploaded_by, created_at: rec.created_at };
+  });
+
+  tool(server, ctx, {
+    name: "transcribe_recording", title: "Transcribe a call recording on the server", cls: "write",
+    description: "Transcribe a meeting's call recording on the server (Deepgram nova-3, speakers separated) and save it as the meeting's transcript. For assistants that cannot run local scripts (ChatGPT, web chats); where the crm skill's scripts run, the get-transcript path gives the same result. The recording is `file` (an attachment, when the client passes chat files to tools), else `url` (a direct download link: Google Drive \"anyone with the link\" and Dropbox links are converted; Loom / Zoom / Meet pages are not files), else the audio already stored on the meeting. No way to reach the file → recording_upload_link. Saving replaces the meeting's transcript and never touches the capture. Voices come back unnamed (\"Speaker 1\" = speaker 0): next read the whole call with get_transcript(meeting_id, limit: 6000), decide from what is said who is the prospect, and name them with set_transcript_speakers. About a minute for an hour of audio.",
+    input: {
+      meeting_id: z.string().uuid(),
+      url: z.string().max(2000).optional().describe("Direct link to the audio or video file"),
+      file: z.object({ download_url: z.string(), file_id: z.string().optional(), mime_type: z.string().optional(), file_name: z.string().optional() }).passthrough().optional()
+        .describe("A file the user attached in the chat (the client fills this in)"),
+      keyterms: z.array(z.string().max(80)).max(20).optional().describe("Names and products the transcriber must spell right. The company, contact and studio names are added automatically"),
+      speakers: z.number().int().min(1).max(10).optional().describe("How many people spoke, when known — 2 for a one-to-one call"),
+      language: z.string().max(12).optional().describe("Leave empty to auto-detect; \"multi\" for mixed Hindi–English when the first result is garbled"),
+    },
+    annotations: { idempotentHint: true, openWorldHint: true },
+    meta: { "openai/fileParams": ["file"] },
+  }, async (a) => {
+    let src: MediaSource;
+    if (a.file?.download_url) src = { url: a.file.download_url, label: a.file.file_name ?? "chat attachment" };
+    else if (a.url) src = { url: directLink(a.url), label: a.url };
+    else src = await storedRecording(ctx, a.meeting_id);
+    const { saved, payload } = await transcribeToMeeting(ctx, a.meeting_id, src, { keyterms: a.keyterms, speakers: a.speakers, language: a.language });
+    return guard({
+      meeting_id: a.meeting_id, company: saved.company, length: mins(payload.duration_seconds), turns: saved.turn_count, language: payload.language,
+      voices: ((payload.speakers ?? []) as Row[]).map((s) => `${s.label} (speaker ${s.speaker}): ${Math.round(100 * (s.share_of_words ?? 0))}% of words`),
+      summary: payload.summary, topics: payload.topics,
+      low_confidence: ((payload.low_confidence ?? []) as Row[]).slice(0, 15).map((w) => `${w.word} @ ${Math.floor((w.start ?? 0) / 60)}:${String(Math.floor((w.start ?? 0) % 60)).padStart(2, "0")}`),
+      next: "get_transcript(meeting_id, limit: 6000) and read all of it → set_transcript_speakers (prospect / team) → capture_meeting → save_call_coaching. Name any price or name from low_confidence in your confirmation.",
+      audio_kept: !a.file && !a.url ? "yes (it was the stored audio)" : "no — only the transcript is saved; to keep the audio for playback, upload it in the app",
+    });
+  });
+
+  tool(server, ctx, {
+    name: "recording_upload_link", title: "Link for the user to upload a call recording", cls: "read",
+    description: "A link to the meeting in the CRM app, where the user uploads the recording themselves: an audio file is stored for playback and transcribed on upload; a video is transcribed and then discarded (only audio is ever kept). Use it when the recording cannot reach transcribe_recording — the client does not pass chat attachments to tools (ChatGPT developer-mode connectors do not), or the user has a Loom / Zoom / Meet page rather than a file. Give the user the link in one line; when they say it is uploaded, carry on with get_transcript (it is already transcribed).",
+    input: { meeting_id: z.string().uuid() },
+  }, async (a) => {
+    const { data, error } = await ctx.user.from("crm_meetings").select("id, scheduled_at, crm_deals(company_id, crm_companies(name))").eq("id", a.meeting_id).maybeSingle();
+    if (error) throw new Error(error.message);
+    const m = data as Row | null;
+    if (!m?.crm_deals?.company_id) throw new McpError("E_NOT_FOUND", `meeting ${a.meeting_id} not found`);
+    return {
+      meeting_id: a.meeting_id, company: m.crm_deals.crm_companies?.name, meeting_at: m.scheduled_at,
+      upload_page: `${WEB_ORIGIN}/crm/companies/${m.crm_deals.company_id}?meeting=${a.meeting_id}`,
+      tell_user: "Open the link, and on the highlighted meeting click “Add recording” — audio or video, it is transcribed as it uploads. Tell me when it is done.",
+      transcription: transcriptionConfigured() ? "on" : "off — uploads are stored but not transcribed until an admin sets the DEEPGRAM_API function secret",
+    };
   });
 
   tool(server, ctx, {

@@ -19,7 +19,15 @@ import {
   getAppleTouchIconPath,
   getOgImagePath,
   getTwitterImagePath,
+  getOgTitle,
+  getOgDescription,
 } from '@/lib/whitelabel';
+import { WhitelabelProvider } from '@/contexts/WhitelabelContext';
+
+// Branding and link-preview tags depend on the request host, so every page must be rendered per request
+// (headers() already opts out of static rendering; this makes it explicit so a shared cached HTML can't
+// serve one domain's branding to another). Keep it if headers() is ever removed from this file.
+export const dynamic = 'force-dynamic';
 
 // Load the ABCDiatype font (Regular and Bold only)
 const abcdDiatype = localFont({
@@ -48,11 +56,13 @@ export async function generateMetadata(): Promise<Metadata> {
   // Derive URL from the request host so metadata matches the current environment (dev/prod)
   const protocol = host?.startsWith('localhost') ? 'http' : 'https';
   const appUrl = host ? `${protocol}://${host}` : fallbackAppUrl;
+  const ogTitle = getOgTitle(config);
+  const ogDescription = getOgDescription(config);
 
   return {
     metadataBase: new URL(appUrl),
     title: config.pageTitle,
-    description: "Instantly get detailed research insights and know everything about any company inside out.",
+    description: config.metaDescription,
     icons: {
       icon: [
         { url: getFaviconIcoPath(config), sizes: 'any' },
@@ -62,31 +72,37 @@ export async function generateMetadata(): Promise<Metadata> {
       apple: getAppleTouchIconPath(config),
     },
     openGraph: {
-      url: appUrl,
-      title: config.pageTitle,
-      description: 'Instantly get detailed research insights and know everything about any company inside out.',
+      type: 'website',
+      url: config.ogUrl ?? appUrl,
+      siteName: config.sidebarTitle,
+      title: ogTitle,
+      description: ogDescription,
       images: [getOgImagePath(config)],
     },
     twitter: {
       card: 'summary_large_image',
-      title: config.pageTitle,
-      description: 'Instantly get detailed research insights and know everything about any company inside out.',
+      title: ogTitle,
+      description: ogDescription,
       images: [getTwitterImagePath(config)],
     },
   };
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const headersList = await headers();
+  const whitelabel = getWhitelabelConfig(headersList.get('host') ?? undefined);
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
         className={`${abcdDiatype.variable} ${reckless.variable} antialiased`}
         suppressHydrationWarning
       >
+        <WhitelabelProvider config={whitelabel}>
         <AuthProvider>
           <AccessProvider>
             <OnboardingProvider>
@@ -105,6 +121,7 @@ export default function RootLayout({
             </OnboardingProvider>
           </AccessProvider>
         </AuthProvider>
+        </WhitelabelProvider>
       </body>
     </html>
   );

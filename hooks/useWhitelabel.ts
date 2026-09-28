@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useContext, useMemo } from 'react';
 import {
   getWhitelabelConfig,
   getLogoPath,
   getOgImagePath,
   type WhitelabelConfig,
 } from '@/lib/whitelabel';
+import { WhitelabelContext } from '@/contexts/WhitelabelContext';
 
 export interface UseWhitelabelReturn extends WhitelabelConfig {
   /** Resolved path to the logo image */
@@ -16,17 +17,19 @@ export interface UseWhitelabelReturn extends WhitelabelConfig {
 }
 
 /**
- * React hook that resolves whitelabel settings from the current browser hostname.
+ * React hook that returns the whitelabel settings for the current domain.
  *
- * Safe for SSR – during server render (or when window is unavailable) the
- * default config is returned. On the client the hostname is read synchronously
- * during the first render so there is no flash of wrong branding.
+ * The root layout resolves the config from the request host and provides it through
+ * WhitelabelContext, so server render and hydration agree and there is no flash of wrong
+ * branding. Outside that provider it falls back to window.location.hostname.
  */
 export function useWhitelabel(): UseWhitelabelReturn {
+  const provided = useContext(WhitelabelContext);
   const config = useMemo(() => {
+    if (provided) return provided;
     const hostname = typeof window !== 'undefined' ? window.location.hostname : undefined;
     return getWhitelabelConfig(hostname);
-  }, []);
+  }, [provided]);
 
   return useMemo(
     () => ({

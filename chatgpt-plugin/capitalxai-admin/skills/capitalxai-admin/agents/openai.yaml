@@ -1,0 +1,7 @@
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "capitalxai"
+      description: "Maintain the CapitalxAI investor database (admins only)"
+      transport: "streamable_http"
+      url: "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/capitalxai-mcp/mcp"

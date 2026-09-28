@@ -6,12 +6,18 @@
  *
  * Usage:
  *   Server components  → getWhitelabelConfig(hostname)  (hostname from headers())
- *   Client components  → useWhitelabel() hook            (reads window.location.hostname)
+ *   Client components  → useWhitelabel() hook            (config resolved on the server by the root layout,
+ *                                                          so the first HTML already carries the right brand)
  */
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+export interface LegalLink {
+  label: string;
+  href: string;
+}
 
 export interface WhitelabelConfig {
   /** Sidebar title shown in MainLayout */
@@ -25,6 +31,36 @@ export interface WhitelabelConfig {
   assetsFolder: string;
   /** Whether to show the "©" copyright symbol on login / signup / reset-password pages */
   showCopyright: boolean;
+
+  // --- Login / signup branding panel -------------------------------------
+  /** Headline text before the typed word, e.g. "Research any". "\n" starts a new line. */
+  authHeadlineBefore: string;
+  /** Words the headline types out on a loop (one word = types and deletes the same word) */
+  authHeadlineWords: string[];
+  /** Headline line under the typed word, e.g. "inside out." Empty string for none. */
+  authHeadlineAfter: string;
+  /** Line under the headline, e.g. "Access all investors, …" */
+  authTagline: string;
+  /** Line under "Create an account" */
+  signupSubtitle: string;
+  /** Pill above the signup form */
+  signupBadge: string;
+  /** Links in the "you agree to our …" line under the login / signup forms */
+  legalLinks: LegalLink[];
+
+  // --- Page metadata / link previews (https://ogp.me) --------------------
+  /** <meta name="description"> and the default og:description */
+  metaDescription: string;
+  /** og:title / twitter:title. Defaults to pageTitle. */
+  ogTitle?: string;
+  /** og:description / twitter:description. Defaults to metaDescription. */
+  ogDescription?: string;
+  /** og:image, absolute URL or path under public/. Defaults to <assetsFolder>/og-image.png. */
+  ogImage?: string;
+  /** twitter:image, absolute URL or path under public/. Defaults to <assetsFolder>/twitter-banner.png. */
+  twitterImage?: string;
+  /** og:url. Defaults to the origin of the current request (so previews and local dev stay correct). */
+  ogUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,6 +73,20 @@ export const DEFAULT_CONFIG: WhitelabelConfig = {
   companyName: 'ResourcePlan Solution Private Limited',
   assetsFolder: '', // assets live at public/ root
   showCopyright: true,
+
+  authHeadlineBefore: 'Research any',
+  authHeadlineWords: ['investor', 'company', 'person', 'prospect'],
+  authHeadlineAfter: 'inside out.',
+  authTagline: 'Access all investors, expand your reach, and accelerate your fundraising.',
+  signupSubtitle: 'Start researching companies with confidence.',
+  signupBadge: 'Sign up for your free trial',
+  legalLinks: [
+    { label: 'Terms', href: 'https://capitalxai.com/terms' },
+    { label: 'Content Safety', href: 'https://capitalxai.com/content-safety' },
+    { label: 'Privacy Policy', href: 'https://capitalxai.com/privacy' },
+  ],
+
+  metaDescription: 'Instantly get detailed research insights and know everything about any company inside out.',
 };
 
 // ---------------------------------------------------------------------------
@@ -44,17 +94,36 @@ export const DEFAULT_CONFIG: WhitelabelConfig = {
 // Add new whitelabel entries here.
 // ---------------------------------------------------------------------------
 
+const GROWTHXAI: Partial<WhitelabelConfig> = {
+  sidebarTitle: 'GrowthxAI',
+  pageTitle: 'GrowthxAI Outreach',
+  companyName: 'ResourcePlan Solution Private Limited',
+  assetsFolder: '', // same logo and favicons as CapitalxAI; only the link-preview images differ
+  ogImage: '/growthxai/og-image.png',
+  twitterImage: '/growthxai/twitter-banner.png',
+
+  authHeadlineBefore: 'B2B outreach.\nAs easy as',
+  authHeadlineWords: ['typing.'],
+  authHeadlineAfter: '',
+  authTagline: 'More meetings from LinkedIn and email, safely.',
+  signupSubtitle: 'Automated LinkedIn and email outreach that books meetings for you.',
+  legalLinks: [
+    { label: 'Terms', href: 'https://growthxai.com/legal/terms/' },
+    { label: 'Acceptable Use', href: 'https://growthxai.com/legal/acceptable-use/' },
+    { label: 'Privacy Policy', href: 'https://growthxai.com/legal/privacy/' },
+  ],
+
+  metaDescription:
+    'Automated LinkedIn and email outreach that books meetings for you, from one account or fifty. Safe limits on every account, and it stops the moment someone replies.',
+  ogTitle: 'GrowthxAI Outreach',
+};
+
 const WHITELABEL_CONFIGS: Record<string, Partial<WhitelabelConfig>> = {
-  'growthxai.com': {
-    sidebarTitle: 'GrowthxAI',
-    pageTitle: 'GrowthxAI CRM',
-    companyName: 'Fidelman',
-    assetsFolder: 'growthxai',
-  },
+  'growthxai.com': GROWTHXAI,
+  // Local preview: http://growthxai.localhost:3000 (browsers resolve *.localhost to this machine)
+  'growthxai.localhost': GROWTHXAI,
   'localhost12': {
-    sidebarTitle: 'GrowthxAI',
-    pageTitle: 'GrowthxAI CRM',
-    companyName: 'Fidelman',
+    ...GROWTHXAI,
     assetsFolder: 'localhost',
     showCopyright: false,
   },
@@ -121,6 +190,7 @@ export function getAppleTouchIconPath(config: WhitelabelConfig): string {
 
 /** Open Graph image path */
 export function getOgImagePath(config: WhitelabelConfig): string {
+  if (config.ogImage) return config.ogImage;
   return config.assetsFolder
     ? `/${config.assetsFolder}/og-image.png`
     : '/Open%20Graph%20CapitalxAI.png';
@@ -128,7 +198,18 @@ export function getOgImagePath(config: WhitelabelConfig): string {
 
 /** Twitter card image path */
 export function getTwitterImagePath(config: WhitelabelConfig): string {
+  if (config.twitterImage) return config.twitterImage;
   return config.assetsFolder
     ? `/${config.assetsFolder}/twitter-banner.png`
     : '/Twitter%20Banner%20CapitalxAI.png';
+}
+
+/** og:title / twitter:title */
+export function getOgTitle(config: WhitelabelConfig): string {
+  return config.ogTitle ?? config.pageTitle;
+}
+
+/** og:description / twitter:description */
+export function getOgDescription(config: WhitelabelConfig): string {
+  return config.ogDescription ?? config.metaDescription;
 }

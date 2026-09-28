@@ -1,6 +1,7 @@
 // supabase/functions/capitalxai-mcp/index.ts
 //
-// Remote MCP server ("Claude connector") for CapitalxAI.
+// Remote MCP server (Claude connector / ChatGPT plugin) for CapitalxAI. It also serves the
+// capitalxai / capitalxai-admin skill (read_skill, skill:// resources — _shared/mcp-skills.ts).
 //
 //   MCP endpoint:        POST/GET/DELETE  /capitalxai-mcp/mcp        (Streamable HTTP)
 //   OAuth metadata:      GET  /capitalxai-mcp/.well-known/oauth-protected-resource
@@ -8,7 +9,7 @@
 // Auth: Supabase Auth OAuth 2.1 access tokens (standard Supabase JWTs).
 // Unauthenticated requests receive 401 + WWW-Authenticate pointing at the
 // protected-resource metadata, which in turn points MCP clients (claude.ai,
-// Claude Code, Claude Desktop) at the project's OAuth 2.1 authorization server
+// Claude Code, Claude Desktop, ChatGPT) at the project's OAuth 2.1 authorization server
 // for discovery + dynamic client registration.
 //
 // Deploy with verify_jwt DISABLED on purpose: the .well-known document and
@@ -25,6 +26,8 @@ import { WebStandardStreamableHTTPServerTransport } from "npm:@modelcontextproto
 import { Hono } from "npm:hono@4.9.7";
 import { z } from "npm:zod@4.1.13";
 import { createClient } from "npm:@supabase/supabase-js@2.76.1";
+import { registerSkill } from "../_shared/mcp-skills.ts";
+import { SKILLS } from "./skills.gen.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -87,7 +90,7 @@ function unauthorized(): Response {
       headers: {
         ...CORS_HEADERS,
         "content-type": "application/json",
-        "www-authenticate": `Bearer realm="capitalxai-mcp", resource_metadata="${PRM_URL}"`,
+        "www-authenticate": `Bearer realm="capitalxai-mcp", resource_metadata="${PRM_URL}", scope="email profile"`,
       },
     },
   );
@@ -442,6 +445,22 @@ async function findInvestorRow(
   return { row: (data as Record<string, unknown> | null) ?? null, error: null };
 }
 
+// Tool safety annotations (MCP ToolAnnotations). ChatGPT asks the user to confirm any tool not marked read-only and
+// warns harder on destructive ones; Claude uses them for its permission prompts. Match actual behaviour.
+const ANN = {
+  READ: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  WRITE: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  WRITE_IDEMPOTENT: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  WRITE_OPEN: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },   // fetches the firm's site
+  DESTRUCTIVE: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+} as const;
+
+const INSTRUCTIONS =
+  "CapitalxAI — a shared database of investors (firms by domain, people by LinkedIn) and recent funding rounds, plus " +
+  "per-account investor-fit analysis. Operating manual: unless the CapitalxAI skill is loaded in this client, call " +
+  "read_skill once at the start (workflows, data conventions, the fit-analysis templates) and open the workflow file it " +
+  "points to before that workflow. Never fabricate investor data; report only what the tools return.";
+
 // ---------------------------------------------------------------------------
 // MCP server (stateless: fresh server per request, bound to the caller)
 // ---------------------------------------------------------------------------
@@ -453,7 +472,7 @@ function buildServer(auth: AuthedUser): McpServer {
     version: "1.0.0",
     websiteUrl: APP_URL,
     icons: [{ src: APP_LOGO_URL, mimeType: "image/png" }],
-  } as ConstructorParameters<typeof McpServer>[0]);
+  } as ConstructorParameters<typeof McpServer>[0], { instructions: INSTRUCTIONS });
 
   // -------------------------------------------------------------------------
   // Read tools — any authenticated user
@@ -463,6 +482,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "find_investors",
     {
       title: "Find investors",
+      annotations: ANN.READ,
       description:
         "Search the investors database (firms and people). Look up by name, by firm domain, or by LinkedIn URL, " +
         "or list the people linked to a firm with at_firm_domain. " +
@@ -640,6 +660,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "list_fundings",
     {
       title: "List new fundings",
+      annotations: ANN.READ,
       description:
         "List recently funded companies from the new_fundings table, newest funding date first. " +
         "Optionally filter by company name or domain. Use get_funding for the full detail of one row.",
@@ -691,6 +712,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "get_funding",
     {
       title: "Get funding details",
+      annotations: ANN.READ,
       description:
         "Get the full record of one funding (all fields, including the complete founders and investors lists). " +
         "Look up by funding id or by company domain. Call this before update_funding when you need the current values.",
@@ -747,6 +769,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "get_investor",
     {
       title: "Get investor details",
+      annotations: ANN.READ,
       description:
         "Get one investor's full record (all profile fields including deep_research — the research text that " +
         "fit analysis is based on). Look up by investor id, firm domain, or LinkedIn URL.",
@@ -772,6 +795,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "get_analysis_context",
     {
       title: "Get fit-analysis context",
+      annotations: ANN.READ,
       description:
         "Fetch everything needed to run an investor fit analysis (the app's 'Analyze with AI'): the account's " +
         "company name, onboarding/company data, plan, and the exact prompt templates to use (the account's custom " +
@@ -849,6 +873,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "list_analyzed_investors",
     {
       title: "List already-analyzed investors",
+      annotations: ANN.READ,
       description:
         "List the investors that already have a saved fit analysis for an account (so batch runs can skip them). " +
         "Returns investor id/name/identifier, the stored fit verdict, and when it was analyzed. " +
@@ -920,6 +945,7 @@ function buildServer(auth: AuthedUser): McpServer {
     "save_investor_analysis",
     {
       title: "Save investor fit analysis",
+      annotations: ANN.WRITE_IDEMPOTENT,
       description:
         "Save an investor fit analysis result to an account's personalization (what the app's 'Analyze with AI' " +
         "button stores). Locate the investor by id, domain, or LinkedIn URL. Only saves for the analyzed account; " +
@@ -1006,6 +1032,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "add_investor",
       {
         title: "Add investor (admin)",
+        annotations: ANN.WRITE_OPEN,
         description:
           "Add a new investor to the database: a firm (identified by domain) or a person (identified by LinkedIn URL). " +
           "If an investor with the same domain/LinkedIn already exists, nothing is created and the existing id is returned — " +
@@ -1149,6 +1176,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "update_investor",
       {
         title: "Update investor (admin)",
+        annotations: ANN.WRITE,
         description:
           "Update an existing investor (firm or person). Locate it by investor_id, domain, or linkedin_url; " +
           "only the fields you pass are changed. Array fields (stages, industries, notable_investments, ...) replace " +
@@ -1309,6 +1337,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "merge_investors",
       {
         title: "Merge duplicate investors (admin)",
+        annotations: ANN.DESTRUCTIVE,
         description:
           "Merge two investor records that are the same entity: the KEEP record gains any fields it was missing " +
           "from the DROP record, the drop record's domain becomes an alt_domain, affiliations and per-user " +
@@ -1425,6 +1454,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "delete_investor",
       {
         title: "Delete investor (admin)",
+        annotations: ANN.DESTRUCTIVE,
         description:
           "Permanently delete an investor record plus its affiliations and per-user personalization. " +
           "DESTRUCTIVE and irreversible — for duplicates prefer merge_investors, which preserves data. " +
@@ -1470,6 +1500,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "unlink_person_from_firm",
       {
         title: "Unlink person from firm (admin)",
+        annotations: ANN.DESTRUCTIVE,
         description:
           "Remove one person→firm affiliation (e.g. the person left the firm, or the link was wrong). " +
           "Only the link is removed — both investor records stay untouched. Use after confirming a departure; " +
@@ -1525,6 +1556,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "get_email_candidates",
       {
         title: "Get email-search candidates (admin)",
+        annotations: ANN.READ,
         description:
           "Next people to run the Gmail-Compose email search on: persons with NO email and NO previous search " +
           "(never-processed), who have an affiliated firm with a domain (the search needs 'First Last domain'). " +
@@ -1612,6 +1644,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "save_email_result",
       {
         title: "Save email search result (admin)",
+        annotations: ANN.WRITE_IDEMPOTENT,
         description:
           "Record the outcome of a Gmail-Compose email search for a person. " +
           "found: merges the address(es) into their email field and marks email_verified. " +
@@ -1673,6 +1706,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "mark_not_an_investor",
       {
         title: "Mark as not an investor (admin)",
+        annotations: ANN.WRITE_IDEMPOTENT,
         description:
           "Record that a researched domain/LinkedIn is NOT an investor, so future research skips it " +
           "(mirrors the app's not_an_investor tracking). Use after research clearly shows the entity does not invest capital. " +
@@ -1745,6 +1779,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "add_funding",
       {
         title: "Add funding (admin)",
+        annotations: ANN.WRITE,
         description:
           "Record a new funding round in new_fundings. Upserts by company domain, exactly like the app: " +
           "if a row for that domain already exists it is UPDATED with the provided values, otherwise a new row is created. " +
@@ -1827,6 +1862,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "add_fundings_bulk",
       {
         title: "Add fundings in bulk (admin)",
+        annotations: ANN.WRITE,
         description:
           "Record many funding rounds in ONE call — same fields and upsert-by-domain behavior as add_funding, applied per row. " +
           "Use when multiple researched rows are ready to write (a prepared batch, or recovery after an auth failure), " +
@@ -1903,6 +1939,7 @@ function buildServer(auth: AuthedUser): McpServer {
       "update_funding",
       {
         title: "Update funding (admin)",
+        annotations: ANN.WRITE,
         description:
           "Update fields of an existing funding row. Locate it by funding_id or domain; only the fields you pass are changed. " +
           "founders/investors REPLACE the stored lists — call get_funding first and resend the full list when adding or removing one entry.",
@@ -1973,6 +2010,9 @@ function buildServer(auth: AuthedUser): McpServer {
       },
     );
   }
+
+  // The skill itself, for clients without it installed. Admins get the admin skill; others never learn it exists.
+  registerSkill(server, "capitalxai", auth.isAdmin ? SKILLS["capitalxai-admin"] : SKILLS.capitalxai);
 
   return server;
 }

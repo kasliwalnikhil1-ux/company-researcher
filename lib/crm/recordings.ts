@@ -31,27 +31,57 @@ function mediaDuration(file: File): Promise<number | undefined> {
   });
 }
 
-/** upload-url → PUT straight to storage (with progress) → confirm. */
-export async function uploadRecording(meetingId: string, file: File, onProgress?: (fraction: number) => void): Promise<void> {
-  if (file.type.startsWith('video/')) throw new CrmError('That is a video — only the call audio is stored. Give the video to Claude (“here is the recording”) and it keeps just the audio, or export the audio (m4a / mp3 / wav) and add that.', 'E_PAYLOAD_INVALID');
-  if (file.size > MAX_RECORDING_MB * 1024 * 1024) throw new CrmError(`That file is ${Math.round(file.size / 1048576)} MB; the limit is ${MAX_RECORDING_MB} MB. Export the audio only — an hour of call audio is about 15 MB.`, 'E_TOO_LARGE');
-  // some browsers (Windows especially) give an .m4a / .flac / .opus file no type at all — fall back to the extension
-  const byExt: Record<string, string> = { m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/opus', aac: 'audio/aac' };
-  const contentType = file.type || byExt[file.name.split('.').pop()?.toLowerCase() ?? ''] || 'application/octet-stream';
-  const [grant, duration] = await Promise.all([
-    call<{ put_url: string; key: string }>('upload-url', { meeting_id: meetingId, content_type: contentType, filename: file.name, bytes: file.size }),
-    mediaDuration(file),
-  ]);
-  await new Promise<void>((resolve, reject) => {
+export const MAX_VIDEO_MB = 2048;
+export type UploadPhase = 'uploading' | 'transcribing';
+
+function put(url: string, file: File, contentType: string, onProgress?: (fraction: number) => void): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const xhr = new XMLHttpRequest();   // fetch() has no upload progress
-    xhr.open('PUT', grant.put_url);
+    xhr.open('PUT', url);
     xhr.setRequestHeader('Content-Type', contentType);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(e.loaded / e.total); };
     xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new CrmError(`Storage refused the upload (${xhr.status})`, 'E_STORAGE')));
     xhr.onerror = () => reject(new CrmError('The upload was interrupted — check the connection and try again', 'E_STORAGE'));
     xhr.send(file);
   });
+}
+
+/** Transcribe on the server (Deepgram, speakers separated) and save it as the meeting's transcript. No key = the stored audio. */
+export const transcribeRecording = (meetingId: string, key?: string, filename?: string) =>
+  call<{ transcript: { turn_count: number; duration_seconds?: number; speakers: number } }>('transcribe', { meeting_id: meetingId, key, filename });
+
+/**
+ * Audio: upload-url → PUT straight to storage (with progress) → confirm → transcribe.
+ * Video: only the audio is ever kept, so a video goes to a temporary key, is transcribed on the server, and is deleted —
+ * the meeting gets a transcript but no playable audio.
+ * The upload counts even if transcription fails: that error comes back in `transcriptError`, not as a throw.
+ */
+export async function uploadRecording(meetingId: string, file: File, onProgress?: (fraction: number) => void, onPhase?: (phase: UploadPhase) => void): Promise<{ kept: boolean; transcriptError?: string }> {
+  // some browsers (Windows especially) give an .m4a / .flac / .opus file no type at all — fall back to the extension
+  const byExt: Record<string, string> = { m4a: 'audio/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', flac: 'audio/flac', ogg: 'audio/ogg', opus: 'audio/opus', aac: 'audio/aac', mp4: 'video/mp4', mov: 'video/quicktime', mkv: 'video/x-matroska', webm: 'video/webm', m4v: 'video/mp4', avi: 'video/x-msvideo' };
+  const contentType = file.type || byExt[file.name.split('.').pop()?.toLowerCase() ?? ''] || 'application/octet-stream';
+  const isVideo = contentType.startsWith('video/');
+  const limit = isVideo ? MAX_VIDEO_MB : MAX_RECORDING_MB;
+  if (file.size > limit * 1024 * 1024) throw new CrmError(`That file is ${Math.round(file.size / 1048576)} MB; the limit is ${limit} MB.${isVideo ? '' : ' Export the audio only — an hour of call audio is about 15 MB.'}`, 'E_TOO_LARGE');
+  onPhase?.('uploading');
+
+  if (isVideo) {
+    const grant = await call<{ put_url: string; key: string }>('upload-url', { meeting_id: meetingId, content_type: contentType, filename: file.name, bytes: file.size, purpose: 'transcribe' });
+    await put(grant.put_url, file, contentType, onProgress);
+    onPhase?.('transcribing');
+    await transcribeRecording(meetingId, grant.key, file.name);   // a video that cannot be transcribed has nothing to keep: let it throw
+    return { kept: false };
+  }
+
+  const [grant, duration] = await Promise.all([
+    call<{ put_url: string; key: string }>('upload-url', { meeting_id: meetingId, content_type: contentType, filename: file.name, bytes: file.size }),
+    mediaDuration(file),
+  ]);
+  await put(grant.put_url, file, contentType, onProgress);
   await call('confirm', { meeting_id: meetingId, key: grant.key, content_type: contentType, filename: file.name, duration_seconds: duration });
+  onPhase?.('transcribing');
+  try { await transcribeRecording(meetingId); return { kept: true }; }
+  catch (e) { return { kept: true, transcriptError: e instanceof Error ? e.message : String(e) }; }
 }
 
 export interface RecordingInfo { bytes?: number; content_type?: string; duration_seconds?: number; original_name?: string; uploaded_via?: 'app' | 'skill'; uploaded_by?: string; created_at: string }

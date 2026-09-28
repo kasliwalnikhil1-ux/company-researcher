@@ -1,0 +1,41 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "capitalxai-smartlead",
+  "version": "2026.9.28",
+  "description": "Run Smartlead cold email through guarded tools: morning digest, burn check, reply triage and copy iteration, with confirmation before anything sends or changes.",
+  "author": {
+    "name": "CapitalxAI",
+    "url": "https://app.capitalxai.com"
+  },
+  "homepage": "https://app.capitalxai.com",
+  "keywords": [
+    "cold email",
+    "smartlead",
+    "outreach"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CapitalxAI Smartlead",
+        "shortDescription": "Cold-email campaigns, replies and mailbox health",
+        "longDescription": "Run Smartlead cold email through guarded tools: morning digest, burn check, reply triage and copy iteration, with confirmation before anything sends or changes.",
+        "developerName": "CapitalxAI",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://app.capitalxai.com",
+        "privacyPolicyURL": "https://capitalxai.com/privacy",
+        "termsOfServiceURL": "https://capitalxai.com/terms",
+        "defaultPrompt": [
+          "Morning digest",
+          "Are any mailboxes burning?",
+          "Triage today's replies"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

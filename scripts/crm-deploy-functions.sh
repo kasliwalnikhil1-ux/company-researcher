@@ -33,6 +33,9 @@ if [ -n "${OUTREACH_DEPLOY_EXTRA_ARGS:-}" ]; then
   EXTRA_ARGS=(${OUTREACH_DEPLOY_EXTRA_ARGS})
 fi
 
+# the crm skill is served by crm-mcp itself (read_skill) — ship the current claude-skill/crm with it
+python scripts/skills-build.py --gen-only >/dev/null || { echo "ERROR: scripts/skills-build.py failed" >&2; exit 1; }
+
 FAILED=()
 for name in "${TARGETS[@]}"; do
   case "$name" in crm-*) ;; *) name="crm-$name" ;; esac

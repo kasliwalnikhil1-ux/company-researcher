@@ -237,7 +237,7 @@ function CostsCard() {
 export default function SettingsPage() {
   return (
     <div className="space-y-3">
-      <PageHeader title="Settings" subtitle="Lookup lists, team, timezone, currencies, channel spend. Same operations are available to the Claude connector." />
+      <PageHeader title="Settings" subtitle="Lookup lists, team, timezone, currencies, channel spend. Same operations are available to the CRM connector in Claude and ChatGPT." />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start"><LookupsCard /><TeamCard /></div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start"><GeneralCard /><FxCard /></div>
       <CostsCard />

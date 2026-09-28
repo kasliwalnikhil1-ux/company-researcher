@@ -1,0 +1,41 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "capitalxai",
+  "version": "2026.9.28",
+  "description": "Search the CapitalxAI investor database (firms and people) and recent funding rounds, and run the app's investor-fit analysis for your company.",
+  "author": {
+    "name": "CapitalxAI",
+    "url": "https://app.capitalxai.com"
+  },
+  "homepage": "https://app.capitalxai.com",
+  "keywords": [
+    "fundraising",
+    "investors",
+    "venture capital"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CapitalxAI",
+        "shortDescription": "Investor database and investor-fit analysis",
+        "longDescription": "Search the CapitalxAI investor database (firms and people) and recent funding rounds, and run the app's investor-fit analysis for your company.",
+        "developerName": "CapitalxAI",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://app.capitalxai.com",
+        "privacyPolicyURL": "https://capitalxai.com/privacy",
+        "termsOfServiceURL": "https://capitalxai.com/terms",
+        "defaultPrompt": [
+          "Find seed-stage fintech investors in India",
+          "Analyze accel.com for my company",
+          "Show this week's new fundings"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

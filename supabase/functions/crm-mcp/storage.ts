@@ -85,6 +85,16 @@ export function recordingKey(meetingId: string, contentType: string | undefined,
   return `crm/recordings/${meetingId}/${stamp}-${rand}.${ext}`;
 }
 
+/** A recording uploaded only to be transcribed on the server (a video, usually): it is deleted right after transcription,
+ *  so no video is ever kept. crm/tmp/<meeting>/<random>.<ext> — transcribe.ts refuses keys outside the meeting's folder. */
+export const MAX_TEMP_BYTES = 2 * 1024 * 1024 * 1024;   // Deepgram's own file limit
+export const isMediaType = (contentType: string | undefined) => isAudioType(contentType) || /^video\//i.test((contentType ?? "").trim());
+export function tempMediaKey(meetingId: string, filename: string | undefined): string {
+  const ext = /\.([a-z0-9]{2,5})$/i.exec(filename ?? "")?.[1]?.toLowerCase() ?? "bin";
+  const rand = [...crypto.getRandomValues(new Uint8Array(9))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `crm/tmp/${meetingId}/${rand}.${ext}`;
+}
+
 export function signedUrl(method: PresignInput["method"], key: string, expiresIn: number, query?: Record<string, string>): Promise<string> {
   const c = config();
   return presign({ method, host: c.host, path: `/${c.bucket}/${key}`, region: c.region, accessKeyId: c.accessKeyId, secretAccessKey: c.secretAccessKey, expiresIn, query });

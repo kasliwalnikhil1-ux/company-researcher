@@ -1,0 +1,42 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "capitalxai-crm",
+  "version": "2026.9.28",
+  "description": "The studio's sales CRM: read the daily standup, capture a meeting from a few words or its recording, coach every call, and answer pipeline questions.",
+  "author": {
+    "name": "CapitalxAI",
+    "url": "https://app.capitalxai.com"
+  },
+  "homepage": "https://app.capitalxai.com/crm",
+  "keywords": [
+    "crm",
+    "sales",
+    "standup",
+    "call coaching"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "CapitalxAI Sales CRM",
+        "shortDescription": "Standup brief, one-minute meeting capture, call coaching",
+        "longDescription": "The studio's sales CRM: read the daily standup, capture a meeting from a few words or its recording, coach every call, and answer pipeline questions.",
+        "developerName": "CapitalxAI",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://app.capitalxai.com/crm",
+        "privacyPolicyURL": "https://capitalxai.com/privacy",
+        "termsOfServiceURL": "https://capitalxai.com/terms",
+        "defaultPrompt": [
+          "Who are we meeting today?",
+          "We just finished the GrowthX call: they need realism, quoted 40K for 8 videos",
+          "Coach my last call"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "capitalxai-smartlead"
+      description: "Cold-email campaigns, replies and mailbox health"
+      transport: "streamable_http"
+      url: "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/smartlead-mcp/mcp"

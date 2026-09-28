@@ -7,10 +7,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
+import { LegalLinks } from '@/components/LegalLinks';
 import { popPendingOAuthConsent } from '@/lib/oauthConsent';
 import { PasswordInput } from '@/components/ui/PasswordInput';
 
-const TYPEWRITER_WORDS = ['investor', 'company', 'person', 'prospect'];
 const CHAR_SPEED_MS = 45;
 const INITIAL_DELAY_MS = 220;
 const END_PAUSE_MS = 800;
@@ -35,6 +35,7 @@ export default function Login() {
 
   const { signIn, signUp, resetPassword, signInWithGoogle } = useAuth();
   const whitelabel = useWhitelabel();
+  const headlineWords = whitelabel.authHeadlineWords;
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -50,7 +51,7 @@ export default function Login() {
 
   // Typewriter loop
   useEffect(() => {
-    const word = TYPEWRITER_WORDS[wordIndex];
+    const word = headlineWords[wordIndex];
 
     if (phase === 'initial') {
       const t = setTimeout(() => setPhase('typing'), INITIAL_DELAY_MS);
@@ -81,7 +82,7 @@ export default function Login() {
 
     if (phase === 'deleting') {
       if (displayedLength <= 0) {
-        setWordIndex((i) => (i + 1) % TYPEWRITER_WORDS.length);
+        setWordIndex((i) => (i + 1) % headlineWords.length);
         setPhase('typing');
         return;
       }
@@ -179,10 +180,10 @@ export default function Login() {
           </div>
         </div>
         <div className="relative space-y-4 max-w-sm">
-          <h1 className="text-3xl font-medium leading-tight">
-            Research any{' '}
+          <h1 className="text-3xl font-medium leading-tight whitespace-pre-line">
+            {whitelabel.authHeadlineBefore}{' '}
             <span className="inline-block">
-              <span>{TYPEWRITER_WORDS[wordIndex].slice(0, displayedLength)}</span>
+              <span>{headlineWords[wordIndex].slice(0, displayedLength)}</span>
               {phase !== 'pause' && (
                 <span
                   className="inline-block w-0.5 h-[1em] align-baseline bg-white ml-0.5"
@@ -191,11 +192,15 @@ export default function Login() {
                 />
               )}
             </span>
-            <br />
-            inside out.
+            {whitelabel.authHeadlineAfter && (
+              <>
+                <br />
+                {whitelabel.authHeadlineAfter}
+              </>
+            )}
           </h1>
           <p className="text-white/80 text-sm leading-relaxed">
-            Access all investors, expand your reach, and accelerate your fundraising.
+            {whitelabel.authTagline}
           </p>
         </div>
         <div className="relative text-sm text-white/60">
@@ -216,12 +221,12 @@ export default function Login() {
             {isLogin ? 'Sign in to your account' : 'Create an account'}
           </h2>
           <p className={`text-gray-500 text-sm ${isLogin ? 'mb-8' : 'mb-2'}`}>
-            {isLogin ? 'Enter your credentials to continue.' : 'Start researching companies with confidence.'}
+            {isLogin ? 'Enter your credentials to continue.' : whitelabel.signupSubtitle}
           </p>
           {!isLogin && (
             <>
               <p className="inline-flex items-center gap-1.5 rounded-full bg-brand-fainter px-4 py-2 text-sm font-semibold text-brand-default mb-3">
-                Sign up and get 5 free credits
+                {whitelabel.signupBadge}
               </p>
               <ul className="flex flex-wrap gap-x-6 gap-y-1 mb-8 text-sm text-gray-600">
                 <li className="flex items-center gap-2">
@@ -423,32 +428,7 @@ export default function Login() {
 
               <p className="mt-4 text-center text-xs text-gray-500">
                 By clicking "{isLogin ? 'Sign in' : 'Sign up'}" or "{isLogin ? 'Sign in with Google' : 'Sign up with Google'}", you agree to our{' '}
-                <a
-                  href="https://capitalxai.com/terms"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-brand-default hover:text-brand-dark underline"
-                >
-                  Terms
-                </a>
-                ,{' '}
-                <a
-                  href="https://capitalxai.com/content-safety"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-brand-default hover:text-brand-dark underline"
-                >
-                  Content Safety
-                </a>
-                , and{' '}
-                <a
-                  href="https://capitalxai.com/privacy"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-brand-default hover:text-brand-dark underline"
-                >
-                  Privacy Policy
-                </a>
+                <LegalLinks links={whitelabel.legalLinks} />
                 .
               </p>
             </>

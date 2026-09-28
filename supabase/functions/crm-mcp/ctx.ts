@@ -183,6 +183,8 @@ export interface ToolSpec<S extends z.ZodRawShape> {
   /** Registered even for non-members (default false → members only). */
   public?: boolean;
   annotations?: Annotations;
+  /** Tool _meta, e.g. {"openai/fileParams": ["file"]} so ChatGPT hands a chat attachment to that argument. */
+  meta?: Record<string, unknown>;
 }
 
 export type Handler<S extends z.ZodRawShape> = (args: z.infer<z.ZodObject<S>>) => Promise<unknown>;
@@ -194,7 +196,7 @@ const DEFAULT_ANN: Record<ToolClass, Annotations> = {
 
 export function tool<S extends z.ZodRawShape>(server: McpServer, ctx: Ctx, spec: ToolSpec<S>, handler: Handler<S>): void {
   if (!ctx.isMember && !spec.public) return; // not registered → a non-member's client never sees it
-  const cfg = { title: spec.title, description: spec.description, inputSchema: spec.input, annotations: { ...DEFAULT_ANN[spec.cls], ...(spec.annotations ?? {}) } };
+  const cfg = { title: spec.title, description: spec.description, inputSchema: spec.input, annotations: { ...DEFAULT_ANN[spec.cls], ...(spec.annotations ?? {}) }, ...(spec.meta ? { _meta: spec.meta } : {}) };
   // deno-lint-ignore no-explicit-any
   (server as any).registerTool(spec.name, cfg, async (args: z.infer<z.ZodObject<S>>) => {
     const t0 = Date.now();

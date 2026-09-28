@@ -1,8 +1,9 @@
 // supabase/functions/crm-mcp/index.ts
 //
-// Remote MCP server ("Claude connector") for the CapitalxAI Sales CRM — the
+// Remote MCP server (Claude connector / ChatGPT plugin) for the CapitalxAI Sales CRM — the
 // video-production studio's standup CRM. Same transport/auth skeleton as
-// capitalxai-mcp and outreach-mcp:
+// capitalxai-mcp and outreach-mcp. The crm skill is served from here too (read_skill,
+// skill:// resources — _shared/mcp-skills.ts) for clients that do not have it installed:
 //
 //   MCP endpoint:        POST/GET/DELETE  /crm-mcp/mcp        (Streamable HTTP)
 //   OAuth metadata:      GET  /crm-mcp/.well-known/oauth-protected-resource
@@ -35,6 +36,8 @@ import { registerRecordingRoutes } from "./recordings.ts";
 import { registerAnalysis } from "./tools_analysis.ts";
 import { registerCoaching } from "./tools_coaching.ts";
 import { registerResources, registerPrompts } from "./resources_prompts.ts";
+import { registerSkill } from "../_shared/mcp-skills.ts";
+import { SKILLS } from "./skills.gen.ts";
 
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/crm-mcp`;
 const RESOURCE_URL = `${FUNCTION_BASE}/mcp`;
@@ -55,7 +58,7 @@ const CORS_HEADERS: Record<string, string> = {
 function unauthorized(): Response {
   return new Response(JSON.stringify({ error: "unauthorized", error_description: "A valid bearer token is required to access this MCP server." }), {
     status: 401,
-    headers: { ...CORS_HEADERS, "content-type": "application/json", "www-authenticate": `Bearer realm="crm-mcp", resource_metadata="${PRM_URL}"` },
+    headers: { ...CORS_HEADERS, "content-type": "application/json", "www-authenticate": `Bearer realm="crm-mcp", resource_metadata="${PRM_URL}", scope="email profile"` },
   });
 }
 
@@ -65,9 +68,11 @@ Rules the database enforces and you must work with, not around: a meeting become
 
 Capture defaults — save in one pass, do not send a questionnaire: whoever is connected did the meeting and owns the deal (never question the connected account); any mention of pricing, a quote or what the prospect said means outcome=held; currency is INR unless stated; pain points are the user's words as given (no rewording, no asking for exact quotes); next step is as given or a short inferred one, its date is today when not mentioned; objections, source channel, role and meeting time are skipped when not mentioned — never ask for them; if the company/contact/deal/meeting is not in the CRM create it (upsert_company → upsert_contact → create_deal → schedule_meeting today → capture_meeting). Confirm in 2–3 lines.
 
-Recordings — when the user gives a call recording (a file, a path or a link: "here is the recording"), the recording replaces their notes and the whole thing runs without questions: find or create the company/contact/deal/meeting from the email they gave → transcribe with the get-transcript skill (speaker-diarized) → work out from what is said which speaker is the prospect and which is us → fill the capture from the transcript (pain points are the PROSPECT's own sentences copied exactly; commercials are the numbers actually spoken; next step + date as agreed on the call) → capture_meeting → save the transcript (transcript_upload_ticket + the crm skill's save_transcript.py; save_transcript only if that upload cannot reach the network; the same script also stores the call audio in the studio's storage, so keep the audio when transcribing). Confirm in 2–3 lines and name any price or name the transcriber was unsure of. Saved transcripts are read back with get_transcript / transcripts_search — filter them, do not page through an hour of speech.
+Operating manual — unless the crm skill is loaded in this client, call read_skill once at the start (it returns the skill: workflows, defaults, reply wording) and open the workflow file it points to before that workflow.
 
-Sales coach — every captured recording is then coached, without being asked: read the whole transcript (get_transcript) and the deal context (company_brief), rate the 12 criteria and the 4 Kaptured lens questions (understood the brand's needs · demonstrated relevant value · addressed quality concerns · secured a clear next step) with met | partial | missed | na | insufficient and timestamped excerpts as evidence, find the exact moments with a better response, keep salesperson execution separate from deal readiness, and save it once with save_call_coaching (1–3 priorities, never a list of twenty). The rubric is the crm skill's coaching-pipeline.md and the resource crm://coaching/rubric. Confirm in 3–5 lines and point to the app's Sales Coach tab; call_coaching_list answers "what do we keep getting wrong?".
+Recordings — when the user gives a call recording (a file, a path or a link: "here is the recording"), the recording replaces their notes and the whole thing runs without questions: find or create the company/contact/deal/meeting from the email they gave → transcribe (where you can run local scripts: the get-transcript skill, speaker-diarized, then transcript_upload_ticket + the crm skill's save_transcript.py, which also stores the call audio; everywhere else — ChatGPT, web — transcribe_recording on the server with the stored audio, a direct link or the attachment, and recording_upload_link when the file cannot reach the tool) → work out from what is said which speaker is the prospect and which is us → fill the capture from the transcript (pain points are the PROSPECT's own sentences copied exactly; commercials are the numbers actually spoken; next step + date as agreed on the call) → capture_meeting. Confirm in 2–3 lines and name any price or name the transcriber was unsure of. Saved transcripts are read back with get_transcript / transcripts_search — filter them, do not page through an hour of speech.
+
+Sales coach — every captured recording is then coached, without being asked: read the whole transcript (get_transcript) and the deal context (company_brief), rate the 12 criteria and the 4 Kaptured lens questions (understood the brand's needs · demonstrated relevant value · addressed quality concerns · secured a clear next step) with met | partial | missed | na | insufficient and timestamped excerpts as evidence, find the exact moments with a better response, keep salesperson execution separate from deal readiness, and save it once with save_call_coaching (1–3 priorities, never a list of twenty). The rubric is the crm skill's coaching-pipeline.md (read_skill(file: "coaching-pipeline.md")) and the resource crm://coaching/rubric. Confirm in 3–5 lines and point to the app's Sales Coach tab; call_coaching_list answers "what do we keep getting wrong?".
 
 Replies use plain words, never raw database values: stages read New / Contacted / Replied / Meeting booked / Meeting held / Proposal sent / Negotiation / Won / Lost (not meeting_held), no_show reads no-show, lookups show their label; no slugs, field names, tool names, ids or underscores in anything the user reads.
 
@@ -86,6 +91,7 @@ function buildServer(ctx: Ctx): McpServer {
   registerCoaching(server, ctx);
   registerResources(server, ctx);
   registerPrompts(server, ctx);
+  if (ctx.isMember) registerSkill(server, "capitalxai-crm", SKILLS.crm);
   return server;
 }
 

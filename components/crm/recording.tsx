@@ -4,9 +4,9 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 're
 import { useQuery } from '@tanstack/react-query';
 import { qk, useCrmInvalidate } from '@/lib/crm/queries';
 import { parseError } from '@/lib/crm/api';
-import { MAX_RECORDING_MB, deleteRecording, getRecordingUrl, uploadRecording } from '@/lib/crm/recordings';
+import { MAX_RECORDING_MB, MAX_VIDEO_MB, deleteRecording, getRecordingUrl, transcribeRecording, uploadRecording, type UploadPhase } from '@/lib/crm/recordings';
 import { Button, ErrorBox, Modal, Spinner } from './ui';
-import { Trash2, Upload } from 'lucide-react';
+import { Loader2, Trash2, Upload } from 'lucide-react';
 
 // Call audio for a meeting. The file is in the studio's private Oracle bucket; this only ever holds a link that expires.
 
@@ -41,30 +41,48 @@ export const RecordingPlayer = forwardRef<PlayerHandle, { meetingId: string; onT
   );
 });
 
-/** Pick an audio file and send it straight to storage (video is refused: only audio is kept). `replace` only changes the wording. */
+/** Pick the call recording: audio is stored and transcribed; a video is transcribed and discarded (only audio is kept). `replace` only changes the wording. */
 export function UploadRecordingButton({ meetingId, replace, size = 'xs' }: { meetingId: string; replace?: boolean; size?: 'xs' | 'sm' }) {
   const input = useRef<HTMLInputElement>(null);
   const invalidate = useCrmInvalidate();
   const [progress, setProgress] = useState<number | null>(null);
+  const [phase, setPhase] = useState<UploadPhase | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const onPick = async (file: File | undefined) => {
     if (!file) return;
     setError(null); setProgress(0);
-    try { await uploadRecording(meetingId, file, setProgress); await invalidate(); }
+    try {
+      const r = await uploadRecording(meetingId, file, setProgress, setPhase);
+      if (r.transcriptError) setError(`Audio saved, but it could not be transcribed: ${r.transcriptError}`);
+      await invalidate();
+    }
     catch (e) { setError(parseError(e).message); }
-    finally { setProgress(null); if (input.current) input.current.value = ''; }
+    finally { setProgress(null); setPhase(null); if (input.current) input.current.value = ''; }
   };
 
+  const label = phase === 'transcribing' ? 'Transcribing…' : progress !== null ? `Uploading ${Math.round(progress * 100)}%` : replace ? 'Replace audio' : 'Add recording';
   return (
     <>
-      <input ref={input} type="file" accept="audio/*,.m4a,.mp3,.wav,.flac,.ogg,.opus,.aac" className="hidden" onChange={(e) => onPick(e.target.files?.[0])} />
-      <Button size={size} variant="secondary" disabled={progress !== null} onClick={() => input.current?.click()} title={`Audio only (m4a, mp3, wav…), up to ${MAX_RECORDING_MB} MB — an hour is about 15 MB. Have a video? Give it to Claude; it keeps just the audio.`}>
-        <Upload className="w-3 h-3" /> {progress !== null ? `Uploading ${Math.round(progress * 100)}%` : replace ? 'Replace audio' : 'Add recording'}
+      <input ref={input} type="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.flac,.ogg,.opus,.aac,.mp4,.mov,.mkv,.webm" className="hidden" onChange={(e) => onPick(e.target.files?.[0])} />
+      <Button size={size} variant="secondary" disabled={progress !== null} onClick={() => input.current?.click()} title={`Audio (m4a, mp3, wav…, up to ${MAX_RECORDING_MB} MB) is kept for playback and transcribed. A video (up to ${MAX_VIDEO_MB / 1024} GB) is transcribed, then discarded — only audio is ever stored.`}>
+        {phase === 'transcribing' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} {label}
       </Button>
       {error && <span className="text-xs text-red-600 basis-full">{error}</span>}
     </>
   );
+}
+
+/** Transcribe audio that is already stored (uploaded before server-side transcription existed, or when it failed). */
+export function TranscribeButton({ meetingId, onDone }: { meetingId: string; onDone?: () => void }) {
+  const invalidate = useCrmInvalidate();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true); setError(null);
+    try { await transcribeRecording(meetingId); await invalidate(); onDone?.(); } catch (e) { setError(parseError(e).message); } finally { setBusy(false); }
+  };
+  return <><Button size="xs" loading={busy} onClick={run}>{busy ? 'Transcribing…' : 'Transcribe'}</Button>{error && <span className="text-xs text-red-600">{error}</span>}</>;
 }
 
 export function DeleteRecordingButton({ meetingId, onDeleted }: { meetingId: string; onDeleted?: () => void }) {
@@ -83,11 +101,11 @@ export function DeleteRecordingButton({ meetingId, onDeleted }: { meetingId: str
 export function RecordingModal({ meetingId, title, onClose }: { meetingId: string | null; title?: string; onClose: () => void }) {
   return (
     <Modal open={!!meetingId} onClose={onClose} size="lg" title={<>Recording{title ? ` · ${title}` : ''}</>}
-      footer={meetingId ? <><DeleteRecordingButton meetingId={meetingId} onDeleted={onClose} /><UploadRecordingButton meetingId={meetingId} replace /></> : undefined}>
+      footer={meetingId ? <><DeleteRecordingButton meetingId={meetingId} onDeleted={onClose} /><UploadRecordingButton meetingId={meetingId} replace /><TranscribeButton meetingId={meetingId} onDone={onClose} /></> : undefined}>
       {meetingId ? (
         <div className="space-y-2">
           <RecordingPlayer meetingId={meetingId} />
-          <p className="text-xs text-gray-500">No transcript yet. In Claude, say “transcribe the recording for this meeting” — it fetches this audio, transcribes it and fills the capture.</p>
+          <p className="text-xs text-gray-500">No transcript yet. Transcribe it here, or ask your assistant (Claude or ChatGPT) to “capture this meeting from its recording” — it transcribes this audio, fills the capture and coaches the call.</p>
         </div>
       ) : <Spinner />}
     </Modal>
