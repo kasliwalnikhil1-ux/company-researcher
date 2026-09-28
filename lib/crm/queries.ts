@@ -14,6 +14,7 @@ export const qk = {
   meeting: (id: string) => ['crm', 'meeting', id] as const,
   deal: (id: string) => ['crm', 'deal', id] as const,
   transcript: (meetingId: string) => ['crm', 'transcript', meetingId] as const,
+  transcriptText: (meetingId: string) => ['crm', 'transcript-text', meetingId] as const,
   recordingUrl: (meetingId: string) => ['crm', 'recording-url', meetingId] as const,
   coaching: (meetingId: string) => ['crm', 'coaching', meetingId] as const,
   coachingList: (f: unknown) => ['crm', 'coaching-list', f] as const,
@@ -121,6 +122,13 @@ export function useMeeting(id: string | undefined) {
 export function useTranscript(meetingId: string | null | undefined) {
   return useQuery({ queryKey: qk.transcript(meetingId ?? ''), enabled: !!meetingId, queryFn: () => rpc<Transcript>('get_transcript', { p_meeting_id: meetingId, p: { limit: 6000, words: true } }) });
 }
+
+/** Every turn as text only (no word timings) — what the draft-email prompts hand the chat. */
+export const transcriptTextQuery = (meetingId: string) => ({
+  queryKey: qk.transcriptText(meetingId),
+  queryFn: () => rpc<Transcript>('get_transcript', { p_meeting_id: meetingId, p: { limit: 6000 } }),
+  staleTime: 5 * 60_000,
+});
 
 /** The sales coach report for one call. `enabled` lets callers wait until they know one exists (crm_meetings_v.has_coaching). */
 export function useCoaching(meetingId: string | null | undefined, enabled = true) {

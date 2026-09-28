@@ -2,8 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Mail, Sprout } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button, CompanyLogo, useToast } from './ui';
-import { fmtMoney, READINESS_LABELS, STAGE_LABELS, type CompanyBrief } from '@/lib/crm/types';
+import { fmtDuration } from './transcript';
+import { transcriptTextQuery } from '@/lib/crm/queries';
+import { fmtMoney, READINESS_LABELS, STAGE_LABELS, type CompanyBrief, type Transcript } from '@/lib/crm/types';
 import { cn } from '@/lib/utils';
 
 // The two post-meeting emails, drafted in ChatGPT: the same-day recap and the nurture email a few
@@ -24,14 +27,14 @@ const TARGETS = [
     key: 'chatgpt',
     name: 'ChatGPT',
     domain: 'chatgpt.com',
-    href: (q: string) => `https://chatgpt.com/?q=${q}`,
+    href: (q: string) => (q ? `https://chatgpt.com/?q=${q}` : 'https://chatgpt.com/'),
     lead: (kind: Kind) => `${kind === 'recap' ? RECAP_BRIEF : NURTURE_BRIEF}\n\n--- THE MEETING ---`,
   },
   {
     key: 'claude',
     name: 'Claude',
     domain: 'claude.ai',
-    href: (q: string) => `https://claude.ai/new?q=${q}`,
+    href: (q: string) => (q ? `https://claude.ai/new?q=${q}` : 'https://claude.ai/new'),
     lead: (kind: Kind) => `Use /client-comms skill\n${KIND_LABEL[kind]}`,
   },
 ] as const;
@@ -40,6 +43,10 @@ type Target = (typeof TARGETS)[number];
 
 const MAX_PAINS = 8;
 const MAX_ACTIVITIES = 10;
+// Past this the prompt is not put in the ?q= URL at all (the chat's server rejects very long
+// URLs); the chat opens empty and the seller pastes the copied prompt. A transcript is usually
+// well over it.
+const MAX_Q_CHARS = 8000;
 
 /** Day-month-year, so a prompt read weeks later still says which year. */
 function longDate(v: string | null | undefined, tz?: string | null, time = false): string {
@@ -130,7 +137,7 @@ How to write it:
 - Name the materials I promised on the call (pricing, samples, proposal) and when they are coming.
 - Confirm who is doing what, and by when.
 - End with exactly one clear next step, using the date already agreed if there is one.
-- Reuse their own phrasing where it helps. Do not invent facts, numbers, dates or promises that are not in the notes.
+- Reuse their own phrasing where it helps. Do not invent facts, numbers, dates or promises that are not in the notes or the transcript.
 - Plain sentences, no marketing language, no emojis. 120-180 words.
 
 Give me, in this order: two subject line options, the email body, then one line listing anything I still have to fill in myself. Mark those spots [like this] in the body rather than guessing.`;
@@ -149,14 +156,32 @@ How to write it:
 
 Give me, in this order: a suggested send date with one line on why that timing, two subject line options, then the email body. If it needs an asset I may not have (a case study, a sample, a benchmark), say so plainly instead of inventing one, and mark anything I must fill in myself [like this].`;
 
-function buildPrompt(kind: Kind, target: Target, b: CompanyBrief, m: Meeting, tz: string | null): string {
-  return `${target.lead(kind)}\n\n${meetingContext(b, m, tz)}`;
+/** The whole call, one speaker turn after another, with no timings — so the draft can draw on
+ *  everything that was said, not just the capture. Back-to-back turns by one speaker are joined. */
+function transcriptText(t: Transcript): string {
+  const who = (label: string, role: string) => `${label}${role === 'prospect' ? ' (them)' : role === 'team' ? ' (us)' : ''}`;
+  const turns: Array<{ who: string; text: string }> = [];
+  for (const turn of t.turns) {
+    const text = turn.text.trim();
+    if (!text) continue;
+    const w = who(turn.label, turn.role);
+    const last = turns[turns.length - 1];
+    if (last && last.who === w) last.text += ` ${text}`;
+    else turns.push({ who: w, text });
+  }
+  const partial = t.returned < t.turn_count ? `, first ${t.returned} of ${t.turn_count} turns` : '';
+  return `\n--- FULL CALL TRANSCRIPT (${fmtDuration(t.duration_seconds)}${partial}; speaker by speaker, in order — the source of truth for what was said) ---\n\n`
+    + turns.map((x) => `${x.who}: ${x.text}`).join('\n\n');
+}
+
+function buildPrompt(kind: Kind, target: Target, b: CompanyBrief, m: Meeting, tz: string | null, transcript: Transcript | null): string {
+  return `${target.lead(kind)}\n\n${meetingContext(b, m, tz)}${transcript?.turns.length ? `\n${transcriptText(transcript)}` : ''}`;
 }
 
 const MENU_HEIGHT = TARGETS.length * 28 + 8; // items + the menu's own padding
 
 /** An outline button that drops down to pick which chat writes the draft. */
-function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.ReactNode; title: string; onPick: (target: Target) => void }) {
+function DraftMenu({ label, icon, title, onPick, onIntent }: { label: string; icon: React.ReactNode; title: string; onPick: (target: Target) => void; onIntent?: () => void }) {
   const [open, setOpen] = useState(false);
   const [up, setUp] = useState(false); // the last meeting sits at the page bottom: flip rather than run off-screen
   const ref = useRef<HTMLDivElement>(null);
@@ -172,6 +197,7 @@ function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.
 
   const toggle = () => {
     if (!open) {
+      onIntent?.();
       const r = ref.current?.getBoundingClientRect();
       const below = r ? window.innerHeight - r.bottom : 0;
       // Downwards unless it would not fit there and there is more room above.
@@ -181,7 +207,7 @@ function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative" onPointerEnter={onIntent}>
       <Button size="xs" variant="secondary" title={title} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>
         {icon} {label} <ChevronDown className={cn('w-3 h-3 opacity-60 transition-transform', open && 'rotate-180')} />
       </Button>
@@ -208,19 +234,35 @@ function DraftMenu({ label, icon, title, onPick }: { label: string; icon: React.
 /** The two draft buttons under a meeting's capture. */
 export function DraftEmailButtons({ brief, meeting, timezone }: { brief: CompanyBrief; meeting: Meeting; timezone: string | null }) {
   const { show, node } = useToast();
+  const qc = useQueryClient();
+  const tq = transcriptTextQuery(meeting.meeting_id);
 
-  const draft = (kind: Kind, target: Target) => {
-    const prompt = buildPrompt(kind, target, brief, meeting, timezone);
-    // The clipboard write and the tab open must both start in this click tick: the write needs
-    // document focus (lost once the tab opens) and the open needs the user gesture (lost after an
-    // await). A long prompt can be dropped from the ?q= URL, and then the seller just pastes.
+  // Load the transcript as soon as the seller reaches for a draft button, so it is usually in
+  // hand by the time they pick a chat.
+  const prefetch = () => { if (meeting.transcript) void qc.prefetchQuery(tq); };
+
+  const draft = async (kind: Kind, target: Target) => {
+    let transcript: Transcript | null = null;
+    let missed = false;
+    if (meeting.transcript) {
+      // Normally a cache hit. If it is still loading, the wait stays inside the click's
+      // user-activation window (~5 s in Chrome/Firefox), so the copy and the tab open still work.
+      try { transcript = qc.getQueryData<Transcript>(tq.queryKey) ?? await qc.fetchQuery(tq); }
+      catch { missed = true; }
+    }
+    const prompt = buildPrompt(kind, target, brief, meeting, timezone, transcript);
+    const q = encodeURIComponent(prompt);
+    const inUrl = q.length <= MAX_Q_CHARS;
+    // The clipboard write and the tab open must both start together: the write needs document
+    // focus (lost once the tab opens) and the open needs the user gesture.
     const copied = navigator.clipboard?.writeText(prompt).then(() => true).catch(() => false) ?? Promise.resolve(false);
-    window.open(target.href(encodeURIComponent(prompt)), '_blank', 'noopener,noreferrer');
+    window.open(target.href(inUrl ? q : ''), '_blank', 'noopener,noreferrer');
+    const note = missed ? ' The transcript could not be loaded, so it is not included.' : '';
     void copied.then((ok) => show(
       ok
-        ? `${target.name} opened, prompt copied. If the message box is empty, paste it.`
-        : `${target.name} opened, but the prompt could not be copied. If the message box is empty, reopen it from this tab.`,
-      ok ? 'success' : 'error',
+        ? `${target.name} opened, prompt copied${transcript ? ' with the full transcript' : ''}. ${inUrl ? 'If the message box is empty, paste it.' : 'Paste it into the message box.'}${note}`
+        : `${target.name} opened, but the prompt could not be copied. ${inUrl ? 'If the message box is empty, reopen it from this tab.' : 'Try again from this tab.'}${note}`,
+      ok && !missed ? 'success' : 'error',
     ));
   };
 
@@ -230,7 +272,8 @@ export function DraftEmailButtons({ brief, meeting, timezone }: { brief: Company
         label={KIND_LABEL.recap}
         icon={<Mail className="w-3 h-3" />}
         title="Draft the same-day recap email: their goals, what was decided, who does what by when, one next step"
-        onPick={(t) => draft('recap', t)}
+        onPick={(t) => void draft('recap', t)}
+        onIntent={prefetch}
       />
       <DraftMenu
         label={KIND_LABEL.nurture}
