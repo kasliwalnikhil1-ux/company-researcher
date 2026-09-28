@@ -487,6 +487,8 @@ export interface Message {
   delivered_at?: string | null;
   /** System event code (calls, group changes); null for a normal message. */
   event_type?: number | null;
+  /** 031: a message type the connector cannot read (poll, live location …): the inbox says to open the app. */
+  unsupported?: boolean;
   transcript: string | null;
   transcript_status: 'pending' | 'done' | 'failed' | null;
   intent: Intent | null;

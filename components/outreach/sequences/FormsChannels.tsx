@@ -71,7 +71,7 @@ export function CheckIdentifierForm() {
   return (
     <div className="space-y-2">
       <Note>Checks whether the lead’s phone number is on WhatsApp, without starting a chat or sending anything. Numbers that are not on WhatsApp take the <span className="font-medium">invalid</span> exit and are marked so no later step tries them.</Note>
-      <Note>Needs a phone number with a country code on the lead (for example +91 98765 43210). Leads without one take the invalid exit too. The check has its own daily allowance and does not count as a new conversation.</Note>
+      <Note>Needs a phone number with a country code on the lead (for example +1 202xxxxx). Leads without one take the invalid exit too. The check has its own daily allowance and does not count as a new conversation.</Note>
     </div>
   );
 }

@@ -69,7 +69,7 @@ export function LeadIdentitiesCard({ leadId, ws, canWrite, toast }: { leadId: st
     setError(null);
     const v = identifier.trim();
     if (!v) return;
-    if (provider === 'WHATSAPP' && !/^(\+|00)\s*\d/.test(v)) { setError('Phone numbers need the country code, for example +91 98765 43210'); return; }
+    if (provider === 'WHATSAPP' && !/^(\+|00)\s*\d/.test(v)) { setError('Phone numbers need the country code, for example +1 202xxxxx'); return; }
     try {
       await add.mutateAsync({ leadId, provider, identifier: v, ws });
       toast(`${channelLabel(provider)} ${provider === 'WHATSAPP' ? 'number' : 'handle'} added.`);
@@ -121,10 +121,10 @@ export function LeadIdentitiesCard({ leadId, ws, canWrite, toast }: { leadId: st
         <form onSubmit={submit} className="mt-3 pt-3 border-t border-gray-100 space-y-2">
           <div className="grid grid-cols-[minmax(0,7rem),minmax(0,1fr)] gap-2">
             <Select label="Channel" value={provider} onChange={(e) => setProvider(e.target.value as Provider)}>{ADDABLE.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}</Select>
-            <Input label={provider === 'WHATSAPP' ? 'WhatsApp number' : 'Instagram handle'} value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder={provider === 'WHATSAPP' ? '+91 98765 43210' : '@handle or instagram.com/handle'} />
+            <Input label={provider === 'WHATSAPP' ? 'WhatsApp number' : 'Instagram handle'} value={identifier} onChange={(e) => setIdentifier(e.target.value)} placeholder={provider === 'WHATSAPP' ? '+1 202xxxxx' : '@handle or instagram.com/handle'} />
           </div>
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-gray-500">{provider === 'WHATSAPP' ? 'Phone numbers need the country code, for example +91 98765 43210' : 'The @ and the instagram.com/ part are optional.'}</span>
+            <span className="text-xs text-gray-500">{provider === 'WHATSAPP' ? 'Phone numbers need the country code, for example +1 202xxxxx' : 'The @ and the instagram.com/ part are optional.'}</span>
             <Button type="submit" size="sm" loading={add.isPending} disabled={!identifier.trim()}>Add</Button>
           </div>
           {error && <ErrorBox message={error} />}

@@ -35,6 +35,15 @@ export function fixMojibake<T extends string | null | undefined>(s: T): T {
 }
 
 /**
+ * The connector's stand-in text for a message type it cannot read yet ("-- Unipile cannot display this type of message
+ * yet …"). It names the vendor, so it is never stored or passed on: the DB trigger from 031 drops it and flags the
+ * message `unsupported`; webhook events and the classifier skip it here.
+ */
+export function isUnsupportedPlaceholder(s: unknown): boolean {
+  return typeof s === "string" && /unipile cannot display/i.test(s);
+}
+
+/**
  * One stored attachment from either payload shape: the messages API ({id, type, mimetype, file_name, file_size}) or the
  * messaging webhook ({attachment_id, attachment_type, attachment_name, attachment_size}). Instagram shares of a post or
  * reel ("media_share") carry the post link, kept as `link` so the inbox can show it.
@@ -579,6 +588,8 @@ export async function handleMessaging(payload: any): Promise<void> {
   const unipileChatId = payload.chat_id;
   const unipileMessageId = payload.message_id;
   if (!unipileChatId) return;
+  const unsupportedText = isUnsupportedPlaceholder(payload.message);
+  if (unsupportedText) payload.message = null;
 
   if (event === "message_edited" || event === "message_deleted") {
     if (unipileMessageId) await admin.from("outreach_messages").update(event === "message_deleted" ? { deleted_at: new Date().toISOString() } : { text: fixMojibake(payload.message) ?? undefined, edited_at: new Date().toISOString() }).eq("unipile_message_id", unipileMessageId);
@@ -675,6 +686,8 @@ export async function handleMessaging(payload: any): Promise<void> {
     is_forwarded: payload.is_forwarded === true || payload.is_forwarded === 1,
     event_type: isEvent ? (Number.isFinite(Number(payload.event_type)) ? Number(payload.event_type) : 0) : null,
   };
+  const unsupported = unsupportedText && attachments.length === 0;
+  if (unsupported) insertRow.unsupported = true;
   if (!isOut && payload.sender) {
     insertRow.sender_name = visibleName(payload.sender.attendee_name);
     insertRow.sender_identifier = channel ? attendeeIdentity(provider, payload.sender).identifier : null;
@@ -698,7 +711,7 @@ export async function handleMessaging(payload: any): Promise<void> {
     if (!isOut) {
       await admin.from("outreach_lead_sender_state").update({ replied: true, last_inbound_at: sentAt, unipile_chat_id: unipileChatId, updated_at: new Date().toISOString() }).eq("lead_id", lead.id).eq("sender_id", sender.id);
       // a voice note without text is classified once its transcript exists (transcribe.ts re-queues it)
-      if (!hasVoiceNote || String(payload.message ?? "").trim()) await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
+      if (!unsupported && (!hasVoiceNote || String(payload.message ?? "").trim())) await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
       if (provider === "LINKEDIN") {
         // their FIRST message in this conversation: queue a profile read for a lead missing company / location / work email
         // (outreach_enrich_on_reply decides; workspace setting enrich_on_reply, default on). Later messages in a live thread

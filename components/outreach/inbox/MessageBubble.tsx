@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus } from 'lucide-react';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';
 import type { ThreadAttributionRow } from '@/lib/outreach/intel';
 import { Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
-import { fixMojibake, isMailProvider } from '@/lib/outreach/channels';
+import { channelLabel, fixMojibake, isMailProvider } from '@/lib/outreach/channels';
 
 export function isVoiceNote(att: MessageAttachment): boolean {
   const mime = att.mimetype ?? att.type ?? '';
@@ -421,7 +421,9 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
               </div>
             </div>
           ) : (
-            <span className={cn(deleted && 'line-through')}>{m.text ? <RichText text={fixMojibake(m.text) ?? ''} format={wa} dark={dark} /> : (atts.length ? '' : <em className="opacity-70">(empty message)</em>)}</span>
+            <span className={cn(deleted && 'line-through')}>{m.text ? <RichText text={fixMojibake(m.text) ?? ''} format={wa} dark={dark} /> : atts.length ? '' : m.unsupported
+              ? <span className={cn('inline-flex items-center gap-1.5 italic', dark ? 'text-white/80' : 'text-gray-500')}><Info className="w-3.5 h-3.5 shrink-0" /> This message can&apos;t be shown here. Open {channelLabel(provider)} to see it.</span>
+              : <em className="opacity-70">(empty message)</em>}</span>
           )}
           {!hideDeletedText && voiceNotes.length > 0 && (
             <div className={cn('space-y-1.5', m.text ? 'mt-2' : '')}>
