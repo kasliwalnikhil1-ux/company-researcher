@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { LeadFilters } from '@/lib/outreach/queries';
 import type { IntelLeadFilters, TimeInRole } from '@/lib/outreach/intel';
-import type { Client, List, Stage, Tag } from '@/lib/outreach/types';
+import { CHANNEL_PROVIDERS, type Client, type List, type Provider, type Stage, type Tag } from '@/lib/outreach/types';
+import { channelLabel } from '@/lib/outreach/channels';
 import { Button, Input, Modal, Select } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import { Bookmark, BookmarkPlus, Search, SlidersHorizontal, X } from 'lucide-react';
@@ -14,7 +15,7 @@ export type ViewFilters = Pick<LeadFilters, 'search' | 'client_id' | 'list_id' |
 export interface SavedView { id: string; name: string; filters: ViewFilters }
 
 export const EMPTY_FILTERS: ViewFilters = {
-  search: '', client_id: null, list_id: null, stage_id: null, tag_id: null, dnc: null,
+  search: '', client_id: null, list_id: null, stage_id: null, tag_id: null, dnc: null, channel: null,
   enriched: null, replied: null, posted_30d: null, min_followers: null, time_in_role: null, past_company: null, skill: null, language: null,
 };
 const FILTER_KEYS = Object.keys(EMPTY_FILTERS) as (keyof ViewFilters)[];
@@ -66,6 +67,7 @@ function sanitizeStored(raw: unknown): ViewFilters {
     if (BOOL_KEYS.includes(k)) { if (typeof v === 'boolean') o[k] = v; }
     else if (k === 'min_followers') { if (typeof v === 'number' && Number.isFinite(v) && v > 0) out.min_followers = v; }
     else if (k === 'time_in_role') { if (typeof v === 'string' && TIME_IN_ROLE_VALUES.includes(v as TimeInRole)) out.time_in_role = v as TimeInRole; }
+    else if (k === 'channel') { if (typeof v === 'string' && CHANNEL_PROVIDERS.includes(v as Provider)) out.channel = v as Provider; }
     else if (typeof v === 'string' && v.trim()) o[k] = v;
   }
   return out;
@@ -154,6 +156,10 @@ export function LeadFilterBar({ filters, onChange, clients, lists, stages, tags,
             {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         )}
+        <select aria-label="Channel" title="Leads you can reach on this channel (they have a profile, handle or number for it)" value={filters.channel ?? ''} onChange={(e) => set('channel', (e.target.value || null) as Provider | null)} className={sel}>
+          <option value="">All channels</option>
+          {CHANNEL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
+        </select>
         <select aria-label="List" value={filters.list_id ?? ''} onChange={(e) => set('list_id', e.target.value || null)} className={sel}>
           <option value="">All lists</option>
           {lists?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}

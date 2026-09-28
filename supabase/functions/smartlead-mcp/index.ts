@@ -35,16 +35,18 @@ import { registerInbox } from "./tools_inbox.ts";
 import { registerLeads } from "./tools_leads.ts";
 import { registerResources, registerPrompts } from "./resources_prompts.ts";
 import { registerSkill } from "../_shared/mcp-skills.ts";
+import { GROWTHXAI as BRAND, brandAuthServer } from "../_shared/brands.ts";
 import { SKILLS } from "./skills.gen.ts";
 
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/smartlead-mcp`;
 const RESOURCE_URL = `${FUNCTION_BASE}/mcp`;
 const PRM_URL = `${FUNCTION_BASE}/.well-known/oauth-protected-resource`;
-const AUTH_SERVER_URL = `${SUPABASE_URL}/auth/v1`;
+// Supabase Auth via oauth-as, so sign-in and consent open on this connector's brand app (see _shared/brands.ts).
+const AUTH_SERVER_URL = brandAuthServer(BRAND);
 
 const APP_NAME = "CapitalxAI Smartlead";
 const APP_URL = WEB_ORIGIN;
-const APP_LOGO_URL = `${WEB_ORIGIN}/logo.png`;
+const APP_LOGO_URL = BRAND.logoUrl;
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -116,13 +118,13 @@ const protectedResourceMetadata = {
   resource_name: APP_NAME,
 };
 
-// ChatGPT's own connector URL (…/mcp-chatgpt): same server, but its OAuth metadata points at oauth-as, which leaves
-// "openid" out so Supabase does not have to sign an ID token (HS256 project secret cannot). Claude's URL is unchanged.
+// ChatGPT's own connector URL (…/mcp-chatgpt): same server and the same authorization server as Claude's URL (oauth-as
+// leaves "openid" out, so Supabase does not have to sign an ID token). Kept so installed ChatGPT plugins keep working.
 const GPT_RESOURCE_URL = `${FUNCTION_BASE}/mcp-chatgpt`;
 const GPT_PRM_URL = `${FUNCTION_BASE}/.well-known/oauth-protected-resource-chatgpt`;
 const chatgptResourceMetadata = {
   resource: GPT_RESOURCE_URL,
-  authorization_servers: [`${SUPABASE_URL}/functions/v1/oauth-as`],
+  authorization_servers: [AUTH_SERVER_URL],
   bearer_methods_supported: ["header"],
   scopes_supported: ["email", "profile"],
   resource_name: APP_NAME,

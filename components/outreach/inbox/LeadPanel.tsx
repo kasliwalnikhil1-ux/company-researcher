@@ -16,7 +16,7 @@ import { Avatar, Badge, Button, EnrollmentBadge, ErrorBox, Spinner, Toggle, fmtD
 import type { ChatDetail, ConvertKind } from './Thread';
 import { CreateTaskModal, ReenrolModal, ConfirmModal, type CreateTaskInput } from './LeadActions';
 import { memberLabel } from './hooks';
-import { activeConsentByChannel, useLeadConsent, useLeadIdentities } from '@/lib/outreach/channels';
+import { activeConsentByChannel, chatTitle, useLeadConsent, useLeadIdentities, visibleName } from '@/lib/outreach/channels';
 import { IdentityList } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
 import { ConsentBadge, ConsentGrantModal, ConsentRevokeModal } from '@/components/outreach/leads/detail/LeadConsentCard';
 import type { LeadConsent } from '@/lib/outreach/types';
@@ -89,6 +89,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const [exitTarget, setExitTarget] = useState<Enrollment | null>(null);
   const [tagInput, setTagInput] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const isGroup = /@g\.us$/i.test(chat.attendee_provider_id ?? '');
   const tagInputRef = useRef<HTMLInputElement>(null);
   const stageRef = useRef<HTMLSelectElement>(null);
   // The chosen tab carries over from one conversation to the next in this browser.
@@ -250,14 +251,21 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
         {!leadId && (
           <div className="px-4 py-5">
             <div className="flex items-center gap-3">
-              <Avatar src={chat.attendee_picture_url} name={chat.attendee_name} size={12} />
+              <Avatar src={chat.attendee_picture_url} name={chatTitle(chat)} size={12} />
               <div className="min-w-0">
-                <div className="text-sm font-semibold text-gray-900 truncate">{chat.attendee_name ?? 'Unknown'}</div>
-                <div className="text-xs text-gray-500 truncate">{chat.attendee_public_identifier ?? chat.attendee_provider_id ?? '—'}</div>
+                <div className="text-sm font-semibold text-gray-900 truncate">{chatTitle(chat)}</div>
+                {/* WhatsApp "@lid" / group ids are opaque: only a phone or handle is worth showing */}
+                <div className="text-xs text-gray-500 truncate">{isGroup ? 'WhatsApp group' : (chat.attendee_public_identifier ?? (/@(lid|g\.us)$/i.test(chat.attendee_provider_id ?? '') ? null : chat.attendee_provider_id) ?? '—')}</div>
               </div>
             </div>
-            <p className="text-xs text-gray-500 mt-3">This conversation is not linked to a lead yet. Create one to track relation state, enrol in sequences and add tags or tasks.</p>
-            {canWrite && <Button className="mt-3 w-full" size="sm" loading={busy === 'create-lead'} onClick={createLead}><UserPlus className="w-4 h-4" /> Create lead from this conversation</Button>}
+            {isGroup ? (
+              <p className="text-xs text-gray-500 mt-3">Group chats are not linked to a lead. Each message shows which member wrote it.</p>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500 mt-3">This conversation is not linked to a lead yet. Create one to track relation state, enrol in sequences and add tags or tasks.</p>
+                {canWrite && <Button className="mt-3 w-full" size="sm" loading={busy === 'create-lead'} onClick={createLead}><UserPlus className="w-4 h-4" /> Create lead from this conversation</Button>}
+              </>
+            )}
           </div>
         )}
 
@@ -267,7 +275,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
               <div className="flex items-start gap-3">
                 <Avatar src={lead.picture_url ?? chat.attendee_picture_url} name={lead.full_name} size={12} />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-semibold text-gray-900 truncate">{lead.full_name ?? chat.attendee_name ?? 'Unknown'}</div>
+                  <div className="text-sm font-semibold text-gray-900 truncate">{visibleName(lead.full_name) ?? chatTitle(chat)}</div>
                   {lead.headline && <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">{lead.headline}</div>}
                   {(lead.company || lead.title) && <div className="text-xs text-gray-500 mt-1 inline-flex items-center gap-1"><Building2 className="w-3 h-3" />{[lead.title, lead.company].filter(Boolean).join(' @ ')}</div>}
                   {lead.location && <div className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{lead.location}</div>}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "growthxai-outreach",
+  "version": "2026.9.28",
+  "description": "Work in your GrowthxAI Outreach workspace by chatting: triage the inbox, build and edit sequences, import and clean lists, check sender health, diagnose why nothing is sending, and pull client reports. Everything that sends or changes many records asks for your yes first.",
+  "author": {
+    "name": "GrowthxAI",
+    "url": "https://app.growthxai.com"
+  },
+  "homepage": "https://app.growthxai.com",
+  "keywords": [
+    "outreach",
+    "linkedin",
+    "email",
+    "sequences",
+    "inbox"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "GrowthxAI Outreach",
+        "shortDescription": "Triage replies, build campaigns and check sender health",
+        "longDescription": "Work in your GrowthxAI Outreach workspace by chatting: triage the inbox, build and edit sequences, import and clean lists, check sender health, diagnose why nothing is sending, and pull client reports. Everything that sends or changes many records asks for your yes first.",
+        "developerName": "GrowthxAI",
+        "category": "Productivity",
+        "capabilities": [
+          "Read",
+          "Write"
+        ],
+        "websiteURL": "https://app.growthxai.com",
+        "privacyPolicyURL": "https://growthxai.com/legal/privacy/",
+        "termsOfServiceURL": "https://growthxai.com/legal/terms/",
+        "defaultPrompt": [
+          "Any pending replies?",
+          "Why isn't anything sending?",
+          "Give me a client report for last month"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

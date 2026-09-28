@@ -3,6 +3,7 @@
 // placed the day's sequence actions (≤30% of the cap, inside working hours, none at warm-up level 0–1). The database decides
 // how many (outreach_enrich_allowance); this worker only spends what it is given, slowly.
 // Priority leads = enrolments waiting on enrichment ("wait for enrichment" at enrol time).
+// Leads queued on their first LinkedIn reply (029, reason 'reply') lead the background line and stay with the sender they replied to for 24 h.
 // One invocation cannot wait 20–90 s between calls, so the pace is: at most 2 leads per sender per run, 3–8 s apart, every 10 minutes.
 import { admin, json, serve, requireCron, log, rpc, flag, sleep, randInt } from "../_shared/outreach/supabase.ts";
 import { unipile, UnipileError } from "../_shared/outreach/unipile.ts";
@@ -53,14 +54,17 @@ async function enrichOne(sender: Row, item: Row): Promise<OneResult> {
 
   // keep the lead row in step with what we just read (same fields the executor keeps)
   const cur = (prof.work_experience ?? []).find((w: Row) => w.current) ?? prof.work_experience?.[0];
-  const { data: upd } = await admin.from("outreach_leads").update({
+  const patch: Row = {
     provider_id: prof.provider_id ?? lead.provider_id,
     public_identifier: lead.public_identifier ?? (prof.public_identifier ? String(prof.public_identifier).toLowerCase() : null),
     headline: prof.headline ?? lead.headline, location: prof.location ?? lead.location, picture_url: prof.profile_picture_url ?? lead.picture_url,
     is_open_profile: typeof prof.is_open_profile === "boolean" ? prof.is_open_profile : lead.is_open_profile,
     company: cur?.company ?? lead.company, company_id: cur?.company_id ?? lead.company_id, title: cur?.position ?? lead.title,
     last_profile_fetch_at: new Date().toISOString(),
-  }).eq("id", lead.id).select("*").maybeSingle();
+  };
+  // a 1st-degree connection (e.g. a lead who just replied) shows their contact email; same rule as the executor's profile read
+  if (prof.contact_info?.emails?.length && !lead.email_work) patch.email_work = String(prof.contact_info.emails[0]).trim().toLowerCase();
+  const { data: upd } = await admin.from("outreach_leads").update(patch).eq("id", lead.id).select("*").maybeSingle();
   const l = upd ?? { ...lead, provider_id: prof.provider_id ?? lead.provider_id };
 
   const saved = await saveProfile(l, prof, sender, "background", sec.requested);

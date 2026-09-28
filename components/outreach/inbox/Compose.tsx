@@ -1,8 +1,8 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Paperclip, Send, X, Lock, CalendarCheck } from 'lucide-react';
+import { Paperclip, Send, X, Lock, CalendarCheck, Smile } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
@@ -21,6 +21,31 @@ export interface ComposeProps {
   disabledReason: string | null;
   onError: (msg: string) => void;
   onSent?: () => void;
+  /** WhatsApp reply: the message this one quotes, shown above the box until sent or cancelled. */
+  replyTo?: Message | null;
+  replyToName?: string;
+  onCancelReply?: () => void;
+}
+
+const EMOJIS = ['😀', '😂', '😊', '😍', '🙂', '😉', '😎', '🤔', '😅', '🙏', '👍', '👏', '🙌', '💪', '🤝', '👋', '❤️', '🔥', '🎉', '✅', '💯', '⭐', '📌', '📅', '📞', '💼', '🚀', '😢', '😮', '👀'];
+
+/** Local preview URL of an image picked for sending. */
+function useObjectUrl(file: File): string | null {
+  const url = useMemo(() => (file.type.startsWith('image/') ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  return url;
+}
+
+function FileChip({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const preview = useObjectUrl(file);
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs pl-1 pr-2 py-1 rounded-md bg-gray-100 text-gray-700">
+      {preview ? <img src={preview} alt="" className="w-10 h-10 rounded object-cover" /> : <Paperclip className="w-3 h-3 ml-1" />}
+      <span className="truncate max-w-[160px]">{file.name}</span>
+      <span className="text-gray-400">{fmtBytes(file.size)}</span>
+      <button type="button" onClick={onRemove} className="text-gray-400 hover:text-red-600" aria-label={`Remove ${file.name}`}><X className="w-3 h-3" /></button>
+    </span>
+  );
 }
 
 function safeName(name: string) { return name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'file'; }
@@ -36,7 +61,7 @@ function bookingTitle(typed: string): string {
   return typed ? 'Sends your text with the booking link added below it' : `Sends: “${BOOKING_DEFAULT_TEXT}” followed by the booking link`;
 }
 
-export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent }: ComposeProps) {
+export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent, replyTo, replyToName, onCancelReply }: ComposeProps) {
   const qc = useQueryClient();
   const isEmail = isMailProvider(chat.provider);
   // Instagram direct messages stop at 1000 characters, WhatsApp at 4096; LinkedIn and email are not limited here.
@@ -50,6 +75,24 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   const interested = chat.intent === 'interested';
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
+  const wa = chat.provider === 'WHATSAPP';
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const emojiRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (replyTo) textRef.current?.focus(); }, [replyTo]);
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const close = (e: MouseEvent) => { if (!emojiRef.current?.contains(e.target as Node)) setEmojiOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [emojiOpen]);
+  const insertEmoji = (e: string) => {
+    const el = textRef.current;
+    const start = el?.selectionStart ?? text.length, end = el?.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + e + text.slice(end);
+    if (maxLength && next.length > maxLength) return;
+    setText(next);
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start + e.length, start + e.length); });
+  };
 
   const addFiles = (list: FileList | null) => {
     if (!list) return;
@@ -69,7 +112,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     // Booking: outreach-send-reply appends the sender's booking link (with the lead id for the booking webhook) to the text,
     // or to a short default line when the composer is empty. The link is therefore never typed into `text` here.
     const typed = text.trim();
-    if (!booking && !typed) return;
+    if (!booking && !typed && !files.length) return;
     const body = booking ? [typed || BOOKING_DEFAULT_TEXT, '', bookingLink].join('\n') : typed;   // what the optimistic bubble shows
     if (booking) setSendingBooking(true); else setSending(true);
     const tempId = `temp-${Date.now()}`;
@@ -78,6 +121,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       attachments: files.map((f, i) => ({ id: `${tempId}-${i}`, name: f.name, type: f.type, size: f.size })),
       sent_at: new Date().toISOString(), is_invite_note: false, intent: null, intent_confidence: null, summary: null, classified_at: null,
       opens: 0, clicks: 0, edited_at: null, deleted_at: null, action_id: null, created_at: new Date().toISOString(),
+      quoted: replyTo ? { unipile_message_id: replyTo.unipile_message_id, text: replyTo.text, sender_name: replyToName ?? null } : null,
     } as Message;
     const key = qk.messages(chat.id);
     qc.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
@@ -93,9 +137,11 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       if (paths.length) payload.attachments = paths;
       if (isEmail && subject.trim()) payload.subject = subject.trim();
       if (booking) payload.booking = true;
+      if (replyTo) payload.quote_message_id = replyTo.id;
       await callFn('send-reply', payload);
       setText('');
       setFiles([]);
+      onCancelReply?.();
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ['outreach', workspaceId, 'chats'] });
       onSent?.();
@@ -132,12 +178,26 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       {isEmail && (
         <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Email subject" className="w-full text-sm px-3 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
       )}
+      {replyTo && (
+        <div className="flex items-start gap-2 rounded-md bg-gray-50 border-l-4 border-emerald-500 px-2.5 py-1.5">
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-semibold text-emerald-700 truncate">Replying to {replyToName ?? 'message'}</div>
+            <div className="text-xs text-gray-600 line-clamp-2 whitespace-pre-wrap">{replyTo.text?.trim() || (replyTo.attachments?.length ? '📎 Attachment' : 'Message')}</div>
+          </div>
+          <button type="button" onClick={onCancelReply} className="p-0.5 text-gray-400 hover:text-gray-700" aria-label="Cancel reply"><X className="w-4 h-4" /></button>
+        </div>
+      )}
       <textarea
         ref={textRef}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); send(false); } }}
-        placeholder={`Reply as ${sender?.display_name ?? 'sender'}… (${typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter to send)`}
+        onKeyDown={(e) => {
+          // WhatsApp: Enter sends, Shift+Enter adds a line (like the app). Everywhere: Ctrl/Cmd+Enter sends; Escape drops the reply.
+          if (e.key === 'Escape' && replyTo) { onCancelReply?.(); return; }
+          if (((e.metaKey || e.ctrlKey) && e.key === 'Enter') || (wa && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing)) { e.preventDefault(); send(false); }
+        }}
+        onPaste={(e) => { const pasted = Array.from(e.clipboardData?.files ?? []); if (pasted.length) { e.preventDefault(); const dt = new DataTransfer(); pasted.forEach((f) => dt.items.add(f)); addFiles(dt.files); } }}
+        placeholder={wa ? `Type a message as ${sender?.display_name ?? 'sender'} (Enter to send, Shift+Enter for a new line)` : `Reply as ${sender?.display_name ?? 'sender'}… (${typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter to send)`}
         aria-label="Reply"
         maxLength={maxLength}
         rows={3}
@@ -145,19 +205,22 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {files.map((f, i) => (
-            <span key={`${f.name}-${i}`} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-gray-100 text-gray-700">
-              <Paperclip className="w-3 h-3" />
-              <span className="truncate max-w-[160px]">{f.name}</span>
-              <span className="text-gray-400">{fmtBytes(f.size)}</span>
-              <button type="button" onClick={() => setFiles(files.filter((_, j) => j !== i))} className="text-gray-400 hover:text-red-600" aria-label={`Remove ${f.name}`}><X className="w-3 h-3" /></button>
-            </span>
-          ))}
+          {files.map((f, i) => <FileChip key={`${f.name}-${i}`} file={f} onRemove={() => setFiles(files.filter((_, j) => j !== i))} />)}
         </div>
       )}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} aria-label="Attach files" />
+          {!isEmail && (
+            <div className="relative" ref={emojiRef}>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setEmojiOpen((v) => !v)} title="Emoji" aria-label="Emoji"><Smile className="w-4 h-4" /></Button>
+              {emojiOpen && (
+                <div className="absolute bottom-full mb-1 left-0 z-20 w-64 grid grid-cols-8 gap-0.5 rounded-lg bg-white border border-gray-200 shadow-lg p-1.5" role="menu">
+                  {EMOJIS.map((e) => <button key={e} type="button" role="menuitem" onClick={() => insertEmoji(e)} className="text-lg leading-none p-1 rounded hover:bg-gray-100" aria-label={e}>{e}</button>)}
+                </div>
+              )}
+            </div>
+          )}
           <Button type="button" variant="ghost" size="sm" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip className="w-4 h-4" /> Attach</Button>
           <span className="text-[11px] text-gray-400 hidden sm:inline">Replies don't count against outbound caps.</span>
           {maxLength && <span className={`text-[11px] tabular-nums ${text.length >= maxLength ? 'text-red-600 font-medium' : 'text-gray-400'}`}>{text.length}/{maxLength}</span>}
@@ -166,7 +229,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           {bookingLink && !interested && (
             <Button type="button" variant="secondary" size="sm" loading={sendingBooking} disabled={sending} onClick={() => send(true)} title={bookingTitle(text.trim())}><CalendarCheck className="w-4 h-4" /> Send booking link</Button>
           )}
-          <Button type="button" size="sm" loading={sending} disabled={!text.trim() || sendingBooking} onClick={() => send(false)} title="Send reply"><Send className="w-4 h-4" /> Send</Button>
+          <Button type="button" size="sm" loading={sending} disabled={(!text.trim() && !files.length) || sendingBooking} onClick={() => send(false)} title="Send reply"><Send className="w-4 h-4" /> Send</Button>
         </div>
       </div>
     </div>

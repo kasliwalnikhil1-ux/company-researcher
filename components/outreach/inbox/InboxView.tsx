@@ -108,6 +108,8 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   useEffect(() => {
     if (!chat || !chat.unread || suspended) return;
     updateChat(chat.id, { unread: false, unread_count: 0 }, true).catch(() => { /* surfaced via query invalidation */ });
+    // WhatsApp: the phone shows the chat as read too, and the contact gets the blue ticks (as when it is opened in the app)
+    if (chat.provider === 'WHATSAPP') callFn('edit-message', { chat_id: chat.id, action: 'read' }).catch(() => { /* best effort: the inbox state is already updated */ });
   }, [chat?.id, chat?.unread, suspended]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setIntent = useCallback(async (intent: Intent) => {
@@ -139,6 +141,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   const markUnread = useCallback(async () => {
     if (!chat) return;
     await updateChat(chat.id, { unread: true, unread_count: Math.max(1, chat.unread_count) });
+    if (chat.provider === 'WHATSAPP') callFn('edit-message', { chat_id: chat.id, action: 'unread' }).catch(() => { /* best effort */ });
     toast.show('Marked as unread');
     const idx = rows?.findIndex((r) => r.id === chat.id) ?? -1;
     const next = rows?.[idx + 1];

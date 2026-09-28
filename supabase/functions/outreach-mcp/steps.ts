@@ -200,6 +200,15 @@ export function compileSteps(input: unknown, opts: CompileOptions = {}): { graph
           if (note.length > TEXT_LIMITS.invite_note) errors.push({ step_path: p, field: "note", code: "E_NOTE_TOO_LONG", message: `invite note exceeds ${TEXT_LIMITS.invite_note} characters (200 for free LinkedIn accounts)` });
           node.config = { note, require_note_for_free: !!s.require_note_for_free };
           { const vs = compileVariants(s, "note", p, errors); if (vs) node.config.variants = vs; }
+          // Open Profile leads skip the invitation and take these steps instead (normally one InMail, free for Open Profiles).
+          // They do not flow on into the steps after the invitation (wait_connection …): the branch ends unless it says otherwise.
+          if (s.open_profile != null) {
+            const op = asList(s.open_profile, []);
+            if (!op.length) errors.push({ step_path: p, field: "open_profile", code: "E_BRANCH_REQUIRED", message: "open_profile needs the steps Open Profile leads take instead of the invitation, e.g. [{\"do\":\"inmail\",…}]" });
+            else if (!op.some((x) => ["inmail", "send_inmail"].includes(String((x as Step)?.do ?? (x as Step)?.type ?? "")))) notes.push(`${p}.open_profile has no inmail step: Open Profile leads skip the invitation and get no message on that branch.`);
+            node.config.open_profile_inmail = true;
+            node.branches = { open_profile: chain(op, `${p}.open_profile`, cx + 220, y - 140, END, { channel, guarded }) };
+          }
           break;
         }
         case "withdraw_invite": node.config = {}; break;
@@ -326,6 +335,8 @@ export function compileSteps(input: unknown, opts: CompileOptions = {}): { graph
   }
 
   nodes.start.next = chain(steps, "steps", 300, 200, END, { channel: channelOf(opts.channel), guarded: false });
+  // an invitation with the Open Profile exit keeps its onward step in `next`, mirrored into branches.next like the builder does
+  for (const n of Object.values(nodes)) if (n.type === "send_invite" && n.branches?.open_profile) n.branches = { next: n.next ?? null, open_profile: n.branches.open_profile };
   return { graph: errors.length ? null : { version: 1, start: "start", nodes }, errors, notes };
 }
 
@@ -344,7 +355,7 @@ export function renderGraph(graph: Graph, stats?: Record<string, any>): string {
     const q = (s: unknown, max = 90) => (s ? `"${String(s).replace(/\s+/g, " ").slice(0, max)}${String(s).length > max ? "…" : ""}"` : "");
     const ch = c.channel ? ` [${String(c.channel).toLowerCase()}]` : "";
     switch (n.type) {
-      case "send_invite": return `invite${c.note ? ` note ${q(c.note)}` : ab ? "" : " (no note)"}${ab}`;
+      case "send_invite": return `invite${c.note ? ` note ${q(c.note)}` : ab ? "" : " (no note)"}${ab}${n.branches?.open_profile ? " [Open Profile leads skip it → open_profile branch]" : ""}`;
       case "send_message": return `message${ch} ${q(c.text)}${c.send_always ? " [send_always]" : ""}${c.new_chat_allowed === false ? " [existing chat only]" : ""}${ab}`;
       case "send_inmail": return `inmail ${q(c.subject, 40)} ${q(c.text)}${ab}`;
       case "send_email": return `email ${q(c.subject, 60)}${ab}`;
@@ -388,7 +399,8 @@ export function renderGraph(graph: Graph, stats?: Record<string, any>): string {
     const stat = st ? `  {sent ${st.sent}, queued ${st.queued}, failed ${st.failed}, skipped ${st.skipped}${st.accepted ? `, accepted ${st.accepted}` : ""}${st.replied ? `, replied ${st.replied}` : ""}}` : "";
     const delay = n.delay ? ` (after ${n.delay.amount} ${n.delay.unit})` : "";
     lines.push(`${pre}[${id}] ${desc(n)}${delay}${stat}`);
-    if (n.branches) for (const [b, t] of Object.entries(n.branches)) walk(t, depth + 1, b);
+    // branches.next mirrors `next` on steps with an optional second exit: walk it once, as the main line
+    if (n.branches) for (const [b, t] of Object.entries(n.branches)) if (!(b === "next" && t === n.next)) walk(t, depth + 1, b);
     if (n.next !== undefined && n.type !== "start") walk(n.next, depth, undefined);
     else if (n.type === "start") walk(n.next, depth);
   };

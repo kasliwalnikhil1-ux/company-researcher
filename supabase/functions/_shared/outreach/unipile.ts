@@ -170,15 +170,26 @@ export const unipile = {
     start: (fields: { account_id: string; attendees_ids: string[]; text?: string; subject?: string; linkedin?: Record<string, unknown>; voice_message?: Blob }) =>
       request<{ chat_id: string | null; message_id: string | null }>("/chats", { method: "POST", form: form(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
     messages: (chatId: string, q: { cursor?: string; limit?: number; after?: string } = {}) => request<{ items: any[]; cursor: string | null }>(`/chats/${encodeURIComponent(chatId)}/messages`, { query: { limit: 100, ...q } }),
-    send: (chatId: string, fields: { account_id?: string; text?: string; attachments?: Blob[]; voice_message?: Blob }) => {
-      const f = form({ account_id: fields.account_id, text: fields.text, voice_message: fields.voice_message });
+    // quote_id: the connector id of the message this one replies to (WhatsApp shows it as a reply).
+    send: (chatId: string, fields: { account_id?: string; text?: string; attachments?: Blob[]; voice_message?: Blob; quote_id?: string }) => {
+      const f = form({ account_id: fields.account_id, text: fields.text, voice_message: fields.voice_message, quote_id: fields.quote_id });
       for (const a of fields.attachments ?? []) f.append("attachments", a);
       return request<{ message_id: string | null }>(`/chats/${encodeURIComponent(chatId)}/messages`, { method: "POST", form: f, accountId: fields.account_id, retries: 0, timeoutMs: 30000 });
     },
+    // Chat actions: setReadStatus (WhatsApp, LinkedIn), setArchiveStatus / setPinnedStatus (WhatsApp), setMuteStatus.
+    patch: (chatId: string, action: string, value: unknown) => request<any>(`/chats/${encodeURIComponent(chatId)}`, { method: "PATCH", body: { action, value }, retries: 0 }),
+  },
+  chatAttendees: {
+    // Picture of an attendee (attendee id) or of a group chat (chat id). Raw bytes; the connector's picture_url links expire.
+    picture: (attendeeOrChatId: string) => request<Response>(`/chat_attendees/${encodeURIComponent(attendeeOrChatId)}/picture`, { raw: true, timeoutMs: 30000, retries: 0 }),
   },
   messages: {
     edit: (messageId: string, text: string) => request<any>(`/messages/${encodeURIComponent(messageId)}`, { method: "PATCH", body: { text }, retries: 0 }),
     delete: (messageId: string) => request<any>(`/messages/${encodeURIComponent(messageId)}`, { method: "DELETE", retries: 0 }),
+    // WhatsApp, LinkedIn, Instagram. The connector documents no "remove reaction" call.
+    react: (messageId: string, reaction: string) => request<any>(`/messages/${encodeURIComponent(messageId)}/reaction`, { method: "POST", body: { reaction }, retries: 0 }),
+    // WhatsApp only: forward into another chat of the same account.
+    forward: (messageId: string, chatId: string) => request<{ message_id?: string | null }>(`/messages/${encodeURIComponent(messageId)}/forward`, { method: "POST", body: { chat_id: chatId }, retries: 0 }),
     attachment: (messageId: string, attachmentId: string) => request<Response>(`/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`, { raw: true, timeoutMs: 60000 }),
   },
   mails: {

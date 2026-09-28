@@ -22,7 +22,8 @@ serve("attachment-proxy", async (req) => {
   }
   const upstream = att.email
     ? await unipile.mails.attachment(msg.unipile_message_id!, attachmentId, chat?.outreach_senders?.unipile_account_id)
-    : await unipile.messages.attachment(msg.unipile_message_id!, attachmentId);
+    // a forwarded copy keeps the original message id on its attachments (the file lives there)
+    : await unipile.messages.attachment(att.unipile_message_id ?? msg.unipile_message_id!, attachmentId);
   if (!upstream.ok) throw new HttpError(upstream.status, "E_UPSTREAM", "attachment fetch failed");
   const headers = new Headers(CORS);
   headers.set("content-type", upstream.headers.get("content-type") ?? att.mimetype ?? "application/octet-stream");

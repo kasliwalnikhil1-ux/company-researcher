@@ -3,7 +3,7 @@
 // No test framework on purpose: `npx tsx components/outreach/sequences/allowedNext.test.ts`.
 import { allowedNext } from './allowedNext';
 import { normalizeNode, validateGraph } from '@/lib/outreach/graph';
-import { syncNodeBranches } from '@/lib/outreach/nodes';
+import { exitLabel, nodeExits, syncNodeBranches } from '@/lib/outreach/nodes';
 import type { Graph, GraphNode } from '@/lib/outreach/types';
 const pos = { x: 0, y: 0 };
 const LI = ['LINKEDIN'] as const;
@@ -112,4 +112,29 @@ const m2 = normalizeNode({ ...m1, next: 'stale', branches: { next: 'end', no_cha
 chk('normalise: branches.next wins, an unconnected "no chat" exit is dropped', m2.next === 'end' && JSON.stringify(m2.branches) === JSON.stringify({ next: 'end' }));
 const m3 = syncNodeBranches({ ...m1, config: { ...m1.config, new_chat_allowed: true } });
 chk('new chat back on: single exit, target back in next only', m3.next === 'end' && m3.branches === undefined);
+
+// --- the optional "Open Profile" exit of an invitation ------------------------
+const i0: GraphNode = { id: 'i', type: 'send_invite', position: pos, config: { note: '' }, next: 'w' };
+chk('invitation: one exit by default', JSON.stringify(nodeExits(i0)) === JSON.stringify(['next']));
+const i1 = syncNodeBranches({ ...i0, config: { ...i0.config, open_profile_inmail: true } });
+chk('Open Profile on: "Open Profile" exit appears, onward step mirrored', JSON.stringify(nodeExits(i1)) === JSON.stringify(['next', 'open_profile']) && JSON.stringify(i1.branches) === JSON.stringify({ next: 'w', open_profile: null }) && i1.next === 'w');
+chk('exit label reads "Open Profile"', exitLabel(i1, 'open_profile') === 'Open Profile');
+const i2 = normalizeNode({ ...i1, branches: { next: 'w', open_profile: null } });
+chk('normalise: an unconnected "Open Profile" exit is dropped (Open Profile leads then get the invitation)', i2.next === 'w' && JSON.stringify(i2.branches) === JSON.stringify({ next: 'w' }));
+const i3 = syncNodeBranches({ ...i1, config: { note: '' } });
+chk('Open Profile off: single exit again', i3.next === 'w' && i3.branches === undefined);
+const op = { version: 1, start: 'start', nodes: {
+  start: { id: 'start', type: 'start', position: pos, next: 'inv' },
+  inv: { id: 'inv', type: 'send_invite', position: pos, config: { note: '', open_profile_inmail: true }, next: 'wait', branches: { next: 'wait', open_profile: 'im' } },
+  wait: { id: 'wait', type: 'wait_connection', position: pos, config: { window_days: 14 }, branches: { connected: 'msg', no_connect: 'end1' } },
+  msg: { id: 'msg', type: 'send_message', position: pos, config: { text: 'hi' }, next: 'end1' },
+  im: { id: 'im', type: 'send_inmail', position: pos, config: { subject: 's', text: 'hi' }, next: 'end1', branches: { no_credit: 'end1' } },
+  end1: { id: 'end1', type: 'end', position: pos },
+}} as unknown as Graph;
+const onOp = allowedNext(op, 'inv', 'open_profile', [...LI]);
+chk('under "Open Profile": InMail offered; invitation, wait and withdraw greyed (no invitation was sent there)',
+  onOp.send_inmail === null && /Send InMail/.test(onOp.send_invite ?? '') && /Send an invitation first/.test(onOp.wait_connection ?? '') && /after an invitation/.test(onOp.withdraw_invite ?? ''));
+chk('under "Open Profile" after the InMail: a message may follow', allowedNext(op, 'im', 'next', [...LI]).send_message === null);
+chk('invitation\'s own exit unchanged: wait for connection offered', allowedNext(op, 'inv', 'next', [...LI]).wait_connection === null);
+chk('graph with the Open Profile exit validates', validateGraph(op, { strict: true, poolProviders: [...LI] }).errors.length === 0);
 console.log('reasons:', t.send_invite, '|', f.send_message, '|', waStart.send_message);

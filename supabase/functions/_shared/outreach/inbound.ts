@@ -3,8 +3,8 @@ import { admin, log, rpc, emitEvent, audit, randInt } from "./supabase.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending, hostedBrowserOptions } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
 import { healthForSender } from "./health.ts";
-import { fillChatPicture } from "./avatars.ts";
-import { instagramHandle, phoneDigits, phoneFromAttendeeId, PROVIDER_WARNING_RE } from "./channels.ts";
+import { fillChatPicture, persistPictureUrl } from "./avatars.ts";
+import { instagramHandle, phoneDigits, phoneFromAttendeeId, whatsappPhoneOf, isWhatsappGroup, visibleName, PROVIDER_WARNING_RE } from "./channels.ts";
 
 type Sender = Record<string, any>;
 type Row = Record<string, any>;
@@ -50,6 +50,12 @@ export function storedAttachment(a: any, unipileMessageId: string | null): Row {
   if (a.unavailable === true || a.attachment_unavailable === true) out.unavailable = true;
   if (link) out.link = { url: String(link), author: a.post?.author ?? null, text: fixMojibake(a.cta?.text && a.cta.text !== a.post?.author ? String(a.cta.text).slice(0, 300) : null) };
   if (isAudio(a)) { out.voice_note = true; out.duration_s = a.duration ?? a.duration_s ?? null; }
+  // WhatsApp detail the thread renders like the app does: stickers without a bubble, GIFs looping, contact cards
+  if (a.sticker === true || a.sticker === 1) out.sticker = true;
+  if (a.gif === true || a.gif === 1) out.gif = true;
+  if (a.type === "contact_card" || a.attachment_type === "contact_card") {
+    out.contact = { name: a.display_name ?? null, phones: (Array.isArray(a.phones) ? a.phones : []).map((p: any) => String(p?.number ?? p ?? "")).filter(Boolean).slice(0, 5) };
+  }
   return out;
 }
 
@@ -119,7 +125,8 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
       patch.provider_user_id = me.provider_id ?? me.id ?? sender.provider_user_id;
       const name = String(me.full_name ?? me.name ?? "").trim();
       if (!sender.display_name || sender.display_name === "Instagram account") patch.display_name = name || (handle ? `@${handle}` : null) || sender.display_name;
-      if (typeof me.profile_picture_url === "string") patch.picture_url = me.profile_picture_url;
+      // Instagram CDN pictures are blocked cross-site in browsers: keep a stored copy
+      if (typeof me.profile_picture_url === "string") patch.picture_url = (await persistPictureUrl(me.profile_picture_url, sender.workspace_id, `sender-${sender.id}`)) ?? sender.picture_url;
       if (typeof me.followers_count === "number") patch.connections_count = me.followers_count;
     } else if (sender.provider === "WHATSAPP") {
       // users/me on WhatsApp: the number as +digits, the profile name, the id the messaging payloads use for "us"
@@ -129,7 +136,8 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
       patch.provider_user_id = me.id ?? me.provider_id ?? (digits ? `${digits}@s.whatsapp.net` : sender.provider_user_id);
       const name = String(me.name ?? me.display_name ?? "").trim();
       if (!sender.display_name || sender.display_name === "WhatsApp number") patch.display_name = name || (digits ? `+${digits}` : null) || sender.display_name;
-      if (typeof me.profile_picture_url === "string") patch.picture_url = me.profile_picture_url;
+      // WhatsApp picture links expire: keep a stored copy
+      if (typeof me.profile_picture_url === "string") patch.picture_url = (await persistPictureUrl(me.profile_picture_url, sender.workspace_id, `sender-${sender.id}`)) ?? sender.picture_url;
     } else {
       const me = await unipile.users.me(sender.unipile_account_id);
       patch.public_identifier = me.email ? String(me.email).trim().toLowerCase() : sender.public_identifier;
@@ -479,18 +487,33 @@ async function matchLeadByIdentity(workspaceId: string, provider: string, identi
   return r ? { id: r.id, created: !!r.created } : null;
 }
 
-/** The identity an inbound attendee carries: WhatsApp "<digits>@s.whatsapp.net" → "+digits"; Instagram the user id + the handle in the profile URL. */
+/** The identity an inbound attendee carries: WhatsApp the phone ("+digits", also behind a "@lid" provider id); Instagram the user id + the handle in the profile URL. */
 function attendeeIdentity(provider: string, attendee: any): { identifier: string | null; providerId: string | null } {
   const pid = attendee?.attendee_provider_id ?? attendee?.provider_id ?? attendee?.id ?? null;
-  if (provider === "WHATSAPP") {
-    const phone = phoneFromAttendeeId(pid) ?? (attendee?.phone_number ? `+${phoneDigits(attendee.phone_number)}` : null);
-    return { identifier: phone, providerId: pid ? String(pid) : null };
-  }
+  if (provider === "WHATSAPP") return { identifier: whatsappPhoneOf(attendee), providerId: pid ? String(pid) : null };
   if (provider === "INSTAGRAM") {
     const handle = instagramHandle(attendee?.attendee_profile_url ?? attendee?.profile_url ?? attendee?.public_profile_url ?? null) ?? instagramHandle(attendee?.attendee_public_identifier ?? attendee?.public_identifier ?? attendee?.username ?? null);
     return { identifier: handle, providerId: pid ? String(pid) : null };
   }
   return { identifier: null, providerId: pid ? String(pid) : null };
+}
+
+/**
+ * The message a reply quotes (webhook `quoted` / `reply_to`, messages API `quoted`) in the stored shape. The author is
+ * looked up among the chat's attendees by provider id; "You" when it is the sender account.
+ */
+export function quotedOf(q: any, attendees: any[], isUs: (id: unknown) => boolean): Row | null {
+  if (!q || typeof q !== "object") return null;
+  const mid = q.message_id ?? q.id ?? null;
+  if (!mid && !q.provider_id && !q.text) return null;
+  const sid = q.sender_id ?? q.sender_attendee_id ?? null;
+  const who = sid ? attendees.find((a) => a && (a.attendee_provider_id === sid || a.provider_id === sid || a.attendee_id === sid || a.id === sid)) : null;
+  const att = Array.isArray(q.attachments) ? q.attachments[0] : null;
+  return {
+    unipile_message_id: mid, provider_id: q.provider_id ?? null, text: q.text ? String(fixMojibake(String(q.text))).slice(0, 500) : null, sender_id: sid,
+    sender_name: sid && isUs(sid) ? "You" : (visibleName(who?.attendee_name ?? who?.name) ?? (who ? whatsappPhoneOf(who) : null)),
+    attachment_type: att ? (att.attachment_type ?? att.type ?? null) : null,
+  };
 }
 
 /** Whether a connector chat object sits in Instagram's message-request folder (`folder` may be a string or an array). */
@@ -508,18 +531,24 @@ async function handleMessageState(sender: Sender, payload: any, event: string): 
   if (event === "message_reaction") {
     if (!unipileMessageId) return;
     const emoji = payload.reaction ?? payload.emoji ?? payload.content ?? payload.value ?? null;
-    if (!emoji) return;
     const { data: msg } = await admin.from("outreach_messages").select("id, reactions, chat_id").eq("unipile_message_id", unipileMessageId).maybeSingle();
     if (!msg) return;
+    // the reactor is `reaction_sender`; `sender` is the author of the message that was reacted to
+    const reactor = payload.reaction_sender ?? payload.reactor ?? payload.sender ?? null;
     const ownId = payload.account_info?.user_id ?? sender.provider_user_id;
-    const byId = payload.sender?.attendee_provider_id ?? payload.reactor?.attendee_provider_id ?? payload.attendee_provider_id ?? null;
-    const by = byId && ownId && byId === ownId ? "us" : (payload.sender?.attendee_name ?? payload.reactor?.attendee_name ?? byId ?? "them");
+    const byId: string | null = reactor?.attendee_provider_id ?? payload.attendee_provider_id ?? null;
+    const ownDigits = phoneDigits(sender.public_identifier);
+    const mine = reactor?.is_self === true || reactor?.is_self === 1 || (!!byId && !!ownId && byId === ownId)
+      || (sender.provider === "WHATSAPP" && !!ownDigits && phoneDigits(whatsappPhoneOf(reactor)) === ownDigits);
+    const by = mine ? "You" : (visibleName(reactor?.attendee_name) ?? whatsappPhoneOf(reactor) ?? byId ?? "them");
     const reactions: Row[] = Array.isArray(msg.reactions) ? [...msg.reactions] : [];
-    const removed = payload.is_removed === true || payload.removed === true || payload.action === "removed";
-    const idx = reactions.findIndex((r) => r.by === by);
-    if (removed) { if (idx >= 0) reactions.splice(idx, 1); }
-    else if (idx >= 0) reactions[idx] = { emoji: String(emoji), by, at: now };
-    else reactions.push({ emoji: String(emoji), by, at: now });
+    // an empty reaction is how a removal arrives
+    const removed = !emoji || payload.is_removed === true || payload.removed === true || payload.action === "removed";
+    const idx = reactions.findIndex((r) => (mine ? r.mine === true || r.by === "us" : (byId ? r.by_id === byId : false) || (!r.by_id && r.by === by)));
+    const entry: Row = { emoji: String(emoji ?? ""), by, by_id: byId, mine, at: now };
+    if (removed) { if (idx >= 0) reactions.splice(idx, 1); else return; }
+    else if (idx >= 0) reactions[idx] = entry;
+    else reactions.push(entry);
     await admin.from("outreach_messages").update({ reactions }).eq("id", msg.id);
     await emitEvent(sender.workspace_id, "message.reaction", { message_id: msg.id, chat_id: msg.chat_id, sender_id: sender.id, emoji: String(emoji), by, removed });
     return;
@@ -532,9 +561,10 @@ async function handleMessageState(sender: Sender, payload: any, event: string): 
     if (chat) await admin.from("outreach_messages").update({ read_at: now }).eq("chat_id", chat.id).eq("direction", "out").is("read_at", null);
     return;
   }
-  // message_delivered: no dedicated column; the delivery is noted on the attachments-free `response` of the action when we can find it
+  // message_delivered: delivered_at on the message (two grey ticks), and noted on the action's `response` when there is one
   if (event === "message_delivered" && unipileMessageId) {
-    const { data: msg } = await admin.from("outreach_messages").select("id, action_id").eq("unipile_message_id", unipileMessageId).maybeSingle();
+    const { data: msg } = await admin.from("outreach_messages").select("id, action_id, delivered_at").eq("unipile_message_id", unipileMessageId).maybeSingle();
+    if (msg && !msg.delivered_at) await admin.from("outreach_messages").update({ delivered_at: now }).eq("id", msg.id);
     if (msg?.action_id) {
       const { data: a } = await admin.from("outreach_actions").select("response").eq("id", msg.action_id).maybeSingle();
       if (a && !(a.response as any)?.delivered_at) await admin.from("outreach_actions").update({ response: { ...((a.response as Row) ?? {}), delivered_at: now } }).eq("id", msg.action_id);
@@ -568,10 +598,15 @@ export async function handleMessaging(payload: any): Promise<void> {
     if (ownDigits && phoneDigits(phoneFromAttendeeId(String(id))) === ownDigits) return true;
     return false;
   };
-  const isOut = payload.is_sender === 1 || payload.is_sender === true || payload.sender?.is_self === true || sameAsUs(payload.sender?.attendee_provider_id);
-  const attendee = isOut ? (payload.attendees ?? []).find((a: any) => !sameAsUs(a.attendee_provider_id)) ?? payload.attendees?.[0] : payload.sender;
-  const attendeeProviderId = attendee?.attendee_provider_id ?? null;
-  const attendeePub = channel ? attendeeIdentity(provider, attendee).identifier : pubIdFromUrl(attendee?.attendee_profile_url);
+  // WhatsApp ids are "@lid" privacy ids now: our own attendee is recognised by its public identifier (the phone) too
+  const isSelf = (a: any): boolean => sameAsUs(a?.attendee_provider_id) || sameAsUs(a?.attendee_public_identifier);
+  const isOut = payload.is_sender === 1 || payload.is_sender === true || payload.sender?.is_self === true || isSelf(payload.sender);
+  // a WhatsApp group is named after the group and never matches / creates a lead: its senders are group members, not prospects
+  const group = provider === "WHATSAPP" && isWhatsappGroup(payload);
+  const attendee = group ? null : isOut ? (payload.attendees ?? []).find((a: any) => !isSelf(a)) ?? payload.attendees?.[0] : payload.sender;
+  const attendeeProviderId = group ? (payload.provider_chat_id ?? null) : attendee?.attendee_provider_id ?? null;
+  const attendeePub = group ? null : channel ? attendeeIdentity(provider, attendee).identifier : pubIdFromUrl(attendee?.attendee_profile_url);
+  const attendeeName = group ? visibleName(payload.subject) : visibleName(attendee?.attendee_name);
   const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).single();
   const createLeads = (ws?.settings?.create_leads_from_inbound ?? true) !== false;
 
@@ -579,9 +614,11 @@ export async function handleMessaging(payload: any): Promise<void> {
   let { data: chat } = await admin.from("outreach_chats").select("*").eq("sender_id", sender.id).eq("unipile_chat_id", unipileChatId).maybeSingle();
   let lead = chat?.lead_id
     ? { id: chat.lead_id, created: false }
-    : channel
-      ? await matchLeadByIdentity(sender.workspace_id, provider, attendeePub, attendeeProviderId, attendee?.attendee_name ?? null, createLeads && !isOut)
-      : await matchLead(sender.workspace_id, attendeeProviderId, attendeePub, attendee?.attendee_name ?? null, createLeads, attendee?.attendee_profile_url);
+    : group
+      ? null
+      : channel
+        ? await matchLeadByIdentity(sender.workspace_id, provider, attendeePub, attendeeProviderId, attendeeName, createLeads && !isOut)
+        : await matchLead(sender.workspace_id, attendeeProviderId, attendeePub, attendeeName, createLeads, attendee?.attendee_profile_url);
   if (!chat) {
     // Instagram: a new chat that sits in the Requests folder (theirs to us, or ours to them) is a message request until answered
     let isRequest = false;
@@ -591,21 +628,32 @@ export async function handleMessaging(payload: any): Promise<void> {
     }
     const row: Row = {
       workspace_id: sender.workspace_id, client_id: sender.client_id, sender_id: sender.id, lead_id: lead?.id ?? null, unipile_chat_id: unipileChatId,
-      provider: sender.provider, attendee_provider_id: attendeeProviderId, attendee_public_identifier: attendeePub, attendee_name: attendee?.attendee_name ?? null,
-      attendee_picture_url: attendee?.attendee_picture_url ?? null,
+      provider: sender.provider, attendee_provider_id: attendeeProviderId, attendee_public_identifier: attendeePub, attendee_name: attendeeName,
+      attendee_picture_url: channel ? null : attendee?.attendee_picture_url ?? null,   // channel pictures are stored by avatars.ts
     };
+    if (group) row.subject = payload.subject ?? null;
     if (isRequest) row.is_request = true;
     let { data: c, error: cErr } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
     if (cErr && isRequest) { delete row.is_request; ({ data: c } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single()); }
     chat = c;
-  } else if (!chat.lead_id && lead) {
-    await admin.from("outreach_chats").update({ lead_id: lead.id }).eq("id", chat.id);
-    chat.lead_id = lead.id;
+  } else {
+    // a chat first seen by the /chats sync often has no name / phone: the webhook's attendee fills them in
+    const patch: Row = {};
+    if (!chat.lead_id && lead) patch.lead_id = lead.id;
+    if (!visibleName(chat.attendee_name) && attendeeName) patch.attendee_name = attendeeName;
+    if (!chat.attendee_public_identifier && attendeePub) patch.attendee_public_identifier = attendeePub;
+    if (group && payload.subject && !chat.subject) patch.subject = payload.subject;
+    if (Object.keys(patch).length) {
+      await admin.from("outreach_chats").update(patch).eq("id", chat.id);
+      Object.assign(chat, patch);
+    }
   }
   if (!chat) return;
-  if (chat.provider === "LINKEDIN" && chat.attendee_picture_url == null) {
+  if (chat.attendee_picture_url == null) {
     try { await fillChatPicture({ ...chat, lead_id: chat.lead_id ?? lead?.id ?? null }); } catch (e) { log({ fn: "messaging", avatar_warn: String(e) }); }
   }
+  // system events (calls, group changes) are shown in the thread but never count as a reply
+  const isEvent = payload.is_event === 1 || payload.is_event === true;
 
   // first message in chat? (before insert)
   const { count: existing } = await admin.from("outreach_messages").select("id", { count: "exact", head: true }).eq("chat_id", chat.id);
@@ -623,7 +671,14 @@ export async function handleMessaging(payload: any): Promise<void> {
   const insertRow: Row = {
     workspace_id: sender.workspace_id, chat_id: chat.id, unipile_message_id: unipileMessageId ?? null, direction: isOut ? "out" : "in",
     text: fixMojibake(payload.message ?? null), attachments, sent_at: sentAt, is_invite_note: false,
+    quoted: quotedOf(payload.quoted ?? payload.reply_to, [...(payload.attendees ?? []), payload.sender], sameAsUs),
+    is_forwarded: payload.is_forwarded === true || payload.is_forwarded === 1,
+    event_type: isEvent ? (Number.isFinite(Number(payload.event_type)) ? Number(payload.event_type) : 0) : null,
   };
+  if (!isOut && payload.sender) {
+    insertRow.sender_name = visibleName(payload.sender.attendee_name);
+    insertRow.sender_identifier = channel ? attendeeIdentity(provider, payload.sender).identifier : null;
+  }
   if (hasVoiceNote) insertRow.transcript_status = "pending";
   let { data: msg, error: mErr } = await admin.from("outreach_messages").insert(insertRow).select("id").single();
   if (mErr && hasVoiceNote && !String(mErr.message).includes("duplicate")) { delete insertRow.transcript_status; ({ data: msg, error: mErr } = await admin.from("outreach_messages").insert(insertRow).select("id").single()); }
@@ -638,12 +693,22 @@ export async function handleMessaging(payload: any): Promise<void> {
     if (ours) await admin.from("outreach_chats").update({ is_request: false }).eq("id", chat.id);
   }
 
-  if (lead) {
+  if (lead && !isEvent) {
     await admin.from("outreach_lead_sender_state").upsert({ lead_id: lead.id, sender_id: sender.id }, { onConflict: "lead_id,sender_id", ignoreDuplicates: true });
     if (!isOut) {
       await admin.from("outreach_lead_sender_state").update({ replied: true, last_inbound_at: sentAt, unipile_chat_id: unipileChatId, updated_at: new Date().toISOString() }).eq("lead_id", lead.id).eq("sender_id", sender.id);
       // a voice note without text is classified once its transcript exists (transcribe.ts re-queues it)
       if (!hasVoiceNote || String(payload.message ?? "").trim()) await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
+      if (provider === "LINKEDIN") {
+        // their FIRST message in this conversation: queue a profile read for a lead missing company / location / work email
+        // (outreach_enrich_on_reply decides; workspace setting enrich_on_reply, default on). Later messages in a live thread
+        // bring no new profile data, so they never spend another profile view.
+        const { count: earlierIn } = await admin.from("outreach_messages").select("id", { count: "exact", head: true }).eq("chat_id", chat.id).eq("direction", "in").neq("id", msg.id);
+        if ((earlierIn ?? 0) === 0) {
+          const r = await rpc<string>("enrich_on_reply", { p_lead: lead.id, p_sender: sender.id }).catch((e) => { log({ fn: "messaging", warn: `enrich_on_reply: ${String((e as any)?.message ?? e)}` }); return null; });
+          if (r === "queued") log({ fn: "messaging", lead_id: lead.id, sender_id: sender.id, enrich_on_reply: r });
+        }
+      }
       if (channel) {
         const text = String(payload.message ?? "");
         if (isStopIntent(text)) {
@@ -779,15 +844,19 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
     for (const c of res.items ?? []) {
       const attendeeId = c.attendee_provider_id ?? null;
       if (!attendeeId) continue;
-      if (channel && /@g\.us$/i.test(String(attendeeId))) continue;   // WhatsApp groups are not conversations with a lead
-      const ident = channel ? attendeeIdentity(sender.provider, { attendee_provider_id: attendeeId, attendee_name: c.name ?? null }) : null;
+      if (sender.provider === "WHATSAPP" && isWhatsappGroup(c)) continue;   // WhatsApp groups are not conversations with a lead
+      // a 1:1 WhatsApp chat's provider_id is the other side's "<digits>@s.whatsapp.net" when the contact is not behind a "@lid"
+      const ident = channel ? attendeeIdentity(sender.provider, { attendee_provider_id: attendeeId, public_identifier: sender.provider === "WHATSAPP" ? c.provider_id : null, attendee_name: c.name ?? null }) : null;
+      const name = visibleName(c.name);
       const lead = channel
-        ? await matchLeadByIdentity(sender.workspace_id, sender.provider, ident!.identifier, ident!.providerId, c.name ?? null, false)
-        : await matchLead(sender.workspace_id, attendeeId, null, c.name ?? null, false);
+        ? await matchLeadByIdentity(sender.workspace_id, sender.provider, ident!.identifier, ident!.providerId, name, false)
+        : await matchLead(sender.workspace_id, attendeeId, null, name, false);
       const row: Row = {
         workspace_id: sender.workspace_id, client_id: sender.client_id, sender_id: sender.id, lead_id: lead?.id ?? null, unipile_chat_id: c.id, provider: sender.provider,
-        attendee_provider_id: attendeeId, attendee_public_identifier: ident?.identifier ?? null, attendee_name: c.name ?? null, subject: c.subject ?? null, unread_count: c.unread_count ?? 0, unread: (c.unread_count ?? 0) > 0,
+        attendee_provider_id: attendeeId, attendee_public_identifier: ident?.identifier ?? null, attendee_name: name, subject: c.subject ?? null, unread_count: c.unread_count ?? 0, unread: (c.unread_count ?? 0) > 0,
       };
+      // a re-sync never blanks what a webhook / name pass already filled in (an omitted column is only null on insert)
+      for (const k of ["lead_id", "attendee_public_identifier", "attendee_name", "subject"]) if (row[k] == null) delete row[k];
       if (sender.provider === "INSTAGRAM" && isRequestFolder(c)) row.is_request = true;
       let { data: chat, error: cErr } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("id, lead_id").single();
       if (cErr && row.is_request) { delete row.is_request; ({ data: chat } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("id, lead_id").single()); }
@@ -796,10 +865,24 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
         const ms = await unipile.chats.messages(c.id, { limit: 30 });
         for (const m of (ms.items ?? []).reverse()) {
           const isOut = m.is_sender === 1 || m.is_sender === true || (ownId && m.sender_id === ownId);
+          if (m.hidden === 1 || m.hidden === true) continue;   // reaction notices and other hidden rows are not messages
           const atts = (m.attachments ?? []).map((a: any) => storedAttachment(a, m.id));
+          const sentAt = m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString();
+          const reactions = (Array.isArray(m.reactions) ? m.reactions : []).filter((r: any) => r?.value).map((r: any) => {
+            const mine = r.is_sender === 1 || r.is_sender === true;
+            return { emoji: String(r.value), by: mine ? "You" : "them", by_id: r.sender_id ?? null, mine, at: sentAt };
+          });
           const { data: ins, error } = await admin.from("outreach_messages").insert({
             workspace_id: sender.workspace_id, chat_id: chat.id, unipile_message_id: m.id, direction: isOut ? "out" : "in", text: fixMojibake(m.text ?? null),
-            attachments: atts, sent_at: m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString(),
+            attachments: atts, sent_at: sentAt,
+            quoted: quotedOf(m.quoted ?? m.reply_to, [], (id) => !!ownId && id === ownId),
+            is_forwarded: m.is_forwarded === 1 || m.is_forwarded === true,
+            event_type: m.is_event === 1 || m.is_event === true ? (Number(m.event_type) || 0) : null,
+            reactions,
+            ...(isOut && (m.seen === 1 || m.seen === true) ? { read_at: sentAt } : {}),
+            ...(isOut && (m.delivered === 1 || m.delivered === true) ? { delivered_at: sentAt } : {}),
+            ...(m.edited === 1 || m.edited === true ? { edited_at: sentAt } : {}),
+            ...(m.deleted === 1 || m.deleted === true ? { deleted_at: sentAt } : {}),
           }).select("id").maybeSingle();
           if (!error) {
             inserted++;
@@ -810,7 +893,7 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
         if (chat.lead_id) {
           const last = ms.items?.[0];
           if (last) {
-            const lastIn = (ms.items ?? []).find((m: any) => !(m.is_sender === 1 || m.is_sender === true || (ownId && m.sender_id === ownId)));
+            const lastIn = (ms.items ?? []).find((m: any) => !(m.is_sender === 1 || m.is_sender === true || (ownId && m.sender_id === ownId)) && !(m.is_event === 1 || m.is_event === true));
             await admin.from("outreach_lead_sender_state").upsert({ lead_id: chat.lead_id, sender_id: sender.id }, { onConflict: "lead_id,sender_id", ignoreDuplicates: true });
             // LinkedIn: a chat means a first-degree connection. Instagram / WhatsApp have no connection graph: only the chat id is recorded.
             await admin.from("outreach_lead_sender_state").update({ unipile_chat_id: c.id, ...(channel ? {} : { relation: "first" }), ...(lastIn ? { last_inbound_at: new Date(lastIn.timestamp).toISOString() } : {}) }).eq("lead_id", chat.lead_id).eq("sender_id", sender.id);
@@ -832,20 +915,26 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
 export async function resolveChatNames(sender: Sender, max = 40): Promise<{ checked: number; named: number; linked: number }> {
   const channel = CHANNEL(sender.provider);
   if (!sender.unipile_account_id || !unipileConfigured() || (sender.provider !== "LINKEDIN" && !channel)) return { checked: 0, named: 0, linked: 0 };
-  const { data: chats } = await admin.from("outreach_chats").select("id, unipile_chat_id, attendee_provider_id, lead_id").eq("sender_id", sender.id).is("attendee_name", null).not("unipile_chat_id", "is", null).order("last_message_at", { ascending: false, nullsFirst: false }).limit(max);
+  // WhatsApp: a named chat can still miss its phone (a "@lid" contact), so those are revisited too; groups are left alone
+  let q = admin.from("outreach_chats").select("id, unipile_chat_id, attendee_provider_id, attendee_name, attendee_public_identifier, lead_id").eq("sender_id", sender.id).not("unipile_chat_id", "is", null);
+  q = sender.provider === "WHATSAPP" ? q.or("attendee_name.is.null,attendee_public_identifier.is.null").not("attendee_provider_id", "like", "%@g.us") : q.is("attendee_name", null);
+  const { data: chats } = await q.order("last_message_at", { ascending: false, nullsFirst: false }).limit(max);
   let named = 0, linked = 0;
   for (const c of chats ?? []) {
     try {
       const res = await unipile.chats.attendees(c.unipile_chat_id);
       const items = res.items ?? [];
       const a = items.find((x: any) => x.provider_id === c.attendee_provider_id) ?? items.find((x: any) => !(x.is_self === 1 || x.is_self === true) && x.provider_id !== sender.provider_user_id);
-      const name = a?.name ?? a?.display_name ?? null;
-      if (!name) continue;
+      const name = visibleName(a?.name ?? a?.display_name ?? null);
       const ident = channel ? attendeeIdentity(sender.provider, { ...a, attendee_provider_id: a?.provider_id ?? c.attendee_provider_id }) : null;
       const pub = channel ? ident!.identifier : (pubIdFromUrl(a?.profile_url ?? a?.public_profile_url ?? null) ?? a?.public_identifier ?? null);
-      const patch: Record<string, unknown> = { attendee_name: name };
-      if (pub) patch.attendee_public_identifier = pub;
-      if (a?.picture_url) patch.attendee_picture_url = a.picture_url;
+      if (!name && !pub) continue;
+      const patch: Record<string, unknown> = {};
+      if (name && !visibleName(c.attendee_name)) patch.attendee_name = name;
+      if (pub && !c.attendee_public_identifier) patch.attendee_public_identifier = pub;
+      if (!Object.keys(patch).length) continue;
+      // WhatsApp / Instagram picture links expire: avatars.ts stores those pictures instead
+      if (a?.picture_url && !channel) patch.attendee_picture_url = a.picture_url;
       if (!c.lead_id) {
         const lead = channel
           ? await matchLeadByIdentity(sender.workspace_id, sender.provider, pub, ident!.providerId ?? c.attendee_provider_id, name, false)

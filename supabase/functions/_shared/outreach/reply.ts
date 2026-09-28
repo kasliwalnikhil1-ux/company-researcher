@@ -18,6 +18,8 @@ export interface ReplyInput {
   subject?: string;
   attachments?: string[];
   booking?: boolean;
+  /** Our id of the message this reply quotes (WhatsApp "reply"); sent as the connector's quote_id. */
+  quote_message_id?: string;
   /** Set for API keys: narrows the member's rights to the key's role and client scope. */
   scope?: { workspaceId: string; role: Role; clientIds: string[] };
 }
@@ -36,7 +38,7 @@ function bookingLink(base: string, leadId: string | null): string {
 }
 
 export async function sendReply(input: ReplyInput): Promise<Record<string, unknown> | null> {
-  if (!input.chat_id || (!input.text?.trim() && !input.booking)) throw new HttpError(400, "E_PAYLOAD_INVALID", "chat_id and text required");
+  if (!input.chat_id || (!input.text?.trim() && !input.booking && !input.attachments?.length)) throw new HttpError(400, "E_PAYLOAD_INVALID", "chat_id and text (or an attachment) required");
   const { data: chat } = await admin.from("outreach_chats").select("*, outreach_senders(*)").eq("id", input.chat_id).maybeSingle();
   if (!chat) throw new HttpError(404, "E_NOT_FOUND");
   const m = await membership(input.userId, chat.workspace_id);
@@ -71,17 +73,31 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     idempotency_key: key, payload: { text, by: input.userId, ...(bookingUrl ? { booking: true } : {}) },
   }).select("*").single();
 
+  // the quoted message must belong to this chat and be known to the connector
+  let quoted: Record<string, unknown> | null = null;
+  if (input.quote_message_id && CHAT_PROVIDERS.includes(sender.provider)) {
+    const { data: q } = await admin.from("outreach_messages").select("id, unipile_message_id, text, direction, sender_name, attachments").eq("id", input.quote_message_id).eq("chat_id", chat.id).maybeSingle();
+    if (!q?.unipile_message_id) throw new HttpError(400, "E_PAYLOAD_INVALID", "that message cannot be replied to");
+    const att = Array.isArray(q.attachments) ? (q.attachments[0] as Record<string, unknown> | undefined) : undefined;
+    quoted = { unipile_message_id: q.unipile_message_id, text: q.text ? String(q.text).slice(0, 500) : null, sender_name: q.direction === "out" ? "You" : (q.sender_name ?? chat.attendee_name ?? null), attachment_type: att?.type ?? null };
+  }
+
   const attachments: Blob[] = [];
+  const stored: Array<Record<string, unknown>> = [];
   for (const path of input.attachments ?? []) {
     if (!path.startsWith(`${chat.workspace_id}/`)) continue;
     const { data: blob } = await admin.storage.from("outreach-attachments").download(path);
-    if (blob) attachments.push(new File([blob], path.split("/").pop() ?? "attachment", { type: blob.type }));
+    if (!blob) continue;
+    const name = path.split("/").pop() ?? "attachment";
+    attachments.push(new File([blob], name, { type: blob.type }));
+    // type + size kept so the thread renders a sent image / video inline after a refetch
+    stored.push({ id: path, storage: true, name: name.replace(/^\d+-/, ""), type: blob.type || null, mimetype: blob.type || null, size: blob.size });
   }
   try {
     let messageId: string | null = null;
     let html: string | null = null;
     if (CHAT_PROVIDERS.includes(sender.provider)) {
-      const r = await unipile.chats.send(chat.unipile_chat_id, { account_id: sender.unipile_account_id, text, attachments });
+      const r = await unipile.chats.send(chat.unipile_chat_id, { account_id: sender.unipile_account_id, text, attachments, quote_id: (quoted?.unipile_message_id as string | undefined) ?? undefined });
       messageId = r.message_id ?? null;
     } else {
       // email thread reply: reply to the last message in the thread
@@ -95,7 +111,7 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
       const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: chat.attendee_name ?? undefined }], subject: input.subject ?? (chat.subject ? (chat.subject.startsWith("Re:") ? chat.subject : `Re: ${chat.subject}`) : undefined), body: html, reply_to: last?.unipile_message_id ?? undefined, attachments, ...(track ? { tracking_options: { opens: true, links: true, label: `reply:${action.id}` } } : {}) });
       messageId = r.provider_id ?? r.tracking_id ?? null;
     }
-    const { data: msg } = await admin.from("outreach_messages").insert({ workspace_id: chat.workspace_id, chat_id: chat.id, unipile_message_id: messageId, direction: "out", text, html, sent_at: new Date().toISOString(), action_id: action.id, sent_by: input.userId, attachments: (input.attachments ?? []).map((p) => ({ id: p, storage: true, name: p.split("/").pop() })) }).select("*").single();
+    const { data: msg } = await admin.from("outreach_messages").insert({ workspace_id: chat.workspace_id, chat_id: chat.id, unipile_message_id: messageId, direction: "out", text, html, sent_at: new Date().toISOString(), action_id: action.id, sent_by: input.userId, attachments: stored, quoted }).select("*").single();
     await admin.from("outreach_actions").update({ status: "sent", executed_at: new Date().toISOString(), response: { message_id: messageId } }).eq("id", action.id);
     await admin.from("outreach_chats").update({ unread: false, unread_count: 0, archived: false }).eq("id", chat.id);
     // Instagram: answering a message request accepts it; the thread is no longer a request

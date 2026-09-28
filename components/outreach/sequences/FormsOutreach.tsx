@@ -39,16 +39,24 @@ export function AiBriefField({ cfg, set, what }: { cfg: Record<string, any>; set
   );
 }
 
-export function SendInviteForm({ node, cfg, set, patch }: FormProps) {
+export function SendInviteForm({ node, cfg, set, patch, update }: FormProps) {
   const { poolSenders } = useBuilder();
   const hasFree = poolSenders.some((s) => s.provider === 'LINKEDIN' && !s.is_premium);
   const limit = hasFree ? TEXT_LIMITS.invite_note_free : TEXT_LIMITS.invite_note;
+  const openProfile = cfg.open_profile_inmail === true;
+  const setOpenProfile = (v: boolean) => update(syncNodeBranches({ ...node, config: { ...cfg, open_profile_inmail: v || undefined } }));
   return (
     <div className="space-y-3">
       <VariantEditor node={node} cfg={cfg} patch={patch} textKey="note" label="Invitation note" max={limit} rows={5} placeholder="Hi {{first_name|there}}, …"
         hint={hasFree ? 'The limit is 200 characters because a free LinkedIn account is in the pool. Premium accounts allow 300.' : 'Premium accounts allow 300 characters. Free accounts allow 200.'} />
       <Toggle checked={!!cfg.require_note_for_free} onChange={(v) => set('require_note_for_free', v)} label="Require the note for free accounts" />
       <Note>Free LinkedIn accounts have a small monthly quota of invitations with notes. When off, the note is dropped for free senders once the quota is exhausted instead of failing.</Note>
+      <Toggle checked={openProfile} onChange={setOpenProfile} label="Send Open Profile leads an InMail instead" />
+      <Note>
+        Anyone can message an Open Profile, and the InMail costs no credits. These leads skip the invitation and the wait for it, so they
+        do not use the daily invitation allowance. InMails have their own allowance (up to 50 a day per sender, fewer while an account warms up).
+        {openProfile ? <> Add a <span className="font-medium">Send InMail</span> step under the <span className="font-medium">Open Profile</span> exit. Until something is connected there, Open Profile leads get the invitation like everyone else.</> : ''}
+      </Note>
       <AiBriefField cfg={cfg} set={set} what="note" />
     </div>
   );

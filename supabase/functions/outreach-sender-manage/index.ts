@@ -4,6 +4,7 @@ import { admin, json, serve, requireUser, membership, requireRole, readJson, Htt
 import { encrypt } from "../_shared/outreach/crypto.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
 import { reconnectLink, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames } from "../_shared/outreach/inbound.ts";
+import { backfillChatPictures } from "../_shared/outreach/avatars.ts";
 import { healthForSender } from "../_shared/outreach/health.ts";
 import { planSender } from "../_shared/outreach/planner.ts";
 import { reconnectSender } from "../_shared/outreach/workers.ts";
@@ -79,6 +80,9 @@ serve("sender-manage", async (req) => {
     }
     case "resolve_chat_names": {
       return json({ ok: true, ...(await resolveChatNames(s, 100)) });
+    }
+    case "fill_chat_pictures": {
+      return json({ ok: true, found: await backfillChatPictures(60, s.id) });
     }
     case "recompute_health": {
       const h = await healthForSender(s.id, "nightly");

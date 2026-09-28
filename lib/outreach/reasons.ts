@@ -10,6 +10,7 @@ const DECISIONS: Record<string, string> = {
   bounced: 'Email bounced',
   no_email: 'No email address',
   no_credit: 'No InMail credit',
+  open_profile: 'Open Profile: InMail instead of an invitation',
   error: 'Failed',
   branch: 'Took a branch',
   suppressed: 'On the do-not-contact list',
@@ -123,6 +124,7 @@ export function reasonText(code: string | null | undefined, decision?: string | 
   if (has('already_invited_recently') || has('cannot_resend') || c === 'invitation_pending') return 'An invitation is already pending or was sent recently';
   if (has('already_connected')) return 'Already connected, so the invitation was skipped';
   if (has('insufficient_credits') || has('not_allowed_inmail') || c === 'not_open_profile') return 'No InMail credit for this lead';
+  if (c === 'open_profile') return 'Open Profile: the lead got an InMail instead of an invitation';
   if (c === 'no_recent_post') return 'The lead has no recent post to react to';
   if (c === 'no_skills') return 'No skills to endorse on the profile';
   if (c === 'no_voice_clip') return 'This sender has not recorded a voice note for the step';

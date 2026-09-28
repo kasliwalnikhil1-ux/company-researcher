@@ -74,6 +74,8 @@ const TOGGLES: ToggleDef[] = [
     description: 'Uses the pipeline stage whose kind is "Interested". A lead never moves backwards: someone already at Meeting or Won stays there.' },
   { key: 'enrich_on_import', defaultValue: false, label: 'Enrich imported leads automatically',
     description: <>Fetches the full LinkedIn profile of new leads in the background. It only spends leftover profile views, never more than 30% of a sender&apos;s daily allowance, and never on a sender at warm-up level 0 or 1. Sequences always come first.</> },
+  { key: 'enrich_on_reply', defaultValue: true, label: 'Fetch LinkedIn profile details when a lead first replies',
+    description: <>When a lead replies on LinkedIn for the first time and their company, location or work email is missing, their profile is read once. Later messages in the same conversation do not trigger another read. Each read uses one profile view from the sender they replied to, taken only from views left over after the day&apos;s sequence steps. Turn this off if many senders get a lot of replies and you would rather keep those views.</> },
   { key: 'track_replies', defaultValue: false, label: 'Track opens and clicks on manual replies',
     description: 'Off by default. A one-to-one reply does not need a tracking pixel, and it can hurt deliverability. Sequence emails are tracked either way. A mailbox can override this in its own settings.' },
   { key: 'create_leads_from_inbound', defaultValue: true, label: 'Create leads from inbound messages',

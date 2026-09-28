@@ -80,6 +80,11 @@ export function editWindowRemainingMs(sentAt: string, now: number): number {
   return EDIT_WINDOW_MS - (now - new Date(sentAt).getTime());
 }
 
+/** Whether a message sent at `sentAt` is still inside the longest (60-minute) edit window right now. */
+export function inEditWindowNow(sentAt: string): boolean {
+  return editWindowRemainingMs(sentAt, Date.now()) > 0;
+}
+
 export function fmtRemaining(ms: number): string {
   const m = Math.max(0, Math.ceil(ms / 60_000));
   return m >= 1 ? `${m}m left` : '<1m left';

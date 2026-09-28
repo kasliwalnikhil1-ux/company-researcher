@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc } from './api';
 import type { ChatFilters, LeadFilters } from './queries';
-import type { ActionType, Chat, Enrollment, JobStatus, Lead, Sender } from './types';
+import type { ActionType, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -134,6 +134,8 @@ export interface SnOptions { saved_searches: SnOption[]; lead_lists: SnOption[] 
 
 export type TimeInRole = '' | 'lt6' | '6to12' | '1to3' | 'gt3';
 export interface IntelLeadFilters {
+  /** Leads reachable on this channel: LinkedIn = has a LinkedIn slug, others = has an identity on that provider. */
+  channel?: Provider | null;
   enriched?: boolean | null;
   replied?: boolean | null;
   posted_30d?: boolean | null;
@@ -299,7 +301,11 @@ export function useLeadsIntel(ws: string | null | undefined, f: LeadListFilters)
       const page = f.page ?? 0; const size = f.pageSize ?? 50;
       const inner = needsProfileJoin(f);
       const P = 'outreach_lead_profiles';
-      let q = supabase.from('outreach_leads').select(`*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS})`, { count: 'exact' }).eq('workspace_id', ws!);
+      // LinkedIn lives on the lead itself; Instagram / WhatsApp only as identity rows, so those need an inner join.
+      const identityJoin = f.channel && f.channel !== 'LINKEDIN';
+      let q = supabase.from('outreach_leads').select(`*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS})${identityJoin ? ', outreach_lead_identities!inner(provider)' : ''}`, { count: 'exact' }).eq('workspace_id', ws!);
+      if (f.channel === 'LINKEDIN') q = q.not('public_identifier', 'is', null);
+      else if (identityJoin) q = q.eq('outreach_lead_identities.provider', f.channel!);
       const search = f.search ? cleanSearch(f.search) : '';
       if (search) q = q.or(`full_name.ilike.%${search}%,company.ilike.%${search}%,headline.ilike.%${search}%,public_identifier.ilike.%${search}%,email_work.ilike.%${search}%`);
       if (f.client_id) q = q.eq('client_id', f.client_id);

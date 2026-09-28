@@ -41,7 +41,8 @@ function above(g: Graph, source: string, exit: string): Above {
     seen.add(cur.id);
     const n: GraphNode | undefined = g.nodes[cur.id];
     if (!n) continue;
-    types.add(n.type);
+    // an invitation left through its "Open Profile" exit was never sent: that path has no invitation above it
+    if (!(n.type === 'send_invite' && cur.exit === 'open_profile')) types.add(n.type);
     if (!connection) connection = branchConnectionFact(n, cur.exit);
     if (!switchedTo && n.type === 'channel_switch' && cur.exit === 'next' && CHANNEL_PROVIDERS.includes(n.config?.to_channel)) switchedTo = n.config!.to_channel as Provider;
     for (const p of parents.get(cur.id) ?? []) queue.push(p);
@@ -69,6 +70,7 @@ export function allowedNext(g: Graph, source: string, exit: string, poolProvider
   const has = (t: NodeType) => up.types.has(t);
   const first = src?.type === 'start';
   const afterNoConnect = src?.type === 'wait_connection' && exit === 'no_connect';
+  const openProfile = src?.type === 'send_invite' && exit === 'open_profile';
   const connected = up.connection === 'connected';          // proven by a wait's "connected" exit or an "Already connected?" branch
   const notConnected = up.connection === 'not_connected';   // proven the other way round
   const invited = has('send_invite');
@@ -114,7 +116,8 @@ export function allowedNext(g: Graph, source: string, exit: string, poolProvider
         else if (withdrawn) reason = 'The invitation was already withdrawn on this path';
         break;
       case 'send_invite':
-        if (connected) reason = 'The lead is already connected on this branch. Use “Send message”';
+        if (openProfile) reason = 'Open Profile leads skip the invitation on this branch. Use “Send InMail”';
+        else if (connected) reason = 'The lead is already connected on this branch. Use “Send message”';
         else if (invited && !withdrawn) reason = 'An invitation was already sent on this path. Withdraw it before sending another';
         break;
       case 'follow_profile':

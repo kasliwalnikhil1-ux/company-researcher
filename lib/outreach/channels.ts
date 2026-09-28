@@ -22,6 +22,17 @@ export function channelLabel(provider: Provider | string | null | undefined): st
   return CHANNEL_LABELS[provider as Provider] ?? String(provider);
 }
 
+/** A display name with nothing visible in it (WhatsApp's "⠀" Braille blank, zero-width / filler characters) is no name. */
+export function visibleName(v: string | null | undefined): string | null {
+  const s = String(v ?? '').trim();
+  return s.replace(/[\s⠀​-‏⁠﻿ㅤᅟᅠ]/g, '') ? s : null;
+}
+
+/** The inbox title of a chat: contact name, lead name, then the phone / handle, then a group's subject. */
+export function chatTitle(c: { attendee_name?: string | null; attendee_public_identifier?: string | null; subject?: string | null; outreach_leads?: { full_name?: string | null } | null }): string {
+  return visibleName(c.attendee_name) || visibleName(c.outreach_leads?.full_name) || c.attendee_public_identifier || visibleName(c.subject) || 'Unknown';
+}
+
 export function isMailProvider(provider: Provider | string | null | undefined): boolean {
   return !!provider && (MAIL_PROVIDERS as string[]).includes(provider);
 }

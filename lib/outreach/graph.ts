@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { AbBranch, AiRouteOption, ConditionRule, Graph, GraphNode, MessageVariant, NodeStats, NodeType, Provider } from './types';
 import { AI_ROUTE_ELSE, CALL_OUTCOMES, CHANNEL_PROVIDERS, MAX_VARIANTS } from './types';
-import { EXECUTABLE_TYPES, MESSAGE_TYPES, NODE_CATALOG, TEXT_LIMITS, VARIANT_TEXT_KEY, WAIT_TYPES, messageTextLimit, nodeChannels, nodeExits } from './nodes';
+import { EXECUTABLE_TYPES, MESSAGE_TYPES, NODE_CATALOG, OPTIONAL_EXIT_TYPES, optionalExit, TEXT_LIMITS, VARIANT_TEXT_KEY, WAIT_TYPES, messageTextLimit, nodeChannels, nodeExits } from './nodes';
 import { spintaxInfo } from './render';
 
 export { nodeExits, exitLabel, syncNodeBranches } from './nodes';
@@ -425,15 +425,17 @@ export function graphEdges(graph: Graph): Array<{ id: string; source: string; ta
  * Idempotent, returns the same object when nothing changes.
  */
 export function normalizeNode(n: GraphNode): GraphNode {
-  if (MESSAGE_TYPES.includes(n.type)) {
-    // A message keeps its onward step in `next` (the engine reads it when the message completes). While the optional
-    // "no chat" exit exists the canvas wires through branches, so branches.next wins and is mirrored back; a "no chat"
-    // exit with nothing connected is dropped (the engine then skips the step for leads with no conversation).
+  if (OPTIONAL_EXIT_TYPES.includes(n.type)) {
+    // A message (or invitation) keeps its onward step in `next` (the engine reads it when the step completes). While the
+    // optional "no chat" / "Open Profile" exit exists the canvas wires through branches, so branches.next wins and is
+    // mirrored back; an optional exit with nothing connected is dropped (the engine then skips the step for leads with no
+    // conversation, or sends Open Profile leads the invitation like everyone else).
     if (!n.branches) return n;
     const onward = 'next' in n.branches ? n.branches.next ?? null : n.next ?? null;
-    if (nodeExits(n).length === 1) { const { branches: _b, ...rest } = n; return { ...rest, next: onward }; }
+    const extra = optionalExit(n);
+    if (!extra) { const { branches: _b, ...rest } = n; return { ...rest, next: onward }; }
     const branches: Record<string, string | null> = { next: onward };
-    if (n.branches.no_chat) branches.no_chat = n.branches.no_chat;
+    if (n.branches[extra]) branches[extra] = n.branches[extra];
     if ((n.next ?? null) === onward && JSON.stringify(n.branches) === JSON.stringify(branches)) return n;
     return { ...n, next: onward, branches };
   }

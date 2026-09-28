@@ -27,7 +27,13 @@ SKILLS_DIR = os.path.join(ROOT, "claude-skill")
 FUNCTIONS_DIR = os.path.join(ROOT, "supabase", "functions")
 PLUGIN_DIR = os.path.join(ROOT, "chatgpt-plugin")
 FUNCTIONS_BASE = "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1"
-WEB = "https://app.capitalxai.com"
+# Brand links per connector; mirror supabase/functions/_shared/brands.ts (only the investor connector is CapitalxAI).
+BRANDS = {
+    "capitalxai": {"developer": "CapitalxAI", "web": "https://app.capitalxai.com", "privacy": "https://capitalxai.com/privacy", "terms": "https://capitalxai.com/terms"},
+    "growthxai": {"developer": "GrowthxAI", "web": "https://app.growthxai.com", "privacy": "https://growthxai.com/legal/privacy/", "terms": "https://growthxai.com/legal/terms/"},
+}
+WEB = BRANDS["capitalxai"]["web"]
+GX_WEB = BRANDS["growthxai"]["web"]
 VERSION = f"{date.today().year}.{date.today().month}.{date.today().day}"
 BACKSLASH = chr(92)
 
@@ -36,6 +42,7 @@ FUNCTIONS = {
     "capitalxai-mcp": ["capitalxai", "capitalxai-admin"],
     "crm-mcp": ["crm"],
     "smartlead-mcp": ["smartlead"],
+    "outreach-mcp": ["outreach"],
 }
 
 PLUGINS = [
@@ -43,29 +50,37 @@ PLUGINS = [
         "name": "capitalxai", "skill": "capitalxai", "fn": "capitalxai-mcp", "server": "capitalxai",
         "display": "CapitalxAI", "short": "Investor database and investor-fit analysis",
         "long": "Search the CapitalxAI investor database (firms and people) and recent funding rounds, and run the app's investor-fit analysis for your company.",
-        "homepage": WEB, "capabilities": ["Read", "Write"], "keywords": ["fundraising", "investors", "venture capital"],
+        "brand": "capitalxai", "homepage": WEB, "capabilities": ["Read", "Write"], "keywords": ["fundraising", "investors", "venture capital"],
         "prompts": ["Find seed-stage fintech investors in India", "Analyze accel.com for my company", "Show this week's new fundings"],
     },
     {
         "name": "capitalxai-admin", "skill": "capitalxai-admin", "fn": "capitalxai-mcp", "server": "capitalxai",
         "display": "CapitalxAI Admin", "short": "Maintain the CapitalxAI investor database (admins only)",
         "long": "Research investors and add or update them, record funding rounds, merge duplicates and find verified emails. For CapitalxAI admin accounts only; do not share with other users.",
-        "homepage": WEB, "capabilities": ["Read", "Write"], "keywords": ["fundraising", "investors", "admin"],
+        "brand": "capitalxai", "homepage": WEB, "capabilities": ["Read", "Write"], "keywords": ["fundraising", "investors", "admin"],
         "prompts": ["Research sequoiacap.com and add it", "Run the new-fundings sweep", "Fill missing emails for 10 people"],
     },
     {
         "name": "capitalxai-crm", "skill": "crm", "fn": "crm-mcp", "server": "capitalxai-crm",
         "display": "CapitalxAI Sales CRM", "short": "Standup brief, one-minute meeting capture, call coaching",
         "long": "The studio's sales CRM: read the daily standup, capture a meeting from a few words or its recording, coach every call, and answer pipeline questions.",
-        "homepage": f"{WEB}/crm", "capabilities": ["Read", "Write"], "keywords": ["crm", "sales", "standup", "call coaching"],
+        "brand": "growthxai", "homepage": f"{GX_WEB}/crm", "capabilities": ["Read", "Write"], "keywords": ["crm", "sales", "standup", "call coaching"],
         "prompts": ["Who are we meeting today?", "We just finished the GrowthX call: they need realism, quoted 40K for 8 videos", "Coach my last call"],
     },
     {
         "name": "capitalxai-smartlead", "skill": "smartlead", "fn": "smartlead-mcp", "server": "capitalxai-smartlead",
         "display": "CapitalxAI Smartlead", "short": "Cold-email campaigns, replies and mailbox health",
         "long": "Run Smartlead cold email through guarded tools: morning digest, burn check, reply triage and copy iteration, with confirmation before anything sends or changes.",
-        "homepage": WEB, "capabilities": ["Read", "Write"], "keywords": ["cold email", "smartlead", "outreach"],
+        "brand": "growthxai", "homepage": GX_WEB, "capabilities": ["Read", "Write"], "keywords": ["cold email", "smartlead", "outreach"],
         "prompts": ["Morning digest", "Are any mailboxes burning?", "Triage today's replies"],
+    },
+    {
+        "name": "growthxai-outreach", "skill": "outreach", "fn": "outreach-mcp", "server": "growthxai-outreach",
+        "display": "GrowthxAI Outreach", "short": "Triage replies, build campaigns and check sender health",
+        "long": "Work in your GrowthxAI Outreach workspace by chatting: triage the inbox, build and edit sequences, import and clean lists, check sender health, diagnose why nothing is sending, and pull client reports. Everything that sends or changes many records asks for your yes first.",
+        "homepage": GX_WEB, "capabilities": ["Read", "Write"], "keywords": ["outreach", "linkedin", "email", "sequences", "inbox"],
+        "prompts": ["Any pending replies?", "Why isn't anything sending?", "Give me a client report for last month"],
+        "brand": "growthxai",
     },
 ]
 
@@ -158,15 +173,16 @@ def write_plugin(p):
     if os.path.isfile(logo):
         shutil.copyfile(logo, os.path.join(out, "assets", "logo.png"))
 
+    brand = BRANDS[p["brand"]]
     manifest = {
         "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
         "name": p["name"], "version": VERSION, "description": p["long"],
-        "author": {"name": "CapitalxAI", "url": WEB},
+        "author": {"name": brand["developer"], "url": brand["web"]},
         "homepage": p["homepage"], "keywords": p["keywords"],
         "extensions": {"com.openai": {"interface": {
             "displayName": p["display"], "shortDescription": p["short"], "longDescription": p["long"],
-            "developerName": "CapitalxAI", "category": "Productivity", "capabilities": p["capabilities"],
-            "websiteURL": p["homepage"], "privacyPolicyURL": "https://capitalxai.com/privacy", "termsOfServiceURL": "https://capitalxai.com/terms",
+            "developerName": brand["developer"], "category": "Productivity", "capabilities": p["capabilities"],
+            "websiteURL": p["homepage"], "privacyPolicyURL": brand["privacy"], "termsOfServiceURL": brand["terms"],
             "defaultPrompt": p["prompts"], "composerIcon": "./assets/logo.png", "logo": "./assets/logo.png",
         }}},
     }

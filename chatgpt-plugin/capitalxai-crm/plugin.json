@@ -4,10 +4,10 @@
   "version": "2026.9.28",
   "description": "The studio's sales CRM: read the daily standup, capture a meeting from a few words or its recording, coach every call, and answer pipeline questions.",
   "author": {
-    "name": "CapitalxAI",
-    "url": "https://app.capitalxai.com"
+    "name": "GrowthxAI",
+    "url": "https://app.growthxai.com"
   },
-  "homepage": "https://app.capitalxai.com/crm",
+  "homepage": "https://app.growthxai.com/crm",
   "keywords": [
     "crm",
     "sales",
@@ -20,15 +20,15 @@
         "displayName": "CapitalxAI Sales CRM",
         "shortDescription": "Standup brief, one-minute meeting capture, call coaching",
         "longDescription": "The studio's sales CRM: read the daily standup, capture a meeting from a few words or its recording, coach every call, and answer pipeline questions.",
-        "developerName": "CapitalxAI",
+        "developerName": "GrowthxAI",
         "category": "Productivity",
         "capabilities": [
           "Read",
           "Write"
         ],
-        "websiteURL": "https://app.capitalxai.com/crm",
-        "privacyPolicyURL": "https://capitalxai.com/privacy",
-        "termsOfServiceURL": "https://capitalxai.com/terms",
+        "websiteURL": "https://app.growthxai.com/crm",
+        "privacyPolicyURL": "https://growthxai.com/legal/privacy/",
+        "termsOfServiceURL": "https://growthxai.com/legal/terms/",
         "defaultPrompt": [
           "Who are we meeting today?",
           "We just finished the GrowthX call: they need realism, quoted 40K for 8 videos",

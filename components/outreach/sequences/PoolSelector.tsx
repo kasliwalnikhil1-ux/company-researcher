@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronDown, Users } from 'lucide-react';
+import { ChevronDown, Search, Users, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Avatar, Button, StatusPill } from '@/components/outreach/ui';
 import type { Sender } from '@/lib/outreach/types';
@@ -31,7 +31,8 @@ export default function PoolSelector({ pool, senders, onChange, disabled, live }
   const [open, setOpen] = useState(false);
   const [staged, setStaged] = useState<string[]>(pool);
   const [review, setReview] = useState<string[] | null>(null);
-  useEffect(() => { if (!open) setStaged(pool); }, [pool, open]);
+  const [q, setQ] = useState('');
+  useEffect(() => { if (!open) { setStaged(pool); setQ(''); } }, [pool, open]);
 
   const current = live ? staged : pool;
   const selected = pool.map((id) => senders.find((s) => s.id === id)).filter(Boolean) as Sender[];
@@ -42,6 +43,11 @@ export default function PoolSelector({ pool, senders, onChange, disabled, live }
     if (live) setStaged(next); else onChange(next);
   };
   const close = () => setOpen(false);
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? senders.filter((s) => [s.display_name, s.owner_email, s.public_identifier, s.provider, s.is_premium ? 'premium' : 'free']
+      .some((v) => v?.toLowerCase().includes(needle)))
+    : senders;
 
   return (
     <div className="relative">
@@ -64,9 +70,19 @@ export default function PoolSelector({ pool, senders, onChange, disabled, live }
         <>
           <div className="fixed inset-0 z-20" onClick={close} />
           <div className="absolute z-30 mt-1 w-80 max-w-[90vw] bg-white border border-gray-200 rounded-lg shadow-lg flex flex-col max-h-96" onKeyDown={(e) => { if (e.key === 'Escape') close(); }}>
+            {senders.length > 0 && (
+              <div className="p-2 border-b border-gray-100">
+                <label className="relative block">
+                  <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search senders" aria-label="Search senders" className="w-full pl-8 pr-7 py-1.5 text-sm rounded-lg border border-gray-200 bg-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  {q && <button type="button" onClick={() => setQ('')} className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-400 hover:text-gray-600" aria-label="Clear search" title="Clear search"><X className="w-3.5 h-3.5" /></button>}
+                </label>
+              </div>
+            )}
             <div className="py-1 overflow-y-auto" role="listbox" aria-multiselectable="true">
               {senders.length === 0 && <p className="px-3 py-3 text-xs text-gray-500">No senders connected yet. Connect one under Senders.</p>}
-              {senders.map((s) => {
+              {senders.length > 0 && shown.length === 0 && <p className="px-3 py-3 text-xs text-gray-500">No senders match “{q.trim()}”.</p>}
+              {shown.map((s) => {
                 const selectable = s.status === 'ok';
                 const checked = current.includes(s.id);
                 const reason = s.status_reason || STATUS_REASON[s.status] || s.status;

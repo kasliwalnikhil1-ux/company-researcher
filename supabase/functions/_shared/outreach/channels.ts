@@ -142,6 +142,35 @@ export function phoneFromAttendeeId(attendeeId: string | null | undefined): stri
   return m ? `+${m[1]}` : null;
 }
 
+/**
+ * E.164 of a WhatsApp attendee (webhook sender / attendee, or a /chats/{id}/attendees item). WhatsApp now hands out
+ * privacy ids ("<n>@lid") as the provider id; the phone then sits on the public identifier ("<digits>@s.whatsapp.net")
+ * or on specifics.phone_number. null when none of them carries a number.
+ */
+export function whatsappPhoneOf(a: any): string | null {
+  if (!a) return null;
+  for (const id of [a.attendee_provider_id, a.provider_id, a.attendee_public_identifier, a.public_identifier, a.specifics?.public_identifier]) {
+    const p = phoneFromAttendeeId(id);
+    if (p) return p;
+  }
+  const raw = a.attendee_specifics?.phone_number ?? a.specifics?.phone_number ?? a.phone_number ?? null;
+  const d = raw ? phoneDigits(raw) : "";
+  return d.length >= 6 ? `+${d}` : null;
+}
+
+/** Whether a WhatsApp chat / webhook payload is a group (chat type 1, or a "@g.us" provider chat id). */
+export function isWhatsappGroup(x: any): boolean {
+  if (!x) return false;
+  if (x.is_group === true || x.is_group === 1 || x.type === 1) return true;
+  return [x.provider_chat_id, x.provider_id, x.attendee_provider_id].some((v) => /@g\.us$/i.test(String(v ?? "")));
+}
+
+/** A display name with nothing visible in it (WhatsApp's "⠀" Braille blank, zero-width / filler characters) is no name. */
+export function visibleName(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  return s.replace(/[\s⠀​-‏⁠﻿ㅤᅟᅠ]/g, "") ? s : null;
+}
+
 export interface LeadIdentity { id?: string | null; identifier: string | null; provider_id: string | null; verified?: boolean; is_valid?: boolean | null }
 
 /**

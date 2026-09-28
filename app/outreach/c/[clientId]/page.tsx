@@ -195,7 +195,7 @@ function ClientViewerPage() {
                 {chats.data.map((ch) => (
                   <li key={ch.id}>
                     <button type="button" onClick={() => { setSelected(ch.id); }} className={cn('w-full text-left px-4 py-3 hover:bg-gray-50 flex gap-3', selected === ch.id && 'bg-gray-100')}>
-                      <Avatar src={ch.attendee_picture_url ?? ch.outreach_leads?.picture_url} name={ch.attendee_name ?? ch.outreach_leads?.full_name} />
+                      <Avatar src={ch.attendee_picture_url || ch.outreach_leads?.picture_url} name={ch.attendee_name ?? ch.outreach_leads?.full_name} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-2"><span className={cn('text-sm truncate', ch.unread ? 'font-semibold text-gray-900' : 'text-gray-800')}>{ch.attendee_name ?? ch.outreach_leads?.full_name ?? 'Unknown'}</span><span className="text-[11px] text-gray-400 whitespace-nowrap">{timeAgo(ch.last_message_at)}</span></div>
                         <div className="text-xs text-gray-500 truncate">{ch.last_direction === 'out' ? 'You: ' : ''}{ch.last_message_preview ?? ch.subject ?? ''}</div>
@@ -212,7 +212,7 @@ function ClientViewerPage() {
               <>
                 <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
                   <button type="button" className="md:hidden p-1 rounded text-gray-500 hover:bg-gray-100" onClick={() => setSelected(null)} aria-label="Back to list"><ArrowLeft className="w-4 h-4" /></button>
-                  <Avatar src={chat.attendee_picture_url ?? chat.outreach_leads?.picture_url} name={chat.attendee_name ?? chat.outreach_leads?.full_name} />
+                  <Avatar src={chat.attendee_picture_url || chat.outreach_leads?.picture_url} name={chat.attendee_name ?? chat.outreach_leads?.full_name} />
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-gray-900 truncate">{chat.attendee_name ?? chat.outreach_leads?.full_name ?? 'Unknown'}</div>
                     <div className="text-xs text-gray-500 truncate">{chat.outreach_leads?.headline ?? chat.outreach_leads?.company ?? chat.subject ?? ''} · via {chat.outreach_senders?.display_name ?? 'sender'}</div>

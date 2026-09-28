@@ -421,6 +421,9 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     if (lss?.relation === "first") return { ok: false, decision: branchOrSkip("connected", "already_connected"), code: "already_connected" };
     if (lss?.relation === "pending_out") return { ok: false, decision: { kind: "skip_node", reason: "invitation_pending" }, code: "invitation_pending" };
     if (lss?.relation === "invalid" || lss?.relation === "blocked") return { ok: false, decision: { kind: "fail_enrollment", reason: `relation_${lss.relation}` }, code: "E_RELATION_INVALID" };
+    // 029: an Open Profile lead takes the step's `open_profile` exit (normally to "Send InMail") instead of an invitation.
+    // The database routes it on entry and after the prefetch; this catches the rest. The branch releases the invite reservation.
+    if (provider === "LINKEDIN" && lead?.is_open_profile === true && hasBranch("open_profile")) return { ok: false, decision: { kind: "branch", name: "open_profile", reason: "open_profile" }, code: "open_profile" };
   }
 
   let l: Row | null = lead;
@@ -586,6 +589,7 @@ export async function executeAction(action: Row): Promise<ExecResult> {
           l = r.lead;
           if (r.relation === "first") return { ok: false, decision: branchOrSkip("connected", "already_connected"), code: "already_connected" };
           if (r.relation === "pending_out") return { ok: false, decision: { kind: "skip_node", reason: "invitation_pending" }, code: "invitation_pending" };
+          if (l?.is_open_profile === true && hasBranch("open_profile")) return { ok: false, decision: { kind: "branch", name: "open_profile", reason: "open_profile" }, code: "open_profile" };
           rctx = { ...rctx, lead: { ...rctx.lead, ...l } };
         }
         let note = renderTemplate(cfg.text ?? cfg.note ?? "", rctx).trim();

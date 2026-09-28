@@ -108,6 +108,21 @@ export const EXECUTABLE_TYPES: NodeType[] = [
 /** Steps that send into a conversation (and may open a new one: `new_chat_allowed`, optional `no_chat` exit). */
 export const MESSAGE_TYPES: NodeType[] = ['send_message', 'send_voice_note'];
 
+/**
+ * Steps with one optional second exit that a config switch turns on. The onward step stays in `next` (mirrored into
+ * branches.next while the second exit exists), because the engine reads `next` when the step completes.
+ *  - send_message / send_voice_note: `new_chat_allowed: false` → "no chat" (leads with no conversation yet)
+ *  - send_invite: `open_profile_inmail: true` → "Open Profile" (Open Profile leads skip the invitation, usually to an InMail)
+ */
+export const OPTIONAL_EXIT_TYPES: NodeType[] = [...MESSAGE_TYPES, 'send_invite'];
+
+/** The optional second exit a step has switched on, or null. */
+export function optionalExit(node: GraphNode): string | null {
+  if (MESSAGE_TYPES.includes(node.type)) return node.config?.new_chat_allowed === false ? 'no_chat' : null;
+  if (node.type === 'send_invite') return node.config?.open_profile_inmail === true ? 'open_profile' : null;
+  return null;
+}
+
 /** Steps that pause the lead for a while: they break a run of Instagram actions for the hourly limit. */
 export const WAIT_TYPES: NodeType[] = ['delay', 'wait_connection', 'wait_follow_back', 'wait_for_reply', 'manual_task', 'call_task', 'ai_draft_approval'];
 
@@ -174,10 +189,12 @@ export function nodeExits(node: GraphNode): string[] {
   const meta = NODE_CATALOG[node.type];
   if (!meta) return [];
   if (meta.dynamicExits) return meta.dynamicExits(node);
-  // A message that may not open a new conversation exposes where leads with no conversation go. This is kept out of
-  // `dynamicExits` on purpose: steps with `dynamicExits` always wire through `branches`, while a plain message keeps
-  // its onward step in `next` like before (the engine reads `next` when a message completes).
-  if (MESSAGE_TYPES.includes(node.type) && node.config?.new_chat_allowed === false) return ['next', 'no_chat'];
+  // A message that may not open a new conversation exposes where leads with no conversation go; an invitation with the
+  // Open Profile switch on exposes where Open Profile leads go. This is kept out of `dynamicExits` on purpose: steps
+  // with `dynamicExits` always wire through `branches`, while these keep their onward step in `next` like before
+  // (the engine reads `next` when the step completes).
+  const extra = optionalExit(node);
+  if (extra) return ['next', extra];
   return meta.exits;
 }
 
@@ -185,7 +202,7 @@ const EXIT_LABELS: Record<string, string> = {
   next: 'next', true: 'true', false: 'false', connected: 'connected', no_connect: 'no connect', no_credit: 'no credit', bounced: 'bounced', no_email: 'no email',
   error: 'error', found: 'found', not_found: 'not found', voicemail: 'voicemail', no_answer: 'no answer', wrong_number: 'wrong number', else: 'everything else',
   followed_back: 'followed back', no_follow_back: 'no follow back', has_consent: 'has consent', no_consent: 'no consent', valid: 'valid', invalid: 'invalid',
-  replied: 'replied', no_reply: 'no reply', no_chat: 'no chat', unavailable: 'unavailable',
+  replied: 'replied', no_reply: 'no reply', no_chat: 'no chat', unavailable: 'unavailable', open_profile: 'Open Profile',
 };
 
 /** Plain-language name of an exit (the A/B branch or AI route label when there is one). */
@@ -211,12 +228,13 @@ export function exitLabel(node: GraphNode, exit: string): string {
  */
 export function syncNodeBranches(node: GraphNode): GraphNode {
   const meta = NODE_CATALOG[node.type];
-  if (MESSAGE_TYPES.includes(node.type)) {
-    // one exit: the onward step lives in `next`; two exits (`no_chat` shown): `next` is mirrored into branches.next so the
-    // canvas (which wires multi-exit steps through branches) and the engine (which reads `next`) agree
+  if (OPTIONAL_EXIT_TYPES.includes(node.type)) {
+    // one exit: the onward step lives in `next`; two exits (`no_chat` / `open_profile` shown): `next` is mirrored into
+    // branches.next so the canvas (which wires multi-exit steps through branches) and the engine (which reads `next`) agree
     const onward = node.next ?? node.branches?.next ?? null;
-    if (nodeExits(node).length === 1) { const { branches: _b, ...rest } = node; return { ...rest, next: onward }; }
-    return { ...node, next: onward, branches: { next: onward, no_chat: node.branches?.no_chat ?? null } };
+    const extra = optionalExit(node);
+    if (!extra) { const { branches: _b, ...rest } = node; return { ...rest, next: onward }; }
+    return { ...node, next: onward, branches: { next: onward, [extra]: node.branches?.[extra] ?? null } };
   }
   if (!meta?.dynamicExits) return node;
   const exits = meta.dynamicExits(node);

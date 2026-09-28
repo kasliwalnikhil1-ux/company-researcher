@@ -15,13 +15,15 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.76.1";
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
 import { z } from "npm:zod@4.1.13";
+import { GROWTHXAI } from "../_shared/brands.ts";
 
 export { z };
 
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") ?? "";
-export const WEB_ORIGIN = Deno.env.get("SMARTLEAD_WEB_ORIGIN") ?? Deno.env.get("OUTREACH_WEB_ORIGIN") ?? "https://app.capitalxai.com";
+// Links back into the web app. The Smartlead connector is a GrowthxAI connector (see _shared/brands.ts).
+export const WEB_ORIGIN = GROWTHXAI.appOrigin;
 
 export const admin: SupabaseClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 

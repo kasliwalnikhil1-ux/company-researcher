@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Search, Inbox, X, Filter, SlidersHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel } from '@/lib/outreach/channels';
+import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel, chatTitle } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import type { ChatFilters } from '@/lib/outreach/queries';
 import type { Chat, Client, Lead, Sender, Sequence } from '@/lib/outreach/types';
@@ -40,7 +40,7 @@ const ROW_H = 76;
 const OVERSCAN = 6;
 
 export function chatDisplayName(c: ChatRow): string {
-  return c.attendee_name || c.outreach_leads?.full_name || c.attendee_public_identifier || 'Unknown';
+  return chatTitle(c);
 }
 
 function FilterField({ label, value, onChange, children }: { label: string; value: string; onChange: (v: string) => void; children: React.ReactNode }) {
@@ -228,7 +228,9 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
               {visible.map((c) => {
                 const active = c.id === selectedId;
                 const name = chatDisplayName(c);
-                const preview = c.last_message_preview ? `${c.last_direction === 'out' ? 'You: ' : ''}${c.last_message_preview}` : (c.subject ?? '');
+                // WhatsApp shows formatted text without its *bold* / _italic_ / ~strike~ markers in the list
+                const plain = c.provider === 'WHATSAPP' && c.last_message_preview ? c.last_message_preview.replace(/(^|[^\w])([*_~]{1,2})(\S(?:[^\n]*?\S)?)\2(?=$|[^\w])/g, '$1$3') : c.last_message_preview;
+                const preview = plain ? `${c.last_direction === 'out' ? 'You: ' : ''}${plain}` : (c.subject ?? '');
                 return (
                   <button
                     key={c.id}
@@ -239,7 +241,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                     style={{ height: ROW_H, contentVisibility: 'auto', containIntrinsicSize: `${ROW_H}px` } as React.CSSProperties}
                     className={cn('w-full text-left px-3 flex items-start gap-2.5 border-b border-l-[3px] transition-colors', active ? 'bg-indigo-100/60 border-l-indigo-600 border-b-indigo-100' : 'border-l-transparent border-b-gray-100 hover:bg-gray-50', c.unread && !active && 'bg-white')}
                   >
-                    <div className="pt-3"><div className={cn('rounded-full', active && 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-indigo-50')}><Avatar src={c.attendee_picture_url ?? c.outreach_leads?.picture_url} name={name} size={9} /></div></div>
+                    <div className="pt-3"><div className={cn('rounded-full', active && 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-indigo-50')}><Avatar src={c.attendee_picture_url || c.outreach_leads?.picture_url} name={name} size={9} /></div></div>
                     <div className="flex-1 min-w-0 py-2.5">
                       <div className="flex items-center gap-1.5">
                         <span className={cn('text-sm truncate', active ? 'font-semibold text-indigo-900' : c.unread ? 'font-semibold text-gray-900' : 'font-medium text-gray-800')}>{name}</span>

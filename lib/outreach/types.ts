@@ -473,12 +473,20 @@ export interface Message {
   html: string | null;
   // id is missing on attachments stored before the webhook's attachment_* fields were read (Instagram shares, Sept 2026).
   // link: a shared Instagram post or reel. unavailable: the provider no longer serves the file.
-  attachments: Array<{ id?: string | null; name?: string | null; type?: string | null; size?: number | null; unipile_message_id?: string; voice_note?: boolean; duration_s?: number | null; mimetype?: string | null; link?: { url: string; author?: string | null; text?: string | null } | null; unavailable?: boolean }>;
+  attachments: Array<{ id?: string | null; name?: string | null; type?: string | null; size?: number | null; unipile_message_id?: string; voice_note?: boolean; duration_s?: number | null; mimetype?: string | null; link?: { url: string; author?: string | null; text?: string | null } | null; unavailable?: boolean; storage?: boolean; sticker?: boolean; gif?: boolean; contact?: { name?: string | null; phones?: string[] } | null }>;
   sent_at: string;
   is_invite_note: boolean;
   /** Channels (025): reactions received, read receipt, voice-note transcript. */
-  reactions: Array<{ emoji: string; by?: string | null; at?: string | null }>;
+  reactions: Array<{ emoji: string; by?: string | null; by_id?: string | null; mine?: boolean; at?: string | null }>;
   read_at: string | null;
+  /** 030: thread fidelity (WhatsApp / Instagram). */
+  quoted?: { unipile_message_id?: string | null; provider_id?: string | null; text?: string | null; sender_id?: string | null; sender_name?: string | null; attachment_type?: string | null } | null;
+  sender_name?: string | null;
+  sender_identifier?: string | null;
+  is_forwarded?: boolean;
+  delivered_at?: string | null;
+  /** System event code (calls, group changes); null for a normal message. */
+  event_type?: number | null;
   transcript: string | null;
   transcript_status: 'pending' | 'done' | 'failed' | null;
   intent: Intent | null;
