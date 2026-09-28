@@ -3,16 +3,22 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, RefreshCw, Save, ShieldCheck, XCircle, CalendarClock } from 'lucide-react';
+import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, MonitorSmartphone, RefreshCw, Save, ShieldCheck, XCircle, CalendarClock } from 'lucide-react';
+import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { reasonText } from '@/lib/outreach/reasons';
 import { qk, useActions } from '@/lib/outreach/queries';
 import { Badge, Button, Card, EmptyState, Input, Select, StatusPill, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isFuture } from './helpers';
-import { cn } from '@/lib/utils';
+import { cn, normalizeEmail } from '@/lib/utils';
 import type { Client, Sender } from '@/lib/outreach/types';
 
 type Notify = (message: string, type?: 'success' | 'error') => void;
+
+const RECONNECT_METHODS: Array<{ id: 'credentials' | 'browser'; label: string; description: string }> = [
+  { id: 'credentials', label: 'Sign in with LinkedIn', description: 'Email and password, plus any code LinkedIn asks for.' },
+  { id: 'browser', label: 'Use the browser they’re signed in on', description: 'A small browser add-on approves the open LinkedIn account. No password.' },
+];
 
 /** WhatsApp: the number-age attestation (PRD §7.4). Level 0 cannot be promoted until it is recorded. */
 function AccountAgeAttestation({ sender, canManage, notify, onDone }: { sender: Sender; canManage: boolean; notify: Notify; onDone: () => void }) {
@@ -67,6 +73,8 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   const canManage = isManager && canWrite;
   const [busy, setBusy] = useState<string | null>(null);
   const [reloginLink, setReloginLink] = useState<string | null>(null);
+  const [reconnectChoice, setReconnectMethod] = useState<'credentials' | 'browser'>(sender.auth_method === 'browser' ? 'browser' : 'credentials');
+  const reconnectMethod = BROWSER_SIGNIN_ENABLED ? reconnectChoice : 'credentials';
   const [code, setCode] = useState('');
   const [showCode, setShowCode] = useState(false);
   const serverForm = { display_name: sender.display_name ?? '', client_id: sender.client_id ?? '', owner_email: sender.owner_email ?? '' };
@@ -90,8 +98,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
     setBusy(action);
     try {
       const r = await callFn<Record<string, unknown>>('sender-manage', { sender_id: sender.id, action, ...extra });
-      if (action === 'reconnect_link') { setReloginLink(String(r.link ?? '')); notify('Re-login link created and emailed to the owner.'); }
-      else if (action === 'reconnect_cookie') { notify(r.ok ? 'Reconnect requested with the stored cookie. Status updates within a minute.' : `Cookie reconnect not possible: ${String(r.reason ?? 'unknown')}`, r.ok ? 'success' : 'error'); }
+      if (action === 'reconnect_cookie') { notify(r.ok ? 'Reconnect requested with the stored cookie. Status updates within a minute.' : `Cookie reconnect not possible: ${String(r.reason ?? 'unknown')}`, r.ok ? 'success' : 'error'); }
       else if (action === 'plan_now') { notify(`Planner ran: ${String(r.planned ?? r.created ?? r.count ?? 'done')} action(s) scheduled.`); }
       else if (action === 'recompute_health') { notify(typeof r.score === 'number' ? `Health recomputed: ${r.score}` : 'Health recompute skipped (debounced).'); }
       else if (action === 'checkpoint') { notify('Verification code submitted.'); setCode(''); setShowCode(false); }
@@ -101,16 +108,34 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
     finally { setBusy(null); }
   }
 
+  /** Hosted sign-in link for the chosen method: open it here, or copy it for the owner. One link per method choice. */
+  async function reconnect(mode: 'redirect' | 'copy') {
+    setBusy(`reconnect_${mode}`);
+    try {
+      let link = reloginLink;
+      if (!link) {
+        const r = await callFn<{ link: string }>('sender-manage', { sender_id: sender.id, action: 'reconnect_link', ...(isLinkedIn ? { connect_method: reconnectMethod } : {}) });
+        link = String(r.link ?? '');
+        setReloginLink(link);
+      }
+      if (mode === 'redirect') { window.location.href = link; return; }
+      const ok = await copyText(link);
+      notify(ok ? 'Link copied. It expires in 1 hour.' :'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
+    } catch (e) { notify(parseError(e).message, 'error'); }
+    finally { setBusy(null); }
+  }
+
   async function saveDetails() {
     setBusy('details');
     try {
-      await rpc('update_sender', { p_sender: sender.id, p_patch: { display_name: form.display_name.trim() || null, client_id: form.client_id || null, owner_email: form.owner_email.trim() || null } });
+      await rpc('update_sender', { p_sender: sender.id, p_patch: { display_name: form.display_name.trim() || null, client_id: form.client_id || null, owner_email: normalizeEmail(form.owner_email) || null } });
       notify('Sender details saved.'); invalidate();
     } catch (e) { notify(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   }
 
   const needsRelogin = sender.status === 'credentials';
+  const canReconnect = sender.status !== 'disabled' && (sender.status === 'connecting' || sender.status === 'error' || sender.auth_method === 'cookie');
   const checkpointHint = /checkpoint|otp|2fa|in_app|validation|captcha|phone/i.test(sender.status_reason ?? '');
   const breakdown = HEALTH_KEYS.map((k) => ({ ...k, value: typeof sender.health_breakdown?.[k.key] === 'number' ? Math.round(sender.health_breakdown[k.key]) : null }));
   const locked = isFuture(sender.warmup_locked_until);
@@ -127,7 +152,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
         <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 text-green-800 text-sm border border-green-200"><CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login completed. The account is syncing — the profile, connections count and inbox backfill arrive within a few minutes.</span></div>
       )}
       {connected === '0' && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-800 text-sm border border-red-200"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login did not complete. {canManage ? 'Generate a fresh re-login link below (links expire after 15 minutes) or disable this sender.' : 'Ask a manager to generate a fresh link.'}</span></div>
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-800 text-sm border border-red-200"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login did not complete. {canManage ? 'Create a fresh sign-in link below (links expire after 1 hour) or disable this sender.' : 'Ask a manager to generate a fresh link.'}</span></div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -157,22 +182,31 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
             <div><dt className="text-xs text-gray-500">Rejects (1h)</dt><dd className={cn('text-gray-900', sender.rejects_1h >= 3 && 'text-red-700 font-medium')}>{sender.rejects_1h}</dd></div>
           </dl>
 
-          {needsRelogin && canManage && (
-            <div className="mt-5 rounded-xl border border-red-200 bg-red-50 p-4">
-              <div className="text-sm font-semibold text-red-900 flex items-center gap-2"><KeyRound className="w-4 h-4" /> This account needs a fresh login</div>
-              <p className="text-sm text-red-800 mt-1">{channelName} ended the session. All actions are held until the owner signs in again. Sending a re-login link emails the owner{sender.owner_email ? ` (${sender.owner_email})` : ''} a hosted login page{sender.auth_method === 'browser' ? ' that reconnects through their browser extension, with no password prompt' : ''} — you can also copy the link and pass it on.</p>
+          {(needsRelogin || canReconnect) && canManage && (
+            <div className={cn('mt-5 rounded-xl border p-4', needsRelogin ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50')}>
+              <div className={cn('text-sm font-semibold flex items-center gap-2', needsRelogin ? 'text-red-900' : 'text-gray-900')}><KeyRound className="w-4 h-4" /> {needsRelogin ? 'This account needs a fresh login' : 'Reconnect with a secure sign-in'}</div>
+              <p className={cn('text-sm mt-1', needsRelogin ? 'text-red-800' : 'text-gray-600')}>{needsRelogin ? `${channelName} ended the session. Actions are held until the owner signs in again.` : sender.auth_method === 'cookie' ? 'Connected by cookie, so profile edits are locked. Have the owner sign in to unlock them.' : 'Use this if the account is stuck connecting or shows an error.'}</p>
+              <p className={cn('text-sm', needsRelogin ? 'text-red-800' : 'text-gray-600')}>Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
+              {isLinkedIn && BROWSER_SIGNIN_ENABLED && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                  {RECONNECT_METHODS.map((m) => (
+                    <button key={m.id} type="button" onClick={() => { setReconnectMethod(m.id); setReloginLink(null); }} aria-pressed={reconnectMethod === m.id}
+                      className={cn('text-left p-3 rounded-lg border bg-white transition-colors', reconnectMethod === m.id ? 'border-indigo-500 ring-1 ring-indigo-500' : 'border-gray-200 hover:bg-gray-50')}>
+                      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">{m.id === 'browser' ? <MonitorSmartphone className="w-4 h-4" /> : <KeyRound className="w-4 h-4" />} {m.label}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{m.description}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex flex-wrap gap-2 mt-3">
-                <Button onClick={() => manage('reconnect_link')} loading={busy === 'reconnect_link'} disabled={!!busy}><ExternalLink className="w-4 h-4" /> Send re-login link</Button>
-                {sender.auth_method === 'cookie' && <Button variant="secondary" onClick={() => manage('reconnect_cookie')} loading={busy === 'reconnect_cookie'} disabled={!!busy}>Retry cookie reconnect</Button>}
+                <Button onClick={() => reconnect('redirect')} loading={busy === 'reconnect_redirect'} disabled={!!busy}><ExternalLink className="w-4 h-4" /> Sign in now</Button>
+                <Button variant="secondary" onClick={() => reconnect('copy')} loading={busy === 'reconnect_copy'} disabled={!!busy}><Copy className="w-4 h-4" /> Copy sign-in link</Button>
+                {needsRelogin && sender.auth_method === 'cookie' && <Button variant="secondary" onClick={() => manage('reconnect_cookie')} loading={busy === 'reconnect_cookie'} disabled={!!busy}>Retry cookie reconnect</Button>}
               </div>
               {reloginLink && (
                 <div className="mt-3">
-                  <div className="text-xs text-red-900 mb-1">Link created and emailed to the owner. Valid for 15 minutes:</div>
-                  <div className="flex gap-2">
-                    <input readOnly value={reloginLink} onFocus={(e) => e.currentTarget.select()} aria-label="Re-login link" className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-red-200 bg-white text-gray-700" />
-                    <Button variant="secondary" size="sm" onClick={async () => notify((await copyText(reloginLink)) ? 'Link copied.' : 'Copy failed.', 'success')}><Copy className="w-3.5 h-3.5" /> Copy</Button>
-                    <a href={reloginLink} target="_blank" rel="noreferrer"><Button size="sm">Open</Button></a>
-                  </div>
+                  <div className="text-xs text-gray-600 mb-1">Sign-in link (expires in 1 hour)</div>
+                  <input readOnly value={reloginLink} onFocus={(e) => e.currentTarget.select()} aria-label="Sign-in link" className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-white text-gray-700" />
                 </div>
               )}
             </div>
@@ -245,7 +279,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
               <option value="">No client</option>
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
-            <Input label="Owner email" type="email" value={form.owner_email} onChange={(e) => setForm({ ...form, owner_email: e.target.value })} disabled={!canManage} hint="Receives re-login reminders" />
+            <Input label="Owner email" type="email" value={form.owner_email} onChange={(e) => setForm({ ...form, owner_email: e.target.value })} onBlur={() => setForm((f) => ({ ...f, owner_email: normalizeEmail(f.owner_email) }))} disabled={!canManage} hint="Receives re-login reminders" />
           </div>
         </Card>
       </div>

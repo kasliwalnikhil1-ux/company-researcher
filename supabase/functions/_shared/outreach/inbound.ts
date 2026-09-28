@@ -101,7 +101,7 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
       patch.is_premium = !!me.premium;
       patch.has_sales_nav = !!me.sales_navigator;
       patch.has_recruiter = !!me.recruiter;
-      if (!sender.owner_email && me.email) patch.owner_email = me.email;
+      if (!sender.owner_email && me.email) patch.owner_email = String(me.email).trim().toLowerCase();
       // connections_count comes from the full profile
       try {
         const ident = me.public_identifier ?? me.provider_id;
@@ -132,9 +132,9 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
       if (typeof me.profile_picture_url === "string") patch.picture_url = me.profile_picture_url;
     } else {
       const me = await unipile.users.me(sender.unipile_account_id);
-      patch.public_identifier = me.email ?? sender.public_identifier;
+      patch.public_identifier = me.email ? String(me.email).trim().toLowerCase() : sender.public_identifier;
       patch.display_name = sender.display_name ?? me.display_name ?? me.email ?? sender.display_name;
-      if (!sender.owner_email && me.email) patch.owner_email = me.email;
+      if (!sender.owner_email && me.email) patch.owner_email = String(me.email).trim().toLowerCase();
     }
     // account connection method (cookies vs credentials) from Unipile
     try {
@@ -331,16 +331,26 @@ async function accountExistsOnDsn(accountId: string): Promise<boolean> {
  * to a `create` link bound to the same sender row via `name`, so the hosted-auth notify re-binds the new
  * account id and the sender keeps its chats, lead state and enrollments.
  */
-export async function reconnectLink(sender: Sender): Promise<string | null> {
+/** Lifetime of a reconnect sign-in link. The sender page and the reconnect email both say "1 hour". */
+export const RECONNECT_LINK_TTL_MIN = 60;
+
+/** `method` (LinkedIn, chosen by a manager) picks password vs signed-in-browser sign-in; omitted, the sender's own method is kept.
+ *  The choice is recorded as a reconnect event so the hosted-auth callback can store it as the sender's auth_method. */
+export async function reconnectLink(sender: Sender, method?: "credentials" | "browser"): Promise<string | null> {
   const { FUNCTIONS_BASE, WEB_ORIGIN } = await import("./supabase.ts");
+  const browser = sender.provider === "LINKEDIN" && (method ? method === "browser" : sender.auth_method === "browser");
+  if (method && sender.provider === "LINKEDIN") {
+    await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "reconnect", data: { method: "hosted_link", connect_method: browser ? "browser" : "credentials" } });
+  }
   const common = {
-    expiresOn: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    // Unipile: keep hosted links short (minutes to a few hours); every link also dies at their daily restart.
+    expiresOn: new Date(Date.now() + RECONNECT_LINK_TTL_MIN * 60_000).toISOString(),
     notify_url: `${FUNCTIONS_BASE}outreach-sender-notify?sid=${sender.id}`,
     name: sender.id,
     success_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=1`,
     failure_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=0`,
     // Senders connected through the browser extension reconnect the same way (no password prompt).
-    ...(sender.auth_method === "browser" ? hostedBrowserOptions() : {}),
+    ...(browser ? hostedBrowserOptions() : {}),
   };
   const stillThere = sender.unipile_account_id ? await accountExistsOnDsn(sender.unipile_account_id) : false;
   if (stillThere) {
@@ -368,16 +378,26 @@ export async function handleHostedNotify(payload: any): Promise<void> {
   const status = String(payload.status ?? "").toUpperCase();
   const patch: Record<string, unknown> = { unipile_account_id: accountId };
   if (status === "RECONNECTED") { patch.status = "ok"; patch.status_reason = null; patch.reconnect_attempts = 0; }
+  // A manager-chosen sign-in method on the latest reconnect link (last 25h) becomes the sender's auth_method.
+  if ((status === "RECONNECTED" || status === "CREATION_SUCCESS") && s.provider === "LINKEDIN") {
+    const { data: ev } = await admin.from("outreach_sender_events").select("data").eq("sender_id", senderId).eq("kind", "reconnect")
+      .eq("data->>method", "hosted_link").gte("at", new Date(Date.now() - 25 * 3600 * 1000).toISOString()).order("at", { ascending: false }).limit(1).maybeSingle();
+    const chosen = ev?.data?.connect_method;
+    if (chosen === "browser") patch.auth_method = "browser";
+    else if (chosen === "credentials" && s.auth_method !== "credentials") patch.auth_method = "credentials";
+  }
   const { error } = await admin.from("outreach_senders").update(patch).eq("id", senderId);
   if (error) {
     // account_id already bound to another sender row (e.g. duplicate connect) → disable this row
     log({ fn: "hosted_notify", error: error.message });
     return;
   }
-  await audit(s.workspace_id, "sender.hosted_auth", "sender", senderId, { status, account_id: accountId });
+  await audit(s.workspace_id, "sender.hosted_auth", "sender", senderId, { status, account_id: accountId, ...(patch.auth_method ? { auth_method: patch.auth_method } : {}) });
+  // A password reconnect may still have used a cookie inside the hosted page; the profile sync reads the real method back.
+  if (status === "RECONNECTED" && patch.auth_method === "credentials") await syncOwnProfile({ ...s, ...patch } as Sender).catch(() => null);
   if (status === "CREATION_SUCCESS") {
     // same LinkedIn / mailbox already connected in this workspace → fold into that sender (it now owns accountId)
-    const fresh = await absorbDuplicateSender(await syncOwnProfile({ ...s, unipile_account_id: accountId }));
+    const fresh = await absorbDuplicateSender(await syncOwnProfile({ ...s, ...patch, unipile_account_id: accountId }));
     await applyOnboardingGate(fresh);
     // if the webhook OK never arrives (platform webhook missing), poll account once
     try {

@@ -9,7 +9,7 @@ import { callFn, parseError } from '@/lib/outreach/api';
 import { BackLink, Button, Card, ErrorBox, Input, PageHeader, SearchableSelect, Select, Toggle, useToast } from '@/components/outreach/ui';
 import { browserTimezone, copyText, timezoneChoices } from '@/components/outreach/senders/helpers';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
-import { cn } from '@/lib/utils';
+import { cn, normalizeEmail } from '@/lib/utils';
 import type { Provider } from '@/lib/outreach/types';
 import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
 
@@ -59,7 +59,8 @@ export default function ConnectSenderPage() {
   const [error, setError] = useState<string | null>(null);
   const tzList = useMemo(() => timezoneChoices(), []);
   const recruiterEnabled = !!(workspace?.settings as Record<string, unknown> | undefined)?.recruiter_enabled;
-  const emailOk = !ownerEmail || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail);
+  const ownerEmailClean = normalizeEmail(ownerEmail);
+  const emailOk = !ownerEmailClean || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmailClean);
   const isWhatsApp = provider === 'WHATSAPP';
   const isInstagram = provider === 'INSTAGRAM';
   const isMailbox = !['LINKEDIN', 'INSTAGRAM', 'WHATSAPP'].includes(provider);
@@ -80,7 +81,7 @@ export default function ConnectSenderPage() {
   async function ensureLink(): Promise<{ link: string; sender_id: string }> {
     if (result) return result;
     const r = await callFn<{ link: string; sender_id: string }>('sender-connect', {
-      workspace_id: ws, provider, client_id: clientId || null, owner_email: ownerEmail.trim() || null, display_name: displayName.trim() || null,
+      workspace_id: ws, provider, client_id: clientId || null, owner_email: ownerEmailClean || null, display_name: displayName.trim() || null,
       recruiter: provider === 'LINKEDIN' && recruiterEnabled ? recruiter : false, timezone,
       connect_method: provider === 'LINKEDIN' ? connectMethod : 'credentials',
       ...(isWhatsApp ? { account_age_months: monthsNum, account_age_attested: true } : {}),
@@ -160,7 +161,7 @@ export default function ConnectSenderPage() {
         <Card title="2. Account details">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             <Input label="Display name" placeholder={provider === 'LINKEDIN' ? 'e.g. Jane (Sales)' : isInstagram ? 'e.g. @acme.studio' : isWhatsApp ? 'e.g. Jane’s WhatsApp' : 'e.g. jane@acme.com'} value={displayName} onChange={(e) => setDisplayName(e.target.value)} hint="Shown in lists and the inbox. The real profile name is filled in once the account is connected." />
-            <Input label="Owner email" type="email" placeholder="owner@company.com" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} error={emailOk ? undefined : 'Enter a valid email address'}
+            <Input label="Owner email" type="email" placeholder="owner@company.com" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} onBlur={() => setOwnerEmail(ownerEmailClean)} error={emailOk ? undefined : 'Enter a valid email address'}
               hint="The person who owns this account. They sign in themselves. We email them here if the account ever needs to be signed in again." />
             <div>
               <SearchableSelect label="Timezone" value={timezone} onChange={setTimezone} options={tzList} searchPlaceholder="Search city, region or GMT offset…" />
@@ -232,7 +233,7 @@ export default function ConnectSenderPage() {
             <dt className="text-gray-500">Account type</dt><dd className="text-gray-900 font-medium">{PROVIDERS.find((p) => p.id === provider)?.label}</dd>
             {clientId && (<><dt className="text-gray-500">Client</dt><dd className="text-gray-900">{clients.data?.find((c) => c.id === clientId)?.name ?? '—'}</dd></>)}
             {displayName && (<><dt className="text-gray-500">Display name</dt><dd className="text-gray-900">{displayName}</dd></>)}
-            {ownerEmail && (<><dt className="text-gray-500">Owner email</dt><dd className="text-gray-900">{ownerEmail}</dd></>)}
+            {ownerEmailClean && (<><dt className="text-gray-500">Owner email</dt><dd className="text-gray-900">{ownerEmailClean}</dd></>)}
             <dt className="text-gray-500">Timezone</dt><dd className="text-gray-900">{timezone}</dd>
             {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (<><dt className="text-gray-500">Sign-in</dt><dd className="text-gray-900">{CONNECT_METHODS.find((m) => m.id === connectMethod)?.label}</dd></>)}
             {provider === 'LINKEDIN' && recruiterEnabled && (<><dt className="text-gray-500">Recruiter</dt><dd className="text-gray-900">{recruiter ? 'Enabled' : 'Disabled'}</dd></>)}

@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX } from 'lucide-react';
+import { AlertTriangle, Archive, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -22,8 +22,12 @@ import { WhyNotSendingDialog } from '@/components/outreach/sequences/WhyNotSendi
 import { fmtInt, type SequenceExt } from '@/components/outreach/sequences/publishTypes';
 import { formatGraphError, nodeCount, senderName, STATUS_TONE } from '@/components/outreach/sequences/helpers';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 
 const STATUSES: SequenceStatus[] = ['draft', 'active', 'paused', 'archived'];
+
+/** Same compact control as the leads filter bar. */
+const SEL = 'px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 const MENU_ITEM = 'w-full text-left flex items-center gap-2 px-3 py-2 hover:bg-gray-50 text-gray-700';
 
@@ -158,6 +162,9 @@ export default function SequencesPage() {
     const needle = search.trim().toLowerCase();
     return (seqs.data ?? []).filter((s) => (!status || s.status === status) && (!client || s.client_id === client) && (!needle || s.name.toLowerCase().includes(needle)));
   }, [seqs.data, status, client, search]);
+  const { pageRows, ...pager } = usePagedRows(rows, [ws, search.trim().toLowerCase(), status, client].join('|'));
+  const filtered = !!(search.trim() || status || client);
+  const clearFilters = () => { setSearch(''); patchListFilters({ status: '', client: '' }); };
 
   const invalidate = () => { if (ws) { qc.invalidateQueries({ queryKey: qk.sequences(ws) }); qc.invalidateQueries({ queryKey: ['outreach', ws, 'sequence_summary'] }); } };
 
@@ -205,27 +212,29 @@ export default function SequencesPage() {
         actions={canManage && <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} />} />
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sequences" aria-label="Search sequences" className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-        </div>
-        <Select value={status} onChange={(e) => setStatus(e.target.value as '' | SequenceStatus)} aria-label="Filter by status" className="w-auto">
+        <label className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input aria-label="Search sequences" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sequences…" className={cn(SEL, 'w-full pl-8')} />
+        </label>
+        <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value as '' | SequenceStatus)} className={SEL}>
           <option value="">All statuses</option>
           {STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
-        </Select>
+        </select>
         {(clients.data?.length ?? 0) > 0 && (
-          <Select value={client} onChange={(e) => setClient(e.target.value)} aria-label="Filter by client" className="w-auto">
+          <select aria-label="Client" value={client} onChange={(e) => setClient(e.target.value)} className={SEL}>
             <option value="">All clients</option>
             {clients.data!.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
+          </select>
         )}
+        {filtered && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="w-3.5 h-3.5" /> Clear</Button>}
       </div>
 
       {seqs.isLoading ? <Spinner className="min-h-[50vh]" /> : seqs.error ? <ErrorBox message={parseError(seqs.error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<GitBranch className="w-6 h-6" />} title={seqs.data?.length ? 'No sequences match these filters' : 'No sequences yet'}
           description={seqs.data?.length ? 'Try a different status, client or search.' : 'Start from a ready-made flow (connect, follow up, rotate senders, nurture) or build your own: invitation, wait for connection, follow-up messages, and CRM updates.'}
-          action={canManage && !seqs.data?.length ? <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} /> : undefined} />
+          action={seqs.data?.length ? <Button variant="secondary" onClick={clearFilters}>Clear filters</Button> : canManage ? <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} /> : undefined} />
       ) : (
+        <>
         <Table>
           <thead>
             <tr>
@@ -235,7 +244,7 @@ export default function SequencesPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((s) => {
+            {pageRows.map((s) => {
               const sm = summaryMap[s.id];
               const ext = s as SequenceExt;
               const failed = failedCounts.data?.[s.id] ?? 0;
@@ -281,6 +290,8 @@ export default function SequencesPage() {
             })}
           </tbody>
         </Table>
+        <PaginationBar {...pager} />
+        </>
       )}
 
       <Modal open={createOpen} onClose={() => !creating && setCreateOpen(false)} title="New sequence" size="sm"

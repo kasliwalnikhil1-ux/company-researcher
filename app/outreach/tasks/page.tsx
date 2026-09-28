@@ -10,11 +10,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { supabase } from '@/utils/supabase/client';
 import { parseError } from '@/lib/outreach/api';
-import { useClients, useMembers, useTasks } from '@/lib/outreach/queries';
+import { useClients, useMembers, useTasksPage } from '@/lib/outreach/queries';
 import type { Lead, Sender, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import TaskDrawer, { TASK_KINDS, memberName, parseCallBody, taskKindLabel, taskKindTone } from '@/components/outreach/tasks/TaskDrawer';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
+import { LIST_PAGE_SIZE, PaginationBar } from '@/components/outreach/Pagination';
 
 type TaskRow = Task & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 
@@ -48,14 +49,21 @@ function TasksPageInner() {
   useEffect(() => { const t = params.get('task'); if (t) setOpenTask(t); }, [params]);
   const closeDrawer = () => { setOpenTask(null); if (params.get('task')) router.replace('/outreach/tasks'); };
 
-  const tasksQ = useTasks(filtersReady ? ws : null, { open: tab === 'open', kind: kind || null, assigned_to: mine ? userId : null });
+  // Paged on the server (a workspace can have thousands of tasks); any filter change goes back to page 1.
+  const filterKey = [ws, tab, kind, mine, clientId].join('|');
+  const [pageState, setPageState] = useState({ key: filterKey, page: 0 });
+  const page = pageState.key === filterKey ? pageState.page : 0;
+  const tasksQ = useTasksPage(filtersReady ? ws : null, { open: tab === 'open', kind: kind || null, assigned_to: mine ? userId : null, client_id: clientId || null, page, pageSize: LIST_PAGE_SIZE });
   const membersQ = useMembers(ws);
   const clientsQ = useClients(ws);
 
-  const rows = useMemo(() => {
-    const all = (tasksQ.data ?? []) as TaskRow[];
-    return clientId ? all.filter((t) => t.client_id === clientId) : all;
-  }, [tasksQ.data, clientId]);
+  const rows = useMemo(() => (tasksQ.data?.rows ?? []) as TaskRow[], [tasksQ.data]);
+  const total = tasksQ.data?.total ?? 0;
+  const pageCount = Math.max(1, Math.ceil(total / LIST_PAGE_SIZE));
+  // Selection is per page: moving to another page clears it.
+  const setPage = (p: number) => { setSelected(new Set()); setPageState({ key: filterKey, page: Math.max(0, Math.min(pageCount - 1, p)) }); };
+  // A page past the end (after completing the last tasks on it) steps back to the last page.
+  if (tasksQ.data && !tasksQ.isPlaceholderData && page > 0 && page >= pageCount) setPageState({ key: filterKey, page: pageCount - 1 });
 
   useEffect(() => { setSelected(new Set()); }, [tab, kind, mine, clientId]);
 
@@ -83,7 +91,7 @@ function TasksPageInner() {
   if (!ws) return null;
   if (role === 'client_viewer') return <ErrorBox message="Tasks are not available for client viewers." />;
 
-  const openCount = tab === 'open' ? rows.length : null;
+  const openCount = tab === 'open' ? total : null;
 
   return (
     <div>
@@ -130,6 +138,7 @@ function TasksPageInner() {
         <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
       )}
       {rows.length > 0 && (
+        <div className={cn('transition-opacity', tasksQ.isPlaceholderData && 'opacity-60')}>
         <Table>
           <thead>
             <tr>
@@ -182,6 +191,12 @@ function TasksPageInner() {
             })}
           </tbody>
         </Table>
+        </div>
+      )}
+      {rows.length > 0 && (
+        <div>
+          <PaginationBar page={page} pageCount={pageCount} setPage={setPage} total={total} from={page * LIST_PAGE_SIZE + 1} to={Math.min(total, (page + 1) * LIST_PAGE_SIZE)} />
+        </div>
       )}
 
       {openTask && <TaskDrawer taskId={openTask} onClose={closeDrawer} members={membersQ.data} workspaceId={ws} canWrite={canWrite} toast={toast.show} />}

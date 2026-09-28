@@ -5,6 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Emails are stored lowercase with no surrounding whitespace (the DB trigger normalize_email_columns enforces
+// the same rule). Also strips the no-break / zero-width spaces that pasting brings along.
+export function normalizeEmail(value: string | null | undefined): string {
+  return (value ?? '').replace(/^[\s​﻿]+|[\s​﻿]+$/g, '').toLowerCase();
+}
+
 // Helper function to unescape common escape sequences in strings
 // Converts literal \n, \t, etc. to actual newlines, tabs, etc.
 export function unescapeString(str: string): string {

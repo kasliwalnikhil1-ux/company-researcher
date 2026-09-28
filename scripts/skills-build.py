@@ -142,7 +142,7 @@ def write_plugin(p):
     skill_out = os.path.join(out, "skills", p["skill"])
     os.makedirs(os.path.join(skill_out, "agents"), exist_ok=True)
     os.makedirs(os.path.join(out, "assets"), exist_ok=True)
-    url = f"{FUNCTIONS_BASE}/{p['fn']}/mcp"
+    url = f"{FUNCTIONS_BASE}/{p['fn']}/mcp-chatgpt"   # ChatGPT's own URL: its OAuth metadata leaves out openid (functions/oauth-as)
 
     for rel, text in skill_files(p["skill"]):
         dst = os.path.join(skill_out, *rel.split("/"))

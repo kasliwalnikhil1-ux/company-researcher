@@ -7,7 +7,7 @@ import { Save, X } from 'lucide-react';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { qk, useSenders } from '@/lib/outreach/queries';
 import { Button, Card, ErrorBox, Input, Select, Textarea } from '@/components/outreach/ui';
-import { cn } from '@/lib/utils';
+import { cn, normalizeEmail } from '@/lib/utils';
 import { EMAIL_RE, isMailbox, type SenderV2 } from './insights';
 import TrackingDomainCard from './TrackingDomainCard';
 
@@ -103,7 +103,7 @@ export default function SenderSettings({ sender, isManager, canWrite, notify, wo
     const p: Record<string, unknown> = {};
     if (form.parent_sender_id !== initial.parent_sender_id) p.parent_sender_id = form.parent_sender_id || null;
     if (form.signature !== initial.signature) p.signature = form.signature.trim() ? form.signature : null;
-    if (form.bcc_address.trim() !== initial.bcc_address) p.bcc_address = form.bcc_address.trim() || null;
+    if (normalizeEmail(form.bcc_address) !== initial.bcc_address) p.bcc_address = normalizeEmail(form.bcc_address) || null;
     if (form.track_replies !== initial.track_replies) p.track_replies = form.track_replies === 'default' ? null : form.track_replies === 'on';
     return p;
   }, [form, initial]);

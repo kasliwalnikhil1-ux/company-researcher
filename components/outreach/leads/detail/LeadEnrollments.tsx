@@ -11,7 +11,9 @@ import { LIVE_ENROLLMENT_STATUSES, type Enrollment } from '@/lib/outreach/types'
 import { Button, Card, EmptyState, EnrollmentBadge, Modal, fmtDate } from '@/components/outreach/ui';
 import { GitBranch, LogOut, Pause, Play } from 'lucide-react';
 import { exitReasonText } from '@/lib/outreach/reasons';
+import { cn } from '@/lib/utils';
 import type { ToastFn } from '../helpers';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 
 export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { leadId: string; enrollments: Enrollment[]; onEnroll: () => void; toast: ToastFn }) {
   const { workspace, canWrite } = useWorkspace();
@@ -21,6 +23,7 @@ export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { lead
   const [busy, setBusy] = useState<string | null>(null);
   const [exitTarget, setExitTarget] = useState<Enrollment | null>(null);
   const [reason, setReason] = useState('');
+  const { pageRows, ...pager } = usePagedRows(enrollments, leadId, 10);
 
   const invalidate = () => { qc.invalidateQueries({ queryKey: qk.lead(leadId) }); qc.invalidateQueries({ queryKey: ['outreach', 'enrollments'] }); if (workspace) qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'dashboard'] }); };
   const act = async (e: Enrollment, fn: 'pause_enrollment' | 'resume_enrollment' | 'exit_enrollment', args: Record<string, unknown>, msg: string) => {
@@ -41,8 +44,9 @@ export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { lead
   return (
     <Card title="Sequence enrollments" actions={canWrite ? <Button size="sm" onClick={onEnroll}><GitBranch className="w-3.5 h-3.5" /> Enrol</Button> : undefined}>
       {enrollments.length === 0 ? <EmptyState title="Not enrolled in any sequence" description="Enrol this lead to start automated outreach." action={canWrite ? <Button variant="secondary" onClick={onEnroll}>Enrol in a sequence</Button> : undefined} /> : (
-        <ul className="divide-y divide-gray-100 -mx-5 -my-5">
-          {enrollments.map((e) => {
+        <>
+        <ul className={cn('divide-y divide-gray-100 -mx-5 -mt-5', pager.pageCount > 1 ? 'border-b border-gray-100' : '-mb-5')}>
+          {pageRows.map((e) => {
             const seq = sequences.data?.find((s) => s.id === e.sequence_id);
             const sender = senders.data?.find((s) => s.id === e.sender_id);
             const live = LIVE_ENROLLMENT_STATUSES.includes(e.status);
@@ -77,6 +81,8 @@ export function LeadEnrollments({ leadId, enrollments, onEnroll, toast }: { lead
             );
           })}
         </ul>
+        {pager.pageCount > 1 && <PaginationBar {...pager} />}
+        </>
       )}
       <Modal open={!!exitTarget} onClose={() => setExitTarget(null)} title="Exit this enrollment?" size="sm"
         footer={<><Button variant="secondary" onClick={() => setExitTarget(null)}>Cancel</Button><Button variant="danger" loading={!!exitTarget && busy === exitTarget.id} onClick={() => exitTarget && act(exitTarget, 'exit_enrollment', { p_reason: reason.trim() || 'manual' }, 'Enrollment exited')}>Exit enrollment</Button></>}>

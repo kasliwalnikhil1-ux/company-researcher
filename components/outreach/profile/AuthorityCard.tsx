@@ -9,7 +9,7 @@ import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { Badge, Button, Card, Input, Modal, Select, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { copyText } from '@/components/outreach/senders/helpers';
 import { FIELD_GROUPS, GROUP_LABELS, profileKeysFor, useProfileAuthority, type FieldGroup } from '@/lib/outreach/profile';
-import { cn } from '@/lib/utils';
+import { cn, normalizeEmail } from '@/lib/utils';
 
 type Notify = (message: string, type?: 'success' | 'error') => void;
 
@@ -42,7 +42,7 @@ export default function AuthorityCard({ senderId, ws, ownerEmail, isManager, can
   async function sendLink() {
     setBusy(true);
     try {
-      const r = await callFn<{ link?: string; email_sent: boolean; owner_email: string; email_configured: boolean }>('profile', { action: 'authority_link', sender_id: senderId, field_groups: groups, mode, owner_email: email.trim() || undefined, grant_days: days ? Number(days) : undefined });
+      const r = await callFn<{ link?: string; email_sent: boolean; owner_email: string; email_configured: boolean }>('profile', { action: 'authority_link', sender_id: senderId, field_groups: groups, mode, owner_email: normalizeEmail(email) || undefined, grant_days: days ? Number(days) : undefined });
       setIssued(r);
       notify(r.email_sent ? `Permission request emailed to ${r.owner_email}.` : r.link ? 'Link created. Email delivery is not set up here, so pass the link to the owner yourself.' : 'Link created but nobody could be emailed.', r.email_sent || r.link ? 'success' : 'error');
       invalidate();

@@ -215,7 +215,7 @@ export async function notifySender(senderId: string, kind: NotifyKind, extra: Re
   switch (kind) {
     case "reconnect_needed":
       subject = `Action needed: reconnect ${plainName}`;
-      html = layout(`${name} needs to be reconnected`, `<p>LinkedIn ended the session for <b>${name}</b>. Outreach is paused for this sender until it is reconnected.</p><p>${button((extra.link as string) ?? senderUrl, "Reconnect now", branding)}</p><p>Log in with your own credentials; the password is never shared with the agency.</p>`, branding);
+      html = layout(`${name} needs to be reconnected`, `<p>LinkedIn ended the session for <b>${name}</b>. Outreach is paused for this sender until it is reconnected.</p><p>${button((extra.link as string) ?? senderUrl, "Reconnect now", branding)}</p><p>Log in with your own credentials; the password is never shared with the agency.</p>${extra.link ? `<p>This link works for 1 hour. If it has expired, <a href="${senderUrl}">open the sender page</a> to get a new one.</p>` : ""}`, branding);
       break;
     case "reconnect_needed_manual":
       subject = `Automatic reconnect failed for ${plainName}`;

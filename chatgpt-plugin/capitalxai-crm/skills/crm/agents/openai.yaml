@@ -4,4 +4,4 @@ dependencies:
       value: "capitalxai-crm"
       description: "Standup brief, one-minute meeting capture, call coaching"
       transport: "streamable_http"
-      url: "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/crm-mcp/mcp"
+      url: "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/crm-mcp/mcp-chatgpt"

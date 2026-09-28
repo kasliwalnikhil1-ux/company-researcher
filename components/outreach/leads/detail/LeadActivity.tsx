@@ -11,6 +11,10 @@ import { Badge, Card, EmptyState, ErrorBox, IntentBadge, Spinner, fmtDate, timeA
 import { cn } from '@/lib/utils';
 import { Activity, CheckSquare, GitBranch, MessageSquare, Zap, ArrowDownLeft, ArrowUpRight, Split, Flag, Sparkles, Hand } from 'lucide-react';
 import { factLines } from '@/lib/outreach/intel';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
+
+/** Rows per page in the lead page's timeline and recent actions cards. */
+const CARD_PAGE_SIZE = 20;
 
 interface TimelineRow { at: string | null; kind: 'action' | 'message' | 'enrollment' | 'task' | 'ai_route' | 'milestone' | 'enrichment' | string; title: string; data: Record<string, unknown> | null }
 
@@ -85,11 +89,13 @@ function TimelineIcon({ kind, held }: { kind: string; held?: boolean }) {
 
 export function LeadTimeline({ leadId }: { leadId: string }) {
   const q = useQuery({ queryKey: ['outreach', 'lead', leadId, 'timeline'], queryFn: () => rpc<TimelineRow[]>('lead_timeline', { p_lead: leadId }), refetchInterval: 60000 });
+  const { pageRows, ...pager } = usePagedRows(q.data ?? [], leadId, CARD_PAGE_SIZE);
   return (
     <Card title="Timeline">
       {q.isLoading ? <Spinner className="py-6" /> : q.error ? <ErrorBox message={parseError(q.error).message} /> : !q.data?.length ? <p className="text-sm text-gray-400">Nothing has happened yet.</p> : (
+        <>
         <ol className="relative border-l border-gray-200 ml-2 space-y-4">
-          {q.data.map((row, i) => {
+          {pageRows.map((row, i) => {
             const d = row.data ?? {};
             const isMsg = row.kind === 'message';
             const held = row.kind === 'enrollment' && row.title === HELD_TITLE;
@@ -99,7 +105,7 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
             const tone = held ? 'bg-amber-100 text-amber-700' : row.kind === 'message' ? 'bg-indigo-100 text-indigo-700' : row.kind === 'enrollment' ? 'bg-purple-100 text-purple-700' : row.kind === 'task' ? 'bg-amber-100 text-amber-700'
               : row.kind === 'ai_route' ? 'bg-fuchsia-100 text-fuchsia-700' : row.kind === 'milestone' ? 'bg-green-100 text-green-700' : row.kind === 'enrichment' ? 'bg-sky-100 text-sky-700' : String(d.error_code ?? '') ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600';
             return (
-              <li key={`${row.kind}-${row.at}-${i}`} className="ml-4">
+              <li key={`${row.kind}-${row.at}-${pager.page}-${i}`} className="ml-4">
                 <span className={cn('absolute -left-[11px] w-[22px] h-[22px] rounded-full flex items-center justify-center ring-4 ring-white', tone)}><TimelineIcon kind={row.kind} held={held} /></span>
                 <div className="text-sm text-gray-900">{row.title}{isMsg && d.intent ? <span className="ml-2 inline-block align-middle"><IntentBadge intent={d.intent as Chat['intent']} /></span> : null}</div>
                 {isMsg && typeof d.text === 'string' && d.text && <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{d.text}</p>}
@@ -125,19 +131,23 @@ export function LeadTimeline({ leadId }: { leadId: string }) {
             );
           })}
         </ol>
+        {pager.pageCount > 1 && <PaginationBar {...pager} className="mt-4 pt-3 border-t border-gray-100" />}
+        </>
       )}
     </Card>
   );
 }
 
-export function LeadRecentActions({ actions }: { actions: Action[] }) {
+export function LeadRecentActions({ leadId, actions }: { leadId: string; actions: Action[] }) {
   const { workspace } = useWorkspace();
   const senders = useSenders(workspace?.id);
+  const { pageRows, ...pager } = usePagedRows(actions, leadId, CARD_PAGE_SIZE);
   return (
     <Card title={<span className="inline-flex items-center gap-1.5"><Activity className="w-4 h-4 text-gray-400" /> Recent actions</span>}>
       {actions.length === 0 ? <p className="text-sm text-gray-400">No actions scheduled or executed for this lead.</p> : (
+        <>
         <ul className="divide-y divide-gray-100 -my-2">
-          {actions.slice(0, 30).map((a) => {
+          {pageRows.map((a) => {
             const sender = senders.data?.find((s) => s.id === a.sender_id);
             const upcoming = a.status === 'queued' || a.status === 'reserved';
             return (
@@ -155,6 +165,8 @@ export function LeadRecentActions({ actions }: { actions: Action[] }) {
             );
           })}
         </ul>
+        {pager.pageCount > 1 && <PaginationBar {...pager} className="mt-4 pt-3 border-t border-gray-100" />}
+        </>
       )}
     </Card>
   );

@@ -59,6 +59,8 @@ export interface WhitelabelConfig {
   ogImage?: string;
   /** twitter:image, absolute URL or path under public/. Defaults to <assetsFolder>/twitter-banner.png. */
   twitterImage?: string;
+  /** og:logo, absolute URL or path under public/. Defaults to the logo. */
+  ogLogo?: string;
   /** og:url. Defaults to the origin of the current request (so previews and local dev stay correct). */
   ogUrl?: string;
 }
@@ -202,6 +204,11 @@ export function getTwitterImagePath(config: WhitelabelConfig): string {
   return config.assetsFolder
     ? `/${config.assetsFolder}/twitter-banner.png`
     : '/Twitter%20Banner%20CapitalxAI.png';
+}
+
+/** og:logo */
+export function getOgLogoPath(config: WhitelabelConfig): string {
+  return config.ogLogo ?? getLogoPath(config);
 }
 
 /** og:title / twitter:title */

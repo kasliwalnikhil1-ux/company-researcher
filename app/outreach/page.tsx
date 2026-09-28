@@ -8,47 +8,139 @@ import { useSequences } from '@/lib/outreach/queries';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
 import { MetricLabel } from '@/components/outreach/reports/primitives';
 import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
-import { healthTileClasses, healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
+import { healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn } from '@/lib/utils';
 
 type DashSender = DashboardV2['senders'][number];
-const TILE_TYPES: Array<{ key: string; label: string }> = [{ key: 'invite', label: 'Invites' }, { key: 'message', label: 'Messages' }, { key: 'profile_view', label: 'Views' }];
 
-function HealthTile({ s }: { s: DashSender }) {
+// The dashboard card stays the same size at 5 senders or 500: counts by group, the few senders that
+// need a look (worst first), and today's capacity summed over every sender. The full, filterable
+// list is /outreach/senders.
+const ATTENTION_ROWS = 5;
+const LOW_HEALTH = 50; // below this healthTone() is red
+
+type HealthGroup = 'attention' | 'paused' | 'dry' | 'connecting' | 'healthy';
+const GROUPS: Array<{ key: HealthGroup; label: string; color: string }> = [
+  { key: 'attention', label: 'Needs attention', color: 'bg-red-500' },
+  { key: 'paused', label: 'Paused', color: 'bg-amber-400' },
+  { key: 'dry', label: 'Running dry', color: 'bg-yellow-300' },
+  { key: 'connecting', label: 'Connecting', color: 'bg-blue-400' },
+  { key: 'healthy', label: 'Healthy', color: 'bg-green-500' },
+];
+const GROUP_ORDER: Record<HealthGroup, number> = { attention: 0, paused: 1, dry: 2, connecting: 3, healthy: 4 };
+const CAPACITY_LABELS: Array<{ key: string; label: string }> = [
+  { key: 'invite', label: 'Invites' }, { key: 'message', label: 'Messages' }, { key: 'new_chat', label: 'New conversations' },
+  { key: 'email', label: 'Emails' }, { key: 'follow', label: 'Follows' }, { key: 'profile_view', label: 'Profile views' },
+];
+
+const isAutoPaused = (s: DashSender) => !!s.paused_until && new Date(s.paused_until).getTime() > Date.now();
+function healthGroup(s: DashSender): HealthGroup {
+  if (s.status === 'credentials' || s.status === 'error' || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
+  if (s.status === 'paused' || s.status === 'disabled' || isAutoPaused(s)) return 'paused';
+  if (s.running_dry) return 'dry';
+  if (s.status === 'connecting') return 'connecting';
+  return 'healthy';
+}
+
+function flagReason(s: DashSender, g: HealthGroup): React.ReactNode {
+  if (s.status !== 'ok') return <StatusPill status={s.status} reason={s.status_reason} />;
+  if (g === 'attention') return <Badge tone="red">Low health</Badge>;
+  if (g === 'paused') return <Badge tone="amber">Auto-paused</Badge>;
+  return <Badge tone="amber">Running out of leads</Badge>;
+}
+
+function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
+  const { counts, flagged, capacity } = useMemo(() => {
+    const counts: Record<HealthGroup, number> = { attention: 0, paused: 0, dry: 0, connecting: 0, healthy: 0 };
+    const flagged: Array<{ s: DashSender; g: HealthGroup }> = [];
+    const sums = new Map<string, { used: number; cap: number }>();
+    for (const s of senders) {
+      const g = healthGroup(s);
+      counts[g]++;
+      if (g === 'attention' || g === 'paused' || g === 'dry') flagged.push({ s, g });
+      for (const [k, b] of Object.entries(s.today ?? {})) {
+        const c = sums.get(k) ?? { used: 0, cap: 0 };
+        c.used += (b?.used ?? 0) + (b?.reserved ?? 0);
+        c.cap += b?.cap ?? 0;
+        sums.set(k, c);
+      }
+    }
+    // Within a group, senders that stopped (re-login needed, error) come before low health.
+    const stopped = (s: DashSender) => (s.status === 'ok' ? 1 : 0);
+    flagged.sort((a, b) => GROUP_ORDER[a.g] - GROUP_ORDER[b.g] || stopped(a.s) - stopped(b.s) || a.s.health_score - b.s.health_score || (a.s.display_name ?? '').localeCompare(b.s.display_name ?? ''));
+    const capacity = CAPACITY_LABELS.map((c) => ({ ...c, ...(sums.get(c.key) ?? { used: 0, cap: 0 }) })).filter((c) => c.cap > 0).slice(0, 4);
+    return { counts, flagged, capacity };
+  }, [senders]);
+
+  const total = senders.length;
+  const shown = flagged.slice(0, ATTENTION_ROWS);
+  const more = flagged.length - shown.length;
+  const legend = GROUPS.filter((g) => counts[g.key] > 0 || g.key === 'attention' || g.key === 'healthy');
+
   return (
-    <Link href={`/outreach/senders/${s.id}`} className={cn('block rounded-xl border p-4 hover:shadow-sm transition-shadow', healthTileClasses(s.health_score))}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <Avatar src={s.picture_url} name={s.display_name} size={10} />
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</div>
-            <div className="text-xs text-gray-500 flex items-center gap-1"><ProviderLogo provider={s.provider} className="w-3 h-3" /> {PROVIDER_LABELS[s.provider] ?? s.provider} · Level {s.warmup_level}</div>
+    <div className="space-y-4">
+      <div>
+        <div className="flex items-baseline justify-between gap-3 mb-2">
+          <div className="text-sm text-gray-600"><span className="text-lg font-semibold text-gray-900 tabular-nums">{fmtInt(total)}</span> {total === 1 ? 'sender' : 'senders'}</div>
+          {counts.healthy === total && <div className="text-xs text-green-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> All healthy</div>}
+        </div>
+        <div className="flex h-2 rounded-full overflow-hidden bg-gray-100" role="img" aria-label={legend.map((g) => `${counts[g.key]} ${g.label.toLowerCase()}`).join(', ')}>
+          {GROUPS.map((g) => counts[g.key] > 0 && <div key={g.key} className={g.color} style={{ width: `${(counts[g.key] / total) * 100}%` }} />)}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {legend.map((g) => (
+            <span key={g.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
+              <span className={cn('w-2 h-2 rounded-full', g.color)} />{g.label} <span className="font-semibold text-gray-900 tabular-nums">{fmtInt(counts[g.key])}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {shown.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Needs a look</div>
+          <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg">
+            {shown.map(({ s, g }) => (
+              <li key={s.id}>
+                <Link href={`/outreach/senders/${s.id}`} className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50">
+                  <Avatar src={s.picture_url} name={s.display_name} size={8} />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</div>
+                    <div className="text-xs text-gray-500 flex items-center gap-1"><ProviderLogo provider={s.provider} className="w-3 h-3" /> {PROVIDER_LABELS[s.provider] ?? s.provider} · Level {s.warmup_level}</div>
+                  </div>
+                  <div className="shrink-0">{flagReason(s, g)}</div>
+                  <div className={cn('w-8 text-right text-sm font-semibold tabular-nums', healthTextClass(s.health_score))} title="Health score">{s.health_score}</div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          {more > 0 && (
+            <Link href="/outreach/senders" className="mt-2 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">
+              {fmtInt(more)} more {more === 1 ? 'needs' : 'need'} a look · Open senders <ArrowRight className="w-3 h-3" />
+            </Link>
+          )}
+        </div>
+      )}
+
+      {capacity.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Today, all senders</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {capacity.map((c) => {
+              const pct = Math.min(100, Math.round((c.used / c.cap) * 100));
+              return (
+                <div key={c.key} className="bg-gray-50 rounded-lg px-3 py-2">
+                  <div className="text-xs text-gray-500 truncate">{c.label}</div>
+                  <div className="text-sm font-semibold text-gray-900 tabular-nums">{fmtInt(c.used)} <span className="text-gray-400 font-normal">/ {fmtInt(c.cap)}</span></div>
+                  <div className="h-1 mt-1 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-indigo-500" style={{ width: `${pct}%` }} /></div>
+                </div>
+              );
+            })}
           </div>
         </div>
-        <div className={cn('text-2xl font-bold tabular-nums', healthTextClass(s.health_score))}>{s.health_score}</div>
-      </div>
-      <div className="mt-2 flex items-center gap-2 flex-wrap">
-        <StatusPill status={s.status} reason={s.status_reason} />
-        {s.paused_until && new Date(s.paused_until).getTime() > Date.now() && <Badge tone="amber">auto-paused</Badge>}
-        {s.running_dry && <Badge tone="amber">running out of leads</Badge>}
-      </div>
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        {TILE_TYPES.map((t) => {
-          const b = s.today?.[t.key];
-          const used = (b?.used ?? 0) + (b?.reserved ?? 0);
-          const cap = b?.cap ?? 0;
-          const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
-          return (
-            <div key={t.key} className="bg-white/70 rounded-lg px-2 py-1.5">
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">{t.label}</div>
-              <div className="text-xs font-semibold text-gray-900 tabular-nums">{b ? `${used}/${cap}` : '—'}</div>
-              <div className="h-1 mt-1 bg-gray-200 rounded-full overflow-hidden"><div className="h-full bg-indigo-500" style={{ width: `${pct}%` }} /></div>
-            </div>
-          );
-        })}
-      </div>
-    </Link>
+      )}
+    </div>
   );
 }
 
@@ -168,7 +260,7 @@ export default function OutreachDashboardPage() {
                 {d.senders.length === 0 ? (
                   <EmptyState title="No senders yet" description="Connect a LinkedIn account to start." icon={<Contact className="w-6 h-6" />} action={isManager ? <Link href="/outreach/senders/new"><Button size="sm">Connect sender</Button></Link> : undefined} />
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">{d.senders.map((s) => <HealthTile key={s.id} s={s} />)}</div>
+                  <SenderHealthSummary senders={d.senders} />
                 )}
               </Card>
             </div>

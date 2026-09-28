@@ -3,7 +3,7 @@
   "mcpServers": {
     "capitalxai-smartlead": {
       "type": "streamable-http",
-      "url": "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/smartlead-mcp/mcp"
+      "url": "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/smartlead-mcp/mcp-chatgpt"
     }
   }
 }

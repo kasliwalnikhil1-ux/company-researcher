@@ -3,7 +3,7 @@
   "mcpServers": {
     "capitalxai-crm": {
       "type": "streamable-http",
-      "url": "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/crm-mcp/mcp"
+      "url": "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/crm-mcp/mcp-chatgpt"
     }
   }
 }

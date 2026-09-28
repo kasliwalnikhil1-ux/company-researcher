@@ -50,7 +50,7 @@ serve("sender-connect", async (req) => {
   const isMail = !isLinkedIn && !isChannel;
   const browser = isLinkedIn && body.connect_method === "browser";
   const row: Record<string, unknown> = {
-    workspace_id: body.workspace_id, client_id: body.client_id ?? null, owner_email: body.owner_email ?? null, owner_user_id: user.id,
+    workspace_id: body.workspace_id, client_id: body.client_id ?? null, owner_email: String(body.owner_email ?? "").trim().toLowerCase() || null, owner_user_id: user.id,
     provider, auth_method: browser ? "browser" : isMail ? "oauth" : "credentials", display_name: body.display_name ?? DEFAULT_NAME[provider],
     status: "connecting", proxy_ip_hint: ip, user_agent: ua, timezone: body.timezone ?? "UTC", warmup_level: isMail ? 3 : 0,
   };

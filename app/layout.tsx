@@ -21,6 +21,7 @@ import {
   getTwitterImagePath,
   getOgTitle,
   getOgDescription,
+  getOgLogoPath,
 } from '@/lib/whitelabel';
 import { WhitelabelProvider } from '@/contexts/WhitelabelContext';
 
@@ -49,13 +50,19 @@ const reckless = localFont({
 
 const fallbackAppUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://app.capitalxai.com';
 
+// Derive URL from the request host so metadata matches the current environment (dev/prod)
+function requestOrigin(host: string | undefined): string {
+  if (!host) return fallbackAppUrl;
+  const hostname = host.replace(/:\d+$/, '');
+  const protocol = hostname === 'localhost' || hostname.endsWith('.localhost') ? 'http' : 'https';
+  return `${protocol}://${host}`;
+}
+
 export async function generateMetadata(): Promise<Metadata> {
   const headersList = await headers();
   const host = headersList.get('host') ?? undefined;
   const config = getWhitelabelConfig(host);
-  // Derive URL from the request host so metadata matches the current environment (dev/prod)
-  const protocol = host?.startsWith('localhost') ? 'http' : 'https';
-  const appUrl = host ? `${protocol}://${host}` : fallbackAppUrl;
+  const appUrl = requestOrigin(host);
   const ogTitle = getOgTitle(config);
   const ogDescription = getOgDescription(config);
 
@@ -94,10 +101,15 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const headersList = await headers();
-  const whitelabel = getWhitelabelConfig(headersList.get('host') ?? undefined);
+  const host = headersList.get('host') ?? undefined;
+  const whitelabel = getWhitelabelConfig(host);
 
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* og:logo is not in the Metadata API (nor in the ogp.me spec), but some preview checkers read it */}
+        <meta property="og:logo" content={new URL(getOgLogoPath(whitelabel), requestOrigin(host)).toString()} />
+      </head>
       <body
         className={`${abcdDiatype.variable} ${reckless.variable} antialiased`}
         suppressHydrationWarning

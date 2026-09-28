@@ -4,4 +4,4 @@ dependencies:
       value: "capitalxai"
       description: "Investor database and investor-fit analysis"
       transport: "streamable_http"
-      url: "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/capitalxai-mcp/mcp"
+      url: "https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/capitalxai-mcp/mcp-chatgpt"

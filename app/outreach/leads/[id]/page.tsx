@@ -67,7 +67,7 @@ export default function LeadDetailPage() {
           <Card title="Next scheduled actions"><QueuedActions leadId={l.id} leadName={leadName(l)} toast={toast.show} /></Card>
           <LeadChats chats={chats} />
           <LeadTimeline leadId={l.id} />
-          <LeadRecentActions actions={actions} />
+          <LeadRecentActions leadId={l.id} actions={actions} />
         </div>
         <div className="space-y-4 min-w-0">
           <EnrichmentCard lead={l} toast={toast.show} />

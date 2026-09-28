@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc } from './api';
 import type {
@@ -142,7 +142,7 @@ export function useLead(id: string | null | undefined) {
         sel<LeadSenderState[]>(supabase.from('outreach_lead_sender_state').select('*').eq('lead_id', id!)),
         sel<Enrollment[]>(supabase.from('outreach_enrollments').select('*').eq('lead_id', id!).order('created_at', { ascending: false })),
         sel<Chat[]>(supabase.from('outreach_chats').select('*').eq('lead_id', id!).order('last_message_at', { ascending: false })),
-        sel<Action[]>(supabase.from('outreach_actions').select('*').eq('lead_id', id!).order('scheduled_for', { ascending: false }).limit(100)),
+        sel<Action[]>(supabase.from('outreach_actions').select('*').eq('lead_id', id!).order('scheduled_for', { ascending: false }).limit(500)),
         sel<Task[]>(supabase.from('outreach_tasks').select('*').eq('lead_id', id!).order('created_at', { ascending: false })),
       ]);
       return { lead, tagIds: tags.map((t) => t.tag_id), states, enrollments, chats, actions, tasks };
@@ -218,6 +218,26 @@ export function useTasks(ws: string | null | undefined, f: { open?: boolean; kin
   });
 }
 
+/** One page of the tasks list with the exact total, for the tasks page (same key prefix, so task invalidations refresh it). */
+export function useTasksPage(ws: string | null | undefined, f: { open: boolean; kind?: string | null; assigned_to?: string | null; client_id?: string | null; page: number; pageSize: number }) {
+  return useQuery({
+    queryKey: qk.tasks(ws ?? '', { ...f, paged: true }), enabled: !!ws, placeholderData: keepPreviousData,
+    queryFn: async () => {
+      let q = supabase.from('outreach_tasks').select('*, outreach_leads(id, full_name, company, public_identifier, picture_url), outreach_senders(id, display_name)', { count: 'exact' }).eq('workspace_id', ws!);
+      if (f.open) q = q.is('completed_at', null); else q = q.not('completed_at', 'is', null);
+      if (f.kind) q = q.eq('kind', f.kind);
+      if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
+      if (f.client_id) q = q.eq('client_id', f.client_id);
+      // Open tasks: soonest due first; completed: most recently completed first. id breaks ties so pages never overlap.
+      q = f.open ? q.order('due_at', { ascending: true, nullsFirst: false }) : q.order('completed_at', { ascending: false });
+      const from = f.page * f.pageSize;
+      const { data, error, count } = await q.order('id').range(from, from + f.pageSize - 1);
+      if (error) throw parseError(error);
+      return { rows: (data ?? []) as (Task & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null })[], total: count ?? 0 };
+    },
+  });
+}
+
 export function useImportJobs(ws: string | null | undefined) {
   return useQuery({ queryKey: qk.imports(ws ?? ''), enabled: !!ws, refetchInterval: 15000, queryFn: () => sel<ImportJob[]>(supabase.from('outreach_import_jobs').select('*').eq('workspace_id', ws!).order('created_at', { ascending: false }).limit(100)) });
 }
@@ -261,18 +281,48 @@ export function useInvalidatingMutation<TArgs, TRes = unknown>(fn: (a: TArgs) =>
 
 // ---------------------------------------------------------------------------
 // Realtime: one channel per workspace, invalidates relevant queries.
+//
+// Events arrive one per row, and a sender's inbox history sync inserts hundreds
+// of messages in a few minutes. Invalidating per event refetched every open
+// tab's queries hundreds of times; each dashboard refetch (~1.7s of DB time)
+// cancelled the last in the browser but not in Postgres, so they piled up and
+// saturated the database (2026-09-28). So: keys are collected and invalidated
+// once per REALTIME_FLUSH_MS, the dashboard at most once per
+// DASHBOARD_FLUSH_MS without restarting a fetch already in flight, and message
+// events don't touch the dashboard at all (its 30s poll picks them up).
 // ---------------------------------------------------------------------------
+const REALTIME_FLUSH_MS = 1500;
+const DASHBOARD_FLUSH_MS = 10_000;
+
 export function useOutreachRealtime(ws: string | null | undefined) {
   const qc = useQueryClient();
   useEffect(() => {
     if (!ws) return;
     const ch = supabase.channel(`outreach:${ws}`);
-    const inv = (keys: readonly unknown[]) => qc.invalidateQueries({ queryKey: keys });
+    const pending = new Map<string, readonly unknown[]>();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let dashTimer: ReturnType<typeof setTimeout> | null = null;
+    const inv = (keys: readonly unknown[]) => {
+      pending.set(JSON.stringify(keys), keys);
+      if (timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        const batch = [...pending.values()];
+        pending.clear();
+        for (const queryKey of batch) qc.invalidateQueries({ queryKey });
+      }, REALTIME_FLUSH_MS);
+    };
+    const invDashboard = () => {
+      if (dashTimer) return;
+      dashTimer = setTimeout(() => {
+        dashTimer = null;
+        qc.invalidateQueries({ queryKey: qk.dashboard(ws) }, { cancelRefetch: false });
+      }, DASHBOARD_FLUSH_MS);
+    };
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_messages', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       const chatId = p.new?.chat_id ?? p.old?.chat_id;
       if (chatId) inv(qk.messages(chatId));
       inv(['outreach', ws, 'chats']);
-      inv(qk.dashboard(ws));
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_chats', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       inv(['outreach', ws, 'chats']);
@@ -281,7 +331,7 @@ export function useOutreachRealtime(ws: string | null | undefined) {
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_senders', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       inv(qk.senders(ws));
       if (p.new?.id) { inv(qk.sender(p.new.id)); inv(qk.senderEvents(p.new.id)); }
-      inv(qk.dashboard(ws));
+      invDashboard();
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_node_stats' }, (p: any) => {
       const sid = p.new?.sequence_id ?? p.old?.sequence_id;
@@ -289,13 +339,17 @@ export function useOutreachRealtime(ws: string | null | undefined) {
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_tasks', filter: `workspace_id=eq.${ws}` }, () => {
       inv(['outreach', ws, 'tasks']);
-      inv(qk.dashboard(ws));
+      invDashboard();
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_enrollments', filter: `workspace_id=eq.${ws}` }, () => {
       inv(['outreach', 'enrollments']);
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_import_jobs', filter: `workspace_id=eq.${ws}` }, () => inv(qk.imports(ws)));
     ch.subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => {
+      if (timer) clearTimeout(timer);
+      if (dashTimer) clearTimeout(dashTimer);
+      supabase.removeChannel(ch);
+    };
   }, [ws, qc]);
 }

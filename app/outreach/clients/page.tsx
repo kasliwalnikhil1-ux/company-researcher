@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Building2, ExternalLink, Pencil, Plus, Trash2 } from 'lucide-react';
+import { BarChart3, Building2, ExternalLink, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
+import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { qk, useClients, useSenders, useSequences } from '@/lib/outreach/queries';
@@ -13,6 +14,10 @@ import { browserTimezone, slugify, timezoneChoices } from '@/components/outreach
 import type { Client } from '@/lib/outreach/types';
 import { fmtInt, fmtRate, presetRange, useReportClients } from '@/lib/outreach/reports';
 import { CountRate, MetricLabel } from '@/components/outreach/reports/primitives';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
+
+/** Same compact control as the leads filter bar. */
+const SEL = 'px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 export default function ClientsPage() {
   const { workspace, isManager, canWrite } = useWorkspace();
@@ -28,6 +33,8 @@ export default function ClientsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
 
   useEffect(() => {
     if (editing === 'new') setForm({ name: '', slug: '', timezone: browserTimezone(), slugTouched: false });
@@ -42,6 +49,9 @@ export default function ClientsPage() {
   const byClient = useMemo(() => Object.fromEntries((report.data ?? []).map((r) => [r.client_id, r])), [report.data]);
   const senderCount = useMemo(() => { const m: Record<string, number> = {}; for (const s of senders.data ?? []) if (s.client_id && s.status !== 'disabled') m[s.client_id] = (m[s.client_id] ?? 0) + 1; return m; }, [senders.data]);
   const sequenceCount = useMemo(() => { const m: Record<string, number> = {}; for (const s of sequences.data ?? []) if (s.client_id && s.status !== 'archived') m[s.client_id] = (m[s.client_id] ?? 0) + 1; return m; }, [sequences.data]);
+
+  const rows = useMemo(() => (clients.data ?? []).filter((c) => !q || c.name.toLowerCase().includes(q) || (c.slug ?? '').toLowerCase().includes(q)), [clients.data, q]);
+  const { pageRows, ...pager } = usePagedRows(rows, [ws, q].join('|'));
 
   const refresh = () => { qc.invalidateQueries({ queryKey: qk.clients(ws ?? '') }); qc.invalidateQueries({ queryKey: qk.senders(ws ?? '') }); qc.invalidateQueries({ queryKey: qk.sequences(ws ?? '') }); };
 
@@ -77,10 +87,22 @@ export default function ClientsPage() {
       {clients.isLoading ? <Spinner className="min-h-[50vh]" /> : clients.isError ? <ErrorBox message={(clients.error as Error).message} /> : !clients.data?.length ? (
         <Card><EmptyState icon={<Building2 className="w-6 h-6" />} title="No clients yet" description="Clients are optional. Create one per customer if you run outreach for several companies; you can then invite a client viewer who only sees their own inbox and stats." action={<Button onClick={() => setEditing('new')} disabled={!canWrite}>Create client</Button>} /></Card>
       ) : (
+        <>
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <label className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input aria-label="Search clients" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or slug…" className={cn(SEL, 'w-full pl-8')} />
+          </label>
+          {q && <Button variant="ghost" size="sm" onClick={() => setSearch('')}><X className="w-3.5 h-3.5" /> Clear</Button>}
+        </div>
+        {rows.length === 0 ? (
+          <Card><EmptyState title="No clients match" description="Try a different search." action={<Button variant="secondary" onClick={() => setSearch('')}>Clear search</Button>} /></Card>
+        ) : (
+        <>
         <Table>
           <thead><tr><Th>Client</Th><Th>Slug</Th><Th>Timezone</Th><Th className="text-right">Senders</Th><Th className="text-right">Leads</Th><Th className="text-right">Sequences</Th><Th className="text-right"><MetricLabel metric="touches">Touches (30d)</MetricLabel></Th><Th className="text-right"><MetricLabel metric="replies">Replies (30d)</MetricLabel></Th><Th className="text-right"><MetricLabel metric="interested">Interested (30d)</MetricLabel></Th><Th>Created</Th><Th></Th></tr></thead>
           <tbody>
-            {clients.data.map((c) => (
+            {pageRows.map((c) => (
               <tr key={c.id}>
                 <Td className="font-medium text-gray-900">{c.name}</Td>
                 <Td className="font-mono text-xs text-gray-600">{c.slug ?? '—'}</Td>
@@ -104,6 +126,10 @@ export default function ClientsPage() {
             ))}
           </tbody>
         </Table>
+        <PaginationBar {...pager} />
+        </>
+        )}
+        </>
       )}
       {report.isError && <ErrorBox className="mt-3" message={`The 30-day numbers could not be loaded. ${(report.error as Error).message}`} />}
 

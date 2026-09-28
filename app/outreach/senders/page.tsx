@@ -1,14 +1,14 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Contact, Lock, Plus } from 'lucide-react';
+import { Contact, Lock, Plus, Search, X } from 'lucide-react';
 import { RunningDryBadge } from '@/components/outreach/senders/RunningDry';
 import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/senders/insights';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
-import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Select, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
 import { PROVIDER_LABELS, STATUS_OPTIONS, isFuture, scheduleSummary } from '@/components/outreach/senders/helpers';
 import type { Provider, Sender } from '@/lib/outreach/types';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
@@ -17,6 +17,10 @@ import { QaScoreBadge } from '@/components/outreach/profile/QaCard';
 import { SendersSubnav } from '@/components/outreach/senders/SendersSubnav';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { useSenderScopes } from '@/lib/outreach/channels';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
+
+/** Same compact control as the leads filter bar. */
+const SEL = 'px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 type Usage = { used: number; reserved: number; cap: number };
 
@@ -73,6 +77,8 @@ export default function SendersPage() {
   const setStatus = (v: string) => patchListFilters({ status: v });
   const setClient = (v: string) => patchListFilters({ client: v });
   const setChannel = (v: string) => patchListFilters({ channel: v });
+  const [search, setSearch] = useState('');
+  const q = search.trim().toLowerCase();
 
   const todayById = useMemo(() => {
     const m = new Map<string, Record<string, { used: number; reserved: number; cap: number }>>();
@@ -81,7 +87,12 @@ export default function SendersPage() {
   }, [dash.data]);
   const clientName = useMemo(() => new Map((clients.data ?? []).map((c) => [c.id, c.name])), [clients.data]);
 
-  const rows = useMemo(() => ((senders.data ?? []) as SenderV2[]).filter((s: Sender) => (!channel || s.provider === channel) && (!status || s.status === status) && (!client || (client === '__none' ? !s.client_id : s.client_id === client))), [senders.data, status, client, channel]);
+  // Newest additions first.
+  const rows = useMemo(() => ((senders.data ?? []) as SenderV2[]).filter((s: Sender) => (!q || [s.display_name, s.public_identifier, s.owner_email].some((f) => f?.toLowerCase().includes(q))) && (!channel || s.provider === channel) && (!status || s.status === status) && (!client || (client === '__none' ? !s.client_id : s.client_id === client))).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')), [senders.data, status, client, channel, q]);
+  // Paged on the client: the full sender list is already loaded; any filter change goes back to page 1.
+  const { pageRows, ...pager } = usePagedRows(rows, [ws, q, status, client, channel].join('|'));
+  const filtered = !!(q || status || client || channel);
+  const clearFilters = () => { setSearch(''); patchListFilters({ status: '', client: '', channel: '' }); };
   // Only channels this workspace actually has senders on are offered, plus the one selected (so it can be cleared).
   const channelCounts = useMemo(() => {
     const m = new Map<Provider, number>();
@@ -111,23 +122,35 @@ export default function SendersPage() {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-end gap-3 mb-4">
-        <div className="w-full sm:w-48"><Select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</Select></div>
-        <div className="w-full sm:w-56"><Select label="Client" value={client} onChange={(e) => setClient(e.target.value)}><option value="">All clients</option><option value="__none">No client</option>{(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></div>
-        <div className="text-xs text-gray-500 pb-2 ml-auto">{rows.length} of {senders.data?.length ?? 0} senders</div>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <label className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input aria-label="Search senders" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, handle, email…" className={cn(SEL, 'w-full pl-8')} />
+        </label>
+        <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)} className={SEL}>
+          <option value="">All statuses</option>
+          {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <select aria-label="Client" value={client} onChange={(e) => setClient(e.target.value)} className={SEL}>
+          <option value="">All clients</option>
+          <option value="__none">No client</option>
+          {(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        {filtered && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="w-3.5 h-3.5" /> Clear</Button>}
       </div>
 
       {senders.isLoading ? <Spinner className="min-h-[50vh]" /> : senders.isError ? <ErrorBox message={(senders.error as Error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<Contact className="w-6 h-6" />} title={senders.data?.length ? 'No senders match these filters' : 'No senders connected'}
-          description={senders.data?.length ? 'Try clearing the channel, status or client filter.' : 'Connect a LinkedIn, Instagram or WhatsApp account, or a mailbox, to start sending. The account owner signs in through a hosted page; you never handle their password.'}
-          action={isManager && canWrite && !senders.data?.length ? <Link href="/outreach/senders/new"><Button>Connect sender</Button></Link> : undefined} />
+          description={senders.data?.length ? 'Try clearing the search, channel, status or client filter.' : 'Connect a LinkedIn, Instagram or WhatsApp account, or a mailbox, to start sending. The account owner signs in through a hosted page; you never handle their password.'}
+          action={senders.data?.length ? <Button variant="secondary" onClick={clearFilters}>Clear filters</Button> : isManager && canWrite ? <Link href="/outreach/senders/new"><Button>Connect sender</Button></Link> : undefined} />
       ) : (
+        <>
         <Table>
           <thead><tr>
             <Th>Sender</Th><Th>Status</Th><Th>Health</Th><Th>Profile</Th><Th>Level</Th><Th>Proxy</Th><Th>Client</Th><Th>Schedule</Th><Th>Last sync</Th><Th className="text-right">Used today</Th>
           </tr></thead>
           <tbody>
-            {rows.map((s) => {
+            {pageRows.map((s) => {
               const today = todayById.get(s.id);
               const locked = isFuture(s.warmup_locked_until);
               const dryAlert = dry.data?.get(s.id);
@@ -155,7 +178,9 @@ export default function SendersPage() {
                     {hint && <div className="text-[11px] text-amber-700 mt-1 max-w-[220px]">{hint}</div>}
                   </Td>
                   <Td><HealthBar score={s.health_score} /></Td>
-                  <Td>{s.provider === 'LINKEDIN' ? <QaScoreBadge score={s.profile_qa_score} /> : <span className="text-gray-300">—</span>}</Td>
+                  <Td>{s.provider === 'LINKEDIN'
+                    ? <Link href={`/outreach/senders/${s.id}?tab=Profile`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} title="Profile quality score. Open the Profile tab." className="inline-flex hover:opacity-80"><QaScoreBadge score={s.profile_qa_score} /></Link>
+                    : <span className="text-gray-300">—</span>}</Td>
                   <Td>
                     <div className="flex items-center gap-1.5">
                       <Badge tone="indigo">L{s.warmup_level}</Badge>
@@ -183,6 +208,8 @@ export default function SendersPage() {
             })}
           </tbody>
         </Table>
+        <PaginationBar {...pager} />
+        </>
       )}
     </div>
   );

@@ -55,10 +55,10 @@ const CORS_HEADERS: Record<string, string> = {
   "access-control-expose-headers": "mcp-session-id, www-authenticate",
 };
 
-function unauthorized(): Response {
+function unauthorized(prm = PRM_URL): Response {
   return new Response(JSON.stringify({ error: "unauthorized", error_description: "A valid bearer token is required to access this MCP server." }), {
     status: 401,
-    headers: { ...CORS_HEADERS, "content-type": "application/json", "www-authenticate": `Bearer realm="crm-mcp", resource_metadata="${PRM_URL}", scope="email profile"` },
+    headers: { ...CORS_HEADERS, "content-type": "application/json", "www-authenticate": `Bearer realm="crm-mcp", resource_metadata="${prm}", scope="email profile"` },
   });
 }
 
@@ -108,6 +108,18 @@ const protectedResourceMetadata = {
   resource_name: APP_NAME,
 };
 
+// ChatGPT's own connector URL (…/mcp-chatgpt): same server, but its OAuth metadata points at oauth-as, which leaves
+// "openid" out so Supabase does not have to sign an ID token (HS256 project secret cannot). Claude's URL is unchanged.
+const GPT_RESOURCE_URL = `${FUNCTION_BASE}/mcp-chatgpt`;
+const GPT_PRM_URL = `${FUNCTION_BASE}/.well-known/oauth-protected-resource-chatgpt`;
+const chatgptResourceMetadata = {
+  resource: GPT_RESOURCE_URL,
+  authorization_servers: [`${SUPABASE_URL}/functions/v1/oauth-as`],
+  bearer_methods_supported: ["header"],
+  scopes_supported: ["email", "profile"],
+  resource_name: APP_NAME,
+};
+
 const app = new Hono().basePath("/crm-mcp");
 
 app.options("*", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
@@ -116,11 +128,12 @@ const prmResponse = () => new Response(JSON.stringify(protectedResourceMetadata)
 app.get("/.well-known/oauth-protected-resource", prmResponse);
 app.get("/.well-known/oauth-protected-resource/mcp", prmResponse);
 app.get("/mcp/.well-known/oauth-protected-resource", prmResponse);
+app.get("/.well-known/oauth-protected-resource-chatgpt", () => new Response(JSON.stringify(chatgptResourceMetadata), { headers: { ...CORS_HEADERS, "content-type": "application/json" } }));
 
-app.all("/mcp", async (c) => {
+const mcpHandler = (prm: string) => async (c: import("npm:hono@4.9.7").Context) => {
   const t0 = Date.now();
   const ctx = await buildCtx(c.req.header("authorization"));
-  if (!ctx) return unauthorized();
+  if (!ctx) return unauthorized(prm);
 
   const server = buildServer(ctx);
   const transport = new WebStandardStreamableHTTPServerTransport();
@@ -131,7 +144,9 @@ app.all("/mcp", async (c) => {
   for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
   log({ fn: "crm-mcp", user: ctx.userId, member: ctx.isMember, status: response.status, duration_ms: Date.now() - t0 });
   return new Response(response.body, { status: response.status, headers });
-});
+};
+app.all("/mcp", mcpHandler(PRM_URL));
+app.all("/mcp-chatgpt", mcpHandler(GPT_PRM_URL));
 
 // Transcript upload. The bearer here is NOT a user JWT but a one-time ticket a member minted with
 // transcript_upload_ticket; crm_save_transcript verifies it (single use, 30 min, bound to one meeting, owner still a

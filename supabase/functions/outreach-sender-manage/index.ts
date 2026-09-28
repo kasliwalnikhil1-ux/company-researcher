@@ -18,7 +18,7 @@ async function userRpc<T = unknown>(user: { client: { rpc: (fn: string, args: Re
 
 serve("sender-manage", async (req) => {
   const user = await requireUser(req);
-  const body = await readJson<{ sender_id: string; action: string; code?: string; li_at?: string; li_a?: string; user_agent?: string; months?: number }>(req);
+  const body = await readJson<{ sender_id: string; action: string; code?: string; li_at?: string; li_a?: string; user_agent?: string; months?: number; connect_method?: string }>(req);
   const { data: s } = await admin.from("outreach_senders").select("*").eq("id", body.sender_id ?? "").maybeSingle();
   if (!s) throw new HttpError(404, "E_NOT_FOUND");
   const m = await membership(user.id, s.workspace_id);
@@ -26,8 +26,9 @@ serve("sender-manage", async (req) => {
   switch (body.action) {
     case "reconnect_link": {
       if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
-      const link = await reconnectLink(s);
-      await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, null, "user");
+      const method = body.connect_method === "browser" || body.connect_method === "credentials" ? body.connect_method : undefined;
+      const link = await reconnectLink(s, method);
+      await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, method ? { connect_method: method } : null, "user");
       return json({ link });
     }
     case "reconnect_cookie": {

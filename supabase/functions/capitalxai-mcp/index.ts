@@ -79,7 +79,7 @@ async function authenticate(authHeader: string | undefined): Promise<AuthedUser 
   }
 }
 
-function unauthorized(): Response {
+function unauthorized(prm = PRM_URL): Response {
   return new Response(
     JSON.stringify({
       error: "unauthorized",
@@ -90,7 +90,7 @@ function unauthorized(): Response {
       headers: {
         ...CORS_HEADERS,
         "content-type": "application/json",
-        "www-authenticate": `Bearer realm="capitalxai-mcp", resource_metadata="${PRM_URL}", scope="email profile"`,
+        "www-authenticate": `Bearer realm="capitalxai-mcp", resource_metadata="${prm}", scope="email profile"`,
       },
     },
   );
@@ -2033,6 +2033,18 @@ const protectedResourceMetadata = {
   resource_name: APP_NAME,
 };
 
+// ChatGPT's own connector URL (…/mcp-chatgpt): same server, but its OAuth metadata points at oauth-as, which leaves
+// "openid" out so Supabase does not have to sign an ID token (HS256 project secret cannot). Claude's URL is unchanged.
+const GPT_RESOURCE_URL = `${FUNCTION_BASE}/mcp-chatgpt`;
+const GPT_PRM_URL = `${FUNCTION_BASE}/.well-known/oauth-protected-resource-chatgpt`;
+const chatgptResourceMetadata = {
+  resource: GPT_RESOURCE_URL,
+  authorization_servers: [`${SUPABASE_URL}/functions/v1/oauth-as`],
+  bearer_methods_supported: ["header"],
+  scopes_supported: ["email", "profile"],
+  resource_name: APP_NAME,
+};
+
 const app = new Hono().basePath("/capitalxai-mcp");
 
 app.options("*", () => new Response(null, { status: 204, headers: CORS_HEADERS }));
@@ -2046,10 +2058,11 @@ app.get("/.well-known/oauth-protected-resource", prmResponse);
 // Some clients append the resource path when probing (RFC 9728 path-aware form).
 app.get("/.well-known/oauth-protected-resource/mcp", prmResponse);
 app.get("/mcp/.well-known/oauth-protected-resource", prmResponse);
+app.get("/.well-known/oauth-protected-resource-chatgpt", () => new Response(JSON.stringify(chatgptResourceMetadata), { headers: { ...CORS_HEADERS, "content-type": "application/json" } }));
 
-app.all("/mcp", async (c) => {
+const mcpHandler = (prm: string) => async (c: import("npm:hono@4.9.7").Context) => {
   const auth = await authenticate(c.req.header("authorization"));
-  if (!auth) return unauthorized();
+  if (!auth) return unauthorized(prm);
 
   const server = buildServer(auth);
   const transport = new WebStandardStreamableHTTPServerTransport();
@@ -2059,7 +2072,9 @@ app.all("/mcp", async (c) => {
   const headers = new Headers(response.headers);
   for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
   return new Response(response.body, { status: response.status, headers });
-});
+};
+app.all("/mcp", mcpHandler(PRM_URL));
+app.all("/mcp-chatgpt", mcpHandler(GPT_PRM_URL));
 
 app.get("/", (c) =>
   c.json({
