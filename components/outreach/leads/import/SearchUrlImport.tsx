@@ -73,7 +73,7 @@ export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreate
         <div className="flex items-center gap-2 text-xs text-gray-600">
           <span className="font-medium text-gray-700">Today&apos;s search pages:</span>
           {budget.isLoading ? <span>loading…</span> : budget.data ? (
-            <><span className="tabular-nums">{budget.data.used + budget.data.reserved} / {budget.data.cap}</span>{!budget.data.planned && <Badge tone="gray">cap for this level</Badge>}{budget.data.cap === 0 && <Badge tone="amber">no search budget today</Badge>}</>
+            <><span className="tabular-nums">{budget.data.used + budget.data.reserved} / {budget.data.cap}</span>{!budget.data.planned && <Badge tone="gray">cap for this level</Badge>}{budget.data.cap === 0 && <Badge tone="amber">no searches left today</Badge>}</>
           ) : <span>unavailable</span>}
         </div>
       )}
@@ -91,7 +91,7 @@ export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreate
             <div><dt className="text-xs text-gray-500">Pages per day</dt><dd className="font-semibold tabular-nums">{estimate.pages_per_day}</dd></div>
             <div><dt className="text-xs text-gray-500">Estimated duration</dt><dd className="font-semibold tabular-nums">{estimate.estimated_days} day{estimate.estimated_days === 1 ? '' : 's'}</dd></div>
           </dl>
-          <p className="text-xs text-gray-600 flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> The job fetches a page every 20–90 minutes within {estimate.sender ?? 'the sender'}&apos;s working hours and daily search budget, so a large search finishes over several days. You can pause or cancel it at any time below.</p>
+          <p className="text-xs text-gray-600 flex items-start gap-1.5"><Info className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> The job fetches a page every 20–90 minutes within {estimate.sender ?? 'the sender'}&apos;s working hours and daily search limit, so a large search finishes over several days. You can pause or cancel it at any time below.</p>
         </div>
       )}
       {error && <ErrorBox message={error} />}

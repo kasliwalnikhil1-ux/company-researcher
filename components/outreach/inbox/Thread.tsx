@@ -17,6 +17,7 @@ import { useThreadAttribution } from '@/lib/outreach/intel';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
 import ForwardDialog from './ForwardDialog';
+import AiModeChip from './ai/AiModeChip';
 
 export type ConvertKind = 'task' | 'tag' | 'stage' | 'reenrol';
 export type ChatDetail = Chat & { outreach_leads: Lead | null; outreach_senders: Sender | null };
@@ -206,6 +207,7 @@ export default function Thread(p: ThreadProps) {
             </span>
           )}
           {chat.provider === 'WHATSAPP' && !isGroup && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
+          <AiModeChip chatId={chat.id} onError={p.onError} onNotice={p.onNotice} />
           <span className="flex-1" />
           <Menu disabled={!p.canWrite} button={() => (
             <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 disabled:cursor-default disabled:hover:bg-transparent" title={p.canWrite ? 'Override intent' : 'AI intent'} aria-label="Override intent" disabled={!p.canWrite}>

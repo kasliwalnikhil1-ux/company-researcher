@@ -166,6 +166,30 @@ export function getWhitelabelConfig(hostname?: string): WhitelabelConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Pages each product serves
+// ---------------------------------------------------------------------------
+
+/** GrowthxAI sells outreach: these pages (and everything under them) are all its domains serve. */
+const GROWTHXAI_PATHS = [
+  '/outreach', '/crm', '/admin', '/account',
+  // sign-in
+  '/login', '/signup', '/reset-password', '/auth', '/mfa-challenge', '/oauth',
+  // public pages opened from outreach emails
+  '/unsubscribe', '/ai-reply-consent', '/profile-approve', '/profile-authority', '/profile-revert',
+];
+
+/** Home page of the product. A GrowthxAI domain sends every page it does not serve here (proxy.ts). */
+export function productHome(config: WhitelabelConfig): string {
+  return config.product === 'growthxai' ? '/outreach' : '/';
+}
+
+/** Whether the domain's product serves this page. CapitalxAI serves every page. */
+export function productServesPath(config: WhitelabelConfig, pathname: string): boolean {
+  if (config.product !== 'growthxai') return true;
+  return GROWTHXAI_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
+// ---------------------------------------------------------------------------
 // Asset path helpers – fall back to original root-level assets
 // ---------------------------------------------------------------------------
 

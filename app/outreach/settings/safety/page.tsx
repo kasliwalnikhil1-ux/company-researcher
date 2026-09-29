@@ -25,7 +25,7 @@ export default function SafetySettingsPage() {
     <div>
       <PageHeader title="Settings" subtitle={workspace.name} />
       <SettingsTabs />
-      <div className="flex items-start gap-2 p-3 mb-6 rounded-lg bg-indigo-50 text-indigo-900 text-sm border border-indigo-100"><ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Safety limits are enforced in the database, not just the UI: every action reserves budget atomically, nothing lands on a round minute, and no cap can exceed the channel ceiling. You can only lower limits per sender: each sender’s Budgets tab shows the cap that applies to it today.</span></div>
+      <div className="flex items-start gap-2 p-3 mb-6 rounded-lg bg-indigo-50 text-indigo-900 text-sm border border-indigo-100"><ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Safety limits are enforced in the database, not just the UI: every action reserves its slot atomically, nothing lands on a round minute, and no cap can exceed the channel ceiling. You can only lower limits per sender: each sender’s Limits tab shows the cap that applies to it today.</span></div>
 
       <Card title="Consent">
         <div className="space-y-3 text-sm text-gray-700">
@@ -48,7 +48,7 @@ export default function SafetySettingsPage() {
       </Card>
 
       {role !== 'client_viewer' && (
-        <Card className="mt-6" title="Manual caps per sender" actions={<span className="text-xs text-gray-400">edit on each sender’s Budgets tab</span>}>
+        <Card className="mt-6" title="Manual caps per sender" actions={<span className="text-xs text-gray-400">edit on each sender’s Limits tab</span>}>
           {senders.isLoading ? <Spinner /> : senders.isError ? <ErrorBox message={(senders.error as Error).message} /> : withCaps.length === 0 ? <div className="text-sm text-gray-500 py-4">No senders yet.</div> : (
             <Table>
               <thead><tr><Th>Sender</Th><Th>Channel</Th><Th>Status</Th><Th>Level</Th><Th>Manual caps</Th><Th></Th></tr></thead>
@@ -62,7 +62,7 @@ export default function SafetySettingsPage() {
                       <Td><StatusPill status={s.status} reason={s.status_reason} /></Td>
                       <Td><Badge tone="indigo">L{s.warmup_level}</Badge></Td>
                       <Td>{caps.length === 0 ? <span className="text-gray-400 text-xs">automatic</span> : <div className="flex flex-wrap gap-1">{caps.map(([k, v]) => <Badge key={k} tone="gray">{ACTION_LABELS[k as ActionType] ?? k}: {v}/day</Badge>)}</div>}</Td>
-                      <Td className="text-right"><Link href={`/outreach/senders/${s.id}?tab=Budgets`} className="text-sm text-indigo-600 hover:underline whitespace-nowrap">Budgets →</Link></Td>
+                      <Td className="text-right"><Link href={`/outreach/senders/${s.id}?tab=Limits`} className="text-sm text-indigo-600 hover:underline whitespace-nowrap">Limits →</Link></Td>
                     </tr>
                   );
                 })}

@@ -8,7 +8,9 @@ import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import type { ChatFilters } from '@/lib/outreach/queries';
 import type { Chat, Client, Lead, Sender, Sequence } from '@/lib/outreach/types';
 import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/components/outreach/ui';
-import { INTENTS, INTENT_LABELS } from './hooks';
+import { INTENTS, INTENT_LABELS, useNow } from './hooks';
+import { ESCALATION_LABEL, fmtCountdown, type StageDef } from '@/lib/outreach/aiReplies';
+import { AI_FILTERS, AI_FILTER_LABEL, humanizeKey, type AiChatFilter } from './ai/useAiInbox';
 
 export type ChatRow = Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 
@@ -34,6 +36,8 @@ export interface ChatListProps {
   restrictCount?: number;
   onClearRestrict?: () => void;
   note?: string | null;
+  /** AI replies: conversation stages offered by the Stage filter. */
+  stages?: StageDef[];
 }
 
 const ROW_H = 76;
@@ -65,7 +69,7 @@ function ActiveChip({ label, value, onClear }: { label: string; value: string; o
 
 type View = 'all' | 'unread' | 'mine' | 'archived';
 
-export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note }: ChatListProps) {
+export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note, stages }: ChatListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
@@ -83,6 +87,9 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
   const end = Math.min(list.length, Math.ceil((scrollTop + height) / ROW_H) + OVERSCAN);
   const visible = useMemo(() => list.slice(start, end), [list, start, end]);
+  // "AI in 9 min" badges tick only while a visible row has a scheduled AI reply.
+  const anyScheduled = useMemo(() => visible.some((c) => c.ai_run_status === 'scheduled' && c.ai_scheduled_send_at), [visible]);
+  const now = useNow(15_000, anyScheduled);
 
   // Keep the selected row within the viewport (keyboard navigation).
   useEffect(() => {
@@ -123,7 +130,9 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   if (sequenceId && onSequence) active.push({ key: 'sequence', label: 'Sequence', value: sequences?.find((x) => x.id === sequenceId)?.name ?? 'Selected', clear: () => onSequence(null) });
   if (filters.intent) active.push({ key: 'intent', label: 'Intent', value: INTENT_LABELS[filters.intent as keyof typeof INTENT_LABELS] ?? filters.intent, clear: () => onFilters({ intent: null }) });
   if (filters.provider) active.push({ key: 'channel', label: 'Channel', value: channelLabel(filters.provider as Parameters<typeof channelLabel>[0]), clear: () => onFilters({ provider: null }) });
-  const clearAll = () => { onFilters({ sender_id: null, client_id: null, intent: null, provider: null }); onSequence?.(null); };
+  if (filters.ai) active.push({ key: 'ai', label: 'AI', value: AI_FILTER_LABEL[filters.ai] ?? filters.ai, clear: () => onFilters({ ai: null }) });
+  if (filters.stage) active.push({ key: 'stage', label: 'Stage', value: stages?.find((x) => x.key === filters.stage)?.label ?? humanizeKey(filters.stage), clear: () => onFilters({ stage: null }) });
+  const clearAll = () => { onFilters({ sender_id: null, client_id: null, intent: null, provider: null, ai: null, stage: null }); onSequence?.(null); };
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -187,6 +196,17 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                   {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
                 </FilterField>
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <FilterField label="AI replies" value={filters.ai ?? ''} onChange={(v) => onFilters({ ai: (v || null) as AiChatFilter | null })}>
+                  <option value="">Any</option>
+                  {AI_FILTERS.map((a) => <option key={a} value={a}>{AI_FILTER_LABEL[a]}</option>)}
+                </FilterField>
+                <FilterField label="Stage" value={filters.stage ?? ''} onChange={(v) => onFilters({ stage: v || null })}>
+                  <option value="">Any</option>
+                  {stages?.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
+                  {filters.stage && !stages?.some((st) => st.key === filters.stage) && <option value={filters.stage}>{humanizeKey(filters.stage)}</option>}
+                </FilterField>
+              </div>
             </div>
           )}
         </div>
@@ -219,7 +239,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
         {error && <ErrorBox message={error} className="m-3" />}
         {!error && loading && !rows && <Spinner />}
         {!error && rows && rows.length === 0 && (
-          <EmptyState icon={<Inbox className="w-6 h-6" />} title={filters.archived ? 'No archived conversations' : 'No conversations'} description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation carries a step of this sequence with these filters.' : search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id ? 'Try clearing some filters.' : 'Replies land here as soon as a sender receives a message.'} />
+          <EmptyState icon={<Inbox className="w-6 h-6" />} title={filters.archived ? 'No archived conversations' : 'No conversations'} description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation carries a step of this sequence with these filters.' : search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id || filters.ai || filters.stage ? 'Try clearing some filters.' : 'Replies land here as soon as a sender receives a message.'} />
         )}
         {note && rows && rows.length > 0 && <p className="px-3 py-1.5 text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100">{note}</p>}
         {rows && rows.length > 0 && (
@@ -248,10 +268,15 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                         <span title={channelLabel(c.provider)} className="flex-shrink-0"><ProviderLogo provider={c.provider} className="w-3 h-3 rounded-[2px]" /></span>
                         <span className="ml-auto text-[11px] text-gray-400 flex-shrink-0 tabular-nums">{timeAgo(c.last_message_at)}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
+                      <div className="flex items-center gap-1.5 mt-0.5 min-w-0 overflow-hidden">
                         {c.outreach_senders?.display_name && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[45%]">{c.outreach_senders.display_name}</span>}
                         {c.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: the person has not accepted the conversation yet, so they may not have seen it">Request</span>}
                         {c.intent && c.intent !== 'unclassified' && <IntentBadge intent={c.intent} />}
+                        {c.ai_run_status === 'scheduled' && c.ai_scheduled_send_at && (() => {
+                          const left = new Date(c.ai_scheduled_send_at).getTime() - now;
+                          return <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap flex-shrink-0" title="An AI reply is on hold: open the chat to send, edit or cancel it">{left > 0 ? `AI in ${fmtCountdown(left)}` : 'AI sending'}</span>;
+                        })()}
+                        {(c.ai_run_status === 'escalated' || (c.ai_run_status === 'draft_ready' && c.ai_run_decision === 'escalate')) && c.last_direction !== 'out' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 whitespace-nowrap flex-shrink-0" title={`The AI handed this to a person${c.ai_escalation_reason ? `: ${ESCALATION_LABEL[c.ai_escalation_reason] ?? humanizeKey(c.ai_escalation_reason)}` : ''}`}>Needs a person</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         <p className={cn('text-xs truncate flex-1', c.unread ? 'text-gray-800' : 'text-gray-500')}>{preview || '—'}</p>

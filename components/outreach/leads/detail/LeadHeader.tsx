@@ -60,7 +60,8 @@ export function LeadHeader({ lead: leadRow, onEnroll, toast }: { lead: Lead; onE
             <h1 className="text-xl font-bold text-gray-900 truncate">{leadName(lead)}</h1>
             {lead.do_not_contact && <Badge tone="red"><ShieldOff className="w-3 h-3 mr-1" /> Do not contact</Badge>}
             {lead.unsubscribed && <Badge tone="amber">Unsubscribed</Badge>}
-            {lead.is_open_profile && <Badge tone="blue">Open profile</Badge>}
+            {lead.is_open_profile === true && <Badge tone="blue">Open profile</Badge>}
+            {lead.is_open_profile === false && <span title="Free InMail is not possible: connect first"><Badge tone="gray">Not an open profile</Badge></span>}
             {consents.map((c) => <ConsentBadge key={c.id} consent={c} />)}
           </div>
           {lead.headline && <p className="text-sm text-gray-700 mt-0.5">{lead.headline}</p>}

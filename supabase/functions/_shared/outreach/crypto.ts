@@ -55,3 +55,19 @@ export async function verifyUnsubscribeToken(leadId: string, token: string): Pro
   for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ got.charCodeAt(i);
   return diff === 0;
 }
+
+// ---- re-login links (hosted-auth reconnect). HMAC-SHA256 with OUTREACH_CRON_SECRET over "relogin:<senderId>:<expiry>:<method>".
+// The link in a re-login email points at outreach-relogin, which creates the short-lived hosted sign-in link only when it is opened.
+export async function reloginToken(senderId: string, exp: number, method: string): Promise<string> {
+  return (await hmacSha256Hex(unsubSecret(), `relogin:${String(senderId).toLowerCase()}:${exp}:${method}`)).slice(0, 40);
+}
+
+export async function verifyReloginToken(senderId: string, exp: number, method: string, token: string): Promise<boolean> {
+  if (!senderId || !token || !/^[0-9a-f]{40}$/i.test(token) || !Number.isFinite(exp) || exp * 1000 < Date.now()) return false;
+  let want: string;
+  try { want = await reloginToken(senderId, exp, method); } catch { return false; }
+  const got = token.toLowerCase();
+  let diff = 0;
+  for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
+}

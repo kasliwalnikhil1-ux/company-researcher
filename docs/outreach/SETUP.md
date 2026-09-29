@@ -175,7 +175,7 @@ It registers one webhook per source, all pointing at `…/functions/v1/outreach-
 | source | events |
 |---|---|
 | `account_status` | creation_success, creation_fail, deleted, reconnected, sync_success, stopped, ok, connecting, error, credentials, permissions |
-| `messaging` | message_received, message_edited, message_deleted |
+| `messaging` | message_received, message_edited, message_deleted, message_reaction, message_read, message_delivered |
 | `users` | new_relation |
 | `email` | mail_received, mail_sent |
 | `email_tracking` | mail_opened, mail_link_clicked |
@@ -701,12 +701,16 @@ The customer wants clients to open `reports.agency.com` instead of our app's add
 
 Connecting a sender always goes through Unipile's **Hosted Auth Wizard** (docs: <https://developer.unipile.com/docs/hosted-auth>). `outreach-sender-connect` creates the link (`type: create`, `name` = our sender id, `notify_url` = `outreach-sender-notify?sid=<id>`, 15-minute expiry); `reconnectLink()` in `_shared/outreach/inbound.ts` creates re-login links (`type: reconnect` + `reconnect_account`, 24 h). The notify callback carries `{status: CREATION_SUCCESS | RECONNECTED, account_id, name}` and is what binds the Unipile account to the sender row.
 
+**Re-login flow** (matches Unipile's "Reconnecting an account" recipe): the `CREDENTIALS` account-status webhook (or an action failing with a credentials error) sets the sender to `credentials` and emails the owner plus the workspace managers (`notifySender(..., "reconnect_needed")`). The email never carries a hosted link: it carries `reloginUrl()` → `outreach-relogin?s=<sender>&e=<expiry>&m=<method>&t=<token>`, an HMAC-signed URL (`OUTREACH_CRON_SECRET`, `reloginToken()` in `crypto.ts`) valid **7 days**. Opening it calls `reconnectLink()` and 302-redirects to a fresh hosted link (60-minute expiry), so a late click still works. An expired or tampered URL, a sender that is already `ok`/`paused`, or a disabled one redirects to the sender page instead; opening it repeatedly is harmless (mail scanners do). `outreach-worker-reconnect` sends daily reminders, up to 3, for **every channel**; only LinkedIn `cookie` senders get the extension retry path first (up to 4 attempts). On the sender page, **Copy sign-in link** returns the same 7-day URL (`sender-manage` `reconnect_link` with `mode: "copy"`); **Sign in now** opens a hosted link directly.
+
 **Two LinkedIn sign-in methods** exist on the connect page (`connect_method` in the request body). The browser method is **switched off in the UI** by the hard-coded toggle `BROWSER_SIGNIN_ENABLED` in `lib/outreach/features.ts` until Unipile confirms it for our account (Sept 2026); the backend accepts it regardless, so flipping that one constant (and un-commenting the `BROWSER_SIGNIN` blocks in outreach-app-docs) re-enables it.
 
 | Method | Hosted-auth options sent | Stored `auth_method` |
 |---|---|---|
-| Sign in with LinkedIn (default) | none | `credentials` (or `cookie` if the account later reports a cookie connection) |
+| Sign in with LinkedIn (default) | `disabled_options: ["cookie_auth"]` | `credentials` (or `cookie` if the account later reports a cookie connection, e.g. from the Chrome extension) |
 | Use the signed-in browser (UniLogin) | `unilogin: {publisher_name, tab_name}` + `disabled_options: ["credentials_auth", "cookie_auth"]` | `browser` (migration 019; never overwritten by the account-status sync) |
+
+**Cookie sign-in in the wizard is always off** (Sept 2026): `unipile.hosted.link()` in `_shared/outreach/unipile.ts` adds `cookie_auth` to `disabled_options` on every create and re-login link, for every provider, so nobody can connect a sender by pasting a cookie on the hosted page. This does not touch the in-app cookie paths on the sender's Session tab (Chrome extension sync, paste `li_at`), which are governed by the workspace's Cookie-mode opt-in.
 
 With the browser method the wizard connects the LinkedIn account already logged in to the owner's browser through the UniLogin store extension (Chrome / Firefox automatic handoff; Edge / Safari ZIP; one-time code fallback when detection fails or a custom domain is used). We receive an account id, never cookies. Re-login links for `browser` senders send the same options, so the owner is not asked for a password. Mailboxes always use OAuth and ignore `connect_method`.
 
@@ -717,6 +721,16 @@ With the browser method the wizard connects the LinkedIn account already logged 
 3. Set the secret `OUTREACH_HOSTED_AUTH_DOMAIN=auth.<yourapp>.com` and redeploy every function that creates links (`sender-connect`, `sender-manage`, `worker-reconnect`, `worker-tick`, `process-inbound`). `hostedAuthUrl()` in `_shared/outreach/unipile.ts` swaps the host of every returned link; nothing else changes. Note: on a custom domain the browser-extension method falls back to the one-time code instead of the automatic handoff (Unipile limitation).
 
 Unipile itself must never appear in customer-facing copy (app UI, marketing site, client docs, emails): say "hosted login", "the connector" or "the connected account" instead.
+
+### 9.11 Connector-doc alignment (29 Sep 2026)
+
+Behaviour changed to match the connector's documentation (provider limits, LinkedIn, WhatsApp, Instagram):
+
+- **Instagram "We suspect automated behavior"** is ignored, as the connector advises ("you can ignore this message and continue using automation"). `execute.ts` and `detectProviderWarning()` in `inbound.ts` only log a `provider_warning` sender event with `ignored: true`; `errors.ts` retries the interrupted action 60–120 min later. `outreach_sender_provider_warning` (level −1, 48 h pause) is no longer called. `E_PROVIDER_WARNING` / **Resume anyway** remain only for senders paused under the old rule.
+- **`422 cannot_resend_yet`** is LinkedIn's answer to every invitation limit, so `execute.ts` decides which one before `errors.ts` freezes the sender's invites until Monday: (1) the lead was invited before (`invite_sent_at` / `invite_withdrawn_at`) → this lead only, retried in 6–9 days, skipped after 3 attempts; (2) a free sender's invite with a note → the monthly note allowance: the invite is re-sent without the note (or, with `require_note_for_free`, retried next month) and an `invite_notes_exhausted` sender event is written for the month; (3) otherwise the weekly limit (`sender_cap_hit`, unchanged).
+- **Free-account notes**: `freeNotesLeft()` allows 5 notes per UTC calendar month (`invite_had_note` on `outreach_lead_sender_state`, sent this month), 0 once `invite_notes_exhausted` was written. With none left the note is dropped, or the step waits for next month when it requires the note (`free_notes_used`).
+- **Re-invite wait**: an invite to a lead whose invitation was withdrawn less than 21 days ago (`REINVITE_COOLDOWN_DAYS`) is retried when the 21 days are up (`reinvite_cooldown`).
+- **WhatsApp voice notes** are stored as MP3: `VoiceClipRecorder` converts clips for WhatsApp senders in the browser (`lib/outreach/audio.ts`, `@breezystack/lamejs`, mono 64 kbps) before upload; the connector recommends MP3 / M4A and browsers record WebM or Opus-in-MP4. Clips saved earlier keep their format until re-recorded.
 
 ### 9.8 Custom tracking domains (email opens and clicks)
 

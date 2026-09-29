@@ -24,7 +24,7 @@ import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import type { SenderV2 } from '@/components/outreach/senders/insights';
 import { cn } from '@/lib/utils';
 
-const TABS = ['Overview', 'Profile', 'Insights', 'Activity', 'Schedule', 'Budgets', 'Events', 'Settings', 'Session', 'Danger'] as const;
+const TABS = ['Overview', 'Profile', 'Insights', 'Activity', 'Schedule', 'Limits', 'Events', 'Settings', 'Session', 'Danger'] as const;
 type Tab = (typeof TABS)[number];
 
 function SenderDetail() {
@@ -33,7 +33,9 @@ function SenderDetail() {
   const router = useRouter();
   const search = useSearchParams();
   const connected = search.get('connected');
-  const tabParam = search.get('tab') === 'Extension' ? 'Session' : search.get('tab') ?? ''; // old links used ?tab=Extension
+  const OLD_TABS: Record<string, string> = { Extension: 'Session', Budgets: 'Limits' }; // renamed tabs; old links still land
+  const rawTab = search.get('tab') ?? '';
+  const tabParam = OLD_TABS[rawTab] ?? rawTab;
   const initialTab = (TABS as readonly string[]).includes(tabParam) ? (tabParam as Tab) : 'Overview';
   const [tab, setTab] = useState<Tab>(initialTab);
   const { workspace, isManager, canWrite, role } = useWorkspace();
@@ -109,7 +111,7 @@ function SenderDetail() {
       {tab === 'Activity' && <SenderActivityReport sender={s} workspaceTimezone={typeof workspace?.settings?.timezone === 'string' ? workspace.settings.timezone : null} />}
       {tab === 'Settings' && <SenderSettings sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} workspaceSettings={workspace?.settings} />}
       {tab === 'Schedule' && <ScheduleEditor sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
-      {tab === 'Budgets' && <BudgetsPanel sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {tab === 'Limits' &&<BudgetsPanel sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Events' && <EventsTimeline senderId={s.id} />}
       {tab === 'Session' && <ExtensionSetup sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Danger' && isManager && <DangerZone sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}

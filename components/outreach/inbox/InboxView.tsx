@@ -18,6 +18,7 @@ import Thread, { type ConvertKind } from './Thread';
 import LeadPanel from './LeadPanel';
 import { isTypingTarget, useDebounced, useMediaQuery } from './hooks';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
+import { useStageOptions } from './ai/useAiInbox';
 
 
 /** `?chats=<ids>&label=<text>`: the reports page opens the inbox on exactly these threads. */
@@ -25,7 +26,7 @@ export interface InboxRestrict { ids: string[]; label: string }
 type InboxFilters = ChatFilters & { sequence_id?: string | null };
 
 // Filters are remembered per workspace in this browser; the search is never stored (it is not a key of the defaults).
-const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null };
+const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null, ai: null, stage: null };
 
 export default function InboxView({ chatId, initialFilters, restrict }: { chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null }) {
   const router = useRouter();
@@ -69,6 +70,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     if (sequenceId && sequencesQ.data && !sequencesQ.data.some((s) => s.id === sequenceId)) patchFilters({ sequence_id: null });
   }, [sequenceId, sequencesQ.data, patchFilters]);
   const clientsQ = useClients(ws);
+  const stageOptions = useStageOptions(ws);
   const membersQ = useMembers(ws);
   const chatQ = useChat(chatId);
   const messagesQ = useMessages(chatId);
@@ -197,7 +199,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
           sequences={sequencesQ.data} sequenceId={sequenceId} onSequence={(id) => patchFilters({ sequence_id: id })}
           restrictLabel={restrict?.label ?? null} restrictCount={restrict?.ids.length ?? 0} onClearRestrict={clearRestrict} note={listNote}
           filters={filters} onFilters={patchFilters} search={search} onSearch={setSearch}
-          senders={sendersQ.data} clients={clientsQ.data} currentUserId={userId} selectedId={chatId} onSelect={select}
+          senders={sendersQ.data} clients={clientsQ.data} currentUserId={userId} selectedId={chatId} onSelect={select} stages={stageOptions}
         />
       </aside>
 

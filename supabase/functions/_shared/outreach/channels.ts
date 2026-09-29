@@ -232,9 +232,9 @@ export function messageLimit(provider: string): number {
   }
 }
 
-/** Per-provider comment limits. */
-export function commentLimit(provider: string): number {
-  return String(provider).toUpperCase() === "INSTAGRAM" ? 2200 : 1250;
+/** Per-provider comment limits. The connector caps comments at 1250 characters on every provider (Instagram itself allows 2200). */
+export function commentLimit(_provider: string): number {
+  return 1250;
 }
 
 /** Unipile codes that mean "this number is not on WhatsApp" (or the identifier cannot be addressed). */

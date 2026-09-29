@@ -3,7 +3,7 @@
 import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit } from "../_shared/outreach/supabase.ts";
 import { encrypt } from "../_shared/outreach/crypto.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
-import { reconnectLink, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames } from "../_shared/outreach/inbound.ts";
+import { reconnectLink, reloginUrl, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames } from "../_shared/outreach/inbound.ts";
 import { backfillChatPictures } from "../_shared/outreach/avatars.ts";
 import { healthForSender } from "../_shared/outreach/health.ts";
 import { planSender } from "../_shared/outreach/planner.ts";
@@ -19,7 +19,7 @@ async function userRpc<T = unknown>(user: { client: { rpc: (fn: string, args: Re
 
 serve("sender-manage", async (req) => {
   const user = await requireUser(req);
-  const body = await readJson<{ sender_id: string; action: string; code?: string; li_at?: string; li_a?: string; user_agent?: string; months?: number; connect_method?: string }>(req);
+  const body = await readJson<{ sender_id: string; action: string; code?: string; li_at?: string; li_a?: string; user_agent?: string; months?: number; connect_method?: string; mode?: string }>(req);
   const { data: s } = await admin.from("outreach_senders").select("*").eq("id", body.sender_id ?? "").maybeSingle();
   if (!s) throw new HttpError(404, "E_NOT_FOUND");
   const m = await membership(user.id, s.workspace_id);
@@ -28,6 +28,12 @@ serve("sender-manage", async (req) => {
     case "reconnect_link": {
       if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
       const method = body.connect_method === "browser" || body.connect_method === "credentials" ? body.connect_method : undefined;
+      // copy = the durable re-login URL for the owner (a fresh hosted link is made when they open it); otherwise the hosted link itself ("Sign in now")
+      if (body.mode === "copy") {
+        const relogin_url = await reloginUrl(s, method);
+        await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, { mode: "copy", ...(method ? { connect_method: method } : {}) }, "user");
+        return json({ link: relogin_url, relogin_url });
+      }
       const link = await reconnectLink(s, method);
       await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, method ? { connect_method: method } : null, "user");
       return json({ link });

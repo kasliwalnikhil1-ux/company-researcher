@@ -105,7 +105,7 @@ function WarmupCard({ sender, w }: { sender: SenderV2; w: Insights['warmup'] }) 
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-gray-500 mt-2">These are the warm-up allowances. Health and manual caps can lower the real allowance for today: see the Budgets tab.</p>
+      <p className="text-xs text-gray-500 mt-2">These are the warm-up allowances. Health and manual caps can lower the real allowance for today: see the Limits tab.</p>
     </Card>
   );
 }

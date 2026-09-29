@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { TEXT_LIMITS } from '@/lib/outreach/nodes';
+import { toMp3 } from '@/lib/outreach/audio';
 import type { Sender, VoiceClip } from '@/lib/outreach/types';
 import { Avatar, Button, fmtDate } from '@/components/outreach/ui';
 import { senderName } from './helpers';
@@ -50,7 +51,7 @@ interface Props {
   workspaceId: string;
   sequenceId: string;
   nodeId: string;
-  /** The LinkedIn senders of the pool. */
+  /** The senders of the pool that can send voice notes (LinkedIn, WhatsApp). WhatsApp clips are stored as MP3. */
   senders: Sender[];
   readOnly?: boolean;
 }
@@ -88,14 +89,20 @@ export default function VoiceClipRecorder({ workspaceId, sequenceId, nodeId, sen
   }, []);
   useEffect(() => () => { try { recorder.current?.stop(); } catch { /* already stopped */ } cleanup(); }, [cleanup]);
 
-  const save = useCallback(async (senderId: string, blob: Blob, mime: string, duration: number | null) => {
-    const type = baseMime(mime);
-    const ext = EXT[type];
-    if (!ext) { setError(senderId, 'This audio type is not supported. Use M4A, MP3, OGG, WebM or WAV.'); return; }
+  const save = useCallback(async (senderId: string, input: Blob, mime: string, duration: number | null) => {
+    let blob = input;
+    let type = baseMime(mime);
+    if (!EXT[type]) { setError(senderId, 'This audio type is not supported. Use M4A, MP3, OGG, WebM or WAV.'); return; }
     if (blob.size > MAX_BYTES) { setError(senderId, 'The file is larger than 10 MB. A 60 second voice note is far smaller than that.'); return; }
     if (duration != null && duration > MAX_SECONDS) { setError(senderId, `Voice notes are limited to ${MAX_SECONDS} seconds. This clip is ${Math.round(duration)} seconds.`); return; }
     setBusy(senderId); setError(senderId, null);
     try {
+      // WhatsApp plays MP3 / M4A voice notes; browsers record WebM or Opus-in-MP4, so WhatsApp clips are converted to MP3 here
+      if (senders.find((s) => s.id === senderId)?.provider === 'WHATSAPP' && type !== 'audio/mpeg') {
+        try { blob = await toMp3(blob); type = 'audio/mpeg'; }
+        catch { throw new Error('This recording could not be converted to MP3 for WhatsApp. Upload an MP3 file instead.'); }
+      }
+      const ext = EXT[type];
       const path = `${workspaceId}/voice/${sequenceId}/${nodeId}/${senderId}.${ext}`;
       const up = await supabase.storage.from(BUCKET).upload(path, blob, { upsert: true, contentType: type, cacheControl: '0' });
       if (up.error) throw up.error;
@@ -105,7 +112,7 @@ export default function VoiceClipRecorder({ workspaceId, sequenceId, nodeId, sen
     } catch (e) { setError(senderId, parseError(e).message); }
     finally { setBusy(null); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, sequenceId, nodeId, qc]);
+  }, [workspaceId, sequenceId, nodeId, qc, senders]);
 
   const start = async (senderId: string) => {
     const type = pickRecordType();

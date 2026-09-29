@@ -20,6 +20,7 @@ export const SETTINGS_TABS: Array<{ href: string; label: string; min: Role; also
   { href: '/outreach/settings/safety', label: 'Safety', min: 'member' },
   { href: '/outreach/settings/suppressions', label: 'Blacklists', min: 'member' },
   { href: '/outreach/settings/ai', label: 'AI & data', min: 'manager' },
+  { href: '/outreach/settings/ai-replies', label: 'AI replies', min: 'member' },
   { href: '/outreach/settings/email', label: 'Email & booking', min: 'manager' },
   { href: '/outreach/settings/api', label: 'API & webhooks', min: 'manager', also: ['/outreach/settings/webhooks'] },
   { href: '/outreach/settings/integrations', label: 'Integrations', min: 'manager' },

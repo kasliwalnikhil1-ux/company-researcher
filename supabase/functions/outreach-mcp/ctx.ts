@@ -144,11 +144,14 @@ const REMEDIES: Record<string, string> = {
   E_IDENTIFIER_INVALID: "The number is not on WhatsApp; nothing to retry.",
   E_HOURLY_CAP: "Instagram allows 10 actions an hour; the planner spreads work over the day. Wait.",
   E_QUIET_PERIOD: "A freshly connected WhatsApp number waits 24 hours before outreach. Wait.",
-  E_PROVIDER_WARNING: "Instagram flagged automated behaviour; the account rests 48 h. Only a human may resume it in the app.",
+  E_PROVIDER_WARNING: "An Instagram warning pause from before Sept 2026 (new 'automated behaviour' notices are logged and ignored, as the connector advises). Only a human may resume it in the app.",
   E_ACCOUNT_TOO_NEW: "WhatsApp numbers need at least 6 months of real use before outreach. A manager attests the account age in the app; there is no override.",
   E_NO_CONSENT_GUARD: "A WhatsApp message that may start a new chat needs a require_consent step above it. The steps compiler adds one for you; with a raw graph, add the node.",
   E_LIKE_COUNT: "like_recent_posts likes at most 3 posts; lower count.",
   E_NO_CHANNEL_SENDER: "A step of that channel needs a connected sender of that channel in the pool (sequence_update with pool).",
+  // AI replies (AI-REPLIES-CONTRACT §3)
+  E_CONFLICT: "Someone saved a newer version in between. Re-read it (master_prompt_get), re-apply the edit on top of it, simulate again and ask the human again.",
+  E_RUN_FINISHED: "That AI reply already finished (sent, cancelled, expired…); nothing to cancel. ai_reply_run_get shows what happened.",
 };
 
 export function toErrorResult(e: unknown): ToolResult {

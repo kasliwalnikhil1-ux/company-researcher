@@ -669,6 +669,7 @@
     "packageJson": {
       "dependencies": [
         "npm:@babel/runtime@^7.27.1",
+        "npm:@breezystack/lamejs@^1.2.7",
         "npm:@dnd-kit/core@^6.3.1",
         "npm:@dnd-kit/sortable@10",
         "npm:@dnd-kit/utilities@^3.2.2",

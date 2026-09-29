@@ -4,6 +4,7 @@ import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitatio
 import { decrypt, hmacSha256Hex } from "./crypto.ts";
 import { notifySender } from "./notify.ts";
 import { classifyMessage, aiConfigured } from "./ai.ts";
+import { BOT_TEXT_RE } from "./ai_reply_rules.ts";
 import { _internal as inboundInternal } from "./inbound.ts";
 import { sources, postIdFromUrl, companyIdentFromUrl, engagementAuthorToItem } from "./unipile_sources.ts";
 
@@ -36,11 +37,12 @@ export async function reconnectSender(sender: Row): Promise<{ ok: boolean; reaso
 }
 
 export async function runReconnect(): Promise<Row> {
-  const { data: senders } = await admin.from("outreach_senders").select("*").eq("status", "credentials").is("deleted_at", null).eq("provider", "LINKEDIN");
+  // every channel gets the re-login reminders; only LinkedIn has the cookie (extension) retry path
+  const { data: senders } = await admin.from("outreach_senders").select("*").eq("status", "credentials").is("deleted_at", null);
   const out: Row = { attempted: 0, notified: 0 };
   for (const s of senders ?? []) {
     const lastAt = s.last_reconnect_at ? new Date(s.last_reconnect_at).getTime() : 0;
-    if (s.auth_method === "cookie") {
+    if (s.auth_method === "cookie" && s.provider === "LINKEDIN") {
       if ((s.reconnect_attempts ?? 0) < 4) {
         if (Date.now() - lastAt < 3600_000) continue;
         out.attempted++;
@@ -53,8 +55,8 @@ export async function runReconnect(): Promise<Row> {
         }
       }
     } else if (!s.reconnect_notified_at || (Date.now() - new Date(s.reconnect_notified_at).getTime() > 86400_000 && (s.reconnect_reminders ?? 0) < 3)) {
-      const { reconnectLink } = await import("./inbound.ts");
-      const link = await reconnectLink(s).catch(() => null);
+      const { reloginUrl } = await import("./inbound.ts");
+      const link = await reloginUrl(s).catch(() => null);
       await notifySender(s.id, "reconnect_needed", { link });
       await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: (s.reconnect_reminders ?? 0) + 1 }).eq("id", s.id);
       out.notified++;
@@ -564,6 +566,57 @@ export async function runOutboundWebhooks(): Promise<Row> {
 // ---------------------------------------------------------------------------
 // F18 classify
 // ---------------------------------------------------------------------------
+/** Classify one inbound message and apply the consequences (intent, flags, tasks, milestones, AI-reply reactions).
+ *  Used by the F18 queue and inline by the AI reply worker when the queue is behind (PRD §6.2). */
+export async function classifyMessageById(messageId: string): Promise<"done" | "skip" | "pending"> {
+  const { data: msg } = await admin.from("outreach_messages").select("*, outreach_chats(*)").eq("id", messageId).single();
+  if (!msg || msg.direction !== "in") return "skip";
+  const chat = (msg as any).outreach_chats;
+  const { data: prev } = await admin.from("outreach_messages").select("text").eq("chat_id", msg.chat_id).eq("direction", "out").lt("sent_at", msg.sent_at).order("sent_at", { ascending: false }).limit(3);
+  let brief: string | null = null;
+  if (chat?.lead_id) {
+    const { data: enr } = await admin.from("outreach_enrollments").select("outreach_sequences(brief, name)").eq("lead_id", chat.lead_id).eq("sender_id", chat.sender_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    brief = (enr as any)?.outreach_sequences?.brief ?? (enr as any)?.outreach_sequences?.name ?? null;
+  }
+  // Voice notes: the transcript stands in for the text. A note that is still being transcribed leaves the queue now;
+  // transcribeVoiceNote() re-queues the message once the transcript is stored.
+  const body = String(msg.text ?? "").trim() || String(msg.transcript ?? "").trim();
+  if (!body && msg.transcript_status === "pending") return "pending";
+  let result: { intent: string; confidence: number; summary: string; return_date?: string | null; flags?: string[] } & Record<string, unknown>;
+  if (aiConfigured() && body) {
+    // sentAt lets the classifier turn "back on Monday" into a date (item 1: an out-of-office resumes on the return date).
+    const input = { workspaceId: msg.workspace_id, text: body, previousOutbound: (prev ?? []).map((p) => p.text ?? "").filter(Boolean).reverse(), brief, channel: chat?.provider ?? "LINKEDIN", sentAt: msg.sent_at as string | null };
+    result = { ...(await classifyMessage(input)) };
+  } else {
+    // no AI: an unlabelled message (the AI reply worker keeps such a burst in draft mode)
+    result = { intent: "unclear", confidence: 0, summary: body.slice(0, 140), flags: [], fallback: true };
+  }
+  // AI replies (§9.2): the full classification + flags feed the drafter; intents keep driving tags and tasks as before
+  await admin.from("outreach_messages").update({ intent: result.intent, intent_confidence: result.confidence, summary: result.summary, classified_at: new Date().toISOString(),
+    ai_flags: result.flags ?? [], classification: result }).eq("id", msg.id);
+  // how they answered one of our AI sends: bot question / hostile reply feed the breakers; auto-responder text pauses the chat
+  try { await rpc("ai_reply_after_classify", { p_message: msg.id, p_bot_pattern: BOT_TEXT_RE.test(body) }); }
+  catch (e) { log({ fn: "classify", warn: `ai_reply_after_classify: ${String((e as any)?.message ?? e)}` }); }
+  await admin.from("outreach_chats").update({ intent: result.intent }).eq("id", msg.chat_id);
+  // Consequences live in the database: re-open out-of-office exits, stage interested leads, record the milestone.
+  const returnDate = /^\d{4}-\d{2}-\d{2}/.test(String(result.return_date ?? "")) ? String(result.return_date).slice(0, 10) : null;
+  let consequences: unknown = null;
+  try { consequences = await rpc("apply_reply_intent", { p_message: msg.id, p_intent: result.intent, p_return_date: returnDate }); }
+  catch (e) { log({ fn: "classify", warn: "apply_reply_intent failed", message_id: msg.id, error: String((e as any)?.message ?? e) }); }
+  // `ooo` never creates a follow-up task: the sequence resumes on its own.
+  if (["interested", "question"].includes(result.intent) && chat) {
+    const { data: existing } = await admin.from("outreach_tasks").select("id").eq("chat_id", chat.id).eq("kind", "follow_up").is("completed_at", null).maybeSingle();
+    if (!existing) {
+      await admin.from("outreach_tasks").insert({
+        workspace_id: msg.workspace_id, client_id: chat.client_id, kind: "follow_up", lead_id: chat.lead_id, sender_id: chat.sender_id, chat_id: chat.id,
+        title: `${result.intent === "interested" ? "Interested" : "Question"}: ${chat.attendee_name ?? "lead"}`, body: result.summary, assigned_to: chat.assigned_to, due_at: new Date(Date.now() + 4 * 3600_000).toISOString(),
+      });
+    }
+  }
+  await emitEvent(msg.workspace_id, "message.classified", { id: msg.id, chat_id: msg.chat_id, lead_id: chat?.lead_id ?? null, intent: result.intent, confidence: result.confidence, summary: result.summary, return_date: returnDate, consequences });
+  return "done";
+}
+
 export async function runClassify(limit = 20): Promise<Row> {
   const { data: q, error: qErr } = await admin.from("outreach_ai_classify_queue").select("*").lt("attempts", 3).or(`locked_at.is.null,locked_at.lt.${new Date(Date.now() - 5 * 60_000).toISOString()}`).order("id").limit(limit);
   if (qErr) return { done: 0, failed: 0, errors: [`queue read: ${qErr.message}`] };
@@ -575,45 +628,7 @@ export async function runClassify(limit = 20): Promise<Row> {
   const runOne = async (item: Row): Promise<void> => {
     await admin.from("outreach_ai_classify_queue").update({ locked_at: new Date().toISOString(), attempts: item.attempts + 1 }).eq("id", item.id);
     try {
-      const { data: msg } = await admin.from("outreach_messages").select("*, outreach_chats(*)").eq("id", item.message_id).single();
-      if (!msg || msg.direction !== "in") { await admin.from("outreach_ai_classify_queue").delete().eq("id", item.id); return; }
-      const chat = (msg as any).outreach_chats;
-      const { data: prev } = await admin.from("outreach_messages").select("text").eq("chat_id", msg.chat_id).eq("direction", "out").lt("sent_at", msg.sent_at).order("sent_at", { ascending: false }).limit(3);
-      let brief: string | null = null;
-      if (chat?.lead_id) {
-        const { data: enr } = await admin.from("outreach_enrollments").select("outreach_sequences(brief, name)").eq("lead_id", chat.lead_id).eq("sender_id", chat.sender_id).order("created_at", { ascending: false }).limit(1).maybeSingle();
-        brief = (enr as any)?.outreach_sequences?.brief ?? (enr as any)?.outreach_sequences?.name ?? null;
-      }
-      // Voice notes: the transcript stands in for the text. A note that is still being transcribed leaves the queue now;
-      // transcribeVoiceNote() re-queues the message once the transcript is stored.
-      const body = String(msg.text ?? "").trim() || String(msg.transcript ?? "").trim();
-      if (!body && msg.transcript_status === "pending") { await admin.from("outreach_ai_classify_queue").delete().eq("id", item.id); return; }
-      let result: { intent: string; confidence: number; summary: string; return_date?: string | null };
-      if (aiConfigured() && body) {
-        // sentAt lets the classifier turn "back on Monday" into a date (item 1: an out-of-office resumes on the return date).
-        const input = { workspaceId: msg.workspace_id, text: body, previousOutbound: (prev ?? []).map((p) => p.text ?? "").filter(Boolean).reverse(), brief, channel: chat?.provider ?? "LINKEDIN", sentAt: msg.sent_at as string | null };
-        result = await classifyMessage(input);
-      } else {
-        result = { intent: "unclear", confidence: 0, summary: body.slice(0, 140) };
-      }
-      await admin.from("outreach_messages").update({ intent: result.intent, intent_confidence: result.confidence, summary: result.summary, classified_at: new Date().toISOString() }).eq("id", msg.id);
-      await admin.from("outreach_chats").update({ intent: result.intent }).eq("id", msg.chat_id);
-      // Consequences live in the database: re-open out-of-office exits, stage interested leads, record the milestone.
-      const returnDate = /^\d{4}-\d{2}-\d{2}/.test(String(result.return_date ?? "")) ? String(result.return_date).slice(0, 10) : null;
-      let consequences: unknown = null;
-      try { consequences = await rpc("apply_reply_intent", { p_message: msg.id, p_intent: result.intent, p_return_date: returnDate }); }
-      catch (e) { log({ fn: "classify", warn: "apply_reply_intent failed", message_id: msg.id, error: String((e as any)?.message ?? e) }); }
-      // `ooo` never creates a follow-up task: the sequence resumes on its own.
-      if (["interested", "question"].includes(result.intent) && chat) {
-        const { data: existing } = await admin.from("outreach_tasks").select("id").eq("chat_id", chat.id).eq("kind", "follow_up").is("completed_at", null).maybeSingle();
-        if (!existing) {
-          await admin.from("outreach_tasks").insert({
-            workspace_id: msg.workspace_id, client_id: chat.client_id, kind: "follow_up", lead_id: chat.lead_id, sender_id: chat.sender_id, chat_id: chat.id,
-            title: `${result.intent === "interested" ? "Interested" : "Question"}: ${chat.attendee_name ?? "lead"}`, body: result.summary, assigned_to: chat.assigned_to, due_at: new Date(Date.now() + 4 * 3600_000).toISOString(),
-          });
-        }
-      }
-      await emitEvent(msg.workspace_id, "message.classified", { id: msg.id, chat_id: msg.chat_id, lead_id: chat?.lead_id ?? null, intent: result.intent, confidence: result.confidence, summary: result.summary, return_date: returnDate, consequences });
+      await classifyMessageById(item.message_id);
       await admin.from("outreach_ai_classify_queue").delete().eq("id", item.id);
       done++;
     } catch (e) {

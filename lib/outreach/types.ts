@@ -28,7 +28,7 @@ export type ImportKind =
   | 'search_url' | 'csv' | 'relations'
   | 'post_engagement' | 'conversations' | 'sn_saved_search' | 'sn_lead_list' | 'company_people';
 export type JobStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
-export type TaskKind = 'manual_node' | 'follow_up' | 'review_ai_draft' | 'reconnect' | 'reply_hold' | 'call';
+export type TaskKind = 'manual_node' | 'follow_up' | 'review_ai_draft' | 'reconnect' | 'reply_hold' | 'call' | 'ai_escalation';
 export type EnrichStatus = 'none' | 'waiting' | 'done' | 'failed';
 export type EmailStatus = 'verified' | 'unverified' | 'invalid';
 export type ReplyChannel = 'linkedin' | 'email' | 'instagram' | 'whatsapp';
@@ -461,6 +461,20 @@ export interface Chat {
   /** Instagram: the conversation sits in the recipient's message requests (not accepted yet). */
   is_request: boolean;
   created_at: string;
+  /** AI replies (036): per-chat mode override, autopilot pause state, conversation stage, active run mirror. */
+  reply_mode_override?: 'off' | 'draft' | 'autopilot' | null;
+  autopilot_state?: 'active' | 'paused_human' | 'paused_escalated' | 'paused_bot';
+  autopilot_paused_until?: string | null;
+  conversation_stage?: string | null;
+  conversation_exchanges?: number;
+  ai_replies_count?: number;
+  last_ai_move?: string | null;
+  is_group?: boolean;
+  ai_run_id?: string | null;
+  ai_run_status?: string | null;
+  ai_run_decision?: 'send' | 'escalate' | 'no_reply' | null;
+  ai_escalation_reason?: string | null;
+  ai_scheduled_send_at?: string | null;
 }
 
 export interface Message {
@@ -506,7 +520,14 @@ export interface Message {
   /** Manual replies: the teammate who sent it. */
   sent_by: string | null;
   created_at: string;
+  /** AI replies (036): who produced the message, the run that drafted / sent it, the extended classification. */
+  origin?: MessageOrigin;
+  ai_reply_run_id?: string | null;
+  ai_flags?: string[];
+  classification?: Record<string, unknown> | null;
 }
+
+export type MessageOrigin = 'prospect' | 'sequence' | 'inbox_user' | 'ai_autopilot' | 'ai_draft_sent' | 'ai_edited' | 'external_device' | 'unknown';
 
 export interface Task {
   id: string;
@@ -631,6 +652,8 @@ export interface LeadProfile {
   profile_language: string | null;
   follower_count: number | null;
   connections_count: number | null;
+  /** 033: top-level LinkedIn facts (open profile, Premium, degree, contact info …); shape in lib/outreach/intel.ts ProfileFacts. */
+  linkedin?: Record<string, unknown> | null;
   posts: LeadProfilePost[] | null;
   posts_fetched_at: string | null;
   last_posted_at: string | null;

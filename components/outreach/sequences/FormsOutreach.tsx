@@ -11,6 +11,7 @@ import { Callout, Note } from './FormsShared';
 import { useBuilder } from './context';
 import { senderName } from './helpers';
 import { EmailAttachments } from './EmailAttachments';
+import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 
 export interface FormProps {
   node: GraphNode;
@@ -211,6 +212,11 @@ const MAILBOX_MODES: Array<{ value: MailboxMode; title: string; help: string }> 
 
 export function SendEmailForm({ node, cfg, set, patch }: FormProps) {
   const { senders } = useBuilder();
+  const { workspace } = useWorkspace();
+  const wsSettings = (workspace?.settings ?? {}) as Record<string, unknown>;
+  const wsPlain = wsSettings.email_plain_text === true;
+  const wsNoTracking = wsSettings.email_tracking === false;
+  const plain = wsPlain || cfg.plain_text === true;
   const mailboxes = senders.filter((s) => s.provider !== 'LINKEDIN');
   const pool: string[] = Array.isArray(cfg.mailbox_pool) ? cfg.mailbox_pool : [];
   const mode: MailboxMode = cfg.mailbox_sender_id ? 'one' : Array.isArray(cfg.mailbox_pool) ? 'pool' : 'own';
@@ -236,10 +242,10 @@ export function SendEmailForm({ node, cfg, set, patch }: FormProps) {
 
   return (
     <div className="space-y-3">
-      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="html" label="Body (HTML allowed)" rows={8} placeholder="<p>Hi {{first_name|there}},</p>" channel="email" subject={{ label: 'Subject', max: 200 }} />
+      <VariantEditor node={node} cfg={cfg} patch={patch} textKey="html" label={plain ? 'Body (plain text)' : 'Body (HTML allowed)'} rows={8} placeholder={plain ? 'Hi {{first_name|there}},' : '<p>Hi {{first_name|there}},</p>'} channel="email" subject={{ label: 'Subject', max: 200 }} />
       <div className="flex flex-wrap items-center gap-1.5">
         <Button type="button" variant="secondary" size="sm" disabled={hasSignature} onClick={() => addToBodies('{{sender.signature}}', 'sender.signature')} title="Adds {{sender.signature}}: the signature saved on the mailbox that sends the email"><PenLine className="w-3.5 h-3.5" aria-hidden /> Insert signature</Button>
-        {noUnsubscribe && <Button type="button" variant="secondary" size="sm" onClick={() => addToBodies('<p><a href="{{unsubscribe_link}}">Unsubscribe</a></p>', 'unsubscribe_link')}>Add unsubscribe link</Button>}
+        {noUnsubscribe && <Button type="button" variant="secondary" size="sm" onClick={() => addToBodies(plain ? '\nUnsubscribe: {{unsubscribe_link}}' : '<p><a href="{{unsubscribe_link}}">Unsubscribe</a></p>', 'unsubscribe_link')}>Add unsubscribe link</Button>}
       </div>
       <EmailAttachments nodeId={node.id} value={cfg.attachments} onChange={(v) => set('attachments', v)} />
       {noUnsubscribe && <Callout tone="warn">This email has no <span className="font-mono">{'{{unsubscribe_link}}'}</span>. Cold email with no way to opt out hurts deliverability and breaks anti-spam rules in most countries.{variants.length > 0 ? ' Add the link to every variant.' : ''}</Callout>}
@@ -284,7 +290,15 @@ export function SendEmailForm({ node, cfg, set, patch }: FormProps) {
         <p className="text-[11px] text-gray-500 leading-4">A contact who was emailed before always gets the same mailbox again.</p>
       </fieldset>
       {mailboxes.length === 0 && <Note>No mailbox connected yet. Connect a Gmail, Outlook or IMAP sender to send emails. The sequence cannot go live until a mailbox is in the pool or chosen here.</Note>}
-      <Toggle checked={cfg.track !== false} onChange={(v) => set('track', v)} label="Track opens and clicks" />
+      <Toggle checked={plain} onChange={(v) => set('plain_text', v || undefined)} disabled={wsPlain} label="Send as plain text" />
+      <Note>
+        {wsPlain
+          ? 'The workspace sends every email as plain text (Settings → Workspace).'
+          : 'Sent without HTML: formatting is removed and links are written out in full.'}
+        {plain && ' Plain-text emails are not tracked.'}
+      </Note>
+      <Toggle checked={!plain && !wsNoTracking && cfg.track !== false} onChange={(v) => set('track', v)} disabled={plain || wsNoTracking} label="Track opens and clicks" />
+      {wsNoTracking && !plain && <Note>Tracking is off for the whole workspace (Settings → Workspace).</Note>}
       <Note>Leads without a matching email take the <span className="font-medium">no email</span> branch; hard bounces take <span className="font-medium">bounced</span>.</Note>
     </div>
   );
@@ -309,7 +323,7 @@ export function AiDraftApprovalForm({ cfg, set }: FormProps) {
         <option value="comment">Post comment</option>
       </Select>
       <Textarea label="Brief" value={cfg.brief ?? ''} onChange={(e) => set('brief', e.target.value)} rows={5} placeholder="Context, value proposition, tone, things to avoid… The sequence brief (top bar → settings) is also passed to the model." />
-      <Note>Creates a “review AI draft” task with the generated text. Approving sends it through the matching action (with normal budgets); rejecting skips the step.</Note>
+      <Note>Creates a “review AI draft” task with the generated text. Approving sends it through the matching action (within the normal daily limits); rejecting skips the step.</Note>
     </div>
   );
 }

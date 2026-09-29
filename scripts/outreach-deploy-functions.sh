@@ -2,7 +2,7 @@
 # Deploy the outreach platform edge functions (supabase/functions/outreach-*) to the CapitalxAI Supabase project.
 #
 # Usage:
-#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh            # all 39 functions
+#   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh            # all 40 functions
 #   CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/outreach-deploy-functions.sh worker-tick outreach-process-inbound
 #
 # Names may be given with or without the `outreach-` prefix. Deploys one function at a time, continues on
@@ -51,6 +51,7 @@ WEBHOOK_FUNCS=(
   outreach-stripe-webhook    # Stripe signature (also user JWT for checkout/portal)
   outreach-booking-webhook   # Calendly / Cal.com: ?ws=<workspace>&k=<booking_secret> checked in code (constant time)
   outreach-unsubscribe       # public one-click unsubscribe: signed token (HMAC, OUTREACH_CRON_SECRET) checked in code
+  outreach-relogin           # public re-login link from emails: signed token (HMAC, OUTREACH_CRON_SECRET), redirects to a fresh hosted sign-in link
   outreach-crm-oauth         # OAuth callback is public (state checked in code); the start call validates the user JWT
 )
 # Cron workers (x-cron-secret via outreach_invoke / pg_net):
@@ -74,6 +75,7 @@ CRON_FUNCS=(
   outreach-domain-check      # DNS checks for portal + tracking domains (every 30 min)
   outreach-worker-profile    # Profile Studio: verify applied changes, owner emails, experiments (every 5 min); weekly drift + QA
   outreach-worker-channels   # Instagram / WhatsApp: followers poll (35 * * * *), identifier check (*/30), block detect (55 * * * *), transcribe (* * * * *), wa_governor
+  outreach-ai-reply-worker   # AI replies: draft (15 s), dispatch (1 min), maintenance (*/15), breakers (hourly), daily (graduation + digests)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
@@ -93,6 +95,7 @@ USER_FUNCS=(
   outreach-workspace-secrets # stores the workspace's own AI / finder keys (encrypted); owner JWT
   outreach-api               # public REST API: the API key is checked in code (outreach_api_authenticate)
   outreach-profile           # Profile Studio: user actions (JWT) + the owner's public token pages (authority / approve / revert)
+  outreach-ai-reply          # AI replies: send now, simulator, regression, prompt save (JWT) + the owner's public consent pages (token)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")
 

@@ -2,6 +2,7 @@
 
 // Sequence settings (plan items 1, 13, 14): reply scope, hold mode, out-of-office, enrichment and AI-review gates.
 // On a running sequence the values travel with the publish call (p_settings); before that they are part of Save.
+import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { Input, Select, Textarea, Toggle } from '@/components/outreach/ui';
 import type { Client } from '@/lib/outreach/types';
@@ -28,7 +29,7 @@ function Radio({ name, checked, onSelect, title, help }: { name: string; checked
   );
 }
 
-export default function SequenceSettingsPanel({ draft, clients, onChange, disabled, live }: { draft: Draft; clients: Client[]; onChange: (patch: Partial<Draft>) => void; disabled: boolean; live: boolean }) {
+export default function SequenceSettingsPanel({ draft, clients, onChange, disabled, live, sequenceId }: { draft: Draft; clients: Client[]; onChange: (patch: Partial<Draft>) => void; disabled: boolean; live: boolean; sequenceId?: string | null }) {
   const s = (draft.settings ?? {}) as SequenceSettingsExt;
   const set = (patch: Partial<SequenceSettingsExt>) => onChange({ settings: { ...s, ...patch } as Draft['settings'] });
   const stop = s.stop_on_reply !== false;
@@ -45,6 +46,16 @@ export default function SequenceSettingsPanel({ draft, clients, onChange, disabl
       <Section title="AI brief">
         <Textarea label="Brief for AI (context for drafts and checks)" value={draft.brief} onChange={(e) => onChange({ brief: e.target.value })} rows={4} placeholder="Who we are, who we target, the offer, the tone." />
       </Section>
+
+      {sequenceId && (
+        <Section title="AI replies">
+          <p className="text-xs text-gray-500">Replies to this sequence follow the workspace master prompt and reply policy unless you override them for this sequence.</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <Link href={`/outreach/settings/ai-replies?tab=policies&scope=sequence&scope_id=${encodeURIComponent(sequenceId)}`} className="text-indigo-600 hover:underline">Set a reply policy for this sequence</Link>
+            <Link href={`/outreach/settings/ai-replies?tab=prompt&scope=sequence&scope_id=${encodeURIComponent(sequenceId)}`} className="text-indigo-600 hover:underline">Use a different master prompt</Link>
+          </div>
+        </Section>
+      )}
 
       <Section title="When a lead replies">
         <Toggle checked={stop} onChange={(v) => set({ stop_on_reply: v })} label="Stop the sequence for that lead" disabled={disabled} />
@@ -84,7 +95,7 @@ export default function SequenceSettingsPanel({ draft, clients, onChange, disabl
 
       <Section title="Before the first step">
         <Toggle checked={!!s.wait_for_enrichment} onChange={(v) => set({ wait_for_enrichment: v })} label="Wait for profile enrichment before the first step" disabled={disabled} />
-        <p className="text-xs text-gray-500">Profile details are fetched within the sender's daily profile-view limit. A lead starts anyway after 72 hours.</p>
+        <p className="text-xs text-gray-500">Profile details are fetched within the sender&apos;s daily profile-view limit. A lead starts anyway after 72 hours.</p>
         <Toggle checked={!!s.hold_for_ai_review} onChange={(v) => set({ hold_for_ai_review: v })} label="Hold leads until AI-written lines are approved" disabled={disabled} />
         <p className="text-xs text-gray-500">Nothing AI-written is sent before a person approves it. With this on, the lead waits instead of using the fallback text.</p>
       </Section>

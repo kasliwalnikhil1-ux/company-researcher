@@ -1,11 +1,14 @@
 /**
  * proxy.ts (Next.js 16: the file that used to be `middleware.ts`)
  *
- * ONE job: white-label custom domains for the Outreach client portal (product plan item 23).
+ * TWO jobs:
+ *   A. Product domains. A GrowthxAI domain (lib/whitelabel.ts) serves outreach only: any page it does not serve
+ *      (`productServesPath`) is redirected to `/outreach`, so e.g. growthxai.com/investors opens the outreach dashboard.
+ *      Runs for every page (see `config.matcher`); `/_next`, `/api` and static files are never touched.
+ *   B. White-label custom domains for the Outreach client portal (product plan item 23), described below.
  *
- * What it does
- *   1. Runs only for `/` and `/outreach/*` (see `config.matcher`). `/_next`, `/api`, static files and every other
- *      route of the app are never touched.
+ * What B does
+ *   1. Runs only for `/` and `/outreach/*`. Every other route of the app passes through unchanged.
  *   2. If the request host is one of the app's own hosts, it does nothing and the request passes through unchanged.
  *      Own hosts are: the host of NEXT_PUBLIC_APP_URL, anything in OUTREACH_APP_HOSTS (comma separated),
  *      localhost / 127.0.0.1 / *.localhost, Vercel preview hosts (*.vercel.app and the VERCEL_* URLs) and bare IPs.
@@ -19,7 +22,7 @@
  *                           The browser URL stays `/`.
  *
  * What it does NOT do
- *   - No authentication, no redirects, no cookies. This app signs in on the client (Supabase session in the browser,
+ *   - No authentication, no cookies, and no redirects other than job A. This app signs in on the client (Supabase session in the browser,
  *     `components/ProtectedRoute`), and there was no middleware before this file, so nothing here can break sign-in.
  *     Note that a browser session belongs to one origin: a client signs in once on the custom domain.
  *   - It never trusts an incoming `x-outreach-*` header. They are removed before ours are set, so a page can rely on them.
@@ -29,11 +32,11 @@
  */
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getWhitelabelConfig, productHome, productServesPath } from '@/lib/whitelabel';
 
 export const config = {
-  // Keep this list short and literal: it is analysed at build time and is the only thing standing between
-  // this file and the rest of the app.
-  matcher: ['/', '/outreach/:path*'],
+  // Keep this literal: it is analysed at build time. Every page, but never `/api`, `/_next` or a file with an extension.
+  matcher: ['/((?!api/|_next/|.*\\.[a-zA-Z0-9]+$).*)'],
 };
 
 const HOST_HEADER = 'x-outreach-host';
@@ -104,7 +107,18 @@ async function resolveHost(host: string): Promise<Resolved | undefined> {
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  // Belt and braces: the matcher already limits this, the check keeps a future matcher edit from widening the effect.
+  const host = (request.headers.get('host') ?? request.nextUrl.host ?? '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+
+  // A. A product domain only serves its own pages: the rest open the product's home.
+  const brand = getWhitelabelConfig(host);
+  if (!productServesPath(brand, pathname)) {
+    const url = request.nextUrl.clone();
+    url.pathname = productHome(brand);
+    url.search = '';
+    return NextResponse.redirect(url);
+  }
+
+  // B. Custom domains: only `/` and `/outreach/*`.
   if (pathname !== '/' && pathname !== '/outreach' && !pathname.startsWith('/outreach/')) return NextResponse.next();
 
   const spoofed = OUR_HEADERS.some((h) => request.headers.has(h));
@@ -115,7 +129,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers } });
   };
 
-  const host = (request.headers.get('host') ?? request.nextUrl.host ?? '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
   if (!host || isOwnHost(host)) return passThrough();
 
   const resolved = await resolveHost(host);

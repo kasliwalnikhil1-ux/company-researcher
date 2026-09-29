@@ -10,6 +10,7 @@ import { Card, PageHeader, PageLoader } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import PlatformSetupCard from '@/components/outreach/settings/admin/PlatformSetupCard';
 import PlatformLimits from '@/components/outreach/settings/admin/PlatformLimits';
+import AiReplyAdmin from '@/components/outreach/settings/admin/AiReplyAdmin';
 
 /**
  * Settings → Admin: everything that is the same for every workspace, sender and user. Rendered only when the app runs on
@@ -42,6 +43,7 @@ export default function AdminSettingsPage() {
       </div>
 
       <PlatformLimits />
+      <AiReplyAdmin />
     </div>
   );
 }

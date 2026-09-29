@@ -8,9 +8,10 @@ import { admin, log, rpc, emitEvent, randInt, sha256Hex, FUNCTIONS_BASE } from "
 import { unipile, UnipileError, distanceToRelation, invitationPending } from "./unipile.ts";
 import { handleUnipileError, isRejectCode, type Decision } from "./errors.ts";
 import { renderTemplate, buildContext, type RenderContext } from "./render.ts";
+import { htmlToText, textToDisplayHtml, PLAIN_TEXT_HEADER } from "./plaintext.ts";
 import { recordReject } from "./health.ts";
 import { notifySender } from "./notify.ts";
-import { reconnectLink } from "./inbound.ts";
+import { reloginUrl } from "./inbound.ts";
 import { unsubscribeToken } from "./crypto.ts";
 import { enrichBackoff, fetchPosts, fetchPostsBudgeted, postsToRows, saveProfile, sectionsFor, storedPosts, tomorrowMorning } from "./enrich.ts";
 import { findEmail, companyDomainOf, finderConfigured } from "./finder.ts";
@@ -22,6 +23,24 @@ type Row = Record<string, any>;
 export type ExecResult = { ok: true; response: unknown; branch?: string | null } | { ok: false; decision: Decision; code: string; retryAt?: Date; branch?: string | null };
 
 const LIMITS = { invite_note: 300, invite_note_free: 200, message: 8000, comment: 1250, inmail_subject: 200, inmail_body: 1900 };
+/** LinkedIn: after an invitation is withdrawn, the same person cannot be invited again for up to 3 weeks. */
+const REINVITE_COOLDOWN_DAYS = 21;
+/** Free LinkedIn accounts: about 5 invitations with a note a month (connector docs, provider limits); 150 a week without one. */
+const FREE_NOTES_PER_MONTH = 5;
+
+function monthStartUtc(offsetMonths = 0): Date {
+  const d = new Date();
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + offsetMonths, 1));
+}
+
+/** Notes this free sender may still attach this calendar month (UTC): counted from sent invites, and 0 once LinkedIn refused one. */
+async function freeNotesLeft(senderId: string): Promise<number> {
+  const since = monthStartUtc().toISOString();
+  const { data: ex } = await admin.from("outreach_sender_events").select("id").eq("sender_id", senderId).eq("kind", "invite_notes_exhausted").gte("at", since).limit(1);
+  if (ex?.length) return 0;
+  const { count } = await admin.from("outreach_lead_sender_state").select("lead_id", { count: "exact", head: true }).eq("sender_id", senderId).eq("invite_had_note", true).gte("invite_sent_at", since);
+  return Math.max(0, FREE_NOTES_PER_MONTH - (count ?? 0));
+}
 const VOICE_BUCKET = "outreach-attachments";
 /** Action types that address a lead through its channel identity (Instagram / WhatsApp senders resolve it once per action). */
 const IDENTITY_TYPES = new Set(["new_chat", "message", "follow", "unfollow", "like", "comment", "identifier_check", "profile_view", "post_fetch"]);
@@ -592,11 +611,42 @@ export async function executeAction(action: Row): Promise<ExecResult> {
           if (l?.is_open_profile === true && hasBranch("open_profile")) return { ok: false, decision: { kind: "branch", name: "open_profile", reason: "open_profile" }, code: "open_profile" };
           rctx = { ...rctx, lead: { ...rctx.lead, ...l } };
         }
+        // LinkedIn's re-invite wait: a person whose invitation was withdrawn cannot be invited again for 3 weeks. Wait it out.
+        const withdrawnAt = lss?.invite_withdrawn_at ? Date.parse(lss.invite_withdrawn_at) : NaN;
+        if (Number.isFinite(withdrawnAt) && withdrawnAt + REINVITE_COOLDOWN_DAYS * 86400_000 > Date.now()) {
+          const at = new Date(withdrawnAt + REINVITE_COOLDOWN_DAYS * 86400_000 + randInt(1, 6) * 3600_000);
+          return { ok: false, decision: { kind: "retry", at, reason: "reinvite_cooldown" }, code: "reinvite_cooldown" };
+        }
         let note = renderTemplate(cfg.text ?? cfg.note ?? "", rctx).trim();
         const limit = sender.is_premium ? LIMITS.invite_note : LIMITS.invite_note_free;
         if (!sender.is_premium && !cfg.require_note_for_free && note.length > LIMITS.invite_note_free) note = "";
         if (note.length > limit) note = note.slice(0, limit);
-        const res = await unipile.users.invite({ account_id: sender.unipile_account_id, provider_id: l!.provider_id, message: note || undefined });
+        // free accounts: once this month's notes are used, invite without the note (or wait for next month when the step requires it)
+        if (note && !sender.is_premium && (await freeNotesLeft(sender.id)) <= 0) {
+          if (cfg.require_note_for_free) return { ok: false, decision: { kind: "retry", at: new Date(monthStartUtc(1).getTime() + randInt(8, 14) * 3600_000), reason: "free_notes_used" }, code: "free_notes_used" };
+          note = "";
+        }
+        const invite = (message: string) => unipile.users.invite({ account_id: sender.unipile_account_id, provider_id: l!.provider_id, message: message || undefined });
+        let res: Awaited<ReturnType<typeof invite>>;
+        try { res = await invite(note); }
+        catch (e) {
+          // 422 cannot_resend_yet is LinkedIn's answer to any invitation limit. Work out which one before freezing the sender's invites.
+          if (!(e instanceof UnipileError && e.status === 422 && e.code === "cannot_resend_yet")) throw e;
+          if (lss?.invite_sent_at || lss?.invite_withdrawn_at) {
+            // invited before (withdrawn outside the platform, or the wait is longer than 3 weeks): this person only
+            if ((action.attempt ?? 1) >= 3) return { ok: false, decision: { kind: "skip_node", reason: "cannot_reinvite_yet" }, code: "422:cannot_resend_yet" };
+            return { ok: false, decision: { kind: "retry", at: new Date(Date.now() + randInt(6, 9) * 86400_000), reason: "reinvite_cooldown" }, code: "422:cannot_resend_yet" };
+          }
+          if (!note || sender.is_premium) throw e;   // no note to drop: the weekly limit → sender_cap_hit (errors.ts)
+          // free account with a note: this month's note allowance. Retry once without the note; a second refusal is the weekly limit.
+          if (cfg.require_note_for_free) {
+            await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "invite_notes_exhausted", data: { month: monthStartUtc().toISOString().slice(0, 7), source: "cannot_resend_yet" } });
+            return { ok: false, decision: { kind: "retry", at: new Date(monthStartUtc(1).getTime() + randInt(8, 14) * 3600_000), reason: "free_notes_used" }, code: "free_notes_used" };
+          }
+          res = await invite("");
+          note = "";
+          await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "invite_notes_exhausted", data: { month: monthStartUtc().toISOString().slice(0, 7), source: "cannot_resend_yet" } });
+        }
         const now = new Date().toISOString();
         await admin.from("outreach_lead_sender_state").update({ relation: "pending_out", invitation_id: res.invitation_id ?? null, invite_sent_at: now, invite_had_note: !!note, invite_withdrawn_at: null, updated_at: now }).eq("lead_id", l!.id).eq("sender_id", sender.id);
         await emitEvent(sender.workspace_id, "invite.sent", { lead_id: l!.id, sender_id: sender.id, invitation_id: res.invitation_id ?? null, note: !!note });
@@ -757,35 +807,51 @@ export async function executeAction(action: Row): Promise<ExecResult> {
         if (lss?.email_bounced) return { ok: false, decision: branchOrSkip("bounced", "bounced"), code: "email_bounced" };
         const subject = renderTemplate(cfg.subject ?? "", rctx).trim();
         const template: string = cfg.html ?? cfg.text ?? "";
-        const isHtml = typeof cfg.html === "string" ? true : looksHtml(template);
-        // {{sender.signature}} is the MAILBOX's signature (this action runs on the mailbox sender). A plain-text signature inside an HTML body keeps its line breaks.
+        // Workspace email settings: email_plain_text sends every email as text/plain; email_tracking=false tracks none of them.
+        const { data: wsRow } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).maybeSingle();
+        const wsSettings = (wsRow?.settings ?? {}) as Record<string, unknown>;
+        const plain = wsSettings.email_plain_text === true || cfg.plain_text === true;
+        // {{sender.signature}} is the MAILBOX's signature (this action runs on the mailbox sender).
         const sig = String(rctx.sender?.signature ?? "");
-        const htmlCtx: RenderContext = isHtml && sig && !looksHtml(sig) ? { ...rctx, sender: { ...(rctx.sender ?? {}), signature: esc(sig).replace(/\r?\n/g, "<br>") } } : rctx;
-        let html = isHtml ? renderTemplate(template, htmlCtx) : textToHtml(renderTemplate(template, rctx));
-        if (!html.trim()) return { ok: false, decision: { kind: "fail_enrollment", reason: "empty_text" }, code: "E_PAYLOAD_INVALID" };
-        html = protectLinks(html, [unsubscribeUrl, rctx.booking_link]);
+        let html: string;
+        let text: string | null = null;
+        if (plain) {
+          // HTML → text on the TEMPLATE (and an HTML signature), then render: values go in raw, never entity-decoded
+          const textCtx: RenderContext = sig && looksHtml(sig) ? { ...rctx, sender: { ...(rctx.sender ?? {}), signature: htmlToText(sig) } } : rctx;
+          text = renderTemplate(looksHtml(template) ? htmlToText(template) : template, textCtx).replace(/\n{3,}/g, "\n\n").trim();
+          if (!text) return { ok: false, decision: { kind: "fail_enrollment", reason: "empty_text" }, code: "E_PAYLOAD_INVALID" };
+          html = textToDisplayHtml(text);   // stored for the inbox only; the email itself is `text`
+        } else {
+          const isHtml = typeof cfg.html === "string" ? true : looksHtml(template);
+          // a plain-text signature inside an HTML body keeps its line breaks
+          const htmlCtx: RenderContext = isHtml && sig && !looksHtml(sig) ? { ...rctx, sender: { ...(rctx.sender ?? {}), signature: esc(sig).replace(/\r?\n/g, "<br>") } } : rctx;
+          html = isHtml ? renderTemplate(template, htmlCtx) : textToHtml(renderTemplate(template, rctx));
+          if (!html.trim()) return { ok: false, decision: { kind: "fail_enrollment", reason: "empty_text" }, code: "E_PAYLOAD_INVALID" };
+          html = protectLinks(html, [unsubscribeUrl, rctx.booking_link]);
+        }
         let replyTo: string | undefined;
         if ((cfg.thread ?? "continue") === "continue") {
           const { data: prev } = await admin.from("outreach_messages").select("unipile_message_id, outreach_chats!inner(sender_id, lead_id)").eq("direction", "out").eq("outreach_chats.sender_id", sender.id).eq("outreach_chats.lead_id", l.id).not("unipile_message_id", "is", null).order("sent_at", { ascending: false }).limit(1).maybeSingle();
           replyTo = (prev as any)?.unipile_message_id ?? undefined;
         }
         let tracking: Record<string, unknown> | undefined;
-        if (cfg.track !== false) {
+        if (!plain && cfg.track !== false && wsSettings.email_tracking !== false) {
           tracking = { opens: true, links: true, label: action.id };
           const domain = await rpc<string | null>("tracking_domain_for", { p_sender: sender.id }).catch(() => null);
           if (domain) tracking.custom_domain = domain;   // only an ACTIVE domain is ever returned; otherwise Unipile's default is used
         }
         // RFC 8058 one-click unsubscribe. Unipile's send-email accepts these two header names in custom_headers.
-        const headers = unsubscribeUrl ? [{ name: "List-Unsubscribe", value: `<${unsubscribeUrl}>` }, { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }] : undefined;
+        const headers: Array<{ name: string; value: string }> = unsubscribeUrl ? [{ name: "List-Unsubscribe", value: `<${unsubscribeUrl}>` }, { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" }] : [];
+        if (plain) headers.push({ ...PLAIN_TEXT_HEADER });
         const bcc = sender.bcc_address && String(sender.bcc_address).toLowerCase() !== String(to).toLowerCase() ? [{ identifier: String(sender.bcc_address) }] : undefined;
         const files = await stepAttachments(sender.workspace_id, cfg.attachments);
         if (!files.ok) return { ok: false, decision: { kind: "fail_enrollment", reason: "attachment_missing" }, code: "E_ATTACHMENT_MISSING" };
-        const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: l.full_name ?? undefined }], bcc, subject: subject || undefined, body: html, reply_to: replyTo, tracking_options: tracking, custom_headers: headers, attachments: files.files });
+        const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: l.full_name ?? undefined }], bcc, subject: subject || undefined, body: text ?? html, reply_to: replyTo, tracking_options: tracking, custom_headers: headers.length ? headers : undefined, attachments: files.files });
         const threadKey = replyTo ? (lss?.unipile_chat_id ?? r.provider_id ?? r.tracking_id) : (r.provider_id ?? r.tracking_id);
         const chat = await ensureChatRow(sender, l, threadKey, subject);
-        await recordOutbound(sender, l, chat, html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), html, r.provider_id ?? r.tracking_id, action.id, false, files.stored);
+        await recordOutbound(sender, l, chat, text ?? html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), html, r.provider_id ?? r.tracking_id, action.id, false, files.stored);
         await emitEvent(sender.workspace_id, "email.sent", { lead_id: l.id, sender_id: sender.id, tracking_id: r.tracking_id });
-        return { ok: true, response: { tracking_id: r.tracking_id, provider_id: r.provider_id, to, bcc: !!bcc, custom_tracking_domain: tracking?.custom_domain ?? null, variant_id: cfg.variant_id ?? null } };
+        return { ok: true, response: { tracking_id: r.tracking_id, provider_id: r.provider_id, to, bcc: !!bcc, format: plain ? "text" : "html", tracked: !!tracking, custom_tracking_domain: tracking?.custom_domain ?? null, variant_id: cfg.variant_id ?? null } };
       }
       case "profile_edit":
         // Profile Studio (PRD §7): pre-snapshot → one PATCH → provisional applied; outreach-worker-profile verifies ≥60 s later.
@@ -826,11 +892,12 @@ export async function executeAction(action: Row): Promise<ExecResult> {
       if (e.code === "blocked_recipient" && (type === "new_chat" || type === "message") && lead) {
         await rpc("record_block", { p_sender: sender.id, p_lead: lead.id, p_code: code, p_action: action.id }).catch((err) => log({ fn: "execute", warn: `record_block: ${String((err as any)?.message ?? err)}` }));
       }
-      // Instagram "We suspect automated behavior": surfaced verbatim, one level down, 48 h pause (the operator may resume)
+      // Instagram "We suspect automated behavior": ignorable per the connector's docs. Logged on the sender only (no pause, no level
+      // drop); handleUnipileError retries the action later.
       if (provider === "INSTAGRAM" && e.status === 403 && PROVIDER_WARNING_RE.test(`${e.message ?? ""} ${JSON.stringify(e.body ?? "")}`)) {
         const text = String(e.message || (e.body as any)?.detail || (e.body as any)?.title || "We suspect automated behavior on your account").slice(0, 500);
-        await rpc("sender_provider_warning", { p_sender: sender.id, p_text: text }).catch((err) => log({ fn: "execute", warn: `sender_provider_warning: ${String((err as any)?.message ?? err)}` }));
-        return { ok: false, decision: { kind: "sender_pause", hours: 48, reason: "provider_warning" }, code };
+        await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "provider_warning", data: { text, ignored: true, action_type: type } });
+        return { ok: false, decision, code };
       }
     }
     if (isRejectCode(e)) {
@@ -839,8 +906,13 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     }
     if (e instanceof UnipileError && e.code === "checkpoint_error") await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "checkpoint", data: { code } });
     if (decision.kind === "sender_credentials") {
-      await admin.from("outreach_senders").update({ status: "credentials", status_reason: code, last_disconnect_at: new Date().toISOString() }).eq("id", sender.id).eq("status", "ok");
-      if (sender.auth_method !== "cookie") { const link = await reconnectLink(sender).catch(() => null); await notifySender(sender.id, "reconnect_needed", { link }); }
+      const { data: flipped } = await admin.from("outreach_senders").update({ status: "credentials", status_reason: code, last_disconnect_at: new Date().toISOString() }).eq("id", sender.id).eq("status", "ok").select("id");
+      // email once, when this action is what ended the session; the reconnect worker sends the daily reminders from here on
+      if (flipped?.length && !(sender.auth_method === "cookie" && sender.provider === "LINKEDIN")) {
+        const link = await reloginUrl(sender).catch(() => null);
+        await notifySender(sender.id, "reconnect_needed", { link });
+        await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: 0 }).eq("id", sender.id);
+      }
     }
     if (decision.kind === "branch" && decision.name === "connected" && lead) {
       await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? new Date().toISOString(), updated_at: new Date().toISOString() }).eq("lead_id", lead.id).eq("sender_id", sender.id);

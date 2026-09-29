@@ -24,7 +24,11 @@ const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
 export interface LlmConfig { provider: LlmProvider; model: string; key: string; own: boolean }
-export interface LlmCallOpts { workspaceId: string | null; purpose: string; system: string; user: string; maxTokens: number; temperature: number; json: boolean; thinking?: ThinkingLevel }
+export interface LlmCallOpts {
+  workspaceId: string | null; purpose: string; system: string; user: string; maxTokens: number; temperature: number; json: boolean; thinking?: ThinkingLevel;
+  /** A different model on the PLATFORM key only (e.g. a cheaper verifier). A workspace on its own key always uses its own model. */
+  platformModel?: string | null;
+}
 export interface LlmResult { text: string; provider: LlmProvider; model: string; ownKey: boolean }
 
 /** Errors carry an `E_CODE: message` text so errorResponse() and parseError() map them. */
@@ -216,8 +220,9 @@ function authFailure(e: unknown): e is HttpFail {
 // ---------------------------------------------------------------------------
 /** One LLM call for a workspace. Returns the answer text plus the provider and model that produced it. */
 export async function llmCallDetailed(o: LlmCallOpts): Promise<LlmResult> {
-  const cfg = await resolveLlm(o.workspaceId);
-  if (!cfg) throw new LlmError("E_AI_UNAVAILABLE", "AI is not configured: no platform key and no workspace key");
+  const resolved = await resolveLlm(o.workspaceId);
+  if (!resolved) throw new LlmError("E_AI_UNAVAILABLE", "AI is not configured: no platform key and no workspace key");
+  const cfg: LlmConfig = !resolved.own && o.platformModel ? { ...resolved, model: o.platformModel } : resolved;
   const t0 = Date.now();
   const q: TransportReq = { system: `${o.system}\n\n[prompt-version ${PROMPT_VERSION}]`, user: o.user, maxTokens: o.maxTokens, temperature: o.temperature, json: o.json, level: o.thinking ?? (o.json ? "MEDIUM" : "HIGH") };
 

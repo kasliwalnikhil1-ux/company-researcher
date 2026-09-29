@@ -9,6 +9,7 @@ import type { ThreadAttributionRow } from '@/lib/outreach/intel';
 import { Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
 import { channelLabel, fixMojibake, isMailProvider } from '@/lib/outreach/channels';
+import AiOriginBadge, { hasOriginBadge, isAiOrigin } from './ai/AiOriginBadge';
 
 export function isVoiceNote(att: MessageAttachment): boolean {
   const mime = att.mimetype ?? att.type ?? '';
@@ -361,6 +362,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   const showAuthor = isGroup && !mine && (m.sender_name || m.sender_identifier);
   const hideDeletedText = deleted && provider !== 'LINKEDIN';
   const actionBtn = 'p-1 rounded-full text-gray-500 hover:text-gray-800 hover:bg-white shadow-sm bg-white/80 border border-gray-200';
+  const originBadge = mine && !pending && hasOriginBadge(m.origin);
   const hasActions = !editing && (reactable || replyable || forwardable || editable || deletable || (!!m.text && !deleted));
 
   const toolbar = hasActions ? (
@@ -472,7 +474,9 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
           <span className="italic">{m.summary}</span>
         </div>
       )}
-      {attribution && !pending && <Attribution a={attribution} mine={mine} />}
+      {/* AI replies: the origin badge replaces the "Sent by" line (it names the teammate itself) */}
+      {attribution && !pending && !(originBadge && (isAiOrigin(m.origin) || attribution.kind === 'manual')) && <Attribution a={attribution} mine={mine} />}
+      {originBadge && <AiOriginBadge origin={m.origin!} runId={m.ai_reply_run_id} sentByName={attribution?.sent_by_name} />}
       {!wa && (
         <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
           <span title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : fmtDate(m.sent_at)}</span>

@@ -48,7 +48,7 @@ The canonical cross-channel pattern is `linkedin_to_whatsapp`: LinkedIn first; W
 - **Instagram**: at most **10 metered actions an hour** per sender (follow, unfollow, new chat, message, like, comment, profile view, followers read, post read; replies excluded) and a daily total per level: 15 / 30 / 50 / 70 / 85 / 100. Level 0 can only follow, like and view. When the hour is used up the planner defers to the next hour (`E_HOURLY_CAP`).
 - **WhatsApp new-chat governor**: level 0–4 = **2 / 5 / 10 / 20 / 35 new chats a day**, promoted nightly on the reply rate of new chats (level 1 needs 7 days connected, 5 inbound conversations and an attested account age over 6 months), demoted at once on any block, a reply rate under 25 % or a disconnect within 24 h of outreach. Messages into existing chats: 100 a day; replies uncapped. A freshly connected number waits **24 h** (`quiet_until`, `E_QUIET_PERIOD`). Numbers need 6 months of real use, attested by a manager (`E_ACCOUNT_TOO_NEW`).
 - Before every new WhatsApp chat the platform checks the number is on WhatsApp (`identifier_check`) without spending a new chat. An invalid number flags the lead: `E_IDENTIFIER_INVALID`, nothing to retry.
-- **Provider warning**: an Instagram "we suspect automated behaviour" notice drops the sender one level and pauses it 48 h (`E_PROVIDER_WARNING`, `provider_warning.text` verbatim on the sender). Only a human may resume it in the app. Do not suggest it.
+- **Provider warning**: an Instagram "we suspect automated behaviour" notice is logged on the sender and ignored: the connector says it brings no further restriction, so there is no pause and no level drop, and the failed action is retried later. `E_PROVIDER_WARNING` only appears on a sender paused under the older rule; only a human may resume it in the app. Do not suggest it.
 - Blocks (a recipient blocked the sender, a send to a valid number failed, a chat went one-way) are logged with the five preceding actions: `report_blocks`. On WhatsApp a block demotes the sender immediately.
 - A reply on any channel stops the lead on every channel. `wait_for_reply` steps advance on a reply instead of exiting.
 
@@ -78,7 +78,7 @@ Validator codes to fix: `E_NO_CONSENT_GUARD` (WhatsApp message without a consent
 | `E_IDENTIFIER_INVALID` | number is not on WhatsApp | "Not on WhatsApp; nothing to retry. Reach them on another channel." |
 | `E_HOURLY_CAP` | Instagram's 10 an hour used | "Instagram allows 10 actions an hour; the planner continues next hour." |
 | `E_QUIET_PERIOD` | WhatsApp number connected less than 24 h ago | "Outreach starts at <quiet_until>; replies work now." |
-| `E_PROVIDER_WARNING` | Instagram flagged automation, 48 h rest | quote the warning text; "only a human may resume it in the app" |
+| `E_PROVIDER_WARNING` | older Instagram warning pause (new warnings are ignored) | quote the warning text; "only a human may resume it in the app" |
 | `E_ACCOUNT_TOO_NEW` | WhatsApp number under 6 months | "A manager attests the account age in the app; numbers under 6 months cannot do outreach." |
 | `E_MIN_GAP` (W) | last action too recent | timing only; nothing to do |
 

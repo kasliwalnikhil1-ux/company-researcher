@@ -10,6 +10,9 @@ import type { Chat, Message, Sender } from '@/lib/outreach/types';
 import { Button } from '@/components/outreach/ui';
 import { fmtBytes } from './hooks';
 import { isMailProvider, messageMaxLength } from '@/lib/outreach/channels';
+import { aiqk } from '@/lib/outreach/aiReplies';
+import AiComposerPanel, { AiDraftLabel } from './ai/AiComposerPanel';
+import { useComposerAi } from './ai/useAiInbox';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
@@ -67,6 +70,8 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   // Instagram direct messages stop at 1000 characters, WhatsApp at 4096; LinkedIn and email are not limited here.
   const maxLength = messageMaxLength(chat.provider);
   const [text, setText] = useState('');
+  // AI replies: pre-fills the AI draft and remembers which run the text came from (sent as `ai_run_id`).
+  const ai = useComposerAi(chat.id, text, setText);
   const [subject, setSubject] = useState(() => defaultSubject(chat));
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -114,6 +119,10 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     const typed = text.trim();
     if (!booking && !typed && !files.length) return;
     const body = booking ? [typed || BOOKING_DEFAULT_TEXT, '', bookingLink].join('\n') : typed;   // what the optimistic bubble shows
+    // the AI already sent its own version of what is in the box: a second message needs an explicit yes
+    if (ai.aiSent && !window.confirm('The AI already sent its version of this reply. Send yours as well?')) return;
+    ai.clearAiSent();
+    const aiRunId = ai.runIdForSend();   // only when the text started as that run's draft (edited or not)
     if (booking) setSendingBooking(true); else setSending(true);
     const tempId = `temp-${Date.now()}`;
     const optimistic = {
@@ -138,12 +147,15 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       if (isEmail && subject.trim()) payload.subject = subject.trim();
       if (booking) payload.booking = true;
       if (replyTo) payload.quote_message_id = replyTo.id;
+      if (aiRunId) payload.ai_run_id = aiRunId;
       await callFn('send-reply', payload);
       setText('');
+      ai.dropTag();
       setFiles([]);
       onCancelReply?.();
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ['outreach', workspaceId, 'chats'] });
+      if (aiRunId) qc.invalidateQueries({ queryKey: aiqk.chatState(chat.id) });
       onSent?.();
       textRef.current?.focus();
     } catch (e) {
@@ -157,15 +169,19 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
 
   if (disabledReason) {
     return (
-      <div className="border-t border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600 flex items-start gap-2">
-        <Lock className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
-        <span>{disabledReason}</span>
+      <div className="border-t border-gray-200 bg-gray-50 px-4 py-3 space-y-2">
+        <AiComposerPanel ai={ai} chat={chat} canCompose={false} onError={onError} />
+        <div className="text-sm text-gray-600 flex items-start gap-2">
+          <Lock className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
+          <span>{disabledReason}</span>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="border-t border-gray-200 bg-white p-3 space-y-2">
+      <AiComposerPanel ai={ai} chat={chat} canCompose onError={onError} />
       {bookingLink && interested && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
           <CalendarCheck className="w-4 h-4 text-green-700 flex-shrink-0" />
@@ -187,10 +203,11 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           <button type="button" onClick={onCancelReply} className="p-0.5 text-gray-400 hover:text-gray-700" aria-label="Cancel reply"><X className="w-4 h-4" /></button>
         </div>
       )}
+      <AiDraftLabel ai={ai} chatId={chat.id} onError={onError} />
       <textarea
         ref={textRef}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => { setText(e.target.value); if (!e.target.value.trim()) ai.dropTag(); }}
         onKeyDown={(e) => {
           // WhatsApp: Enter sends, Shift+Enter adds a line (like the app). Everywhere: Ctrl/Cmd+Enter sends; Escape drops the reply.
           if (e.key === 'Escape' && replyTo) { onCancelReply?.(); return; }

@@ -2,11 +2,11 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Briefcase, GraduationCap, Languages, Newspaper, RefreshCw, Sparkles, ThumbsUp, Users } from 'lucide-react';
+import { Briefcase, Cake, Contact, GraduationCap, Hash, Languages, Linkedin, Newspaper, RefreshCw, Sparkles, ThumbsUp, Users } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk, useSenders } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
-import { ik, requestEnrichment, useLeadProfile, type EnrichStatus, type LeadWithIntel, type ProfileExperience } from '@/lib/outreach/intel';
+import { ik, requestEnrichment, useLeadProfile, type EnrichStatus, type LeadWithIntel, type ProfileExperience, type ProfileFacts } from '@/lib/outreach/intel';
 import { Badge, Button, Card, ErrorBox, Spinner, fmtDate } from '@/components/outreach/ui';
 import type { ToastFn } from '../helpers';
 
@@ -33,6 +33,26 @@ function timeInRole(startedOn: string | null): string | null {
 function span(x: ProfileExperience): string {
   const s = [x.start, x.current ? 'now' : x.end].filter(Boolean).join(' to ');
   return s;
+}
+
+const DEGREE: Record<string, string> = { FIRST_DEGREE: '1st-degree connection', SECOND_DEGREE: '2nd degree', THIRD_DEGREE: '3rd degree', OUT_OF_NETWORK: 'Out of network' };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const safeUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : `https://${u}`);
+
+/** Yes/no LinkedIn flags. Open profile always shows once known (yes or no); the rest only when true, except InMail. */
+function FactChips({ f, openProfile }: { f: ProfileFacts; openProfile: boolean | null | undefined }) {
+  const chips: { label: string; tone: 'gray' | 'green' | 'blue' | 'indigo' | 'purple' | 'amber'; title?: string }[] = [];
+  if (openProfile === true) chips.push({ label: 'Open profile', tone: 'blue', title: 'Anyone can send this person a free InMail without connecting' });
+  if (openProfile === false) chips.push({ label: 'Not an open profile', tone: 'gray', title: 'A free InMail is not possible: connect first' });
+  if (f.is_premium) chips.push({ label: 'Premium', tone: 'amber' });
+  if (f.is_open_to_work) chips.push({ label: 'Open to work', tone: 'green' });
+  if (f.is_hiring) chips.push({ label: 'Hiring', tone: 'purple' });
+  if (f.is_creator) chips.push({ label: 'Creator', tone: 'indigo' });
+  if (f.is_influencer) chips.push({ label: 'Top voice', tone: 'indigo' });
+  if (f.can_send_inmail === true) chips.push({ label: 'InMail possible', tone: 'green', title: 'The enriching sender can InMail this person' });
+  if (f.can_send_inmail === false) chips.push({ label: 'No InMail', tone: 'gray', title: 'The enriching sender cannot InMail this person' });
+  if (!chips.length) return null;
+  return <div className="flex flex-wrap gap-1.5">{chips.map((c) => <span key={c.label} title={c.title}><Badge tone={c.tone}>{c.label}</Badge></span>)}</div>;
 }
 
 function Block({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
@@ -62,6 +82,9 @@ export function EnrichmentCard({ lead, toast }: { lead: LeadWithIntel; toast: To
   const posts = p?.posts ?? [];
   const empty = p?.empty_sections ?? [];
   const meta = STATUS[status] ?? STATUS.none;
+  const f: ProfileFacts = p?.linkedin ?? {};
+  const hasFacts = Object.keys(f).length > 0;
+  const hasContact = !!(f.emails?.length || f.phones?.length || f.websites?.length || f.creator_website?.url || f.socials?.length || f.addresses?.length || f.birthdate?.month);
 
   const reEnrich = async () => {
     if (!workspace) return;
@@ -109,6 +132,43 @@ export function EnrichmentCard({ lead, toast }: { lead: LeadWithIntel; toast: To
                 {p.connections_count != null && <span><span className="font-medium tabular-nums">{p.connections_count.toLocaleString()}</span> connections</span>}
                 {p.profile_language && <span className="text-gray-500">Profile language: {p.profile_language}</span>}
               </div>
+            )}
+
+            <Block icon={<Linkedin className="w-3 h-3" />} title="LinkedIn profile">
+              <FactChips f={f} openProfile={f.is_open_profile ?? lead.is_open_profile} />
+              {(f.network_distance || f.shared_connections_count != null || f.connected_at || f.country) && (
+                <p className="text-sm text-gray-700 mt-1.5">
+                  {[
+                    f.network_distance && (DEGREE[f.network_distance] ?? f.network_distance),
+                    f.shared_connections_count != null && `${f.shared_connections_count.toLocaleString()} shared connection${f.shared_connections_count === 1 ? '' : 's'}`,
+                    f.connected_at && `connected ${fmtDate(f.connected_at, false)}`,
+                    f.country && `country ${f.country.toUpperCase()}`,
+                  ].filter(Boolean).join(' · ')}
+                  {enrichedBy && (f.network_distance || f.shared_connections_count != null) && <span className="text-xs text-gray-500"> (as seen by {enrichedBy.display_name ?? 'the sender'})</span>}
+                </p>
+              )}
+              {!hasFacts && <p className="text-xs text-gray-500 mt-1">Premium, open to work, degree and contact details are stored from the next enrichment. Re-enrich to fill them in.</p>}
+            </Block>
+
+            {hasContact && (
+              <Block icon={<Contact className="w-3 h-3" />} title="Contact info on LinkedIn">
+                <ul className="space-y-0.5 text-sm text-gray-700">
+                  {(f.emails ?? []).map((e) => <li key={e}><a href={`mailto:${e}`} className="hover:text-indigo-700">{e}</a></li>)}
+                  {(f.phones ?? []).map((ph) => <li key={ph}><a href={`tel:${ph}`} className="hover:text-indigo-700">{ph}</a></li>)}
+                  {(f.websites ?? []).map((w) => <li key={w}><a href={safeUrl(w)} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{w}</a></li>)}
+                  {f.creator_website?.url && <li><a href={safeUrl(f.creator_website.url)} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{f.creator_website.description || f.creator_website.url}</a></li>}
+                  {(f.socials ?? []).map((s, i) => <li key={i}><span className="text-gray-500">{s.type ? `${s.type.charAt(0)}${s.type.slice(1).toLowerCase()}: ` : ''}</span>{s.name}</li>)}
+                  {(f.addresses ?? []).map((a) => <li key={a} className="text-gray-600">{a}</li>)}
+                  {f.birthdate?.month && <li className="inline-flex items-center gap-1"><Cake className="w-3.5 h-3.5 text-gray-400" /> Birthday {f.birthdate.day ? `${f.birthdate.day} ` : ''}{MONTHS[f.birthdate.month - 1] ?? ''}</li>}
+                </ul>
+                <p className="text-xs text-gray-400 mt-1">LinkedIn usually shows these only to 1st-degree connections.</p>
+              </Block>
+            )}
+
+            {!!f.hashtags?.length && (
+              <Block icon={<Hash className="w-3 h-3" />} title="Talks about">
+                <p className="text-sm text-gray-700">{f.hashtags.map((h) => (h.startsWith('#') ? h : `#${h}`)).join(' ')}</p>
+              </Block>
             )}
 
             {p.about && (

@@ -232,7 +232,7 @@ export default function OutreachDashboardPage() {
 
   return (
     <div>
-      <PageHeader title="Dashboard" subtitle={`${workspace?.name ?? ''} · live overview of senders, budgets and replies`} actions={quickActions} />
+      <PageHeader title="Dashboard" subtitle={`${workspace?.name ?? ''} · live overview of senders, daily limits and replies`} actions={quickActions} />
 
       {!allDone && !isViewer && (
         <Card className="mb-6" title={emptyWorkspace ? 'Welcome — let’s get you set up' : 'Finish setting up'}>

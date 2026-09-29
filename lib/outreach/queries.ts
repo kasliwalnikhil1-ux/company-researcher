@@ -177,7 +177,10 @@ export function useEnrollments(f: { sequence_id?: string; lead_id?: string; send
   });
 }
 
-export interface ChatFilters { sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string }
+/** AI replies (inbox filter): the chat's mirror of its AI run (`ai_run_status`) or whether the AI has ever sent in it. */
+export type AiChatFilter = 'scheduled' | 'escalated' | 'sent_by_ai' | 'draft_ready';
+
+export interface ChatFilters { sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null }
 
 export function useChats(ws: string | null | undefined, f: ChatFilters) {
   return useQuery({
@@ -190,6 +193,12 @@ export function useChats(ws: string | null | undefined, f: ChatFilters) {
       if (f.unread) q = q.eq('unread', true);
       if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
       if (f.provider) q = q.eq('provider', f.provider);
+      // Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart
+      if (f.ai === 'scheduled') q = q.eq('ai_run_status', 'scheduled');
+      else if (f.ai === 'escalated') q = q.or('ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)');
+      else if (f.ai === 'draft_ready') q = q.eq('ai_run_status', 'draft_ready').eq('ai_run_decision', 'send');
+      else if (f.ai === 'sent_by_ai') q = q.gt('ai_replies_count', 0);
+      if (f.stage) q = q.eq('conversation_stage', f.stage);
       if (f.search) q = q.or(`attendee_name.ilike.%${f.search}%,subject.ilike.%${f.search}%,last_message_preview.ilike.%${f.search}%`);
       return sel<(Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null })[]>(q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(300));
     },
@@ -292,6 +301,8 @@ export function useInvalidatingMutation<TArgs, TRes = unknown>(fn: (a: TArgs) =>
 // events don't touch the dashboard at all (its 30s poll picks them up).
 // ---------------------------------------------------------------------------
 const REALTIME_FLUSH_MS = 1500;
+/** = aiqk.chatState in aiReplies.ts (not imported: that module imports this one). */
+const aiStateKey = (chatId: string) => ['outreach', 'chat', chatId, 'ai-state'] as const;
 const DASHBOARD_FLUSH_MS = 10_000;
 
 export function useOutreachRealtime(ws: string | null | undefined) {
@@ -309,7 +320,9 @@ export function useOutreachRealtime(ws: string | null | undefined) {
         timer = null;
         const batch = [...pending.values()];
         pending.clear();
-        for (const queryKey of batch) qc.invalidateQueries({ queryKey });
+        // invalidation matches by prefix, so a key under another key of the same batch is already covered
+        const covered = (k: readonly unknown[]) => batch.some((o) => o !== k && o.length < k.length && o.every((v, i) => v === k[i]));
+        for (const queryKey of batch) if (!covered(queryKey)) qc.invalidateQueries({ queryKey });
       }, REALTIME_FLUSH_MS);
     };
     const invDashboard = () => {
@@ -326,7 +339,12 @@ export function useOutreachRealtime(ws: string | null | undefined) {
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_chats', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       inv(['outreach', ws, 'chats']);
-      if (p.new?.id) inv(qk.chat(p.new.id));
+      if (p.new?.id) { inv(qk.chat(p.new.id)); inv(aiStateKey(p.new.id)); }
+    });
+    // AI replies: a run moving through debouncing → drafting → draft_ready / scheduled → sent refreshes the thread's AI state.
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_ai_reply_runs', filter: `workspace_id=eq.${ws}` }, (p: { new?: { chat_id?: string }; old?: { chat_id?: string } }) => {
+      const chatId = p.new?.chat_id ?? p.old?.chat_id;
+      if (chatId) { inv(aiStateKey(chatId)); inv(qk.chat(chatId)); }
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_senders', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       inv(qk.senders(ws));

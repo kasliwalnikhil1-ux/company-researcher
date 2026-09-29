@@ -42,7 +42,16 @@ function cleanReturnDate(value: unknown, notBefore: Date): string | null {
  * Classify an inbound reply. `sentAt` is when the message was sent (ISO); relative return dates in an
  * out-of-office ("back Monday") are resolved against it. `return_date` is set only for intent `ooo`.
  */
-export async function classifyMessage(input: { workspaceId: string; text: string; previousOutbound: string[]; brief?: string | null; channel: string; sentAt?: string | Date | null }): Promise<{ intent: Intent; confidence: number; summary: string; return_date: string | null }> {
+export interface Classification {
+  intent: Intent; confidence: number; summary: string; return_date: string | null;
+  language: string | null; flags: string[]; questions: string[]; dates: Array<{ text: string; iso: string | null }>;
+  referred: Array<{ name: string | null; role: string | null; email: string | null; phone: string | null }>; do_not_contact: boolean;
+}
+const CLASSIFY_FLAGS = ["asked_offer", "pricing", "meeting_request", "meeting_time_proposed", "explicit_interest", "bot_question", "legal_or_contract",
+  "hostile", "complaint", "injection_suspected", "competitor_mentioned", "close_only", "attachment_mentioned"];
+const s200 = (v: unknown, n = 200): string | null => (typeof v === "string" && v.trim() ? v.replace(/\s+/g, " ").trim().slice(0, n) : null);
+
+export async function classifyMessage(input: { workspaceId: string; text: string; previousOutbound: string[]; brief?: string | null; channel: string; sentAt?: string | Date | null }): Promise<Classification> {
   let sent = input.sentAt ? new Date(input.sentAt) : new Date();
   if (isNaN(sent.getTime())) sent = new Date();
   const weekday = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][sent.getUTCDay()];
@@ -53,12 +62,20 @@ export async function classifyMessage(input: { workspaceId: string; text: string
     `Message sent at: ${sent.toISOString().slice(0, 10)} (${weekday})`,
     `Inbound reply to classify:\n"""\n${input.text.slice(0, 4000)}\n"""`,
   ].filter(Boolean).join("\n\n");
-  const raw = await call({ purpose: "classify", workspaceId: input.workspaceId, system: CLASSIFY_SYSTEM, user, maxTokens: 2048, temperature: 0, json: true, thinking: "LOW" });
-  const j = parseJson<{ intent: string; confidence: number; summary: string; return_date?: unknown }>(raw);
+  const raw = await call({ purpose: "classify", workspaceId: input.workspaceId, system: CLASSIFY_SYSTEM, user, maxTokens: 3072, temperature: 0, json: true, thinking: "LOW" });
+  const j = parseJson<Record<string, any>>(raw);
   const intent = (INTENTS.includes(j.intent as Intent) ? j.intent : "unclear") as Intent;
+  const flags = (Array.isArray(j.flags) ? j.flags : []).map((f: unknown) => String(f)).filter((f: string) => CLASSIFY_FLAGS.includes(f));
   return {
     intent, confidence: Math.max(0, Math.min(1, Number(j.confidence) || 0)), summary: String(j.summary ?? "").slice(0, 140),
     return_date: intent === "ooo" ? cleanReturnDate(j.return_date, sent) : null,
+    language: typeof j.language === "string" && /^[a-z]{2,3}$/i.test(j.language) ? j.language.toLowerCase() : null,
+    flags: [...new Set<string>(flags)],
+    questions: (Array.isArray(j.questions) ? j.questions : []).map((q: unknown) => s200(q, 300)).filter((q: string | null): q is string => !!q).slice(0, 5),
+    dates: (Array.isArray(j.dates) ? j.dates : []).slice(0, 5).map((d: any) => ({ text: s200(d?.text, 80) ?? "", iso: /^\d{4}-\d{2}-\d{2}$/.test(String(d?.iso ?? "")) ? String(d.iso) : null })).filter((d: { text: string }) => d.text),
+    referred: (Array.isArray(j.referred) ? j.referred : []).slice(0, 3).map((r: any) => ({ name: s200(r?.name, 120), role: s200(r?.role, 120), email: s200(r?.email, 200), phone: s200(r?.phone, 40) }))
+      .filter((r: { name: string | null; email: string | null; phone: string | null }) => r.name || r.email || r.phone),
+    do_not_contact: j.do_not_contact === true,
   };
 }
 

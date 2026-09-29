@@ -68,6 +68,14 @@ export interface ProfileExperience { company?: string | null; company_id?: strin
 export interface ProfileEducation { school?: string | null; degree?: string | null; field?: string | null; start?: string | null; end?: string | null }
 export interface ProfilePost { id?: string | null; text?: string | null; date?: string | null; reactions?: number | null; comments?: number | null; url?: string | null }
 
+export interface ProfileFacts {
+  is_open_profile?: boolean; is_premium?: boolean; can_send_inmail?: boolean; is_open_to_work?: boolean; is_hiring?: boolean; is_creator?: boolean; is_influencer?: boolean;
+  network_distance?: 'FIRST_DEGREE' | 'SECOND_DEGREE' | 'THIRD_DEGREE' | 'OUT_OF_NETWORK' | string; shared_connections_count?: number; connected_at?: string;
+  websites?: string[]; hashtags?: string[]; creator_website?: { url?: string | null; description?: string | null };
+  emails?: string[]; phones?: string[]; addresses?: string[]; socials?: { type?: string | null; name?: string | null }[];
+  birthdate?: { month?: number | null; day?: number | null }; country?: string; pronoun?: string;
+}
+
 export interface LeadProfile {
   lead_id: string;
   workspace_id: string;
@@ -82,6 +90,8 @@ export interface LeadProfile {
   profile_language: string | null;
   follower_count: number | null;
   connections_count: number | null;
+  /** 033: top-level LinkedIn facts from the last enrichment. Degree, shared connections, InMail and connected_at are the enriching sender's view. */
+  linkedin?: ProfileFacts | null;
   posts: ProfilePost[] | null;
   posts_fetched_at: string | null;
   last_posted_at: string | null;
@@ -240,6 +250,12 @@ export function useChatsByIds(ws: string | null | undefined, ids: string[] | nul
         if (f.unread) q = q.eq('unread', true);
         if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
         if (f.provider) q = q.eq('provider', f.provider);
+        // Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart
+        if (f.ai === 'scheduled') q = q.eq('ai_run_status', 'scheduled');
+        else if (f.ai === 'escalated') q = q.or('ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)');
+        else if (f.ai === 'draft_ready') q = q.eq('ai_run_status', 'draft_ready').eq('ai_run_decision', 'send');
+        else if (f.ai === 'sent_by_ai') q = q.gt('ai_replies_count', 0);
+        if (f.stage) q = q.eq('conversation_stage', f.stage);
         const search = f.search ? cleanSearch(f.search) : '';
         if (search) q = q.or(`attendee_name.ilike.%${search}%,subject.ilike.%${search}%,last_message_preview.ilike.%${search}%`);
         all.push(...((await sel<ChatRowWithJoins[]>(q)) ?? []));

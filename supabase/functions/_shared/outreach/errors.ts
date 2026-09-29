@@ -57,8 +57,9 @@ export function handleUnipileError(err: unknown, ctx: ErrorCtx): Decision {
     return ctx.hasBranch("invalid") ? { kind: "branch", name: "invalid", reason } : { kind: "skip_node", reason: "not_on_whatsapp" };
   }
   if (provider === "INSTAGRAM" && e.status === 403 && PROVIDER_WARNING_RE.test(`${e.message ?? ""} ${JSON.stringify(e.body ?? "")}`)) {
-    // provider warning: the executor records it (outreach_sender_provider_warning: level −1, 48 h pause) before returning this
-    return { kind: "sender_pause", hours: 48, reason: "provider_warning" };
+    // "We suspect automated behavior": the connector's docs say it can be ignored (no further restrictions observed), so no pause
+    // and no level drop. The executor logs it on the sender; this action is tried again later.
+    return { kind: "retry", at: new Date(Date.now() + rand(60, 120) * 60_000), reason: "provider_warning_ignored" };
   }
   if ((provider === "INSTAGRAM" || provider === "WHATSAPP") && e.status === 422 && code === "blocked_recipient") {
     // the recipient blocked this account: block signal (recorded by the executor) + the lead is invalid for this sender
@@ -119,6 +120,7 @@ export function handleUnipileError(err: unknown, ctx: ErrorCtx): Decision {
     }
     return { kind: "sender_pause", hours: 24, reason };
   }
+  if (e.status === 415) return { kind: "skip_node", reason: `unsupported_media:${code}` };
   if (e.status === 400) return { kind: "fail_enrollment", reason: `payload_invalid:${code}` };
   if (e.status === 407 || e.status === 502) return { kind: "retry", at: new Date(Date.now() + rand(15, 45) * 60_000), reason: `proxy:${code}` };
   return { kind: "retry", at: new Date(Date.now() + 30 * 60_000), reason };

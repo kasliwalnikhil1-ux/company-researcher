@@ -135,7 +135,7 @@ export default function AiVariablesCard() {
             </div>
             <div className="border border-gray-200 rounded-lg px-3">
               <SettingRow title="Needs recent posts" control={<Switch label="Needs recent posts" checked={draft.needs_posts} onChange={(v) => setDraft({ ...draft, needs_posts: v })} />}
-                description="Turn this on when the line should mention something the lead posted. Fetching posts has its own small daily budget per sender, separate from profile views, so lines for a large list arrive over a few days." />
+                description="Turn this on when the line should mention something the lead posted. Fetching posts has its own small daily limit per sender, separate from profile views, so lines for a large list arrive over a few days." />
             </div>
             <div><div className="text-xs font-medium text-gray-600 mb-1">Use it in a message as</div>
               <div className="flex items-center gap-2"><code className="flex-1 min-w-0 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-800 truncate">{token(draft.key || 'key', draft.fallback.trim())}</code><CopyButton value={token(draft.key || 'key', draft.fallback.trim())} label="Copy the variable" /></div></div>

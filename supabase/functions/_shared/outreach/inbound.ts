@@ -247,18 +247,16 @@ export async function applyOnboardingGate(sender: Sender): Promise<void> {
   if (Object.keys(patch).length) await admin.from("outreach_senders").update(patch).eq("id", sender.id);
 }
 
-/** Instagram "We suspect automated behavior": an account-status payload (PERMISSIONS / ERROR) whose text matches → provider warning. */
+/** Instagram "We suspect automated behavior": an account-status payload (PERMISSIONS / ERROR) whose text matches. The connector's
+ *  docs say it can be ignored, so it is only logged: no pause, no level drop, and the status is not treated as an error. */
 async function detectProviderWarning(sender: Sender, st: any, message: string): Promise<boolean> {
   if (sender.provider !== "INSTAGRAM" || !(message === "PERMISSIONS" || message === "ERROR")) return false;
   let blob = "";
   try { blob = JSON.stringify(st ?? {}); } catch { blob = String(st ?? ""); }
   if (!PROVIDER_WARNING_RE.test(blob)) return false;
   const text = String(st?.reason ?? st?.detail ?? st?.error ?? st?.description ?? st?.text ?? "We suspect automated behavior on your account").slice(0, 500);
-  try {
-    await rpc("sender_provider_warning", { p_sender: sender.id, p_text: text });
-    await notifySender(sender.id, "sender_paused", { reason: `provider warning: ${text}`, until: new Date(Date.now() + 48 * 3600_000).toISOString() });
-    return true;
-  } catch (e) { log({ fn: "account_status", sender_id: sender.id, warn: `sender_provider_warning: ${String((e as any)?.message ?? e)}` }); return false; }
+  await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "provider_warning", data: { text, ignored: true, status: message } });
+  return true;
 }
 
 export async function handleAccountStatus(payload: any): Promise<void> {
@@ -287,7 +285,8 @@ export async function handleAccountStatus(payload: any): Promise<void> {
       break;
     }
     case "RECONNECTED": {
-      await admin.from("outreach_senders").update({ status: sender.status === "disabled" ? "disabled" : "ok", status_reason: null, last_ok_at: new Date().toISOString(), reconnect_attempts: 0 }).eq("id", sender.id);
+      await admin.from("outreach_senders").update({ status: sender.status === "paused" || sender.status === "disabled" ? sender.status : "ok", status_reason: null, last_ok_at: new Date().toISOString(), reconnect_attempts: 0 }).eq("id", sender.id);
+      await reconnectQuietPeriod(sender);
       await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "reconnect", data: { result: "reconnected" } });
       break;
     }
@@ -299,10 +298,11 @@ export async function handleAccountStatus(payload: any): Promise<void> {
     case "CREDENTIALS": {
       await admin.from("outreach_senders").update({ status: sender.status === "disabled" ? "disabled" : "credentials", status_reason: "CREDENTIALS", last_disconnect_at: new Date().toISOString(), reconnect_attempts: 0 }).eq("id", sender.id);
       await healthForSender(sender.id, "disconnect");
-      if (sender.auth_method !== "cookie") {
-        const link = await reconnectLink(sender).catch(() => null);
+      // LinkedIn cookie senders are retried by the reconnect worker first; every other sender is emailed a re-login link now
+      if (!(sender.auth_method === "cookie" && sender.provider === "LINKEDIN")) {
+        const link = await reloginUrl(sender).catch(() => null);
         await notifySender(sender.id, "reconnect_needed", { link });
-        await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString() }).eq("id", sender.id);
+        await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: 0 }).eq("id", sender.id);
       }
       break;
     }
@@ -348,8 +348,22 @@ async function accountExistsOnDsn(accountId: string): Promise<boolean> {
  * to a `create` link bound to the same sender row via `name`, so the hosted-auth notify re-binds the new
  * account id and the sender keeps its chats, lead state and enrollments.
  */
-/** Lifetime of a reconnect sign-in link. The sender page and the reconnect email both say "1 hour". */
+/** Lifetime of a hosted sign-in link. It is created when the owner opens it (outreach-relogin, or "Sign in now"). */
 export const RECONNECT_LINK_TTL_MIN = 60;
+/** Lifetime of the re-login link that is emailed or copied. The emails and the sender page say "7 days". */
+export const RELOGIN_URL_TTL_DAYS = 7;
+
+/** Durable re-login link (hosted-auth docs, "Reconnecting an account"): it points at our own outreach-relogin endpoint, which
+ *  creates a fresh hosted sign-in link when it is opened and redirects to it, so the email never carries an expired link. */
+export async function reloginUrl(sender: Sender, method?: "credentials" | "browser"): Promise<string> {
+  const { FUNCTIONS_BASE } = await import("./supabase.ts");
+  const { reloginToken } = await import("./crypto.ts");
+  const exp = Math.floor(Date.now() / 1000) + RELOGIN_URL_TTL_DAYS * 86400;
+  const m = method ?? "";
+  const q = new URLSearchParams({ s: sender.id, e: String(exp), t: await reloginToken(sender.id, exp, m) });
+  if (m) q.set("m", m);
+  return `${FUNCTIONS_BASE}outreach-relogin?${q}`;
+}
 
 /** `method` (LinkedIn, chosen by a manager) picks password vs signed-in-browser sign-in; omitted, the sender's own method is kept.
  *  The choice is recorded as a reconnect event so the hosted-auth callback can store it as the sender's auth_method. */
@@ -385,6 +399,18 @@ export async function reconnectLink(sender: Sender, method?: "credentials" | "br
   return r.url;
 }
 
+/** The connector asks for up to 24 h between (re)connecting a WhatsApp number and new outreach. The status trigger covers
+ *  connecting / credentials / error → ok; a re-login while ok or paused changes no status, so set the quiet period here. */
+async function reconnectQuietPeriod(sender: Sender): Promise<void> {
+  if (!["ok", "paused"].includes(String(sender.status))) return;
+  const { data: cap } = await admin.from("outreach_channel_capabilities").select("ledger").eq("provider", sender.provider).maybeSingle();
+  const hrs = Number(cap?.ledger?.post_connect_quiet_hours ?? 0);
+  if (!(hrs > 0)) return;
+  const until = new Date(Date.now() + hrs * 3600_000).toISOString();
+  await admin.from("outreach_senders").update({ outreach_allowed_from: until }).eq("id", sender.id);
+  await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "quiet_period", data: { until, hours: hrs, from_status: sender.status, reason: "reconnected" } });
+}
+
 /** Hosted-auth notify_url payload: {status, account_id, name} */
 export async function handleHostedNotify(payload: any): Promise<void> {
   const senderId = payload.name;
@@ -394,7 +420,7 @@ export async function handleHostedNotify(payload: any): Promise<void> {
   if (!s) return;
   const status = String(payload.status ?? "").toUpperCase();
   const patch: Record<string, unknown> = { unipile_account_id: accountId };
-  if (status === "RECONNECTED") { patch.status = "ok"; patch.status_reason = null; patch.reconnect_attempts = 0; }
+  if (status === "RECONNECTED") { patch.status = s.status === "paused" || s.status === "disabled" ? s.status : "ok"; patch.status_reason = null; patch.reconnect_attempts = 0; }
   // A manager-chosen sign-in method on the latest reconnect link (last 25h) becomes the sender's auth_method.
   if ((status === "RECONNECTED" || status === "CREATION_SUCCESS") && s.provider === "LINKEDIN") {
     const { data: ev } = await admin.from("outreach_sender_events").select("data").eq("sender_id", senderId).eq("kind", "reconnect")
@@ -410,6 +436,7 @@ export async function handleHostedNotify(payload: any): Promise<void> {
     return;
   }
   await audit(s.workspace_id, "sender.hosted_auth", "sender", senderId, { status, account_id: accountId, ...(patch.auth_method ? { auth_method: patch.auth_method } : {}) });
+  if (status === "RECONNECTED") await reconnectQuietPeriod(s);
   // A password reconnect may still have used a cookie inside the hosted page; the profile sync reads the real method back.
   if (status === "RECONNECTED" && patch.auth_method === "credentials") await syncOwnProfile({ ...s, ...patch } as Sender).catch(() => null);
   if (status === "CREATION_SUCCESS") {
@@ -592,7 +619,15 @@ export async function handleMessaging(payload: any): Promise<void> {
   if (unsupportedText) payload.message = null;
 
   if (event === "message_edited" || event === "message_deleted") {
-    if (unipileMessageId) await admin.from("outreach_messages").update(event === "message_deleted" ? { deleted_at: new Date().toISOString() } : { text: fixMojibake(payload.message) ?? undefined, edited_at: new Date().toISOString() }).eq("unipile_message_id", unipileMessageId);
+    if (unipileMessageId) {
+      const { data: changed } = await admin.from("outreach_messages").update(event === "message_deleted" ? { deleted_at: new Date().toISOString() } : { text: fixMojibake(payload.message) ?? undefined, edited_at: new Date().toISOString() })
+        .eq("unipile_message_id", unipileMessageId).select("id, direction").maybeSingle();
+      // AI replies §7.3: a message the AI is answering was deleted (cancel) or edited (redraft)
+      if (changed?.direction === "in") {
+        await rpc("ai_reply_on_message_change", { p_message: changed.id, p_kind: event === "message_deleted" ? "deleted" : "edited" })
+          .catch((e) => log({ fn: "messaging", warn: `ai_reply_on_message_change: ${String((e as any)?.message ?? e)}` }));
+      }
+    }
     return;
   }
   if (event === "message_reaction" || event === "message_read" || event === "message_delivered") { await handleMessageState(sender, payload, event); return; }
@@ -618,6 +653,8 @@ export async function handleMessaging(payload: any): Promise<void> {
   const attendeeProviderId = group ? (payload.provider_chat_id ?? null) : attendee?.attendee_provider_id ?? null;
   const attendeePub = group ? null : channel ? attendeeIdentity(provider, attendee).identifier : pubIdFromUrl(attendee?.attendee_profile_url);
   const attendeeName = group ? visibleName(payload.subject) : visibleName(attendee?.attendee_name);
+  // AI replies G2: only 1:1 conversations are answered. LinkedIn group threads carry more than two attendees.
+  const multiParty = group || payload.is_group === true || payload.is_group === 1 || (Array.isArray(payload.attendees) && payload.attendees.length > 2);
   const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).single();
   const createLeads = (ws?.settings?.create_leads_from_inbound ?? true) !== false;
 
@@ -643,6 +680,7 @@ export async function handleMessaging(payload: any): Promise<void> {
       attendee_picture_url: channel ? null : attendee?.attendee_picture_url ?? null,   // channel pictures are stored by avatars.ts
     };
     if (group) row.subject = payload.subject ?? null;
+    if (multiParty) row.is_group = true;
     if (isRequest) row.is_request = true;
     let { data: c, error: cErr } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
     if (cErr && isRequest) { delete row.is_request; ({ data: c } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single()); }
@@ -654,6 +692,7 @@ export async function handleMessaging(payload: any): Promise<void> {
     if (!visibleName(chat.attendee_name) && attendeeName) patch.attendee_name = attendeeName;
     if (!chat.attendee_public_identifier && attendeePub) patch.attendee_public_identifier = attendeePub;
     if (group && payload.subject && !chat.subject) patch.subject = payload.subject;
+    if (multiParty && !chat.is_group) patch.is_group = true;
     if (Object.keys(patch).length) {
       await admin.from("outreach_chats").update(patch).eq("id", chat.id);
       Object.assign(chat, patch);
@@ -749,6 +788,18 @@ export async function handleMessaging(payload: any): Promise<void> {
           await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: sentAt, invite_detected_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("lead_id", lead.id).eq("sender_id", sender.id);
         }
       }
+    }
+  }
+  // AI replies (§5, §10.4): an inbound message opens / extends the chat's AI run; an outbound message no send of ours
+  // recorded first was typed on the sender's phone or LinkedIn web → human takeover. Never blocks inbound processing.
+  if (!isEvent) {
+    const call = () => isOut ? rpc("ai_reply_on_outbound_external", { p_message: msg!.id }) : rpc("ai_reply_enqueue", { p_chat: chat!.id, p_message: msg!.id });
+    try { await call(); }
+    catch (e) {
+      // one retry for a transient lock conflict; the message itself is already stored either way
+      if (/deadlock|could not serialize|lock/i.test(String((e as any)?.message ?? e))) {
+        try { await call(); } catch (e2) { log({ fn: "messaging", warn: `ai_reply (retry): ${String((e2 as any)?.message ?? e2)}`, chat_id: chat.id }); }
+      } else log({ fn: "messaging", warn: `ai_reply: ${String((e as any)?.message ?? e)}`, chat_id: chat.id });
     }
   }
   await emitEvent(sender.workspace_id, isOut ? "message.sent" : "message.received", { id: msg.id, chat_id: chat.id, lead_id: lead?.id ?? null, sender_id: sender.id, text: (payload.message ?? "").slice(0, 500), direction: isOut ? "out" : "in" });

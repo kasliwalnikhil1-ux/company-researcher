@@ -37,7 +37,7 @@ const WARMUP_INTRO: Record<Provider, string> = {
 
 /**
  * Limits that are the same for every sender in every workspace: channel ceilings, warm-up caps by level and the engine's
- * pause / resume rules. Moved from Settings → Safety to Settings → Admin (localhost only). Each sender's Budgets tab still
+ * pause / resume rules. Moved from Settings → Safety to Settings → Admin (localhost only). Each sender's Limits tab still
  * shows the ceiling and level cap that apply to it.
  */
 export default function PlatformLimits() {

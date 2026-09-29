@@ -200,6 +200,8 @@ export async function notifyWorkspace(workspaceId: string, kind: WorkspaceNotify
   return { recipients, sent, configured: emailConfigured() };
 }
 
+const CHANNEL_NAME: Record<string, string> = { LINKEDIN: "LinkedIn", INSTAGRAM: "Instagram", WHATSAPP: "WhatsApp", GMAIL: "Google", OUTLOOK: "Microsoft", IMAP: "The mail server" };
+
 /** Notify a sender's owner, its alert recipients and the workspace owners / managers about a sender event. */
 export async function notifySender(senderId: string, kind: NotifyKind, extra: Record<string, unknown> = {}): Promise<void> {
   const { data: s } = await admin.from("outreach_senders").select("id, workspace_id, display_name, owner_email, owner_user_id, status, provider, unipile_account_id, alert_emails").eq("id", senderId).maybeSingle();
@@ -215,7 +217,11 @@ export async function notifySender(senderId: string, kind: NotifyKind, extra: Re
   switch (kind) {
     case "reconnect_needed":
       subject = `Action needed: reconnect ${plainName}`;
-      html = layout(`${name} needs to be reconnected`, `<p>LinkedIn ended the session for <b>${name}</b>. Outreach is paused for this sender until it is reconnected.</p><p>${button((extra.link as string) ?? senderUrl, "Reconnect now", branding)}</p><p>Log in with your own credentials; the password is never shared with the agency.</p>${extra.link ? `<p>This link works for 1 hour. If it has expired, <a href="${senderUrl}">open the sender page</a> to get a new one.</p>` : ""}`, branding);
+      {
+        const channel = CHANNEL_NAME[String(s.provider)] ?? "The provider";
+        const how = s.provider === "WHATSAPP" ? "Scan the new QR code from WhatsApp → Linked devices on the phone with this number." : s.provider === "GMAIL" || s.provider === "OUTLOOK" || s.provider === "IMAP" ? "Sign in to the mailbox on the secure page that opens." : "Sign in with your own credentials on the secure page that opens; the password is never shared with the agency.";
+        html = layout(`${name} needs to be reconnected`, `<p>${esc(channel)} ended the session for <b>${name}</b>. Outreach is paused for this sender until it is reconnected.</p><p>${button((extra.link as string) ?? senderUrl, "Reconnect now", branding)}</p><p>${esc(how)}</p>${extra.link ? `<p>This link works for 7 days. If it has expired, <a href="${senderUrl}">open the sender page</a> to get a new one.</p>` : ""}`, branding);
+      }
       break;
     case "reconnect_needed_manual":
       subject = `Automatic reconnect failed for ${plainName}`;

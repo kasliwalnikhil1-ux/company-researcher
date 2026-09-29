@@ -22,7 +22,7 @@ export function RefreshProfileForm({ cfg, set }: FormProps) {
     <div className="space-y-3">
       <Input type="number" min={1} max={730} label="Only if the stored profile is older than (days)" value={days} onChange={(e) => set('only_if_stale_days', Math.min(730, Math.max(1, Math.round(Number(e.target.value)) || 90)))} hint="90 days is a good default. Use 1 to refresh every lead." />
       <Note>Reads the full profile again (about, experience, education, skills, languages) and stores it for conditions, variables and AI lines. Leads refreshed in the last {days} day{days === 1 ? '' : 's'} are skipped at no cost. A lead that was never read is always refreshed.</Note>
-      <Note>The visit is silent and counts as one profile view in the sender&apos;s daily budget.</Note>
+      <Note>The visit is silent and counts as one profile view toward the sender&apos;s daily limit.</Note>
     </div>
   );
 }
@@ -31,7 +31,7 @@ export function FollowProfileForm() {
   return (
     <div className="space-y-2">
       <Note>Follows the lead from the sender&apos;s LinkedIn account. A light touch before an invitation: the lead gets a notification, and the sender starts seeing their posts.</Note>
-      <Note>Follows have their own daily budget and warm-up. Leads the sender already follows are skipped.</Note>
+      <Note>Follows have their own daily limit and warm-up. Leads the sender already follows are skipped.</Note>
     </div>
   );
 }
@@ -76,7 +76,7 @@ export function SendVoiceNoteForm({ node, cfg, set, patch, update }: FormProps) 
   const onLinkedIn = effective.includes('LINKEDIN');
   return (
     <div className="space-y-3">
-      <Note>Sends a recorded voice message{effective.includes('WHATSAPP') && onLinkedIn ? ' on LinkedIn or WhatsApp' : effective.includes('WHATSAPP') ? ' on WhatsApp' : ' on LinkedIn'}. {onLinkedIn ? 'On LinkedIn it needs a 1st-degree connection. ' : ''}It counts against the message budget.</Note>
+      <Note>Sends a recorded voice message{effective.includes('WHATSAPP') && onLinkedIn ? ' on LinkedIn or WhatsApp' : effective.includes('WHATSAPP') ? ' on WhatsApp' : ' on LinkedIn'}. {onLinkedIn ? 'On LinkedIn it needs a 1st-degree connection. ' : ''}It counts toward the daily message limit.</Note>
       <MessageChannelFields node={node} cfg={cfg} patch={patch} update={update} what="voice note" />
       <VoiceClipRecorder workspaceId={workspaceId} sequenceId={sequenceId} nodeId={node.id} senders={senders} readOnly={readOnly} />
       <Note>There is no AI voice cloning, on purpose: a cloned voice puts the account and your reputation at risk. One real recording per sender is the feature. The same clip goes to every lead, so keep it general (“Hi, thanks for connecting…”).</Note>

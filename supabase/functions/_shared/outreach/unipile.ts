@@ -99,6 +99,14 @@ function form(fields: Record<string, unknown>): FormData {
   return f;
 }
 
+/** POST /chats takes its LinkedIn options as bracketed multipart keys (linkedin[api], linkedin[inmail]), not a JSON string. */
+function chatStartForm(fields: Record<string, unknown>): FormData {
+  const { linkedin, ...rest } = fields;
+  const f = form(rest);
+  for (const [k, v] of Object.entries((linkedin ?? {}) as Record<string, unknown>)) if (v !== undefined && v !== null) f.append(`linkedin[${k}]`, String(v));
+  return f;
+}
+
 export interface HostedLinkInput {
   type: "create" | "reconnect";
   providers?: string[];
@@ -120,7 +128,9 @@ export interface HostedLinkInput {
 export const unipile = {
   hosted: {
     link: async (input: HostedLinkInput) => {
-      const r = await request<{ object: string; url: string }>("/hosted/accounts/link", { method: "POST", body: { ...input, api_url: unipileBase() } });
+      // The wizard's cookie sign-in is always off: owners sign in with their password (or the browser method), never a pasted cookie.
+      const disabled_options = [...new Set([...(input.disabled_options ?? []), "cookie_auth"])];
+      const r = await request<{ object: string; url: string }>("/hosted/accounts/link", { method: "POST", body: { ...input, disabled_options, api_url: unipileBase() } });
       return { ...r, url: hostedAuthUrl(r.url) };
     },
   },
@@ -168,7 +178,7 @@ export const unipile = {
     attendees: (chatId: string) => request<{ items: any[] }>(`/chats/${encodeURIComponent(chatId)}/attendees`),
     // voice_message: (LinkedIn | WhatsApp) a file sent as a voice note; LinkedIn prefers .m4a. Pass a File so the name/extension survives.
     start: (fields: { account_id: string; attendees_ids: string[]; text?: string; subject?: string; linkedin?: Record<string, unknown>; voice_message?: Blob }) =>
-      request<{ chat_id: string | null; message_id: string | null }>("/chats", { method: "POST", form: form(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
+      request<{ chat_id: string | null; message_id: string | null }>("/chats", { method: "POST", form: chatStartForm(fields), accountId: fields.account_id, retries: 0, timeoutMs: 30000 }),
     messages: (chatId: string, q: { cursor?: string; limit?: number; after?: string } = {}) => request<{ items: any[]; cursor: string | null }>(`/chats/${encodeURIComponent(chatId)}/messages`, { query: { limit: 100, ...q } }),
     // quote_id: the connector id of the message this one replies to (WhatsApp shows it as a reply).
     send: (chatId: string, fields: { account_id?: string; text?: string; attachments?: Blob[]; voice_message?: Blob; quote_id?: string }) => {

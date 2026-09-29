@@ -83,18 +83,22 @@ export default function MainLayout({ children, subnav }: { children: React.React
     const canAccessLinkedInInbox = has('linkedin_inbox', canAccessMeData);
     const canAccessSenderProfiles = has('sender_profiles', canAccessMeData);
     const canAccessInvestors = fundraisingOn && isFundraising;
-    const defaultRoute = canAccessInvestors ? '/investors' : canAccessResearch ? '/' : outreachOn ? '/outreach' : crmMember ? '/crm' : '/account';
+    const defaultRoute = isGrowthxai
+      ? (outreachOn ? '/outreach' : crmMember ? '/crm' : '/account')
+      : canAccessInvestors ? '/investors' : canAccessResearch ? '/' : outreachOn ? '/outreach' : crmMember ? '/crm' : '/account';
+    // A GrowthxAI domain does not serve the CapitalxAI pages (proxy.ts sends them to /outreach): no links to them.
+    const capitalxai = !isGrowthxai;
     return {
-      showResearch: canAccessResearch,
-      showCompanies: b2bOn,
-      showInvestors: canAccessInvestors,
-      showEnrich: b2bOn,
-      showPersonalization: canAccessPersonalization,
-      showMeData: canAccessMeData,
-      showAdminStats: isAdmin,
+      showResearch: capitalxai && canAccessResearch,
+      showCompanies: capitalxai && b2bOn,
+      showInvestors: capitalxai && canAccessInvestors,
+      showEnrich: capitalxai && b2bOn,
+      showPersonalization: capitalxai && canAccessPersonalization,
+      showMeData: capitalxai && canAccessMeData,
+      showAdminStats: capitalxai && isAdmin,
       showAdmin: isAdmin,
-      showLinkedInInbox: canAccessLinkedInInbox,
-      showSenderProfiles: canAccessSenderProfiles,
+      showLinkedInInbox: capitalxai && canAccessLinkedInInbox,
+      showSenderProfiles: capitalxai && canAccessSenderProfiles,
       showOutreach: outreachOn,
       showCrm: crmMember,
       canAccessResearch,
@@ -107,13 +111,13 @@ export default function MainLayout({ children, subnav }: { children: React.React
       canAccessAdmin: isAdmin,
       canAccessLinkedInInbox,
       canAccessSenderProfiles,
-      canAccessResetAccount,
+      canAccessResetAccount: capitalxai && canAccessResetAccount,
       canAccessOutreach: outreachOn,
       canAccessCrm: crmMember,
       fundraisingOn,
       defaultRoute,
     };
-  }, [primaryUse, user?.id, access]);
+  }, [primaryUse, user?.id, access, isGrowthxai]);
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
   // me-data, me-data-prospects, and data-pipelines are accessible irrespective of onboarding

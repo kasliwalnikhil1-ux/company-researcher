@@ -249,7 +249,8 @@ export function compileSteps(input: unknown, opts: CompileOptions = {}): { graph
         case "send_email": {
           const subject = String(s.subject ?? ""), html = String(s.html ?? s.text ?? "").replace(/\n/g, "<br/>");
           if ((!subject || !html) && !Array.isArray(s.variants)) errors.push({ step_path: p, code: "E_TEXT_REQUIRED", message: "email needs subject and text/html (or variants with subject + text)" });
-          node.config = { subject, html, to: String(s.to ?? "any"), thread: String(s.thread ?? "continue"), mailbox_sender_id: s.mailbox_sender_id ?? null, track: s.track !== false };
+          node.config = { subject, html, to: String(s.to ?? "any"), thread: String(s.thread ?? "continue"), mailbox_sender_id: s.mailbox_sender_id ?? null, track: s.track !== false && s.plain_text !== true };
+          if (s.plain_text === true) node.config.plain_text = true;
           if (Array.isArray(s.mailbox_pool) && s.mailbox_pool.length) node.config.mailbox_pool = s.mailbox_pool;
           { const vs = compileVariants(s, "html", p, errors); if (vs) node.config.variants = vs; }
           break;

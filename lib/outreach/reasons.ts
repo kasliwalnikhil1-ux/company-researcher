@@ -121,6 +121,8 @@ export function reasonText(code: string | null | undefined, decision?: string | 
   if (c === 'network_timeout_max' || c.startsWith('net:')) return 'Could not reach LinkedIn after three tries';
   if (has('invalid_recipient') || has('user_unreachable') || c.startsWith('404:')) return 'The profile no longer exists or cannot be reached';
   if (has('blocked_recipient') || has('cannot_invite_attendee')) return 'This person cannot be invited (they limit who can connect)';
+  if (c === 'reinvite_cooldown') return 'The last invitation to this person was withdrawn less than 3 weeks ago, so LinkedIn does not allow a new one yet. The step waits';
+  if (c === 'free_notes_used') return 'This free LinkedIn account has used its invitation notes for the month. The step waits for next month because it requires the note';
   if (has('already_invited_recently') || has('cannot_resend') || c === 'invitation_pending') return 'An invitation is already pending or was sent recently';
   if (has('already_connected')) return 'Already connected, so the invitation was skipped';
   if (has('insufficient_credits') || has('not_allowed_inmail') || c === 'not_open_profile') return 'No InMail credit for this lead';

@@ -70,7 +70,38 @@ export function profileToEnrichment(prof: Row, requestedSections: readonly strin
     profile_language: clip(prof?.primary_locale?.language, 20),
     follower_count: num(prof?.follower_count),
     connections_count: num(prof?.connections_count),
+    linkedin: profileFacts(prof),
     requested_sections: [...requestedSections],
+  };
+}
+
+const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
+const strs = (list: unknown, n: number, max = 10): string[] | null => {
+  const out = (Array.isArray(list) ? list : []).map((x) => clip(x, n)).filter((x): x is string => !!x).slice(0, max);
+  return out.length ? out : null;
+};
+
+/**
+ * The top-level facts of a Unipile LinkedIn profile (033 `linkedin` column). Null means "not in this answer" and never
+ * replaces a stored value. network_distance, shared_connections_count, can_send_inmail and connected_at are the fetching sender's view.
+ */
+export function profileFacts(prof: Row): Row {
+  const ci = prof?.contact_info ?? {};
+  const bd = prof?.birthdate;
+  const cw = prof?.creator_website;
+  const connectedAt = num(prof?.connected_at);
+  const socials = (Array.isArray(ci.socials) ? ci.socials as Row[] : []).map((s) => ({ type: clip(s?.type, 40), name: clip(s?.name, 200) })).filter((s) => s.name).slice(0, 10);
+  return {
+    is_open_profile: bool(prof?.is_open_profile), is_premium: bool(prof?.is_premium), can_send_inmail: bool(prof?.can_send_inmail),
+    is_open_to_work: bool(prof?.is_open_to_work), is_hiring: bool(prof?.is_hiring), is_creator: bool(prof?.is_creator), is_influencer: bool(prof?.is_influencer),
+    network_distance: clip(prof?.network_distance, 20), shared_connections_count: num(prof?.shared_connections_count),
+    connected_at: connectedAt ? new Date(connectedAt).toISOString() : null,
+    websites: strs(prof?.websites, 300), hashtags: strs(prof?.hashtags, 80, 20),
+    creator_website: cw?.url ? { url: clip(cw.url, 300), description: clip(cw.description, 200) } : null,
+    emails: strs(ci.emails, 200)?.map((e) => e.toLowerCase()) ?? null, phones: strs(ci.phones, 40), addresses: strs(ci.adresses ?? ci.addresses, 300, 5),
+    socials: socials.length ? socials : null,
+    birthdate: bd && (num(bd.month) || num(bd.day)) ? { month: num(bd.month), day: num(bd.day) } : null,
+    country: clip(prof?.primary_locale?.country, 10), pronoun: clip(prof?.pronoun, 40),
   };
 }
 
@@ -86,14 +117,17 @@ export async function saveProfile(lead: Row, prof: Row, sender: Row, source: str
   } catch (e) { log({ fn: "enrich", lead_id: lead.id, error: `save_lead_profile: ${String((e as any)?.message ?? e)}` }); return null; }
 }
 
-/** Post rows for outreach_save_lead_posts: [{id,text,date,reactions,comments,url}]. `id` is the social id a reaction / comment needs. */
+/** Post rows for outreach_save_lead_posts: [{id,text,date,reactions,comments,url}]. `id` is the id a reaction / comment needs:
+ *  LinkedIn `social_id`; Instagram `provider_id` (its posts carry caption{text,created_at}, like_count, comment_count and no social_id). */
 export function postsToRows(items: Row[]): Row[] {
   return (items ?? []).filter((p) => !p?.is_repost).map((p) => {
-    const raw = p.parsed_datetime ?? p.date ?? null;
-    const t = raw ? Date.parse(raw) : NaN;
+    const ig = !p?.social_id && (typeof p?.caption === "object" || p?.like_count !== undefined);
+    let t = NaN;
+    if (ig) { const c = Number(p.caption?.created_at ?? p.created_at); if (Number.isFinite(c) && c > 0) t = c < 1e12 ? c * 1000 : c; }
+    else { const raw = p.parsed_datetime ?? p.date ?? null; t = raw ? Date.parse(raw) : NaN; }
     return {
-      id: String(p.social_id ?? p.id ?? ""), text: String(p.text ?? "").slice(0, 3000), date: isNaN(t) ? "" : new Date(t).toISOString(),
-      reactions: num(p.reaction_counter) ?? 0, comments: num(p.comment_counter) ?? 0, url: p.share_url ?? null,
+      id: String((ig ? p.provider_id : p.social_id ?? p.id) ?? ""), text: String((ig ? p.caption?.text : p.text) ?? "").slice(0, 3000), date: isNaN(t) ? "" : new Date(t).toISOString(),
+      reactions: num(ig ? p.like_count : p.reaction_counter) ?? 0, comments: num(ig ? p.comment_count : p.comment_counter) ?? 0, url: p.share_url ?? p.url ?? null,
     };
   }).filter((p) => p.id);
 }

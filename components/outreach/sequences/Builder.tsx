@@ -518,7 +518,7 @@ export default function Builder({ id }: { id: string }) {
         {tab === 'senders' && (
           <SendersTab sequenceId={sequence.id} draft={draft} senders={senders} readOnly={readOnly} publishMode={publishMode} dirty={dirty} onChange={patchDraft} onPoolApplied={onPoolApplied} onSave={save} />
         )}
-        {tab === 'settings' && <SettingsTab draft={draft} clients={clientsQ.data ?? []} readOnly={readOnly} publishMode={publishMode} onChange={patchDraft} />}
+        {tab === 'settings' && <SettingsTab sequenceId={sequence.id} draft={draft} clients={clientsQ.data ?? []} readOnly={readOnly} publishMode={publishMode} onChange={patchDraft} />}
         {tab === 'leads' && (
           <TabPage title="Leads" subtitle="Who is in this sequence, where each lead has got to, and add more leads by hand." wide>
             <EnrolPanel id={sequence.id} onOpenBuilder={() => setTab('steps')} />

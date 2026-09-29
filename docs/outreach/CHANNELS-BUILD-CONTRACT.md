@@ -87,6 +87,8 @@ Unique partial index `(lead_id, channel) where revoked_at is null`. RLS select v
 
 Block signals and provider warnings are `outreach_sender_events` rows: `kind = 'block'` data `{lead_id, code, action_id, action_type, preceding:[{at,type,lead_id}]}`; `kind = 'provider_warning'` data `{text, level_before, paused_until}`.
 
+> 29 Sep 2026: the Instagram "suspected automated behavior" warning no longer calls `outreach_sender_provider_warning`; it is logged as `provider_warning` with `ignored: true` and the action is retried (connector docs: the warning can be ignored). See SETUP.md §9.11.
+
 ## 3. Functions (026_channels_functions.sql)
 
 Grants: same footer as 023 (revoke from public/anon, grant service_role, internal ones revoked from authenticated). Every user RPC: `outreach_require()` then `outreach_client_visible()`.
