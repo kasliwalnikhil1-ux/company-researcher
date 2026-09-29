@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 
 export function QaScoreBadge({ score }: { score: number | null | undefined }) {
   const tone = qaTone(score);
-  return <span className={cn('inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full', tone === 'green' ? 'bg-green-50 text-green-700' : tone === 'amber' ? 'bg-amber-50 text-amber-700' : tone === 'red' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500')} title="Profile quality score">Profile {score ?? '—'}</span>;
+  return <span className={cn('inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap', tone === 'green' ? 'bg-green-50 text-green-700' : tone === 'amber' ? 'bg-amber-50 text-amber-700' : tone === 'red' ? 'bg-red-50 text-red-700' : 'bg-gray-100 text-gray-500')} title="Profile quality score">Profile {score ?? '—'}</span>;
 }
 
 export default function QaCard({ qa, snapshotAt }: { qa: ProfileOverview['qa']; snapshotAt: string | null }) {

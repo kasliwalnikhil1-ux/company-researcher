@@ -7,6 +7,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSequences } from '@/lib/outreach/queries';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
 import { MetricLabel } from '@/components/outreach/reports/primitives';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
 import { healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
@@ -14,10 +15,9 @@ import { cn } from '@/lib/utils';
 
 type DashSender = DashboardV2['senders'][number];
 
-// The dashboard card stays the same size at 5 senders or 500: counts by group, the few senders that
-// need a look (worst first), and today's capacity summed over every sender. The full, filterable
-// list is /outreach/senders.
-const ATTENTION_ROWS = 5;
+// The dashboard card: counts by group, every sender that needs a look (worst first, 20 per page),
+// and today's capacity summed over every sender. The full, filterable list is /outreach/senders.
+const ATTENTION_PAGE_SIZE = 20;
 const LOW_HEALTH = 50; // below this healthTone() is red
 
 type HealthGroup = 'attention' | 'paused' | 'dry' | 'connecting' | 'healthy';
@@ -74,8 +74,7 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
   }, [senders]);
 
   const total = senders.length;
-  const shown = flagged.slice(0, ATTENTION_ROWS);
-  const more = flagged.length - shown.length;
+  const { pageRows: shown, ...pager } = usePagedRows(flagged, '', ATTENTION_PAGE_SIZE);
   const legend = GROUPS.filter((g) => counts[g.key] > 0 || g.key === 'attention' || g.key === 'healthy');
 
   return (
@@ -115,11 +114,7 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
               </li>
             ))}
           </ul>
-          {more > 0 && (
-            <Link href="/outreach/senders" className="mt-2 inline-flex items-center gap-1 text-xs text-indigo-600 hover:underline">
-              {fmtInt(more)} more {more === 1 ? 'needs' : 'need'} a look · Open senders <ArrowRight className="w-3 h-3" />
-            </Link>
-          )}
+          {pager.pageCount > 1 && <PaginationBar {...pager} className="mt-2 text-xs" />}
         </div>
       )}
 
