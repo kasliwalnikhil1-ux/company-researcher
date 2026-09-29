@@ -38,13 +38,13 @@ export function registerBrief(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "whos_meeting_today", title: "Who's meeting today", cls: "read",
-    description: "Every meeting scheduled on a day (default today, team timezone). For each: company (+notes), contact & role, ICP segment, source channel, deal stage/value/owner/next step, prior no-shows, the FULL activity history with that contact, and the previous meeting's capture. This is the one call to run before the daily sales meeting.",
+    description: "Every meeting scheduled on a day (default today, team timezone). For each: company (+notes and its about profile: description, industry), contact & role (+their about profile: summary, past orgs), ICP segment, source channel, deal stage/value/owner/next step, prior no-shows, the FULL activity history with that contact, and the previous meeting's capture. This is the one call to run before the daily sales meeting.",
     input: { date: dateParam("Day to list").optional(), timezone: tzParam },
   }, async (a) => {
     const r = await rpc<Row>(ctx, "whos_meeting_today", { p_date: a.date ?? null, p_tz: a.timezone ?? null });
     const meetings = (r.meetings ?? []).map(shieldMeeting);
     return { date: r.date, timezone: r.timezone, count: meetings.length, meetings,
-      summary: meetings.length === 0 ? `No meetings on ${r.date}.` : meetings.map((m: Row) => `${m.local_time} ${m.company?.name} — ${m.contact?.name ?? "?"}${m.contact?.role ? ` (${m.contact.role})` : ""} · ${m.deal?.stage} · ${money(m.deal?.value_monthly, m.deal?.currency)}/mo · ${m.icp_segment ?? "unsegmented"} via ${m.source_channel ?? "?"}${m.prior_no_shows > 0 ? ` · ⚠ ${m.prior_no_shows} prior no-show(s)` : ""}`).join("\n") };
+      summary: meetings.length === 0 ? `No meetings on ${r.date}.` : meetings.map((m: Row) => `${m.local_time} ${m.company?.name}${m.company?.about?.company_industry ? ` [${m.company.about.company_industry}]` : ""} — ${m.contact?.name ?? "?"}${m.contact?.role ? ` (${m.contact.role})` : ""} · ${m.deal?.stage} · ${money(m.deal?.value_monthly, m.deal?.currency)}/mo · ${m.icp_segment ?? "unsegmented"} via ${m.source_channel ?? "?"}${m.prior_no_shows > 0 ? ` · ⚠ ${m.prior_no_shows} prior no-show(s)` : ""}`).join("\n") };
   });
 
   tool(server, ctx, {

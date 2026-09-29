@@ -18,6 +18,7 @@ Call out: a channel where no-shows ≥ held; zero replies on a channel with heav
 ## 2. Today's meetings (one line each)
 From `meetings_today`, in time order:
 `11:00 IST · StoryVerse Audio — Ananya Iyer (Head of Marketing) · meeting_booked · ₹4,50,000/mo · PocketFM/story via LinkedIn · owner Aarushi · last touch 3d ago · ⚠ 1 prior no-show`
+When the company or contact has an `about` profile, fold it into that line: the company's industry and one-line description, and the person's summary / last company ("ex-Nykaa brand lead") — that is who the team is about to talk to.
 Then for each, in one sentence: what the last capture said (pain points, next step) or, for a first meeting, the thread so far. If someone wants the full story: `whos_meeting_today()` has the complete activity history and last capture per meeting — quote the pain points verbatim.
 For meetings with `prior_no_shows > 0`: suggest a reminder message now.
 

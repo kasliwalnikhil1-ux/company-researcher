@@ -59,7 +59,7 @@ Speaker numbers mean nothing: Deepgram knows the voices differ, not who they are
 - **prospect** — describes their company and their problems, asks what it costs, raises the objections.
 - A "speaker" with a handful of words is a diarization slip, not a person. Leave it `unknown`.
 
-If the transcript gives the prospect's real name or role and the CRM only has the email, fix it: `upsert_contact(email, name, role)`.
+If the transcript gives the prospect's real name or role and the CRM only has the email, fix it: `upsert_contact(email, name, role)`. If the call says what the company does or who the person is (their background, where they worked before), and the profile is empty or thinner, add it in the same call: `upsert_company(about: {description, company_industry})` / `upsert_contact(about: {summary, past_orgs})` — only what was said, see "Profiles" in SKILL.md.
 
 **Only our voice on the whole recording** (nobody else speaks, or it is a few minutes of waiting) → they did not join. Capture it as a no-show: reason "Did not join (only our side on the recording)", follow-up "Rebook the meeting", date today.
 

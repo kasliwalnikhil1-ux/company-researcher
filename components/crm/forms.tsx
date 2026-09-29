@@ -6,6 +6,7 @@ import { rpc, compact, parseError } from '@/lib/crm/api';
 import { useCrmInvalidate } from '@/lib/crm/queries';
 import { COMMIT_KEYS, stageRank, STAGE_LABELS, STAGES, type Contact, type DealStage, type Company } from '@/lib/crm/types';
 import { Button, Input, Select, Textarea, Modal, Field, ErrorBox, addDaysISO, todayISO } from './ui';
+import { CompanyAboutFields, ContactAboutFields, companyAboutDraft, companyAboutPatch, contactAboutDraft, contactAboutPatch } from './about';
 
 export const TZ_OPTIONS = ['Asia/Kolkata', 'Asia/Dubai', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Asia/Singapore', 'Australia/Sydney'];
 const OUTCOMES = ['', 'connected', 'no_answer', 'voicemail', 'accepted', 'replied', 'booked', 'left_message', 'bounced'];
@@ -151,12 +152,15 @@ export function MeetingModal({ dealId, contacts, defaultTz, open, onClose }: { d
 // ---------------------------------------------------------------- company
 export function CompanyModal({ company, open, onClose, onSaved }: { company?: Partial<Company> | null; open: boolean; onClose: () => void; onSaved?: (c: Company) => void }) {
   const { lookups, timezone } = useCrm();
-  const { write, busy, error } = useWrite();
+  const { write, busy, error, setError } = useWrite();
   const segs = lookups('icp_segment'); const chans = lookups('source_channel');
   const [f, setF] = useState({ name: '', website: '', country: '', timezone: '', icp_segment: '', source_channel: '', notes: '' });
-  useEffect(() => { if (open) setF({ name: company?.name ?? '', website: company?.website ?? '', country: company?.country ?? '', timezone: company?.timezone ?? timezone, icp_segment: company?.icp_segment_id ?? '', source_channel: company?.source_channel_id ?? '', notes: company?.notes ?? '' }); }, [open, company, timezone]);
+  const [about, setAbout] = useState(companyAboutDraft(null));
+  useEffect(() => { if (open) { setF({ name: company?.name ?? '', website: company?.website ?? '', country: company?.country ?? '', timezone: company?.timezone ?? timezone, icp_segment: company?.icp_segment_id ?? '', source_channel: company?.source_channel_id ?? '', notes: company?.notes ?? '' }); setAbout(companyAboutDraft(company?.about)); } }, [open, company, timezone]);
   const save = async () => {
-    const r = await write<Company>('upsert_company', { p: { id: company?.id ?? undefined, name: f.name, website: f.website || null, country: f.country || null, timezone: f.timezone || null, icp_segment: f.icp_segment || null, source_channel: f.source_channel || null, notes: f.notes || null } });
+    let aboutPatch;
+    try { aboutPatch = companyAboutPatch(company?.about, about); } catch (e) { setError((e as Error).message); return; }
+    const r = await write<Company>('upsert_company', { p: compact({ id: company?.id ?? undefined, name: f.name, website: f.website || null, country: f.country || null, timezone: f.timezone || null, icp_segment: f.icp_segment || null, source_channel: f.source_channel || null, notes: f.notes || null, about: aboutPatch }) });
     if (r) { onSaved?.(r); onClose(); }
   };
   return (
@@ -169,6 +173,8 @@ export function CompanyModal({ company, open, onClose, onSaved }: { company?: Pa
         <Select label="ICP segment" value={f.icp_segment} onChange={(e) => setF({ ...f, icp_segment: e.target.value })}><option value="">—</option>{segs.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
         <Select label="Source channel" value={f.source_channel} onChange={(e) => setF({ ...f, source_channel: e.target.value })}><option value="">—</option>{chans.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
         <div className="col-span-2"><Textarea label="Notes" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="Anything the team should know before a call" /></div>
+        <div className="col-span-2 border-t border-gray-100 pt-2 -mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">About the company <span className="font-normal normal-case tracking-normal text-gray-400">· optional</span></div>
+        <CompanyAboutFields value={about} onChange={setAbout} />
         {error && <div className="col-span-2"><ErrorBox message={error} /></div>}
       </div>
     </Modal>
@@ -177,11 +183,14 @@ export function CompanyModal({ company, open, onClose, onSaved }: { company?: Pa
 
 // ---------------------------------------------------------------- contact
 export function ContactModal({ companyId, contact, open, onClose }: { companyId: string; contact?: Partial<Contact> | null; open: boolean; onClose: () => void }) {
-  const { write, busy, error } = useWrite();
+  const { write, busy, error, setError } = useWrite();
   const [f, setF] = useState({ name: '', role: '', email: '', phone: '', linkedin_url: '', timezone: '', is_primary: false });
-  useEffect(() => { if (open) setF({ name: contact?.name ?? '', role: contact?.role ?? '', email: contact?.email ?? '', phone: contact?.phone ?? '', linkedin_url: contact?.linkedin_url ?? '', timezone: contact?.timezone ?? '', is_primary: contact?.is_primary ?? false }); }, [open, contact]);
+  const [about, setAbout] = useState(contactAboutDraft(null));
+  useEffect(() => { if (open) { setF({ name: contact?.name ?? '', role: contact?.role ?? '', email: contact?.email ?? '', phone: contact?.phone ?? '', linkedin_url: contact?.linkedin_url ?? '', timezone: contact?.timezone ?? '', is_primary: contact?.is_primary ?? false }); setAbout(contactAboutDraft(contact?.about)); } }, [open, contact]);
   const save = async () => {
-    const r = await write('upsert_contact', { p: { id: contact?.id ?? undefined, company_id: companyId, name: f.name, role: f.role || null, email: f.email || null, phone: f.phone || null, linkedin_url: f.linkedin_url || null, timezone: f.timezone || null, is_primary: f.is_primary } });
+    let aboutPatch;
+    try { aboutPatch = contactAboutPatch(contact?.about, about); } catch (e) { setError((e as Error).message); return; }
+    const r = await write('upsert_contact', { p: compact({ id: contact?.id ?? undefined, company_id: companyId, name: f.name, role: f.role || null, email: f.email || null, phone: f.phone || null, linkedin_url: f.linkedin_url || null, timezone: f.timezone || null, is_primary: f.is_primary, about: aboutPatch }) });
     if (r) onClose();
   };
   return (
@@ -194,6 +203,8 @@ export function ContactModal({ companyId, contact, open, onClose }: { companyId:
         <Input label="LinkedIn URL" value={f.linkedin_url} onChange={(e) => setF({ ...f, linkedin_url: e.target.value })} />
         <Field label="Timezone"><input list="crm-tz3" className="w-full px-2.5 py-1.5 text-sm rounded-md border border-gray-300" value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} /><datalist id="crm-tz3">{TZ_OPTIONS.map((t) => <option key={t} value={t} />)}</datalist></Field>
         <label className="col-span-2 flex items-center gap-2 text-sm text-gray-700"><input type="checkbox" checked={f.is_primary} onChange={(e) => setF({ ...f, is_primary: e.target.checked })} /> Primary contact</label>
+        <div className="col-span-2 border-t border-gray-100 pt-2 -mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-500">About them <span className="font-normal normal-case tracking-normal text-gray-400">· optional</span></div>
+        <ContactAboutFields value={about} onChange={setAbout} />
         {error && <div className="col-span-2"><ErrorBox message={error} /></div>}
       </div>
     </Modal>

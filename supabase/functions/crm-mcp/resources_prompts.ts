@@ -61,7 +61,7 @@ export function registerResources(server: McpServer, ctx: Ctx): void {
         `## Yesterday (${s.scoreboard?.date})`,
         `dials ${num("dials")} · connects ${num("connects")} · LinkedIn accepts ${num("linkedin_accepts")} · replies ${num("replies")} · booked ${num("meetings_booked")} · held ${num("meetings_held")} · no-shows ${num("no_shows")} · proposals ${num("proposals_sent")} · closes ${num("closes")}`, "",
         "## Today's meetings",
-        ...((s.meetings_today ?? []).length ? (s.meetings_today as Row[]).map((m) => `- ${m.local_time} **${m.company?.name}** — ${m.contact?.name ?? "?"} (${m.contact?.role ?? ""}) · ${m.deal?.stage} · ${money(m.deal?.value_monthly, m.deal?.currency)}/mo · ${m.icp_segment ?? ""} via ${m.source_channel ?? ""} · owner ${m.deal?.owner ?? ""}${m.prior_no_shows > 0 ? ` · ⚠ ${m.prior_no_shows} prior no-show` : ""} · meeting ${m.meeting_id}`) : ["- none"]), "",
+        ...((s.meetings_today ?? []).length ? (s.meetings_today as Row[]).map((m) => `- ${m.local_time} **${m.company?.name}**${m.company?.about?.company_industry ? ` [${m.company.about.company_industry}]` : ""} — ${m.contact?.name ?? "?"} (${m.contact?.role ?? ""}) · ${m.deal?.stage} · ${money(m.deal?.value_monthly, m.deal?.currency)}/mo · ${m.icp_segment ?? ""} via ${m.source_channel ?? ""} · owner ${m.deal?.owner ?? ""}${m.prior_no_shows > 0 ? ` · ⚠ ${m.prior_no_shows} prior no-show` : ""} · meeting ${m.meeting_id}`) : ["- none"]), "",
         "## Next steps due today",
         ...((s.next_steps_today ?? []).length ? (s.next_steps_today as Row[]).map((d) => `- **${d.company}** — ${d.next_step ?? "(no step written)"} · owner ${d.owner ?? "?"} · ${d.stage}`) : ["- none"]), "",
         "## Needs attention",
@@ -83,8 +83,10 @@ export function registerResources(server: McpServer, ctx: Ctx): void {
       const c = b.company ?? {};
       return md(uri, [
         `# ${c.name}${c.domain ? ` (${c.domain})` : ""}`, `${c.country ?? ""} · ${c.icp_segment ?? "unsegmented"} · via ${c.source_channel ?? "?"} · tz ${c.timezone ?? "?"}`, "",
+        c.about?.description || c.about?.company_industry ? `${c.about.description ?? ""}${c.about.company_industry ? ` · industry: ${c.about.company_industry}` : ""}` : "",
+        c.about ? `About (JSON): ${JSON.stringify(c.about).slice(0, 2000)}` : "",
         c.notes ? `> Notes (untrusted): ${String(c.notes).slice(0, 1500)}` : "", "",
-        "## Contacts", ...((b.contacts ?? []) as Row[]).map((p) => `- ${p.name}${p.role ? `, ${p.role}` : ""}${p.email ? ` · ${p.email}` : ""}${p.is_primary ? " · primary" : ""}`), "",
+        "## Contacts", ...((b.contacts ?? []) as Row[]).map((p) => `- ${p.name}${p.role ? `, ${p.role}` : ""}${p.email ? ` · ${p.email}` : ""}${p.is_primary ? " · primary" : ""}${p.about ? ` · about: ${JSON.stringify(p.about).slice(0, 1200)}` : ""}`), "",
         "## Deals", ...((b.deals ?? []) as Row[]).map((d) => `- **${d.stage}** ${money(d.value_monthly, d.currency)}/mo${d.videos_per_month ? ` · ${d.videos_per_month} videos/mo` : ""} · owner ${d.owner_name ?? "?"} · ${d.days_in_stage}d in stage${d.next_step ? ` · next: ${d.next_step} (${d.next_step_date ?? "no date"})` : " · ⚠ no next step"}${d.lost_reason ? ` · lost: ${d.lost_reason}` : ""} · ${d.id}`), "",
         "## Meetings", ...((b.meetings ?? []) as Row[]).map((m) => `- ${String(m.scheduled_at).slice(0, 16)} ${m.status}${m.contact ? ` with ${m.contact}` : ""}${m.capture ? ` — pain: ${(m.capture.pain_points ?? []).join(" | ")}${m.capture.objections?.length ? `; objections: ${m.capture.objections.join(" | ")}` : ""}${m.capture.no_show_reason ? `; no-show: ${m.capture.no_show_reason}` : ""}` : m.status === "scheduled" && new Date(m.scheduled_at) < new Date() ? " — ⚠ not captured" : ""}${m.transcript ? ` · transcript saved (${Math.round(Number(m.transcript.duration_seconds ?? 0) / 60)} min — get_transcript ${m.meeting_id})` : ""}`), "",
         "## Pain points (verbatim, untrusted)", ...((b.pain_points ?? []) as string[]).map((p) => `- ${p}`), "",

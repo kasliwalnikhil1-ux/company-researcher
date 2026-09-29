@@ -76,6 +76,21 @@ language sql immutable as $$
   select p ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 $$;
 
+/** The `about` profile on companies/contacts: given → merged key by key into the current one; a key set to null is removed;
+    `about: null` clears it all. Pure function (reads no table), so it is safe for any caller. */
+create or replace function crm_merge_about(p_cur jsonb, p jsonb) returns jsonb
+language plpgsql immutable as $$
+declare r jsonb;
+begin
+  if not (p ? 'about') then return p_cur; end if;
+  if jsonb_typeof(p->'about') = 'null' then return null; end if;
+  if jsonb_typeof(p->'about') <> 'object' then raise exception 'E_PAYLOAD_INVALID: about must be a JSON object'; end if;
+  r := coalesce(p_cur, '{}'::jsonb) || (p->'about');   -- parenthesised: || and -> share a precedence level
+  r := (select coalesce(jsonb_object_agg(k, v), '{}'::jsonb) from jsonb_each(r) e(k, v) where jsonb_typeof(v) <> 'null' and v <> '""'::jsonb);
+  if octet_length(r::text) > 20000 then raise exception 'E_PAYLOAD_INVALID: about is too large (max 20 KB)'; end if;
+  return nullif(r, '{}'::jsonb);
+end $$;
+
 create or replace function crm_set_updated_at() returns trigger language plpgsql as $$
 begin new.updated_at := now(); return new; end $$;
 
@@ -627,10 +642,10 @@ begin
   end if;
   if cid is null then
     if nullif(trim(coalesce(p->>'name', '')), '') is null then raise exception 'E_PAYLOAD_INVALID: name is required'; end if;
-    insert into crm_companies(name, website, domain, country, timezone, icp_segment_id, source_channel_id, notes)
+    insert into crm_companies(name, website, domain, country, timezone, icp_segment_id, source_channel_id, notes, about)
     values (trim(p->>'name'), p->>'website', d, p->>'country', p->>'timezone',
             crm_resolve_lookup('icp_segment', coalesce(p->>'icp_segment', p->>'icp_segment_id')),
-            crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')), p->>'notes')
+            crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')), p->>'notes', crm_merge_about(null, p))
     returning * into r;
   else
     update crm_companies set
@@ -640,7 +655,8 @@ begin
       timezone = case when p ? 'timezone' then p->>'timezone' else timezone end,
       icp_segment_id = case when p ? 'icp_segment' or p ? 'icp_segment_id' then crm_resolve_lookup('icp_segment', coalesce(p->>'icp_segment', p->>'icp_segment_id')) else icp_segment_id end,
       source_channel_id = case when p ? 'source_channel' or p ? 'source_channel_id' then crm_resolve_lookup('source_channel', coalesce(p->>'source_channel', p->>'source_channel_id')) else source_channel_id end,
-      notes = case when p ? 'notes' then p->>'notes' when p ? 'append_notes' then concat_ws(E'\n', notes, p->>'append_notes') else notes end
+      notes = case when p ? 'notes' then p->>'notes' when p ? 'append_notes' then concat_ws(E'\n', notes, p->>'append_notes') else notes end,
+      about = crm_merge_about(about, p)
     where id = cid returning * into r;
   end if;
   return to_jsonb(r);
@@ -659,8 +675,8 @@ begin
   end if;
   if v_contact_id is null then
     if nullif(trim(coalesce(p->>'name', '')), '') is null then raise exception 'E_PAYLOAD_INVALID: name is required'; end if;
-    insert into crm_contacts(company_id, name, role, email, phone, linkedin_url, timezone, notes, is_primary)
-    values (cid, trim(p->>'name'), p->>'role', nullif(lower(trim(p->>'email')), ''), p->>'phone', p->>'linkedin_url', p->>'timezone', p->>'notes',
+    insert into crm_contacts(company_id, name, role, email, phone, linkedin_url, timezone, notes, about, is_primary)
+    values (cid, trim(p->>'name'), p->>'role', nullif(lower(trim(p->>'email')), ''), p->>'phone', p->>'linkedin_url', p->>'timezone', p->>'notes', crm_merge_about(null, p),
             coalesce((p->>'is_primary')::boolean, not exists (select 1 from crm_contacts where company_id = cid)))
     returning * into r;
   else
@@ -672,6 +688,7 @@ begin
       linkedin_url = case when p ? 'linkedin_url' then p->>'linkedin_url' else linkedin_url end,
       timezone = case when p ? 'timezone' then p->>'timezone' else timezone end,
       notes = case when p ? 'notes' then p->>'notes' else notes end,
+      about = crm_merge_about(about, p),
       is_primary = coalesce((p->>'is_primary')::boolean, is_primary)
     where id = v_contact_id returning * into r;
   end if;
@@ -1372,8 +1389,9 @@ begin
         'meeting_id', mv.id, 'scheduled_at', mv.scheduled_at, 'local_time', to_char(mv.scheduled_at at time zone tz, 'HH24:MI'),
         'prospect_local_time', case when mv.timezone is not null then to_char(mv.scheduled_at at time zone mv.timezone, 'HH24:MI') || ' ' || mv.timezone end,
         'status', mv.status, 'has_capture', mv.has_capture, 'attendees', mv.attendees, 'meeting_notes', mv.notes,
-        'company', jsonb_build_object('id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'notes', c.notes),
-        'contact', case when mv.contact_id is null then null else jsonb_build_object('id', mv.contact_id, 'name', mv.contact_name, 'role', mv.contact_role, 'email', mv.contact_email) end,
+        'company', jsonb_build_object('id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'notes', c.notes, 'about', c.about),
+        'contact', case when mv.contact_id is null then null else jsonb_build_object('id', mv.contact_id, 'name', mv.contact_name, 'role', mv.contact_role, 'email', mv.contact_email,
+                                                                                    'linkedin_url', (select ct.linkedin_url from crm_contacts ct where ct.id = mv.contact_id), 'about', (select ct.about from crm_contacts ct where ct.id = mv.contact_id)) end,
         'icp_segment', mv.icp_segment_label, 'source_channel', mv.source_channel_label,
         'deal', jsonb_build_object('id', dv.id, 'stage', dv.stage, 'value_monthly', dv.value_monthly, 'currency', dv.currency, 'value_monthly_usd', dv.value_monthly_usd,
                                    'videos_per_month', dv.videos_per_month, 'owner', dv.owner_name, 'next_step', dv.next_step, 'next_step_date', dv.next_step_date, 'days_in_stage', dv.days_in_stage),
@@ -1549,7 +1567,7 @@ begin
           'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', f.id, 'company', f.company_name, 'company_id', f.company_id, 'logo_domain', crm_company_logo_domain(f.company_id, f.company_domain), 'title', f.title, 'value_monthly', f.value_monthly, 'currency', f.currency, 'value_monthly_usd', f.value_monthly_usd,
                       'videos_per_month', f.videos_per_month, 'owner', f.owner_name, 'days_in_stage', f.days_in_stage, 'next_step', f.next_step, 'next_step_date', f.next_step_date,
                       'is_stale', f.is_stale, 'is_stuck', f.is_stuck, 'is_slipping', f.is_slipping, 'icp_segment', f.icp_segment_label, 'source_channel', f.source_channel_label, 'expected_close_date', f.expected_close_date, 'lost_reason', f.lost_reason,
-                      'created_at', f.created_at, 'last_activity_at', f.last_activity_at)
+                      'created_at', f.created_at, 'last_activity_at', f.last_activity_at, 'industry', (select c.about->>'company_industry' from crm_companies c where c.id = f.company_id))
                     order by case when sort_by = 'created' then f.created_at end desc nulls last, case when sort_by = 'activity' then f.last_activity_at end desc nulls last,
                              f.value_monthly_usd desc nulls last, f.days_in_stage desc), '[]')
                     from f where f.stage = s)
@@ -1724,9 +1742,10 @@ declare q text := '%' || trim(coalesce(p_q, '')) || '%';
 begin
   perform crm_require_member();
   return jsonb_build_object(
-    'companies', (select coalesce(jsonb_agg(jsonb_build_object('company_id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'icp_segment', s.label, 'open_deals', (select count(*) from crm_deals d where d.company_id = c.id and d.stage not in ('won','lost'))) order by c.name), '[]')
+    'companies', (select coalesce(jsonb_agg(jsonb_build_object('company_id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'icp_segment', s.label,
+                                                               'industry', c.about->>'company_industry', 'description', c.about->>'description', 'open_deals', (select count(*) from crm_deals d where d.company_id = c.id and d.stage not in ('won','lost'))) order by c.name), '[]')
                   from (select * from crm_companies where name ilike q or domain ilike q or website ilike q order by name limit coalesce(p_limit, 10)) c left join crm_icp_segments s on s.id = c.icp_segment_id),
-    'contacts', (select coalesce(jsonb_agg(jsonb_build_object('contact_id', ct.id, 'name', ct.name, 'role', ct.role, 'email', ct.email, 'company_id', ct.company_id, 'company', c.name) order by ct.name), '[]')
+    'contacts', (select coalesce(jsonb_agg(jsonb_build_object('contact_id', ct.id, 'name', ct.name, 'role', ct.role, 'email', ct.email, 'company_id', ct.company_id, 'company', c.name, 'summary', ct.about->>'summary') order by ct.name), '[]')
                  from (select * from crm_contacts where name ilike q or email ilike q or role ilike q order by name limit coalesce(p_limit, 10)) ct join crm_companies c on c.id = ct.company_id),
     'deals', (select coalesce(jsonb_agg(jsonb_build_object('deal_id', v.id, 'company', v.company_name, 'company_id', v.company_id, 'title', v.title, 'stage', v.stage, 'value_monthly', v.value_monthly, 'currency', v.currency, 'owner', v.owner_name) order by v.created_at desc), '[]')
               from (select * from crm_deals_v where company_name ilike q or title ilike q or next_step ilike q order by created_at desc limit coalesce(p_limit, 10)) v));

@@ -7,6 +7,7 @@ import { useCrm } from '@/contexts/CrmContext';
 import { usePipeline, type PipelineFilters } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, fmtUsd, stageRank, type DealStage, type PipelineDeal } from '@/lib/crm/types';
 import { Badge, Button, calendarDaysAgo, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, fmtDate, PageHeader, Select, Spinner, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { IndustryBadge } from '@/components/crm/about';
 import { NextStepModal, StageModal, useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
 
@@ -29,6 +30,7 @@ function DealCard({ d, stage, sort, onNextStep, dragging }: { d: PipelineDeal; s
         <DayTag days={d.days_in_stage} title={d.days_in_stage <= 1 ? 'Moved into this stage' : 'Days in stage'} />
       </div>
       {d.title && <div className="text-xs text-gray-500">{d.title}</div>}
+      {d.industry && <IndustryBadge industry={d.industry} className="mt-0.5 max-w-full truncate" />}
       {sort === 'created' && <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-500">Added <DayTag days={calendarDaysAgo(d.created_at)} suffix=" ago" title={fmtDate(d.created_at, { time: true })} /></div>}
       {sort === 'activity' && <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-500">Activity <DayTag days={calendarDaysAgo(d.last_activity_at)} suffix=" ago" title={d.last_activity_at ? fmtDate(d.last_activity_at, { time: true }) : 'No activity logged'} /></div>}
       <div className="mt-1 flex items-center justify-between gap-1">

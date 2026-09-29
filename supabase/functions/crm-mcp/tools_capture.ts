@@ -77,24 +77,37 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
   }, async (a) => rpc(ctx, "create_deal", { p: compact(a) }));
 
   // ---------------------------------------------------------------- companies / contacts
+  // `about` = an optional JSON profile shown in the app (company page, companies list, pipeline cards, standup). Display-only: nothing filters on it.
+  // Merged key by key into what is stored; a key set to null is removed; about: null clears it.
+  const ABOUT_NOTE = "Merged into the stored profile key by key (send only what changed); a key set to null removes it; about: null clears it. Extra keys are kept and shown as-is. Only facts you actually found — never guess.";
+
   tool(server, ctx, {
     name: "upsert_company", title: "Add or update a company", cls: "write",
-    description: "Create a company or update it (matched by id, then website domain, then exact name). ICP segment and source channel accept slug/label/id. Use append_notes to add to notes without replacing them.",
+    description: "Create a company or update it (matched by id, then website domain, then exact name). ICP segment and source channel accept slug/label/id. Use append_notes to add to notes without replacing them. `about` is an optional profile of the company (a precise description under 10 words + its specific industry) shown across the app.",
     input: {
       id: z.string().uuid().optional(), name: z.string().min(1).max(200).optional(), website: z.string().max(300).optional(), country: z.string().max(80).optional(),
       timezone: z.string().max(60).optional().describe("IANA, e.g. Asia/Dubai"), icp_segment: lookupRef("ICP segment"), source_channel: lookupRef("Source channel"),
       notes: z.string().max(4000).optional(), append_notes: z.string().max(2000).optional(),
+      about: z.object({
+        description: z.string().max(120).nullable().optional().describe("Precise description of what the company does, in under 10 words, e.g. \"Handmade silver jewelry for Gen Z\""),
+        company_industry: z.string().max(60).nullable().optional().describe("Specific industry of the company, such as jewelry, skincare, music, SaaS, AI, creator, media, marketplace, agency, etc., in less than 4 words"),
+      }).passthrough().nullable().optional().describe(`Optional company profile (JSON object). ${ABOUT_NOTE}`),
     },
     annotations: { idempotentHint: true },
   }, async (a) => rpc(ctx, "upsert_company", { p: compact(a) }));
 
   tool(server, ctx, {
     name: "upsert_contact", title: "Add or update a contact", cls: "write",
-    description: "Create or update a person at a company (matched by id, then email, then company+name). company = id, domain or name.",
+    description: "Create or update a person at a company (matched by id, then email, then company+name). company = id, domain or name. `about` is an optional profile of the person (a short summary + past organisations) shown on the company page and in the standup when they have a meeting.",
     input: {
       id: z.string().uuid().optional(), company: z.string().optional().describe("Company id, domain or name (required for a new contact)"), name: z.string().min(1).max(160).optional(),
       role: z.string().max(120).optional(), email: z.string().max(200).optional(), phone: z.string().max(40).optional(), linkedin_url: z.string().max(300).optional(),
       timezone: z.string().max(60).optional(), notes: z.string().max(2000).optional(), is_primary: z.boolean().optional(),
+      about: z.object({
+        summary: z.string().max(1000).nullable().optional().describe("Who they are in 1–3 sentences: current role, background, what they care about"),
+        past_orgs: z.array(z.union([z.string().max(160), z.object({ org: z.string().max(160), role: z.string().max(120).optional(), years: z.string().max(40).optional() }).passthrough()])).max(30).nullable().optional()
+          .describe("Earlier organisations, most recent first: {org, role?, years?} or just the name"),
+      }).passthrough().nullable().optional().describe(`Optional person profile (JSON object). ${ABOUT_NOTE}`),
     },
     annotations: { idempotentHint: true },
   }, async (a) => rpc(ctx, "upsert_contact", { p: compact(a) }));

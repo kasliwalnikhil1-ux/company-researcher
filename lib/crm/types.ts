@@ -29,14 +29,21 @@ export interface CrmContextData {
   fx_rates: Record<string, number>;
 }
 
+/** Optional research profile on a company (crm_companies.about). Display-only; any extra key is kept and shown as-is. */
+export interface CompanyAbout { description?: string; company_industry?: string; [key: string]: unknown }
+/** A past organisation: `{org, role?, years?}` or just its name. */
+export type PastOrg = string | { org: string; role?: string; years?: string; [key: string]: unknown };
+/** Optional research profile on a contact (crm_contacts.about). Display-only; any extra key is kept and shown as-is. */
+export interface ContactAbout { summary?: string; past_orgs?: PastOrg[]; [key: string]: unknown }
+
 export interface Company {
   id: string; name: string; website: string | null; domain: string | null; country: string | null; timezone: string | null;
-  icp_segment_id: string | null; source_channel_id: string | null; notes: string | null; created_at: string; updated_at: string;
+  icp_segment_id: string | null; source_channel_id: string | null; notes: string | null; about: CompanyAbout | null; created_at: string; updated_at: string;
 }
 
 export interface Contact {
   id: string; company_id: string; name: string; role: string | null; email: string | null; phone: string | null; linkedin_url: string | null;
-  timezone: string | null; notes: string | null; is_primary: boolean; created_at: string;
+  timezone: string | null; notes: string | null; about: ContactAbout | null; is_primary: boolean; created_at: string;
 }
 
 /** Row of crm_deals_v */
@@ -150,8 +157,8 @@ export interface Scoreboard { date: string; timezone: string; day: { channels: S
 
 export interface TodayMeeting {
   meeting_id: string; scheduled_at: string; local_time: string; prospect_local_time: string | null; status: MeetingStatus; has_capture: boolean; attendees: string[]; meeting_notes: string | null;
-  company: { id: string; name: string; domain: string | null; country: string | null; notes: string | null };
-  contact: { id: string; name: string; role: string | null; email: string | null } | null;
+  company: { id: string; name: string; domain: string | null; country: string | null; notes: string | null; about?: CompanyAbout | null };
+  contact: { id: string; name: string; role: string | null; email: string | null; linkedin_url?: string | null; about?: ContactAbout | null } | null;
   icp_segment: string | null; source_channel: string | null;
   deal: { id: string; stage: DealStage; value_monthly: number | null; currency: string; value_monthly_usd: number | null; videos_per_month: number | null; owner: string | null; next_step: string | null; next_step_date: string | null; days_in_stage: number };
   prior_no_shows: number;
@@ -178,7 +185,7 @@ export interface PipelineDeal {
   deal_id: string; company: string; company_id: string; logo_domain?: string | null; title: string | null; value_monthly: number | null; currency: string; value_monthly_usd: number | null; videos_per_month: number | null;
   owner: string | null; days_in_stage: number; next_step: string | null; next_step_date: string | null; is_stale: boolean; is_stuck: boolean; is_slipping: boolean;
   icp_segment: string | null; source_channel: string | null; expected_close_date: string | null; lost_reason: string | null;
-  created_at: string; last_activity_at: string | null;
+  created_at: string; last_activity_at: string | null; industry?: string | null;
 }
 export interface Pipeline { stages: Array<{ stage: DealStage; count: number; value_monthly_usd: number; deals: PipelineDeal[] }>; totals: { open_deals: number; open_value_monthly_usd: number; won_value_monthly_usd: number; stale: number; stuck: number; slipping: number } }
 

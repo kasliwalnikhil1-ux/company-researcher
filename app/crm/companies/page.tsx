@@ -8,6 +8,7 @@ import { useCompanies, type CompanyFilters } from '@/lib/crm/queries';
 import { fmtMoney } from '@/lib/crm/types';
 import { Button, calendarDaysAgo, CompanyLogo, DayTag, EmptyState, ErrorBox, fmtDate, Input, logoDomain, PageHeader, Pagination, Select, Spinner, StageBadge, Table, Td, Th, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
 import { CompanyModal } from '@/components/crm/forms';
+import { IndustryBadge } from '@/components/crm/about';
 import { Plus } from 'lucide-react';
 
 export default function CompaniesPage() {
@@ -69,7 +70,11 @@ export default function CompaniesPage() {
                   <Td>
                     <div className="flex items-center gap-2">
                       <CompanyLogo name={c.name} domain={logoDomain(c.domain ?? c.website, [primary?.email, ...c.crm_contacts.map((x) => x.email)])} />
-                      <div className="min-w-0"><Link href={`/crm/companies/${c.id}`} className="font-medium text-gray-900 hover:text-indigo-700">{c.name}</Link>{c.domain && <div className="text-xs text-gray-400">{c.domain}</div>}</div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5"><Link href={`/crm/companies/${c.id}`} className="font-medium text-gray-900 hover:text-indigo-700">{c.name}</Link><IndustryBadge industry={c.about?.company_industry} /></div>
+                        {c.about?.description && <div className="text-xs text-gray-600 max-w-[280px] truncate" title={c.about.description}>{c.about.description}</div>}
+                        {c.domain && <div className="text-xs text-gray-400">{c.domain}</div>}
+                      </div>
                     </div>
                   </Td>
                   <Td className="whitespace-nowrap">{c.country ?? '—'}</Td>

@@ -5,10 +5,12 @@ import { useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useStandup } from '@/lib/crm/queries';
 import { SCORE_KEYS, fmtMoney, type AttentionDeal, type TodayMeeting } from '@/lib/crm/types';
-import { addDaysISO, Badge, Button, Card, daysAgo, EmptyState, ErrorBox, fmtDate, fmtTime, PageLoader, StageBadge, todayISO } from '@/components/crm/ui';
+import { addDaysISO, Badge, Button, Card, CompanyLogo, daysAgo, EmptyState, ErrorBox, fmtDate, fmtTime, logoDomain, PageLoader, StageBadge, todayISO } from '@/components/crm/ui';
 import { CommitmentForm, NextStepModal } from '@/components/crm/forms';
+import { CompanyAboutBlock, ContactAboutBlock, hasAbout, IndustryBadge } from '@/components/crm/about';
+import { ContactAvatar, ContactCard } from '@/components/crm/contact-card';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, ChevronLeft, ChevronRight, ClipboardCheck, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, RefreshCw } from 'lucide-react';
 
 // The only screen open during the daily meeting. Yesterday's numbers → today's meetings → stuck/stale/slipping → commitments.
 // Tall middle row with internal scrolling per panel (commitments sit below it), readable across a room.
@@ -25,54 +27,99 @@ function Tile({ label, value, avg, warn }: { label: string; value: number; avg: 
   );
 }
 
+function lastTouchText(m: TodayMeeting): React.ReactNode {
+  const t = m.activity_history?.[0];
+  if (m.last_capture) return <span title={(m.last_capture.pain_points ?? []).join(' | ')}>Last: {m.last_capture.next_step ?? (m.last_capture.no_show_reason ? `no-show — ${m.last_capture.no_show_reason}` : 'captured')}</span>;
+  if (t) return <span>{t.direction === 'inbound' ? '← ' : '→ '}{t.type}{t.outcome ? ` [${t.outcome}]` : ''} · {daysAgo(t.at)}</span>;
+  return <span className="text-gray-400">First touch</span>;
+}
+
+// One meeting: time | who (company, what they do, the person and who they are, then the last touch) | deal + action.
+// The middle column takes all the spare width, so the descriptions read as sentences instead of a narrow stack.
 function MeetingRow({ m, tz }: { m: TodayMeeting; tz: string }) {
   const [open, setOpen] = useState(false);
-  const lastTouch = m.activity_history?.[0];
+  const toggle = () => setOpen((o) => !o);
+  const desc = m.company.about?.description;
   return (
-    <>
-      <tr className={cn('border-b border-gray-100 hover:bg-gray-50 cursor-pointer', m.status !== 'scheduled' && 'opacity-60')} onClick={() => setOpen((o) => !o)}>
-        <td className="px-3 py-2 whitespace-nowrap"><div className="text-xl font-bold tabular-nums text-gray-900">{m.local_time}</div>{m.prospect_local_time && <div className="text-[11px] text-gray-500">{m.prospect_local_time}</div>}</td>
-        <td className="px-3 py-2"><Link href={`/crm/companies/${m.company.id}`} onClick={(e) => e.stopPropagation()} className="text-base font-semibold text-gray-900 hover:text-indigo-700">{m.company.name}</Link><div className="text-sm text-gray-600">{m.contact?.name ?? '—'}{m.contact?.role ? <span className="text-gray-400"> · {m.contact.role}</span> : null}</div></td>
-        <td className="px-3 py-2 text-sm text-gray-600 whitespace-nowrap">{m.icp_segment ?? <span className="text-gray-400">unsegmented</span>}<div className="text-xs text-gray-400">via {m.source_channel ?? '?'}</div></td>
-        <td className="px-3 py-2 whitespace-nowrap"><StageBadge stage={m.deal.stage} /><div className="text-sm font-medium text-gray-800 mt-0.5">{fmtMoney(m.deal.value_monthly, m.deal.currency)}<span className="text-gray-400 text-xs">/mo</span>{m.deal.videos_per_month ? <span className="text-xs text-gray-500"> · {m.deal.videos_per_month} vid</span> : null}</div></td>
-        <td className="px-3 py-2 text-sm text-gray-600">{m.deal.owner ?? '—'}</td>
-        <td className="px-3 py-2 text-sm text-gray-600 max-w-[280px]">{m.last_capture ? <span title={(m.last_capture.pain_points ?? []).join(' | ')}>Last: {m.last_capture.next_step ?? (m.last_capture.no_show_reason ? `no-show — ${m.last_capture.no_show_reason}` : 'captured')}</span> : lastTouch ? <span className="truncate block">{lastTouch.direction === 'inbound' ? '← ' : '→ '}{lastTouch.type}{lastTouch.outcome ? ` [${lastTouch.outcome}]` : ''} · {daysAgo(lastTouch.at)}</span> : <span className="text-gray-400">first touch</span>}</td>
-        <td className="px-3 py-2 whitespace-nowrap text-right">
-          {m.prior_no_shows > 0 && <Badge tone="red" className="mr-1" title="Prior no-shows for this contact">⚠ {m.prior_no_shows} no-show</Badge>}
-          {m.status === 'scheduled' ? <Link href={`/crm/capture?meeting=${m.meeting_id}`} onClick={(e) => e.stopPropagation()}><Button size="xs" variant="secondary"><ClipboardCheck className="w-3 h-3" /> Capture</Button></Link> : <Badge tone={m.status === 'held' ? 'green' : m.status === 'no_show' ? 'red' : 'gray'}>{m.status.replace('_', '-')}</Badge>}
-        </td>
-      </tr>
-      {open && (
-        <tr className="bg-gray-50/70 border-b border-gray-100">
-          <td colSpan={7} className="px-4 py-3">
-            <div className="grid md:grid-cols-3 gap-4 text-sm">
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Company notes</div>
-                <p className="text-gray-700 whitespace-pre-wrap">{m.company.notes ?? '—'}</p>
-                {m.deal.next_step && <p className="mt-2 text-gray-700"><span className="text-gray-500">Next step:</span> {m.deal.next_step} <span className="text-gray-400">({fmtDate(m.deal.next_step_date)})</span></p>}
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Last capture {m.last_capture ? `(${fmtDate(m.last_capture.meeting_at)})` : ''}</div>
-                {m.last_capture ? (
-                  <ul className="list-disc pl-4 text-gray-700 space-y-0.5">
-                    {(m.last_capture.pain_points ?? []).map((p, i) => <li key={i}>“{p}”</li>)}
-                    {(m.last_capture.objections ?? []).length ? <li className="text-amber-700">Objections: {(m.last_capture.objections ?? []).join('; ')}</li> : null}
-                    {m.last_capture.no_show_reason && <li className="text-red-700">No-show: {m.last_capture.no_show_reason}</li>}
-                  </ul>
-                ) : <p className="text-gray-400">First meeting</p>}
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">History with {m.contact?.name ?? 'this deal'} ({m.activity_history?.length ?? 0})</div>
-                <ul className="space-y-0.5 max-h-40 overflow-auto pr-1">
-                  {(m.activity_history ?? []).slice(0, 12).map((a, i) => <li key={i} className="text-gray-700"><span className="text-gray-400 tabular-nums">{fmtDate(a.at, { time: true, tz })}</span> {a.direction === 'inbound' ? '←' : '→'} {a.type}{a.channel ? ` (${a.channel})` : ''}{a.outcome ? ` [${a.outcome}]` : ''}{a.body ? `: ${a.body}` : ''}</li>)}
-                  {!(m.activity_history ?? []).length && <li className="text-gray-400">No activity logged yet</li>}
-                </ul>
+    <li className={cn('border-b border-gray-100 last:border-b-0', open && 'bg-gray-50/70')}>
+      <div role="button" tabIndex={0} aria-expanded={open} onClick={toggle} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } }}
+        className={cn('grid grid-cols-[4.5rem_minmax(0,1fr)_auto] gap-x-4 px-3 py-3 cursor-pointer hover:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-400', m.status !== 'scheduled' && 'opacity-60')}>
+        <div className="pt-0.5">
+          <div className="text-xl font-bold tabular-nums text-gray-900 leading-none">{m.local_time}</div>
+          {m.prospect_local_time && <div className="mt-1 text-[11px] leading-tight text-gray-500">{m.prospect_local_time}</div>}
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <CompanyLogo name={m.company.name} domain={logoDomain(m.company.domain, [m.contact?.email])} />
+            <Link href={`/crm/companies/${m.company.id}`} onClick={(e) => e.stopPropagation()} className="truncate text-base font-semibold text-gray-900 hover:text-indigo-700">{m.company.name}</Link>
+            <IndustryBadge industry={m.company.about?.company_industry} className="shrink-0" />
+          </div>
+          {desc && <div className="mt-0.5 text-xs text-gray-500 truncate" title={desc}>{desc}</div>}
+
+          {m.contact ? (
+            <div className="mt-2 flex items-start gap-2">
+              <ContactAvatar name={m.contact.name} className="w-6 h-6 text-[10px] mt-px" />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm leading-6 text-gray-800 truncate"><span className="font-medium">{m.contact.name}</span>{m.contact.role && <span className="text-gray-500"> · {m.contact.role}</span>}</div>
+                <ContactAboutBlock about={m.contact.about} compact />
               </div>
             </div>
-          </td>
-        </tr>
+          ) : <div className="mt-2 text-sm text-gray-400">No contact on this meeting</div>}
+
+          <div className="mt-2 text-xs text-gray-500">{lastTouchText(m)}</div>
+        </div>
+
+        <div className="flex flex-col items-end gap-1.5 text-right">
+          <StageBadge stage={m.deal.stage} />
+          <div className="text-sm font-semibold tabular-nums text-gray-800 whitespace-nowrap">{fmtMoney(m.deal.value_monthly, m.deal.currency)}<span className="text-xs font-normal text-gray-400">/mo</span></div>
+          {m.deal.videos_per_month ? <div className="text-xs text-gray-500 whitespace-nowrap">{m.deal.videos_per_month} videos/mo</div> : null}
+          {m.prior_no_shows > 0 && <Badge tone="red" title="Prior no-shows for this contact">⚠ {m.prior_no_shows} no-show</Badge>}
+          <div className="mt-auto flex items-center gap-1 pt-1">
+            {m.status === 'scheduled' ? <Link href={`/crm/capture?meeting=${m.meeting_id}`} onClick={(e) => e.stopPropagation()}><Button size="xs" variant="secondary"><ClipboardCheck className="w-3 h-3" /> Capture</Button></Link> : <Badge tone={m.status === 'held' ? 'green' : m.status === 'no_show' ? 'red' : 'gray'}>{m.status.replace('_', '-')}</Badge>}
+            <ChevronDown className={cn('w-4 h-4 text-gray-400 transition-transform', open && 'rotate-180')} aria-hidden />
+          </div>
+        </div>
+      </div>
+
+      {open && (
+        <div className="px-3 pb-4 grid md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 text-sm">
+          <div className="space-y-3">
+            {(hasAbout(m.company.about) || hasAbout(m.contact?.about)) && (
+              <div className="space-y-2">
+                <div className="text-[11px] uppercase tracking-wide text-gray-500">Who they are</div>
+                {hasAbout(m.contact?.about) && <ContactCard contact={m.contact!} full className="py-2.5 bg-white rounded-md border border-gray-200" />}
+                {hasAbout(m.company.about) && <div className="bg-white rounded-md border border-gray-200 px-3 py-2.5"><div className="flex items-center gap-1.5 text-sm font-semibold text-gray-900">{m.company.name}<IndustryBadge industry={m.company.about!.company_industry} /></div><CompanyAboutBlock about={m.company.about} full className="mt-1 [&_p]:text-xs [&_p]:text-gray-700" /></div>}
+              </div>
+            )}
+            <div>
+              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Company notes</div>
+              <p className="text-gray-700 whitespace-pre-wrap">{m.company.notes ?? '—'}</p>
+              {m.deal.next_step && <p className="mt-2 text-gray-700"><span className="text-gray-500">Next step:</span> {m.deal.next_step} <span className="text-gray-400">({fmtDate(m.deal.next_step_date)})</span></p>}
+            </div>
+          </div>
+          <div className="space-y-4">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Last capture {m.last_capture ? `(${fmtDate(m.last_capture.meeting_at)})` : ''}</div>
+            {m.last_capture ? (
+              <ul className="list-disc pl-4 text-gray-700 space-y-0.5">
+                {(m.last_capture.pain_points ?? []).map((p, i) => <li key={i}>“{p}”</li>)}
+                {(m.last_capture.objections ?? []).length ? <li className="text-amber-700">Objections: {(m.last_capture.objections ?? []).join('; ')}</li> : null}
+                {m.last_capture.no_show_reason && <li className="text-red-700">No-show: {m.last_capture.no_show_reason}</li>}
+              </ul>
+            ) : <p className="text-gray-400">First meeting</p>}
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">History with {m.contact?.name ?? 'this deal'} ({m.activity_history?.length ?? 0})</div>
+            <ul className="space-y-0.5 max-h-40 overflow-auto pr-1">
+              {(m.activity_history ?? []).slice(0, 12).map((a, i) => <li key={i} className="text-gray-700"><span className="text-gray-400 tabular-nums">{fmtDate(a.at, { time: true, tz })}</span> {a.direction === 'inbound' ? '←' : '→'} {a.type}{a.channel ? ` (${a.channel})` : ''}{a.outcome ? ` [${a.outcome}]` : ''}{a.body ? `: ${a.body}` : ''}</li>)}
+              {!(m.activity_history ?? []).length && <li className="text-gray-400">No activity logged yet</li>}
+            </ul>
+          </div>
+          </div>
+        </div>
       )}
-    </>
+    </li>
   );
 }
 
@@ -92,7 +139,7 @@ function AttentionPanel({ groups, onFix }: { groups: AttentionGroup[]; onFix: (d
   const shown = tab === 'all' ? groups.filter((g) => g.rows.length > 0) : groups.filter((g) => g.key === tab);
   const tabCls = (on: boolean, onCls: string) => cn('flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors', on ? onCls : 'border-transparent text-gray-600 hover:bg-gray-100');
   return (
-    <div className="rounded-lg border border-gray-200 bg-white flex flex-col min-h-0 max-lg:max-h-[80vh]">
+    <div className="rounded-lg border border-gray-200 bg-white flex flex-col min-h-0 max-lg:max-h-[80vh] lg:absolute lg:inset-0">
       <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-1 flex-wrap">
         <span className="text-xs font-semibold uppercase tracking-wide text-gray-600 mr-auto">Needs attention</span>
         <button className={tabCls(tab === 'all', 'bg-gray-100 text-gray-900 border-gray-300')} onClick={() => setTab('all')}>All <span className="tabular-nums font-bold">{total}</span></button>
@@ -193,18 +240,17 @@ export default function StandupPage() {
       </div>
 
       {/* Meetings + attention */}
-      <div className="grid lg:grid-cols-[3fr_2fr] gap-3 lg:h-[78vh] lg:min-h-[620px]">
-        <div className="flex flex-col gap-3 min-h-0 max-lg:h-[80vh]">
-          <Card title={`Today's meetings (${s.meetings_today.length})`} dense className="min-h-0 max-h-[50%] shrink-0">
+      {/* The meetings card takes its full height (every meeting visible, the section grows with them); Next steps fills the rest; Needs attention is pinned to the row height so its long lists scroll instead of stretching the row. */}
+      <div className="grid lg:grid-cols-[3fr_2fr] gap-3 lg:min-h-[78vh]">
+        <div className="flex flex-col gap-3 min-h-0">
+          <Card title={`Today's meetings (${s.meetings_today.length})`} dense className="shrink-0">
             <div className="overflow-auto h-full">
               {s.meetings_today.length === 0 ? <EmptyState compact title="No meetings today" description="Book one from a company page." /> : (
-                <table className="min-w-full text-sm">
-                  <tbody>{s.meetings_today.map((m) => <MeetingRow key={m.meeting_id} m={m} tz={timezone} />)}</tbody>
-                </table>
+                <ul>{s.meetings_today.map((m) => <MeetingRow key={m.meeting_id} m={m} tz={timezone} />)}</ul>
               )}
             </div>
           </Card>
-          <Card title={`Next steps due (${due.length})`} dense className="min-h-0 flex-1"
+          <Card title={`Next steps due (${due.length})`} dense className="grow shrink-0 basis-[280px] max-lg:basis-auto max-lg:max-h-[60vh]"
             actions={<div className="flex items-center gap-0.5">{dueTabs.map((t) => <button key={t.key} onClick={() => setDueTab(t.key)} title={t.hint} className={cn('flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-medium transition-colors', dueTab === t.key ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'border-transparent text-gray-600 hover:bg-gray-100')}>{t.label} <span className="tabular-nums font-bold">{t.rows.length}</span></button>)}</div>}>
             <div className="overflow-auto h-full">
               {due.length === 0 ? <div className="px-3 py-3 text-sm text-gray-400">No next steps due {dueTab === 'today' ? (s.date === todayISO() ? 'today' : `on ${fmtDate(s.date)}`) : dueTab === 'week' ? 'in the rest of this week' : 'next week'}.</div> : (
@@ -225,14 +271,14 @@ export default function StandupPage() {
             </div>
           </Card>
         </div>
-        <AttentionPanel
+        <div className="lg:relative"><AttentionPanel
           onFix={setFix}
           groups={[
             { key: 'stuck', label: 'Stuck', hint: 'no next step', tone: 'amber', rows: s.attention.stuck, render: (d) => `${d.days_in_stage}d in stage · missing ${d.missing}` },
             { key: 'stale', label: 'Stale', hint: `${s.attention.stale_after_days}d without activity`, tone: 'red', rows: s.attention.stale, render: (d) => `last activity ${d.last_activity_at ? daysAgo(d.last_activity_at) : 'never'} · ${fmtMoney(d.value_monthly, d.currency)}` },
             { key: 'slipping', label: 'Slipping', hint: 'next step overdue', tone: 'pink', rows: s.attention.slipping, render: (d) => <><span className="font-medium text-pink-700">{d.days_late}d late</span> · {d.next_step} <span className="text-gray-400">({fmtDate(d.next_step_date)})</span></> },
           ]}
-        />
+        /></div>
       </div>
 
       {/* Commitments */}

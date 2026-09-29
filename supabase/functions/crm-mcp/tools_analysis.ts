@@ -41,7 +41,7 @@ export function registerAnalysis(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "company_brief", title: "Company brief", cls: "read",
-    description: "Everything known about one company (by id, domain or name): profile + notes, contacts, deals with full stage history, every meeting with its capture, the whole activity timeline, all pain points/tags, objections, commercials discussed, open next steps, linked delivery projects. Clean enough to feed a proposal or deck.",
+    description: "Everything known about one company (by id, domain or name): profile + notes + about (description, industry), contacts (each with their about: summary, past orgs), deals with full stage history, every meeting with its capture, the whole activity timeline, all pain points/tags, objections, commercials discussed, open next steps, linked delivery projects. Clean enough to feed a proposal or deck.",
     input: { company: companyRef },
   }, async (a) => {
     const r = await rpc<Row>(ctx, "company_brief", { p_company: a.company });
@@ -62,20 +62,20 @@ export function registerAnalysis(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "companies_list", title: "List companies", cls: "read",
-    description: "Companies with their ICP segment, source channel, open-deal count and last activity. Filter by segment/channel/country; paginated.",
+    description: "Companies with their ICP segment, source channel, industry + short description (from the about profile), open-deal count and last activity. Filter by segment/channel/country; paginated.",
     input: { icp_segment: lookupRef("ICP segment"), source_channel: lookupRef("Source channel"), country: z.string().optional(), q: z.string().optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).optional() },
   }, async (a) => {
     const c = ctx.crm;
     const segId = a.icp_segment ? c.icp_segments.find((s) => s.id === a.icp_segment || s.slug === a.icp_segment || s.label.toLowerCase() === a.icp_segment!.toLowerCase())?.id : undefined;
     const chId = a.source_channel ? c.source_channels.find((s) => s.id === a.source_channel || s.slug === a.source_channel || s.label.toLowerCase() === a.source_channel!.toLowerCase())?.id : undefined;
-    let q = ctx.user.from("crm_companies").select("id, name, domain, country, timezone, notes, created_at, crm_icp_segments(label), crm_source_channels(label), crm_deals(id, stage, value_monthly, currency, last_activity_at)").order("name").range(a.offset ?? 0, (a.offset ?? 0) + (a.limit ?? 50) - 1);
+    let q = ctx.user.from("crm_companies").select("id, name, domain, country, timezone, notes, about, created_at, crm_icp_segments(label), crm_source_channels(label), crm_deals(id, stage, value_monthly, currency, last_activity_at)").order("name").range(a.offset ?? 0, (a.offset ?? 0) + (a.limit ?? 50) - 1);
     if (segId) q = q.eq("icp_segment_id", segId);
     if (chId) q = q.eq("source_channel_id", chId);
     if (a.country) q = q.ilike("country", `%${a.country}%`);
     if (a.q) q = q.or(`name.ilike.%${a.q}%,domain.ilike.%${a.q}%`);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
-    return { count: (data ?? []).length, companies: (data ?? []).map((x: Row) => ({ company_id: x.id, name: x.name, domain: x.domain, country: x.country, icp_segment: x.crm_icp_segments?.label, source_channel: x.crm_source_channels?.label, open_deals: (x.crm_deals ?? []).filter((d: Row) => !["won", "lost"].includes(d.stage)).map((d: Row) => `${d.stage} ${money(d.value_monthly, d.currency)}`), last_activity_at: (x.crm_deals ?? []).map((d: Row) => d.last_activity_at).filter(Boolean).sort().pop() })) };
+    return { count: (data ?? []).length, companies: (data ?? []).map((x: Row) => ({ company_id: x.id, name: x.name, domain: x.domain, country: x.country, industry: x.about?.company_industry, description: x.about?.description, icp_segment: x.crm_icp_segments?.label, source_channel: x.crm_source_channels?.label, open_deals: (x.crm_deals ?? []).filter((d: Row) => !["won", "lost"].includes(d.stage)).map((d: Row) => `${d.stage} ${money(d.value_monthly, d.currency)}`), last_activity_at: (x.crm_deals ?? []).map((d: Row) => d.last_activity_at).filter(Boolean).sort().pop() })) };
   });
 
   // ---------------------------------------------------------------- settings / lookups (Settings screen parity)

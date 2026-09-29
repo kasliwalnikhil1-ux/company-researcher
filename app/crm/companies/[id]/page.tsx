@@ -11,6 +11,8 @@ import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, Nex
 import { TranscriptModal, fmtDuration, type TranscriptTab } from '@/components/crm/transcript';
 import { RecordingModal, UploadRecordingButton } from '@/components/crm/recording';
 import { DraftEmailButtons } from '@/components/crm/draft-email';
+import { CompanyAboutBlock, IndustryBadge } from '@/components/crm/about';
+import { ContactCard } from '@/components/crm/contact-card';
 import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, GraduationCap, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -60,8 +62,10 @@ export default function CompanyPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600 mt-1">
             {c.domain && <span>{c.domain}</span>}{c.country && <span>· {c.country}</span>}{c.timezone && <span>· {c.timezone}</span>}
+            <IndustryBadge industry={c.about?.company_industry} />
             <Badge tone="indigo">{c.icp_segment ?? 'unsegmented'}</Badge><Badge tone="gray">via {c.source_channel ?? '?'}</Badge>
           </div>
+          <CompanyAboutBlock about={c.about} className="mt-1.5 max-w-3xl" />
           {c.notes && <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap max-w-3xl bg-amber-50/60 border border-amber-100 rounded-md px-3 py-2">{c.notes}</p>}
         </div>
         <div className="flex items-center gap-2">
@@ -76,13 +80,7 @@ export default function CompanyPage() {
             <ul className="divide-y divide-gray-100">
               {contacts.length === 0 && <li className="px-3 py-3 text-sm text-gray-400">No contacts yet.</li>}
               {contacts.map((ct) => (
-                <li key={ct.id} className="px-3 py-2 text-sm flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-gray-900">{ct.name} {ct.is_primary && <Badge tone="green">primary</Badge>}</div>
-                    <div className="text-xs text-gray-500">{[ct.role, ct.email, ct.phone, ct.timezone].filter(Boolean).join(' · ')}{ct.linkedin_url && <> · <a className="text-indigo-600 hover:underline" href={ct.linkedin_url} target="_blank" rel="noreferrer">LinkedIn</a></>}</div>
-                  </div>
-                  <Button size="xs" variant="ghost" onClick={() => setContactModal({ open: true, contact: ct })}><Pencil className="w-3 h-3" /></Button>
-                </li>
+                <li key={ct.id}><ContactCard contact={ct} onEdit={() => setContactModal({ open: true, contact: ct })} /></li>
               ))}
             </ul>
           </Card>

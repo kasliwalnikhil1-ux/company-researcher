@@ -118,10 +118,18 @@ create table if not exists crm_companies (
   icp_segment_id     uuid references crm_icp_segments(id),
   source_channel_id  uuid references crm_source_channels(id),
   notes              text,
+  about              jsonb,                               -- optional research profile, see below
   created_by         uuid references crm_members(user_id),
   created_at         timestamptz not null default now(),
   updated_at         timestamptz not null default now()
 );
+-- `about` = what we know about the company, as a JSON object. Display-only (nothing filters on it).
+-- Known keys: description (precise, < 10 words), company_industry (< 4 words: jewelry, skincare, SaaS, AI, creator, agency…).
+-- Any other key is kept and shown as-is.
+alter table crm_companies add column if not exists about jsonb;
+do $$ begin
+  alter table crm_companies add constraint crm_companies_about_object check (about is null or jsonb_typeof(about) = 'object');
+exception when duplicate_object then null; end $$;
 create unique index if not exists crm_companies_domain_uq on crm_companies (domain) where domain is not null;
 create index if not exists crm_companies_name_idx on crm_companies (lower(name));
 
@@ -135,10 +143,17 @@ create table if not exists crm_contacts (
   linkedin_url  text,
   timezone      text,
   notes         text,
+  about         jsonb,                                  -- optional research profile, see below
   is_primary    boolean not null default false,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
+-- `about` = what we know about the person, as a JSON object. Display-only (nothing filters on it).
+-- Known keys: summary (who they are, 1–3 sentences), past_orgs ([{org, role?, years?}] or plain strings). Any other key is kept and shown as-is.
+alter table crm_contacts add column if not exists about jsonb;
+do $$ begin
+  alter table crm_contacts add constraint crm_contacts_about_object check (about is null or jsonb_typeof(about) = 'object');
+exception when duplicate_object then null; end $$;
 create index if not exists crm_contacts_company_idx on crm_contacts (company_id);
 create unique index if not exists crm_contacts_email_uq on crm_contacts (lower(email)) where email is not null;
 

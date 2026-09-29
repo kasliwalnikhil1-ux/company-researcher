@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "capitalxai-crm",
-  "version": "2026.9.28",
+  "version": "2026.9.29",
   "description": "The studio's sales CRM: read the daily standup, capture a meeting from a few words or its recording, coach every call, and answer pipeline questions.",
   "author": {
     "name": "GrowthxAI",
