@@ -21,6 +21,9 @@ const FN = "outreach-webchat";
 const API_VERSION = "1.0.0";
 const REALTIME_URL = SUPABASE_URL.replace(/^http/, "ws") + "/realtime/v1/websocket";
 const TURNSTILE_SECRET = Deno.env.get("OUTREACH_TURNSTILE_SECRET") ?? "";
+// One platform secret pairs with one Cloudflare widget, so its site key is the default for every inbox that sets none.
+const TURNSTILE_SITE_KEY = Deno.env.get("OUTREACH_TURNSTILE_SITE_KEY") ?? "";
+const TURNSTILE_ACTION = "webchat_start";   // the widget renders with this action; siteverify echoes it
 const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]);
 const BLOCKED_EXT = /\.(exe|msi|bat|cmd|com|scr|ps1|sh|js|jar|vbs|dll|apk|dmg|pkg|deb|rpm|html?|svg)$/i;
 
@@ -78,14 +81,20 @@ function sse(event: string, data: unknown): Uint8Array {
   return new TextEncoder().encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
+/** Effective Turnstile site key for an inbox (its own, else the platform's). */
+function turnstileSiteKey(inbox: Inbox): string { return String(inbox.settings?.security?.turnstile_site_key ?? "") || TURNSTILE_SITE_KEY; }
+/** The check is enforced only when the widget can actually run it: toggle on, a site key to render, a secret to verify. */
+function turnstileRequired(inbox: Inbox): boolean { return !!inbox.settings?.security?.turnstile_enabled && !!TURNSTILE_SECRET && !!turnstileSiteKey(inbox); }
+
 async function verifyTurnstile(token: string | undefined, ip: string): Promise<boolean> {
-  if (!TURNSTILE_SECRET) return true;   // not configured on the platform → cannot enforce
-  if (!token) return false;
+  if (!token || typeof token !== "string" || token.length > 2048) return false;
   try {
-    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ secret: TURNSTILE_SECRET, response: token, remoteip: ip }) });
+    const r = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ secret: TURNSTILE_SECRET, response: token, remoteip: ip }), signal: AbortSignal.timeout(8000) });
     const j = await r.json();
-    return !!j?.success;
-  } catch { return false; }
+    if (!j?.success) { log({ fn: FN, warn: "turnstile rejected", codes: j?.["error-codes"] ?? [] }); return false; }
+    if (j.action && j.action !== TURNSTILE_ACTION) return false;   // minted for something other than starting a chat
+    return true;
+  } catch (e) { log({ fn: FN, warn: "turnstile siteverify failed", error: String((e as any)?.message ?? e) }); return false; }
 }
 
 function safeName(n: string): string { return String(n ?? "file").replace(/[^\w.\-]+/g, "_").slice(0, 120); }
@@ -115,6 +124,11 @@ serve(FN, async (req) => {
     if (origin && origin !== WEB_ORIGIN) rpc("webchat_public_install_seen", { p_inbox: inbox.id, p_origin: origin }).catch(() => {});
     const full = cfg?.ok ? cfg : await rpc<any>("webchat_public_config", { p_token: inbox.website_token, p_origin: WEB_ORIGIN });
     delete full.hmac_token;
+    // Turnstile: fill in the platform site key, and never tell the widget to challenge visitors this server cannot verify.
+    if (full.security && typeof full.security === "object") {
+      full.security.turnstile_site_key = turnstileSiteKey(inbox) || null;
+      full.security.turnstile_enabled = turnstileRequired(inbox);
+    }
     return json({ ...full, api_version: API_VERSION, realtime: { url: REALTIME_URL, anon_key: ANON_KEY } }, 200, { "cache-control": "public, max-age=300", vary: "Origin" });
   }
 
@@ -198,7 +212,7 @@ serve(FN, async (req) => {
   if (m === "POST" && path === "/conversations") {
     const b = await readJson<any>(req);
     await rateLimit(`webchat:cs:${vid}`, 10, 600);
-    if (inbox.settings?.security?.turnstile_enabled && !(await verifyTurnstile(b.turnstile_token, clientIp(req)))) throw new HttpError(403, "E_TURNSTILE", "verification failed");
+    if (turnstileRequired(inbox) && !(await verifyTurnstile(b.turnstile_token, clientIp(req)))) throw new HttpError(403, "E_TURNSTILE", "verification failed");
     const r = await rpc<any>("webchat_v_conversation_start", { p_inbox: inbox.id, p_visitor: vid, p_form: b.form ?? null, p_source: ["launcher", "popup", "campaign", "sdk", "standalone", "email"].includes(b.source) ? b.source : "launcher", p_page: b.page ?? null });
     return json(r);
   }

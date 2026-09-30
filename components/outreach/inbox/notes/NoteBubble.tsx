@@ -3,7 +3,8 @@
 // A private note in the conversation timeline (private-notes-PRD.md §5): amber card, 🔒 label, author, time, Visible to
 // client tag, mention chips, attachments, Seen by, edit / delete / make task / copy link / visibility menu, deleted
 // placeholder, revision history for the author and managers. System / AI notes get a grey tint.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Lock, MoreHorizontal, Pencil, Trash2, CheckSquare, Link2, Eye, EyeOff, History, Paperclip, Download, Bot, Cog, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Chat, Member } from '@/lib/outreach/types';
@@ -94,7 +95,23 @@ export default function NoteBubble(p: NoteBubbleProps) {
   const noAccess = useMemo(() => new Set(note.mentions.filter((m) => !m.access).map((m) => m.user_id)), [note.mentions]);
   const seen = note.mentions.filter((m) => m.read_at);
   const unseen = note.mentions.filter((m) => !m.read_at && m.access);
-  useEffect(() => { if (!menu) return; const close = () => setMenu(false); window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close); }, [menu]);
+  // The menu is portalled with fixed positioning so the timeline's scroll container can't clip it; it opens upward
+  // when the note sits near the bottom of the viewport, and closes on scroll / resize instead of drifting.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ right: number; top?: number; bottom?: number } | null>(null);
+  const openMenu = () => {
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const right = window.innerWidth - r.right;
+    setMenuPos(window.innerHeight - r.bottom < 260 && r.top > window.innerHeight - r.bottom ? { right, bottom: window.innerHeight - r.top + 4 } : { right, top: r.bottom + 4 });
+    setMenu(true);
+  };
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(false);
+    window.addEventListener('keydown', close); window.addEventListener('resize', close); window.addEventListener('scroll', close, true);
+    return () => { window.removeEventListener('keydown', close); window.removeEventListener('resize', close); window.removeEventListener('scroll', close, true); };
+  }, [menu]);
 
   const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); try { await fn(); } catch (e) { p.onError((e as Error)?.message ?? 'Something went wrong'); } finally { setBusy(null); } };
   const copyLink = async () => {
@@ -144,13 +161,13 @@ export default function NoteBubble(p: NoteBubbleProps) {
         <span className="flex-1" />
         {(canEdit || canDelete || canChangeVisibility || canSeeHistory || !system) && (
           <div className="relative">
-            <button type="button" onClick={() => setMenu((o) => !o)} className={cn('p-1 rounded text-gray-500 hover:bg-amber-100 hover:text-gray-800', menu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100')} aria-label="Note actions" aria-haspopup="menu" aria-expanded={menu}>
+            <button ref={triggerRef} type="button" onClick={() => (menu ? setMenu(false) : openMenu())} className={cn('p-1 rounded text-gray-500 hover:bg-amber-100 hover:text-gray-800', menu ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100')} aria-label="Note actions" aria-haspopup="menu" aria-expanded={menu}>
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <MoreHorizontal className="w-4 h-4" />}
             </button>
-            {menu && (
+            {menu && menuPos && typeof document !== 'undefined' && createPortal(
               <>
-                <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-                <div role="menu" className="absolute right-0 z-30 mt-1 min-w-[190px] bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
+                <div className="fixed inset-0 z-[60]" onClick={() => setMenu(false)} />
+                <div role="menu" style={{ position: 'fixed', ...menuPos }} className="z-[70] min-w-[190px] bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
                   {canEdit && <button type="button" role="menuitem" onClick={() => { setMenu(false); setEditing(true); }} className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"><Pencil className="w-4 h-4 text-gray-400" /> Edit</button>}
                   {chat.lead_id && <button type="button" role="menuitem" onClick={() => { setMenu(false); p.onMakeTask(note); }} className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"><CheckSquare className="w-4 h-4 text-gray-400" /> Make task</button>}
                   <button type="button" role="menuitem" onClick={() => { setMenu(false); void copyLink(); }} className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"><Link2 className="w-4 h-4 text-gray-400" /> Copy link</button>
@@ -162,7 +179,8 @@ export default function NoteBubble(p: NoteBubbleProps) {
                   {canSeeHistory && <button type="button" role="menuitem" onClick={() => { setMenu(false); setHistory(true); }} className="w-full text-left px-3 py-1.5 hover:bg-gray-50 flex items-center gap-2 text-gray-700"><History className="w-4 h-4 text-gray-400" /> Edit history ({note.revisions})</button>}
                   {canDelete && <button type="button" role="menuitem" onClick={() => { setMenu(false); if (window.confirm('Delete this note? Teammates will see that it was deleted.')) void run('del', () => p.onDelete(note.id)); }} className="w-full text-left px-3 py-1.5 hover:bg-red-50 flex items-center gap-2 text-red-700"><Trash2 className="w-4 h-4" /> Delete</button>}
                 </div>
-              </>
+              </>,
+              document.body,
             )}
           </div>
         )}

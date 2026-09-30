@@ -259,11 +259,11 @@ export const HMAC_SAMPLES: Array<{ label: string; code: (secret: string) => stri
   { label: 'Go', code: (s) => `mac := hmac.New(sha256.New, []byte("${s}"))\nmac.Write([]byte(userID))\nhash := hex.EncodeToString(mac.Sum(nil))` },
 ];
 
-export const CSP_NOTES = (apiHost: string, appOrigin: string) => [
-  `script-src ${appOrigin}`,
+export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false) => [
+  `script-src ${appOrigin}${turnstile ? ' https://challenges.cloudflare.com' : ''}`,
   `connect-src ${apiHost} ${apiHost.replace(/^http/, 'ws')}`,
   `img-src ${apiHost} data:`,
-  `frame-src: none needed (the widget uses Shadow DOM, not an iframe)`,
+  turnstile ? `frame-src https://challenges.cloudflare.com  (Turnstile runs its check in an iframe)` : `frame-src: none needed (the widget uses Shadow DOM, not an iframe)`,
   `style-src: no change needed (styles are constructed stylesheets inside the Shadow root)`,
 ];
 

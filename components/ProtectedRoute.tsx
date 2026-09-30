@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarCheck, ExternalLink, ShieldOff } from 'lucide-react';
 import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
@@ -15,8 +15,6 @@ function Spinner() {
   );
 }
 
-const CALENDLY_SCRIPT = 'https://assets.calendly.com/assets/external/widget.js';
-
 /** Calendly URL with the person's details prefilled and the GDPR banner off (the app already has its own notice). */
 function calendlyUrl(email: string | null, name: string | null): string {
   const u = new URL(ONBOARDING_CALENDLY_URL);
@@ -28,43 +26,41 @@ function calendlyUrl(email: string | null, name: string | null): string {
   return u.toString();
 }
 
+/** What Calendly's widget script would build: the same page framed inline, tagged with the embedding host. */
+function calendlyEmbedUrl(url: string): string {
+  const u = new URL(url);
+  u.searchParams.set('embed_domain', typeof window === 'undefined' ? '' : window.location.host);
+  u.searchParams.set('embed_type', 'Inline');
+  return u.toString();
+}
+
+/** Is a postMessage from the framed Calendly page? */
+function fromCalendly(origin: unknown): boolean {
+  if (typeof origin !== 'string') return false;
+  try { return /(^|\.)calendly\.com$/.test(new URL(origin).hostname); } catch { return false; }
+}
+
 /**
- * The embedded onboarding-call calendar. Loads Calendly's widget script once, listens for the "event scheduled"
- * message so the booking is recorded on the person's lead row, and falls back to a plain link if the embed never renders.
+ * The embedded onboarding-call calendar. Frames the Calendly page directly (no third-party widget script, which ad
+ * blockers often stop), listens for the "event scheduled" message so the booking is recorded on the person's lead row,
+ * and falls back to a plain link if the frame never reports in.
  */
 function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: string | null; onBooked: (booking: { event: string | null; invitee: string | null }) => void }) {
   const url = calendlyUrl(email, name);
   const [booked, setBooked] = useState(false);
   const [failed, setFailed] = useState(false);
-  const container = useRef<HTMLDivElement>(null);
+  const heard = useRef(false);
   const onBookedRef = useRef(onBooked);
   useEffect(() => { onBookedRef.current = onBooked; }, [onBooked]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${CALENDLY_SCRIPT}"]`);
-    const init = () => {
-      const w = window as unknown as { Calendly?: { initInlineWidget: (o: { url: string; parentElement: HTMLElement }) => void } };
-      if (cancelled || !container.current || !w.Calendly) return;
-      container.current.innerHTML = '';
-      w.Calendly.initInlineWidget({ url, parentElement: container.current });
-    };
-    if (existing) {
-      if ((window as unknown as { Calendly?: unknown }).Calendly) init();
-      else existing.addEventListener('load', init, { once: true });
-    } else {
-      const s = document.createElement('script');
-      s.src = CALENDLY_SCRIPT;
-      s.async = true;
-      s.onload = init;
-      s.onerror = () => { if (!cancelled) setFailed(true); };
-      document.head.appendChild(s);
-    }
-    // if nothing has rendered after a while (blocked script, offline) show the link instead
-    const t = setTimeout(() => { if (!cancelled && container.current && !container.current.querySelector('iframe')) setFailed(true); }, 8000);
+  // the frame src carries the page host; the gate only renders in the browser, after sign-in resolves
+  const embedSrc = useMemo(() => (typeof window === 'undefined' ? null : calendlyEmbedUrl(url)), [url]);
 
+  useEffect(() => {
+    heard.current = false;
     const onMessage = (e: MessageEvent) => {
-      if (typeof e.origin !== 'string' || !/\.calendly\.com$/.test(new URL(e.origin).hostname)) return;
+      if (!fromCalendly(e.origin)) return;
+      heard.current = true;
       const d = e.data as { event?: string; payload?: { event?: { uri?: string }; invitee?: { uri?: string } } } | undefined;
       if (d?.event === 'calendly.event_scheduled') {
         setBooked(true);
@@ -72,7 +68,9 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
       }
     };
     window.addEventListener('message', onMessage);
-    return () => { cancelled = true; clearTimeout(t); window.removeEventListener('message', onMessage); };
+    // the framed page posts its height as soon as it renders; if nothing arrives (blocked frame, offline) show the link instead
+    const t = setTimeout(() => { if (!heard.current) setFailed(true); }, 15000);
+    return () => { clearTimeout(t); window.removeEventListener('message', onMessage); };
   }, [url]);
 
   return (
@@ -91,7 +89,19 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
           </a>
         </div>
       ) : (
-        <div ref={container} className="calendly-inline-widget rounded-xl overflow-hidden border border-gray-200 bg-white" style={{ minWidth: 320, height: 660 }} />
+        <>
+          <div className="rounded-xl overflow-hidden border border-gray-200 bg-white" style={{ minWidth: 320, height: 660 }}>
+            {embedSrc && (
+              <iframe src={embedSrc} title="Book your onboarding call" className="w-full h-full border-0" allow="payment" />
+            )}
+          </div>
+          <p className="mt-2 text-xs text-gray-400 text-right">
+            Calendar not showing?{' '}
+            <a href={url} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-indigo-600 hover:underline">
+              Open it in a new tab <ExternalLink className="w-3 h-3" />
+            </a>
+          </p>
+        </>
       )}
     </div>
   );

@@ -12,7 +12,7 @@
 
   // ---------------------------------------------------------------- i18n --------------------------------------------
   var STR = {
-    en: { chat: "Chat with us", close: "Close", send: "Send", placeholder: "Type a message…", start: "Start a conversation", cont: "Continue conversation", newconv: "New conversation", prev: "Previous conversations", online: "We're online", offline: "We're away at the moment", minutes: "Typically replies in a few minutes", hours: "Typically replies in a few hours", day: "Typically replies in a day", back_at: "We're away — back {when}", tomorrow: "tomorrow", soon: "We'll reply as soon as we can", ai: "AI", you: "You", talk: "Talk to a person", sources: "Sources", helpful: "Helpful", nothelpful: "Not helpful", thanks: "Thanks for your feedback", retry: "Retry", failed: "Not sent", sent: "Sent", read: "Read", typing: "{name} is typing…", closed: "This conversation is closed — start a new one", end: "End conversation", ended: "Conversation ended", rate: "How was this conversation?", comment: "Tell us more (optional)", submit: "Submit", rated: "Thanks for your rating", email_ph: "you@example.com", name_ph: "Your name", phone_ph: "+1 555 0100", required: "Required", invalid_email: "Enter a valid email", invalid_phone: "Enter a valid phone number", transcript: "Email me this conversation", transcript_sent: "Transcript sent", transcript_email: "Where should we send it?", sound_on: "Sound on", sound_off: "Sound off", popout: "Open in a new window", attach: "Attach a file", emoji: "Add an emoji", too_large: "File too large (max {mb} MB)", bad_type: "This file type is not allowed", limit: "Messages can be up to 5,000 characters", rate_limited: "You're sending too fast — try again in a moment", error: "Something went wrong. Please try again.", offline_q: "You're offline — we'll send this when you're back", today: "Today", yesterday: "Yesterday", powered: "Powered by", brand: "GrowthxAI", back: "Back", menu: "Menu", ai_note: "Answers by AI assistant. Ask for a person any time.", handoff: "Connecting you with a person…", copy: "Copy", copied: "Copied", download: "Download", consent_err: "Please accept to continue", campaign_reply: "Reply", closepanel: "Close chat", team: "Team" },
+    en: { chat: "Chat with us", close: "Close", send: "Send", placeholder: "Type a message…", start: "Start a conversation", cont: "Continue conversation", newconv: "New conversation", prev: "Previous conversations", online: "We're online", offline: "We're away at the moment", minutes: "Typically replies in a few minutes", hours: "Typically replies in a few hours", day: "Typically replies in a day", back_at: "We're away — back {when}", tomorrow: "tomorrow", soon: "We'll reply as soon as we can", ai: "AI", you: "You", talk: "Talk to a person", sources: "Sources", helpful: "Helpful", nothelpful: "Not helpful", thanks: "Thanks for your feedback", retry: "Retry", failed: "Not sent", sent: "Sent", read: "Read", typing: "{name} is typing…", closed: "This conversation is closed — start a new one", end: "End conversation", ended: "Conversation ended", rate: "How was this conversation?", comment: "Tell us more (optional)", submit: "Submit", rated: "Thanks for your rating", email_ph: "you@example.com", name_ph: "Your name", phone_ph: "+1 555 0100", required: "Required", invalid_email: "Enter a valid email", invalid_phone: "Enter a valid phone number", transcript: "Email me this conversation", transcript_sent: "Transcript sent", transcript_email: "Where should we send it?", sound_on: "Sound on", sound_off: "Sound off", popout: "Open in a new window", attach: "Attach a file", emoji: "Add an emoji", too_large: "File too large (max {mb} MB)", bad_type: "This file type is not allowed", limit: "Messages can be up to 5,000 characters", rate_limited: "You're sending too fast — try again in a moment", verify_failed: "We couldn't confirm you're not a robot. Please try again.", error: "Something went wrong. Please try again.", offline_q: "You're offline — we'll send this when you're back", today: "Today", yesterday: "Yesterday", powered: "Powered by", brand: "GrowthxAI", back: "Back", menu: "Menu", ai_note: "Answers by AI assistant. Ask for a person any time.", handoff: "Connecting you with a person…", copy: "Copy", copied: "Copied", download: "Download", consent_err: "Please accept to continue", campaign_reply: "Reply", closepanel: "Close chat", team: "Team" },
     hi: { chat: "हमसे चैट करें", send: "भेजें", placeholder: "संदेश लिखें…", start: "बातचीत शुरू करें", cont: "बातचीत जारी रखें", newconv: "नई बातचीत", prev: "पिछली बातचीत", online: "हम ऑनलाइन हैं", offline: "हम अभी उपलब्ध नहीं हैं", minutes: "आमतौर पर कुछ मिनटों में जवाब", hours: "आमतौर पर कुछ घंटों में जवाब", day: "आमतौर पर एक दिन में जवाब", back_at: "हम बाहर हैं — {when} वापस", tomorrow: "कल", soon: "हम जल्द ही जवाब देंगे", you: "आप", talk: "किसी व्यक्ति से बात करें", sources: "स्रोत", helpful: "उपयोगी", nothelpful: "उपयोगी नहीं", thanks: "आपकी प्रतिक्रिया के लिए धन्यवाद", retry: "फिर कोशिश करें", failed: "नहीं भेजा गया", closed: "यह बातचीत बंद है — नई शुरू करें", end: "बातचीत समाप्त करें", rate: "यह बातचीत कैसी रही?", comment: "और बताएं (वैकल्पिक)", submit: "भेजें", rated: "रेटिंग के लिए धन्यवाद", required: "आवश्यक", invalid_email: "सही ईमेल दर्ज करें", transcript: "यह बातचीत ईमेल करें", error: "कुछ गलत हो गया। फिर कोशिश करें।", today: "आज", yesterday: "कल", handoff: "आपको एक व्यक्ति से जोड़ रहे हैं…", back: "वापस" },
     es: { chat: "Chatea con nosotros", send: "Enviar", placeholder: "Escribe un mensaje…", start: "Iniciar conversación", cont: "Continuar conversación", newconv: "Nueva conversación", prev: "Conversaciones anteriores", online: "Estamos en línea", offline: "No estamos disponibles ahora", minutes: "Suele responder en unos minutos", hours: "Suele responder en unas horas", day: "Suele responder en un día", back_at: "Volvemos {when}", tomorrow: "mañana", soon: "Responderemos lo antes posible", you: "Tú", talk: "Hablar con una persona", sources: "Fuentes", helpful: "Útil", nothelpful: "No útil", thanks: "Gracias por tu opinión", retry: "Reintentar", failed: "No enviado", closed: "Esta conversación está cerrada — inicia una nueva", end: "Terminar conversación", rate: "¿Cómo fue esta conversación?", comment: "Cuéntanos más (opcional)", submit: "Enviar", rated: "Gracias por tu valoración", required: "Obligatorio", invalid_email: "Introduce un email válido", transcript: "Enviarme esta conversación", error: "Algo salió mal. Inténtalo de nuevo.", today: "Hoy", yesterday: "Ayer", handoff: "Conectándote con una persona…", back: "Atrás" },
     fr: { chat: "Discutez avec nous", send: "Envoyer", placeholder: "Écrivez un message…", start: "Démarrer une conversation", cont: "Continuer la conversation", newconv: "Nouvelle conversation", prev: "Conversations précédentes", online: "Nous sommes en ligne", offline: "Nous sommes absents", minutes: "Répond généralement en quelques minutes", hours: "Répond généralement en quelques heures", day: "Répond généralement en un jour", back_at: "De retour {when}", tomorrow: "demain", soon: "Nous répondrons dès que possible", you: "Vous", talk: "Parler à une personne", sources: "Sources", helpful: "Utile", nothelpful: "Pas utile", thanks: "Merci pour votre retour", retry: "Réessayer", failed: "Non envoyé", closed: "Cette conversation est fermée — commencez-en une nouvelle", end: "Terminer la conversation", rate: "Comment s'est passée cette conversation ?", comment: "Dites-nous en plus (facultatif)", submit: "Envoyer", rated: "Merci pour votre note", required: "Obligatoire", invalid_email: "Entrez un e-mail valide", transcript: "M'envoyer cette conversation", error: "Une erreur est survenue. Réessayez.", today: "Aujourd'hui", yesterday: "Hier", handoff: "Mise en relation avec une personne…", back: "Retour" },
@@ -370,8 +370,13 @@
         return createConversation(null, S.pendingSource).then(function () { if (firstText) sendText(firstText); });
       }).catch(showErr);
     }
+    function postConversation(form, source, retried) {
+      var body = { form: form, source: source || "launcher", page: { url: location.href, title: doc.title, campaign_message: S.campaignMsg || null, campaign_id: S.campaignId || null } };
+      return turnstileToken().then(function (tt) { if (tt) body.turnstile_token = tt; return api("POST", "/conversations", body); })
+        .catch(function (e) { if (e && e.code === "E_TURNSTILE" && !retried) return postConversation(form, source, true); throw e; });   // a token is single-use and expires: one fresh try
+    }
     function createConversation(form, source) {
-      return api("POST", "/conversations", { form: form, source: source || "launcher", page: { url: location.href, title: doc.title, campaign_message: S.campaignMsg || null, campaign_id: S.campaignId || null } }).then(function (r) {
+      return postConversation(form, source).then(function (r) {
         S.campaignMsg = null; S.campaignId = null;
         if (r.visitor) S.visitor = r.visitor;
         var c = r.conversation; S.convs = [c].concat(S.convs.filter(function (x) { return x.id !== c.id; }));
@@ -489,7 +494,7 @@
     function submitCsat(rating, comment) { api("POST", "/conversations/" + S.conv.id + "/csat", { rating: rating, comment: comment }).then(function (r) { S.conv = Object.assign(S.conv, r.conversation); sdk.emit("csat:submitted", { rating: rating }); renderMessages(false); }).catch(showErr); }
     function lightbox(u) { var d = el("div", "light", '<img src="' + esc(u) + '" alt="">'); d.addEventListener("click", function () { d.remove(); }); root.appendChild(d); }
     function toast(t) { var d = el("div", "toast", esc(t)); ui.panel.appendChild(d); setTimeout(function () { d.remove(); }, 1800); }
-    function showErr(e) { var code = e && e.code; toast(code === "E_RATE_LIMITED" ? T("rate_limited") : code === "E_TOO_LARGE" ? T("too_large", { mb: 10 }) : code === "E_TYPE_BLOCKED" ? T("bad_type") : T("error")); sdk.emit("error", { code: code, message: e && e.message }); }
+    function showErr(e) { var code = e && e.code; toast(code === "E_RATE_LIMITED" ? T("rate_limited") : code === "E_TURNSTILE" ? T("verify_failed") : code === "E_TOO_LARGE" ? T("too_large", { mb: 10 }) : code === "E_TYPE_BLOCKED" ? T("bad_type") : T("error")); sdk.emit("error", { code: code, message: e && e.message }); }
 
     // ---------------------------------------------------------------- composer --------------------------------------
     function composerDisabled() {
@@ -528,6 +533,51 @@
       S.files.push(f); renderFiles(); var b = ui.cp.querySelector("[data-c=send]"); if (b) b.disabled = false;
     }
     function renderFiles() { var w = ui.cp.querySelector(".files"); if (!w) return; w.innerHTML = S.files.map(function (f, i) { return "<span>" + esc(f.name) + '<button type="button" data-rm="' + i + '" aria-label="' + esc(T("close")) + '">×</button></span>'; }).join(""); w.querySelectorAll("[data-rm]").forEach(function (b) { b.addEventListener("click", function () { S.files.splice(+b.getAttribute("data-rm"), 1); renderFiles(); }); }); }
+
+    // ---------------------------------------------------------------- Turnstile (PRD §7: bot check before the first message)
+    // Cloudflare's script is loaded only when the inbox has it on, and the box renders into a light-DOM host (Turnstile
+    // does not render inside a closed shadow root) with appearance "interaction-only": nothing shows unless Cloudflare
+    // needs a click, then the box appears over the composer. Tokens are single-use and expire after 5 minutes, so one
+    // is fetched right before each conversation start and sent as `turnstile_token`; the server verifies it.
+    var ts = { load: null, wait: null, id: null, host: null };
+    function turnstileOn() { var sec = S.eff.security || {}; return !!(sec.turnstile_enabled && sec.turnstile_site_key); }
+    function turnstileScript() {
+      if (win.turnstile) return Promise.resolve(win.turnstile);
+      if (ts.load) return ts.load;
+      ts.load = new Promise(function (res, rej) {
+        var s = doc.querySelector('script[src^="https://challenges.cloudflare.com/turnstile/"]');
+        if (!s) { s = doc.createElement("script"); s.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"; s.async = true; s.defer = true; (doc.head || doc.documentElement).appendChild(s); }
+        s.addEventListener("load", function () { if (win.turnstile) res(win.turnstile); else rej(new Error("turnstile")); });
+        s.addEventListener("error", function () { ts.load = null; rej(new Error("turnstile")); });
+      });
+      return ts.load;
+    }
+    function turnstileHost(show) {
+      if (!ts.host) { ts.host = el("div"); ts.host.setAttribute("data-growthxai", "turnstile"); ts.host.style.cssText = "position:fixed;z-index:2147483001;opacity:0;pointer-events:none;transition:opacity .15s"; (doc.body || doc.documentElement).appendChild(ts.host); }
+      if (show && ui.panel) { var r = ui.panel.getBoundingClientRect(); ts.host.style.left = Math.max(8, r.left + 16) + "px"; ts.host.style.top = Math.max(8, r.bottom - 150) + "px"; }
+      ts.host.style.opacity = show ? "1" : "0"; ts.host.style.pointerEvents = show ? "auto" : "none";
+      return ts.host;
+    }
+    function codeErr(code) { var e = new Error(code); e.code = code; return e; }
+    function turnstileToken() {
+      if (!turnstileOn()) return Promise.resolve(null);
+      if (ts.wait) return ts.wait;
+      ts.wait = turnstileScript().then(function (tsl) {
+        return new Promise(function (res, rej) {
+          var host = turnstileHost(false), timer = setTimeout(function () { finish(); rej(codeErr("E_TURNSTILE")); }, 120000);
+          function finish() { clearTimeout(timer); ts.wait = null; turnstileHost(false); }
+          try { if (ts.id != null) tsl.remove(ts.id); } catch (e) {}
+          ts.id = null; host.innerHTML = "";
+          ts.id = tsl.render(host, { sitekey: S.eff.security.turnstile_site_key, action: "webchat_start", appearance: "interaction-only", theme: isDark() ? "dark" : "light", size: "normal",
+            callback: function (token) { finish(); res(token); },
+            "error-callback": function () { finish(); rej(codeErr("E_TURNSTILE")); return true; },
+            "timeout-callback": function () { finish(); rej(codeErr("E_TURNSTILE")); },
+            "before-interactive-callback": function () { turnstileHost(true); },
+            "after-interactive-callback": function () { turnstileHost(false); } });
+        });
+      }).catch(function () { ts.wait = null; turnstileHost(false); throw codeErr("E_TURNSTILE"); });
+      return ts.wait;
+    }
 
     // ---------------------------------------------------------------- sending ---------------------------------------
     function sendText(text) {

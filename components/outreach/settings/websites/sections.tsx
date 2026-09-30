@@ -494,8 +494,8 @@ export function SecuritySection(p: SectionProps) {
         </div>
         <div className="divide-y divide-gray-100 mt-2">
           <SettingRow title="Allow .zip attachments" control={<Switch checked={draft.sec.attachments.allow_zip} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, attachments: { ...d.sec.attachments, allow_zip: v } } }))} label="Allow zip" disabled={!p.canEdit} />} />
-          <SettingRow title="Cloudflare Turnstile on the first message" description="Needs the platform Turnstile secret; the site key goes below." control={<Switch checked={draft.sec.turnstile_enabled} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_enabled: v } }))} label="Turnstile" disabled={!p.canEdit} />} />
-          {draft.sec.turnstile_enabled && <div className="py-2"><Label>Turnstile site key</Label><input className={field} value={draft.sec.turnstile_site_key ?? ''} disabled={!p.canEdit} onChange={(e) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_site_key: e.target.value || null } }))} /></div>}
+          <SettingRow title="Cloudflare Turnstile on the first message" description="Cloudflare's mostly invisible bot check runs before a conversation starts. Leave the site key blank to use the platform's widget; if your site sets a CSP, see Installation." control={<Switch checked={draft.sec.turnstile_enabled} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_enabled: v } }))} label="Turnstile" disabled={!p.canEdit} />} />
+          {draft.sec.turnstile_enabled && <div className="py-2"><Label hint="optional">Turnstile site key</Label><input className={field} placeholder="Platform widget key" value={draft.sec.turnstile_site_key ?? ''} disabled={!p.canEdit} onChange={(e) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_site_key: e.target.value || null } }))} /></div>}
           <SettingRow title="Wait for cookie consent" description="Nothing is stored until your site calls growthxai.consent(true)." control={<Switch checked={draft.sec.consent_mode} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, consent_mode: v } }))} label="Consent mode" disabled={!p.canEdit} />} />
           <SettingRow title="Allow localhost" description="For local development and the demo page." control={<Switch checked={draft.sec.allow_localhost} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, allow_localhost: v } }))} label="Allow localhost" disabled={!p.canEdit} />} />
         </div>
@@ -533,7 +533,7 @@ export function InstallSection(p: SectionProps) {
       </Card>
       <Card title="Content-Security-Policy">
         <p className="text-xs text-gray-500 mb-2">If your site sets a CSP, allow:</p>
-        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin).join('\n')}</pre>
+        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled).join('\n')}</pre>
       </Card>
       <Card title="SDK">
         <p className="text-xs text-gray-500">Global <code>window.growthxai</code> (alias <code>window.kaptured</code>), ready event <code>growthxai:ready</code>.</p>

@@ -38,7 +38,13 @@ Deviations from the PRD, all deliberate:
 3. Deploy: `bash scripts/outreach-deploy-functions.sh webchat webchat-worker send-reply process-inbound mcp` (`OUTREACH_DEPLOY_EXTRA_ARGS="--use-api"` when Docker is off). `outreach-webchat` must stay `--no-verify-jwt` (the script does that).
 4. `bash scripts/outreach-sql.sh migrations/outreach/052_webchat_cron.sql`.
 5. Deploy the Next.js app (widget files are static under `/widget/v1/`).
-6. Optional secrets: `OUTREACH_WEBCHAT_TOKEN_KEY` (32+ random bytes; rotating it logs every visitor out), `OUTREACH_TURNSTILE_SECRET` (enables the Turnstile toggle). Both match `scripts/outreach-set-secrets.sh`'s allowlist (`OUTREACH_` prefix).
+6. Optional secrets (all match `scripts/outreach-set-secrets.sh`'s allowlist, `OUTREACH_` prefix): `OUTREACH_WEBCHAT_TOKEN_KEY` (32+ random bytes; rotating it logs every visitor out — set 2026-09-30), `OUTREACH_TURNSTILE_SECRET` + `OUTREACH_TURNSTILE_SITE_KEY` (one Cloudflare Turnstile widget for the platform, both set 2026-09-30; the widget's hostname list must contain every customer domain that turns the toggle on — the free plan caps it, so a customer with many domains sets their own site key in Security).
+
+## Turnstile (bot check before the first message)
+
+- Off by default per inbox (Security → "Cloudflare Turnstile on the first message"). `/config` reports `security.turnstile_enabled` as **true only when the server can verify** (secret set + a site key), so a half-configured platform never challenges visitors it cannot check; `turnstile_site_key` falls back to the platform key.
+- Widget (`chat.js` → `turnstileToken()`): loads `challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` on demand, renders into a light-DOM host (`data-growthxai="turnstile"`; Turnstile does not render inside the closed shadow root) with `appearance: "interaction-only"`, `action: "webchat_start"`. Nothing is visible unless Cloudflare needs a click; then the box appears over the composer (`before/after-interactive-callback`). A token is fetched per conversation start (`POST /conversations` body `turnstile_token`) — tokens are single-use and expire after 5 minutes — and one fresh retry follows an `E_TURNSTILE` reply.
+- Server (`outreach-webchat` → `verifyTurnstile`): siteverify with `remoteip`, 8 s timeout, `action` must be `webchat_start`; failures are logged with Cloudflare's `error-codes`. Customer CSP additions: `script-src` + `frame-src https://challenges.cloudflare.com` (Installation card shows them once the toggle is on).
 
 ## Testing locally
 
