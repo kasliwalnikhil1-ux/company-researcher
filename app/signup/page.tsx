@@ -142,10 +142,10 @@ export default function Signup() {
           <div className="absolute bottom-0 right-0 w-80 h-80 rounded-full bg-white translate-x-1/2 translate-y-1/2" />
         </div>
         <div className="relative">
-          <div className="flex items-center gap-2">
+          <a href={whitelabel.homeUrl} className="flex w-fit items-center gap-2">
             <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={32} height={32} className="h-8 w-auto" />
             <span className="text-xl font-semibold tracking-tight">{whitelabel.pageTitle}</span>
-          </div>
+          </a>
         </div>
         <div className="relative space-y-4 max-w-sm">
           <h1 className="text-3xl font-medium leading-tight whitespace-pre-line">
@@ -180,10 +180,10 @@ export default function Signup() {
       <div className="flex-1 flex items-center justify-center py-12 px-6 sm:px-8 lg:px-12">
         <div className="w-full max-w-[400px]">
           {/* Mobile logo */}
-          <div className="flex items-center gap-2 mb-8 lg:hidden">
+          <a href={whitelabel.homeUrl} className="flex w-fit items-center gap-2 mb-8 lg:hidden">
             <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={28} height={28} className="h-7 w-auto" />
             <span className="text-lg font-semibold text-gray-900 tracking-tight">{whitelabel.pageTitle}</span>
-          </div>
+          </a>
 
           <h2 className="text-2xl font-medium text-gray-900 mb-1">Create an account</h2>
           <p className="text-gray-500 text-sm mb-2">{whitelabel.signupSubtitle}</p>
