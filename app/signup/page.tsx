@@ -3,11 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth, SIGNUP_USER_EXISTS_MESSAGE } from '@/contexts/AuthContext';
 import { Check } from 'lucide-react';
 import { useWhitelabel } from '@/hooks/useWhitelabel';
 import { LegalLinks } from '@/components/LegalLinks';
 import { PasswordInput } from '@/components/ui/PasswordInput';
+import { popPendingOAuthConsent } from '@/lib/oauthConsent';
 
 const CHAR_SPEED_MS = 45;
 const INITIAL_DELAY_MS = 220;
@@ -29,9 +31,17 @@ export default function Signup() {
   const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cursorRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { signUp, signInWithGoogle } = useAuth();
+  const { user, signUp, signInWithGoogle } = useAuth();
   const whitelabel = useWhitelabel();
   const headlineWords = whitelabel.authHeadlineWords;
+  const router = useRouter();
+
+  // Already signed in: there is nothing to do here, go where a fresh sign-in would go
+  // (a pending OAuth consent, else home; the home route sends a 2FA account to its challenge).
+  useEffect(() => {
+    if (!user) return;
+    router.replace(popPendingOAuthConsent() ?? '/');
+  }, [user, router]);
 
   // Cursor blink
   useEffect(() => {
@@ -119,6 +129,9 @@ export default function Signup() {
       setIsLoading(false);
     }
   };
+
+  // Signed in: the effect above is leaving this page; do not flash the form.
+  if (user) return <div className="min-h-screen bg-secondary-default" />;
 
   return (
     <div className="min-h-screen flex bg-secondary-default">

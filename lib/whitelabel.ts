@@ -26,6 +26,8 @@ export interface WhitelabelConfig {
   sidebarTitle: string;
   /** Title shown on login / signup / reset-password pages (e.g. "CapitalxAI CRM") */
   pageTitle: string;
+  /** Where the logo + title in the login / signup / reset-password headers link to (opens in the same tab) */
+  homeUrl: string;
   /** Company name used in copyright lines */
   companyName: string;
   /** Folder name inside public/ that holds brand assets (logo, favicon, og image).
@@ -83,6 +85,7 @@ export const DEFAULT_CONFIG: WhitelabelConfig = {
   product: 'capitalxai',
   sidebarTitle: 'CapitalxAI',
   pageTitle: 'CapitalxAI CRM',
+  homeUrl: 'https://capitalxai.com',
   companyName: 'ResourcePlan Solution Private Limited',
   assetsFolder: '', // assets live at public/ root
   showCopyright: true,
@@ -114,6 +117,7 @@ const GROWTHXAI: Partial<WhitelabelConfig> = {
   product: 'growthxai',
   sidebarTitle: 'GrowthxAI',
   pageTitle: 'GrowthxAI Outreach',
+  homeUrl: 'https://growthxai.com',
   companyName: 'ResourcePlan Solution Private Limited',
   assetsFolder: '', // same logo and favicons as CapitalxAI; only the link-preview images differ
   ogImage: '/growthxai/og-image.png',

@@ -33,11 +33,18 @@ export default function Login() {
   const typewriterRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cursorRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const { signIn, signUp, resetPassword, signInWithGoogle } = useAuth();
+  const { user, signIn, signUp, resetPassword, signInWithGoogle } = useAuth();
   const whitelabel = useWhitelabel();
   const headlineWords = whitelabel.authHeadlineWords;
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // Already signed in: there is nothing to do here, go where a fresh sign-in would go
+  // (a pending OAuth consent, else home; the home route sends a 2FA account to its challenge).
+  useEffect(() => {
+    if (!user) return;
+    router.replace(popPendingOAuthConsent() ?? '/');
+  }, [user, router]);
 
   // Cursor blink
   useEffect(() => {
@@ -164,6 +171,9 @@ export default function Login() {
       setIsLoading(false);
     }
   };
+
+  // Signed in: the effect above is leaving this page; do not flash the form.
+  if (user) return <div className="min-h-screen bg-secondary-default" />;
 
   return (
     <div className="min-h-screen flex bg-secondary-default">
