@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
 import { CalendarCheck, ExternalLink, ShieldOff } from 'lucide-react';
 import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
@@ -49,6 +49,8 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
   const url = calendlyUrl(email, name);
   const [booked, setBooked] = useState(false);
   const [failed, setFailed] = useState(false);
+  // the framed page's own height (it posts calendly.page_height as it renders and grows), so nothing scrolls inside the frame
+  const [pageHeight, setPageHeight] = useState<number | null>(null);
   const heard = useRef(false);
   const onBookedRef = useRef(onBooked);
   useEffect(() => { onBookedRef.current = onBooked; }, [onBooked]);
@@ -61,8 +63,11 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
     const onMessage = (e: MessageEvent) => {
       if (!fromCalendly(e.origin)) return;
       heard.current = true;
-      const d = e.data as { event?: string; payload?: { event?: { uri?: string }; invitee?: { uri?: string } } } | undefined;
-      if (d?.event === 'calendly.event_scheduled') {
+      const d = e.data as { event?: string; payload?: { height?: string; event?: { uri?: string }; invitee?: { uri?: string } } } | undefined;
+      if (d?.event === 'calendly.page_height') {
+        const h = parseInt(d.payload?.height ?? '', 10);
+        if (Number.isFinite(h) && h > 100) setPageHeight(h);
+      } else if (d?.event === 'calendly.event_scheduled') {
         setBooked(true);
         onBookedRef.current({ event: d.payload?.event?.uri ?? null, invitee: d.payload?.invitee?.uri ?? null });
       }
@@ -90,9 +95,17 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
         </div>
       ) : (
         <>
-          {/* the frame sits flush in the card, wide enough for Calendly's two-column layout (details left, dates right) */}
+          {/*
+            Phones: the frame is the page, full width, as tall as Calendly says (no inner scroll).
+            Desktop: Calendly's card is 800px wide, centred, 66px from the top of a 1100px-wide frame. The frame is
+            rendered at that width and the wrapper crops the frame's own margins so the card sits flush in ours.
+          */}
           {embedSrc && (
-            <iframe src={embedSrc} title="Book your onboarding call" className="block w-full border-0" style={{ minWidth: 320, height: 720 }} allow="payment" />
+            <div className="overflow-hidden h-[calc(var(--ph)-40px)] lg:h-[calc(var(--ph)-90px)]" style={{ '--ph': `${pageHeight ?? 720}px` } as CSSProperties}>
+              <iframe src={embedSrc} title="Book your onboarding call" allow="payment"
+                className="block border-0 w-full lg:w-[1100px] lg:ml-[calc(50%-550px)] lg:-mt-[50px]"
+                style={{ minWidth: 320, height: pageHeight ?? 720 }} />
+            </div>
           )}
           <p className="px-6 sm:px-8 pt-2 text-xs text-gray-400 text-right">
             Calendar not showing?{' '}
@@ -135,15 +148,16 @@ function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | '
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 px-4 py-8 sm:py-12">
-      <div className="mx-auto w-full max-w-6xl bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+    <div className="min-h-screen bg-white lg:bg-gray-50 lg:px-4 lg:py-12">
+      {/* a card on desktop (sized to Calendly's 800px booking card plus padding); on phones the page itself, edge to edge */}
+      <div className="mx-auto w-full lg:max-w-[864px] bg-white lg:border lg:border-gray-200 lg:rounded-2xl lg:shadow-sm overflow-hidden">
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-6 sm:p-8 pb-4 sm:pb-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in</p>
             <h1 className="mt-1 text-2xl font-semibold text-gray-900">Book your 20-minute onboarding call</h1>
             <p className="mt-2 text-sm text-gray-600 max-w-2xl">
               Thanks for signing up. Every new account is set up on a short call: we connect your first sending accounts, build your first
-              sequence with you, setup your AI auto reply agent, and switch your workspace on. Pick a time that suits you below.
+              sequence with you, setup your AI auto reply agent, and switch your workspace on.
             </p>
             {email && <p className="mt-2 text-xs text-gray-400">Signed in as {email}</p>}
           </div>
