@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils';
 type KindTone = 'blue' | 'amber' | 'purple' | 'red' | 'green' | 'indigo' | 'gray';
 // Keyed by string so a task kind added to the database later still renders.
 export const TASK_KINDS = ['manual_node', 'follow_up', 'review_ai_draft', 'reconnect', 'call', 'reply_hold'] as const;
-export const TASK_KIND_LABEL: Record<string, string> = { manual_node: 'Manual step', follow_up: 'Follow-up', review_ai_draft: 'Review AI draft', reconnect: 'Reconnect sender', call: 'Call', reply_hold: 'Held after a reply' };
+export const TASK_KIND_LABEL: Record<string, string> = { manual_node: 'Manual step', follow_up: 'Follow-up', review_ai_draft: 'Review AI Personalization', reconnect: 'Reconnect sender', call: 'Call', reply_hold: 'Held after a reply' };
 export const TASK_KIND_TONE: Record<string, KindTone> = { manual_node: 'blue', follow_up: 'amber', review_ai_draft: 'purple', reconnect: 'red', call: 'green', reply_hold: 'indigo' };
 export function taskKindLabel(kind: string): string { return TASK_KIND_LABEL[kind] ?? kind.replace(/_/g, ' '); }
 export function taskKindTone(kind: string): KindTone { return TASK_KIND_TONE[kind] ?? 'gray'; }

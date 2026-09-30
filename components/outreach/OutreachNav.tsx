@@ -23,7 +23,7 @@ export const OUTREACH_NAV: NavItem[] = [
   { href: '/outreach/leads', label: 'Leads', icon: Users },
   { href: '/outreach/sequences', label: 'Sequences', icon: GitBranch },
   { href: '/outreach/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks_open' },
-  { href: '/outreach/ai-review', label: 'AI review', icon: Sparkles, badge: 'ai_review', writer: true },
+  { href: '/outreach/ai-review', label: 'AI Personalization', icon: Sparkles, badge: 'ai_review', writer: true },
   { href: '/outreach/reports', label: 'Reports', icon: BarChart3 },
   { href: '/outreach/clients', label: 'Clients', icon: Building2, manager: true },
   { href: '/outreach/billing', label: 'Billing', icon: CreditCard, owner: true },

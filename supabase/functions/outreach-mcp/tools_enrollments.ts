@@ -98,7 +98,7 @@ export function registerEnrollments(server: McpServer, ctx: Ctx): void {
     await admin.from("outreach_agent_previews").update({ committed_at: isoNow() }).eq("token", a.preview_token);
     return {
       enrolled: r?.enrolled ?? 0, skipped_active: r?.skipped_active ?? 0, skipped_suppressed: r?.skipped_suppressed ?? 0, skipped_replied: r?.skipped_replied ?? 0, skipped_other: r?.skipped_other ?? 0, waiting: r?.waiting ?? 0,
-      waiting_note: r?.waiting ? "`waiting` leads are enrolled but parked: their profile is being enriched, or their AI-written line waits for a person (ai_review_list). They start on their own afterwards." : undefined,
+      waiting_note: r?.waiting ? "`waiting` leads are enrolled but parked: their profile is being enriched, or their AI-written line waits to be approved (ai_review_list). They start on their own afterwards." : undefined,
       skipped_replied_note: r?.skipped_replied ? "These leads replied between the preview and now. The reply stop is lead-wide, so they were left out." : undefined,
       sequence_id: seq.id, sequence_status: seq.status, next: seq.status === "active" ? "Use why_not_sending(sequence_id) if nothing goes out within one working window." : "Activate with sequence_activate when ready.",
     };

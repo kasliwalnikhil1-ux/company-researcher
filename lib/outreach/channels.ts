@@ -15,7 +15,7 @@ export { CHANNEL_PROVIDERS, MAIL_PROVIDERS };
 // ---------------------------------------------------------------------------
 // Labels
 // ---------------------------------------------------------------------------
-export const CHANNEL_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'Email' };
+export const CHANNEL_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'Email', WEBCHAT: 'Website' };
 
 export function channelLabel(provider: Provider | string | null | undefined): string {
   if (!provider) return 'Unknown channel';
@@ -45,6 +45,7 @@ export function channelKey(provider: Provider | string | null | undefined): stri
 
 export function channelKeyLabel(key: string): string {
   if (key === 'email') return 'Email';
+  if (key === 'webchat') return 'Web chat';
   if (key === 'linkedin') return 'LinkedIn';
   if (key === 'instagram') return 'Instagram';
   if (key === 'whatsapp') return 'WhatsApp';

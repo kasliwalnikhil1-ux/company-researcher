@@ -38,7 +38,7 @@ export default function SettingsTab({ onOpenUser }: { onOpenUser: (id: string) =
         <div className="space-y-2">
           <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50/40">
             <input type="radio" className="mt-1" checked={mode === 'approval'} onChange={() => setModeEdit('approval')} />
-            <div><div className="text-sm font-medium text-gray-900">Approval required</div><div className="text-xs text-gray-500">The account is created but sees a “waiting for approval” screen until an admin approves it here. New sign-ups appear under Accounts → Pending.</div></div>
+            <div><div className="text-sm font-medium text-gray-900">Approval required</div><div className="text-xs text-gray-500">The account is created but sees a welcome screen with the onboarding-call calendar (Calendly) until an admin approves it here. New sign-ups appear under Accounts → Pending and under Leads.</div></div>
           </label>
           <label className="flex items-start gap-3 p-3 border rounded-lg cursor-pointer has-[:checked]:border-indigo-400 has-[:checked]:bg-indigo-50/40">
             <input type="radio" className="mt-1" checked={mode === 'open'} onChange={() => setModeEdit('open')} />

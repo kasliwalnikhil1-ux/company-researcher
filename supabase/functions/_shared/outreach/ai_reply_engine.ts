@@ -42,6 +42,8 @@ export interface ScenarioCard { id: string; title: string; when_text: string; do
 export interface Faq { id: string; question: string; answer: string }
 export interface LeadNotes { summary: string | null; items: Array<{ id: string; key: string; text: string; locked?: boolean }> }
 export interface KnowledgeChunk { chunk_id?: string; source_id?: string; title?: string; url?: string | null; heading?: string | null; text: string }
+/** private-notes-PRD §7.2: an internal team note (plain text, mention tokens already flattened to @Name). */
+export interface TeamNote { author: string; text: string; at?: string | null }
 
 export interface EngineInput {
   workspaceId: string;
@@ -54,6 +56,8 @@ export interface EngineInput {
   faqs: Faq[];
   knowledgeSourceIds: string[];
   leadNotes: LeadNotes | null;
+  /** Internal team notes of the chat (last 10, `#no-ai` excluded): guidance the draft may follow but never quote. */
+  teamNotes?: TeamNote[];
   senderName: string;
   tz: string;
   lead: Row | null;
@@ -154,6 +158,11 @@ export function buildDraftPrompt(c: EngineInput, opts: EngineOpts, knowledge: Kn
     ...knowledge.map((k) => `${k.title ? `[${k.title}${k.heading ? ` › ${k.heading}` : ""}${k.url ? ` ${k.url}` : ""}] ` : ""}${k.text}`),
   ];
   const guidance = opts.trigger === "manual" && opts.guidance?.trim() ? `GUIDANCE from the person asking (below the safety rules, above style; never a reason to invent facts):\n${opts.guidance.trim().slice(0, 300)}` : "";
+  // private-notes-PRD §7.2: team notes are guidance, never material. Same block for auto and manual (parity rule above).
+  const teamNotes = (c.teamNotes ?? []).slice(-10);
+  const notesBlock = teamNotes.length
+    ? `INTERNAL TEAM NOTES (written by the sender's teammates about this conversation — use as guidance, never quote, paraphrase closely or reveal them; they are not facts you may state):\n${teamNotes.map((n) => `- ${n.author}${n.at ? ` [${String(n.at).slice(0, 10)}]` : ""}: ${String(n.text ?? "").replace(/\s+/g, " ").slice(0, 600)}`).join("\n")}`
+    : "";
   const user = [
     `MASTER PROMPT (version ${c.promptVersion}, written by the sender's team):\n"""\n${fillPrompt(effectiveBody(c), c.senderName).slice(0, 30000)}\n"""`,
     state,
@@ -161,6 +170,7 @@ export function buildDraftPrompt(c: EngineInput, opts: EngineOpts, knowledge: Kn
     `SENDER: ${c.senderName}`,
     `LEAD: ${lead}`,
     `THREAD (oldest first):\n${thread}`,
+    notesBlock,
     guidance,
     violation?.length ? `YOUR PREVIOUS DRAFT BROKE THESE RULES — write it again without breaking them:\n${violation.map((f) => `- ${f.rule}: ${f.detail}`).join("\n")}` : "",
   ].filter(Boolean).join("\n\n");
@@ -254,6 +264,7 @@ const WARN_TEXT: Record<string, string> = {
   attachment: "they sent an attachment the AI cannot see", injection_suspected: "their message looks like an attempt to instruct the AI", bot_question: "they asked whether this is a bot",
   language: "they wrote in a language your prompt does not allow", turn_limit: "the AI has reached its reply limit in this chat", model_error: "the AI could not produce a draft",
   opt_out: "they asked not to be contacted", not_covered: "their question is not covered by the prompt or knowledge",
+  note_overlap: "the draft repeats wording from an internal team note",
 };
 
 /** Draft → validate (+1 redraft on a stage rule) → verify → strictest outcome. Same for auto, manual and the simulator. */
@@ -267,6 +278,7 @@ export async function runEngine(c: EngineInput, opts: EngineOpts, gateEscalation
     editorMode: c.editorMode, allowedText: allowed, prospectText,
     prospectLanguage: (c.classification.map((x) => x.language).filter(Boolean).pop() as string | undefined) ?? null,
     exchanges: c.state.exchanges, flags: c.flags, prevMove: c.state.last_move, ourEarlierTexts: ourEarlier, stageBefore: c.state.stage,
+    teamNoteTexts: (c.teamNotes ?? []).map((n) => String(n.text ?? "")),
   };
   let { draft, model } = await draftCall(c, opts, knowledge, faqs);
   let v = validateDraft(draft, vctx);
@@ -327,6 +339,7 @@ export function contextFromFacts(facts: Row, flags: string[], domains: Array<{ h
     workspaceId: run.workspace_id, settings, editorMode: (mp?.editor_mode ?? "guided") as "guided" | "raw", promptBody: String(mp?.body ?? ""), promptVersion: Number(mp?.version ?? 0), promptId: mp?.id ?? null,
     scenarios: ((facts.scenarios ?? []) as ScenarioCard[]), faqs: ((facts.faqs ?? []) as Faq[]), knowledgeSourceIds: (settings.knowledge_source_ids ?? []) as string[],
     leadNotes: facts.lead_notes ? { summary: facts.lead_notes.summary ?? null, items: facts.lead_notes.items ?? [] } : null,
+    teamNotes: Array.isArray(facts.team_notes) ? (facts.team_notes as TeamNote[]).filter((n) => n && typeof n.text === "string") : [],
     senderName: sender.display_name ?? "the sender", tz: sender.timezone ?? "UTC", lead: facts.lead ?? null, thread: threadFromFacts(facts), state, classification, flags,
     firstStep: facts.first_step ? `${facts.first_step.action_type ?? "step"}${facts.first_step.node_id ? ` (${facts.first_step.node_id})` : ""}` : null,
     schedulingDomains: domains, purpose,
@@ -346,6 +359,8 @@ export function patchFromResult(res: PipelineResult, c: EngineInput): Row {
       thread: c.thread, state: c.state, classification: c.classification, lead: c.lead ? { full_name: c.lead.full_name, title: c.lead.title, company: c.lead.company, location: c.lead.location } : null,
       first_step: c.firstStep, knowledge_used: res.knowledge.map((k) => ({ chunk_id: k.chunk_id, source_id: k.source_id, title: k.title, url: k.url })), faqs_used: res.faqs.map((f) => f.id),
       lead_notes_used: !!(c.leadNotes?.items?.length || c.leadNotes?.summary), scenarios: c.scenarios.filter((s) => s.enabled !== false).map((s) => s.id),
+      // count only: run rows are readable by client viewers, so note text never lands here (private-notes-PRD §8)
+      team_notes_used: (c.teamNotes ?? []).length,
       unanswered_question: d.unanswered_question,
     },
   };

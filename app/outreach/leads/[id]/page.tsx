@@ -17,6 +17,7 @@ import { LeadCustomFields } from '@/components/outreach/leads/detail/LeadCustomF
 import { LeadRelations } from '@/components/outreach/leads/detail/LeadRelations';
 import { LeadEnrollments } from '@/components/outreach/leads/detail/LeadEnrollments';
 import { LeadChats, LeadRecentActions, LeadTasks, LeadTimeline } from '@/components/outreach/leads/detail/LeadActivity';
+import LeadTeamNotes from '@/components/outreach/leads/detail/LeadTeamNotes';
 import { EnrichmentCard } from '@/components/outreach/leads/detail/EnrichmentCard';
 import { LeadIdentitiesCard } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
 import { LeadConsentCard } from '@/components/outreach/leads/detail/LeadConsentCard';
@@ -66,6 +67,7 @@ export default function LeadDetailPage() {
           <LeadEnrollments leadId={l.id} enrollments={enrollments} onEnroll={() => setEnrollOpen(true)} toast={toast.show} />
           <Card title="Next scheduled actions"><QueuedActions leadId={l.id} leadName={leadName(l)} toast={toast.show} /></Card>
           <LeadChats chats={chats} />
+          <LeadTeamNotes leadId={l.id} />
           <LeadTimeline leadId={l.id} />
           <LeadRecentActions leadId={l.id} actions={actions} />
         </div>

@@ -3,7 +3,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, BarChart3, Building2, Globe, Inbox, MessageSquare, Send } from 'lucide-react';
+import { ArrowLeft, BarChart3, Building2, Globe, Inbox, Loader2, MessageSquare, Send } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
@@ -189,7 +189,10 @@ function ClientViewerPage() {
 
       <Card className="overflow-hidden mt-6" title={<span className="flex items-center gap-2"><Inbox className="w-4 h-4" /> Conversations</span>} actions={<span className="text-xs text-gray-400">{fmtInt(chats.data?.length ?? 0)} threads</span>}>
         <div className="-m-5 grid grid-cols-1 md:grid-cols-[320px_1fr] min-h-[520px]">
-          <div className={cn('border-r border-gray-100 overflow-y-auto max-h-[70vh]', selected && 'hidden md:block')}>
+          <div
+            className={cn('border-r border-gray-100 overflow-y-auto max-h-[70vh]', selected && 'hidden md:block')}
+            onScroll={(e) => { const el = e.currentTarget; if (chats.hasNextPage && !chats.isFetchingNextPage && el.scrollHeight - el.scrollTop - el.clientHeight < 400) chats.fetchNextPage(); }}
+          >
             {chats.isLoading ? <Spinner /> : chats.isError ? <div className="p-4"><ErrorBox message={(chats.error as Error).message} /></div> : !chats.data?.length ? <EmptyState title="No conversations yet" description="Replies to this account’s senders appear here." /> : (
               <ul className="divide-y divide-gray-100">
                 {chats.data.map((ch) => (
@@ -204,6 +207,7 @@ function ClientViewerPage() {
                     </button>
                   </li>
                 ))}
+                {(chats.hasNextPage || chats.isFetchingNextPage) && <li className="py-3 flex items-center justify-center gap-2 text-xs text-gray-500" role="status" aria-live="polite"><Loader2 className="w-4 h-4 text-gray-400 animate-spin" aria-hidden="true" /><span>Loading more conversations…</span></li>}
               </ul>
             )}
           </div>

@@ -132,6 +132,13 @@ const REMEDIES: Record<string, string> = {
   E_UNKNOWN_CURRENCY: "Add the currency with set_fx_rate(currency, usd_per_unit) first; values are never stored without a currency.",
   E_LAST_MEMBER: "At least one active team member must remain.",
   E_STORAGE_NOT_CONFIGURED: "Call-audio storage is not set up on the server yet. Tell the user; transcripts and captures still work without it.",
+  E_CALENDAR_NOT_CONFIGURED: "Google Calendar is not set up on the server yet (an admin runs scripts/crm-set-calendar-secrets.sh with Desk's Google client file). Tell the user; the rest of the CRM works without it.",
+  E_CALENDAR_NOT_CONNECTED: "calendar_connect_link (hint: the user's email) → give the user the link + instructions → they paste back the address the browser lands on → calendar_connect_finish(address) → retry.",
+  E_CALENDAR_RECONNECT: "Google no longer accepts the saved sign-in for that account. calendar_connect_link with that email as hint → user pastes back the address → calendar_connect_finish → retry.",
+  E_CALENDAR_SCOPE: "The account was connected without 'view and edit events'. calendar_connect_link again (then calendar_connect_finish) and tell the user to allow every calendar permission.",
+  E_CALENDAR_READONLY: "That is a teammate's calendar: visible, not bookable. Book on one of the user's own accounts (calendar_accounts shows them).",
+  E_GOOGLE: "Google refused the request; report the message. Retry once if it looks transient.",
+  E_GOOGLE_NETWORK: "Google could not be reached; nothing was changed. Retry shortly.",
   E_INTERNAL: "Report the code and message to the user; do not retry blindly.",
 };
 

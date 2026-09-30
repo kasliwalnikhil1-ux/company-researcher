@@ -129,6 +129,7 @@ export function actionLabel(action: string): string {
     'outreach.workspace_created': 'Outreach workspace created', 'outreach.member_added': 'Added to workspace', 'outreach.member_updated': 'Workspace role changed',
     'outreach.member_removed': 'Removed from workspace', 'crm.member_added': 'Added to CRM team', 'crm.member_updated': 'CRM membership updated',
     'account.created': 'Account created', 'account.banned': 'Sign-in banned', 'account.unbanned': 'Ban lifted', 'account.recovery_link': 'Recovery link issued', 'account.deleted': 'Account deleted',
+    'lead.updated': 'Lead updated', 'lead.deleted': 'Lead deleted',
   };
   return map[action] ?? action;
 }

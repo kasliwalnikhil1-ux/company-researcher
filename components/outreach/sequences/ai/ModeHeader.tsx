@@ -38,7 +38,7 @@ export default function ModeHeader({ sequenceId, s, canEdit, notify }: {
       const applies = r.settings?.applies_to ?? s.open_conversations;
       notify(`${MODE_LABEL_V2[mode]} is on. Applies to the next reply in ${applies} open ${applies === 1 ? 'conversation' : 'conversations'}.`);
       const req = r.consent?.requested ?? [];
-      for (const x of req) notify(`${x.sender_name ?? 'The sender'}'s replies will be drafts until they approve AI replies (request sent).`);
+      for (const x of req) notify(`${x.sender_name ?? 'The sender'}'s replies will be drafts until they approve AI Auto Replies (request sent).`);
       const missing = req.filter((x) => x.link && !x.emailed).map((x) => ({ name: x.sender_name ?? 'Sender', link: x.link! }));
       if (missing.length) setLinks(missing);
     } catch (e) { notify(errText(e), 'error'); }
@@ -58,9 +58,9 @@ export default function ModeHeader({ sequenceId, s, canEdit, notify }: {
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <Sparkles className="w-4 h-4 text-indigo-600 flex-shrink-0" aria-hidden="true" />
-          <h2 className="text-lg font-semibold text-gray-900">AI replies</h2>
+          <h2 className="text-lg font-semibold text-gray-900">AI Auto Replies</h2>
         </div>
-        <div role="radiogroup" aria-label="AI replies mode" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+        <div role="radiogroup" aria-label="AI Auto Replies mode" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
           {MODES.map((m) => (
             <button key={m} type="button" role="radio" aria-checked={s.mode === m} disabled={!canEdit || set.isPending} onClick={() => pick(m)} title={MODE_HELP[m]}
               className={cn('px-3.5 py-1 text-sm rounded-md transition-colors', s.mode === m ? (m === 'autopilot' ? 'bg-green-600 text-white shadow-sm font-medium' : m === 'draft' ? 'bg-white text-gray-900 shadow-sm font-medium' : 'bg-white text-gray-700 shadow-sm font-medium') : 'text-gray-600 hover:text-gray-900', !canEdit && 'cursor-default')}>
@@ -86,7 +86,7 @@ export default function ModeHeader({ sequenceId, s, canEdit, notify }: {
       {notConsented.length > 0 && (
         <Note tone="amber">
           {notConsented.map((x) => (
-            <div key={x.sender_id}>{x.sender_name ?? 'A sender'}&rsquo;s replies will be drafts until they approve AI replies{x.consent === 'pending' ? ' (request sent)' : ''}.</div>
+            <div key={x.sender_id}>{x.sender_name ?? 'A sender'}&rsquo;s replies will be drafts until they approve AI Auto Replies{x.consent === 'pending' ? ' (request sent)' : ''}.</div>
           ))}
         </Note>
       )}

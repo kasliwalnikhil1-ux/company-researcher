@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { rpc, compact, parseError } from '@/lib/crm/api';
 import { useCrmInvalidate } from '@/lib/crm/queries';
+import { calendarApi, useCalendarAccounts } from '@/lib/crm/calendar';
 import { COMMIT_KEYS, stageRank, STAGE_LABELS, STAGES, type Contact, type DealStage, type Company } from '@/lib/crm/types';
 import { Button, Input, Select, Textarea, Modal, Field, ErrorBox, addDaysISO, todayISO } from './ui';
 import { CompanyAboutFields, ContactAboutFields, companyAboutDraft, companyAboutPatch, contactAboutDraft, contactAboutPatch } from './about';
@@ -127,22 +128,44 @@ export function ActivityModal({ companyId, contacts, dealId, open, onClose }: { 
 // ---------------------------------------------------------------- meeting
 export function MeetingModal({ dealId, contacts, defaultTz, open, onClose }: { dealId: string; contacts: Pick<Contact, 'id' | 'name' | 'timezone'>[]; defaultTz?: string | null; open: boolean; onClose: () => void }) {
   const { timezone } = useCrm();
-  const { write, busy, error } = useWrite();
-  const [f, setF] = useState({ contact_id: '', scheduled_at: '', timezone: '', duration_min: '30', attendees: '', notes: '' });
-  useEffect(() => { if (open) { const c = contacts[0]; setF({ contact_id: c?.id ?? '', scheduled_at: localNow(), timezone: c?.timezone ?? defaultTz ?? timezone, duration_min: '30', attendees: c?.name ?? '', notes: '' }); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { write, busy, error, setError } = useWrite();
+  const invalidate = useCrmInvalidate();
+  const accountsQ = useCalendarAccounts();
+  const myAccounts = (accountsQ.data?.accounts ?? []).filter((a) => a.mine && a.auth_state === 'ok');
+  const [f, setF] = useState({ contact_id: '', scheduled_at: '', timezone: '', duration_min: '30', attendees: '', notes: '', gcal: true, gcal_account: '' });
+  const [calBusy, setCalBusy] = useState(false);
+  const [calNote, setCalNote] = useState<string | null>(null);
+  useEffect(() => { if (open) { const c = contacts[0]; setCalNote(null); setF({ contact_id: c?.id ?? '', scheduled_at: localNow(), timezone: c?.timezone ?? defaultTz ?? timezone, duration_min: '30', attendees: c?.name ?? '', notes: '', gcal: true, gcal_account: '' }); } }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
-    const r = await write('schedule_meeting', { p: compact({ deal_id: dealId, contact_id: f.contact_id || undefined, scheduled_at: toISO(f.scheduled_at), timezone: f.timezone || undefined, duration_min: Number(f.duration_min) || 30, attendees: f.attendees.split(',').map((s) => s.trim()).filter(Boolean), notes: f.notes || undefined }) });
-    if (r) onClose();
+    const r = await write<{ id: string }>('schedule_meeting', { p: compact({ deal_id: dealId, contact_id: f.contact_id || undefined, scheduled_at: toISO(f.scheduled_at), timezone: f.timezone || undefined, duration_min: Number(f.duration_min) || 30, attendees: f.attendees.split(',').map((s) => s.trim()).filter(Boolean), notes: f.notes || undefined }) });
+    if (!r) return;
+    if (f.gcal && myAccounts.length > 0) {
+      // the CRM meeting is saved either way; the Google event (Meet link + invites) is best effort and reported
+      setCalBusy(true);
+      try { const g = await calendarApi.createForMeeting(r.id, { account: f.gcal_account || undefined }); await invalidate(); setCalNote(null); onClose(); return; void g; }
+      catch (e) { setCalNote(`Meeting saved, but the Google Calendar event was not created: ${parseError(e).message}. You can add it from Calendar later.`); setError(null); return; }
+      finally { setCalBusy(false); }
+    }
+    onClose();
   };
   return (
-    <Modal open={open} onClose={onClose} title="Schedule meeting" footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save} disabled={!f.scheduled_at}>Book</Button></>}>
+    <Modal open={open} onClose={onClose} title="Schedule meeting" footer={<><Button variant="secondary" onClick={onClose}>{calNote ? 'Close' : 'Cancel'}</Button>{!calNote && <Button loading={busy || calBusy} onClick={save} disabled={!f.scheduled_at}>Book</Button>}</>}>
       <div className="grid grid-cols-2 gap-3">
         <Input label="When (your local time)" type="datetime-local" value={f.scheduled_at} onChange={(e) => setF({ ...f, scheduled_at: e.target.value })} />
         <Field label="Prospect timezone"><input list="crm-tz" className="w-full px-2.5 py-1.5 text-sm rounded-md border border-gray-300" value={f.timezone} onChange={(e) => setF({ ...f, timezone: e.target.value })} /><datalist id="crm-tz">{TZ_OPTIONS.map((t) => <option key={t} value={t} />)}</datalist></Field>
         <Select label="Contact" value={f.contact_id} onChange={(e) => setF({ ...f, contact_id: e.target.value })}><option value="">—</option>{contacts.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
         <Input label="Duration (min)" type="number" value={f.duration_min} onChange={(e) => setF({ ...f, duration_min: e.target.value })} />
-        <div className="col-span-2"><Input label="Attendees (comma separated)" value={f.attendees} onChange={(e) => setF({ ...f, attendees: e.target.value })} /></div>
+        <div className="col-span-2"><Input label="Attendees (comma separated)" value={f.attendees} onChange={(e) => setF({ ...f, attendees: e.target.value })} hint="Email addresses here are invited to the Google Calendar event; the contact's email is invited automatically." /></div>
         <div className="col-span-2"><Textarea label="Agenda / notes" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
+        <div className="col-span-2 flex flex-wrap items-center gap-3 text-sm rounded-md border border-gray-200 bg-gray-50/60 px-2.5 py-2">
+          {myAccounts.length > 0 ? (
+            <>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={f.gcal} onChange={(e) => setF({ ...f, gcal: e.target.checked })} /> Also create the Google Calendar event (Meet link + invites)</label>
+              {f.gcal && myAccounts.length > 1 && <select className="px-2 py-1 text-sm rounded-md border border-gray-300" value={f.gcal_account} onChange={(e) => setF({ ...f, gcal_account: e.target.value })}><option value="">default account</option>{myAccounts.map((a) => <option key={a.id} value={a.id}>{a.email}{a.label ? ` (${a.label})` : ''}</option>)}</select>}
+            </>
+          ) : <span className="text-gray-500">No Google Calendar connected for you yet — connect one under Calendar to get a Meet link and invites when booking.</span>}
+        </div>
+        {calNote && <div className="col-span-2"><ErrorBox message={calNote} /></div>}
         {error && <div className="col-span-2"><ErrorBox message={error} /></div>}
       </div>
     </Modal>

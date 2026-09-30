@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { notePreview } from './notes/NoteBody';
+import { useChatNotes, useCreateNote, useDeleteNote, useMarkNoteRead, useUpdateNote, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import { useQueryClient } from '@tanstack/react-query';
 import { MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -9,13 +11,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
-import { qk, useChat, useChats, useClients, useMembers, useMessages, useSenders, useSequences, type ChatFilters } from '@/lib/outreach/queries';
+import { patchChatInLists, qk, useChat, useChats, useClients, useMembers, useMessages, useSenders, useSequences, type ChatFilters } from '@/lib/outreach/queries';
 import { CHAT_IDS_FETCH_LIMIT, useChatsByIds, useSequenceChatIds } from '@/lib/outreach/intel';
 import type { Chat, Intent, Message } from '@/lib/outreach/types';
 import { EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import ChatList from './ChatList';
 import Thread, { type ConvertKind } from './Thread';
 import LeadPanel from './LeadPanel';
+import VisitorPanel from './webchat/VisitorPanel';
 import { isTypingTarget, useDebounced, useMediaQuery } from './hooks';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { useStageOptions } from './ai/useAiInbox';
@@ -33,10 +36,20 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   const router = useRouter();
   const qc = useQueryClient();
   const { user } = useAuth();
-  const { workspace, canWrite, canReply, suspended } = useWorkspace();
+  const { workspace, canWrite, canReply, suspended, isManager, isClientViewer } = useWorkspace();
   const ws = workspace?.id ?? null;
   const toast = useToast();
   const userId = user?.id ?? null;
+  // Private notes: `?note=<id>` deep link (scroll + flash), `?view=mentions` opens the Mentions view of the list.
+  const params = useSearchParams();
+  const noteParam = params.get('note');
+  const [mentionsView, setMentionsView] = useState(params.get('view') === 'mentions');
+  const notesQ = useChatNotes(chatId);
+  const createNote = useCreateNote(ws ?? '');
+  const updateNote = useUpdateNote(ws ?? '');
+  const deleteNote = useDeleteNote(ws ?? '');
+  const markNoteRead = useMarkNoteRead(ws ?? '');
+  const [taskPrefill, setTaskPrefill] = useState<{ title: string; body: string; assigned_to: string | null } | null>(null);
 
   // URL params (e.g. from dashboard links) override the remembered filters.
   const { filters, patch: patchFilters, ready: filtersReady } = usePersistedFilters<InboxFilters>('inbox', ws, INBOX_FILTER_DEFAULTS, { overrides: initialFilters ?? null });
@@ -85,20 +98,26 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     return chatsQ.data?.filter((c) => allowed.has(c.id));
   }, [waitingForSeq, fetchByIds, restrictIds, chatsQ.data]);
   const listError = seqIdsQ.error ?? chatsQ.error;
-  const listNote = restrictIds && !fetchByIds && !waitingForSeq ? `This filter matches ${restrictIds.length.toLocaleString()} conversations. Showing the ones among the 300 most recent.` : null;
+  const listNote = restrictIds && !fetchByIds && !waitingForSeq ? `This filter matches ${restrictIds.length.toLocaleString()} conversations. Matching ones appear as the list loads.` : null;
+  // More rows load as the list is scrolled (the by-ids list is fetched whole, so it has no further pages).
+  const hasMore = !fetchByIds && !waitingForSeq && !!listQ.hasNextPage;
+  const loadingMore = !fetchByIds && listQ.isFetchingNextPage;
+  const loadMore = useCallback(() => { if (!fetchByIds && listQ.hasNextPage && !listQ.isFetchingNextPage) listQ.fetchNextPage(); }, [fetchByIds, listQ.hasNextPage, listQ.isFetchingNextPage, listQ.fetchNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
   const chat = chatQ.data ?? null;
 
   // Keep the drill-down in the URL while moving between threads.
   const restrictQs = useMemo(() => (restrict ? `?chats=${encodeURIComponent(restrict.ids.join(','))}&label=${encodeURIComponent(restrict.label)}` : ''), [restrictKey, restrict?.label]); // eslint-disable-line react-hooks/exhaustive-deps
-  const select = useCallback((id: string) => { router.replace(`/outreach/inbox/${id}${restrictQs}`); setPanelOpen(false); }, [router, restrictQs]);
-  const back = useCallback(() => router.replace(`/outreach/inbox${restrictQs}`), [router, restrictQs]);
+  const mentionsQs = mentionsView ? (restrictQs ? '&view=mentions' : '?view=mentions') : '';
+  const select = useCallback((id: string) => { router.replace(`/outreach/inbox/${id}${restrictQs}${mentionsQs}`); setPanelOpen(false); }, [router, restrictQs, mentionsQs]);
+  const selectMention = useCallback((id: string, noteId: string) => { router.replace(`/outreach/inbox/${id}?note=${noteId}&view=mentions`); setPanelOpen(false); }, [router]);
+  const back = useCallback(() => router.replace(`/outreach/inbox${restrictQs}${mentionsQs}`), [router, restrictQs, mentionsQs]);
   const clearRestrict = useCallback(() => router.replace(chatId ? `/outreach/inbox/${chatId}` : '/outreach/inbox'), [router, chatId]);
 
   // ---------------------------------------------------------------- chat mutations
   const updateChat = useCallback(async (id: string, patch: Partial<Chat>, silent = false) => {
     const listKey = ['outreach', ws ?? '', 'chats'] as const;
     qc.setQueryData(qk.chat(id), (old: any) => (old ? { ...old, ...patch } : old));
-    qc.setQueriesData<any[]>({ queryKey: listKey }, (old) => old?.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    patchChatInLists(qc, ws ?? '', id, patch);
     const { error } = await supabase.from('outreach_chats').update(patch).eq('id', id);
     if (error) {
       qc.invalidateQueries({ queryKey: qk.chat(id) });
@@ -173,7 +192,36 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   }, [chat, qc, toast]);
 
   const onConvert = useCallback((kind: ConvertKind) => { setConvert(kind); setPanelOpen(true); }, []);
-  const onActionHandled = useCallback(() => setConvert(null), []);
+  const onActionHandled = useCallback(() => { setConvert(null); setTaskPrefill(null); }, []);
+
+  // ---------------------------------------------------------------- private notes
+  const addNote = useCallback(async (body: string, visibility: NoteVisibility, attachments: NoteAttachment[]) => {
+    if (!chat) return;
+    const n = await createNote.mutateAsync({ chatId: chat.id, body, visibility, attachments });
+    const dropped = n.dropped_mentions?.filter((d) => d.reason !== 'self') ?? [];
+    if (dropped.length) toast.show(`${dropped.map((d) => d.name).join(', ')} ${dropped.length === 1 ? "can't" : "can't"} see this conversation — ${dropped.length === 1 ? 'they were' : 'they were'} not notified.`, 'error');
+    else if (n.mentions.length) toast.show(`Note added · ${n.mentions.map((m) => m.name).join(', ')} notified`);
+    else toast.show('Note added');
+  }, [chat, createNote, toast]);
+  const updateNoteFn = useCallback(async (noteId: string, patch: { body?: string; visibility?: NoteVisibility }) => {
+    if (!chat) return;
+    const n = await updateNote.mutateAsync({ noteId, chatId: chat.id, ...patch });
+    const dropped = n.dropped_mentions?.filter((d) => d.reason !== 'self') ?? [];
+    if (dropped.length) toast.show(`${dropped.map((d) => d.name).join(', ')} can't see this conversation — not notified.`, 'error');
+    else toast.show(patch.visibility && !patch.body ? (patch.visibility === 'team' ? 'Note hidden from the client' : 'Note visible to the client') : 'Note updated');
+  }, [chat, updateNote, toast]);
+  const deleteNoteFn = useCallback(async (noteId: string) => {
+    if (!chat) return;
+    await deleteNote.mutateAsync({ noteId, chatId: chat.id });
+    toast.show('Note deleted');
+  }, [chat, deleteNote, toast]);
+  const makeTaskFromNote = useCallback((n: ChatNote) => {
+    // PRD §5: the task form opens pre-filled with the note text, linked to the conversation, assigned to the first person mentioned
+    const text = notePreview(n.body, 2000);
+    setTaskPrefill({ title: text.slice(0, 120) || 'Follow up', body: text, assigned_to: n.mentions.find((m) => m.access)?.user_id ?? null });
+    setConvert('task'); setPanelOpen(true);
+  }, []);
+  const noteSeen = useCallback((noteId: string) => { markNoteRead.mutate({ noteId, chatId: chat?.id }); }, [markNoteRead, chat?.id]);
 
   // ---------------------------------------------------------------- keyboard: j/k/e/u
   useEffect(() => {
@@ -203,6 +251,8 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
           restrictLabel={restrict?.label ?? null} restrictCount={restrict?.ids.length ?? 0} onClearRestrict={clearRestrict} note={listNote}
           filters={filters} onFilters={patchFilters} search={search} onSearch={setSearch}
           senders={sendersQ.data} clients={clientsQ.data} currentUserId={userId} selectedId={chatId} onSelect={select} stages={stageOptions}
+          hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMore}
+          ws={ws} mentionsView={mentionsView} onMentionsView={(v) => { setMentionsView(v); router.replace(chatId ? `/outreach/inbox/${chatId}${v ? '?view=mentions' : ''}` : `/outreach/inbox${v ? '?view=mentions' : ''}`); }} onSelectMention={selectMention}
         />
       </aside>
 
@@ -237,6 +287,8 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
             onDeleteMessage={deleteMessage}
             onError={(m) => toast.show(m, 'error')}
             onNotice={(m) => toast.show(m)}
+            notes={notesQ.data} currentUserId={userId} isManager={isManager} isClientViewer={isClientViewer} highlightNoteId={noteParam}
+            onAddNote={addNote} onUpdateNote={updateNoteFn} onDeleteNote={deleteNoteFn} onMakeTaskFromNote={makeTaskFromNote} onNoteSeen={noteSeen}
           />
         )}
       </main>
@@ -246,14 +298,18 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
         <>
           {isXl && (
             <aside className="flex w-80 flex-shrink-0 border-l border-gray-200 min-h-0 flex-col">
-              <LeadPanel chat={chat} workspaceId={ws} canWrite={canWrite} members={membersQ.data} currentUserId={userId} requestedAction={convert} onActionHandled={onActionHandled} toast={toast.show} />
+              {chat.provider === 'WEBCHAT'
+                ? <VisitorPanel chat={chat} workspaceId={ws} canWrite={canWrite} isManager={isManager} members={membersQ.data} toast={toast.show} />
+                : <LeadPanel chat={chat} workspaceId={ws} canWrite={canWrite} members={membersQ.data} currentUserId={userId} requestedAction={convert} taskPrefill={taskPrefill} onActionHandled={onActionHandled} toast={toast.show} />}
             </aside>
           )}
           {!isXl && panelOpen && (
             <div className="fixed inset-0 z-40 flex justify-end">
               <div className="absolute inset-0 bg-black/30" onClick={() => setPanelOpen(false)} />
               <div className="relative w-full max-w-sm h-full bg-white shadow-xl flex flex-col">
-                <LeadPanel chat={chat} workspaceId={ws} canWrite={canWrite} members={membersQ.data} currentUserId={userId} requestedAction={convert} onActionHandled={onActionHandled} onClose={() => setPanelOpen(false)} toast={toast.show} />
+                {chat.provider === 'WEBCHAT'
+                  ? <VisitorPanel chat={chat} workspaceId={ws} canWrite={canWrite} isManager={isManager} members={membersQ.data} onClose={() => setPanelOpen(false)} toast={toast.show} />
+                  : <LeadPanel chat={chat} workspaceId={ws} canWrite={canWrite} members={membersQ.data} currentUserId={userId} requestedAction={convert} taskPrefill={taskPrefill} onActionHandled={onActionHandled} onClose={() => setPanelOpen(false)} toast={toast.show} />}
               </div>
             </div>
           )}

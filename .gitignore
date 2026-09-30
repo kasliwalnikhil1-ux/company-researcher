@@ -43,3 +43,6 @@ next-env.d.ts
 
 # Oracle Object Storage credentials (pushed to the edge function with scripts/crm-set-storage-secrets.sh)
 oracle-storage.env
+
+# Google Calendar web-client secrets for the CRM (scripts/crm-set-calendar-secrets.sh)
+google-calendar.env

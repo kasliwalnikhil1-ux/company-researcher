@@ -205,6 +205,8 @@ export interface ValidateCtx {
   prevMove: string | null;
   ourEarlierTexts: string[];
   stageBefore: string | null;
+  /** private-notes-PRD §7.2: internal team notes are guidance only — a draft must never repeat their wording */
+  teamNoteTexts?: string[];
 }
 export interface Failure { rule: string; detail: string; stage?: boolean }
 
@@ -226,12 +228,35 @@ export function countQuestions(text: string): number {
   return (unquoted.match(/\?/g) ?? []).length;
 }
 
+/** Words of a text for overlap checks: lower-case, letters and digits only. */
+function wordsOf(s: string): string[] {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().split(/\s+/).filter(Boolean);
+}
+
+/**
+ * private-notes-PRD §7.2: true when the draft repeats `n` (default 8) consecutive words of any internal team note.
+ * Notes are guidance for the AI, never material to quote — the prospect must not be able to read team wording.
+ */
+export function noteOverlap(text: string, notes: string[], n = 8): boolean {
+  const dw = wordsOf(text);
+  if (dw.length < n) return false;
+  const grams = new Set<string>();
+  for (let i = 0; i + n <= dw.length; i++) grams.add(dw.slice(i, i + n).join(" "));
+  for (const note of notes) {
+    const nw = wordsOf(note);
+    for (let i = 0; i + n <= nw.length; i++) if (grams.has(nw.slice(i, i + n).join(" "))) return true;
+  }
+  return false;
+}
+
 export function validateDraft(d: DraftOutput, c: ValidateCtx): { ok: boolean; failures: Failure[]; stageViolation: boolean } {
   const failures: Failure[] = [];
   if (d.decision !== "send") return { ok: true, failures, stageViolation: false };
   const text = d.text ?? "";
   const max = clamp(Number(c.settings.max_length) || 600, 100, 1000);
   if (text.length < 1 || text.length > max) failures.push({ rule: "length", detail: `${text.length} characters (1–${max} allowed)` });
+  // the detail never quotes the note: run rows are readable by client viewers
+  if (c.teamNoteTexts?.length && noteOverlap(text, c.teamNoteTexts)) failures.push({ rule: "note_overlap", detail: "repeats wording from an internal team note (8+ words in a row)" });
 
   const allowed = c.allowedText;
   const allowedUrls = extractUrls(allowed).map(normUrl).filter((u): u is { host: string; path: string } => !!u);

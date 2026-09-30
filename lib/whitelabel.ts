@@ -50,6 +50,14 @@ export interface WhitelabelConfig {
   /** Links in the "you agree to our …" line under the login / signup forms */
   legalLinks: LegalLink[];
 
+  // --- Sidebar links -----------------------------------------------------
+  /** Label of the sidebar's help item, e.g. "Need Help" or "Documentation" */
+  helpLabel: string;
+  /** Where the sidebar's help item opens */
+  helpUrl: string;
+  /** Where the sidebar's "Contact & Support" item opens. Omit to hide the item. */
+  supportUrl?: string;
+
   // --- Page metadata / link previews (https://ogp.me) --------------------
   /** <meta name="description"> and the default og:description */
   metaDescription: string;
@@ -91,6 +99,9 @@ export const DEFAULT_CONFIG: WhitelabelConfig = {
     { label: 'Privacy Policy', href: 'https://capitalxai.com/privacy' },
   ],
 
+  helpLabel: 'Need Help',
+  helpUrl: 'https://calendly.com/founders-capitalxai/20min',
+
   metaDescription: 'Instantly get detailed research insights and know everything about any company inside out.',
 };
 
@@ -118,6 +129,10 @@ const GROWTHXAI: Partial<WhitelabelConfig> = {
     { label: 'Acceptable Use', href: 'https://growthxai.com/legal/acceptable-use/' },
     { label: 'Privacy Policy', href: 'https://growthxai.com/legal/privacy/' },
   ],
+
+  helpLabel: 'Documentation',
+  helpUrl: 'https://docs.growthxai.com/',
+  supportUrl: 'https://calendly.com/founders-growthxai/20min',
 
   metaDescription:
     'Automated LinkedIn and email outreach that books meetings for you, from one account or fifty. Safe limits on every account, and it stops the moment someone replies.',

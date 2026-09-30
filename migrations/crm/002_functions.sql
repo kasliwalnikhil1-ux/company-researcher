@@ -568,7 +568,12 @@ create or replace function crm_set_setting(p_key text, p_value jsonb) returns js
 language plpgsql security definer set search_path = public as $$
 begin
   perform crm_require_member();
-  if p_key not in ('default_timezone','stale_after_days','default_currency','studio_name') then raise exception 'E_PAYLOAD_INVALID: unknown setting %', p_key; end if;
+  if p_key not in ('default_timezone','stale_after_days','default_currency','studio_name','invite_title_template','invite_description_template') then raise exception 'E_PAYLOAD_INVALID: unknown setting %', p_key; end if;
+  -- Calendar-invite templates (005): strings with {me} {who} {contact} {company} {studio} {notes} placeholders; empty = default.
+  if p_key in ('invite_title_template','invite_description_template') then
+    if jsonb_typeof(p_value) <> 'string' then raise exception 'E_PAYLOAD_INVALID: % must be a string', p_key; end if;
+    if length(p_value #>> '{}') > (case when p_key = 'invite_title_template' then 300 else 2000 end) then raise exception 'E_PAYLOAD_INVALID: % is too long', p_key; end if;
+  end if;
   insert into crm_settings(key, value) values (p_key, p_value) on conflict (key) do update set value = excluded.value, updated_at = now();
   return (select coalesce(jsonb_object_agg(key, value), '{}') from crm_settings);
 end $$;
@@ -1389,6 +1394,7 @@ begin
         'meeting_id', mv.id, 'scheduled_at', mv.scheduled_at, 'local_time', to_char(mv.scheduled_at at time zone tz, 'HH24:MI'),
         'prospect_local_time', case when mv.timezone is not null then to_char(mv.scheduled_at at time zone mv.timezone, 'HH24:MI') || ' ' || mv.timezone end,
         'status', mv.status, 'has_capture', mv.has_capture, 'attendees', mv.attendees, 'meeting_notes', mv.notes,
+        'meet_link', mv.meet_link, 'calendar_link', mv.calendar_link,
         'company', jsonb_build_object('id', c.id, 'name', c.name, 'domain', c.domain, 'country', c.country, 'notes', c.notes, 'about', c.about),
         'contact', case when mv.contact_id is null then null else jsonb_build_object('id', mv.contact_id, 'name', mv.contact_name, 'role', mv.contact_role, 'email', mv.contact_email,
                                                                                     'linkedin_url', (select ct.linkedin_url from crm_contacts ct where ct.id = mv.contact_id), 'about', (select ct.about from crm_contacts ct where ct.id = mv.contact_id)) end,
@@ -1721,6 +1727,7 @@ begin
                  'stage_history', (select coalesce(jsonb_agg(jsonb_build_object('from', h.from_stage, 'to', h.to_stage, 'at', h.changed_at, 'reason', h.reason, 'by', mm.display_name) order by h.changed_at), '[]') from crm_stage_history h left join crm_members mm on mm.user_id = h.changed_by where h.deal_id = v.id)
                ) order by v.created_at desc), '[]') from crm_deals_v v where v.company_id = cid),
     'meetings', (select coalesce(jsonb_agg(jsonb_build_object('meeting_id', mv.id, 'deal_id', mv.deal_id, 'scheduled_at', mv.scheduled_at, 'status', mv.status, 'contact', mv.contact_name, 'attendees', mv.attendees, 'notes', mv.notes,
+                   'meet_link', mv.meet_link, 'calendar_link', mv.calendar_link, 'calendar_account', mv.calendar_account,
                    'capture', (select to_jsonb(cp) - 'id' - 'meeting_id' - 'created_by' || jsonb_build_object('tags', (select coalesce(jsonb_agg(pt.label), '[]') from crm_capture_pain_tags cpt join crm_pain_point_tags pt on pt.id = cpt.tag_id where cpt.capture_id = cp.id)) from crm_meeting_captures cp where cp.meeting_id = mv.id),
                    'transcript', (select jsonb_build_object('summary', tr.summary, 'topics', to_jsonb(tr.topics), 'duration_seconds', tr.duration_seconds, 'word_count', tr.word_count, 'speakers', tr.speakers) from crm_meeting_transcripts tr where tr.meeting_id = mv.id),
                    'recording', (select jsonb_build_object('bytes', rc.bytes, 'content_type', rc.content_type, 'duration_seconds', rc.duration_seconds, 'original_name', rc.original_name, 'uploaded_via', rc.uploaded_via, 'created_at', rc.created_at) from crm_meeting_recordings rc where rc.meeting_id = mv.id),

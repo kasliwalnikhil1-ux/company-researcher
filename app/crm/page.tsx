@@ -10,7 +10,7 @@ import { CommitmentForm, NextStepModal } from '@/components/crm/forms';
 import { CompanyAboutBlock, ContactAboutBlock, hasAbout, IndustryBadge } from '@/components/crm/about';
 import { ContactAvatar, ContactCard } from '@/components/crm/contact-card';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, RefreshCw } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, ClipboardCheck, RefreshCw, Video } from 'lucide-react';
 
 // The only screen open during the daily meeting. Yesterday's numbers → today's meetings → stuck/stale/slipping → commitments.
 // Tall middle row with internal scrolling per panel (commitments sit below it), readable across a room.
@@ -76,6 +76,7 @@ function MeetingRow({ m, tz }: { m: TodayMeeting; tz: string }) {
           {m.deal.videos_per_month ? <div className="text-xs text-gray-500 whitespace-nowrap">{m.deal.videos_per_month} videos/mo</div> : null}
           {m.prior_no_shows > 0 && <Badge tone="red" title="Prior no-shows for this contact">⚠ {m.prior_no_shows} no-show</Badge>}
           <div className="mt-auto flex items-center gap-1 pt-1">
+            {m.status === 'scheduled' && m.meet_link && <a href={m.meet_link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700" title="Join the Google Meet"><Video className="w-3 h-3" /> Join</a>}
             {m.status === 'scheduled' ? <Link href={`/crm/capture?meeting=${m.meeting_id}`} onClick={(e) => e.stopPropagation()}><Button size="xs" variant="secondary"><ClipboardCheck className="w-3 h-3" /> Capture</Button></Link> : <Badge tone={m.status === 'held' ? 'green' : m.status === 'no_show' ? 'red' : 'gray'}>{m.status.replace('_', '-')}</Badge>}
             <ChevronDown className={cn('w-4 h-4 text-gray-400 transition-transform', open && 'rotate-180')} aria-hidden />
           </div>

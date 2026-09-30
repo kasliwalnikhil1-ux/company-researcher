@@ -46,7 +46,7 @@ export default function ActivityPanel({ ws, openRunId, onOpenRun }: {
         {q.error && <ErrorBox message={parseError(q.error).message} />}
         {ready && !q.isLoading && !q.error && rows.length === 0 && (
           <EmptyState icon={<History className="w-6 h-6" />} title={loaded.length ? 'No loaded runs match the search' : 'No AI replies yet'}
-            description={loaded.length ? 'Clear the search box or load more runs.' : 'Runs appear here when a lead replies on LinkedIn and AI replies are on.'} />
+            description={loaded.length ? 'Clear the search box or load more runs.' : 'Runs appear here when a lead replies on LinkedIn and AI Auto Replies are on.'} />
         )}
         {rows.length > 0 && <RunsTable rows={rows} stageLabels={labels} onOpen={(id) => onOpenRun(id)} />}
 

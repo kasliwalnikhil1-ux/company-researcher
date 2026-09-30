@@ -100,13 +100,15 @@ begin
        'outreach_sender_local_hour','outreach_weekly_invites_used','outreach_ws_tz','outreach_lead_is_suppressed','outreach_lead_suppression_reason','outreach_audit');
   if n = 0 then log := log || E'\nok   internal helpers are not callable by signed-in users'; else fails := fails + 1; log := log || E'\nFAIL ' || n || ' internal helper(s) callable by authenticated — run 018 after 017'; end if;
 
-  -- a SECURITY DEFINER RPC open to viewers/members must scope by client somewhere in its body. The three exceptions hold nothing
-  -- client-specific (workspace branding, the caller's own saved date ranges, the team list).
+  -- a SECURITY DEFINER RPC open to viewers/members must scope by client somewhere in its body. The exceptions hold nothing
+  -- client-specific (workspace branding, the caller's own saved date ranges, the team list, workspace-wide canned responses
+  -- and the caller's own web-chat presence ping).
   select count(*), string_agg(p.proname, ', ') into n, q from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
    where ns.nspname = 'public' and p.prosecdef and p.proname like 'outreach\_%' and has_function_privilege('authenticated', p.oid, 'execute')
      and p.prosrc ~ 'outreach_require\([^,]+,\s*''(client_viewer|member)''\)'
      and p.prosrc !~ 'outreach_client_visible|outreach_visible_clients|outreach__check_range'
-     and p.proname not in ('outreach_branding','outreach_save_range','outreach_workspace_members');
+     and p.proname not in ('outreach_branding','outreach_save_range','outreach_workspace_members',
+                           'outreach_webchat_canned_list','outreach_webchat_canned_save','outreach_webchat_canned_delete','outreach_webchat_presence');
   if n = 0 then log := log || E'\nok   every viewer/member RPC checks the client'; else fails := fails + 1; log := log || E'\nFAIL no client check in: ' || q; end if;
 
   raise exception E'%\n%', case when fails = 0 then 'SMOKE OK (access scope)' else 'SMOKE FAIL (' || fails || ')' end, log;

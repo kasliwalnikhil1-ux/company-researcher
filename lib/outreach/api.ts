@@ -81,6 +81,8 @@ export function humanize(code: string): string {
     E_MIN_GAP: 'The account needs a short pause between actions',
     E_PROVIDER_WARNING: 'Instagram flagged automated behaviour. Outreach is paused for 48 hours',
     E_ACCOUNT_TOO_NEW: 'WhatsApp numbers need at least 6 months of real use before outreach',
+    // Private notes
+    E_NOTE_BODY_TOO_LONG: 'A note can hold up to 10,000 characters',
   };
   if (map[code]) return map[code];
   // unknown code: "E_SOME_THING" → "Some thing"

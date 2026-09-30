@@ -9,8 +9,8 @@ export default function AiSettingsPage() {
   return (
     <SettingsFrame min="manager">
       <div className="space-y-6 max-w-4xl">
-        <LlmKeyCard />
         <AiVariablesCard />
+        <LlmKeyCard />
         <FinderKeysCard />
       </div>
     </SettingsFrame>

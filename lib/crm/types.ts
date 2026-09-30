@@ -66,6 +66,8 @@ export interface Meeting {
   company_id: string; company_name: string; deal_stage: DealStage; value_monthly: number | null; currency: string; value_monthly_usd: number | null; owner_id: string | null;
   contact_name: string | null; contact_role: string | null; contact_email: string | null; icp_segment_label: string | null; source_channel_label: string | null;
   has_capture: boolean; capture_outcome: 'held' | 'no_show' | null; has_transcript: boolean; has_recording: boolean;
+  /** Linked Google Calendar event (crm_meeting_calendar_events) */
+  has_calendar_event?: boolean; meet_link?: string | null; calendar_link?: string | null; calendar_account?: string | null;
 }
 
 export type SpeakerRole = 'prospect' | 'team' | 'unknown';
@@ -157,6 +159,7 @@ export interface Scoreboard { date: string; timezone: string; day: { channels: S
 
 export interface TodayMeeting {
   meeting_id: string; scheduled_at: string; local_time: string; prospect_local_time: string | null; status: MeetingStatus; has_capture: boolean; attendees: string[]; meeting_notes: string | null;
+  meet_link?: string | null; calendar_link?: string | null;
   company: { id: string; name: string; domain: string | null; country: string | null; notes: string | null; about?: CompanyAbout | null };
   contact: { id: string; name: string; role: string | null; email: string | null; linkedin_url?: string | null; about?: ContactAbout | null } | null;
   icp_segment: string | null; source_channel: string | null;
@@ -201,7 +204,7 @@ export interface CompanyBrief {
   company: Company & { icp_segment: string | null; source_channel: string | null; created_by_name: string | null };
   contacts: Contact[];
   deals: Array<Deal & { stage_history: Array<{ from: DealStage | null; to: DealStage; at: string; reason: string | null; by: string | null }> }>;
-  meetings: Array<{ meeting_id: string; deal_id: string; scheduled_at: string; status: MeetingStatus; contact: string | null; attendees: string[]; notes: string | null; capture: (Capture & { tags: string[] }) | null; transcript: TranscriptSummary | null; recording: RecordingSummary | null; coaching: CoachingSummary | null }>;
+  meetings: Array<{ meeting_id: string; deal_id: string; scheduled_at: string; status: MeetingStatus; contact: string | null; attendees: string[]; notes: string | null; meet_link?: string | null; calendar_link?: string | null; calendar_account?: string | null; capture: (Capture & { tags: string[] }) | null; transcript: TranscriptSummary | null; recording: RecordingSummary | null; coaching: CoachingSummary | null }>;
   activities: Array<{ at: string; type: string; direction: Direction; channel: string | null; contact: string | null; outcome: string | null; body: string | null; by: string | null; deal_id: string | null }>;
   pain_points: string[]; pain_point_tags: string[]; objections: string[]; commercials: Array<Record<string, unknown>>;
   open_next_steps: Array<{ deal_id: string; stage: DealStage; next_step: string | null; next_step_date: string | null; owner: string | null }>;

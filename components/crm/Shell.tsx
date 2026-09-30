@@ -7,13 +7,15 @@ import { cn } from '@/lib/utils';
 import { useCrm } from '@/contexts/CrmContext';
 import { useSidebarCollapsed } from '@/contexts/SidebarContext';
 import { useGoShortcuts } from './ui';
-import { Sunrise, Kanban, Building2, ClipboardCheck, Filter, Settings, GraduationCap } from 'lucide-react';
+import { Sunrise, Kanban, Building2, CalendarDays, ClipboardCheck, Filter, Settings, GraduationCap } from 'lucide-react';
 
-// Six screens + Settings. Resist adding more. (Sales Coach = every coached call + what repeats across them.)
+// Seven screens + Settings. Resist adding more. (Sales Coach = every coached call + what repeats across them; Calendar = the
+// team's connected Google Calendars, where CRM meetings are booked with a Meet link.)
 const NAV = [
   { href: '/crm', label: 'Standup', icon: Sunrise, exact: true, key: 's' },
   { href: '/crm/pipeline', label: 'Pipeline', icon: Kanban, key: 'p' },
   { href: '/crm/companies', label: 'Companies', icon: Building2, key: 'c' },
+  { href: '/crm/calendar', label: 'Calendar', icon: CalendarDays, key: 'l' },
   { href: '/crm/coach', label: 'Sales Coach', icon: GraduationCap, key: 'o' },
   { href: '/crm/capture', label: 'Capture', icon: ClipboardCheck, key: 'k' },
   { href: '/crm/funnel', label: 'Funnel', icon: Filter, key: 'f' },

@@ -1,7 +1,8 @@
 // Shared types for the Outreach platform (mirrors migrations/outreach/*.sql, including 009–016)
 
 export type Role = 'owner' | 'manager' | 'member' | 'client_viewer';
-export type Provider = 'LINKEDIN' | 'INSTAGRAM' | 'WHATSAPP' | 'GMAIL' | 'OUTLOOK' | 'IMAP';
+/** WEBCHAT = a website inbox (web-chat-PRD.md): a synthetic sender with no connected account; never an outreach channel. */
+export type Provider = 'LINKEDIN' | 'INSTAGRAM' | 'WHATSAPP' | 'GMAIL' | 'OUTLOOK' | 'IMAP' | 'WEBCHAT';
 /** Providers that are outreach channels (not mailboxes). */
 export const CHANNEL_PROVIDERS: Provider[] = ['LINKEDIN', 'INSTAGRAM', 'WHATSAPP'];
 export const MAIL_PROVIDERS: Provider[] = ['GMAIL', 'OUTLOOK', 'IMAP'];
@@ -460,6 +461,13 @@ export interface Chat {
   archived: boolean;
   /** Instagram: the conversation sits in the recipient's message requests (not accepted yet). */
   is_request: boolean;
+  /** Private notes (046): when the latest internal note was added. Never moves the list or the unread state. */
+  last_note_at?: string | null;
+  /** Web chat (049): set on WEBCHAT threads; `status` exists on every chat (default open). */
+  webchat_inbox_id?: string | null; visitor_id?: string | null; status?: 'open' | 'pending' | 'snoozed' | 'resolved'; snoozed_until?: string | null;
+  priority?: 'urgent' | 'high' | 'medium' | 'low' | null; labels?: string[]; custom_attributes?: Record<string, unknown>; csat?: { rating: number; comment?: string | null; at?: string } | null;
+  ai_handled?: boolean; handed_off_at?: string | null; handoff_reason?: string | null; first_response_at?: string | null; resolved_at?: string | null; resolved_by?: string | null; source?: string | null;
+  visitor_last_seen_at?: string | null; visitor_typing_at?: string | null; visitor_typing_text?: string | null; ai_mode?: 'off' | 'first' | 'offline_only' | null; continuity_stopped?: boolean; last_continuity_email_at?: string | null;
   created_at: string;
   /** AI replies (036 / 040): autopilot pause state, conversation stage, active run mirror. `reply_mode_override` was dropped in v2. */
   autopilot_state?: 'active' | 'paused_escalated' | 'paused_bot';
@@ -537,6 +545,11 @@ export interface Message {
   classification?: Record<string, unknown> | null;
   /** AI replies v2 (040): a cached translation of a received message (compose_assist translate_in). */
   translation?: { lang: string; text: string; at: string; source_language?: string | null } | null;
+  /** Web chat (049): rich content + read state. `content_type` is 'text' on every non-webchat row. */
+  content_type?: 'text' | 'attachment' | 'cards' | 'quick_replies' | 'form' | 'form_response' | 'csat' | 'event';
+  content_attributes?: Record<string, any>;
+  sender_type?: 'visitor' | 'agent' | 'bot' | 'system' | null;
+  read_by_visitor_at?: string | null; read_by_agent_at?: string | null; echo_id?: string | null; source?: string | null;
 }
 
 export type MessageOrigin = 'prospect' | 'sequence' | 'inbox_user' | 'ai_autopilot' | 'ai_draft_sent' | 'ai_edited' | 'external_device' | 'unknown';

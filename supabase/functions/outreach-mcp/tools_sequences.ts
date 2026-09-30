@@ -21,7 +21,7 @@ const SETTINGS = z.object({
   ooo_resume_days: z.number().int().min(1).max(60).optional().describe("Default 7, when the auto-reply names no date"),
   hold_max_days: z.number().int().min(1).max(90).optional().describe("Default 30"),
   wait_for_enrichment: z.boolean().optional().describe("Leads start only once their profile is enriched (or after 72 h)"),
-  hold_for_ai_review: z.boolean().optional().describe("Leads start only once their {{ai.*}} lines are approved by a person"),
+  hold_for_ai_review: z.boolean().optional().describe("Leads start only once their {{ai.*}} lines are approved (by a person, or by the checks for an Auto variable)"),
   withdraw_after_days: z.number().int().min(1).max(60).optional(),
 }).passthrough();
 

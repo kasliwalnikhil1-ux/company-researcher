@@ -64,7 +64,7 @@ export default function RunDrawer({ runId, stageLabels, onClose }: { runId: stri
                 </Link>
                 {r.sequence_id && (
                   <Link href={`/outreach/sequences/${r.sequence_id}?tab=ai`} className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
-                    <Settings2 className="w-3.5 h-3.5" />Sequence AI replies
+                    <Settings2 className="w-3.5 h-3.5" />Sequence AI Auto Replies
                   </Link>
                 )}
               </div>

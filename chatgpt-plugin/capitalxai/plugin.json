@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "capitalxai",
-  "version": "2026.9.29",
+  "version": "2026.9.30",
   "description": "Search the CapitalxAI investor database (firms and people) and recent funding rounds, and run the app's investor-fit analysis for your company.",
   "author": {
     "name": "CapitalxAI",

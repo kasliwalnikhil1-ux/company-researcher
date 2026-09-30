@@ -40,7 +40,7 @@ export function FindEmailForm() {
   return (
     <div className="space-y-2">
       <Note>Looks up a work email and saves it on the lead. It uses your own provider keys, tried in order, and stops at the first hit. We do not resell data.</Note>
-      <Callout>Add one or two finder keys and a verifier under <Link href="/outreach/settings/ai" className="underline font-medium">Settings → AI &amp; data</Link>. Without a key, every lead takes the not found exit.</Callout>
+      <Callout>Add one or two finder keys and a verifier under <Link href="/outreach/settings/ai" className="underline font-medium">Settings → AI Personalization</Link>. Without a key, every lead takes the not found exit.</Callout>
       <ul className="text-xs text-gray-600 space-y-1 list-disc pl-4">
         <li><span className="font-medium">Found</span>: an email was saved. Put your email step here.</li>
         <li><span className="font-medium">Not found</span>: no provider had one, or the lead has no company to search by. Continue on LinkedIn.</li>

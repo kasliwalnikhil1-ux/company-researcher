@@ -11,7 +11,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Linkedin, Briefcase, SlidersHorizontal } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, LifeBuoy, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Linkedin, Briefcase, SlidersHorizontal } from 'lucide-react';
 import OnboardingFlow from './OnboardingFlow';
 import { BookDemoButton } from './BookDemoButton';
 import DeleteConfirmationModal from './ui/DeleteConfirmationModal';
@@ -340,7 +340,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
           ? `fixed top-14 left-0 w-64 z-40 transform transition-transform duration-300 ${
               isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
             }`
-          : `fixed top-0 left-0 h-screen transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
+          : `fixed top-0 left-0 z-30 h-screen transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
         }
         bg-white border-r border-gray-200 flex flex-col
         ${isMobile ? 'h-[calc(100vh-3.5rem)]' : ''}
@@ -748,15 +748,28 @@ export default function MainLayout({ children, subnav }: { children: React.React
             )}
 
             <a
-              href="https://calendly.com/founders-capitalxai/20min"
+              href={whitelabel.helpUrl}
               target="_blank"
               rel="noopener noreferrer"
               className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
-              title="Need Help - Book a 15 min call"
+              title={whitelabel.supportUrl ? whitelabel.helpLabel : `${whitelabel.helpLabel} - Book a 15 min call`}
             >
               <HelpCircle className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
-              {(!isCollapsed || isMobile) && <span>Need Help</span>}
+              {(!isCollapsed || isMobile) && <span>{whitelabel.helpLabel}</span>}
             </a>
+
+            {whitelabel.supportUrl && (
+              <a
+                href={whitelabel.supportUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center px-2' : 'px-4'} py-2.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors`}
+                title="Contact & Support - Book a 20 min call"
+              >
+                <LifeBuoy className={`w-5 h-5 flex-shrink-0 ${isCollapsed && !isMobile ? '' : 'mr-3'}`} />
+                {(!isCollapsed || isMobile) && <span>Contact &amp; Support</span>}
+              </a>
+            )}
           </nav>
 
           {/* Country Dropdown - hidden for fundraising, and Auto option excluded */}
@@ -802,10 +815,12 @@ export default function MainLayout({ children, subnav }: { children: React.React
         </div>
       </aside>
 
-      {/* Main content */}
+      {/* Main content. `relative`: absolutely positioned descendants (sr-only labels, virtual-list spacers) otherwise
+          have no positioned ancestor, escape their page's scroll container and stretch the document, which gives the
+          window a scrollbar and a strip of empty body background under every full-height page. */}
       <main className={`
         ${isMobile ? 'ml-0' : isCollapsed ? 'ml-16' : 'ml-64'}
-        flex-1 flex flex-col overflow-hidden transition-all duration-300
+        relative flex-1 flex flex-col overflow-hidden transition-all duration-300
         ${isMobile ? 'pt-14 isolate' : ''}
       `}>
         {children}

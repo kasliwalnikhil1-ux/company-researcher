@@ -339,12 +339,12 @@ export function EnrollOptions({ sequence, value, onChange, ai, disabled }: Optio
           </label>
           <p className="text-xs text-gray-600 pl-6">
             {holds
-              ? 'This sequence holds for AI review: leads wait at “waiting for review” until their lines are approved, skipped or come back blank. They do not start on their own, so review the lines soon.'
-              : 'This sequence does not hold for AI review: leads start right away, and a message that goes out before its line is approved uses the fallback. Turn on “Hold for AI review” in the sequence settings to make leads wait.'}
+              ? 'This sequence holds for AI Personalization: leads wait at “waiting for review” until their lines are approved, skipped or come back blank. They do not start on their own, so review the lines soon.'
+              : 'This sequence does not hold for AI Personalization: leads start right away, and a message that goes out before its line is approved uses the fallback. Turn on “Hold leads until AI-written lines are approved” in the sequence settings to make leads wait.'}
           </p>
           {ai.isLoading && <p className="text-xs text-gray-400 pl-6">Loading AI variables…</p>}
           {ai.error != null && <p className="text-xs text-red-600 pl-6">{parseError(ai.error).message}</p>}
-          {ai.missing.length > 0 && <p className="text-xs text-amber-700 pl-6">No saved AI variable for {ai.missing.map((k) => `{{ai.${k}}}`).join(', ')}. Those always use the fallback. Create them under <Link href="/outreach/settings/ai" className="underline">Settings → AI &amp; data</Link>.</p>}
+          {ai.missing.length > 0 && <p className="text-xs text-amber-700 pl-6">No saved AI variable for {ai.missing.map((k) => `{{ai.${k}}}`).join(', ')}. Those always use the fallback. Create them under <Link href="/outreach/settings/ai" className="underline">Settings → AI Personalization</Link>.</p>}
         </div>
       )}
     </fieldset>

@@ -81,3 +81,45 @@ It sets `CRM_S3_ENDPOINT / REGION / BUCKET / ACCESS_KEY_ID / SECRET_ACCESS_KEY` 
 - `crm_deals.delivery_project_id` — join to the client portal.
 - `crm_activities.external_ref` (unique) + `log_activity` upsert — machine-written LinkedIn/email activity from the outreach platform.
 - `crm_company_brief` — clean JSON for a proposal/deck generator.
+
+## Google Calendar (team calendars, Meet links, meeting ↔ event link)
+
+What it is: every CRM member connects their own Google account(s) once — work, personal, or both, one of them the
+default — and the whole team sees each other's events on `/crm/calendar` (only the owner books, moves or cancels on
+theirs). Booking a CRM meeting (company page, `schedule_meeting`) also creates the Google event with a Meet link and
+invites; an event booked on the Calendar screen (or `calendar_create_event` with `crm{…}`) can be attached to a
+company/deal and becomes a CRM meeting; moving or cancelling either side updates the other. The connector tools
+(`calendar_*`) and the screen share one service, `supabase/functions/crm-mcp/calendar.ts`; the skill's rules are in
+`claude-skill/crm/calendar-pipeline.md`.
+
+Where things live:
+- SQL: `migrations/crm/004_calendar.sql` — `crm_calendar_accounts` (refresh token AES-256-GCM encrypted; **no RLS
+  policy for authenticated**, members read it only through `crm_calendar_accounts_list()`), `crm_meeting_calendar_events`
+  (one Google event per meeting), `crm_meetings_v` gained `has_calendar_event / meet_link / calendar_link /
+  calendar_account` (appended last), `crm_whos_meeting_today` + `crm_company_brief` carry `meet_link`.
+- SQL: `migrations/crm/005_invite_templates.sql` — two team settings decide what every invite the CRM books says: `invite_title_template` (default `{me} <> {who}`) and `invite_description_template` (default `{notes}
+
+{company} · {contact}`). Placeholders `{me}` `{me_full}` `{who}` `{contact}` `{contact_first}` `{company}` `{studio}` `{notes}`; separators next to an empty value are dropped. Rendered by `crm-mcp/invite_template.ts` (mirror: `lib/crm/invite.ts`) in `createEventForMeeting` (schedule_meeting, calendar_event_for_meeting, Add to Google Calendar) and pre-filled on the Calendar screen's New event once a company is attached. Edited in **CRM → Settings → Calendar invites**. The Calendar screen also has a view-timezone toggle (team default / India / US / UK / any IANA zone, per browser) and a per-event time zone on the form; both just pass `tz` to the existing routes.
+- Edge: `crm-mcp/calendar.ts` (service), `calendar_routes.ts` (`GET /calendar/callback`, `POST /calendar/*` for the app),
+  `tools_calendar.ts` (connector tools). `schedule_meeting` / `update_meeting` call into it.
+- App: `app/crm/calendar/page.tsx`, `components/crm/calendar.tsx`, `lib/crm/calendar.ts`; "Also create the Google
+  Calendar event" on the Schedule-meeting modal; Join Meet on the standup and company page.
+
+One-time setup (admin) — DONE 2026-09-30 with Desk's own client, no Google console work:
+1. `CAPITALXAI_SUPABASE_ACCESS_TOKEN=sbp_… bash scripts/crm-set-calendar-secrets.sh ../recorder-app/CallRecorder/resources/google_oauth_client.json`
+   sets `CRM_GOOGLE_CLIENT_ID/SECRET`, `CRM_GOOGLE_CLIENT_KIND=desktop` and a generated `CRM_TOKEN_KEY`, and keeps a copy
+   in `google-calendar.env` (git-ignored; keep it — a lost key means everyone reconnects; re-runs reuse it).
+2. Desk's client is a Desktop client: Google only returns to loopback addresses. So on `localhost`/`127.0.0.1` the app
+   gets Google straight back at `/crm/calendar/google`; on the hosted app, and in Claude/ChatGPT
+   (`calendar_connect_link` → `calendar_connect_finish`), Google lands on `http://127.0.0.1:53682/…` which does not load
+   and the member pastes that address back once per account. If the consent screen is in Testing, each member's Google
+   account must be a Test user (Desk's already are).
+3. Optional, for a fully automatic hosted flow: create a **Web application** client in the same project with redirect URI
+   `https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/crm-mcp/calendar/callback` and re-run the script with its JSON
+   (it detects `"web"` and sets `CRM_GOOGLE_CLIENT_KIND=web`). Existing connections keep working only if the client id
+   stays the same, so members reconnect after switching clients.
+4. Each member: CRM → Calendar → **Connect Google Calendar** (or ask the assistant). Allow every permission — a read-only
+   grant is flagged on the chip. Repeat for a second account; label them (work / personal) from the pencil on the chip.
+
+Without the secrets every calendar route/tool answers `E_CALENDAR_NOT_CONFIGURED`; the rest of the CRM is unaffected.
+Scopes asked: exactly Desk's — `calendar.events`, `calendar.calendarlist.readonly`, `openid email`. Guests' free/busy is best effort (reported as not visible when Google refuses).

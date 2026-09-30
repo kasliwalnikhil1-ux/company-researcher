@@ -222,3 +222,33 @@ Call from the web app with `rpc('<name without outreach_>', args)`, from edge fu
 | `outreach_workspace_ids` | `` | `SETOF uuid` | user |
 | `outreach_workspace_members` | `p_ws uuid` | `TABLE(user_id uuid, role outreach_role_t, client_ids uuid[], can_reply boolean, email text, display_name text, created_at timestamp with time zone)` | user |
 | `outreach_ws_tz` | `p_ws uuid` | `text` | user |
+
+## Private notes (migration 046, 30 Sep 2026)
+
+| Function | Arguments | Returns | Caller |
+|---|---|---|---|
+| `outreach_note_create` | `p_chat uuid, p_body text, p_visibility text DEFAULT 'team', p_attachments jsonb DEFAULT '[]', p_author_type text DEFAULT 'user'` | `jsonb` | user |
+| `outreach_note_update` | `p_note uuid, p_body text DEFAULT NULL, p_visibility text DEFAULT NULL` | `jsonb` | user |
+| `outreach_note_delete` | `p_note uuid` | `jsonb` | user |
+| `outreach_note_mark_read` | `p_note uuid` | `jsonb` | user |
+| `outreach_mentions_mark_all_read` | `p_ws uuid` | `jsonb` | user |
+| `outreach_notifications_mark_read` | `p_ids uuid[]` | `int` | user |
+| `outreach_notes_list` | `p_chat uuid` | `jsonb` | user |
+| `outreach_notes_for_lead` | `p_lead uuid, p_limit int DEFAULT 50` | `jsonb` | user |
+| `outreach_notes_search` | `p_ws uuid, p_q text, p_limit int DEFAULT 20` | `jsonb` | user |
+| `outreach_note_revisions` | `p_note uuid` | `jsonb` | user |
+| `outreach_mentions_list` | `p_ws uuid, p_unread_only boolean DEFAULT false, p_limit int DEFAULT 100` | `jsonb` | user |
+| `outreach_notifications_list` | `p_ws uuid, p_limit int DEFAULT 30` | `jsonb` | user |
+| `outreach_notes_badge` | `p_ws uuid` | `jsonb` | user |
+| `outreach_notification_prefs_get` | `p_ws uuid` | `jsonb` | user |
+| `outreach_notification_prefs_set` | `p_ws uuid, p_kind text, p_email boolean, p_email_delay_min int DEFAULT 10, p_push boolean DEFAULT true` | `jsonb` | user |
+| `outreach_note_visible` | `p_chat uuid, p_visibility text` | `boolean` | user (RLS) |
+| `outreach_can_read_note` | `p_note uuid` | `boolean` | user (RLS) |
+| `outreach_note_attachment_readable` | `p_path text` | `boolean` | user (storage policy) |
+| `outreach_note_system_create` | `p_chat uuid, p_body text, p_author_type text DEFAULT 'system', p_mentions uuid[] DEFAULT '{}', p_visibility text DEFAULT 'team'` | `jsonb` | service |
+| `outreach_note_mentions_due` | `p_limit int DEFAULT 200` | `jsonb` | service |
+| `outreach_note_mentions_mark_emailed` | `p_pairs jsonb` | `int` | service |
+| `outreach_note_email_context` | `p_chat uuid, p_n int DEFAULT 3` | `jsonb` | service |
+| `outreach_notes_purge` | `` | `jsonb` | service |
+| `outreach__team_notes_for_ai` | `p_chat uuid, p_limit int DEFAULT 10` | `jsonb` | internal (gate_facts) |
+| `outreach__note_on_ai_handoff` | `p_chat uuid, p_reason text, p_rule text, p_assignee uuid, p_label text` | `uuid` | internal (ai_handoff) |

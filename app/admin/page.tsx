@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Users, Linkedin, Briefcase, Settings, History } from 'lucide-react';
+import { Users, Linkedin, Briefcase, Settings, History, Inbox } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useAccess } from '@/contexts/AccessContext';
@@ -16,10 +16,12 @@ import OutreachTab from '@/components/admin/OutreachTab';
 import CrmTab from '@/components/admin/CrmTab';
 import SettingsTab from '@/components/admin/SettingsTab';
 import AuditTab from '@/components/admin/AuditTab';
+import LeadsTab from '@/components/admin/LeadsTab';
 
-type Tab = 'users' | 'outreach' | 'crm' | 'settings' | 'audit';
+type Tab = 'users' | 'leads' | 'outreach' | 'crm' | 'settings' | 'audit';
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'users', label: 'Accounts', icon: Users },
+  { id: 'leads', label: 'Leads', icon: Inbox },
   { id: 'outreach', label: 'Outreach workspaces', icon: Linkedin },
   { id: 'crm', label: 'CRM team', icon: Briefcase },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -51,7 +53,7 @@ function AdminConsole() {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-900">Admin</h1>
-        <p className="text-sm text-gray-500 mt-1">Every account that signs up, what it may use, its credits and plan, its outreach workspaces and the sales CRM team.</p>
+        <p className="text-sm text-gray-500 mt-1">Every account that signs up, what it may use, its credits and plan, its outreach workspaces, the sales CRM team, and every lead from the website.</p>
       </div>
 
       <div className="flex items-center gap-1 border-b border-gray-200 mb-6 overflow-x-auto">
@@ -64,6 +66,7 @@ function AdminConsole() {
       </div>
 
       {tab === 'users' && <UsersTab onOpenUser={setUserId} />}
+      {tab === 'leads' && <LeadsTab onOpenUser={setUserId} />}
       {tab === 'outreach' && <OutreachTab onOpenUser={setUserId} />}
       {tab === 'crm' && <CrmTab onOpenUser={setUserId} />}
       {tab === 'settings' && <SettingsTab onOpenUser={setUserId} />}

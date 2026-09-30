@@ -113,7 +113,7 @@ export interface DigestInput { overview: Row; sequences: Row[]; attention: Row[]
 
 const ATTENTION_LABEL: Record<string, string> = {
   sequence_stalled: "Sequence stopped sending", sender_running_dry: "Sender running out of leads", import_failed: "Import failed",
-  held_leads: "Replies held for review", failed_leads: "Failed leads", sender: "Sender", sequence: "Sequence slowed down", ai_review: "AI lines to review",
+  held_leads: "Replies held for review", failed_leads: "Failed leads", sender: "Sender", sequence: "Sequence slowed down", ai_review: "AI Personalization lines to review",
 };
 
 function attentionLink(a: Row, origin: string): string {

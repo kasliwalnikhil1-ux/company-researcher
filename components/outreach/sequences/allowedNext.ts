@@ -57,8 +57,9 @@ const ADD_FIRST: Record<Provider, string> = {
   GMAIL: 'Add a mailbox to the sender pool first',
   OUTLOOK: 'Add a mailbox to the sender pool first',
   IMAP: 'Add a mailbox to the sender pool first',
+  WEBCHAT: 'Website chat is not an outreach channel',
 };
-const CHANNEL_NAME: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP' };
+const CHANNEL_NAME: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP', WEBCHAT: 'Website' };
 
 /**
  * For every step type: null when it can follow `exit` of `source`, otherwise a short reason it cannot.

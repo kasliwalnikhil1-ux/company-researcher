@@ -4,8 +4,9 @@ import { useEffect, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
 import { useChannelCosts } from '@/lib/crm/queries';
 import type { Lookup, LookupKind, Member } from '@/lib/crm/types';
-import { Badge, Button, Card, ErrorBox, Input, PageHeader, Select, Table, Td, Th, fmtDate } from '@/components/crm/ui';
+import { Badge, Button, Card, ErrorBox, Input, PageHeader, Select, Table, Td, Th, Textarea, fmtDate } from '@/components/crm/ui';
 import { TZ_OPTIONS, useWrite } from '@/components/crm/forms';
+import { INVITE_DEFAULTS, INVITE_PLACEHOLDERS, inviteDescription, inviteTitle, type InviteVars } from '@/lib/crm/invite';
 import { ArrowDown, ArrowUp, Pencil, Plus, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -183,6 +184,40 @@ function GeneralCard() {
   );
 }
 
+// What the Google Calendar invite says when the CRM books it (schedule meeting, Add to Google Calendar, connector).
+const PLACEHOLDER_HELP: Record<(typeof INVITE_PLACEHOLDERS)[number], string> = {
+  me: 'your first name', me_full: 'your full name', who: 'contact first name, else company', contact: 'contact full name', contact_first: 'contact first name', company: 'company', studio: 'studio name', notes: 'meeting notes',
+};
+function InviteCard() {
+  const { data, me } = useCrm();
+  const { write, busy, error } = useWrite();
+  const s = data?.settings ?? {};
+  const [title, setTitle] = useState(String(s.invite_title_template ?? INVITE_DEFAULTS.title));
+  const [desc, setDesc] = useState(String(s.invite_description_template ?? INVITE_DEFAULTS.description));
+  const sample: InviteVars = { me: me?.display_name || 'Aarushi Jain', contact: 'Naman Jain', company: 'Resourceplan', studio: String(s.studio_name || 'Kaptured'), notes: 'Agenda: intro + pricing' };
+  const preview = { title: inviteTitle({ invite_title_template: title }, sample), description: inviteDescription({ invite_description_template: desc }, sample) };
+  const set = (k: string, v: string) => write('set_setting', { p_key: k, p_value: v.trim() }, { refreshContext: true });
+  return (
+    <Card title="Calendar invites">
+      <div className="space-y-3">
+        <div className="flex items-end gap-2"><Input label="Invite title" value={title} onChange={(e) => setTitle(e.target.value)} className="flex-1 font-mono" placeholder={INVITE_DEFAULTS.title} /><Button size="sm" variant="secondary" loading={busy} onClick={() => set('invite_title_template', title)}>Save</Button></div>
+        <div className="flex items-end gap-2"><Textarea label="Invite description" value={desc} onChange={(e) => setDesc(e.target.value)} className="flex-1 font-mono" rows={3} placeholder={INVITE_DEFAULTS.description} /><Button size="sm" variant="secondary" loading={busy} onClick={() => set('invite_description_template', desc)}>Save</Button></div>
+        <div className="rounded-md border border-gray-200 bg-gray-50/60 p-2.5 text-sm">
+          <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Preview (sample meeting with Naman Jain at Resourceplan)</div>
+          <div className="font-medium text-gray-900">{preview.title || <span className="text-gray-400">(empty title)</span>}</div>
+          <div className="text-gray-700 whitespace-pre-wrap text-[13px] mt-0.5">{preview.description || <span className="text-gray-400">(empty description)</span>}</div>
+        </div>
+        <div className="text-xs text-gray-500">
+          Placeholders: {INVITE_PLACEHOLDERS.map((p, i) => <span key={p}>{i ? ' · ' : ''}<code className="bg-gray-100 px-1 rounded">{`{${p}}`}</code> {PLACEHOLDER_HELP[p]}</span>)}. Empty values take their separator with them, so “{'{company} · {contact}'}” with no contact is just the company.
+          Applies to every invite the CRM books: Schedule meeting, Add to Google Calendar, the Calendar screen once a company is attached, and the connector.
+          <button type="button" className="ml-1 text-indigo-600 hover:underline" onClick={() => { setTitle(INVITE_DEFAULTS.title); setDesc(INVITE_DEFAULTS.description); }}>Reset to defaults</button>
+        </div>
+      </div>
+      {error && <div className="mt-2"><ErrorBox message={error} /></div>}
+    </Card>
+  );
+}
+
 function FxCard() {
   const { fxRates } = useCrm();
   const { write, busy, error } = useWrite();
@@ -239,7 +274,7 @@ export default function SettingsPage() {
     <div className="space-y-3">
       <PageHeader title="Settings" subtitle="Lookup lists, team, timezone, currencies, channel spend. Same operations are available to the CRM connector in Claude and ChatGPT." />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start"><LookupsCard /><TeamCard /></div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start"><GeneralCard /><FxCard /></div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 items-start"><GeneralCard /><FxCard /><InviteCard /></div>
       <CostsCard />
     </div>
   );

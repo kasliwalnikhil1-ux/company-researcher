@@ -24,6 +24,8 @@ export default function WorkspaceSettingsPage() {
   useEffect(() => setName(workspace?.name ?? ''), [workspace?.name]);
   const audit = useAudit(isManager ? ws : null);
   const [auditOpen, setAuditOpen] = useState<Record<number, boolean>>({});
+  // private-notes-PRD §8.5: managers may include internal notes in the messages export (file name gets -with-notes, audited)
+  const [includeNotes, setIncludeNotes] = useState(false);
 
   async function rename() {
     if (!ws || !name.trim()) return;
@@ -35,7 +37,7 @@ export default function WorkspaceSettingsPage() {
 
   async function exportKind(kind: 'leads' | 'messages' | 'actions' | 'audit') {
     setBusy(`export-${kind}`);
-    try { const r = await callFn<{ url: string; rows: number }>('exports-create', { workspace_id: ws, kind }); window.open(r.url, '_blank', 'noopener'); toast.show(`${kind} export ready (${r.rows.toLocaleString()} rows). The link is valid for one hour.`); qc.invalidateQueries({ queryKey: qk.audit(ws ?? '') }); }
+    try { const r = await callFn<{ url: string; rows: number }>('exports-create', { workspace_id: ws, kind, include_notes: kind === 'messages' && includeNotes }); window.open(r.url, '_blank', 'noopener'); toast.show(`${kind} export ready (${r.rows.toLocaleString()} rows${kind === 'messages' && includeNotes ? ', private notes included' : ''}). The link is valid for one hour.`); qc.invalidateQueries({ queryKey: qk.audit(ws ?? '') }); }
     catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   }
@@ -78,6 +80,10 @@ export default function WorkspaceSettingsPage() {
                   <Button key={k} variant="secondary" size="sm" onClick={() => exportKind(k)} loading={busy === `export-${k}`} disabled={!!busy && busy !== `export-${k}`}><Download className="w-3.5 h-3.5" /> {k}</Button>
                 ))}
               </div>
+              <label className="mt-3 flex items-start gap-2 text-xs text-gray-600 cursor-pointer">
+                <input type="checkbox" className="mt-0.5 accent-amber-600" checked={includeNotes} onChange={(e) => setIncludeNotes(e.target.checked)} />
+                <span><span className="font-medium text-gray-800">Include private notes</span> in the messages export. Internal team notes are left out otherwise; the file is named <code>…-with-notes.csv</code> and the export is audited.</span>
+              </label>
             </Card>
           )}
         </div>

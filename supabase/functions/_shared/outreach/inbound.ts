@@ -1,5 +1,6 @@
 // Inbound Unipile event processing (F2 handlers).
 import { admin, log, rpc, emitEvent, audit, randInt } from "./supabase.ts";
+import { webchatMailHook } from "./webchat.ts";
 import { notifyReturned } from "./ai_reply.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending, hostedBrowserOptions } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
@@ -899,6 +900,9 @@ export async function handleMail(payload: any): Promise<void> {
   if (!sender) return;
   const event = payload.event ?? "mail_received";
   if (event === "mail_moved") return;
+  // web chat continuity (web-chat-PRD.md §9): our own digests leaving the reply mailbox, and visitors answering them by
+  // email, belong to the web-chat conversation, never to a new email thread
+  if (await webchatMailHook(payload)) return;
   const isOut = event === "mail_sent";
   const from = payload.from_attendee?.identifier ? String(payload.from_attendee.identifier).toLowerCase() : null;
   const to = (payload.to_attendees ?? []).map((a: any) => String(a.identifier ?? "").toLowerCase()).filter(Boolean);

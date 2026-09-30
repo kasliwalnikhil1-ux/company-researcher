@@ -16,7 +16,7 @@ export default function AiRepliesIntro({ ws }: { ws: string }) {
       <div className="flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3">
         <Sparkles className="w-4 h-4 text-indigo-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
         <div className="text-sm text-gray-700 space-y-1">
-          <p>AI replies are set per sequence: open a sequence and use its <strong className="text-gray-900">AI replies</strong> tab for the mode, the prompt, scenarios, knowledge and limits. <Link href="/outreach/sequences" className="text-indigo-700 underline underline-offset-2">Go to sequences</Link>.</p>
+          <p>AI Auto Replies are set per sequence: open a sequence and use its <strong className="text-gray-900">AI Auto Replies</strong> tab for the mode, the prompt, scenarios, knowledge and limits. <Link href="/outreach/sequences" className="text-indigo-700 underline underline-offset-2">Go to sequences</Link>.</p>
           <p><strong className="text-gray-900">Draft</strong> leaves an AI reply in the inbox for a person to send. <strong className="text-gray-900">Auto</strong> sends it after a short hold and hands over when a meeting is on the table; it needs the sender owner&apos;s approval, once per account.</p>
           <p>This page holds what is shared across sequences: the per-sender daily cap, library prompts, approvals, the activity log and reports.</p>
         </div>

@@ -9,6 +9,9 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useOutreachRealtime } from '@/lib/outreach/queries';
 import { applyAccent, isHexColor, isHttpsUrl, productName, useBranding, type Branding } from '@/lib/outreach/branding';
 import { aiReviewCountKey } from './OutreachNav';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNotificationsRealtime, type IncomingNotification } from '@/lib/outreach/notes';
+import MentionToast from './inbox/notes/MentionToast';
 
 /** Keeps the "AI review" badge fresh: `outreach_ai_values` is in the realtime publication. */
 function useAiReviewRealtime(ws: string | null | undefined, enabled: boolean) {
@@ -72,8 +75,12 @@ function HelpMenu({ branding }: { branding: Branding }) {
 
 export default function OutreachShell({ children }: { children: React.ReactNode }) {
   const { workspace, suspended, isClientViewer } = useWorkspace();
+  const { user } = useAuth();
   useOutreachRealtime(workspace?.id);
   useAiReviewRealtime(workspace?.id, !isClientViewer);
+  // Private notes: the signed-in user's notification stream (bell badge + toast for a fresh @mention)
+  const [toasts, setToasts] = useState<IncomingNotification[]>([]);
+  useNotificationsRealtime(workspace?.id, user?.id, (n) => setToasts((t) => [...t.filter((x) => x.id !== n.id), n].slice(-3)));
 
   // White-label: clients see the agency's name, logo, colour and help links. The team keeps the normal look.
   const brandingQuery = useBranding(isClientViewer ? workspace?.id : null);
@@ -113,6 +120,7 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
       <div className="flex-1 overflow-auto">
         <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto w-full">{children}</div>
       </div>
+      <MentionToast items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   );
 }

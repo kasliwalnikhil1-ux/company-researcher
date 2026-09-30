@@ -37,8 +37,8 @@ export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null
 
   if (!sequenceId) {
     return (
-      <TabPage title="AI replies" wide>
-        <Note>Save the sequence first. AI replies are set per sequence once it exists.</Note>
+      <TabPage title="AI Auto Replies" wide>
+        <Note>Save the sequence first. AI Auto Replies are set per sequence once it exists.</Note>
       </TabPage>
     );
   }

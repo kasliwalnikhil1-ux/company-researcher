@@ -25,7 +25,7 @@ export const ACTION_LABELS: Record<ActionType, string> = {
   unfollow: 'Unfollows', new_chat: 'New conversations', identifier_check: 'Number checks', followers_poll: 'Follower checks', story_react: 'Story reactions',
 };
 
-export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP' };
+export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP', WEBCHAT: 'Website' };
 /** How the sender was connected: password login on the hosted page, cookies from the Chrome extension, OAuth (mailboxes),
  *  or the hosted page's browser-extension sign-in that reuses the LinkedIn session already open on the owner's computer. */
 export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = { credentials: 'Password login', cookie: 'Cookie (extension)', oauth: 'OAuth', browser: 'Signed-in browser' };

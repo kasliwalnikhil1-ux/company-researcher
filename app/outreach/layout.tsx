@@ -9,6 +9,7 @@ import OutreachShell from '@/components/outreach/Shell';
 import { OutreachSidebarNav } from '@/components/outreach/OutreachNav';
 import { EmptyState, ErrorBox, PageLoader } from '@/components/outreach/ui';
 import { useAccess } from '@/contexts/AccessContext';
+import WebchatPresence from '@/components/outreach/WebchatPresence';
 
 function Gate({ children }: { children: React.ReactNode }) {
   const { loading, error, workspace } = useWorkspace();
@@ -23,7 +24,7 @@ function Gate({ children }: { children: React.ReactNode }) {
   if (loading) return <PageLoader className="min-h-[calc(100dvh-3.5rem)] md:min-h-screen" />;
   if (error) return <div className="p-6"><ErrorBox message={error} /></div>;
   if (!workspace) return <div className="p-6"><ErrorBox message="No workspace available." /></div>;
-  return <OutreachShell>{children}</OutreachShell>;
+  return <OutreachShell><WebchatPresence />{children}</OutreachShell>;
 }
 
 export default function OutreachLayout({ children }: { children: React.ReactNode }) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData, type QueryClient, type UseQueryOptions } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc } from './api';
 import type {
@@ -195,12 +195,24 @@ export function applyAiChatFilter<Q>(q: Q, ai: AiChatFilter | null | undefined):
   return q;
 }
 
-export interface ChatFilters { sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null }
+export interface ChatFilters { sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null; /** private notes: only conversations that carry at least one note */ has_notes?: boolean | null }
 
+export type ChatListRow = Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
+/** Keyset cursor for the inbox list: the last row of the previous page (raw DB timestamp, so microsecond values round-trip). */
+export type ChatCursor = { at: string | null; id: string };
+export const CHATS_PAGE_SIZE = 50;
+type ChatPage = { rows: ChatListRow[]; next: ChatCursor | null };
+
+/**
+ * Inbox list, newest first, loaded page by page as the user scrolls (WhatsApp-style, no "next" button).
+ * `data` is the flat, de-duplicated list of every page fetched so far; `fetchNextPage` / `hasNextPage` drive the loading.
+ * Pages are keyed on (last_message_at desc nulls last, id desc), so a new reply arriving between two fetches never skips a row.
+ */
 export function useChats(ws: string | null | undefined, f: ChatFilters) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.chats(ws ?? '', f), enabled: !!ws, placeholderData: (prev) => prev,
-    queryFn: () => {
+    initialPageParam: null as ChatCursor | null,
+    queryFn: async ({ pageParam }): Promise<ChatPage> => {
       let q = supabase.from('outreach_chats').select('*, outreach_leads(id, full_name, company, headline, picture_url), outreach_senders(id, display_name, provider)').eq('workspace_id', ws!).eq('archived', !!f.archived);
       if (f.sender_id) q = q.eq('sender_id', f.sender_id);
       if (f.client_id) q = q.eq('client_id', f.client_id);
@@ -210,9 +222,39 @@ export function useChats(ws: string | null | undefined, f: ChatFilters) {
       if (f.provider) q = q.eq('provider', f.provider);
       q = applyAiChatFilter(q, f.ai);
       if (f.stage) q = q.eq('conversation_stage', f.stage);
+      if (f.has_notes) q = q.not('last_note_at', 'is', null);
       if (f.search) q = q.or(`attendee_name.ilike.%${f.search}%,subject.ilike.%${f.search}%,last_message_preview.ilike.%${f.search}%`);
-      return sel<(Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null })[]>(q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(300));
+      if (pageParam) {
+        // Everything strictly after the cursor in (last_message_at desc nulls last, id desc) order.
+        q = pageParam.at
+          ? q.or(`last_message_at.lt.${pageParam.at},and(last_message_at.eq.${pageParam.at},id.lt.${pageParam.id}),last_message_at.is.null`)
+          : q.is('last_message_at', null).lt('id', pageParam.id);
+      }
+      const rows = (await sel<ChatListRow[]>(q.order('last_message_at', { ascending: false, nullsFirst: false }).order('id', { ascending: false }).limit(CHATS_PAGE_SIZE))) ?? [];
+      const last = rows[rows.length - 1];
+      return { rows, next: rows.length === CHATS_PAGE_SIZE && last ? { at: last.last_message_at, id: last.id } : null };
     },
+    getNextPageParam: (last: ChatPage) => last.next ?? undefined,
+    select: (d: InfiniteData<ChatPage, ChatCursor | null>) => {
+      const seen = new Set<string>();
+      const out: ChatListRow[] = [];
+      for (const p of d.pages) for (const r of p.rows) if (!seen.has(r.id)) { seen.add(r.id); out.push(r); }
+      return out;
+    },
+  });
+}
+
+/**
+ * Optimistically patches one chat in every cached inbox list of the workspace: the paged list ({ pages }) and the
+ * by-ids lists (plain arrays) live under the same key prefix and hold the same row shape.
+ */
+export function patchChatInLists(qc: QueryClient, ws: string, id: string, patch: Partial<Chat>) {
+  const apply = (rows: ChatListRow[]) => rows.map((c) => (c.id === id ? { ...c, ...patch } : c));
+  qc.setQueriesData<ChatListRow[] | InfiniteData<ChatPage, ChatCursor | null>>({ queryKey: ['outreach', ws, 'chats'] }, (old) => {
+    if (!old) return old;
+    if (Array.isArray(old)) return apply(old);
+    if ('pages' in old) return { ...old, pages: old.pages.map((p) => ({ ...p, rows: apply(p.rows) })) };
+    return old;
   });
 }
 
@@ -380,6 +422,19 @@ export function useOutreachRealtime(ws: string | null | undefined) {
       inv(['outreach', 'enrollments']);
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_import_jobs', filter: `workspace_id=eq.${ws}` }, () => inv(qk.imports(ws)));
+    // Private notes (046): a note or a "seen by" change refreshes the open thread's notes; a mention refreshes the badge and the Mentions view.
+    // Notifications are streamed per user by useNotificationsRealtime (lib/outreach/notes.ts), which also shows the toast.
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_chat_notes', filter: `workspace_id=eq.${ws}` }, (p: { new?: { chat_id?: string; lead_id?: string }; old?: { chat_id?: string } }) => {
+      const chatId = p.new?.chat_id ?? p.old?.chat_id;
+      if (chatId) inv(['outreach', 'chat', chatId, 'notes']);
+      if (p.new?.lead_id) inv(['outreach', 'lead', p.new.lead_id, 'team-notes']);
+      inv(['outreach', ws, 'notes']);
+    });
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_chat_note_mentions', filter: `workspace_id=eq.${ws}` }, (p: { new?: { chat_id?: string }; old?: { chat_id?: string } }) => {
+      const chatId = p.new?.chat_id ?? p.old?.chat_id;
+      if (chatId) inv(['outreach', 'chat', chatId, 'notes']);
+      inv(['outreach', ws, 'notes']);
+    });
     ch.subscribe();
     return () => {
       if (timer) clearTimeout(timer);

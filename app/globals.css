@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 :root {
+  /* Private notes (outreach inbox): amber note surface, with a dark-mode value */
+  --note-bg: #fffbeb;
   --foreground-rgb: 0, 0, 0;
   --background-start-rgb: 231, 231, 245;
   --background-end-rgb: 255, 255, 255;
@@ -119,4 +121,8 @@ h1, h2, h3, h4, h5, h6 {
   .text-balance {
     text-wrap: balance;
   }
+}
+
+.dark {
+  --note-bg: #3b2f0b;
 }

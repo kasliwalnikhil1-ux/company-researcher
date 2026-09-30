@@ -117,7 +117,7 @@ export function flagsOf(classification: SimulateResult['classification'] | undef
 /** Human error text; AI setup problems point to Settings → AI. */
 export function aiErrorText(e: unknown): { message: string; setup: boolean } {
   const err = parseError(e);
-  if (err.code === 'E_AI_UNAVAILABLE') return { message: 'AI drafting is not set up for this workspace yet. Add an AI key in Settings → AI, or ask the platform team to switch it on.', setup: true };
+  if (err.code === 'E_AI_UNAVAILABLE') return { message: 'AI drafting is not set up for this workspace yet. Add an AI key in Settings → AI Personalization, or ask the platform team to switch it on.', setup: true };
   if (err.code === 'E_AI_KEY_INVALID') return { message: `The workspace's AI key was rejected. Check it in Settings → AI. ${err.message}`.trim(), setup: true };
   if (err.code === 'E_FORBIDDEN') return { message: 'Only owners and managers can do this.', setup: false };
   return { message: !err.message || err.message === err.code ? humanize(err.code) : err.message, setup: false };

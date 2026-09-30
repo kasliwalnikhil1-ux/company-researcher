@@ -192,7 +192,7 @@ function CopyPromptModal({ sequenceId, ws, sequences, onClose, onDone }: { seque
             {(lib.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}{l.is_default ? ' (workspace default)' : ''} · v{l.version}</option>)}
           </Select>
         )}
-        {source === 'library' && lib.data && lib.data.length === 0 && <Note>No library prompts yet. Add them in Settings → AI replies → Defaults.</Note>}
+        {source === 'library' && lib.data && lib.data.length === 0 && <Note>No library prompts yet. Add them in Settings → AI Auto Replies → Defaults.</Note>}
         {error && <ErrorBox message={error} />}
       </div>
     </Modal>

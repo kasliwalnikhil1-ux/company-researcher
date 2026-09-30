@@ -2,12 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Paperclip, Send, X, Lock, CalendarCheck, Smile } from 'lucide-react';
+import { Paperclip, Send, X, Lock, CalendarCheck, Smile, MessageSquare } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
-import { callFn, parseError } from '@/lib/outreach/api';
+import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk, useMessages } from '@/lib/outreach/queries';
-import type { Chat, Message, Sender } from '@/lib/outreach/types';
+import { useAgentTyping } from '@/lib/outreach/webchat';
+import type { Chat, Member, Message, Sender } from '@/lib/outreach/types';
 import { Button } from '@/components/outreach/ui';
+import { useDraftText, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
+import NoteComposer from './notes/NoteComposer';
 import { fmtBytes } from './hooks';
 import { isMailProvider, messageMaxLength } from '@/lib/outreach/channels';
 import { aiqk } from '@/lib/outreach/aiReplies';
@@ -28,6 +32,13 @@ export interface ComposeProps {
   replyTo?: Message | null;
   replyToName?: string;
   onCancelReply?: () => void;
+  /** Private notes (private-notes-PRD §4): the second composer mode. Reply and note keep separate drafts. */
+  mode: 'reply' | 'note';
+  onModeChange: (mode: 'reply' | 'note') => void;
+  members: Member[] | undefined;
+  currentUserId: string | null;
+  isClientViewer: boolean;
+  onAddNote: (body: string, visibility: NoteVisibility, attachments: NoteAttachment[]) => Promise<void>;
 }
 
 const EMOJIS = ['😀', '😂', '😊', '😍', '🙂', '😉', '😎', '🤔', '😅', '🙏', '👍', '👏', '🙌', '💪', '🤝', '👋', '❤️', '🔥', '🎉', '✅', '💯', '⭐', '📌', '📅', '📞', '💼', '🚀', '😢', '😮', '👀'];
@@ -75,12 +86,16 @@ function bookingTitle(typed: string): string {
   return typed ? 'Sends your text with the booking link added below it' : `Sends: “${BOOKING_DEFAULT_TEXT}” followed by the booking link`;
 }
 
-export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent, replyTo, replyToName, onCancelReply }: ComposeProps) {
+export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent, replyTo, replyToName, onCancelReply, mode, onModeChange, members, currentUserId, isClientViewer, onAddNote }: ComposeProps) {
   const qc = useQueryClient();
   const isEmail = isMailProvider(chat.provider);
   // Instagram direct messages stop at 1000 characters, WhatsApp at 4096; LinkedIn and email are not limited here.
   const maxLength = messageMaxLength(chat.provider);
-  const [text, setText] = useState('');
+  // the reply draft is remembered per chat (and restored on reload), separately from the note draft
+  const [text, setTextRaw] = useDraftText(chat.id, 'reply');
+  // web chat: the visitor sees "… is typing" (throttled; PRD §5.4)
+  const agentTyping = useAgentTyping(chat.id, chat.provider === 'WEBCHAT');
+  const setText = (v: string) => { setTextRaw(v); agentTyping(v); };
   // AI replies: pre-fills the AI draft and remembers which run the text came from (sent as `ai_run_id`).
   const ai = useComposerAi(chat.id, text, setText);
   // Draft with AI (draft_now) for this chat, plus the Improve / Translate undo state.
@@ -167,7 +182,12 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       if (booking) payload.booking = true;
       if (replyTo) payload.quote_message_id = replyTo.id;
       if (aiRunId) payload.ai_run_id = aiRunId;
-      await callFn('send-reply', payload);
+      if (chat.provider === 'WEBCHAT') {
+        // web chat: no connector; the row + Realtime broadcast come from the RPC (web-chat-PRD.md §8). "/shortcut" expands there.
+        await rpc('webchat_agent_send', { p_chat: chat.id, p_text: body, p_content_type: paths.length ? 'attachment' : 'text', p_attrs: {}, p_attachments: paths.map((path, i) => ({ id: path, storage: true, name: files[i]?.name ?? path.split('/').pop(), type: files[i]?.type ?? null, size: files[i]?.size ?? null })) });
+      } else {
+        await callFn('send-reply', payload);
+      }
       setText('');
       ai.dropTag();
       setUndo(null);
@@ -187,20 +207,55 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     }
   };
 
+  // Reply / Private note tabs (Alt+P switches; the shortcut listener lives in Thread). A note is allowed whenever the
+  // chat is readable — sender status, can_reply, AI state and pauses only gate the Reply mode.
+  const noteMode = mode === 'note';
+  const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigator.platform) ? '⌥P' : 'Alt+P';
+  const tabs = (
+    <div className="flex items-center gap-1" role="tablist" aria-label="Composer mode">
+      {([['reply', 'Reply', MessageSquare], ['note', 'Private note', Lock]] as const).map(([m, label, Icon]) => (
+        <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => onModeChange(m)}
+          className={cn('inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border transition-colors',
+            mode === m ? (m === 'note' ? 'bg-amber-100 border-amber-300 text-amber-950 font-medium' : 'bg-indigo-50 border-indigo-200 text-indigo-800 font-medium') : 'bg-transparent border-transparent text-gray-500 hover:bg-gray-100')}>
+          <Icon className="w-3.5 h-3.5" /> {label}
+        </button>
+      ))}
+      <span className="ml-auto text-[10px] text-gray-400 hidden sm:inline" title="Switch between Reply and Private note">{modKey} to switch</span>
+    </div>
+  );
+  const noteBody = noteMode ? (
+    <NoteComposer chat={chat} workspaceId={workspaceId} members={members} currentUserId={currentUserId} isClientViewer={isClientViewer} canImprove={aiChannel && !disabledReason} onSubmit={onAddNote} onError={onError} autoFocus />
+  ) : null;
+
   if (disabledReason) {
     return (
-      <div className="border-t border-gray-200 bg-gray-50 px-4 py-3 space-y-2">
-        <AiComposerPanel ai={ai} chat={chat} canCompose={false} onError={onError} />
-        <div className="text-sm text-gray-600 flex items-start gap-2">
-          <Lock className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
-          <span>{disabledReason}</span>
-        </div>
+      <div className={cn('border-t border-gray-200 px-4 py-3 space-y-2', noteMode ? 'bg-amber-50/60' : 'bg-gray-50')}>
+        {tabs}
+        {noteBody ?? (
+          <>
+            <AiComposerPanel ai={ai} chat={chat} canCompose={false} onError={onError} />
+            <div className="text-sm text-gray-600 flex items-start gap-2">
+              <Lock className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
+              <span>{disabledReason}</span>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  if (noteMode) {
+    return (
+      <div className="border-t border-gray-200 bg-amber-50/60 p-3 space-y-2">
+        {tabs}
+        {noteBody}
       </div>
     );
   }
 
   return (
     <div className="border-t border-gray-200 bg-white p-3 space-y-2">
+      {tabs}
       <AiComposerPanel ai={ai} chat={chat} canCompose onError={onError} onRegenerate={aiChannel ? () => { void draft.request({ regenerate: true }); } : undefined} regenerating={draft.busy} />
       {bookingLink && interested && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">

@@ -53,7 +53,7 @@ export default function ConsentPanel({ ws, canEdit, isManager, notify }: {
         Auto writes as a real person, so the owner of each LinkedIn account approves it once: &ldquo;AI may reply as me in the sequences my team turns on.&rdquo; The owner sees the daily cap and three example replies from their own recent chats. Approving your own accounts takes one click. Prompt edits never ask again; a weekly email lists which sequences used the approval.
       </p>
       {senders.length === 0 ? (
-        <EmptyState icon={<ShieldCheck className="w-6 h-6" />} title="No LinkedIn senders yet" description="Connect a LinkedIn sender to ask its owner to approve AI replies." />
+        <EmptyState icon={<ShieldCheck className="w-6 h-6" />} title="No LinkedIn senders yet" description="Connect a LinkedIn sender to ask its owner to approve AI Auto Replies." />
       ) : senders.map((s) => (
         <ConsentSenderCard key={s.sender_id} sender={s} canEdit={canEdit} busy={busy === s.sender_id}
           onRequest={() => doRequest(s)} onRevoke={() => { setReason(''); setRevoking(s); }} />

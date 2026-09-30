@@ -95,7 +95,7 @@ function TasksPageInner() {
 
   return (
     <div>
-      <PageHeader title="Tasks" subtitle="Manual steps, calls, AI drafts to review, leads held after a reply, follow-ups and sender reconnects." actions={
+      <PageHeader title="Tasks" subtitle="Manual steps, calls, AI Personalization drafts to review, leads held after a reply, follow-ups and sender reconnects." actions={
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {(['open', 'completed'] as const).map((t) => (
             <button key={t} type="button" onClick={() => setTab(t)} className={cn('px-3 py-1.5 text-sm rounded-md capitalize', tab === t ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{t}{t === 'open' && openCount != null && tasksQ.data ? ` (${openCount})` : ''}</button>
@@ -135,7 +135,7 @@ function TasksPageInner() {
       {(!filtersReady || tasksQ.isLoading) && <Spinner className="min-h-[50vh]" />}
       {tasksQ.error && <ErrorBox message={parseError(tasksQ.error).message} />}
       {tasksQ.data && rows.length === 0 && (
-        <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
+        <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI Personalization draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
       )}
       {rows.length > 0 && (
         <div className={cn('transition-opacity', tasksQ.isPlaceholderData && 'opacity-60')}>

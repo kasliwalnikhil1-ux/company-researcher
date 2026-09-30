@@ -10,11 +10,14 @@ function csvEscape(v: unknown): string {
 serve("exports-create", async (req) => {
   const user = await requireUser(req);
   await rateLimit(`user:${user.id}:exports`, 10, 600);
-  const body = await readJson<{ workspace_id: string; kind: "leads" | "messages" | "actions" | "audit"; client_id?: string | null; filters?: Record<string, unknown> }>(req);
+  const body = await readJson<{ workspace_id: string; kind: "leads" | "messages" | "actions" | "audit"; client_id?: string | null; filters?: Record<string, unknown>; include_notes?: boolean }>(req);
   if (!body.workspace_id || !body.kind) throw new HttpError(400, "E_PAYLOAD_INVALID");
   const m = await membership(user.id, body.workspace_id);
   requireRole(m, "manager");
   const ws = body.workspace_id;
+  // private-notes-PRD §8.5: internal notes are excluded by default; a manager may tick "Include private notes" on the
+  // messages export. The rows are marked type=note and the file name carries -with-notes (audited below).
+  const includeNotes = body.kind === "messages" && body.include_notes === true;
   let columns: string[] = [];
   const rows: unknown[][] = [];
   const pageSize = 1000;
@@ -41,12 +44,24 @@ serve("exports-create", async (req) => {
     if (data.length < pageSize || rows.length >= 200_000) break;
     from += pageSize;
   }
+  if (includeNotes) {
+    if (!columns.includes("type")) columns.push("type");
+    for (const r of rows) r.push("message");
+    const { data: notes, error: nErr } = await admin.from("outreach_chat_notes").select("id, chat_id, author_type, body, visibility, created_at, edited_at, outreach_chats!inner(sender_id, lead_id, attendee_name, provider)")
+      .eq("workspace_id", ws).is("deleted_at", null).order("created_at").limit(50_000);
+    if (nErr) throw new HttpError(500, "E_INTERNAL", nErr.message);
+    for (const n of (notes ?? []) as any[]) {
+      const flat: Record<string, unknown> = { id: n.id, chat_id: n.chat_id, direction: "note", text: `[private note · ${n.author_type} · ${n.visibility}] ${String(n.body ?? "").replace(/@\[([^\]]+)\]\(user:[^)]+\)/g, "@$1")}`,
+        sent_at: n.created_at, sender_id: n.outreach_chats?.sender_id, lead_id: n.outreach_chats?.lead_id, attendee_name: n.outreach_chats?.attendee_name, provider: n.outreach_chats?.provider, type: "note" };
+      rows.push(columns.map((c) => flat[c]));
+    }
+  }
   const csv = [columns.map(csvEscape).join(","), ...rows.map((r) => r.map(csvEscape).join(","))].join("\r\n");
-  const path = `${ws}/${body.kind}-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+  const path = `${ws}/${body.kind}-${new Date().toISOString().replace(/[:.]/g, "-")}${includeNotes ? "-with-notes" : ""}.csv`;
   const { error: upErr } = await admin.storage.from("outreach-exports").upload(path, new Blob([csv], { type: "text/csv" }), { contentType: "text/csv", upsert: true });
   if (upErr) throw new HttpError(500, "E_INTERNAL", upErr.message);
   const { data: signed, error: sErr } = await admin.storage.from("outreach-exports").createSignedUrl(path, 3600);
   if (sErr) throw new HttpError(500, "E_INTERNAL", sErr.message);
-  await audit(ws, "export.created", "export", path, { kind: body.kind, rows: rows.length, by: user.id }, "user");
+  await audit(ws, "export.created", "export", path, { kind: body.kind, rows: rows.length, by: user.id, include_notes: includeNotes || undefined }, "user");
   return json({ ok: true, url: signed.signedUrl, rows: rows.length, path });
 });

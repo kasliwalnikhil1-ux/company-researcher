@@ -120,6 +120,21 @@ async function afterHumanSend(chat: Row, msg: Row, input: ReplyInput, text: stri
   } catch (e) { log({ fn: "reply", warn: `ai_reply_on_human_send: ${String((e as any)?.message ?? e)}` }); }
 }
 
+/** Web chat attachments: the paths the composer uploaded to outreach-attachments, described (not downloaded: nothing leaves the platform). */
+async function storedAttachments(chat: Row, input: ReplyInput): Promise<Array<Record<string, unknown>>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const path of input.attachments ?? []) {
+    if (!path.startsWith(`${chat.workspace_id}/${chat.id}/`) || /(^|\/)chat-notes(\/|$)/i.test(path) || path.includes("..")) continue;
+    const dir = path.slice(0, path.lastIndexOf("/")), file = path.split("/").pop() ?? "attachment";
+    const { data: list } = await admin.storage.from("outreach-attachments").list(dir, { search: file, limit: 1 });
+    const meta = list?.find((f) => f.name === file);
+    if (!meta) continue;
+    const type = (meta.metadata as Record<string, unknown> | null)?.mimetype as string | undefined;
+    out.push({ id: path, storage: true, name: file.replace(/^\d+-/, ""), type: type ?? null, mimetype: type ?? null, size: (meta.metadata as Record<string, unknown> | null)?.size ?? null });
+  }
+  return out;
+}
+
 export async function sendReply(input: ReplyInput): Promise<Record<string, unknown> | null> {
   if (!input.chat_id || (!input.text?.trim() && !input.booking && !input.attachments?.length)) throw new HttpError(400, "E_PAYLOAD_INVALID", "chat_id and text (or an attachment) required");
   const { data: chat } = await admin.from("outreach_chats").select("*, outreach_senders(*)").eq("id", input.chat_id).maybeSingle();
@@ -135,6 +150,12 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     if (input.scope.clientIds.length && chat.client_id && !input.scope.clientIds.includes(chat.client_id)) throw new HttpError(404, "E_NOT_FOUND");
   }
   const sender = (chat as any).outreach_senders;
+  // web chat (web-chat-PRD.md): no connector; the message is a row + a Realtime broadcast, written by the same RPC the inbox uses
+  if (sender?.provider === "WEBCHAT") {
+    const stored = await storedAttachments(chat, input);
+    const msg = await rpc<Record<string, unknown>>("webchat_agent_send", { p_chat: chat.id, p_text: input.text ?? "", p_content_type: stored.length ? "attachment" : "text", p_attrs: {}, p_attachments: stored, p_actor: input.userId });
+    return msg;
+  }
   if (!sender || sender.status !== "ok" || !sender.unipile_account_id) throw new HttpError(409, "E_SENDER_NOT_OK", "sender is not connected");
   let text = (input.text ?? "").trim();
   let bookingUrl: string | null = null;
@@ -178,6 +199,8 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
   const stored: Array<Record<string, unknown>> = [];
   for (const path of input.attachments ?? []) {
     if (!path.startsWith(`${chat.workspace_id}/`)) continue;
+    // private-notes-PRD §8.3: files of internal notes live in another bucket and are never sent out, whatever the path says
+    if (/(^|\/)chat-notes(\/|$)/i.test(path) || path.includes("..")) continue;
     const { data: blob } = await admin.storage.from("outreach-attachments").download(path);
     if (!blob) continue;
     const name = path.split("/").pop() ?? "attachment";

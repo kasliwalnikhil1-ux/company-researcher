@@ -13,7 +13,7 @@ import { RecordingModal, UploadRecordingButton } from '@/components/crm/recordin
 import { DraftEmailButtons } from '@/components/crm/draft-email';
 import { CompanyAboutBlock, IndustryBadge } from '@/components/crm/about';
 import { ContactCard } from '@/components/crm/contact-card';
-import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, GraduationCap, Headphones, Pencil, Plus, MessageSquarePlus } from 'lucide-react';
+import { ArrowRight, CalendarPlus, ClipboardCheck, ExternalLink, FileText, GraduationCap, Headphones, Pencil, Plus, MessageSquarePlus, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // Everything about one account: contacts, deals, full activity timeline, every past meeting capture.
@@ -125,6 +125,8 @@ export default function CompanyPage() {
                       <span className="font-medium text-gray-900 tabular-nums">{fmtDate(m.scheduled_at, { time: true, tz: timezone })}</span>
                       <Badge tone={m.status === 'held' ? 'green' : m.status === 'no_show' ? 'red' : m.status === 'cancelled' ? 'gray' : 'blue'}>{m.status.replace('_', '-')}</Badge>
                       {m.contact && <span className="text-gray-600">with {m.contact}</span>}
+                      {m.meet_link && m.status === 'scheduled' && <a href={m.meet_link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline" title={`Google Meet${m.calendar_account ? ` · booked from ${m.calendar_account}` : ''}`}><Video className="w-3 h-3" /> Join Meet</a>}
+                      {!m.meet_link && m.calendar_link && <a href={m.calendar_link} target="_blank" rel="noreferrer" className="text-xs text-gray-500 hover:underline" title="Open in Google Calendar">on Google Calendar</a>}
                       {m.status === 'scheduled' && past && <Link href={`/crm/capture?meeting=${m.meeting_id}`}><Button size="xs"><ClipboardCheck className="w-3 h-3" /> Capture now</Button></Link>}
                       {m.status === 'scheduled' && !past && <Link href={`/crm/capture?meeting=${m.meeting_id}`} className="text-xs text-indigo-600 hover:underline">capture</Link>}
                       {m.transcript && <Button size="xs" variant="secondary" onClick={() => setTranscriptFor({ id: m.meeting_id, tab: 'transcript' })} title={m.transcript.summary ?? 'Open the call transcript'}><FileText className="w-3 h-3" /> Transcript · {fmtDuration(m.transcript.duration_seconds)}{m.recording ? ' + audio' : ''}</Button>}

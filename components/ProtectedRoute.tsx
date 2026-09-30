@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Clock, ShieldOff } from 'lucide-react';
+import { CalendarCheck, ExternalLink, ShieldOff } from 'lucide-react';
 import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { useAccess } from '@/contexts/AccessContext';
+import { ONBOARDING_CALENDLY_URL, trackMySignup } from '@/lib/platform/leads';
 
 function Spinner() {
   return (
@@ -14,35 +15,146 @@ function Spinner() {
   );
 }
 
+const CALENDLY_SCRIPT = 'https://assets.calendly.com/assets/external/widget.js';
+
+/** Calendly URL with the person's details prefilled and the GDPR banner off (the app already has its own notice). */
+function calendlyUrl(email: string | null, name: string | null): string {
+  const u = new URL(ONBOARDING_CALENDLY_URL);
+  u.searchParams.set('hide_gdpr_banner', '1');
+  u.searchParams.set('utm_source', 'app');
+  u.searchParams.set('utm_medium', 'signup_gate');
+  if (email) u.searchParams.set('email', email);
+  if (name) u.searchParams.set('name', name);
+  return u.toString();
+}
+
+/**
+ * The embedded onboarding-call calendar. Loads Calendly's widget script once, listens for the "event scheduled"
+ * message so the booking is recorded on the person's lead row, and falls back to a plain link if the embed never renders.
+ */
+function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: string | null; onBooked: (booking: { event: string | null; invitee: string | null }) => void }) {
+  const url = calendlyUrl(email, name);
+  const [booked, setBooked] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  const onBookedRef = useRef(onBooked);
+  useEffect(() => { onBookedRef.current = onBooked; }, [onBooked]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${CALENDLY_SCRIPT}"]`);
+    const init = () => {
+      const w = window as unknown as { Calendly?: { initInlineWidget: (o: { url: string; parentElement: HTMLElement }) => void } };
+      if (cancelled || !container.current || !w.Calendly) return;
+      container.current.innerHTML = '';
+      w.Calendly.initInlineWidget({ url, parentElement: container.current });
+    };
+    if (existing) {
+      if ((window as unknown as { Calendly?: unknown }).Calendly) init();
+      else existing.addEventListener('load', init, { once: true });
+    } else {
+      const s = document.createElement('script');
+      s.src = CALENDLY_SCRIPT;
+      s.async = true;
+      s.onload = init;
+      s.onerror = () => { if (!cancelled) setFailed(true); };
+      document.head.appendChild(s);
+    }
+    // if nothing has rendered after a while (blocked script, offline) show the link instead
+    const t = setTimeout(() => { if (!cancelled && container.current && !container.current.querySelector('iframe')) setFailed(true); }, 8000);
+
+    const onMessage = (e: MessageEvent) => {
+      if (typeof e.origin !== 'string' || !/\.calendly\.com$/.test(new URL(e.origin).hostname)) return;
+      const d = e.data as { event?: string; payload?: { event?: { uri?: string }; invitee?: { uri?: string } } } | undefined;
+      if (d?.event === 'calendly.event_scheduled') {
+        setBooked(true);
+        onBookedRef.current({ event: d.payload?.event?.uri ?? null, invitee: d.payload?.invitee?.uri ?? null });
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => { cancelled = true; clearTimeout(t); window.removeEventListener('message', onMessage); };
+  }, [url]);
+
+  return (
+    <div>
+      {booked && (
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 flex items-start gap-2">
+          <CalendarCheck className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>Your call is booked. The invitation is in your inbox; your account is switched on right after we speak, often sooner.</span>
+        </div>
+      )}
+      {failed ? (
+        <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center">
+          <p className="text-sm text-gray-600">The calendar could not load here (an ad blocker or a strict network often does this).</p>
+          <a href={url} target="_blank" rel="noopener" className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+            Open the calendar in a new tab <ExternalLink className="w-4 h-4" />
+          </a>
+        </div>
+      ) : (
+        <div ref={container} className="calendly-inline-widget rounded-xl overflow-hidden border border-gray-200 bg-white" style={{ minWidth: 320, height: 660 }} />
+      )}
+    </div>
+  );
+}
+
 /**
  * Shown instead of the app while the account is waiting for approval or has been switched off by an admin.
  * The database refuses the product RPCs for these accounts as well; this screen just explains why.
+ * Pending accounts see the onboarding-call calendar embedded (lib/platform/leads ONBOARDING_CALENDLY_URL); the visit
+ * and the booking are recorded on the person's lead row (/admin → Leads) through /api/leads/track.
  */
-function AccountGate({ status, email, onSignOut, onRetry }: { status: 'pending' | 'blocked'; email: string | null; onSignOut: () => void; onRetry: () => void }) {
+function AccountGate({ status, email, name, onSignOut, onRetry }: { status: 'pending' | 'blocked'; email: string | null; name: string | null; onSignOut: () => void; onRetry: () => void }) {
   const pending = status === 'pending';
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
-        <div className={`mx-auto w-12 h-12 rounded-full flex items-center justify-center ${pending ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
-          {pending ? <Clock className="w-6 h-6" /> : <ShieldOff className="w-6 h-6" />}
+
+  // record where this sign-up came from (best effort, once per mount)
+  useEffect(() => { if (pending) trackMySignup(); }, [pending]);
+
+  if (!pending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
+        <div className="w-full max-w-md bg-white border border-gray-200 rounded-2xl shadow-sm p-8 text-center">
+          <div className="mx-auto w-12 h-12 rounded-full flex items-center justify-center bg-rose-100 text-rose-700"><ShieldOff className="w-6 h-6" /></div>
+          <h1 className="mt-4 text-xl font-semibold text-gray-900">Your access has been turned off</h1>
+          <p className="mt-2 text-sm text-gray-600">An administrator has switched off access for this account. If you think this is a mistake, contact support.</p>
+          {email && <p className="mt-3 text-xs text-gray-400">Signed in as {email}</p>}
+          <div className="mt-6 flex items-center justify-center gap-2">
+            <button type="button" onClick={onSignOut} className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">Sign out</button>
+          </div>
         </div>
-        <h1 className="mt-4 text-xl font-semibold text-gray-900">{pending ? 'Your account is waiting for approval' : 'Your access has been turned off'}</h1>
-        <p className="mt-2 text-sm text-gray-600">
-          {pending
-            ? 'Thanks for signing up. An administrator reviews new accounts before they can use the app. You will be able to sign in as soon as it is approved.'
-            : 'An administrator has switched off access for this account. If you think this is a mistake, contact support.'}
-        </p>
-        {email && <p className="mt-3 text-xs text-gray-400">Signed in as {email}</p>}
-        <div className="mt-6 flex items-center justify-center gap-2">
-          {pending && (
-            <button type="button" onClick={onRetry} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50">
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 px-4 py-8 sm:py-12">
+      <div className="mx-auto w-full max-w-3xl bg-white border border-gray-200 rounded-2xl shadow-sm p-6 sm:p-8">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in — one last step</p>
+            <h1 className="mt-1 text-2xl font-semibold text-gray-900">Book your 20-minute onboarding call</h1>
+            <p className="mt-2 text-sm text-gray-600 max-w-xl">
+              Thanks for signing up. Every new account is set up on a short call: we connect your first sending accounts, build your first
+              sequence with you and switch your workspace on. Pick a time that suits you below.
+            </p>
+            {email && <p className="mt-2 text-xs text-gray-400">Signed in as {email}</p>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button type="button" onClick={onRetry} className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50" title="Already approved? Check again">
               Check again
             </button>
-          )}
-          <button type="button" onClick={onSignOut} className="px-4 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
-            Sign out
-          </button>
+            <button type="button" onClick={onSignOut} className="px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+              Sign out
+            </button>
+          </div>
         </div>
+
+        <div className="mt-6">
+          <CalendlyEmbed email={email} name={name} onBooked={(booking) => { trackMySignup({ booked: true, booking }); }} />
+        </div>
+
+        <p className="mt-4 text-xs text-gray-400">
+          Can&apos;t find a time? Write to <a href="mailto:hello@growthxai.com" className="text-indigo-600 hover:underline">hello@growthxai.com</a> and we&apos;ll sort it out by email.
+        </p>
       </div>
     </div>
   );
@@ -73,7 +185,11 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
   // Pending / blocked accounts see an explanation instead of the app. (If the access read failed the app
   // still renders: the database refuses the product calls on its own.)
   if (access.status === 'pending' || access.status === 'blocked') {
-    return <AccountGate status={access.status} email={user.email ?? null} onSignOut={() => { signOut().catch(() => undefined); }} onRetry={() => { access.refresh(); }} />;
+    const meta = (user.user_metadata ?? {}) as { full_name?: string; name?: string };
+    return (
+      <AccountGate status={access.status} email={user.email ?? null} name={meta.full_name ?? meta.name ?? null}
+        onSignOut={() => { signOut().catch(() => undefined); }} onRetry={() => { access.refresh(); }} />
+    );
   }
 
   return <>{children}</>;

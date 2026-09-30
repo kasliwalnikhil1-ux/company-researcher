@@ -14,7 +14,7 @@ export type StatusAction = 'activate' | 'pause' | 'resume' | 'archive' | 'draft'
 /** Sections of the builder shown as tabs, in the order of the tab row. */
 export type BuilderTab = 'steps' | 'senders' | 'leads' | 'auto' | 'ai' | 'settings' | 'versions';
 export const BUILDER_TABS: BuilderTab[] = ['steps', 'senders', 'leads', 'auto', 'ai', 'settings', 'versions'];
-const TAB_LABEL: Record<BuilderTab, string> = { steps: 'Steps', senders: 'Senders', leads: 'Leads', auto: 'Auto-enrol', ai: 'AI replies', settings: 'Settings', versions: 'Versions' };
+const TAB_LABEL: Record<BuilderTab, string> = { steps: 'Steps', senders: 'Senders', leads: 'Leads', auto: 'Auto-enrol', ai: 'AI Auto Replies', settings: 'Settings', versions: 'Versions' };
 
 export interface DraftIndicator {
   status: DraftSaveStatus;
@@ -45,7 +45,7 @@ interface Props {
   failedCount: number | undefined;
   tab: BuilderTab;
   onTab: (tab: BuilderTab) => void;
-  /** Small counts shown next to a tab label (e.g. open unanswered questions on AI replies). */
+  /** Small counts shown next to a tab label (e.g. open unanswered questions on AI Auto Replies). */
   tabBadges?: Partial<Record<BuilderTab, number>>;
   onChange: (patch: Partial<Draft>) => void;
   onSave: () => Promise<boolean>;

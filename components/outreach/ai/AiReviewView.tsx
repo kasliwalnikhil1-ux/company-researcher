@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronLeft, ChevronRight, Loader2, RefreshCw, ShieldCheck, SkipForward, Sparkles, Wand2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, HelpCircle, Loader2, RefreshCw, ShieldCheck, SkipForward, Sparkles, Wand2 } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { factLines, ik, useAiBatches, useAiRealtime, useAiReviewList, type AiBatch, type AiGenerateResult, type AiReviewAction, type AiReviewRow, type AiValueStatus } from '@/lib/outreach/intel';
@@ -20,6 +20,52 @@ const STATUS_FILTERS: Array<{ id: string; label: string }> = [
   { id: 'generated', label: 'To review' }, { id: 'approved', label: 'Approved' }, { id: 'skipped', label: 'Skipped' },
   { id: 'blank', label: 'Blank' }, { id: 'failed', label: 'Failed' }, { id: 'pending', label: 'Still generating' }, { id: 'all', label: 'All' },
 ];
+// One line under the filter so the chosen status is never a guess.
+const STATUS_HINTS: Record<string, string> = {
+  generated: 'Written by the AI and waiting for a person. Nothing here is sent until you approve it.',
+  approved: 'Approved lines. These are the only lines a message can send.',
+  skipped: 'You chose the fallback for these leads. Approve a line to use it after all.',
+  blank: 'The profile had nothing usable, so the fallback is used. Type your own line to replace it.',
+  failed: 'The line could not be written. The fallback is used unless you regenerate it.',
+  pending: 'Still being written. Lines move to “To review” as they finish.',
+  all: 'Every line, whatever its status.',
+};
+const GUIDE_KEY = 'outreach.ai-review.guide-hidden';
+
+function Guide() {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => { try { setHidden(window.localStorage.getItem(GUIDE_KEY) === '1'); } catch { /* storage blocked */ } }, []);
+  const toggle = () => { const next = !hidden; setHidden(next); try { window.localStorage.setItem(GUIDE_KEY, next ? '1' : '0'); } catch { /* storage blocked */ } };
+  const steps: Array<{ title: string; body: ReactNode }> = [
+    { title: 'Create an AI variable', body: <>In <Link href="/outreach/settings/ai" className="text-indigo-700 underline">Settings → AI Personalization</Link>, write what the AI should say (for example one sentence about their current role) and a fallback. You get a token like <code className="text-[11px] bg-white border border-indigo-100 rounded px-1">{'{{ai.opener|fallback}}'}</code>.</> },
+    { title: 'Choose how lines get approved', body: <><strong>Review</strong>: you approve each line. <strong>Auto</strong>: lines that pass the checks are approved for you, and the rest come here. Auto starts with 20 lines for you to review.</> },
+    { title: 'Generate lines', body: <>Click <strong>Generate lines</strong>, pick the variable and a list, a tag or the leads you selected. Use <strong>Try it</strong> on one lead first to check the prompt. Lines are written in the background, up to 2,000 leads per batch.</> },
+    { title: 'Review what needs you', body: <>Each row shows the profile facts the AI used, the line it wrote and any check it failed. <strong>Approve</strong> it, type over it and press <strong>Save and approve</strong> (or Ctrl+Enter), <strong>regenerate</strong> it, or <strong>skip</strong> it to use the fallback. Auto-approved lines can be revoked until they are sent.</> },
+    { title: 'Use it in a message', body: <>Paste the token into a sequence step. To make leads wait for their line instead of sending the fallback, turn on <strong>Hold leads until AI-written lines are approved</strong> in the sequence settings, and set how long they may wait.</> },
+  ];
+  return (
+    <div className="rounded-xl border border-indigo-200 bg-indigo-50 mb-4 text-sm text-indigo-900" role="note">
+      <div className="flex items-start gap-2 px-4 py-3">
+        <ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" />
+        <span className="flex-1"><span className="font-semibold">Only approved lines are ever sent, approved by you or by the checks. Everything else uses the fallback.</span> A lead whose sequence waits for review starts as soon as its line is approved, skipped or blank.</span>
+        <button type="button" onClick={toggle} aria-expanded={!hidden} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline whitespace-nowrap">
+          <HelpCircle className="w-3.5 h-3.5" /> {hidden ? 'How it works' : 'Hide guide'}<ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !hidden && 'rotate-180')} />
+        </button>
+      </div>
+      {!hidden && (
+        <ol className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3 px-4 pb-4">
+          {steps.map((s, i) => (
+            <li key={s.title} className="rounded-lg bg-white/70 border border-indigo-100 p-3">
+              <div className="flex items-center gap-2 font-semibold text-indigo-950"><span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-[11px] flex items-center justify-center tabular-nums">{i + 1}</span>{s.title}</div>
+              <p className="text-xs text-indigo-900/80 mt-1.5 leading-relaxed">{s.body}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 const STATUS_META: Record<AiValueStatus, { tone: 'gray' | 'green' | 'red' | 'amber' | 'blue' | 'purple'; label: string }> = {
   pending: { tone: 'blue', label: 'Generating' }, generated: { tone: 'amber', label: 'To review' }, approved: { tone: 'green', label: 'Approved' },
   skipped: { tone: 'gray', label: 'Skipped' }, blank: { tone: 'gray', label: 'Blank' }, failed: { tone: 'red', label: 'Failed' },
@@ -192,16 +238,13 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
   };
 
   if (!ws) return null;
-  if (role === 'client_viewer') return <ErrorBox message="AI review is not available for client viewers." />;
+  if (role === 'client_viewer') return <ErrorBox message="AI Personalization is not available for client viewers." />;
 
   return (
     <div>
-      <PageHeader title="AI review" subtitle="Lines the AI wrote ahead of time. Read them, fix them, approve them." actions={canWrite ? <Button onClick={() => setGenerateOpen(true)}><Wand2 className="w-4 h-4" /> Generate lines</Button> : undefined} />
+      <PageHeader title="AI Personalization" subtitle="Lines the AI wrote ahead of time for each lead. Approve them yourself, or let the checks approve the good ones." actions={canWrite ? <Button onClick={() => setGenerateOpen(true)}><Wand2 className="w-4 h-4" /> Generate lines</Button> : undefined} />
 
-      <div className="flex items-start gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 mb-4 text-sm text-indigo-900" role="note">
-        <ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" />
-        <span><span className="font-semibold">Only approved lines are ever sent. Everything else uses the fallback.</span> A lead whose sequence waits for review starts as soon as its line is approved, skipped or blank.</span>
-      </div>
+      <Guide />
 
       <div className="grid grid-cols-1 lg:grid-cols-[300px,1fr] gap-4">
         {/* Left: batches */}
@@ -231,10 +274,11 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
             {canWrite && (
               <>
                 <Button variant="secondary" size="sm" disabled={skippable.length === 0 || !!busy} onClick={() => act(skippable.map((r) => r.value_id), 'skip')}><SkipForward className="w-3.5 h-3.5" /> Skip selected{skippable.length ? ` (${skippable.length})` : ''}</Button>
-                <Button size="sm" disabled={approvable.length === 0 || !!busy} loading={busy === 'bulk'} onClick={() => setConfirmAll(true)}><Check className="w-3.5 h-3.5" /> Approve all shown{approvable.length ? ` (${approvable.length})` : ''}</Button>
+                <Button size="sm" disabled={approvable.length === 0 || !!busy} loading={busy === 'bulk'} onClick={() => setConfirmAll(true)} title="Approves the lines on this page only. Rows with an unsaved edit are left out."><Check className="w-3.5 h-3.5" /> Approve all shown{approvable.length ? ` (${approvable.length})` : ''}</Button>
               </>
             )}
           </div>
+          {STATUS_HINTS[status] && <p className="text-xs text-gray-500 -mt-1 mb-3">{STATUS_HINTS[status]}</p>}
 
           {!filtersReady || listQ.isLoading ? <Spinner /> : listQ.error ? <ErrorBox message={parseError(listQ.error).message} /> : rows.length === 0 ? (
             <div className="bg-white border border-gray-200 rounded-xl">
@@ -250,8 +294,8 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
                     <tr>
                       {canWrite && <Th className="w-8"><input type="checkbox" aria-label="Select all shown" checked={allChecked} onChange={() => setChecked(allChecked ? new Set() : new Set(rows.map((r) => r.value_id)))} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /></Th>}
                       <Th>Lead</Th>
-                      <Th>Source facts used</Th>
-                      <Th>Generated line</Th>
+                      <Th title="What the AI read on the lead's profile. It may only use these facts.">Source facts used</Th>
+                      <Th title="Type over a line to change it, then Save and approve (Ctrl+Enter). Esc discards the edit.">Generated line</Th>
                       <Th>Status</Th>
                       {canWrite && <Th className="text-right">Actions</Th>}
                     </tr>

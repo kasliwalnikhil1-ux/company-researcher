@@ -9,6 +9,7 @@
 //   OAuth metadata:      GET  /crm-mcp/.well-known/oauth-protected-resource
 //   Transcript upload:   POST /crm-mcp/transcript             (one-time ticket from transcript_upload_ticket, not a JWT)
 //   Call audio:          POST /crm-mcp/recording/{upload-url,confirm,play-url,delete}   (member JWT or ticket — recordings.ts)
+//   Google Calendar:     GET  /crm-mcp/calendar/callback (Google OAuth) + POST /crm-mcp/calendar/*   (member JWT — calendar_routes.ts)
 //
 // Auth: Supabase Auth OAuth 2.1 access tokens (standard Supabase JWTs). The same
 // JWT is forwarded to an RLS-scoped supabase client, so every read and every
@@ -35,6 +36,8 @@ import { registerTranscript } from "./tools_transcript.ts";
 import { registerRecordingRoutes } from "./recordings.ts";
 import { registerAnalysis } from "./tools_analysis.ts";
 import { registerCoaching } from "./tools_coaching.ts";
+import { registerCalendar } from "./tools_calendar.ts";
+import { registerCalendarRoutes } from "./calendar_routes.ts";
 import { registerResources, registerPrompts } from "./resources_prompts.ts";
 import { registerSkill } from "../_shared/mcp-skills.ts";
 import { GROWTHXAI as BRAND, brandAuthServer } from "../_shared/brands.ts";
@@ -76,6 +79,8 @@ Recordings — when the user gives a call recording (a file, a path or a link: "
 
 Sales coach — every captured recording is then coached, without being asked: read the whole transcript (get_transcript) and the deal context (company_brief), rate the 12 criteria and the 4 Kaptured lens questions (understood the brand's needs · demonstrated relevant value · addressed quality concerns · secured a clear next step) with met | partial | missed | na | insufficient and timestamped excerpts as evidence, find the exact moments with a better response, keep salesperson execution separate from deal readiness, and save it once with save_call_coaching (1–3 priorities, never a list of twenty). The rubric is the crm skill's coaching-pipeline.md (read_skill(file: "coaching-pipeline.md")) and the resource crm://coaching/rubric. Confirm in 3–5 lines and point to the app's Sales Coach tab; call_coaching_list answers "what do we keep getting wrong?".
 
+Google Calendar — each team member connects their own Google accounts (work, personal, …) once; the sign-in is stored server-side, so calendar tools work in every client with no local script. calendar_accounts shows every connected account (the team's are visible, only the user's own are bookable; their default account is used unless they name another of theirs); calendar_events answers "what's on my calendar / tomorrow / am I free", calendar_free_slots finds open time (counting all of the user's accounts, plus guests Google lets it see), calendar_create_event books with a Google Meet link and emailed invites (title '<User first name> <> <name they used>', 30 min, never a time you picked yourself — offer 2–3 free slots when none was given; link it to the CRM with crm{contact_email|company|deal_id} whenever the guest is a prospect), calendar_update_event moves/edits, calendar_delete_event cancels (confirm unless they asked to cancel that exact meeting). schedule_meeting also creates the Google event when the member has a calendar connected; update_meeting keeps it in step. E_CALENDAR_NOT_CONNECTED / E_CALENDAR_RECONNECT → calendar_connect_link, hand the user the link and instructions; they paste back the address their browser lands on (http://127.0.0.1:53682/…, it does not load — expected) → calendar_connect_finish(address). Rules: the crm skill's calendar-pipeline.md (read_skill(file: "calendar-pipeline.md")).
+
 Replies use plain words, never raw database values: stages read New / Contacted / Replied / Meeting booked / Meeting held / Proposal sent / Negotiation / Won / Lost (not meeting_held), no_show reads no-show, lookups show their label; no slugs, field names, tool names, ids or underscores in anything the user reads.
 
 Profiles — every company and contact can carry an optional "about" JSON object that the app shows on the company page, the companies list, pipeline cards and the standup: company {description: precise, under 10 words; company_industry: specific industry in under 4 words, e.g. jewelry, skincare, music, SaaS, AI, creator, media, marketplace, agency}, contact {summary: who they are in 1–3 sentences; past_orgs: [{org, role?, years?}]}; extra keys are kept. Write it with upsert_company / upsert_contact (merged key by key) whenever you research them or a call reveals it; only facts you found. It is display-only — nothing filters on it.
@@ -93,6 +98,7 @@ function buildServer(ctx: Ctx): McpServer {
   registerTranscript(server, ctx);
   registerAnalysis(server, ctx);
   registerCoaching(server, ctx);
+  registerCalendar(server, ctx);
   registerResources(server, ctx);
   registerPrompts(server, ctx);
   if (ctx.isMember) registerSkill(server, "capitalxai-crm", SKILLS.crm);
@@ -183,6 +189,7 @@ app.post("/transcript", async (c) => {
 });
 
 registerRecordingRoutes(app, CORS_HEADERS);
+registerCalendarRoutes(app, CORS_HEADERS);
 
 app.get("/", (c) =>
   c.json({

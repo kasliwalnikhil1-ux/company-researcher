@@ -2,7 +2,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   computeSendAt, countQuestions, editDistance, evaluateGates, extractDates, extractMoney, extractPhones, extractUrls, factsChanged, figureKey,
-  floorPrecheck, hasSchedulingLink, parseCountry, parseDraft, similarity, strictest, validateDraft, windowAt, type DraftOutput, type GateInput, type PromptSettings, type ValidateCtx,
+  floorPrecheck, hasSchedulingLink, noteOverlap, parseCountry, parseDraft, similarity, strictest, validateDraft, windowAt, type DraftOutput, type GateInput, type PromptSettings, type ValidateCtx,
 } from "./ai_reply_rules.ts";
 
 const SETTINGS: PromptSettings = {
@@ -31,6 +31,18 @@ Deno.test("extraction: urls, money, phones, dates", () => {
   assertEquals(extractPhones("call +91 98765 43210"), ["919876543210"]);
   assertEquals(extractPhones("we did 2.5x and ₹50,000 on 15 Nov"), []);
   assertEquals(extractDates("on 15 Nov or November 15th, not 2.5x"), ["15-11"]);
+});
+
+Deno.test("validator: a draft that repeats 8+ words of an internal team note is rejected, guidance-level reuse passes", () => {
+  const notes = ["@Naman she asked for 3 films, can you quote before Friday? Budget is tight so keep it simple."];
+  const bad = validateDraft(draft({ text: "Sure — she asked for 3 films, can you quote before Friday? Happy to help." }), ctx({ teamNoteTexts: notes }));
+  assert(bad.failures.some((f) => f.rule === "note_overlap"), "8 consecutive words copied from a note must fail");
+  assert(!bad.failures.find((f) => f.rule === "note_overlap")!.detail.includes("3 films"), "the failure detail must not quote the note");
+  const ok = validateDraft(draft({ text: "Happy to put together a quote for three films before Friday. What is the launch date?" }), ctx({ teamNoteTexts: notes }));
+  assert(!ok.failures.some((f) => f.rule === "note_overlap"), "paraphrase passes");
+  assertEquals(noteOverlap("one two three four five six seven eight", ["zero one two three four five six seven eight nine"]), true);
+  assertEquals(noteOverlap("one two three four five six seven", ["one two three four five six seven"]), false, "fewer than 8 words never matches");
+  assertEquals(noteOverlap("anything at all", []), false);
 });
 
 Deno.test("validator: allowed facts pass", () => {

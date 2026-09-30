@@ -96,7 +96,7 @@ export function GenerateLinesModal({ open, onClose, workspaceId, isManager, sele
         {variables.error && <ErrorBox message={parseError(variables.error).message} />}
         {noVariables ? (
           <div className="text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-            There are no AI variables yet. {isManager ? <>Create one under <Link href="/outreach/settings/ai" className="text-indigo-600 hover:underline">Settings, AI</Link>: a prompt plus a fallback, used in messages as <code className="text-xs bg-white px-1 rounded border border-amber-200">{'{{ai.icebreaker|fallback}}'}</code>.</> : 'Ask a manager to create one under Settings, AI.'}
+            There are no AI variables yet. {isManager ? <>Create one under <Link href="/outreach/settings/ai" className="text-indigo-600 hover:underline">Settings → AI Personalization</Link>: a prompt plus a fallback, used in messages as <code className="text-xs bg-white px-1 rounded border border-amber-200">{'{{ai.icebreaker|fallback}}'}</code>.</> : 'Ask a manager to create one under Settings → AI Personalization.'}
           </div>
         ) : (
           <Select label="AI variable" value={variableId} onChange={(e) => setVariableId(e.target.value)} disabled={variables.isLoading}>

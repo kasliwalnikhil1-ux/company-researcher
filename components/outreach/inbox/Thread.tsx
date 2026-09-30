@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat, NotebookPen } from 'lucide-react';
+import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat, NotebookPen, Eye, EyeOff } from 'lucide-react';
+import NoteBubble from './notes/NoteBubble';
+import { isNoteModeShortcut, readComposerMode, readShowNotes, writeComposerMode, writeShowNotes, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { channelLabel, chatTitle, isMailProvider } from '@/lib/outreach/channels';
@@ -18,6 +20,7 @@ import { callFn, parseError } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
 import ForwardDialog from './ForwardDialog';
 import AiModeChip from './ai/AiModeChip';
+import WebchatThreadBar from './webchat/WebchatThreadBar';
 
 /** `notes` opens the lead panel on its AI lead-notes tab (AI replies v2). */
 export type ConvertKind = 'task' | 'tag' | 'stage' | 'reenrol' | 'notes';
@@ -45,6 +48,19 @@ export interface ThreadProps {
   onError: (msg: string) => void;
   /** Success toasts (consent recorded / revoked). Optional so older callers keep working. */
   onNotice?: (msg: string) => void;
+  /** Private notes (private-notes-PRD §5): interleaved with the messages by time; the composer's second mode. */
+  notes: ChatNote[] | undefined;
+  currentUserId: string | null;
+  isManager: boolean;
+  isClientViewer: boolean;
+  /** `?note=<id>` deep link: scroll to this note and flash it */
+  highlightNoteId: string | null;
+  onAddNote: (body: string, visibility: NoteVisibility, attachments: NoteAttachment[]) => Promise<void>;
+  onUpdateNote: (noteId: string, patch: { body?: string; visibility?: NoteVisibility }) => Promise<void>;
+  onDeleteNote: (noteId: string) => Promise<void>;
+  onMakeTaskFromNote: (note: ChatNote) => void;
+  /** a note that mentions the signed-in user scrolled into view: marks the mention read */
+  onNoteSeen: (noteId: string) => void;
 }
 
 function Menu({ button, children, align = 'right', disabled }: { button: (open: boolean) => React.ReactNode; children: (close: () => void) => React.ReactNode; align?: 'left' | 'right'; disabled?: boolean }) {
@@ -121,13 +137,59 @@ export default function Thread(p: ThreadProps) {
   }, [qc, p]);
   const now = useNow(15_000, hasEditable);
 
+  // ---------------------------------------------------------------- private notes: composer mode, Show notes, deep link, seen
+  const [composerMode, setComposerModeState] = useState<'reply' | 'note'>(() => (typeof window === 'undefined' ? 'reply' : readComposerMode()));
+  const setComposerMode = useCallback((m: 'reply' | 'note') => { setComposerModeState(m); writeComposerMode(m); }, []);
+  const [showNotes, setShowNotesState] = useState<boolean>(() => (typeof window === 'undefined' ? true : readShowNotes()));
+  const setShowNotes = useCallback((v: boolean) => { setShowNotesState(v); writeShowNotes(v); }, []);
+  useEffect(() => {
+    // Alt+P / ⌥P toggles Reply ↔ Private note anywhere in the thread (physical key, so it works on every layout)
+    const onKey = (e: KeyboardEvent) => { if (isNoteModeShortcut(e)) { e.preventDefault(); setComposerMode(composerMode === 'note' ? 'reply' : 'note'); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [composerMode, setComposerMode]);
+  const notes = p.notes;
+  const [flashNoteId, setFlashNoteId] = useState<string | null>(null);
+  const jumpedRef = useRef<string | null>(null);
+  useEffect(() => {
+    // ?note=<id>: once the notes are loaded, scroll to it and flash it for a moment (a deleted note shows its placeholder)
+    const id = p.highlightNoteId;
+    if (!id || !notes || jumpedRef.current === id) return;
+    if (!notes.some((n) => n.id === id)) return;
+    jumpedRef.current = id;
+    const t = window.setTimeout(() => {
+      if (!showNotes) setShowNotes(true);
+      document.getElementById(`note-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setFlashNoteId(id);
+      window.setTimeout(() => setFlashNoteId((h) => (h === id ? null : h)), 2200);
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [p.highlightNoteId, notes, showNotes, setShowNotes]);
+  useEffect(() => { jumpedRef.current = null; }, [chat.id]);
+  // a note that mentions me, unread, visible for a second → mark the mention read (PRD §6.1)
+  const unreadMentionIds = useMemo(() => (notes ?? []).filter((n) => !n.deleted_at && n.mentions.some((m) => m.user_id === p.currentUserId && !m.read_at)).map((n) => n.id), [notes, p.currentUserId]);
+  useEffect(() => {
+    if (!unreadMentionIds.length || !showNotes) return;
+    const timers = new Map<string, number>();
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        const id = (e.target as HTMLElement).id.replace(/^note-/, '');
+        if (e.isIntersecting) { if (!timers.has(id)) timers.set(id, window.setTimeout(() => { timers.delete(id); p.onNoteSeen(id); }, 1000)); }
+        else { const t = timers.get(id); if (t) { window.clearTimeout(t); timers.delete(id); } }
+      }
+    }, { root: scrollRef.current, threshold: 0.5 });
+    for (const id of unreadMentionIds) { const el = document.getElementById(`note-${id}`); if (el) io.observe(el); }
+    return () => { io.disconnect(); for (const t of timers.values()) window.clearTimeout(t); };
+  }, [unreadMentionIds, showNotes, p.onNoteSeen]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || !messages) return;
-    const grew = messages.length !== lastCountRef.current;
-    lastCountRef.current = messages.length;
-    if (grew) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    const total = messages.length + (showNotes ? (notes?.length ?? 0) : 0);
+    const grew = total !== lastCountRef.current;
+    lastCountRef.current = total;
+    if (grew && !p.highlightNoteId) el.scrollTop = el.scrollHeight;
+  }, [messages, notes, showNotes, p.highlightNoteId]);
   useEffect(() => { lastCountRef.current = 0; }, [chat.id]);
 
   const senderOk = sender?.status === 'ok';
@@ -142,15 +204,21 @@ export default function Thread(p: ThreadProps) {
           : null;
   const canEditMessages = !disabledReason;
 
+  type TimelineItem = { kind: 'message'; at: string; m: Message } | { kind: 'note'; at: string; n: ChatNote };
   const grouped = useMemo(() => {
-    const out: Array<{ day: string; items: Message[] }> = [];
-    for (const m of messages ?? []) {
-      const day = dayLabel(m.sent_at);
+    // messages and (when shown) private notes, interleaved by time (PRD §5)
+    const items: TimelineItem[] = (messages ?? []).map((m) => ({ kind: 'message' as const, at: m.sent_at, m }));
+    if (showNotes) for (const n of notes ?? []) items.push({ kind: 'note', at: n.created_at, n });
+    items.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+    const out: Array<{ day: string; items: TimelineItem[] }> = [];
+    for (const it of items) {
+      const day = dayLabel(it.at);
       const last = out[out.length - 1];
-      if (last && last.day === day) last.items.push(m); else out.push({ day, items: [m] });
+      if (last && last.day === day) last.items.push(it); else out.push({ day, items: [it] });
     }
     return out;
-  }, [messages]);
+  }, [messages, notes, showNotes]);
+  const noteCount = (notes ?? []).filter((n) => !n.deleted_at).length;
 
   const assignee = members?.find((m) => m.user_id === chat.assigned_to);
 
@@ -191,6 +259,10 @@ export default function Thread(p: ThreadProps) {
             </div>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
+            <button type="button" onClick={() => setShowNotes(!showNotes)} aria-pressed={showNotes} className={cn('p-2 rounded-md hover:bg-gray-100 disabled:opacity-40 relative', showNotes ? 'text-amber-700' : 'text-gray-500')} title={showNotes ? 'Hide private notes (read the pure conversation)' : 'Show private notes'} aria-label={showNotes ? 'Hide private notes' : 'Show private notes'}>
+              {showNotes ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+              {noteCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-amber-500 text-white text-[9px] leading-[14px] text-center tabular-nums">{noteCount > 99 ? '99+' : noteCount}</span>}
+            </button>
             <button type="button" onClick={p.onMarkUnread} disabled={!p.canWrite} className="p-2 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title="Mark as unread (u)" aria-label="Mark as unread"><MailOpen className="w-4 h-4" /></button>
             <button type="button" onClick={() => p.onArchive(!chat.archived)} disabled={!p.canWrite} className="p-2 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title={chat.archived ? 'Unarchive (e)' : 'Archive (e)'} aria-label={chat.archived ? 'Unarchive' : 'Archive'}>{chat.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}</button>
             <button type="button" onClick={p.onTogglePanel} className="xl:hidden p-2 rounded-md hover:bg-gray-100 text-gray-500" title="Lead details" aria-label="Toggle lead panel"><PanelRight className="w-4 h-4" /></button>
@@ -249,6 +321,9 @@ export default function Thread(p: ThreadProps) {
         </div>
       </div>
 
+      {/* Web chat: status / assignment / labels / AI toggle bar (web-chat-PRD.md §8) */}
+      {chat.provider === 'WEBCHAT' && <WebchatThreadBar chat={chat} messages={messages} members={members} workspaceId={p.workspaceId} canWrite={p.canWrite && !p.isClientViewer} onError={p.onError} onNotice={p.onNotice} />}
+
       {/* Messages */}
       <div ref={scrollRef} className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4', wa ? 'space-y-1.5 bg-[#efeae2] bg-[radial-gradient(rgba(0,0,0,0.035)_1px,transparent_1px)] [background-size:14px_14px]' : 'space-y-3')}>
         {p.messagesError && <ErrorBox message={p.messagesError} />}
@@ -259,11 +334,18 @@ export default function Thread(p: ThreadProps) {
             {wa
               ? <div className="flex justify-center py-1"><span className="text-[11px] text-gray-600 bg-white/90 rounded-md px-2.5 py-1 shadow-sm">{g.day}</span></div>
               : <div className="flex items-center gap-3 text-[11px] text-gray-400 uppercase tracking-wide"><span className="flex-1 h-px bg-gray-200" />{g.day}<span className="flex-1 h-px bg-gray-200" /></div>}
-            {g.items.map((m) => (
+            {g.items.map((it) => it.kind === 'note' ? (
+              <NoteBubble
+                key={`note-${it.n.id}`} note={it.n} chat={chat} workspaceId={p.workspaceId} members={members} currentUserId={p.currentUserId}
+                isManager={p.isManager} isClientViewer={p.isClientViewer} canImprove={chat.provider === 'LINKEDIN' && !disabledReason}
+                highlight={flashNoteId === it.n.id} onUpdate={p.onUpdateNote} onDelete={p.onDeleteNote} onMakeTask={p.onMakeTaskFromNote}
+                onError={p.onError} onNotice={(m) => p.onNotice?.(m)}
+              />
+            ) : (
               <MessageBubble
-                key={m.id} m={m} attribution={attributionQ.data?.[m.id]} provider={chat.provider} now={now} canEdit={canEditMessages} onEdit={p.onEditMessage} onDelete={p.onDeleteMessage}
-                isGroup={isGroup} contactName={isGroup ? undefined : name} highlight={highlightId === m.id}
-                quotedLocal={m.quoted?.unipile_message_id ? byUnipileId.get(m.quoted.unipile_message_id) ?? null : null}
+                key={it.m.id} m={it.m} attribution={attributionQ.data?.[it.m.id]} provider={chat.provider} now={now} canEdit={canEditMessages} onEdit={p.onEditMessage} onDelete={p.onDeleteMessage}
+                isGroup={isGroup} contactName={isGroup ? undefined : name} highlight={highlightId === it.m.id}
+                quotedLocal={it.m.quoted?.unipile_message_id ? byUnipileId.get(it.m.quoted.unipile_message_id) ?? null : null}
                 onReply={setReplyTo} onReact={react} onForward={setForwarding} onJumpTo={jumpTo}
               />
             ))}
@@ -272,7 +354,8 @@ export default function Thread(p: ThreadProps) {
       </div>
 
       <Compose key={chat.id} chat={chat} sender={sender} workspaceId={p.workspaceId} disabledReason={disabledReason} onError={p.onError}
-        replyTo={replyTo} replyToName={replyTo ? (replyTo.direction === 'out' ? 'You' : (replyTo.sender_name || name)) : undefined} onCancelReply={() => setReplyTo(null)} />
+        replyTo={replyTo} replyToName={replyTo ? (replyTo.direction === 'out' ? 'You' : (replyTo.sender_name || name)) : undefined} onCancelReply={() => setReplyTo(null)}
+        mode={composerMode} onModeChange={setComposerMode} members={members} currentUserId={p.currentUserId} isClientViewer={p.isClientViewer} onAddNote={p.onAddNote} />
       <ForwardDialog chat={chat} message={forwarding} onClose={() => setForwarding(null)} onForward={forward} />
     </div>
   );

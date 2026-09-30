@@ -53,6 +53,7 @@ WEBHOOK_FUNCS=(
   outreach-unsubscribe       # public one-click unsubscribe: signed token (HMAC, OUTREACH_CRON_SECRET) checked in code
   outreach-relogin           # public re-login link from emails: signed token (HMAC, OUTREACH_CRON_SECRET), redirects to a fresh hosted sign-in link
   outreach-crm-oauth         # OAuth callback is public (state checked in code); the start call validates the user JWT
+  outreach-webchat           # public widget API: website token + Origin + visitor token checked in code (web-chat-PRD.md §13)
 )
 # Cron workers (x-cron-secret via outreach_invoke / pg_net):
 CRON_FUNCS=(
@@ -76,6 +77,8 @@ CRON_FUNCS=(
   outreach-worker-profile    # Profile Studio: verify applied changes, owner emails, experiments (every 5 min); weekly drift + QA
   outreach-worker-channels   # Instagram / WhatsApp: followers poll (35 * * * *), identifier check (*/30), block detect (55 * * * *), transcribe (* * * * *), wa_governor
   outreach-ai-reply-worker   # AI replies: draft (15 s), dispatch (1 min), maintenance (*/15), breakers (hourly), daily (graduation + digests)
+  outreach-notes-worker      # private notes: mention emails (every minute), purge of deleted notes (daily)
+  outreach-webchat-worker    # web chat: continuity email digests (every minute), maintenance (every 5 min)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
@@ -86,6 +89,7 @@ USER_FUNCS=(
   outreach-send-reply
   outreach-edit-message
   outreach-attachment-proxy
+  outreach-note-attachment   # private notes: signed upload / read URLs for the outreach-chat-notes bucket
   outreach-ai-sequence-qa
   outreach-imports-create
   outreach-exports-create

@@ -134,6 +134,8 @@ export default function AiComposerPanel({ ai, chat, canCompose, onError, onRegen
   }
 
   if (run?.status === 'draft_ready' && run.decision === 'escalate') {
+    // Once the draft sits in the composer, the strip above the box shows the reason, side effects and Dismiss: no second card.
+    if (tag?.runId === run.id) return null;
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1.5">
         <div className="flex items-start gap-1.5 text-xs text-amber-900"><Hand className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span><span className="font-medium">AI suggests handing this to a person:</span> {escalationText(run.escalation_reasons)}</span></div>
@@ -141,7 +143,7 @@ export default function AiComposerPanel({ ai, chat, canCompose, onError, onRegen
         <SideEffects run={run} dark />
         {canWrite && (
           <div className="flex flex-wrap items-center gap-1.5">
-            {canCompose && run.draft_text && tag?.runId !== run.id && <Button size="sm" variant="secondary" onClick={() => ai.takeDraft(run)}><Pencil className="w-3.5 h-3.5" /> Use draft</Button>}
+            {canCompose && run.draft_text && <Button size="sm" variant="secondary" onClick={() => ai.takeDraft(run)}><Pencil className="w-3.5 h-3.5" /> Use draft</Button>}
             <Button size="sm" variant="ghost" loading={cancel.isPending} onClick={() => dismiss(run)}>Dismiss</Button>
           </div>
         )}
@@ -179,11 +181,12 @@ export default function AiComposerPanel({ ai, chat, canCompose, onError, onRegen
 
   // The AI handed the chat over on an escalation; shown until someone answers the prospect.
   if (!run && last?.status === 'escalated' && chat.last_direction !== 'out') {
+    if (tag?.runId === last.id) return null; // the strip above the box says "AI handed off" and why
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1.5">
         <div className="flex items-start gap-1.5 text-xs text-amber-900"><Hand className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /><span><span className="font-medium">Handed to a person:</span> {escalationText(last.escalation_reasons)}</span></div>
         {last.draft_text && <DraftText text={last.draft_text} />}
-        {canWrite && canCompose && last.draft_text && tag?.runId !== last.id && (
+        {canWrite && canCompose && last.draft_text && (
           <div><Button size="sm" variant="secondary" onClick={() => ai.takeDraft(last)}><Pencil className="w-3.5 h-3.5" /> Send this draft</Button></div>
         )}
       </div>
@@ -310,8 +313,14 @@ export function AiDraftMeta({ ai, draft, chat, text, onError, canCompose }: { ai
   const promptNote = draft.prompt?.fallback === 'template' ? 'built-in template' : draft.prompt?.fallback === 'workspace_default' ? 'workspace default prompt' : s?.fallback === 'template' ? 'built-in template' : s?.fallback === 'workspace_default' ? 'workspace default prompt' : null;
   const chips = canWrite && canCompose;
   const chip = 'inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50';
-  const escalationWarnings = m.decision === 'escalate' && m.escalationReasons.length ? [{ code: 'escalate', text: `The AI would have handed this to a person: ${escalationText(m.escalationReasons)}` }] : [];
-  const warnings = [...escalationWarnings, ...m.warnings];
+  // The engine already emits one warning per escalation reason; fold those into the single "handed to a person" line
+  // (keeping the engine's more specific text, e.g. the unsupported claim) instead of listing the same reason twice.
+  const escalating = m.decision === 'escalate' && m.escalationReasons.length > 0;
+  const reasonSet = new Set(escalating ? m.escalationReasons : []);
+  const escalationWarnings = escalating
+    ? [{ code: 'escalate', text: `${m.trigger === 'manual' ? 'The AI would have handed this to a person' : 'AI suggests handing this to a person'}: ${m.escalationReasons.map((r) => m.warnings.find((w) => w.code === r)?.text?.trim() || escalationText([r])).join('; ')}` }]
+    : [];
+  const warnings = [...escalationWarnings, ...m.warnings.filter((w) => !reasonSet.has(w.code))];
 
   return (
     <div className="rounded-md border border-indigo-100 bg-indigo-50/40 px-2.5 py-1.5 space-y-1">

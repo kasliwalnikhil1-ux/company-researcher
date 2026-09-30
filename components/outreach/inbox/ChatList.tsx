@@ -1,7 +1,11 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Search, Inbox, X, Filter, SlidersHorizontal } from 'lucide-react';
+import { Search, Inbox, X, Filter, SlidersHorizontal, Loader2, Lock } from 'lucide-react';
+import MentionsList from './notes/MentionsList';
+import NotificationBell from './notes/NotificationBell';
+import { useNoteSearch, useNotesBadge, noteLink } from '@/lib/outreach/notes';
+import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel, chatTitle } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
@@ -38,10 +42,21 @@ export interface ChatListProps {
   note?: string | null;
   /** AI replies: conversation stages offered by the Stage filter. */
   stages?: StageDef[];
+  /** Infinite scroll: more conversations are requested as the bottom of the list comes near. */
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
+  /** Private notes: the Mentions view (conversations where I was @mentioned), the bell, the "Has notes" filter, note search. */
+  ws?: string | null;
+  mentionsView?: boolean;
+  onMentionsView?: (v: boolean) => void;
+  onSelectMention?: (chatId: string, noteId: string) => void;
 }
 
 const ROW_H = 76;
 const OVERSCAN = 6;
+/** Rows left below the viewport before the next page is requested. */
+const LOAD_AHEAD_ROWS = 12;
 
 export function chatDisplayName(c: ChatRow): string {
   return chatTitle(c);
@@ -67,10 +82,15 @@ function ActiveChip({ label, value, onClear }: { label: string; value: string; o
   );
 }
 
-type View = 'all' | 'unread' | 'mine' | 'archived';
+type View = 'all' | 'unread' | 'mine' | 'mentions' | 'archived';
 
-export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note, stages }: ChatListProps) {
+export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note, stages, hasMore, loadingMore, onLoadMore, ws, mentionsView, onMentionsView, onSelectMention }: ChatListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // private notes: unread-mention badge for the Mentions tab; note search results shown above the conversation rows
+  const badgeQ = useNotesBadge(ws ?? null);
+  const unreadMentions = badgeQ.data?.unread_mentions ?? 0;
+  const noteSearchQ = useNoteSearch(ws ?? null, mentionsView ? '' : search);
+  const [mentionsUnreadOnly, setMentionsUnreadOnly] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
 
@@ -83,13 +103,21 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
     return () => ro.disconnect();
   }, []);
 
-  const list = rows ?? [];
+  const list = useMemo(() => rows ?? [], [rows]);
   const start = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
   const end = Math.min(list.length, Math.ceil((scrollTop + height) / ROW_H) + OVERSCAN);
   const visible = useMemo(() => list.slice(start, end), [list, start, end]);
   // "AI in 9 min" badges tick only while a visible row has a scheduled AI reply.
   const anyScheduled = useMemo(() => visible.some((c) => c.ai_run_status === 'scheduled' && c.ai_scheduled_send_at), [visible]);
   const now = useNow(15_000, anyScheduled);
+
+  // Infinite scroll: ask for the next page when the bottom is within LOAD_AHEAD_ROWS of the viewport, and also when the
+  // rows fetched so far do not fill the viewport (short pages, client-side restriction), so the list never stalls.
+  useEffect(() => {
+    if (!hasMore || loadingMore || !onLoadMore || !rows) return;
+    const remaining = list.length * ROW_H - (scrollTop + height);
+    if (remaining <= LOAD_AHEAD_ROWS * ROW_H) onLoadMore();
+  }, [hasMore, loadingMore, onLoadMore, rows, list.length, scrollTop, height]);
 
   // Keep the selected row within the viewport (keyboard navigation).
   useEffect(() => {
@@ -114,12 +142,17 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
     return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
   }, [filtersOpen]);
 
-  const view: View = filters.archived ? 'archived' : filters.assigned_to && filters.assigned_to === currentUserId ? 'mine' : filters.unread ? 'unread' : 'all';
-  const setView = (v: View) => onFilters({ archived: v === 'archived', unread: v === 'unread' ? true : null, assigned_to: v === 'mine' ? currentUserId : null });
-  const views: { id: View; label: string; title: string }[] = [
+  const view: View = mentionsView ? 'mentions' : filters.archived ? 'archived' : filters.assigned_to && filters.assigned_to === currentUserId ? 'mine' : filters.unread ? 'unread' : 'all';
+  const setView = (v: View) => {
+    if (v === 'mentions') { onMentionsView?.(true); return; }
+    if (mentionsView) onMentionsView?.(false);
+    onFilters({ archived: v === 'archived', unread: v === 'unread' ? true : null, assigned_to: v === 'mine' ? currentUserId : null });
+  };
+  const views: { id: View; label: string; title: string; count?: number }[] = [
     { id: 'all', label: 'All', title: 'All open conversations' },
     { id: 'unread', label: 'Unread', title: 'Only unread' },
     { id: 'mine', label: 'Mine', title: 'Assigned to me' },
+    ...(ws && onMentionsView ? [{ id: 'mentions' as View, label: 'Mentions', title: 'Conversations where a teammate mentioned you in a private note', count: unreadMentions }] : []),
     { id: 'archived', label: 'Archived', title: 'Archived conversations' },
   ];
 
@@ -132,7 +165,8 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   if (filters.provider) active.push({ key: 'channel', label: 'Channel', value: channelLabel(filters.provider as Parameters<typeof channelLabel>[0]), clear: () => onFilters({ provider: null }) });
   if (filters.ai) active.push({ key: 'ai', label: 'AI', value: AI_FILTER_LABEL[filters.ai] ?? filters.ai, clear: () => onFilters({ ai: null }) });
   if (filters.stage) active.push({ key: 'stage', label: 'Stage', value: stages?.find((x) => x.key === filters.stage)?.label ?? humanizeKey(filters.stage), clear: () => onFilters({ stage: null }) });
-  const clearAll = () => { onFilters({ sender_id: null, client_id: null, intent: null, provider: null, ai: null, stage: null }); onSequence?.(null); };
+  if (filters.has_notes) active.push({ key: 'notes', label: 'Notes', value: 'Has private notes', clear: () => onFilters({ has_notes: null }) });
+  const clearAll = () => { onFilters({ sender_id: null, client_id: null, intent: null, provider: null, ai: null, stage: null, has_notes: null }); onSequence?.(null); };
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -162,6 +196,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
             <span className="hidden sm:inline">Filters</span>
             {active.length > 0 && <span className="text-[10px] leading-none bg-indigo-600 text-white rounded-full px-1.5 py-0.5 tabular-nums">{active.length}</span>}
           </button>
+          {ws && <NotificationBell ws={ws} />}
 
           {filtersOpen && (
             <div role="dialog" aria-label="Filters" className="absolute right-0 top-full mt-1.5 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-gray-200 bg-white shadow-lg p-3 space-y-2.5">
@@ -194,10 +229,11 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                   <option value="">All</option>
                   {CHANNEL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
                   {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
+                  <option value="WEBCHAT">{channelLabel('WEBCHAT')}</option>
                 </FilterField>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <FilterField label="AI replies" value={filters.ai ?? ''} onChange={(v) => onFilters({ ai: (v || null) as AiChatFilter | null })}>
+                <FilterField label="AI Auto Replies" value={filters.ai ?? ''} onChange={(v) => onFilters({ ai: (v || null) as AiChatFilter | null })}>
                   <option value="">Any</option>
                   {AI_FILTERS.map((a) => <option key={a} value={a}>{AI_FILTER_LABEL[a]}</option>)}
                 </FilterField>
@@ -207,6 +243,10 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                   {filters.stage && !stages?.some((st) => st.key === filters.stage) && <option value={filters.stage}>{humanizeKey(filters.stage)}</option>}
                 </FilterField>
               </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" className="accent-amber-600" checked={!!filters.has_notes} onChange={(e) => onFilters({ has_notes: e.target.checked ? true : null })} />
+                <Lock className="w-3.5 h-3.5 text-amber-600" /> Has private notes
+              </label>
             </div>
           )}
         </div>
@@ -220,9 +260,10 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
               aria-selected={view === v.id}
               title={v.title}
               onClick={() => setView(v.id)}
-              className={cn('flex-1 text-xs py-1 rounded-md transition-colors', view === v.id ? 'bg-white text-gray-900 font-medium shadow-sm' : 'text-gray-500 hover:text-gray-800')}
+              className={cn('flex-1 text-xs py-1 rounded-md transition-colors inline-flex items-center justify-center gap-1', view === v.id ? 'bg-white text-gray-900 font-medium shadow-sm' : 'text-gray-500 hover:text-gray-800')}
             >
               {v.label}
+              {!!v.count && <span className="min-w-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] leading-4 tabular-nums">{v.count > 99 ? '99+' : v.count}</span>}
             </button>
           ))}
         </div>
@@ -235,7 +276,26 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
         )}
       </div>
 
-      <div ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="flex-1 min-h-0 overflow-y-auto" role="listbox" aria-label="Conversations">
+      {mentionsView && ws && onSelectMention ? (
+        <MentionsList ws={ws} selectedId={selectedId} onSelect={onSelectMention} unreadOnly={mentionsUnreadOnly} onUnreadOnly={setMentionsUnreadOnly} />
+      ) : (
+      /* `relative`: the virtual spacer below is positioned, so without a positioned scroll container its full height leaks into the page's scroll height (a window scrollbar and empty space under the inbox). */
+      <div ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="relative flex-1 min-h-0 overflow-y-auto" role="listbox" aria-label="Conversations">
+        {search.trim().length >= 2 && !!noteSearchQ.data?.length && (
+          <div className="border-b border-amber-100 bg-amber-50/50">
+            <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-amber-800">Private notes matching “{search.trim()}”</div>
+            {noteSearchQ.data.slice(0, 5).map((h) => (
+              <Link key={h.note_id} href={noteLink(h.chat_id, h.note_id)} className="flex items-start gap-2 px-3 py-1.5 hover:bg-amber-100/60">
+                <Lock className="w-3.5 h-3.5 mt-0.5 text-amber-600 flex-shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium text-gray-900 truncate">{h.chat.lead_name || h.chat.attendee_name || 'Conversation'}{h.chat.company ? ` · ${h.chat.company}` : ''}</span>
+                  <span className="block text-[11px] text-gray-600 line-clamp-2">{h.author}: {h.snippet.replace(/\*\*/g, '')}</span>
+                </span>
+                <span className="text-[10px] text-gray-400 flex-shrink-0">{timeAgo(h.created_at)}</span>
+              </Link>
+            ))}
+          </div>
+        )}
         {error && <ErrorBox message={error} className="m-3" />}
         {!error && loading && !rows && <Spinner />}
         {!error && rows && rows.length === 0 && (
@@ -271,6 +331,9 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                       <div className="flex items-center gap-1.5 mt-0.5 min-w-0 overflow-hidden">
                         {c.outreach_senders?.display_name && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[45%]">{c.outreach_senders.display_name}</span>}
                         {c.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: the person has not accepted the conversation yet, so they may not have seen it">Request</span>}
+                        {c.provider === 'WEBCHAT' && c.status && c.status !== 'open' && <span className={cn('text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0', c.status === 'resolved' ? 'bg-emerald-50 text-emerald-700' : c.status === 'snoozed' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700')} title={`Web chat conversation is ${c.status}`}>{c.status}</span>}
+                        {c.provider === 'WEBCHAT' && c.ai_handled && !c.handed_off_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap flex-shrink-0" title="The website assistant is answering this visitor">AI</span>}
+                        {c.provider === 'WEBCHAT' && c.handed_off_at && c.status === 'open' && !c.assigned_to && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 whitespace-nowrap flex-shrink-0" title="A visitor is waiting for a person">Waiting</span>}
                         {c.intent && c.intent !== 'unclassified' && <IntentBadge intent={c.intent} />}
                         {c.ai_run_status === 'scheduled' && c.ai_scheduled_send_at && (() => {
                           const left = new Date(c.ai_scheduled_send_at).getTime() - now;
@@ -294,7 +357,14 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
             </div>
           </div>
         )}
+        {rows && rows.length > 0 && (hasMore || loadingMore) && (
+          <div className="flex items-center justify-center gap-2 py-3 text-xs text-gray-500" role="status" aria-live="polite">
+            <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" aria-hidden="true" />
+            <span>Loading more conversations…</span>
+          </div>
+        )}
       </div>
+      )}
     </div>
   );
 }

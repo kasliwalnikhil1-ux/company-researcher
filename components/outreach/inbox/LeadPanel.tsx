@@ -31,6 +31,8 @@ export interface LeadPanelProps {
   members: Member[] | undefined;
   currentUserId: string | null;
   requestedAction: ConvertKind | null;
+  /** "Make task" from a private note: pre-fills the task form (title, body, first mentioned person) */
+  taskPrefill?: { title: string; body: string; assigned_to: string | null } | null;
   onActionHandled: () => void;
   onClose?: () => void;
   toast: (msg: string, type?: 'success' | 'error') => void;
@@ -70,7 +72,7 @@ function Section({ title, action, children }: { title: string; action?: React.Re
   );
 }
 
-export default function LeadPanel({ chat, workspaceId, canWrite, members, currentUserId, requestedAction, onActionHandled, onClose, toast }: LeadPanelProps) {
+export default function LeadPanel({ chat, workspaceId, canWrite, members, currentUserId, requestedAction, taskPrefill, onActionHandled, onClose, toast }: LeadPanelProps) {
   const qc = useQueryClient();
   const { canReply } = useWorkspace();
   const leadId = chat.lead_id;
@@ -465,7 +467,8 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
 
       {lead && (
         <>
-          <CreateTaskModal open={taskOpen} onClose={() => setTaskOpen(false)} onCreate={createTask} members={members} currentUserId={currentUserId} defaultTitle={`Follow up with ${lead.full_name ?? chat.attendee_name ?? 'lead'}`} />
+          <CreateTaskModal open={taskOpen} onClose={() => setTaskOpen(false)} onCreate={createTask} members={members} currentUserId={currentUserId}
+            defaultTitle={taskPrefill?.title ?? `Follow up with ${lead.full_name ?? chat.attendee_name ?? 'lead'}`} defaultBody={taskPrefill?.body ?? null} defaultAssignee={taskPrefill?.assigned_to ?? null} />
           <ReenrolModal open={reenrolOpen} onClose={() => setReenrolOpen(false)} sequences={seqQ.data} senderId={chat.sender_id} senderName={senderName} onEnrol={enrol} />
           <ConfirmModal open={dncOpen} onClose={() => setDncOpen(false)} title="Mark as do-not-contact?" danger confirmLabel="Mark do-not-contact" onConfirm={async () => { await updateLead({ do_not_contact: true }, 'Lead marked do-not-contact'); }} message={<>No sender will contact <span className="font-medium">{lead.full_name ?? 'this lead'}</span> again. Live enrollments are exited by the engine. You can still reply manually here.</>} />
           <ConfirmModal open={!!exitTarget} onClose={() => setExitTarget(null)} title="Exit enrollment?" danger confirmLabel="Exit" onConfirm={async () => { if (exitTarget) await run('exit', () => rpc('exit_enrollment', { p_id: exitTarget.id, p_reason: 'manual' }), 'Enrollment exited'); }} message={<>The lead leaves <span className="font-medium">{activeSeq?.name ?? 'the sequence'}</span> now. Queued actions for this enrollment are cancelled.</>} />

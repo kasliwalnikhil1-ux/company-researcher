@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "capitalxai-admin",
-  "version": "2026.9.29",
+  "version": "2026.9.30",
   "description": "Research investors and add or update them, record funding rounds, merge duplicates and find verified emails. For CapitalxAI admin accounts only; do not share with other users.",
   "author": {
     "name": "CapitalxAI",

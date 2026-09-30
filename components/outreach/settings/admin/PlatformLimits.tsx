@@ -33,6 +33,7 @@ const WARMUP_INTRO: Record<Provider, string> = {
   INSTAGRAM: 'Every Instagram account starts at level 0, where it can follow, like and view profiles but not send direct messages. A level is gained after 14 consecutive days at health ≥ 85. Every level keeps to 10 metered actions an hour and to a daily total for all metered actions together.',
   WHATSAPP: 'WhatsApp numbers start at level 0 (2 new conversations a day). Levels follow the reply rate, not time: the governor promotes nightly and demotes at once on a block or a poor fortnight. Messages into existing conversations and replies are not limited by level.',
   GMAIL: '', OUTLOOK: '', IMAP: '',
+  WEBCHAT: 'Website chat inboxes are not warmed up: the widget has no daily allowance.',
 };
 
 /**

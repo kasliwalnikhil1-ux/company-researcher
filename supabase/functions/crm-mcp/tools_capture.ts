@@ -2,6 +2,7 @@
 // update_deal, log_activity, schedule/update meeting, and the entity upserts they need.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
 import { type Ctx, tool, z, rpc, compact, dateParam, stageEnum, lookupRef, memberRef, McpError, money } from "./ctx.ts";
+import { createEventForMeeting, syncMeetingToEvent, isConfigured as calendarConfigured } from "./calendar.ts";
 
 type Row = Record<string, any>;
 
@@ -143,22 +144,45 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
   // ---------------------------------------------------------------- meetings
   tool(server, ctx, {
     name: "schedule_meeting", title: "Schedule a meeting", cls: "write",
-    description: "Book a meeting on a deal (deal_id, or a contact/company whose open deal is used — a deal is created if none is open). Moves the deal to meeting_booked when it is earlier. Give scheduled_at as an ISO timestamp with offset (e.g. 2026-09-18T11:00:00+05:30) and the prospect's timezone.",
+    description: "Book a meeting on a deal (deal_id, or a contact/company whose open deal is used — a deal is created if none is open). Moves the deal to meeting_booked when it is earlier. Give scheduled_at as an ISO timestamp with offset (e.g. 2026-09-18T11:00:00+05:30) and the prospect's timezone. When the connected member has a Google Calendar connected, the Google event is created too (Meet link, invites to the contact's email + attendee emails) and linked — calendar: false skips that; calendar_account picks which of their accounts.",
     input: {
       deal_id: z.string().uuid().optional(), contact_id: z.string().uuid().optional(), contact_email: z.string().optional(), company: z.string().optional(), contact_name: z.string().optional(),
       scheduled_at: z.string().describe("ISO timestamp with offset"), timezone: z.string().optional(), duration_min: z.number().int().min(5).max(480).optional(),
       attendees: z.array(z.string()).max(20).optional(), notes: z.string().max(2000).optional(),
+      calendar: z.boolean().optional().describe("Also create the Google Calendar event (default true when a calendar is connected)"),
+      calendar_account: z.string().optional().describe("Which of the member's Google accounts (email/label); default their default account"),
+      calendar_title: z.string().max(300).optional().describe("Event title (default: the team's invite title template from settings, '<Me> <> <contact>' unless changed)"),
+      notify: z.enum(["all", "externalOnly", "none"]).optional().describe("Invite emails for the Google event (default all)"),
     },
-  }, async (a) => rpc(ctx, "schedule_meeting", { p: compact(a) }));
+  }, async (a) => {
+    const { calendar, calendar_account, calendar_title, notify, ...rest } = a;
+    const meeting = await rpc<Row>(ctx, "schedule_meeting", { p: compact(rest) });
+    if (calendar === false || !calendarConfigured()) return meeting;
+    try {
+      const r = await createEventForMeeting(ctx, meeting.id, { account: calendar_account, title: calendar_title, notify });
+      const e = r.event as Row;
+      return { ...meeting, calendar: { event_id: e.id, account: e.account_email, when: e.when, meet_link: e.meet || undefined, html_link: e.html_link, guests: (e.attendees ?? []).filter((x: Row) => !x.self).map((x: Row) => x.email) }, calendar_note: `Google event booked on ${e.account_email}${e.meet ? ` with Meet ${e.meet}` : ""}${r.crm_error ? ` (link warning: ${r.crm_error})` : ""}.` };
+    } catch (e) {
+      const code = (e as Row)?.code ?? "";
+      const note = code === "E_CALENDAR_NOT_CONNECTED" ? "No Google Calendar is connected for this account, so no calendar event or Meet link was created. Offer calendar_connect_link."
+        : `The CRM meeting is saved but the Google event was not created: ${e instanceof Error ? e.message : String(e)}`;
+      return { ...meeting, calendar_note: note };
+    }
+  });
 
   tool(server, ctx, {
     name: "update_meeting", title: "Reschedule / cancel a meeting", cls: "write",
-    description: "Change scheduled_at, timezone, duration, contact, attendees, notes, or set status=cancelled / back to scheduled. held and no_show are NOT settable here — the database only allows them through capture_meeting.",
+    description: "Change scheduled_at, timezone, duration, contact, attendees, notes, or set status=cancelled / back to scheduled. held and no_show are NOT settable here — the database only allows them through capture_meeting. A linked Google event is moved / cancelled to match (guests notified).",
     input: {
       meeting_id: z.string().uuid(), scheduled_at: z.string().optional(), timezone: z.string().optional(), duration_min: z.number().int().optional(), contact_id: z.string().uuid().optional(),
       attendees: z.array(z.string()).optional(), notes: z.string().max(2000).optional(), status: z.enum(["scheduled", "cancelled"]).optional(),
     },
-  }, async (a) => { const { meeting_id, ...rest } = a; return rpc(ctx, "update_meeting", { p_meeting_id: meeting_id, p: compact(rest) }); });
+  }, async (a) => {
+    const { meeting_id, ...rest } = a;
+    const meeting = await rpc<Row>(ctx, "update_meeting", { p_meeting_id: meeting_id, p: compact(rest) });
+    const calendar_note = calendarConfigured() ? await syncMeetingToEvent(ctx, meeting_id, rest) : undefined;
+    return { ...meeting, calendar_note };
+  });
 
   tool(server, ctx, {
     name: "meetings_list", title: "List meetings", cls: "read",
@@ -167,13 +191,13 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
   }, async (a) => {
     const from = a.from ? `${a.from}T00:00:00Z` : new Date(Date.now() - 7 * 86400_000).toISOString();
     const to = a.to ? `${a.to}T23:59:59Z` : new Date(Date.now() + 7 * 86400_000).toISOString();
-    let q = ctx.user.from("crm_meetings_v").select("id, deal_id, company_id, company_name, contact_name, contact_role, scheduled_at, timezone, status, has_capture, has_transcript, has_recording, capture_outcome, deal_stage, value_monthly, currency, attendees, notes").gte("scheduled_at", from).lte("scheduled_at", to).order("scheduled_at").limit(a.limit ?? 100);
+    let q = ctx.user.from("crm_meetings_v").select("id, deal_id, company_id, company_name, contact_name, contact_role, scheduled_at, timezone, status, has_capture, has_transcript, has_recording, capture_outcome, deal_stage, value_monthly, currency, attendees, notes, has_calendar_event, meet_link").gte("scheduled_at", from).lte("scheduled_at", to).order("scheduled_at").limit(a.limit ?? 100);
     if (a.status) q = q.eq("status", a.status);
     if (a.company) q = q.ilike("company_name", `%${a.company}%`);
     const { data, error } = await q;
     if (error) throw new Error(error.message);
     const rows = (data ?? []) as Row[];
-    return { from, to, count: rows.length, uncaptured_past: rows.filter((m) => m.status === "scheduled" && new Date(m.scheduled_at).getTime() < Date.now()).length, meetings: rows.map((m) => ({ meeting_id: m.id, deal_id: m.deal_id, company: m.company_name, contact: m.contact_name, role: m.contact_role, scheduled_at: m.scheduled_at, timezone: m.timezone, status: m.status, has_capture: m.has_capture, has_transcript: m.has_transcript || undefined, has_recording: m.has_recording || undefined, deal_stage: m.deal_stage, value: money(m.value_monthly, m.currency) })) };
+    return { from, to, count: rows.length, uncaptured_past: rows.filter((m) => m.status === "scheduled" && new Date(m.scheduled_at).getTime() < Date.now()).length, meetings: rows.map((m) => ({ meeting_id: m.id, deal_id: m.deal_id, company: m.company_name, contact: m.contact_name, role: m.contact_role, scheduled_at: m.scheduled_at, timezone: m.timezone, status: m.status, has_capture: m.has_capture, has_transcript: m.has_transcript || undefined, has_recording: m.has_recording || undefined, on_google_calendar: m.has_calendar_event || undefined, meet_link: m.meet_link || undefined, deal_stage: m.deal_stage, value: money(m.value_monthly, m.currency) })) };
   });
 
   tool(server, ctx, {

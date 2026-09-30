@@ -159,7 +159,7 @@ export default function TemplateField({ label, value, onChange, max, multiline =
               {g.note && <p className="px-3 pb-1 text-[11px] text-gray-500 leading-4">{g.note}</p>}
               {g.id === 'ai' && aiVars.isLoading && <p className="px-3 py-1 text-xs text-gray-400">Loading…</p>}
               {g.id === 'ai' && aiVars.error && <p className="px-3 py-1 text-xs text-red-600">{parseError(aiVars.error).message}</p>}
-              {g.id === 'ai' && !aiVars.isLoading && !aiVars.error && g.variables.length === 0 && <p className="px-3 py-1 text-xs text-gray-500">No AI variables yet. Create one under Settings → AI &amp; data.</p>}
+              {g.id === 'ai' && !aiVars.isLoading && !aiVars.error && g.variables.length === 0 && <p className="px-3 py-1 text-xs text-gray-500">No AI variables yet. Create one under Settings → AI Personalization.</p>}
               {g.id === 'custom' && g.variables.length === 0 && <p className="px-3 py-1 text-xs text-gray-500">No custom fields found on recent leads. Type a key below.</p>}
               {g.variables.map((v) => (
                 <button key={v.name} type="button" onClick={() => insert(tokenFor(v.name, v.fallback))} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none flex items-center justify-between gap-2">

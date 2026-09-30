@@ -59,6 +59,31 @@ async function briefFor(ctx: Ctx, chat: Row): Promise<string | null> {
   return (data as Row | null)?.outreach_sequences?.brief ?? null;
 }
 
+/** Private notes of one chat (RPC outreach_notes_list under the caller's scope), shaped for the connector. */
+export async function notesFor(ctx: Ctx, chatId: string): Promise<Row[]> {
+  const rows = await urpc<Row[]>(ctx, "notes_list", { p_chat: chatId }).catch(() => [] as Row[]);
+  return (rows ?? []).filter((n) => !n.deleted_at).map((n) => ({
+    type: "note", private: true, id: n.id, at: n.created_at, author: n.author?.name, author_type: n.author?.type,
+    visibility: n.visibility, body: untrusted("team_note", String(n.body ?? "").replace(/@\[([^\]]+)\]\(user:[^)]+\)/g, "@$1"), 2000),
+    mentions: Array.isArray(n.mentions) && n.mentions.length ? n.mentions.map((m: Row) => m.name) : undefined,
+    attachments: Array.isArray(n.attachments) && n.attachments.length ? n.attachments.map((a: Row) => a.name) : undefined,
+    edited: n.edited_at ? true : undefined,
+  }));
+}
+
+/** notes_count + latest note per chat for inbox_pending rows (RLS-scoped table read; one query for the page). */
+async function notesSummaryFor(ctx: Ctx, chatIds: string[]): Promise<Map<string, { count: number; latest: Row }>> {
+  const out = new Map<string, { count: number; latest: Row }>();
+  if (!chatIds.length) return out;
+  const { data } = await ctx.user.from("outreach_chat_notes").select("chat_id, body, author_type, created_at").in("chat_id", chatIds).is("deleted_at", null).order("created_at", { ascending: false }).limit(2000);
+  for (const n of (data ?? []) as Row[]) {
+    const cur = out.get(n.chat_id);
+    if (cur) cur.count++;
+    else out.set(n.chat_id, { count: 1, latest: { at: n.created_at, by: n.author_type === "ai" ? "AI" : n.author_type === "system" ? "System" : "teammate", snippet: short(String(n.body ?? "").replace(/@\[([^\]]+)\]\(user:[^)]+\)/g, "@$1"), 160) } });
+  }
+  return out;
+}
+
 /**
  * Item 4: which sequence, step, variant and sender produced each message (outreach_thread_attribution).
  * Automated outbound: sequence + step + variant + sender. Manual outbound: the teammate who sent it.
@@ -361,7 +386,11 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
     // AI replies: every thread gets ai (state) + lead_notes_summary, and ai_run when a run concerns the latest message; a
     // scheduled / sending AI reply makes the thread handled_by_ai → a compact row, listed last
     const ai = await aiP;
+    // private-notes-PRD §12: notes_count + the latest note per thread, never mixed into their_words / recent
+    const noteSummary = await notesSummaryFor(ctx, chats.map((c) => c.id)).catch(() => new Map<string, { count: number; latest: Row }>());
     const threads: Row[] = built.map((t: Row) => {
+      const ns = noteSummary.get(t.chat_id);
+      if (ns) { t.notes_count = ns.count; t.latest_note = { ...ns.latest, private: true }; }
       const x = ai.get(t.chat_id);
       const run = aiRunOf(x, t.reply_to_message_id);
       const block = aiBlockOf(x, run);
@@ -398,7 +427,7 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
     input: { chat_id: z.string(), limit: z.number().int().min(1).max(50).optional() },
   }, async (a) => {
     const chat = await loadChat(ctx, a.chat_id);
-    const [msgs, brief, attr, consent] = await Promise.all([loadThread(ctx, chat.id, a.limit ?? 20), briefFor(ctx, chat), attributionFor(ctx, chat.id), consentFor(ctx, chat)]);
+    const [msgs, brief, attr, consent, notes] = await Promise.all([loadThread(ctx, chat.id, a.limit ?? 20), briefFor(ctx, chat), attributionFor(ctx, chat.id), consentFor(ctx, chat), notesFor(ctx, chat.id)]);
     const seqs = new Map<string, string>();
     for (const x of attr.values()) if (x.sequence_id) seqs.set(x.sequence_id, x.sequence_name);
     const src = srcFor(chat.provider);
@@ -410,6 +439,9 @@ export function registerInbox(server: McpServer, ctx: Ctx): void {
         : chat.reply_sequence_id ? { state: "replying", sequence_id: chat.reply_sequence_id, session: chat.ai_session_kind && chat.ai_session_kind !== "normal" ? chat.ai_session_kind : undefined, note: "AI replies follow this sequence's settings (ai_reply_chat_state for the effective mode and the active run)." }
         : chat.provider === "LINKEDIN" ? { state: "off", note: "No sequence conversation: the AI does not answer here by itself (draft_reply still works)." } : undefined,
       sequences: [...seqs].map(([id, name]) => ({ id, name })),
+      // private-notes-PRD §12: internal team notes, interleaved by time in the client's view of the thread; never part of
+      // their_words / recent and never something to send. type:'note', private:true marks them.
+      notes: notes.length ? notes : undefined,
       messages: msgs.map((m) => ({ id: m.id, from: m.direction === "in" ? "prospect" : "sender", at: m.sent_at, ...attrOf(attr.get(m.id)), invite_note: m.is_invite_note || undefined, intent: m.intent ?? undefined, summary: m.summary ?? undefined, edited: !!m.edited_at || undefined, deleted: !!m.deleted_at || undefined, attachments: m.attachments?.length || undefined, ...mediaOf(m), text: m.deleted_at ? undefined : untrusted(m.direction === "in" ? src : "own_message", m.text, 1500) })),
     };
   });

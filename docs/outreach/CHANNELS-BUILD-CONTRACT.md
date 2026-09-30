@@ -5,7 +5,7 @@ Source: `instagram-whatsapp-channels-PRD.md` (25 Sep 2026). This contract is the
 connector. Every name here is final. The SQL is the source of truth for return shapes; TypeScript never re-implements a rule.
 
 Rules carried over from `PLAN-BUILD-CONTRACT.md`: one RPC, three surfaces · safety in the database · nothing AI-written sends
-unapproved · nothing deletes history · `outreach_` / `outreach-` / `/outreach` naming · `E_CODE: message` errors · plain UI copy
+unapproved (by a person, or by the checks for an Auto AI Personalization variable) · nothing deletes history · `outreach_` / `outreach-` / `/outreach` naming · `E_CODE: message` errors · plain UI copy
 (never "node", "enrollment", "payload", "graph"; never name the connector vendor in customer-facing copy: say "the connected
 account" / "the connector").
 

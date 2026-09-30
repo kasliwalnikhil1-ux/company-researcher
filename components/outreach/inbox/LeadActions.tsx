@@ -12,15 +12,17 @@ function toLocalInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function CreateTaskModal({ open, onClose, onCreate, members, currentUserId, defaultTitle }: {
+export function CreateTaskModal({ open, onClose, onCreate, members, currentUserId, defaultTitle, defaultBody, defaultAssignee }: {
   open: boolean; onClose: () => void; onCreate: (t: CreateTaskInput) => Promise<void>; members: Member[] | undefined; currentUserId: string | null; defaultTitle: string;
+  /** "Make task" from a private note: the note text and the first person mentioned */
+  defaultBody?: string | null; defaultAssignee?: string | null;
 }) {
   const [title, setTitle] = useState(defaultTitle);
-  const [body, setBody] = useState('');
+  const [body, setBody] = useState(defaultBody ?? '');
   const [due, setDue] = useState(() => toLocalInput(new Date(Date.now() + 24 * 3600 * 1000)));
-  const [assignee, setAssignee] = useState(currentUserId ?? '');
+  const [assignee, setAssignee] = useState(defaultAssignee ?? currentUserId ?? '');
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) { setTitle(defaultTitle); setBody(''); setDue(toLocalInput(new Date(Date.now() + 24 * 3600 * 1000))); setAssignee(currentUserId ?? ''); } }, [open, defaultTitle, currentUserId]);
+  useEffect(() => { if (open) { setTitle(defaultTitle); setBody(defaultBody ?? ''); setDue(toLocalInput(new Date(Date.now() + 24 * 3600 * 1000))); setAssignee(defaultAssignee ?? currentUserId ?? ''); } }, [open, defaultTitle, defaultBody, defaultAssignee, currentUserId]);
   const submit = async () => {
     if (!title.trim()) return;
     setBusy(true);
