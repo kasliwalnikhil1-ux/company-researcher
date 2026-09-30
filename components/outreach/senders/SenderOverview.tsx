@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, MonitorSmartphone, RefreshCw, Save, ShieldCheck, XCircle, CalendarClock } from 'lucide-react';
@@ -9,7 +9,7 @@ import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { reasonText } from '@/lib/outreach/reasons';
 import { qk, useActions } from '@/lib/outreach/queries';
 import { Badge, Button, Card, EmptyState, Input, Select, StatusPill, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
-import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isFuture } from './helpers';
+import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isAbandonedSignIn, isFuture, statusReasonText } from './helpers';
 import { cn, normalizeEmail } from '@/lib/utils';
 import type { Client, Sender } from '@/lib/outreach/types';
 
@@ -94,6 +94,15 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
     qc.invalidateQueries({ queryKey: qk.dashboard(sender.workspace_id) });
   };
 
+  // The hosted page's failure redirect (?connected=0) is the only signal for a closed or expired sign-in page: flag the row now
+  // so it shows as "Sign-in not completed" instead of "Connecting" (the server sweep would do it within the hour anyway).
+  const flagIncomplete = connected === '0' && sender.status === 'connecting' && !sender.unipile_account_id && !sender.status_reason;
+  useEffect(() => {
+    if (!flagIncomplete) return;
+    callFn('sender-manage', { sender_id: sender.id, action: 'sign_in_incomplete' }).then(invalidate).catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flagIncomplete, sender.id]);
+
   async function manage(action: string, extra: Record<string, unknown> = {}, successMsg?: string) {
     setBusy(action);
     try {
@@ -141,7 +150,10 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   }
 
   const needsRelogin = sender.status === 'credentials';
+  // a first sign-in that never finished, or that the hosted page reported as failed: the card is highlighted like a re-login
+  const signInFailed = isAbandonedSignIn(sender) || (sender.status === 'error' && !sender.unipile_account_id);
   const canReconnect = sender.status !== 'disabled' && (sender.status === 'connecting' || sender.status === 'error' || sender.auth_method === 'cookie');
+  const urgent = needsRelogin || signInFailed;
   const checkpointHint = /checkpoint|otp|2fa|in_app|validation|captcha|phone/i.test(sender.status_reason ?? '');
   const breakdown = HEALTH_KEYS.map((k) => ({ ...k, value: typeof sender.health_breakdown?.[k.key] === 'number' ? Math.round(sender.health_breakdown[k.key]) : null }));
   const locked = isFuture(sender.warmup_locked_until);
@@ -171,8 +183,8 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           </div>
         ) : undefined}>
           <div className="flex flex-wrap items-center gap-3">
-            <StatusPill status={sender.status} reason={sender.status_reason} />
-            {sender.status_reason && <span className="text-sm text-gray-600">{sender.status_reason}</span>}
+            <StatusPill status={sender.status} reason={statusReasonText(sender.status_reason)} />
+            {sender.status_reason && <span className="text-sm text-gray-600">{statusReasonText(sender.status_reason)}</span>}
             {isFuture(sender.paused_until) && <Badge tone="amber">{sender.provider_warning ? 'paused after a warning until' : 'auto-paused until'} {fmtDate(sender.paused_until)}</Badge>}
             {isFuture(sender.outreach_allowed_from) && <Badge tone="blue">quiet period: outreach starts {fmtDate(sender.outreach_allowed_from)}</Badge>}
             {isFuture(sender.invite_blocked_until) && <Badge tone="amber">invites blocked until {fmtDate(sender.invite_blocked_until, false)}</Badge>}
@@ -189,10 +201,12 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           </dl>
 
           {(needsRelogin || canReconnect) && canManage && (
-            <div className={cn('mt-5 rounded-xl border p-4', needsRelogin ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50')}>
-              <div className={cn('text-sm font-semibold flex items-center gap-2', needsRelogin ? 'text-red-900' : 'text-gray-900')}><KeyRound className="w-4 h-4" /> {needsRelogin ? 'This account needs a fresh login' : 'Reconnect with a secure sign-in'}</div>
-              <p className={cn('text-sm mt-1', needsRelogin ? 'text-red-800' : 'text-gray-600')}>{needsRelogin ? `${channelName} ended the session. Actions are held until the owner signs in again.` : sender.auth_method === 'cookie' ? 'Connected by cookie, so profile edits are locked. Have the owner sign in to unlock them.' : 'Use this if the account is stuck connecting or shows an error.'}</p>
-              <p className={cn('text-sm', needsRelogin ? 'text-red-800' : 'text-gray-600')}>Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
+            <div className={cn('mt-5 rounded-xl border p-4', urgent ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50')}>
+              <div className={cn('text-sm font-semibold flex items-center gap-2', urgent ? 'text-red-900' : 'text-gray-900')}><KeyRound className="w-4 h-4" /> {needsRelogin ? 'This account needs a fresh login' : signInFailed ? 'The sign-in was not completed' : 'Reconnect with a secure sign-in'}</div>
+              <p className={cn('text-sm mt-1', urgent ? 'text-red-800' : 'text-gray-600')}>{needsRelogin ? `${channelName} ended the session. Actions are held until the owner signs in again.`
+                : signInFailed ? `${sender.status_reason === 'SIGN_IN_FAILED' || sender.status_reason === 'CREATION_FAIL' ? `${channelName} rejected the sign-in (wrong password, or a verification step was not finished).` : 'The sign-in page was closed or its link expired (links last 15 minutes).'} Nothing was connected: send a fresh link and the owner can try again.`
+                : sender.auth_method === 'cookie' ? 'Connected by cookie, so profile edits are locked. Have the owner sign in to unlock them.' : 'Use this if the account is stuck connecting or shows an error.'}</p>
+              <p className={cn('text-sm', urgent ? 'text-red-800' : 'text-gray-600')}>Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
               {isLinkedIn && BROWSER_SIGNIN_ENABLED && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                   {RECONNECT_METHODS.map((m) => (

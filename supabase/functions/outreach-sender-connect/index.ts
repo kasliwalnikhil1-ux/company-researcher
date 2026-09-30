@@ -16,6 +16,8 @@ interface Body {
   connect_method?: "credentials" | "browser";
   /** WhatsApp only: the operator attests the number has at least 6 months of real use. */
   account_age_months?: number; account_age_attested?: boolean;
+  /** The same owner email is already connected on this channel and the manager still wants a second, separate sender. */
+  allow_duplicate?: boolean;
 }
 
 serve("sender-connect", async (req) => {
@@ -60,27 +62,53 @@ serve("sender-connect", async (req) => {
     row.account_age_attested_by = user.id;
     row.account_age_months = ageMonths;
   }
-  const { data: sender, error } = await admin.from("outreach_senders").insert(row).select("*").single();
-  if (error) throw new HttpError(500, "E_INTERNAL", error.message);
+  // One sender per owner email and channel. An unfinished sign-in for the same owner (the hosted page was never completed, so the
+  // row has no account yet) is reused: the new link replaces the expired one instead of leaving two "connecting" rows behind.
+  // An owner that is already connected is refused unless the manager explicitly wants a second sender.
+  let reused: Record<string, unknown> | null = null;
+  if (row.owner_email) {
+    const { data: twins } = await admin.from("outreach_senders").select("id, display_name, status, unipile_account_id, created_at")
+      .eq("workspace_id", body.workspace_id).eq("provider", provider).eq("owner_email", String(row.owner_email)).is("deleted_at", null).neq("status", "disabled").order("created_at");
+    const connected = (twins ?? []).find((t) => t.unipile_account_id);
+    if (connected && !body.allow_duplicate) {
+      throw new HttpError(409, "E_DUPLICATE_SENDER", `${connected.display_name ?? "This account"} is already connected with this owner email. Reconnect it instead of connecting it again.`,
+        { existing_sender_id: connected.id, existing_display_name: connected.display_name, existing_status: connected.status });
+    }
+    reused = (twins ?? []).find((t) => !t.unipile_account_id && t.status === "connecting") ?? null;
+  }
+  let sender: Record<string, unknown>;
+  if (reused) {
+    const { status: _s, ...details } = row;
+    const { data, error } = await admin.from("outreach_senders").update({ ...details, status_reason: null }).eq("id", reused.id).select("*").single();
+    if (error) throw new HttpError(500, "E_INTERNAL", error.message);
+    sender = data;
+  } else {
+    const { data, error } = await admin.from("outreach_senders").insert(row).select("*").single();
+    if (error) throw new HttpError(500, "E_INTERNAL", error.message);
+    sender = data;
+  }
+  const senderId = String(sender.id);
   const providers = HOSTED[provider];
   const recruiter = !!body.recruiter && !!(ws?.settings?.recruiter_enabled);
   try {
     const link = await unipile.hosted.link({
       type: "create", providers,
       expiresOn: new Date(Date.now() + 15 * 60_000).toISOString(),
-      notify_url: `${FUNCTIONS_BASE}outreach-sender-notify?sid=${sender.id}`,
-      name: sender.id,
-      success_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=1`,
-      failure_redirect_url: `${WEB_ORIGIN}/outreach/senders/${sender.id}?connected=0`,
+      notify_url: `${FUNCTIONS_BASE}outreach-sender-notify?sid=${senderId}`,
+      name: senderId,
+      success_redirect_url: `${WEB_ORIGIN}/outreach/senders/${senderId}?connected=1`,
+      failure_redirect_url: `${WEB_ORIGIN}/outreach/senders/${senderId}?connected=0`,
       disabled_features: isLinkedIn && !recruiter ? ["linkedin_recruiter"] : undefined,
       bypass_success_screen: false,
       ...(browser ? hostedBrowserOptions() : {}),
     });
-    await audit(body.workspace_id, "sender.connect_link", "sender", sender.id, { provider, ip, connect_method: browser ? "browser" : "default", ...(ageMonths != null ? { account_age_months: ageMonths, account_age_attested_by: user.id } : {}) }, "user");
-    if (provider === "WHATSAPP") await audit(body.workspace_id, "sender.attest_account_age", "sender", sender.id, { months: ageMonths, by: user.id, at_connect: true }, "user");
-    return json({ link: link.url, sender_id: sender.id });
+    await audit(body.workspace_id, "sender.connect_link", "sender", senderId, { provider, ip, connect_method: browser ? "browser" : "default", reused_sender: !!reused, ...(ageMonths != null ? { account_age_months: ageMonths, account_age_attested_by: user.id } : {}) }, "user");
+    if (provider === "WHATSAPP") await audit(body.workspace_id, "sender.attest_account_age", "sender", senderId, { months: ageMonths, by: user.id, at_connect: true }, "user");
+    // the sweep that flags abandoned sign-ins counts from the latest link, not from the row's creation
+    await admin.from("outreach_sender_events").insert({ sender_id: senderId, kind: "reconnect", data: { method: "connect_link", reused: !!reused, connect_method: browser ? "browser" : "credentials" } });
+    return json({ link: link.url, sender_id: senderId, reused: !!reused });
   } catch (e) {
-    await admin.from("outreach_senders").delete().eq("id", sender.id);
+    if (!reused) await admin.from("outreach_senders").delete().eq("id", senderId);
     throw e;
   }
 });

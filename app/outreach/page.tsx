@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Contact, FileWarning, GitBranch, Hand, Inbox, MessageSquare, PauseCircle, Plus, Sparkles, Upload, CheckSquare, UserMinus, Wand2, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSequences } from '@/lib/outreach/queries';
@@ -9,7 +9,7 @@ import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem,
 import { MetricLabel } from '@/components/outreach/reports/primitives';
 import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
-import { healthTextClass, PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
+import { healthTextClass, isAbandonedSignIn, PROVIDER_LABELS, statusReasonText } from '@/components/outreach/senders/helpers';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn } from '@/lib/utils';
 
@@ -36,7 +36,9 @@ const CAPACITY_LABELS: Array<{ key: string; label: string }> = [
 
 const isAutoPaused = (s: DashSender) => !!s.paused_until && new Date(s.paused_until).getTime() > Date.now();
 function healthGroup(s: DashSender): HealthGroup {
-  if (s.status === 'credentials' || s.status === 'error' || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
+  // A first sign-in that never finished (page closed, link expired, or the hosted page reported a failure) is not "connecting":
+  // nothing will change until a manager sends a fresh link.
+  if (s.status === 'credentials' || s.status === 'error' || isAbandonedSignIn(s) || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
   if (s.status === 'paused' || s.status === 'disabled' || isAutoPaused(s)) return 'paused';
   if (s.running_dry) return 'dry';
   if (s.status === 'connecting') return 'connecting';
@@ -44,21 +46,25 @@ function healthGroup(s: DashSender): HealthGroup {
 }
 
 function flagReason(s: DashSender, g: HealthGroup): React.ReactNode {
-  if (s.status !== 'ok') return <StatusPill status={s.status} reason={s.status_reason} />;
+  if (isAbandonedSignIn(s)) return <Badge tone="red">{statusReasonText(s.status_reason) ?? 'Sign-in not completed'}</Badge>;
+  if (s.status !== 'ok') return <StatusPill status={s.status} reason={statusReasonText(s.status_reason)} />;
   if (g === 'attention') return <Badge tone="red">Low health</Badge>;
   if (g === 'paused') return <Badge tone="amber">Auto-paused</Badge>;
-  return <Badge tone="amber">Running out of leads</Badge>;
+  if (g === 'dry') return <Badge tone="amber">Running out of leads</Badge>;
+  return <Badge tone="green">Healthy</Badge>;
 }
 
 function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
-  const { counts, flagged, capacity } = useMemo(() => {
+  // Clicking a legend chip narrows the list to that group (click again to go back to "needs a look").
+  const [filter, setFilter] = useState<HealthGroup | null>(null);
+  const { counts, grouped, flagged, capacity } = useMemo(() => {
     const counts: Record<HealthGroup, number> = { attention: 0, paused: 0, dry: 0, connecting: 0, healthy: 0 };
-    const flagged: Array<{ s: DashSender; g: HealthGroup }> = [];
+    const grouped: Array<{ s: DashSender; g: HealthGroup }> = [];
     const sums = new Map<string, { used: number; cap: number }>();
     for (const s of senders) {
       const g = healthGroup(s);
       counts[g]++;
-      if (g === 'attention' || g === 'paused' || g === 'dry') flagged.push({ s, g });
+      grouped.push({ s, g });
       for (const [k, b] of Object.entries(s.today ?? {})) {
         const c = sums.get(k) ?? { used: 0, cap: 0 };
         c.used += (b?.used ?? 0) + (b?.reserved ?? 0);
@@ -66,16 +72,19 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
         sums.set(k, c);
       }
     }
-    // Within a group, senders that stopped (re-login needed, error) come before low health.
+    // Within a group, senders that stopped (re-login needed, error, sign-in not completed) come before low health.
     const stopped = (s: DashSender) => (s.status === 'ok' ? 1 : 0);
-    flagged.sort((a, b) => GROUP_ORDER[a.g] - GROUP_ORDER[b.g] || stopped(a.s) - stopped(b.s) || a.s.health_score - b.s.health_score || (a.s.display_name ?? '').localeCompare(b.s.display_name ?? ''));
+    grouped.sort((a, b) => GROUP_ORDER[a.g] - GROUP_ORDER[b.g] || stopped(a.s) - stopped(b.s) || a.s.health_score - b.s.health_score || (a.s.display_name ?? '').localeCompare(b.s.display_name ?? ''));
+    const flagged = grouped.filter(({ g }) => g === 'attention' || g === 'paused' || g === 'dry');
     const capacity = CAPACITY_LABELS.map((c) => ({ ...c, ...(sums.get(c.key) ?? { used: 0, cap: 0 }) })).filter((c) => c.cap > 0).slice(0, 4);
-    return { counts, flagged, capacity };
+    return { counts, grouped, flagged, capacity };
   }, [senders]);
 
   const total = senders.length;
-  const { pageRows: shown, ...pager } = usePagedRows(flagged, '', ATTENTION_PAGE_SIZE);
+  const listed = filter ? grouped.filter(({ g }) => g === filter) : flagged;
+  const { pageRows: shown, ...pager } = usePagedRows(listed, filter ?? '', ATTENTION_PAGE_SIZE);
   const legend = GROUPS.filter((g) => counts[g.key] > 0 || g.key === 'attention' || g.key === 'healthy');
+  const filterLabel = GROUPS.find((g) => g.key === filter)?.label;
 
   return (
     <div className="space-y-4">
@@ -85,20 +94,27 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
           {counts.healthy === total && <div className="text-xs text-green-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> All healthy</div>}
         </div>
         <div className="flex h-2 rounded-full overflow-hidden bg-gray-100" role="img" aria-label={legend.map((g) => `${counts[g.key]} ${g.label.toLowerCase()}`).join(', ')}>
-          {GROUPS.map((g) => counts[g.key] > 0 && <div key={g.key} className={g.color} style={{ width: `${(counts[g.key] / total) * 100}%` }} />)}
+          {GROUPS.map((g) => counts[g.key] > 0 && <div key={g.key} className={cn(g.color, filter && filter !== g.key && 'opacity-30')} style={{ width: `${(counts[g.key] / total) * 100}%` }} />)}
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1" role="group" aria-label="Show senders by state">
           {legend.map((g) => (
-            <span key={g.key} className="inline-flex items-center gap-1.5 text-xs text-gray-600">
-              <span className={cn('w-2 h-2 rounded-full', g.color)} />{g.label} <span className="font-semibold text-gray-900 tabular-nums">{fmtInt(counts[g.key])}</span>
-            </span>
+            <button key={g.key} type="button" onClick={() => setFilter(filter === g.key ? null : g.key)} aria-pressed={filter === g.key} disabled={counts[g.key] === 0}
+              className={cn('inline-flex items-center gap-1.5 text-xs rounded-full px-2 py-0.5 border transition-colors', filter === g.key ? 'border-gray-900 bg-gray-900 text-white' : 'border-transparent text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-default')}>
+              <span className={cn('w-2 h-2 rounded-full', g.color)} />{g.label} <span className={cn('font-semibold tabular-nums', filter === g.key ? 'text-white' : 'text-gray-900')}>{fmtInt(counts[g.key])}</span>
+            </button>
           ))}
         </div>
       </div>
 
-      {shown.length > 0 && (
+      {(shown.length > 0 || filter) && (
         <div>
-          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Needs a look</div>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">{filter ? filterLabel : 'Needs a look'}</div>
+            {filter && <button type="button" onClick={() => setFilter(null)} className="text-xs text-indigo-600 hover:underline">Show what needs a look</button>}
+          </div>
+          {shown.length === 0 ? (
+            <div className="text-sm text-gray-500 border border-dashed border-gray-200 rounded-lg px-3 py-4 text-center">No senders in this group.</div>
+          ) : (
           <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg">
             {shown.map(({ s, g }) => (
               <li key={s.id}>
@@ -114,6 +130,7 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
               </li>
             ))}
           </ul>
+          )}
           {pager.pageCount > 1 && <PaginationBar {...pager} className="mt-2 text-xs" />}
         </div>
       )}

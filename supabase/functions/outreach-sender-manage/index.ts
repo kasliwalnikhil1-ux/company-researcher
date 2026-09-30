@@ -3,7 +3,7 @@
 import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit } from "../_shared/outreach/supabase.ts";
 import { encrypt } from "../_shared/outreach/crypto.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
-import { reconnectLink, reloginUrl, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames } from "../_shared/outreach/inbound.ts";
+import { reconnectLink, reloginUrl, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames, SIGN_IN_INCOMPLETE } from "../_shared/outreach/inbound.ts";
 import { backfillChatPictures } from "../_shared/outreach/avatars.ts";
 import { healthForSender } from "../_shared/outreach/health.ts";
 import { planSender } from "../_shared/outreach/planner.ts";
@@ -41,6 +41,14 @@ serve("sender-manage", async (req) => {
     case "reconnect_cookie": {
       const r = await reconnectSender(s);
       return json(r);
+    }
+    case "sign_in_incomplete": {
+      // The owner came back through the hosted page's failure redirect. The page itself only notifies on CREATION_FAIL, so a
+      // closed or expired page is flagged from here (the sweep would catch it within the hour anyway).
+      if (s.status !== "connecting" || s.unipile_account_id || s.status_reason) return json({ ok: false });
+      await admin.from("outreach_senders").update({ status_reason: SIGN_IN_INCOMPLETE }).eq("id", s.id);
+      await admin.from("outreach_sender_events").insert({ sender_id: s.id, kind: "reconnect", data: { result: "incomplete", via: "failure_redirect" } });
+      return json({ ok: true });
     }
     case "set_cookie": {
       // Manual alternative to the extension: a pasted li_at (e.g. copied with a cookie editor or DevTools).

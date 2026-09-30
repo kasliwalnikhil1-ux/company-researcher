@@ -9,7 +9,7 @@ import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/sender
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
-import { PROVIDER_LABELS, STATUS_OPTIONS, isFuture, scheduleSummary } from '@/components/outreach/senders/helpers';
+import { PROVIDER_LABELS, STATUS_OPTIONS, isAbandonedSignIn, isFuture, scheduleSummary, statusReasonText } from '@/components/outreach/senders/helpers';
 import type { Provider, Sender } from '@/lib/outreach/types';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn } from '@/lib/utils';
@@ -38,7 +38,8 @@ function Budget({ label, b }: { label: string; b?: Usage }) {
 
 /** Why a connected sender may still be sending little or nothing, from the sender row itself. */
 function blockedHint(s: SenderV2): string | null {
-  if (s.status !== 'ok') return null;   // the status pill already says it
+  if (isAbandonedSignIn(s)) return `${statusReasonText(s.status_reason) ?? 'Sign-in not completed'}: open the sender and send a fresh link`;
+  if (s.status !== 'ok') return s.status === 'connecting' || s.status === 'error' ? statusReasonText(s.status_reason) : null;   // the pill says the state; a sign-in reason goes under it
   if (s.provider_warning) return 'Paused after an Instagram warning';
   if (isFuture(s.paused_until)) return `Resting until ${fmtDate(s.paused_until)}`;
   if (s.health_score < 50) return 'Health is below 50: sending is paused';

@@ -275,7 +275,9 @@ export async function handleAccountStatus(payload: any): Promise<void> {
       sender = await syncOwnProfile(sender);
       sender = await absorbDuplicateSender(sender);
       await applyOnboardingGate(sender);
-      await admin.from("outreach_senders").update({ status: sender.status === "disabled" ? "disabled" : "connecting", connected_at: sender.connected_at ?? new Date().toISOString() }).eq("id", sender.id);
+      // the hosted-auth notify usually lands first and may already have polled the account to ok: never move it back to connecting
+      const keep = sender.status === "disabled" || sender.status === "ok" || sender.status === "paused";
+      await admin.from("outreach_senders").update({ status: keep ? sender.status : "connecting", status_reason: keep ? sender.status_reason : null, connected_at: sender.connected_at ?? new Date().toISOString() }).eq("id", sender.id);
       break;
     }
     case "OK": {
@@ -384,6 +386,10 @@ export async function reconnectLink(sender: Sender, method?: "credentials" | "br
     // Senders connected through the browser extension reconnect the same way (no password prompt).
     ...(browser ? hostedBrowserOptions() : {}),
   };
+  // a fresh link restarts the sign-in window: the "not completed" flag comes back through the sweep if this one is abandoned too
+  if (sender.status_reason === SIGN_IN_INCOMPLETE || (sender.status_reason === SIGN_IN_FAILED && sender.status === "connecting")) {
+    await admin.from("outreach_senders").update({ status_reason: null }).eq("id", sender.id);
+  }
   const stillThere = sender.unipile_account_id ? await accountExistsOnDsn(sender.unipile_account_id) : false;
   if (stillThere) {
     const r = await unipile.hosted.link({ type: "reconnect", reconnect_account: sender.unipile_account_id, ...common });
@@ -412,16 +418,70 @@ async function reconnectQuietPeriod(sender: Sender): Promise<void> {
   await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "quiet_period", data: { until, hours: hrs, from_status: sender.status, reason: "reconnected" } });
 }
 
-/** Hosted-auth notify_url payload: {status, account_id, name} */
+/** status_reason values written by the sign-in flow itself (not by the provider). The UI turns them into plain words. */
+export const SIGN_IN_INCOMPLETE = "SIGN_IN_INCOMPLETE";   // the hosted page was opened (or never opened) and the link expired
+export const SIGN_IN_FAILED = "SIGN_IN_FAILED";           // the hosted page reported CREATION_FAIL / a failed reconnect
+
+/** The hosted page reported a failure. A failed *create* leaves an orphan account on the DSN (it is billed): remove it unless a
+ *  sender already owns that id (a failed *reconnect* reports the existing account id, which must stay). */
+async function handleHostedFailure(s: Sender, accountId: string | null, status: string): Promise<void> {
+  const { data: owner } = accountId ? await admin.from("outreach_senders").select("id").eq("unipile_account_id", accountId).maybeSingle() : { data: null };
+  const patch: Record<string, unknown> = { status_reason: SIGN_IN_FAILED };
+  // a first sign-in that failed is an error the manager has to act on; a failed re-login keeps its current (credentials/error) status
+  if (s.status === "connecting") { patch.status = "error"; patch.status_reason = SIGN_IN_FAILED; }
+  await admin.from("outreach_senders").update(patch).eq("id", s.id);
+  await admin.from("outreach_sender_events").insert({ sender_id: s.id, kind: "reconnect", data: { result: "failed", hosted_status: status, account_id: accountId, orphan_removed: !!accountId && !owner } });
+  await audit(s.workspace_id, "sender.hosted_auth", "sender", s.id, { status, account_id: accountId, failed: true });
+  if (accountId && !owner) {
+    try { if (await accountExistsOnDsn(accountId)) await unipile.accounts.delete(accountId); }
+    catch (e) { log({ fn: "hosted_notify", warn: "failed account cleanup", account_id: accountId, error: String(e) }); }
+  }
+}
+
+/** The account id from the hosted page is already bound to another (live) sender row: this row is a duplicate connect of the
+ *  same account (e.g. "Connect" clicked twice, or a re-login link opened for a row that was later merged). Fold it into the owner. */
+async function foldIntoAccountOwner(s: Sender, accountId: string, status: string): Promise<boolean> {
+  const { data: owner } = await admin.from("outreach_senders").select("*").eq("unipile_account_id", accountId).neq("id", s.id).maybeSingle();
+  if (!owner) return false;
+  const now = new Date().toISOString();
+  if (owner.deleted_at) {
+    // the owner is a tombstone: free the id so this row can take it
+    await admin.from("outreach_senders").update({ unipile_account_id: null }).eq("id", owner.id);
+    return false;
+  }
+  if (!s.deleted_at && !s.unipile_account_id) {
+    await admin.from("outreach_senders").update({ status: "disabled", status_reason: `merged_into:${owner.id}`, deleted_at: now }).eq("id", s.id);
+    await admin.from("outreach_sender_events").update({ sender_id: owner.id }).eq("sender_id", s.id);
+  }
+  const live = owner.status === "paused" || owner.status === "disabled" ? owner.status : "ok";
+  if (status === "RECONNECTED" || status === "CREATION_SUCCESS") {
+    await admin.from("outreach_senders").update({ status: live, status_reason: null, last_ok_at: now, reconnect_attempts: 0 }).eq("id", owner.id);
+  }
+  await admin.from("outreach_sender_events").insert({ sender_id: owner.id, kind: "reconnect", data: { method: "merged_duplicate", merged_sender_id: s.id, account_id: accountId, hosted_status: status } });
+  await audit(owner.workspace_id, "sender.merged_duplicate", "sender", owner.id, { merged_sender_id: s.id, account_id: accountId, via: "hosted_notify" });
+  log({ fn: "hosted_notify", merged: s.id, into: owner.id });
+  return true;
+}
+
+/** Hosted-auth notify_url payload: {status, account_id, name}. Statuses seen from the hosted page: CREATION_SUCCESS, RECONNECTED and
+ *  CREATION_FAIL (the docs list the first two; the third arrives in practice). Anything ending in FAIL is treated as a failure. */
 export async function handleHostedNotify(payload: any): Promise<void> {
   const senderId = payload.name;
-  const accountId = payload.account_id;
-  if (!senderId || !accountId) return;
+  const accountId = payload.account_id ?? null;
+  if (!senderId) return;
   const { data: s } = await admin.from("outreach_senders").select("*").eq("id", senderId).maybeSingle();
   if (!s) return;
   const status = String(payload.status ?? "").toUpperCase();
+  if (/FAIL|ERROR/.test(status)) { await handleHostedFailure(s as Sender, accountId, status); return; }
+  if (!accountId) return;
+  if (s.unipile_account_id && s.unipile_account_id !== accountId && !s.deleted_at) {
+    // this row is bound to another account: only a create-fallback reconnect (account gone from the DSN) may replace it
+    log({ fn: "hosted_notify", info: "rebinding account", sender_id: s.id, from: s.unipile_account_id, to: accountId });
+  }
   const patch: Record<string, unknown> = { unipile_account_id: accountId };
   if (status === "RECONNECTED") { patch.status = s.status === "paused" || s.status === "disabled" ? s.status : "ok"; patch.status_reason = null; patch.reconnect_attempts = 0; }
+  // a first sign-in that completes after an earlier failure / expired link starts the normal connecting → ok path again
+  if (status === "CREATION_SUCCESS") { patch.status_reason = null; if (s.status === "error" || s.status === "credentials") patch.status = "connecting"; }
   // A manager-chosen sign-in method on the latest reconnect link (last 25h) becomes the sender's auth_method.
   if ((status === "RECONNECTED" || status === "CREATION_SUCCESS") && s.provider === "LINKEDIN") {
     const { data: ev } = await admin.from("outreach_sender_events").select("data").eq("sender_id", senderId).eq("kind", "reconnect")
@@ -430,12 +490,14 @@ export async function handleHostedNotify(payload: any): Promise<void> {
     if (chosen === "browser") patch.auth_method = "browser";
     else if (chosen === "credentials" && s.auth_method !== "credentials") patch.auth_method = "credentials";
   }
-  const { error } = await admin.from("outreach_senders").update(patch).eq("id", senderId);
-  if (error) {
-    // account_id already bound to another sender row (e.g. duplicate connect) → disable this row
-    log({ fn: "hosted_notify", error: error.message });
-    return;
+  let { error } = await admin.from("outreach_senders").update(patch).eq("id", senderId);
+  if (error && (error.code === "23505" || /unique|duplicate key/i.test(error.message))) {
+    // account_id already bound to another sender row (duplicate connect): fold this row into the owner, or retry once the
+    // owner turned out to be a tombstone whose id was just freed
+    if (await foldIntoAccountOwner(s as Sender, accountId, status)) return;
+    ({ error } = await admin.from("outreach_senders").update(patch).eq("id", senderId));
   }
+  if (error) { log({ fn: "hosted_notify", error: error.message, sender_id: senderId }); return; }
   await audit(s.workspace_id, "sender.hosted_auth", "sender", senderId, { status, account_id: accountId, ...(patch.auth_method ? { auth_method: patch.auth_method } : {}) });
   if (status === "RECONNECTED") await reconnectQuietPeriod(s);
   // A password reconnect may still have used a cookie inside the hosted page; the profile sync reads the real method back.

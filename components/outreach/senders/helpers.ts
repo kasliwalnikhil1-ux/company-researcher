@@ -30,6 +30,28 @@ export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn',
  *  or the hosted page's browser-extension sign-in that reuses the LinkedIn session already open on the owner's computer. */
 export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = { credentials: 'Password login', cookie: 'Cookie (extension)', oauth: 'OAuth', browser: 'Signed-in browser' };
 
+/** status_reason values the sign-in flow writes itself (see outreach-sender-notify / the sign-in sweep), in plain words. Provider
+ *  codes (CREDENTIALS, CREATION_FAIL, …) are shown as they are. */
+const SIGN_IN_REASONS: Record<string, string> = {
+  SIGN_IN_INCOMPLETE: 'Sign-in not completed',
+  SIGN_IN_FAILED: 'Sign-in failed',
+  CREATION_FAIL: 'Sign-in failed',
+};
+export function statusReasonText(reason: string | null | undefined): string | null {
+  if (!reason) return null;
+  return SIGN_IN_REASONS[reason] ?? reason;
+}
+/** A first sign-in that never finished: the row has no account and the sweep (or the failure redirect) flagged it, or it is
+ *  simply older than the 15-minute link. These count as "needs attention", not "connecting". */
+export const SIGN_IN_STALE_MS = 60 * 60_000;
+export function isAbandonedSignIn(s: { status: SenderStatus; status_reason: string | null; unipile_account_id?: string | null; has_account?: boolean; created_at?: string | null }): boolean {
+  if (s.status !== 'connecting') return false;
+  const hasAccount = s.has_account ?? !!s.unipile_account_id;
+  if (hasAccount) return false;
+  if (s.status_reason) return true;
+  return !!s.created_at && Date.now() - new Date(s.created_at).getTime() > SIGN_IN_STALE_MS;
+}
+
 export const STATUS_OPTIONS: Array<{ value: SenderStatus; label: string }> = [
   { value: 'ok', label: 'Connected' }, { value: 'connecting', label: 'Connecting' }, { value: 'credentials', label: 'Re-login needed' },
   { value: 'error', label: 'Error' }, { value: 'paused', label: 'Paused' }, { value: 'disabled', label: 'Disabled' },

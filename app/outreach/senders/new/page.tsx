@@ -54,7 +54,10 @@ export default function ConnectSenderPage() {
   const [ageAttested, setAgeAttested] = useState(false);
   const [ageMonths, setAgeMonths] = useState('');
   const [launching, setLaunching] = useState<'redirect' | 'copy' | null>(null);
-  const [result, setResult] = useState<{ link: string; sender_id: string } | null>(null);
+  const [result, setResult] = useState<{ link: string; sender_id: string; reused?: boolean } | null>(null);
+  // The owner email is already connected on this channel: offer the existing sender, or a deliberate second one.
+  const [duplicate, setDuplicate] = useState<{ id: string; name: string | null; status: string } | null>(null);
+  const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const tzList = useMemo(() => timezoneChoices(), []);
@@ -78,28 +81,32 @@ export default function ConnectSenderPage() {
     );
   }
 
-  async function ensureLink(): Promise<{ link: string; sender_id: string }> {
+  async function ensureLink(force = allowDuplicate): Promise<{ link: string; sender_id: string; reused?: boolean }> {
     if (result) return result;
-    const r = await callFn<{ link: string; sender_id: string }>('sender-connect', {
+    const r = await callFn<{ link: string; sender_id: string; reused?: boolean }>('sender-connect', {
       workspace_id: ws, provider, client_id: clientId || null, owner_email: ownerEmailClean || null, display_name: displayName.trim() || null,
       recruiter: provider === 'LINKEDIN' && recruiterEnabled ? recruiter : false, timezone,
       connect_method: provider === 'LINKEDIN' ? connectMethod : 'credentials',
       ...(isWhatsApp ? { account_age_months: monthsNum, account_age_attested: true } : {}),
+      ...(force ? { allow_duplicate: true } : {}),
     });
     setResult(r);
     return r;
   }
 
-  async function launch(mode: 'redirect' | 'copy') {
-    setLaunching(mode); setError(null);
+  async function launch(mode: 'redirect' | 'copy', force = allowDuplicate) {
+    setLaunching(mode); setError(null); setDuplicate(null);
     try {
-      const r = await ensureLink();
+      const r = await ensureLink(force);
       if (mode === 'redirect') { window.location.href = r.link; return; }
       const ok = await copyText(r.link);
       setCopied(ok);
       toast.show(ok ? 'Link copied. It expires in 15 minutes.' : 'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
     } catch (e) {
-      setError(parseError(e).message);
+      const err = parseError(e);
+      const d = (err.details as { details?: { existing_sender_id?: string; existing_display_name?: string | null; existing_status?: string } } | undefined)?.details;
+      if (err.code === 'E_DUPLICATE_SENDER' && d?.existing_sender_id) setDuplicate({ id: d.existing_sender_id, name: d.existing_display_name ?? null, status: d.existing_status ?? '' });
+      else setError(err.message);
     } finally { setLaunching(null); }
   }
 
@@ -246,6 +253,16 @@ export default function ConnectSenderPage() {
             <p>Connecting someone else’s account? Use <strong>Copy sign-in link</strong> and send it to the account owner so they can sign in themselves. {isWhatsApp ? 'They need the phone with the number to hand.' : 'The proxy is pinned to the country of whoever opens the link.'}</p>
           </div>
           {error && <ErrorBox message={error} className="mb-4" />}
+          {duplicate && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <div className="font-semibold">{duplicate.name ?? 'This account'} is already connected with {ownerEmailClean}</div>
+              <p className="mt-1">{duplicate.status === 'ok' ? 'It is connected and working. Connecting it again would create a second copy of the same account.' : 'It needs a fresh sign-in rather than a new connection: reconnecting keeps its conversations, leads and sequences.'}</p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <Link href={`/outreach/senders/${duplicate.id}`}><Button size="sm">{duplicate.status === 'ok' ? 'Open the connected account' : 'Reconnect the existing account'}</Button></Link>
+                <Button size="sm" variant="ghost" onClick={() => { setAllowDuplicate(true); launch('redirect', true); }} loading={launching === 'redirect'} disabled={!!launching}>This is a different account — connect anyway</Button>
+              </div>
+            </div>
+          )}
           {result && (
             <div className="mb-4">
               <div className="text-xs font-medium text-gray-600 mb-1">Sign-in link (valid for 15 minutes)</div>
@@ -253,7 +270,7 @@ export default function ConnectSenderPage() {
                 <input readOnly value={result.link} onFocus={(e) => e.currentTarget.select()} className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-gray-50 text-gray-700" aria-label="Sign-in link" />
                 <Button variant="secondary" onClick={() => launch('copy')} loading={launching === 'copy'}>{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} Copy</Button>
               </div>
-              <div className="text-xs text-gray-500 mt-1">The account now shows as <Link href={`/outreach/senders/${result.sender_id}`} className="text-indigo-600 hover:underline">connecting</Link>. It becomes active once the sign-in is complete.</div>
+              <div className="text-xs text-gray-500 mt-1">{result.reused ? 'An earlier sign-in for this owner was never completed; this link replaces it on the same ' : 'The account now shows as '}<Link href={`/outreach/senders/${result.sender_id}`} className="text-indigo-600 hover:underline">{result.reused ? 'sender' : 'connecting'}</Link>. It becomes active once the sign-in is complete.</div>
             </div>
           )}
           <div className="flex flex-wrap justify-between gap-2">
