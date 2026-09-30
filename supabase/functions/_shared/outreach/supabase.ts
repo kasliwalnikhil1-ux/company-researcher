@@ -12,7 +12,7 @@ export const admin: SupabaseClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY
 
 export const CORS: Record<string, string> = {
   "access-control-allow-origin": "*",
-  "access-control-allow-headers": "authorization, content-type, apikey, x-client-info, x-cron-secret, unipile-auth",
+  "access-control-allow-headers": "authorization, content-type, apikey, x-client-info, x-cron-secret, unipile-auth, x-website-token",   // x-website-token: the web chat widget (browser preflight)
   "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
 };
 

@@ -72,7 +72,7 @@
   win.growthxai = sdk; if (!win.kaptured) win.kaptured = sdk;
 
   // ---- config -----------------------------------------------------------------------------------------------------
-  var cfg = null, hideLauncher = !!settings.hideMessageBubble, host = null, shadow = null, sheet = null, btn = null, popupEl = null, popupTimer = null;
+  var cfg = null, pendingStart = null, hideLauncher = !!settings.hideMessageBubble, host = null, shadow = null, sheet = null, btn = null, popupEl = null, popupTimer = null;
   function effective(c) {
     // precedence: SDK call > window.growthxaiSettings > data-* > server config > defaults (PRD §4.1)
     var s = c.settings || {}, ap = Object.assign({}, s.appearance), la = Object.assign({}, s.launcher);
@@ -231,10 +231,15 @@
     s.onload = function () {
       var init = win.__growthxaiWebchatPanel;
       if (!init) { chatState = 0; return; }
-      panel = init(sdk, cfg, effective(cfg));
-      chatState = 2;
-      queue.splice(0).forEach(function (q) { try { panel[q[0]] && panel[q[0]].apply(panel, q[1]); } catch (e) {} });
-      chatCbs.splice(0).forEach(function (f) { try { f(); } catch (e) {} });
+      var start = function () {
+        panel = init(sdk, cfg, effective(cfg));
+        chatState = 2;
+        queue.splice(0).forEach(function (q) { try { panel[q[0]] && panel[q[0]].apply(panel, q[1]); } catch (e) {} });
+        chatCbs.splice(0).forEach(function (f) { try { f(); } catch (e) {} });
+      };
+      // open() / send() called before /config answered (a site button, autoOpen): the panel needs the config, so
+      // start it when boot() has one; queued calls stay queued until then.
+      if (cfg) start(); else pendingStart = start;
     };
     s.onerror = function () { chatState = 0; };
     doc.head.appendChild(s);
@@ -258,6 +263,7 @@
     fetchConfig().then(function (c) {
       if (c) { var changed = !cfg || cfg.config_version !== c.config_version; cfg = c; renderLauncher(); if (!cached) schedulePopup(); if (panel && panel.configUpdated && changed) panel.configUpdated(c, effective(c)); }
       else if (!cfg) return;
+      if (pendingStart) { var ps = pendingStart; pendingStart = null; ps(); }
       emit("ready", { config_version: cfg.config_version });
       // returning visitor: load the panel core early so unread counts + realtime work while closed
       if (store.get("vt") || effective(cfg).appearance.mode === "embedded") { (win.requestIdleCallback || function (f) { setTimeout(f, 1200); })(function () { loadChat(); }); }
