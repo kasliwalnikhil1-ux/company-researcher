@@ -76,13 +76,13 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
   return (
     <div>
       {booked && (
-        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 flex items-start gap-2">
+        <div className="mx-6 sm:mx-8 mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 flex items-start gap-2">
           <CalendarCheck className="w-4 h-4 mt-0.5 shrink-0" />
           <span>Your call is booked. The invitation is in your inbox; your account is switched on right after we speak, often sooner.</span>
         </div>
       )}
       {failed ? (
-        <div className="rounded-xl border border-dashed border-gray-300 p-6 text-center">
+        <div className="mx-6 sm:mx-8 rounded-xl border border-dashed border-gray-300 p-6 text-center">
           <p className="text-sm text-gray-600">The calendar could not load here (an ad blocker or a strict network often does this).</p>
           <a href={url} target="_blank" rel="noopener" className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
             Open the calendar in a new tab <ExternalLink className="w-4 h-4" />
@@ -90,12 +90,11 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
         </div>
       ) : (
         <>
-          <div className="rounded-xl overflow-hidden border border-gray-200 bg-white" style={{ minWidth: 320, height: 660 }}>
-            {embedSrc && (
-              <iframe src={embedSrc} title="Book your onboarding call" className="w-full h-full border-0" allow="payment" />
-            )}
-          </div>
-          <p className="mt-2 text-xs text-gray-400 text-right">
+          {/* the frame sits flush in the card, wide enough for Calendly's two-column layout (details left, dates right) */}
+          {embedSrc && (
+            <iframe src={embedSrc} title="Book your onboarding call" className="block w-full border-0" style={{ minWidth: 320, height: 720 }} allow="payment" />
+          )}
+          <p className="px-6 sm:px-8 pt-2 text-xs text-gray-400 text-right">
             Calendar not showing?{' '}
             <a href={url} target="_blank" rel="noopener" className="inline-flex items-center gap-1 text-indigo-600 hover:underline">
               Open it in a new tab <ExternalLink className="w-3 h-3" />
@@ -113,7 +112,7 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
  * Pending accounts see the onboarding-call calendar embedded (lib/platform/leads ONBOARDING_CALENDLY_URL); the visit
  * and the booking are recorded on the person's lead row (/admin → Leads) through /api/leads/track.
  */
-function AccountGate({ status, email, name, onSignOut, onRetry }: { status: 'pending' | 'blocked'; email: string | null; name: string | null; onSignOut: () => void; onRetry: () => void }) {
+function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | 'blocked'; email: string | null; name: string | null; onSignOut: () => void }) {
   const pending = status === 'pending';
 
   // record where this sign-up came from (best effort, once per mount)
@@ -137,32 +136,25 @@ function AccountGate({ status, email, name, onSignOut, onRetry }: { status: 'pen
 
   return (
     <div className="min-h-screen bg-gray-50 px-4 py-8 sm:py-12">
-      <div className="mx-auto w-full max-w-3xl bg-white border border-gray-200 rounded-2xl shadow-sm p-6 sm:p-8">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+      <div className="mx-auto w-full max-w-6xl bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-6 sm:p-8 pb-4 sm:pb-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in — one last step</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in</p>
             <h1 className="mt-1 text-2xl font-semibold text-gray-900">Book your 20-minute onboarding call</h1>
-            <p className="mt-2 text-sm text-gray-600 max-w-xl">
+            <p className="mt-2 text-sm text-gray-600 max-w-2xl">
               Thanks for signing up. Every new account is set up on a short call: we connect your first sending accounts, build your first
-              sequence with you and switch your workspace on. Pick a time that suits you below.
+              sequence with you, setup your AI auto reply agent, and switch your workspace on. Pick a time that suits you below.
             </p>
             {email && <p className="mt-2 text-xs text-gray-400">Signed in as {email}</p>}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <button type="button" onClick={onRetry} className="px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50" title="Already approved? Check again">
-              Check again
-            </button>
-            <button type="button" onClick={onSignOut} className="px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
-              Sign out
-            </button>
-          </div>
+          <button type="button" onClick={onSignOut} className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
+            Sign out
+          </button>
         </div>
 
-        <div className="mt-6">
-          <CalendlyEmbed email={email} name={name} onBooked={(booking) => { trackMySignup({ booked: true, booking }); }} />
-        </div>
+        <CalendlyEmbed email={email} name={name} onBooked={(booking) => { trackMySignup({ booked: true, booking }); }} />
 
-        <p className="mt-4 text-xs text-gray-400">
+        <p className="px-6 sm:px-8 py-4 text-xs text-gray-400">
           Can&apos;t find a time? Write to <a href="mailto:hello@growthxai.com" className="text-indigo-600 hover:underline">hello@growthxai.com</a> and we&apos;ll sort it out by email.
         </p>
       </div>
@@ -198,7 +190,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     const meta = (user.user_metadata ?? {}) as { full_name?: string; name?: string };
     return (
       <AccountGate status={access.status} email={user.email ?? null} name={meta.full_name ?? meta.name ?? null}
-        onSignOut={() => { signOut().catch(() => undefined); }} onRetry={() => { access.refresh(); }} />
+        onSignOut={() => { signOut().catch(() => undefined); }} />
     );
   }
 
