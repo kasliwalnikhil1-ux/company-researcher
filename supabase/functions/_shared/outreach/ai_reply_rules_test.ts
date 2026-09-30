@@ -2,7 +2,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   computeSendAt, countQuestions, editDistance, evaluateGates, extractDates, extractMoney, extractPhones, extractUrls, factsChanged, figureKey,
-  floorPrecheck, parseCountry, parseDraft, similarity, strictest, validateDraft, windowAt, type DraftOutput, type GateInput, type PromptSettings, type ValidateCtx,
+  floorPrecheck, hasSchedulingLink, parseCountry, parseDraft, similarity, strictest, validateDraft, windowAt, type DraftOutput, type GateInput, type PromptSettings, type ValidateCtx,
 } from "./ai_reply_rules.ts";
 
 const SETTINGS: PromptSettings = {
@@ -18,7 +18,7 @@ const PROMPT = `## Facts I can use
 - 60-second product films. Projects start at ₹50,000. Turnaround is 2 weeks.
 - Book a call: https://cal.com/naman/15min
 - Email hello@kaptured.ai or call +91 98765 43210. Launch on 15 Nov.`;
-const draft = (o: Partial<DraftOutput>): DraftOutput => ({ decision: "send", text: "Thanks!", stage_before: "pitch", stage_after: "next_step", move: "answer", rule_applied: "Stage 1", side_effects: [], facts_used: [], confidence: 0.9, escalation_reason: null, language: "en", ...o });
+const draft = (o: Partial<DraftOutput>): DraftOutput => ({ decision: "send", text: "Thanks!", stage_before: "pitch", stage_after: "next_step", move: "answer", rule_applied: "Stage 1", side_effects: [], facts_used: [], confidence: 0.9, escalation_reason: null, language: "en", stop_after_send: false, stop_rule: null, scenario_id: null, unanswered_question: null, ...o });
 const ctx = (o: Partial<ValidateCtx> = {}): ValidateCtx => ({ settings: SETTINGS, editorMode: "guided", allowedText: PROMPT, prospectText: "", prospectLanguage: "en", exchanges: 3, flags: [], prevMove: null, ourEarlierTexts: [], stageBefore: "pitch", ...o });
 
 Deno.test("extraction: urls, money, phones, dates", () => {
@@ -168,4 +168,24 @@ Deno.test("timing: inside the window, live, next window", () => {
   const n = computeSendAt({ now: friLate, delayMinS: 240, delayMaxS: 1200, draftLength: 80, live: false, schedule: SCHED, tz: "Asia/Kolkata", rand: () => 0.5 });
   const local = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", weekday: "short", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(n);
   assert(/^Mon/.test(local) && /09:|10:/.test(local), local);
+});
+
+// ---------------------------------------------------------------------------------------------------- v2
+const DOMAINS = [{ host: "calendly.com", path_prefix: null }, { host: "cal.com", path_prefix: null }, { host: "outlook.office.com", path_prefix: "/bookwithme" }, { host: "calendar.app.google", path_prefix: null }];
+Deno.test("v2 T3: scheduling links are detected, incl. subdomains and path prefixes; other links are not", () => {
+  assert(hasSchedulingLink("grab a slot: https://cal.com/naman/15min", DOMAINS));
+  assert(hasSchedulingLink("calendly.com/naman/intro works", DOMAINS));
+  assert(hasSchedulingLink("https://app.calendly.com/x", DOMAINS));
+  assert(hasSchedulingLink("https://outlook.office.com/bookwithme/user/abc", DOMAINS));
+  assert(!hasSchedulingLink("https://outlook.office.com/mail/inbox", DOMAINS));
+  assert(!hasSchedulingLink("see https://kaptured.ai/work and https://cal.company.com", DOMAINS));
+  assert(!hasSchedulingLink("no links here", DOMAINS));
+});
+Deno.test("v2 parseDraft: stop flag, rule, scenario id validated against the cards", () => {
+  const d = parseDraft({ decision: "send", text: "ok", stop_after_send: true, stop_rule: "we agreed a time", scenario_id: "card-1", unanswered_question: " what is your SLA? " }, SETTINGS, "2026-09-30", ["card-1", "card-2"]);
+  assertEquals(d.stop_after_send, true); assertEquals(d.stop_rule, "we agreed a time"); assertEquals(d.scenario_id, "card-1"); assertEquals(d.unanswered_question, "what is your SLA?");
+  const e = parseDraft({ decision: "send", text: "ok", stop_after_send: "yes", scenario_id: "card-9" }, SETTINGS, "2026-09-30", ["card-1"]);
+  assertEquals(e.stop_after_send, false); assertEquals(e.stop_rule, null); assertEquals(e.scenario_id, null);
+  const f = parseDraft({ decision: "send", text: "ok", stop_after_send: true }, SETTINGS, "2026-09-30");
+  assertEquals(f.stop_rule, "stop rule");
 });

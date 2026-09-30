@@ -7,7 +7,7 @@
 // they are on). Queued text is never re-rendered in TypeScript: outreach_refresh_queued_text
 // drops the pre-rendered copy so the step renders again at send time, with the one renderer.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
-import { type Ctx, tool, z, wsParam, resolveWs, requireRole, urpc, unwrap, McpError, gate, callFn, roleAtLeast, short, todayIn, wsTz, untrusted } from "./ctx.ts";
+import { type Ctx, tool, z, wsParam, resolveWs, requireRole, urpc, unwrap, McpError, gate, callFn, roleAtLeast, short, todayIn, wsTz, untrusted, mapPool } from "./ctx.ts";
 import { compileSteps, renderGraph, TEMPLATES, templateByKey, parseWait, type Graph, type GraphNode } from "./steps.ts";
 
 type Row = Record<string, any>;
@@ -67,6 +67,25 @@ async function poolInfo(ctx: Ctx, pool: string[]): Promise<Row[]> {
   const { data } = await ctx.user.from("outreach_senders").select("id, display_name, provider, status, health_score, warmup_level, is_premium").in("id", pool);
   return (data ?? []).map((s: Row) => ({ id: s.id, name: s.display_name, provider: s.provider, status: s.status, health: s.health_score, level: s.warmup_level, premium: s.is_premium || undefined }));
 }
+
+/**
+ * AI replies block of a sequence (AI-REPLIES-V2-CONTRACT §5 sequence_ai_summary): mode, effective mode, open conversations per
+ * stage, hand-offs in the last 7 days. Member-only RPC: a client_viewer (or a failure) gets no block, never a broken row.
+ */
+async function aiRepliesOf(ctx: Ctx, sequenceId: string): Promise<Row | undefined> {
+  const s = await urpc<Row>(ctx, "sequence_ai_summary", { p_sequence: sequenceId }).catch(() => null);
+  if (!s) return undefined;
+  return {
+    mode: s.mode, effective_mode: s.effective_mode !== s.mode ? s.effective_mode : undefined, warmup_remaining: s.warmup_remaining || undefined, downgraded_at: s.downgraded_at ?? undefined,
+    open_conversations: s.open_conversations, open_by_stage: (s.open_by_stage ?? []).map((x: Row) => ({ stage: x.stage, label: x.label, n: x.n })),
+    handed_off_7d: s.handed_off_7d, handed_off_open: s.handed_off_open || undefined, drafts_waiting: s.drafts_waiting || undefined, unanswered_open: s.unanswered_open || undefined,
+  };
+}
+
+const aiRepliesCreate = z.object({
+  mode: z.enum(["off", "draft"]).optional().describe("Every new sequence starts in draft (the AI drafts every eligible reply; a person sends). Auto is turned on later with sequence_ai_replies_set (consent, confirmation)."),
+  copy_prompt_from: z.string().optional().describe("Sequence id whose AI replies prompt, scenario cards, knowledge links and Q&A are copied as an independent copy (default: the workspace default prompt or the template)"),
+}).strict().describe("AI replies of the new sequence: {mode: off | draft, copy_prompt_from?: sequence_id}");
 
 function nodeTextField(n: GraphNode): "text" | "note" | "html" | null {
   switch (n.type) { case "send_invite": return "note"; case "send_message": case "send_inmail": case "comment_latest_post": case "send_voice_note": return "text"; case "send_email": return "html"; default: return null; }
@@ -145,8 +164,8 @@ async function publishFlow(ctx: Ctx, toolName: string, s: Row, graph: Graph | nu
 export function registerSequences(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "sequences_list", title: "List sequences", cls: "read", minRole: "client_viewer",
-    description: "Sequences of a workspace with status, pool size, live/completed/replied counts, throttle reason, stalled reason (the stall alert) and whether an unpublished draft exists.",
-    input: { ...wsParam, status: z.enum(["draft", "active", "paused", "archived"]).optional(), client_id: z.string().optional() },
+    description: "Sequences of a workspace with status, pool size, live/completed/replied counts, throttle reason, stalled reason (the stall alert), whether an unpublished draft exists, and ai_replies = {mode (off | draft | autopilot), effective_mode (when lower: paused / archived sequences run at most in draft), open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open} (members; included for up to 50 rows, or always with include_ai:true).",
+    input: { ...wsParam, status: z.enum(["draft", "active", "paused", "archived"]).optional(), client_id: z.string().optional(), include_ai: z.boolean().optional().describe("Force the ai_replies block on every row (one extra read per sequence)") },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     let q = ctx.user.from("outreach_sequences").select(SEQ_COLS).eq("workspace_id", ws.id).order("updated_at", { ascending: false }).limit(100);
@@ -155,12 +174,14 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
     const rows = unwrap<Row[]>(await q);
     const summary = await urpc<Row[]>(ctx, "sequence_summary", { p_ws: ws.id }).catch(() => []);
     const byId = new Map((summary ?? []).map((s: Row) => [s.sequence_id, s]));
-    return { workspace: ws.name, count: rows.length, sequences: rows.map((s) => { const m = byId.get(s.id) ?? {}; return { id: s.id, name: s.name, status: s.status, version: s.head_version, pool: s.sender_pool?.length ?? 0, assignment: s.assignment, client_id: s.client_id, live: m.live, completed: m.completed, replied: m.replied, sent: m.sent, queued: m.queued, throttled: s.throttled_reason, stalled: s.stalled_at ? s.stalled_reason ?? true : undefined, unpublished_draft: s.draft_updated_at ? s.draft_updated_at : undefined, updated: s.updated_at?.slice(0, 10) }; }) };
+    const withAi = roleAtLeast(ws.role, "member") && (a.include_ai || rows.length <= 50);
+    const ai = withAi ? new Map(await mapPool(rows, 6, async (s) => [s.id, await aiRepliesOf(ctx, s.id)] as [string, Row | undefined])) : new Map<string, Row | undefined>();
+    return { workspace: ws.name, count: rows.length, ai_replies_included: withAi || undefined, sequences: rows.map((s) => { const m = byId.get(s.id) ?? {}; return { id: s.id, name: s.name, status: s.status, version: s.head_version, pool: s.sender_pool?.length ?? 0, assignment: s.assignment, client_id: s.client_id, live: m.live, completed: m.completed, replied: m.replied, sent: m.sent, queued: m.queued, throttled: s.throttled_reason, stalled: s.stalled_at ? s.stalled_reason ?? true : undefined, unpublished_draft: s.draft_updated_at ? s.draft_updated_at : undefined, ai_replies: ai.get(s.id), updated: s.updated_at?.slice(0, 10) }; }) };
   });
 
   tool(server, ctx, {
     name: "sequence_get", title: "Get sequence", cls: "read", minRole: "client_viewer",
-    description: "One sequence: readable step-by-step rendering of the LIVE graph (with per-step stats when include_stats; A/B variants are added together per step), pool senders, settings (reply stop scope, on_reply, holds, enrichment / AI-review waits), assignment rule, brief, version, stall reason, and whether an unpublished draft exists (include_draft renders it).",
+    description: "One sequence: readable step-by-step rendering of the LIVE graph (with per-step stats when include_stats; A/B variants are added together per step), pool senders, settings (reply stop scope, on_reply, holds, enrichment / AI-review waits), assignment rule, brief, version, stall reason, ai_replies = {mode, effective_mode, open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open} (the full card: sequence_ai_replies_get), and whether an unpublished draft exists (include_draft renders it).",
     input: { sequence_id: z.string(), include_stats: z.boolean().optional(), include_graph_json: z.boolean().optional().describe("Also return the raw graph (verbose)"), include_draft: z.boolean().optional().describe("Also render the saved, unpublished draft") },
   }, async (a) => {
     const s = await loadSequence(ctx, a.sequence_id);
@@ -168,6 +189,7 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
     if (a.include_stats) { const { data } = await ctx.user.from("outreach_node_stats").select("*").eq("sequence_id", s.id); stats = statsByNode(data ?? []); }
     return {
       id: s.id, name: s.name, status: s.status, version: s.head_version, client_id: s.client_id, brief: s.brief, settings: s.settings, assignment: s.assignment, use_sender_schedule: s.use_sender_schedule, throttled: s.throttled_reason, stalled: s.stalled_at ? s.stalled_reason : undefined,
+      ai_replies: await aiRepliesOf(ctx, s.id),
       pool: await poolInfo(ctx, s.sender_pool), nodes: Object.keys(s.graph?.nodes ?? {}).length, rendered: renderGraph(s.graph, stats), graph: a.include_graph_json ? s.graph : undefined,
       draft: s.draft_graph ? { saved_at: s.draft_updated_at, base_version: s.draft_base_version, stale: s.draft_base_version != null && s.draft_base_version !== s.head_version, rendered: a.include_draft ? renderGraph(s.draft_graph) : undefined, note: "Nothing in a draft reaches a lead until it is published (sequence_publish)." } : undefined,
     };
@@ -212,12 +234,13 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "sequence_create", title: "Create sequence", cls: "write", minRole: "manager",
-    description: "Create a sequence (as a draft) from a compact step list, a template, or a graph, with a sender pool and optional brief/settings/assignment rule. Compiles, validates (strict) and saves; returns the id, version, validation result and a readable rendering. Nothing is sent until sequence_activate + enrollments. Defaults worth knowing: a reply stops the lead everywhere (stop_on_reply_scope 'lead') and exits cleanly (on_reply 'exit'); out-of-office replies resume on their own.",
+    description: "Create a sequence (as a draft) from a compact step list, a template, or a graph, with a sender pool and optional brief/settings/assignment rule. Compiles, validates (strict) and saves; returns the id, version, validation result and a readable rendering. Nothing is sent until sequence_activate + enrollments. Defaults worth knowing: a reply stops the lead everywhere (stop_on_reply_scope 'lead') and exits cleanly (on_reply 'exit'); out-of-office replies resume on their own. AI replies: every new sequence starts in Draft mode with a copy of the workspace default prompt (or the template); ai_replies {mode: off | draft, copy_prompt_from?: sequence_id} changes that at creation (Auto is turned on later with sequence_ai_replies_set).",
     input: {
       ...wsParam, name: z.string().min(1), ...graphInput,
       pool: z.array(z.string()).optional().describe("Sender ids to send from (required before activation)"),
       brief: z.string().optional().describe("Campaign brief: ICP, offer, tone — used by AI drafting/QA and reply classification"),
       settings: SETTINGS.optional(), assignment: ASSIGNMENT.optional(), client_id: z.string().optional(),
+      ai_replies: aiRepliesCreate.optional(),
       allow_warnings: z.boolean().optional().describe("Create even when strict validation returns warnings (errors always block)"),
     },
   }, async (a) => {
@@ -225,13 +248,25 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
     const g = graphFrom(a);
     if (g.errors.length) return { created: false, compile_errors: g.errors };
     if (!g.graph) throw new McpError("E_PAYLOAD_INVALID", "steps, graph or from_template required");
+    if (a.ai_replies?.copy_prompt_from) await loadSequence(ctx, a.ai_replies.copy_prompt_from, "id, workspace_id, name"); // visible to the caller, or E_NOT_FOUND before anything is created
     const pool = a.pool ?? [];
     const v = await validate(ctx, g.graph, pool, true);
     if (v.errors.length) return { created: false, errors: v.errors, warnings: v.warnings, rendered: renderGraph(g.graph) };
     if (v.warnings.length && !a.allow_warnings) return { created: false, warnings: v.warnings, rendered: renderGraph(g.graph), next: "Review the warnings with the user; call again with allow_warnings:true to create anyway, or fix the steps." };
     const id = await urpc<string>(ctx, "create_sequence", { p_workspace: ws.id, p_name: a.name, p_client_id: a.client_id ?? null });
     const version = await urpc<number>(ctx, "save_sequence", { p_id: id, p_graph: g.graph, p_pool: pool.length ? pool : null, p_settings: a.settings ?? null, p_brief: a.brief ?? null, p_assignment: a.assignment ?? null });
-    return { created: true, sequence_id: id, version, status: "draft", source: g.source, warnings: v.warnings, compiler_notes: g.notes, pool: await poolInfo(ctx, pool), rendered: renderGraph(g.graph), next: pool.length ? "sequence_project → enroll_preview → enroll_commit; then sequence_activate (confirmation) when ready." : "Add senders with sequence_update(pool) before activating." };
+    // AI replies: the platform created the settings row (draft + default prompt copy); apply the requested prompt copy / mode
+    const aiNotes: string[] = [];
+    if (a.ai_replies?.copy_prompt_from) {
+      try { const r = await urpc<Row>(ctx, "master_prompt_copy", { p_sequence: id, p_from_sequence: a.ai_replies.copy_prompt_from, p_from_library: null }); aiNotes.push(`prompt copied from sequence ${a.ai_replies.copy_prompt_from} (${(r?.scenarios ?? []).length} card(s), ${(r?.faqs ?? []).length} Q&A, ${(r?.knowledge ?? []).length} knowledge source(s))`); }
+      catch (e) { aiNotes.push(`prompt copy failed: ${e instanceof Error ? e.message : String(e)} — the sequence keeps the default prompt (master_prompt_copy to retry)`); }
+    }
+    if (a.ai_replies?.mode) {
+      try { const r = await urpc<Row>(ctx, "sequence_ai_replies_set", { p_sequence: id, p_patch: { mode: a.ai_replies.mode }, p_note: null }); aiNotes.push(`mode ${r?.mode ?? a.ai_replies.mode}`); }
+      catch (e) { aiNotes.push(`mode change failed: ${e instanceof Error ? e.message : String(e)} — the sequence stays in draft mode (sequence_ai_replies_set to retry)`); }
+    }
+    const aiSummary = await aiRepliesOf(ctx, id);
+    return { created: true, sequence_id: id, version, status: "draft", source: g.source, warnings: v.warnings, compiler_notes: g.notes, pool: await poolInfo(ctx, pool), ai_replies: aiSummary ? { ...aiSummary, notes: aiNotes.length ? aiNotes : undefined } : undefined, rendered: renderGraph(g.graph), next: pool.length ? "sequence_project → enroll_preview → enroll_commit; then sequence_activate (confirmation) when ready." : "Add senders with sequence_update(pool) before activating." };
   });
 
   tool(server, ctx, {

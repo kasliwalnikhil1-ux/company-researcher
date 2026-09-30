@@ -21,6 +21,8 @@ import { IdentityList } from '@/components/outreach/leads/detail/LeadIdentitiesC
 import { ConsentBadge, ConsentGrantModal, ConsentRevokeModal } from '@/components/outreach/leads/detail/LeadConsentCard';
 import type { LeadConsent } from '@/lib/outreach/types';
 import { cn } from '@/lib/utils';
+import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
+import LeadNotesPanel from './ai/LeadNotesPanel';
 
 export interface LeadPanelProps {
   chat: ChatDetail;
@@ -37,10 +39,11 @@ export interface LeadPanelProps {
 const RELATION_TONE: Record<Relation, 'gray' | 'green' | 'blue' | 'amber' | 'red'> = { none: 'gray', pending_out: 'blue', pending_in: 'amber', first: 'green', blocked: 'red', invalid: 'red' };
 const RELATION_LABEL: Record<Relation, string> = { none: 'Not connected', pending_out: 'Invite pending', pending_in: 'They invited', first: '1st degree', blocked: 'Blocked', invalid: 'Invalid' };
 
-type PanelTab = 'contact' | 'sequence' | 'organise' | 'tasks';
+type PanelTab = 'contact' | 'sequence' | 'organise' | 'tasks' | 'notes';
 // Each tab opens with a one-line guide to what can be done there, like the Leads page tabs.
 const PANEL_TABS: { key: PanelTab; label: string; guide: string }[] = [
   { key: 'contact', label: 'Contact', guide: 'How to reach this lead, and where each of your senders stands with them.' },
+  { key: 'notes', label: 'Notes', guide: 'Key facts the AI picked up from their messages: budget, timeline, objections. Edit or add your own; every AI draft uses them.' },
   { key: 'tasks', label: 'Tasks', guide: 'Follow-ups for you or a teammate. They also show on the Tasks page.' },
   { key: 'organise', label: 'Organise', guide: 'Tag the lead, set its stage and list, or stop all outreach to them.' },
   { key: 'sequence', label: 'Sequence', guide: 'Enrol, pause or exit automation, and see what goes out next.' },
@@ -69,6 +72,7 @@ function Section({ title, action, children }: { title: string; action?: React.Re
 
 export default function LeadPanel({ chat, workspaceId, canWrite, members, currentUserId, requestedAction, onActionHandled, onClose, toast }: LeadPanelProps) {
   const qc = useQueryClient();
+  const { canReply } = useWorkspace();
   const leadId = chat.lead_id;
   const leadQ = useLead(leadId);
   const tagsQ = useTags(workspaceId);
@@ -130,6 +134,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
     if (leadId && leadQ.isLoading) return; // wait for the lead to load
     if (!lead) { toast('Create a lead from this conversation first.', 'error'); onActionHandled(); return; }
     if (requestedAction === 'task') { setTab('tasks'); setTaskOpen(true); }
+    else if (requestedAction === 'notes') setTab('notes');
     else if (requestedAction === 'reenrol') { setTab('sequence'); setReenrolOpen(true); }
     else if (requestedAction === 'tag' || requestedAction === 'stage') {
       if (tab === 'organise') focusField(requestedAction);
@@ -445,6 +450,12 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                   );
                 })}
               </ul>
+            </Section>
+            )}
+
+            {tab === 'notes' && (
+            <Section title="Lead notes">
+              <LeadNotesPanel key={lead.id} leadId={lead.id} chatId={chat.id} canWrite={canWrite && canReply} personName={lead.full_name ?? chat.attendee_name} onError={(m) => toast(m, 'error')} onNotice={(m) => toast(m)} />
             </Section>
             )}
             </div>

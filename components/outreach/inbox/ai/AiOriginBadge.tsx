@@ -5,7 +5,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { Bot, Loader2, Smartphone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';
-import { MOVE_LABEL, ORIGIN_LABEL, useAiRun } from '@/lib/outreach/aiReplies';
+import { MOVE_LABEL, ORIGIN_LABEL, useAiRun, warningText } from '@/lib/outreach/aiReplies';
 import type { MessageOrigin } from '@/lib/outreach/types';
 import { humanizeKey } from './useAiInbox';
 
@@ -19,10 +19,10 @@ export function isAiOrigin(origin: MessageOrigin | undefined | null): boolean {
   return !!origin && AI_ORIGINS.includes(origin);
 }
 
-/** "AI draft — sent by Naman", "AI draft — edited by Naman", "AI — autopilot", "Sent from phone". */
+/** "AI draft · sent by Naman", "AI draft, edited by Naman", "AI · auto", "Sent from phone". */
 export function originText(origin: MessageOrigin, sentByName: string | null | undefined): string {
-  if (origin === 'ai_draft_sent' && sentByName) return `AI draft — sent by ${sentByName}`;
-  if (origin === 'ai_edited' && sentByName) return `AI draft — edited by ${sentByName}`;
+  if (origin === 'ai_draft_sent') return sentByName ? `AI draft · sent by ${sentByName}` : 'AI draft';
+  if (origin === 'ai_edited') return sentByName ? `AI draft, edited by ${sentByName}` : 'AI draft, edited';
   return ORIGIN_LABEL[origin] ?? humanizeKey(origin);
 }
 
@@ -34,10 +34,14 @@ function RunDetails({ runId }: { runId: string }) {
   if (!r) return null;
   const stage = [r.stage_before, r.stage_after].filter(Boolean).map((k) => humanizeKey(k as string));
   const rows: Array<[string, React.ReactNode]> = [];
-  if (r.master_prompt_version != null) rows.push(['Master prompt', `v${r.master_prompt_version}`]);
+  if (r.master_prompt_version != null) rows.push(['Prompt', `${r.sequence_name ? `sequence ${r.sequence_name} · ` : ''}v${r.master_prompt_version}`]);
+  if (r.trigger === 'manual') rows.push(['Asked for', r.guidance ? `Draft with AI · “${r.guidance}”` : 'Draft with AI']);
+  if (r.scenario_title) rows.push(['Handled by', r.scenario_title]);
   if (r.rule_applied) rows.push(['Rule followed', r.rule_applied]);
   if (stage.length) rows.push(['Stage', stage[0] === stage[1] || stage.length === 1 ? stage[0] : `${stage[0]} → ${stage[1]}`]);
   if (r.move) rows.push(['Move', MOVE_LABEL[r.move] ?? r.move]);
+  if (r.session_kind && r.session_kind !== 'normal') rows.push(['Session', r.session_kind === 'dormant' ? `Re-engage${r.gap_days != null ? ` · back after ${Math.round(r.gap_days)} days` : ''}` : `Came back${r.gap_days != null ? ` after ${Math.round(r.gap_days)} days` : ''}`]);
+  if (r.stop_after_send) rows.push(['Stop', r.stop_rule ? `Ended the AI conversation (${r.stop_rule})` : 'Ended the AI conversation']);
   if (r.draft_confidence != null) rows.push(['Confidence', `${Math.round(r.draft_confidence * 100)}%`]);
   const v = r.verifier;
   return (
@@ -62,6 +66,9 @@ function RunDetails({ runId }: { runId: string }) {
       )}
       {r.validator && !r.validator.ok && !!r.validator.failures?.length && (
         <div className="text-amber-800">Rule checks: {r.validator.failures.map((f) => f.detail || f.rule).join('; ')}</div>
+      )}
+      {!!r.warnings?.length && (
+        <div className="text-amber-800">Warnings: {r.warnings.map((w) => warningText(w)).join('; ')}</div>
       )}
     </div>
   );

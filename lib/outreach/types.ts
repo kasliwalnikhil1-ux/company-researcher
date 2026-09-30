@@ -461,10 +461,10 @@ export interface Chat {
   /** Instagram: the conversation sits in the recipient's message requests (not accepted yet). */
   is_request: boolean;
   created_at: string;
-  /** AI replies (036): per-chat mode override, autopilot pause state, conversation stage, active run mirror. */
-  reply_mode_override?: 'off' | 'draft' | 'autopilot' | null;
-  autopilot_state?: 'active' | 'paused_human' | 'paused_escalated' | 'paused_bot';
+  /** AI replies (036 / 040): autopilot pause state, conversation stage, active run mirror. `reply_mode_override` was dropped in v2. */
+  autopilot_state?: 'active' | 'paused_escalated' | 'paused_bot';
   autopilot_paused_until?: string | null;
+  autopilot_paused_reason?: string | null;
   conversation_stage?: string | null;
   conversation_exchanges?: number;
   ai_replies_count?: number;
@@ -475,6 +475,16 @@ export interface Chat {
   ai_run_decision?: 'send' | 'escalate' | 'no_reply' | null;
   ai_escalation_reason?: string | null;
   ai_scheduled_send_at?: string | null;
+  /** AI replies v2 (040): the sequence the conversation belongs to, the handoff, and the session (returning / dormant). */
+  reply_sequence_id?: string | null;
+  ai_handed_off_at?: string | null;
+  ai_handoff_reason?: 'human_replied' | 'meeting_confirmed' | 'calendar_sent' | 'stop_rule' | 'max_replies' | 'stage' | 'booking' | 'manual' | null;
+  ai_handoff_rule?: string | null;
+  ai_handoff_run_id?: string | null;
+  ai_session_started_at?: string | null;
+  ai_session_kind?: 'normal' | 'returning' | 'dormant' | null;
+  ai_session_count?: number;
+  ai_quiet_task_at?: string | null;
 }
 
 export interface Message {
@@ -525,6 +535,8 @@ export interface Message {
   ai_reply_run_id?: string | null;
   ai_flags?: string[];
   classification?: Record<string, unknown> | null;
+  /** AI replies v2 (040): a cached translation of a received message (compose_assist translate_in). */
+  translation?: { lang: string; text: string; at: string; source_language?: string | null } | null;
 }
 
 export type MessageOrigin = 'prospect' | 'sequence' | 'inbox_user' | 'ai_autopilot' | 'ai_draft_sent' | 'ai_edited' | 'external_device' | 'unknown';

@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc } from './api';
-import type { ChatFilters, LeadFilters } from './queries';
+import { applyAiChatFilter, type ChatFilters, type LeadFilters } from './queries';
 import type { ActionType, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
 
 // ---------------------------------------------------------------------------
@@ -250,11 +250,7 @@ export function useChatsByIds(ws: string | null | undefined, ids: string[] | nul
         if (f.unread) q = q.eq('unread', true);
         if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
         if (f.provider) q = q.eq('provider', f.provider);
-        // Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart
-        if (f.ai === 'scheduled') q = q.eq('ai_run_status', 'scheduled');
-        else if (f.ai === 'escalated') q = q.or('ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)');
-        else if (f.ai === 'draft_ready') q = q.eq('ai_run_status', 'draft_ready').eq('ai_run_decision', 'send');
-        else if (f.ai === 'sent_by_ai') q = q.gt('ai_replies_count', 0);
+        q = applyAiChatFilter(q, f.ai);
         if (f.stage) q = q.eq('conversation_stage', f.stage);
         const search = f.search ? cleanSearch(f.search) : '';
         if (search) q = q.or(`attendee_name.ilike.%${search}%,subject.ilike.%${search}%,last_message_preview.ilike.%${search}%`);

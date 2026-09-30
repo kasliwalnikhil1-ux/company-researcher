@@ -9,7 +9,7 @@ import type { ChatFilters } from '@/lib/outreach/queries';
 import type { Chat, Client, Lead, Sender, Sequence } from '@/lib/outreach/types';
 import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/components/outreach/ui';
 import { INTENTS, INTENT_LABELS, useNow } from './hooks';
-import { ESCALATION_LABEL, fmtCountdown, type StageDef } from '@/lib/outreach/aiReplies';
+import { ESCALATION_LABEL, HANDOFF_LABEL, fmtCountdown, type StageDef } from '@/lib/outreach/aiReplies';
 import { AI_FILTERS, AI_FILTER_LABEL, humanizeKey, type AiChatFilter } from './ai/useAiInbox';
 
 export type ChatRow = Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
@@ -277,6 +277,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                           return <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap flex-shrink-0" title="An AI reply is on hold: open the chat to send, edit or cancel it">{left > 0 ? `AI in ${fmtCountdown(left)}` : 'AI sending'}</span>;
                         })()}
                         {(c.ai_run_status === 'escalated' || (c.ai_run_status === 'draft_ready' && c.ai_run_decision === 'escalate')) && c.last_direction !== 'out' && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 whitespace-nowrap flex-shrink-0" title={`The AI handed this to a person${c.ai_escalation_reason ? `: ${ESCALATION_LABEL[c.ai_escalation_reason] ?? humanizeKey(c.ai_escalation_reason)}` : ''}`}>Needs a person</span>}
+                        {c.ai_handed_off_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 text-amber-800 whitespace-nowrap flex-shrink-0" title={`AI handed off${c.ai_handoff_reason ? ` · ${HANDOFF_LABEL[c.ai_handoff_reason] ?? humanizeKey(c.ai_handoff_reason)}` : ''} · ${new Date(c.ai_handed_off_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}. A person takes it from here.`}>Handed off</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         <p className={cn('text-xs truncate flex-1', c.unread ? 'text-gray-800' : 'text-gray-500')}>{preview || '—'}</p>

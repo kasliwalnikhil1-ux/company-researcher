@@ -13,8 +13,8 @@ import RunDrawer from './RunDrawer';
 import { RUN_FILTER_DEFAULTS, exportRunsCsv, matchesText, toRpcFilters, useRunsPaged } from './runsData';
 
 /** Every AI reply run, filterable and exportable. `openRunId` (from the URL) shows the run drawer. */
-export default function ActivityPanel({ ws, openRunId, onOpenRun, onWhy }: {
-  ws: string; openRunId: string | null; onOpenRun: (id: string | null) => void; onWhy: (id: string) => void;
+export default function ActivityPanel({ ws, openRunId, onOpenRun }: {
+  ws: string; openRunId: string | null; onOpenRun: (id: string | null) => void;
 }) {
   const { filters: f, patch, reset, ready } = usePersistedFilters('ai-runs', ws, RUN_FILTER_DEFAULTS, { omit: ['q'] });
   const rpcFilters = useMemo(() => toRpcFilters(f), [f]);
@@ -56,7 +56,7 @@ export default function ActivityPanel({ ws, openRunId, onOpenRun, onWhy }: {
         </div>
       </div>
 
-      {openRunId && <RunDrawer key={openRunId} runId={openRunId} stageLabels={labels} onClose={closeDrawer} onWhy={onWhy} />}
+      {openRunId && <RunDrawer key={openRunId} runId={openRunId} stageLabels={labels} onClose={closeDrawer} />}
     </Card>
   );
 }

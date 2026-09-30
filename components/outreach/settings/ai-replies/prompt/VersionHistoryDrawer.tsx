@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import { usePromptVersions } from '@/lib/outreach/aiReplies';
-import type { DraftPrompt, PromptVersion } from '@/lib/outreach/aiReplies';
+import { usePromptVersionsV2 } from '@/lib/outreach/aiRepliesSequence';
+import type { DraftPromptV2 as DraftPrompt, PromptVersionV2 as PromptVersion } from '@/lib/outreach/aiRepliesSequence';
 import { Badge, Button, EmptyState, ErrorBox, Select, Spinner, fmtDate } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import { lineDiff, withContext } from './lineDiff';
@@ -38,7 +38,7 @@ export default function VersionHistoryDrawer({ open, onClose, masterPromptId, ed
   stageName: (id: string) => string | undefined;
   onRestore: (v: PromptVersion) => void;
 }) {
-  const versions = usePromptVersions(open ? masterPromptId : null);
+  const versions = usePromptVersionsV2(open ? masterPromptId : null);
   const list = useMemo(() => [...(versions.data ?? [])].sort((a, b) => b.version - a.version), [versions.data]);
   const [picked, setPicked] = useState<number | null>(null);
   const [against, setAgainst] = useState<string>('editor');
@@ -46,10 +46,10 @@ export default function VersionHistoryDrawer({ open, onClose, masterPromptId, ed
   const other = against === 'editor' ? null : list.find((v) => String(v.version) === against) ?? null;
 
   if (!open) return null;
-  const text = (p: DraftPrompt) => promptToText(normalize(p), stageName);
+  const text = (p: Parameters<typeof normalize>[0]) => promptToText(normalize(p), stageName);
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50" data-outreach-drawer>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <aside role="dialog" aria-modal="true" aria-label="Version history" className="absolute right-0 top-0 h-full w-full max-w-3xl bg-white shadow-2xl flex flex-col">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">

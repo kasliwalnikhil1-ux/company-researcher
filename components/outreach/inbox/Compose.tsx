@@ -5,13 +5,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Paperclip, Send, X, Lock, CalendarCheck, Smile } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError } from '@/lib/outreach/api';
-import { qk } from '@/lib/outreach/queries';
+import { qk, useMessages } from '@/lib/outreach/queries';
 import type { Chat, Message, Sender } from '@/lib/outreach/types';
 import { Button } from '@/components/outreach/ui';
 import { fmtBytes } from './hooks';
 import { isMailProvider, messageMaxLength } from '@/lib/outreach/channels';
 import { aiqk } from '@/lib/outreach/aiReplies';
-import AiComposerPanel, { AiDraftLabel } from './ai/AiComposerPanel';
+import AiComposerPanel, { AiComposerActions, AiDraftMeta, AssistWarnings, useDraftWithAi, type AssistUndo } from './ai/AiComposerPanel';
 import { useComposerAi } from './ai/useAiInbox';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -53,6 +53,17 @@ function FileChip({ file, onRemove }: { file: File; onRemove: () => void }) {
 
 function safeName(name: string) { return name.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 120) || 'file'; }
 
+/** The prospect's language from the latest classified received message ("hi", "fr"); null when unknown. */
+function prospectLanguageOf(list: Message[] | undefined): string | null {
+  for (let i = (list?.length ?? 0) - 1; i >= 0; i--) {
+    const m = list![i];
+    if (m.direction !== 'in') continue;
+    const lang = (m.classification as { language?: string } | null)?.language;
+    if (lang && /^[a-z]{2,3}$/i.test(lang)) return lang.toLowerCase();
+  }
+  return null;
+}
+
 function defaultSubject(chat: Chat): string {
   if (!chat.subject) return '';
   return /^re:/i.test(chat.subject.trim()) ? chat.subject : `Re: ${chat.subject}`;
@@ -72,6 +83,14 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   const [text, setText] = useState('');
   // AI replies: pre-fills the AI draft and remembers which run the text came from (sent as `ai_run_id`).
   const ai = useComposerAi(chat.id, text, setText);
+  // Draft with AI (draft_now) for this chat, plus the Improve / Translate undo state.
+  const draft = useDraftWithAi(ai, chat.id, onError);
+  const [undo, setUndo] = useState<AssistUndo | null>(null);
+  // the prospect's language (for the Translate menu): the latest received message's classification, from the thread already loaded
+  const messagesQ = useMessages(chat.id);
+  const prospectLanguage = prospectLanguageOf(messagesQ.data);
+  // AI replies are LinkedIn only: the AI buttons stay hidden on other channels
+  const aiChannel = chat.provider === 'LINKEDIN';
   const [subject, setSubject] = useState(() => defaultSubject(chat));
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -151,6 +170,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       await callFn('send-reply', payload);
       setText('');
       ai.dropTag();
+      setUndo(null);
       setFiles([]);
       onCancelReply?.();
       qc.invalidateQueries({ queryKey: key });
@@ -181,7 +201,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
 
   return (
     <div className="border-t border-gray-200 bg-white p-3 space-y-2">
-      <AiComposerPanel ai={ai} chat={chat} canCompose onError={onError} />
+      <AiComposerPanel ai={ai} chat={chat} canCompose onError={onError} onRegenerate={aiChannel ? () => { void draft.request({ regenerate: true }); } : undefined} regenerating={draft.busy} />
       {bookingLink && interested && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
           <CalendarCheck className="w-4 h-4 text-green-700 flex-shrink-0" />
@@ -203,11 +223,11 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           <button type="button" onClick={onCancelReply} className="p-0.5 text-gray-400 hover:text-gray-700" aria-label="Cancel reply"><X className="w-4 h-4" /></button>
         </div>
       )}
-      <AiDraftLabel ai={ai} chatId={chat.id} onError={onError} />
+      <AiDraftMeta ai={ai} draft={draft} chat={chat} text={text} onError={onError} canCompose={aiChannel} />
       <textarea
         ref={textRef}
         value={text}
-        onChange={(e) => { setText(e.target.value); if (!e.target.value.trim()) ai.dropTag(); }}
+        onChange={(e) => { setText(e.target.value); if (!e.target.value.trim()) { ai.dropTag(); setUndo(null); } }}
         onKeyDown={(e) => {
           // WhatsApp: Enter sends, Shift+Enter adds a line (like the app). Everywhere: Ctrl/Cmd+Enter sends; Escape drops the reply.
           if (e.key === 'Escape' && replyTo) { onCancelReply?.(); return; }
@@ -225,6 +245,12 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           {files.map((f, i) => <FileChip key={`${f.name}-${i}`} file={f} onRemove={() => setFiles(files.filter((_, j) => j !== i))} />)}
         </div>
       )}
+      {aiChannel && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <AiComposerActions ai={ai} draft={draft} chatId={chat.id} text={text} setText={setText} prospectLanguage={prospectLanguage} disabled={sending || sendingBooking} onError={onError} undo={undo} setUndo={setUndo} />
+        </div>
+      )}
+      {aiChannel && <AssistWarnings undo={undo} />}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => addFiles(e.target.files)} aria-label="Attach files" />

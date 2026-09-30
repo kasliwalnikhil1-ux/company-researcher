@@ -2,7 +2,6 @@
 
 // Sequence settings (plan items 1, 13, 14): reply scope, hold mode, out-of-office, enrichment and AI-review gates.
 // On a running sequence the values travel with the publish call (p_settings); before that they are part of Save.
-import Link from 'next/link';
 import { Info } from 'lucide-react';
 import { Input, Select, Textarea, Toggle } from '@/components/outreach/ui';
 import type { Client } from '@/lib/outreach/types';
@@ -29,7 +28,7 @@ function Radio({ name, checked, onSelect, title, help }: { name: string; checked
   );
 }
 
-export default function SequenceSettingsPanel({ draft, clients, onChange, disabled, live, sequenceId }: { draft: Draft; clients: Client[]; onChange: (patch: Partial<Draft>) => void; disabled: boolean; live: boolean; sequenceId?: string | null }) {
+export default function SequenceSettingsPanel({ draft, clients, onChange, disabled, live }: { draft: Draft; clients: Client[]; onChange: (patch: Partial<Draft>) => void; disabled: boolean; live: boolean }) {
   const s = (draft.settings ?? {}) as SequenceSettingsExt;
   const set = (patch: Partial<SequenceSettingsExt>) => onChange({ settings: { ...s, ...patch } as Draft['settings'] });
   const stop = s.stop_on_reply !== false;
@@ -46,16 +45,6 @@ export default function SequenceSettingsPanel({ draft, clients, onChange, disabl
       <Section title="AI brief">
         <Textarea label="Brief for AI (context for drafts and checks)" value={draft.brief} onChange={(e) => onChange({ brief: e.target.value })} rows={4} placeholder="Who we are, who we target, the offer, the tone." />
       </Section>
-
-      {sequenceId && (
-        <Section title="AI replies">
-          <p className="text-xs text-gray-500">Replies to this sequence follow the workspace master prompt and reply policy unless you override them for this sequence.</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-            <Link href={`/outreach/settings/ai-replies?tab=policies&scope=sequence&scope_id=${encodeURIComponent(sequenceId)}`} className="text-indigo-600 hover:underline">Set a reply policy for this sequence</Link>
-            <Link href={`/outreach/settings/ai-replies?tab=prompt&scope=sequence&scope_id=${encodeURIComponent(sequenceId)}`} className="text-indigo-600 hover:underline">Use a different master prompt</Link>
-          </div>
-        </Section>
-      )}
 
       <Section title="When a lead replies">
         <Toggle checked={stop} onChange={(v) => set({ stop_on_reply: v })} label="Stop the sequence for that lead" disabled={disabled} />

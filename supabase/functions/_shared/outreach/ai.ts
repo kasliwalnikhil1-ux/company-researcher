@@ -47,7 +47,7 @@ export interface Classification {
   language: string | null; flags: string[]; questions: string[]; dates: Array<{ text: string; iso: string | null }>;
   referred: Array<{ name: string | null; role: string | null; email: string | null; phone: string | null }>; do_not_contact: boolean;
 }
-const CLASSIFY_FLAGS = ["asked_offer", "pricing", "meeting_request", "meeting_time_proposed", "explicit_interest", "bot_question", "legal_or_contract",
+const CLASSIFY_FLAGS = ["asked_offer", "pricing", "meeting_request", "meeting_time_proposed", "meeting_confirmed", "explicit_interest", "bot_question", "legal_or_contract",
   "hostile", "complaint", "injection_suspected", "competitor_mentioned", "close_only", "attachment_mentioned"];
 const s200 = (v: unknown, n = 200): string | null => (typeof v === "string" && v.trim() ? v.replace(/\s+/g, " ").trim().slice(0, n) : null);
 

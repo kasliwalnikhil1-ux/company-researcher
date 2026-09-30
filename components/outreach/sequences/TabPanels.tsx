@@ -87,11 +87,11 @@ export function SendersTab({ sequenceId, draft, senders, readOnly, publishMode, 
   );
 }
 
-export function SettingsTab({ sequenceId, draft, clients, readOnly, publishMode, onChange }: { sequenceId?: string | null; draft: Draft; clients: Client[]; readOnly: boolean; publishMode: boolean; onChange: (patch: Partial<Draft>) => void }) {
+export function SettingsTab({ draft, clients, readOnly, publishMode, onChange }: { sequenceId?: string | null; draft: Draft; clients: Client[]; readOnly: boolean; publishMode: boolean; onChange: (patch: Partial<Draft>) => void }) {
   return (
-    <TabPage title="Settings" subtitle="What happens on replies and out-of-office, what to wait for before the first step, the client and the AI brief.">
+    <TabPage title="Settings" subtitle="What happens on replies and out-of-office, what to wait for before the first step, the client and the AI brief. AI replies have their own tab.">
       <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <SequenceSettingsPanel draft={draft} clients={clients} onChange={onChange} disabled={readOnly} live={publishMode} sequenceId={sequenceId} />
+        <SequenceSettingsPanel draft={draft} clients={clients} onChange={onChange} disabled={readOnly} live={publishMode} />
       </div>
     </TabPage>
   );

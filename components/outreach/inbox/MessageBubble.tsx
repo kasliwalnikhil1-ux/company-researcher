@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus, Info } from 'lucide-react';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus, Info, Languages } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';
 import type { ThreadAttributionRow } from '@/lib/outreach/intel';
+import { parseError } from '@/lib/outreach/api';
+import { useComposeAssist } from '@/lib/outreach/aiReplies';
 import { Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
 import { channelLabel, fixMojibake, isMailProvider } from '@/lib/outreach/channels';
 import AiOriginBadge, { hasOriginBadge, isAiOrigin } from './ai/AiOriginBadge';
+import { languageName } from './ai/useAiInbox';
 
 export function isVoiceNote(att: MessageAttachment): boolean {
   const mime = att.mimetype ?? att.type ?? '';
@@ -281,6 +284,25 @@ function QuoteBlock({ m, quotedLocal, contactName, dark, onJumpTo }: { m: Messag
   );
 }
 
+/**
+ * AI replies v2: the translation of a received message (compose_assist translate_in, cached on `messages.translation`).
+ * Shown under the bubble; "Show original" collapses it (the original text always stays in the bubble).
+ */
+function Translation({ m, local, dark }: { m: Message; local: { text: string; language: string | null } | null; dark: boolean }) {
+  const t = local ?? (m.translation?.text ? { text: m.translation.text, language: m.translation.lang } : null);
+  const [hidden, setHidden] = useState(false);
+  if (!t) return null;
+  return (
+    <div className={cn('mt-1.5 border-l-2 pl-2', dark ? 'border-white/40' : 'border-sky-300')}>
+      <div className={cn('flex items-center gap-2 text-[11px]', dark ? 'text-white/75' : 'text-gray-500')}>
+        <span className="inline-flex items-center gap-1"><Languages className="w-3 h-3" /> {hidden ? 'Translation hidden' : `Translated to ${languageName(t.language)}`}</span>
+        <button type="button" onClick={() => setHidden((h) => !h)} className="hover:underline">{hidden ? 'Show translation' : 'Show original'}</button>
+      </div>
+      {!hidden && <div className={cn('text-sm whitespace-pre-wrap break-words mt-0.5', dark ? 'text-white' : 'text-gray-800')}>{t.text}</div>}
+    </div>
+  );
+}
+
 function Ticks({ m, pending }: { m: Message; pending: boolean }) {
   if (pending) return <Clock className="w-3 h-3" aria-label="Sending" />;
   if (m.read_at) return <CheckCheck className="w-3.5 h-3.5 text-sky-500" aria-label={`Read ${fmtDate(m.read_at)}`} />;
@@ -310,6 +332,11 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   const [picker, setPicker] = useState(false);
   const [copied, setCopied] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  // AI replies v2: Translate a received message (cached on the message afterwards)
+  const translate = useComposeAssist();
+  const [translation, setTranslation] = useState<{ text: string; language: string | null } | null>(null);
+  const [translateError, setTranslateError] = useState<string | null>(null);
+  const translatable = canEdit && !mine && !deleted && !pending && !!(m.text || m.transcript) && !translation && !m.translation?.text;
   const isEmail = isMailProvider(provider);
   const safeHtml = useMemo(() => (isEmail && m.html && !m.text ? sanitizeHtml(m.html) : ''), [isEmail, m.html, m.text]);
   const atts = useMemo(() => (m.attachments ?? []) as MessageAttachment[], [m.attachments]);
@@ -358,12 +385,19 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   const copy = async () => {
     try { await navigator.clipboard.writeText(fixMojibake(m.text) ?? ''); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* clipboard blocked */ }
   };
+  const doTranslate = () => {
+    setTranslateError(null);
+    translate.mutate({ chatId: m.chat_id, kind: 'translate_in', messageId: m.id }, {
+      onSuccess: (r) => setTranslation({ text: r.text, language: r.language }),
+      onError: (e) => setTranslateError(parseError(e).message),
+    });
+  };
 
   const showAuthor = isGroup && !mine && (m.sender_name || m.sender_identifier);
   const hideDeletedText = deleted && provider !== 'LINKEDIN';
   const actionBtn = 'p-1 rounded-full text-gray-500 hover:text-gray-800 hover:bg-white shadow-sm bg-white/80 border border-gray-200';
   const originBadge = mine && !pending && hasOriginBadge(m.origin);
-  const hasActions = !editing && (reactable || replyable || forwardable || editable || deletable || (!!m.text && !deleted));
+  const hasActions = !editing && (reactable || replyable || forwardable || editable || deletable || translatable || (!!m.text && !deleted));
 
   const toolbar = hasActions ? (
     <div className={cn('relative flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity', picker && 'opacity-100')}>
@@ -381,6 +415,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
       {replyable && <button type="button" className={actionBtn} onClick={() => onReply!(m)} title="Reply" aria-label="Reply"><Reply className="w-3.5 h-3.5" /></button>}
       {forwardable && <button type="button" className={actionBtn} onClick={() => onForward!(m)} title="Forward" aria-label="Forward"><Forward className="w-3.5 h-3.5" /></button>}
       {!!m.text && !deleted && <button type="button" className={actionBtn} onClick={copy} title={copied ? 'Copied' : 'Copy text'} aria-label="Copy text">{copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}</button>}
+      {translatable && <button type="button" className={actionBtn} onClick={doTranslate} disabled={translate.isPending} title="Translate this message (1 AI action)" aria-label="Translate message">{translate.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Languages className="w-3.5 h-3.5" />}</button>}
       {editable && <button type="button" className={actionBtn} onClick={() => { setDraft(m.text ?? ''); setEditing(true); }} title={`Edit (${fmtRemaining(editRemaining)})`} aria-label="Edit message"><Pencil className="w-3.5 h-3.5" /></button>}
       {deletable && <button type="button" className={cn(actionBtn, 'hover:text-red-600')} onClick={() => setConfirmDelete(true)} title="Delete for everyone" aria-label="Delete message"><Trash2 className="w-3.5 h-3.5" /></button>}
     </div>
@@ -441,6 +476,8 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
               {otherAttachments.map((a, i) => <AttachmentChip key={a.id ?? `a${i}`} messageId={m.id} att={a} dark={dark} />)}
             </div>
           )}
+          {!mine && !deleted && <Translation m={m} local={translation} dark={dark} />}
+          {translateError && <div className="text-[11px] text-red-600 mt-1">{translateError}</div>}
           {wa && !editing && (
             // WhatsApp keeps the time (and our ticks) inside the bubble, bottom right
             <span className={cn('float-right ml-3 mt-1 -mb-0.5 inline-flex items-center gap-1 text-[11px] leading-4 select-none', onlySticker ? 'bg-black/40 text-white rounded px-1' : 'text-gray-500')} title={new Date(m.sent_at).toLocaleString()}>

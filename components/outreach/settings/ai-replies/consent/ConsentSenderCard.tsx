@@ -1,84 +1,64 @@
 'use client';
 
-import { Badge, Button, Card, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
-import type { ConsentRow, ConsentSender, PromptListRow } from '@/lib/outreach/aiReplies';
+import Link from 'next/link';
+import { Badge, Button, Card, fmtDate } from '@/components/outreach/ui';
+import type { ConsentSenderV2 } from '@/lib/outreach/aiRepliesSequence';
 import { isPast } from '../format';
 
 type Tone = 'green' | 'amber' | 'red' | 'gray';
 
-export function consentStatus(c: ConsentRow | undefined): { label: string; tone: Tone } {
-  if (!c) return { label: 'No consent', tone: 'gray' };
-  if (c.needs_reconsent) return { label: 'Needs re-consent', tone: 'amber' };
-  if (c.valid) return { label: 'Valid', tone: 'green' };
-  if (isPast(c.expires_at)) return { label: 'Expired', tone: 'red' };
-  return { label: 'Not valid', tone: 'red' };
+export function consentStatus(s: ConsentSenderV2): { label: string; tone: Tone } {
+  const c = s.consent;
+  if (c?.valid) return { label: 'Approved', tone: 'green' };
+  if (c && isPast(c.expires_at)) return { label: 'Expired', tone: 'red' };
+  if (c) return { label: 'Not valid', tone: 'red' };
+  if (s.pending_link) return { label: 'Approval requested', tone: 'amber' };
+  return { label: 'Not approved', tone: 'gray' };
 }
 
-/** One sender: consent per master prompt, pending links and the actions a manager can take. */
-export default function ConsentSenderCard({ sender, prompts, canEdit, granting, onRequest, onGrant, onRevoke }: {
-  sender: ConsentSender; prompts: PromptListRow[]; canEdit: boolean; granting: string | null;
-  onRequest: (promptId: string | null) => void; onGrant: (promptId: string) => void; onRevoke: (c: ConsentRow) => void;
+/** One sender: its single approval, the pending link, the sequences on Auto and what a manager can do. */
+export default function ConsentSenderCard({ sender, canEdit, busy, onRequest, onRevoke }: {
+  sender: ConsentSenderV2; canEdit: boolean; busy: boolean; onRequest: () => void; onRevoke: () => void;
 }) {
-  // Every saved master prompt gets a row, plus any consent for a prompt no longer in the list.
-  const rows: Array<{ promptId: string; label: string; version: number | null; consent?: ConsentRow }> = prompts.map((p) => ({
-    promptId: p.id, label: p.scope_label, version: p.version, consent: sender.consents.find((c) => c.master_prompt_id === p.id),
-  }));
-  for (const c of sender.consents) if (!rows.some((r) => r.promptId === c.master_prompt_id)) rows.push({ promptId: c.master_prompt_id, label: c.scope_label, version: null, consent: c });
-  const promptLabel = (id: string) => prompts.find((p) => p.id === id)?.scope_label ?? sender.consents.find((c) => c.master_prompt_id === id)?.scope_label ?? 'Master prompt';
-
+  const st = consentStatus(sender);
+  const needs = !sender.consent?.valid;
+  const c = sender.consent;
   return (
     <Card
-      title={<span className="flex flex-wrap items-center gap-2">{sender.sender_name}<Badge>{sender.provider}</Badge>{sender.owner_is_me && <Badge tone="indigo">Yours</Badge>}</span>}
-      actions={canEdit && <Button size="sm" variant="secondary" onClick={() => onRequest(null)} disabled={!prompts.length}>Request consent</Button>}>
-      <div className="text-xs text-gray-500 mb-3">Owner: {sender.owner_email ?? <span className="text-amber-700">no email on file — requests give you a link to pass on</span>}</div>
-      {rows.length === 0 ? (
-        <p className="text-sm text-gray-500">No master prompt saved yet.</p>
-      ) : (
-        <Table>
-          <thead><tr><Th>Master prompt</Th><Th>Status</Th><Th>Version agreed</Th><Th>Expires</Th><Th>Granted</Th><Th className="text-right"> </Th></tr></thead>
-          <tbody>
-            {rows.map((r) => {
-              const st = consentStatus(r.consent);
-              const needs = !r.consent || !r.consent.valid || r.consent.needs_reconsent;
-              return (
-                <tr key={r.promptId}>
-                  <Td><span className="font-medium text-gray-900">{r.label}</span>{r.version != null && <span className="text-xs text-gray-500 ml-1">v{r.version}</span>}</Td>
-                  <Td><Badge tone={st.tone}>{st.label}</Badge></Td>
-                  <Td>{r.consent ? `v${r.consent.master_prompt_version}` : '—'}</Td>
-                  <Td>{r.consent ? fmtDate(r.consent.expires_at, false) : '—'}</Td>
-                  <Td className="text-xs">
-                    {r.consent ? (
-                      <>
-                        <div>{r.consent.granted_via === 'owner_is_operator' ? 'By the owner, in the app' : 'Signed link'}</div>
-                        <div className="text-gray-500">{r.consent.granted_by_email} · {fmtDate(r.consent.granted_at, false)}</div>
-                      </>
-                    ) : '—'}
-                  </Td>
-                  <Td className="text-right whitespace-nowrap">
-                    {canEdit && needs && sender.owner_is_me && (
-                      <Button size="sm" onClick={() => onGrant(r.promptId)} loading={granting === `${sender.sender_id}:${r.promptId}`}>I own this account — grant now</Button>
-                    )}
-                    {canEdit && needs && !sender.owner_is_me && <Button size="sm" variant="secondary" onClick={() => onRequest(r.promptId)}>{r.consent ? 'Request again' : 'Request'}</Button>}
-                    {canEdit && r.consent && <Button size="sm" variant="ghost" className="ml-1 text-red-600 hover:bg-red-50" onClick={() => onRevoke(r.consent!)}>Revoke</Button>}
-                  </Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </Table>
-      )}
-      {sender.pending_links.length > 0 && (
-        <div className="mt-4">
-          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1.5">Waiting for the owner</div>
-          <ul className="space-y-1 text-sm text-gray-700">
-            {sender.pending_links.map((l) => (
-              <li key={l.id}>
-                {promptLabel(l.master_prompt_id)} — sent {l.email ? `to ${l.email} ` : ''}{fmtDate(l.created_at)}, expires {fmtDate(l.expires_at)}
-              </li>
-            ))}
-          </ul>
+      title={<span className="flex flex-wrap items-center gap-2">{sender.sender_name ?? 'Sender'}<Badge tone={st.tone}>{st.label}</Badge>{sender.owner_is_me && <Badge tone="indigo">Yours</Badge>}</span>}
+      actions={canEdit && (
+        <>
+          {needs && sender.owner_is_me && <Button size="sm" onClick={onRequest} loading={busy}>Approve for my account</Button>}
+          {needs && !sender.owner_is_me && <Button size="sm" variant="secondary" onClick={onRequest} loading={busy}>{sender.pending_link ? 'Send approval link again' : 'Send approval link'}</Button>}
+          {c && <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50" onClick={onRevoke}>Revoke</Button>}
+        </>
+      )}>
+      <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        <div><dt className="text-xs text-gray-500">Owner</dt><dd className="text-gray-800">{sender.owner_email ?? <span className="text-amber-700">No email on file. Requests give you a link to pass on.</span>}</dd></div>
+        <div>
+          <dt className="text-xs text-gray-500">Approval</dt>
+          <dd className="text-gray-800">
+            {c ? (
+              <>
+                {c.granted_via === 'owner_is_operator' ? 'By the owner, in the app' : 'Signed link'}{c.granted_by_email ? ` · ${c.granted_by_email}` : ''}
+                <div className="text-xs text-gray-500">Given {fmtDate(c.granted_at, false)} · expires {fmtDate(c.expires_at, false)}{c.scope?.daily_cap ? ` · up to ${c.scope.daily_cap} sends a day` : ''}</div>
+              </>
+            ) : sender.pending_link ? (
+              <>Link sent {sender.pending_link.email ? `to ${sender.pending_link.email} ` : ''}{fmtDate(sender.pending_link.created_at)}, expires {fmtDate(sender.pending_link.expires_at)}</>
+            ) : 'None yet'}
+          </dd>
         </div>
-      )}
+        <div>
+          <dt className="text-xs text-gray-500">Sequences on Auto</dt>
+          <dd className="text-gray-800">
+            {sender.sequences_on_auto.length === 0 ? 'None' : sender.sequences_on_auto.map((q, i) => (
+              <span key={q.id}>{i > 0 && ', '}<Link href={`/outreach/sequences/${q.id}?tab=ai`} className="text-indigo-700 hover:underline">{q.name}</Link></span>
+            ))}
+            {needs && sender.sequences_on_auto.length > 0 && <div className="text-xs text-amber-700">Replies in these sequences are drafts until the owner approves.</div>}
+          </dd>
+        </div>
+        <div><dt className="text-xs text-gray-500">Sent by Auto, last 7 days</dt><dd className="text-gray-800 tabular-nums">{sender.ai_sent_7d}</dd></div>
+      </dl>
     </Card>
   );
 }

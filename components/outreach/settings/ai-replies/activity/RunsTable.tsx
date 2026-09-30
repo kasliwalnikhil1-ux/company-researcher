@@ -1,7 +1,8 @@
 'use client';
 
 import { ArrowRight } from 'lucide-react';
-import { MODE_LABEL, STATUS_LABEL, type Decision, type RunListItem, type RunStatus } from '@/lib/outreach/aiReplies';
+import { STATUS_LABEL, type Decision, type RunStatus } from '@/lib/outreach/aiReplies';
+import { MODE_LABEL_V2, type RunListItemV2 as RunListItem } from '@/lib/outreach/aiRepliesSequence';
 import { Badge, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { fmtSeconds, inboundToDraft, inboundToSent, reasonLabel, runReasons, stageLabel } from '../format';
 
@@ -18,7 +19,7 @@ export default function RunsTable({ rows, stageLabels, onOpen }: { rows: RunList
     <Table>
       <thead>
         <tr>
-          <Th>When</Th><Th>Lead</Th><Th>Sender</Th><Th>Sequence</Th><Th>Stage</Th><Th>Status</Th><Th>Decision</Th><Th>Reasons</Th>
+          <Th>When</Th><Th>Lead</Th><Th>Sender</Th><Th>Sequence</Th><Th>Stage</Th><Th>Status</Th><Th>Decision</Th><Th>Scenario</Th><Th>Reasons</Th>
           <Th title="Their message → draft ready / → sent">Timing</Th>
         </tr>
       </thead>
@@ -45,9 +46,13 @@ export default function RunsTable({ rows, stageLabels, onOpen }: { rows: RunList
               </Td>
               <Td>
                 <Badge tone={STATUS_TONE[r.status] ?? 'gray'}>{STATUS_LABEL[r.status] ?? r.status}</Badge>
-                {r.mode && <div className="text-[11px] text-gray-500 mt-0.5">{MODE_LABEL[r.mode]}</div>}
+                <div className="text-[11px] text-gray-500 mt-0.5">{r.mode ? MODE_LABEL_V2[r.mode] : ''}{r.trigger === 'manual' ? (r.mode ? ' · ' : '') + 'Draft with AI' : ''}</div>
               </Td>
-              <Td className="text-xs">{r.decision ? DECISION_LABEL[r.decision] : '—'}</Td>
+              <Td className="text-xs">
+                {r.decision ? DECISION_LABEL[r.decision] : '—'}
+                {r.stop_after_send && <div className="text-[11px] text-amber-700" title={r.stop_rule ?? undefined}>Stops here</div>}
+              </Td>
+              <Td className="text-xs max-w-[10rem] truncate" title={r.scenario_title ?? undefined}>{r.scenario_title ?? <span className="text-gray-400">—</span>}</Td>
               <Td className="text-xs max-w-[16rem]">
                 {reasons.length ? <span className="line-clamp-2" title={reasons.map(reasonLabel).join('\n')}>{reasons.map(reasonLabel).join('; ')}</span> : <span className="text-gray-400">—</span>}
               </Td>

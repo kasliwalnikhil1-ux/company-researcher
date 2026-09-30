@@ -33,6 +33,8 @@ import QueuedNotice from './QueuedNotice';
 import FailedLeadsDrawer from './FailedLeadsDrawer';
 import { WhyNotSendingDialog } from './WhyNotSendingDialog';
 import AutoEnrolRules from './AutoEnrolRules';
+import AiRepliesTab from './ai/AiRepliesTab';
+import { useSequenceAiSummary } from '@/lib/outreach/aiRepliesSequence';
 
 const EMPTY: never[] = [];
 
@@ -67,6 +69,7 @@ export default function Builder({ id }: { id: string }) {
   const inflightQ = useInflightCount(id);
   const failedQ = useFailedCount(id);
   const everQ = useEverEnrolled(id);
+  const aiSummaryQ = useSequenceAiSummary(id);
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -494,6 +497,7 @@ export default function Builder({ id }: { id: string }) {
           sequence={sequence} draft={draft} dirty={dirty} saving={saving} version={sequence.head_version} readOnly={readOnly} canManage={canManage}
           publishMode={publishMode} modeKnown={modeKnown} canDiscard={dirty || !!autosave.savedAt} indicator={indicator}
           inflight={inflightQ.data} failedCount={failedQ.data} tab={tab} onTab={setTab}
+          tabBadges={(aiSummaryQ.data?.unanswered_open ?? 0) >= 3 ? { ai: aiSummaryQ.data!.unanswered_open } : undefined}
           onChange={patchDraft} onSave={save} onPublish={openPublish} onDiscard={() => setConfirm({ kind: 'discard' })} onStatus={onStatus}
           onWhy={() => setWhyOpen(true)} onFailed={() => setFailedView({ nodeId: null, kind: 'failed' })}
           onNavigate={navigate}
@@ -530,6 +534,7 @@ export default function Builder({ id }: { id: string }) {
             <VersionsPanel id={sequence.id} onRestored={() => { loadedKey.current = null; setTab('steps'); }} />
           </TabPage>
         )}
+        {tab === 'ai' && <AiRepliesTab sequenceId={sequence.id} />}
         {tab === 'auto' && (
           <TabPage title="Auto-enrol" subtitle="Rules that add new matching leads to this sequence on their own, every day." wide>
             {ws && <AutoEnrolRules sequenceId={sequence.id} workspaceId={ws} canManage={canManage && sequence.status !== 'archived'} sequenceActive={sequence.status === 'active'} />}

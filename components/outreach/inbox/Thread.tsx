@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat } from 'lucide-react';
+import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat, NotebookPen } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { channelLabel, chatTitle, isMailProvider } from '@/lib/outreach/channels';
@@ -19,7 +19,8 @@ import { qk } from '@/lib/outreach/queries';
 import ForwardDialog from './ForwardDialog';
 import AiModeChip from './ai/AiModeChip';
 
-export type ConvertKind = 'task' | 'tag' | 'stage' | 'reenrol';
+/** `notes` opens the lead panel on its AI lead-notes tab (AI replies v2). */
+export type ConvertKind = 'task' | 'tag' | 'stage' | 'reenrol' | 'notes';
 export type ChatDetail = Chat & { outreach_leads: Lead | null; outreach_senders: Sender | null };
 
 export interface ThreadProps {
@@ -208,6 +209,11 @@ export default function Thread(p: ThreadProps) {
           )}
           {chat.provider === 'WHATSAPP' && !isGroup && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
           <AiModeChip chatId={chat.id} onError={p.onError} onNotice={p.onNotice} />
+          {lead && (
+            <button type="button" onClick={() => p.onConvert('notes')} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50" title="Key facts the AI picked up from this person's messages (budget, timeline, objections…)">
+              <NotebookPen className="w-3.5 h-3.5 text-gray-400" /> Lead notes
+            </button>
+          )}
           <span className="flex-1" />
           <Menu disabled={!p.canWrite} button={() => (
             <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 disabled:cursor-default disabled:hover:bg-transparent" title={p.canWrite ? 'Override intent' : 'AI intent'} aria-label="Override intent" disabled={!p.canWrite}>

@@ -12,9 +12,9 @@ import { fmtClock, fmtInt, plural, type SequenceExt } from './publishTypes';
 export type StatusAction = 'activate' | 'pause' | 'resume' | 'archive' | 'draft';
 
 /** Sections of the builder shown as tabs, in the order of the tab row. */
-export type BuilderTab = 'steps' | 'senders' | 'leads' | 'auto' | 'settings' | 'versions';
-export const BUILDER_TABS: BuilderTab[] = ['steps', 'senders', 'leads', 'auto', 'settings', 'versions'];
-const TAB_LABEL: Record<BuilderTab, string> = { steps: 'Steps', senders: 'Senders', leads: 'Leads', auto: 'Auto-enrol', settings: 'Settings', versions: 'Versions' };
+export type BuilderTab = 'steps' | 'senders' | 'leads' | 'auto' | 'ai' | 'settings' | 'versions';
+export const BUILDER_TABS: BuilderTab[] = ['steps', 'senders', 'leads', 'auto', 'ai', 'settings', 'versions'];
+const TAB_LABEL: Record<BuilderTab, string> = { steps: 'Steps', senders: 'Senders', leads: 'Leads', auto: 'Auto-enrol', ai: 'AI replies', settings: 'Settings', versions: 'Versions' };
 
 export interface DraftIndicator {
   status: DraftSaveStatus;
@@ -45,6 +45,8 @@ interface Props {
   failedCount: number | undefined;
   tab: BuilderTab;
   onTab: (tab: BuilderTab) => void;
+  /** Small counts shown next to a tab label (e.g. open unanswered questions on AI replies). */
+  tabBadges?: Partial<Record<BuilderTab, number>>;
   onChange: (patch: Partial<Draft>) => void;
   onSave: () => Promise<boolean>;
   onPublish: () => void;
@@ -100,7 +102,7 @@ function DraftStatusText({ i, dirty, publishMode, readOnly }: { i: DraftIndicato
 const tabClass = (active: boolean) => cn('px-3.5 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors', active ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800');
 
 export default function TopBar(p: Props) {
-  const { sequence, draft, dirty, saving, version, readOnly, canManage, publishMode, modeKnown, canDiscard, indicator, inflight, failedCount, tab, onTab, onChange, onSave, onPublish, onDiscard, onStatus, onWhy, onFailed, onNavigate } = p;
+  const { sequence, draft, dirty, saving, version, readOnly, canManage, publishMode, modeKnown, canDiscard, indicator, inflight, failedCount, tab, onTab, tabBadges, onChange, onSave, onPublish, onDiscard, onStatus, onWhy, onFailed, onNavigate } = p;
   const status = sequence.status;
   const live = status === 'active' || status === 'paused';
   // Everyone who can edit enrols; readers still see the leads of a running sequence.
@@ -136,7 +138,10 @@ export default function TopBar(p: Props) {
       <div className="flex items-center gap-2 px-3">
         <div role="tablist" aria-label="Sequence section" className="flex gap-1 overflow-x-auto overflow-y-hidden min-w-0">
           {BUILDER_TABS.filter((t) => t !== 'leads' || showLeads).map((t) => (
-            <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => onTab(t)} className={tabClass(tab === t)}>{TAB_LABEL[t]}</button>
+            <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => onTab(t)} className={tabClass(tab === t)}>
+              {TAB_LABEL[t]}
+              {!!tabBadges?.[t] && <span className="ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] px-1 rounded-full bg-amber-100 text-amber-800 text-[11px] font-semibold tabular-nums align-middle">{tabBadges[t]}</span>}
+            </button>
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2 flex-shrink-0 pb-1">

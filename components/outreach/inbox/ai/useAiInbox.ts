@@ -1,10 +1,10 @@
 'use client';
 
 // AI replies in the inbox: helpers and hooks that sit on top of lib/outreach/aiReplies.ts (contract:
-// docs/outreach/AI-REPLIES-CONTRACT.md). Labels are customer copy: plain, short, never the connector vendor's name.
+// docs/outreach/AI-REPLIES-V2-CONTRACT.md §8). Labels are customer copy: plain, short, never the connector vendor's name.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiChatFilter } from '@/lib/outreach/queries';
-import { useChatAiState, useMasterPrompt, ESCALATION_LABEL, type ChatAiState, type RunSummary, type SideEffect, type StageDef } from '@/lib/outreach/aiReplies';
+import { useChatAiState, ESCALATION_LABEL, HANDOFF_LABEL, MODE_LABEL, type ChatAiState, type RunSummary, type SideEffect, type StageDef } from '@/lib/outreach/aiReplies';
 
 // ---------------------------------------------------------------------------
 // Chat list filters
@@ -15,11 +15,13 @@ export const AI_FILTER_LABEL: Record<AiChatFilter, string> = {
   scheduled: 'Scheduled by AI',
   escalated: 'Handed to a person',
   draft_ready: 'AI draft ready',
+  manual_drafts: 'My AI drafts',
+  handed_off: 'Handed off by AI',
   sent_by_ai: 'Sent by AI',
 };
 export const AI_FILTERS = Object.keys(AI_FILTER_LABEL) as AiChatFilter[];
 
-/** The contract's default stages (§5); `closing` is always allowed as a terminal stage. */
+/** The contract's default stages; `closing` is always allowed as a terminal stage. */
 export const DEFAULT_STAGES: StageDef[] = [
   { key: 'engage', label: 'Engage' }, { key: 'relate', label: 'Relate' }, { key: 'pitch', label: 'Pitch' }, { key: 'next_step', label: 'Next step' },
 ];
@@ -31,68 +33,110 @@ export function humanizeKey(key: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : key;
 }
 
-/** Stage filter options: the workspace master prompt's stages (defaults until one is saved), plus `closing`. */
-export function useStageOptions(ws: string | null | undefined): StageDef[] {
-  const mp = useMasterPrompt(ws);
+/**
+ * Stage filter options. v2 has no workspace prompt: the list shows the default stages plus `closing`; a filter value the
+ * list does not know is still offered (humanised) by ChatList. `extra` lets a caller merge the open chat's stages in.
+ */
+export function useStageOptions(_ws: string | null | undefined, extra?: StageDef[] | null): StageDef[] {
   return useMemo(() => {
-    const stages = mp.data?.settings?.stages?.length ? mp.data.settings.stages : DEFAULT_STAGES;
+    const stages = extra?.length ? extra : DEFAULT_STAGES;
     return stages.some((s) => s.key === CLOSING.key) ? stages : [...stages, CLOSING];
-  }, [mp.data]);
+  }, [extra]);
 }
 
 // ---------------------------------------------------------------------------
 // Text helpers
 // ---------------------------------------------------------------------------
-const SOURCE_TEXT: Record<ChatAiState['source'], string> = {
-  chat: 'set for this chat', sequence: 'from sequence', sender: 'from sender', client: 'from client', workspace: 'workspace setting', default: 'default',
-};
-
-/** Why the chat is in its mode: "from sequence Fintech CFOs", "sender consent missing", "set for this chat". */
+/** Why the chat is in its mode: "from sequence Fintech CFOs", "not part of a sequence", "sender consent missing". */
 export function modeWhy(s: ChatAiState): string | null {
-  if (s.reason_code && s.reason) return s.reason;
-  if (s.source === 'sequence' || s.source === 'sender' || s.source === 'client') return s.source_label ? `${SOURCE_TEXT[s.source]} ${s.source_label}` : SOURCE_TEXT[s.source];
-  if (s.mode === 'off' && s.source !== 'chat') return null;
-  return SOURCE_TEXT[s.source];
+  if (s.reason_code === 'handed_off') return s.handed_off ? `handed off · ${HANDOFF_LABEL[s.handed_off.reason] ?? humanizeKey(s.handed_off.reason)}` : 'handed off';
+  if (s.reason_code === 'no_sequence') return 'not part of a sequence';
+  if (s.reason_code === 'channel_not_supported') return 'LinkedIn only for now';
+  if (s.reason_code === 'consent_missing') return s.sequence_name ? `from sequence ${s.sequence_name} · sender consent missing` : 'sender consent missing';
+  if (s.reason_code === 'sequence_paused' || s.reason_code === 'sequence_archived' || s.reason_code === 'sequence_draft') {
+    const what = s.reason_code === 'sequence_paused' ? 'paused' : s.reason_code === 'sequence_archived' ? 'archived' : 'not live yet';
+    return s.sequence_name ? `sequence ${s.sequence_name} is ${what}` : `sequence is ${what}`;
+  }
+  if (s.reason_code === 'paused_escalated') return 'paused · handed to a person';
+  if (s.reason_code === 'paused_bot') return 'paused · they asked if this is a bot';
+  if (s.source === 'sequence' && s.sequence_name) return `from sequence ${s.sequence_name}`;
+  if (s.reason && s.reason_code) return s.reason;
+  return null;
 }
 
-/** AI replies are LinkedIn only in v1: other channels get no header chip at all. */
+/** "Draft · from sequence Fintech CFOs" */
+export function modeLine(s: ChatAiState): string {
+  const why = modeWhy(s);
+  return why ? `${MODE_LABEL[s.mode]} · ${why}` : MODE_LABEL[s.mode];
+}
+
+/** AI replies are LinkedIn only: other channels get no header chip at all. */
 export function aiHidden(s: ChatAiState | null | undefined): boolean {
   return !s || (s.mode === 'off' && s.reason_code === 'channel_not_supported');
 }
 
 export const PAUSE_WHY: Record<Exclude<ChatAiState['autopilot_state'], 'active'>, string> = {
-  paused_human: 'a teammate replied', paused_escalated: 'handed to a person', paused_bot: 'they asked if this is a bot',
+  paused_escalated: 'handed to a person', paused_bot: 'they asked if this is a bot',
 };
 
 export function isPaused(s: ChatAiState | null | undefined): s is ChatAiState & { autopilot_state: Exclude<ChatAiState['autopilot_state'], 'active'> } {
   return !!s && s.autopilot_state !== 'active';
 }
 
-/** "Paused — a teammate replied until Tue 14:05" */
+/** "Paused: they asked if this is a bot" */
 const PAUSE_REASON: Record<string, string> = {
-  teammate_replied: 'a teammate replied', sent_from_phone: 'the sender replied from their phone or LinkedIn',
   hostile_after_ai: 'they reacted badly to an AI reply', fast_replies: 'the other side answers like a bot', auto_responder: 'the other side looks like an auto-responder',
 };
 
 export function pausedText(s: ChatAiState & { autopilot_state: Exclude<ChatAiState['autopilot_state'], 'active'> }): string {
   const why = (s.paused_reason && (PAUSE_REASON[s.paused_reason] ?? humanizeKey(s.paused_reason))) || PAUSE_WHY[s.autopilot_state];
-  const until = s.paused_until ? ` until ${new Date(s.paused_until).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
-  return `Paused — ${why}${until}`;
+  return `Paused: ${why}`;
+}
+
+/** "AI handed off · calendar link sent · 2 Oct" */
+export function handoffLine(s: ChatAiState): string | null {
+  if (!s.handed_off) return null;
+  const when = new Date(s.handed_off.at);
+  const date = Number.isNaN(when.getTime()) ? '' : when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return ['AI handed off', HANDOFF_LABEL[s.handed_off.reason] ?? humanizeKey(s.handed_off.reason), date].filter(Boolean).join(' · ');
+}
+
+/** "Stage 2 · Relate", "Re-engage" (dormant session), null when the conversation has no stage yet. */
+export function stageShort(s: ChatAiState): string | null {
+  if (!s.stage) return null;
+  return s.stage.position > 0 ? `Stage ${s.stage.position} · ${s.stage.label}` : s.stage.label;
 }
 
 /** "Stage 2 · Relate · 2 exchanges" */
 export function stageLine(s: ChatAiState): string | null {
-  if (!s.stage) return null;
-  return `Stage ${s.stage.position} · ${s.stage.label} · ${s.exchanges} exchange${s.exchanges === 1 ? '' : 's'}`;
+  const st = stageShort(s);
+  if (!st) return null;
+  return `${st} · ${s.exchanges} exchange${s.exchanges === 1 ? '' : 's'}`;
+}
+
+/** "AI replies left 4/6" */
+export function repliesLeftText(s: ChatAiState): string {
+  const left = Math.max(0, (s.max_ai_replies ?? 0) - (s.ai_replies_count ?? 0));
+  return `AI replies left ${left}/${s.max_ai_replies ?? 0}`;
 }
 
 /** The stage a draft was written in: the chat's stage, plus where the draft moves it ("Stage 1 · Engage → Relate"). */
 export function runStageText(run: RunSummary, s: ChatAiState | null | undefined): string | null {
-  const cur = s?.stage ? `Stage ${s.stage.position} · ${s.stage.label}` : run.stage_before ? humanizeKey(run.stage_before) : null;
+  const cur = s?.stage ? stageShort(s) : run.stage_before ? humanizeKey(run.stage_before) : null;
   const curKey = s?.stage?.key ?? run.stage_before;
   const next = run.stage_after && run.stage_after !== curKey ? humanizeKey(run.stage_after) : null;
   if (cur && next) return `${cur} → ${next}`;
   return cur ?? next;
+}
+
+const LANGUAGE_NAME: Record<string, string> = {
+  en: 'English', hi: 'Hindi', es: 'Spanish', fr: 'French', de: 'German', pt: 'Portuguese', it: 'Italian', nl: 'Dutch', ar: 'Arabic', zh: 'Chinese', ja: 'Japanese', ko: 'Korean',
+  ru: 'Russian', tr: 'Turkish', id: 'Indonesian', sv: 'Swedish', da: 'Danish', no: 'Norwegian', fi: 'Finnish', pl: 'Polish', he: 'Hebrew', th: 'Thai', vi: 'Vietnamese', ta: 'Tamil', te: 'Telugu', mr: 'Marathi', bn: 'Bengali',
+};
+/** "fr" → "French"; an unknown code is shown upper-cased. */
+export function languageName(code: string | null | undefined): string {
+  const c = (code ?? '').toLowerCase();
+  return c ? (LANGUAGE_NAME[c] ?? c.toUpperCase()) : 'their language';
 }
 
 export function escalationText(reasons: string[] | null | undefined): string {
@@ -127,10 +171,12 @@ export interface DraftTag { runId: string; original: string }
 /**
  * Keeps the composer and the chat's AI run in step.
  * - A `draft_ready` run whose decision is `send` pre-fills an empty composer once per run id (never over typed text;
- *   the previous run's untouched draft counts as empty, so a newer draft replaces it).
+ *   the previous run's untouched draft counts as empty, so a newer draft replaces it). When the box holds typed text
+ *   AiComposerPanel offers the new automatic draft as an "AI draft ready · View" pill instead.
  * - `tag` remembers which run the composer text came from; `runIdForSend()` returns it only while that run can still be
  *   answered (draft ready, scheduled or escalated), so send-reply gets `ai_run_id` only for text that started as that draft.
  * - When the run ends elsewhere (sent, cancelled, superseded), an untouched draft is cleared from the composer so it is not sent twice.
+ * - `placeDraft(runId, text)` puts a Draft with AI result in the box, tagged with its run (Regenerate / Shorter / Instruction…).
  */
 export function useComposerAi(chatId: string, text: string, setText: (t: string) => void) {
   const q = useChatAiState(chatId);
@@ -159,7 +205,8 @@ export function useComposerAi(chatId: string, text: string, setText: (t: string)
     if (!prefill || seen.current === prefill.id) return;
     seen.current = prefill.id;
     const { text: cur, tag: t } = live.current;
-    if (cur.trim() && !(t && cur === t.original)) return;   // never overwrite what the user typed
+    // never overwrite what the user typed: AiComposerPanel offers the draft as an "AI draft ready · View" pill instead
+    if (cur.trim() && !(t && cur === t.original)) return;
     setText(prefill.text);
     setTag({ runId: prefill.id, original: prefill.text });
   }, [prefill?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -173,7 +220,7 @@ export function useComposerAi(chatId: string, text: string, setText: (t: string)
     setTag(null);
   }, [state, answerable]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Put a draft in the composer (Use draft / Edit / Send this draft). Asks before replacing typed text. */
+  /** Put a draft in the composer (Use draft / Edit / Send this draft / View). Asks before replacing typed text. */
   const takeDraft = useCallback((r: RunSummary) => {
     const draft = r.draft_text ?? '';
     const { text: cur, tag: t } = live.current;
@@ -182,6 +229,14 @@ export function useComposerAi(chatId: string, text: string, setText: (t: string)
     setText(draft);
     setTag({ runId: r.id, original: draft });
     return true;
+  }, [setText]);
+
+  /** Place a Draft with AI result (no confirmation: the caller already asked Replace / Insert below). */
+  const placeDraft = useCallback((runId: string, draft: string, mode: 'replace' | 'insert' = 'replace') => {
+    seen.current = runId;
+    const next = mode === 'insert' && live.current.text.trim() ? `${live.current.text.replace(/\s+$/, '')}\n\n${draft}` : draft;
+    setText(next);
+    setTag({ runId, original: next });
   }, [setText]);
 
   const dropTag = useCallback(() => setTag(null), []);
@@ -198,6 +253,6 @@ export function useComposerAi(chatId: string, text: string, setText: (t: string)
   }, [answerable]);
 
   const clearAiSent = useCallback(() => setAiSent(false), []);
-  return { query: q, state, run, last, tag, takeDraft, dropTag, discardDraft, runIdForSend, aiSent, clearAiSent };
+  return { query: q, state, run, last, tag, takeDraft, placeDraft, dropTag, discardDraft, runIdForSend, aiSent, clearAiSent };
 }
 export type ComposerAi = ReturnType<typeof useComposerAi>;

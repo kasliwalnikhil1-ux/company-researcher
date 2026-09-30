@@ -1,7 +1,8 @@
 'use client';
 
 import { ChevronDown, Search } from 'lucide-react';
-import { ESCALATION_LABEL, GATE_LABEL, MODE_LABEL, STATUS_LABEL, type RunStatus } from '@/lib/outreach/aiReplies';
+import { ESCALATION_LABEL, GATE_LABEL, STATUS_LABEL, type RunStatus } from '@/lib/outreach/aiReplies';
+import { MODE_LABEL_V2 } from '@/lib/outreach/aiRepliesSequence';
 import { SearchableSelect, Select } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import { SINCE_OPTIONS, statusList, type RunFilterState } from './runsData';
@@ -44,7 +45,10 @@ export default function ActivityFilters({ f, patch, reset, senders, sequences, s
         <option value="">Any decision</option><option value="send">Reply</option><option value="escalate">Hand to a person</option><option value="no_reply">No reply</option>
       </Select>
       <Select aria-label="Mode" value={f.mode} onChange={(e) => patch({ mode: e.target.value })} className={small}>
-        <option value="">Any mode</option>{(['draft', 'autopilot'] as const).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+        <option value="">Any mode</option>{(['draft', 'autopilot'] as const).map((m) => <option key={m} value={m}>{MODE_LABEL_V2[m]}</option>)}
+      </Select>
+      <Select aria-label="Trigger" value={f.trigger} onChange={(e) => patch({ trigger: e.target.value })} className={small}>
+        <option value="">Any trigger</option><option value="auto">Automatic</option><option value="manual">Draft with AI</option>
       </Select>
       <SearchableSelect aria-label="Sender" className="w-44" value={f.sender_id} onChange={(v) => patch({ sender_id: v })} emptyOption="Any sender"
         placeholder="Any sender" options={senders.map((s) => ({ value: s.id, label: s.label }))} />

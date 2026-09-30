@@ -177,8 +177,23 @@ export function useEnrollments(f: { sequence_id?: string; lead_id?: string; send
   });
 }
 
-/** AI replies (inbox filter): the chat's mirror of its AI run (`ai_run_status`) or whether the AI has ever sent in it. */
-export type AiChatFilter = 'scheduled' | 'escalated' | 'sent_by_ai' | 'draft_ready';
+/**
+ * AI replies (inbox filter): the chat's mirror of its AI run (`ai_run_status`), whether the AI has ever sent in it,
+ * v2 `handed_off` (`ai_handed_off_at` set: the "meetings to take over" list) and `manual_drafts` (a draft_ready run waiting for a person).
+ */
+export type AiChatFilter = 'scheduled' | 'escalated' | 'sent_by_ai' | 'draft_ready' | 'handed_off' | 'manual_drafts';
+
+/** Applies the AI filter to an outreach_chats query (shared by useChats and intel.useChatsByIds). */
+export function applyAiChatFilter<Q>(q: Q, ai: AiChatFilter | null | undefined): Q {
+  const b = q as any;   // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart
+  if (ai === 'scheduled') return b.eq('ai_run_status', 'scheduled');
+  if (ai === 'escalated') return b.or('ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)');
+  if (ai === 'draft_ready' || ai === 'manual_drafts') return b.eq('ai_run_status', 'draft_ready').eq('ai_run_decision', 'send');
+  if (ai === 'sent_by_ai') return b.gt('ai_replies_count', 0);
+  if (ai === 'handed_off') return b.not('ai_handed_off_at', 'is', null);
+  return q;
+}
 
 export interface ChatFilters { sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null }
 
@@ -193,11 +208,7 @@ export function useChats(ws: string | null | undefined, f: ChatFilters) {
       if (f.unread) q = q.eq('unread', true);
       if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
       if (f.provider) q = q.eq('provider', f.provider);
-      // Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart
-      if (f.ai === 'scheduled') q = q.eq('ai_run_status', 'scheduled');
-      else if (f.ai === 'escalated') q = q.or('ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)');
-      else if (f.ai === 'draft_ready') q = q.eq('ai_run_status', 'draft_ready').eq('ai_run_decision', 'send');
-      else if (f.ai === 'sent_by_ai') q = q.gt('ai_replies_count', 0);
+      q = applyAiChatFilter(q, f.ai);
       if (f.stage) q = q.eq('conversation_stage', f.stage);
       if (f.search) q = q.or(`attendee_name.ilike.%${f.search}%,subject.ilike.%${f.search}%,last_message_preview.ilike.%${f.search}%`);
       return sel<(Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null })[]>(q.order('last_message_at', { ascending: false, nullsFirst: false }).limit(300));
@@ -301,8 +312,9 @@ export function useInvalidatingMutation<TArgs, TRes = unknown>(fn: (a: TArgs) =>
 // events don't touch the dashboard at all (its 30s poll picks them up).
 // ---------------------------------------------------------------------------
 const REALTIME_FLUSH_MS = 1500;
-/** = aiqk.chatState in aiReplies.ts (not imported: that module imports this one). */
+/** = aiqk.chatState / aiqk.leadNotes in aiReplies.ts (not imported: that module imports this one). */
 const aiStateKey = (chatId: string) => ['outreach', 'chat', chatId, 'ai-state'] as const;
+const leadNotesKey = (leadId: string) => ['outreach', 'lead', leadId, 'ai-notes'] as const;
 const DASHBOARD_FLUSH_MS = 10_000;
 
 export function useOutreachRealtime(ws: string | null | undefined) {
@@ -345,6 +357,11 @@ export function useOutreachRealtime(ws: string | null | undefined) {
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_ai_reply_runs', filter: `workspace_id=eq.${ws}` }, (p: { new?: { chat_id?: string }; old?: { chat_id?: string } }) => {
       const chatId = p.new?.chat_id ?? p.old?.chat_id;
       if (chatId) { inv(aiStateKey(chatId)); inv(qk.chat(chatId)); }
+    });
+    // AI replies v2: lead notes written by the extraction worker (or a teammate) refresh the inbox side panel.
+    ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_lead_ai_notes', filter: `workspace_id=eq.${ws}` }, (p: { new?: { lead_id?: string }; old?: { lead_id?: string } }) => {
+      const leadId = p.new?.lead_id ?? p.old?.lead_id;
+      if (leadId) inv(leadNotesKey(leadId));
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_senders', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       inv(qk.senders(ws));

@@ -5,7 +5,7 @@ export type Mode = "off" | "draft" | "autopilot";
 export type Decision = "send" | "escalate" | "no_reply";
 export const MOVES = ["answer", "ask", "relate", "insight", "pitch", "cta", "schedule", "close", "acknowledge"] as const;
 export type Move = typeof MOVES[number];
-export const FLAGS = ["asked_offer", "pricing", "meeting_request", "meeting_time_proposed", "explicit_interest", "bot_question", "legal_or_contract",
+export const FLAGS = ["asked_offer", "pricing", "meeting_request", "meeting_time_proposed", "meeting_confirmed", "explicit_interest", "bot_question", "legal_or_contract",
   "hostile", "complaint", "injection_suspected", "competitor_mentioned", "close_only", "attachment_mentioned"] as const;
 export const SKIP_FLAGS = ["asked_offer", "pricing", "meeting_request", "meeting_time_proposed", "explicit_interest"];
 
@@ -38,6 +38,13 @@ export interface DraftOutput {
   confidence: number;
   escalation_reason: string | null;
   language: string | null;
+  /** v2: a "Stop when" rule is met by this reply or by what they said (T4) */
+  stop_after_send: boolean;
+  stop_rule: string | null;
+  /** v2: the scenario card that drove the reply (null when a stage rule did) */
+  scenario_id: string | null;
+  /** v2: what they asked that the prompt / knowledge could not answer */
+  unanswered_question: string | null;
 }
 
 export const CLOSING = "closing";
@@ -45,8 +52,9 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 
 // ---------------------------------------------------------------------------------------------------- model output
 /** Coerce the drafter's JSON into a safe shape. Anything unknown is dropped, never trusted. */
-export function parseDraft(j: Record<string, unknown>, settings: PromptSettings, todayIso: string): DraftOutput {
+export function parseDraft(j: Record<string, unknown>, settings: PromptSettings, todayIso: string, scenarioIds: string[] = []): DraftOutput {
   const keys = new Set([...settings.stages.map((s) => s.key), CLOSING]);
+  const scen = typeof j.scenario_id === "string" && scenarioIds.includes(j.scenario_id) ? j.scenario_id : null;
   const dec = String(j.decision ?? "").toLowerCase();
   const decision: Decision = dec === "send" || dec === "escalate" || dec === "no_reply" ? dec : "escalate";
   const text = typeof j.text === "string" && j.text.trim() ? j.text.replace(/\r\n/g, "\n").trim() : null;
@@ -73,6 +81,8 @@ export function parseDraft(j: Record<string, unknown>, settings: PromptSettings,
     rule_applied: str(j.rule_applied, 120), side_effects: effects, facts_used: facts,
     confidence: clamp(Number(j.confidence) || 0, 0, 1), escalation_reason: str(j.escalation_reason, 200),
     language: typeof j.language === "string" && /^[a-z]{2,3}$/i.test(j.language) ? j.language.toLowerCase() : null,
+    stop_after_send: j.stop_after_send === true, stop_rule: j.stop_after_send === true ? (str(j.stop_rule, 200) ?? "stop rule") : null,
+    scenario_id: scen, unanswered_question: str(j.unanswered_question, 300),
   };
 }
 function str(v: unknown, max: number): string | null {
@@ -130,6 +140,16 @@ export function dateKey(s: string): string {
 }
 function monthIndex(m: string): number { return ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(m.slice(0, 3)) + 1; }
 export const extractDates = (t: string) => [...new Set((t.match(DATE_RE) ?? []).map(dateKey))];
+
+/** T3: the text links to a scheduling page (hosts from outreach_scheduling_domains; a subdomain counts, a path prefix must match). */
+export function hasSchedulingLink(text: string, domains: Array<{ host: string; path_prefix: string | null }>): boolean {
+  for (const u of extractUrls(text)) {
+    const n = normUrl(u);
+    if (!n) continue;
+    if (domains.some((d) => (n.host === d.host || n.host.endsWith(`.${d.host}`)) && (!d.path_prefix || n.path.startsWith(d.path_prefix.toLowerCase())))) return true;
+  }
+  return false;
+}
 
 /** Everything a person would call "a fact that can be wrong": used by the validator and by the facts-changed check. */
 export function factsOf(t: string): { urls: string[]; emails: string[]; phones: string[]; money: string[]; percents: string[]; dates: string[] } {

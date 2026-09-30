@@ -1,5 +1,6 @@
 // Inbound Unipile event processing (F2 handlers).
 import { admin, log, rpc, emitEvent, audit, randInt } from "./supabase.ts";
+import { notifyReturned } from "./ai_reply.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending, hostedBrowserOptions } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
 import { healthForSender } from "./health.ts";
@@ -793,8 +794,14 @@ export async function handleMessaging(payload: any): Promise<void> {
   // AI replies (§5, §10.4): an inbound message opens / extends the chat's AI run; an outbound message no send of ours
   // recorded first was typed on the sender's phone or LinkedIn web → human takeover. Never blocks inbound processing.
   if (!isEvent) {
-    const call = () => isOut ? rpc("ai_reply_on_outbound_external", { p_message: msg!.id }) : rpc("ai_reply_enqueue", { p_chat: chat!.id, p_message: msg!.id });
-    try { await call(); }
+    const call = () => isOut ? rpc<Record<string, unknown>>("ai_reply_on_outbound_external", { p_message: msg!.id }) : rpc<Record<string, unknown>>("ai_reply_enqueue", { p_chat: chat!.id, p_message: msg!.id });
+    try {
+      const r = await call();
+      // v2 §6: a handed-off prospect came back after a gap — its owner is told (the task was reopened in SQL)
+      if (!isOut && r && typeof r === "object" && (r as any).returned === true) {
+        notifyReturned(chat!.id, (r as any).gap_days != null ? Number((r as any).gap_days) : null).catch((e) => log({ fn: "messaging", warn: `notifyReturned: ${String((e as any)?.message ?? e)}` }));
+      }
+    }
     catch (e) {
       // one retry for a transient lock conflict; the message itself is already stored either way
       if (/deadlock|could not serialize|lock/i.test(String((e as any)?.message ?? e))) {

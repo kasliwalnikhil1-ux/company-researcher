@@ -2,13 +2,14 @@
 
 import { useState } from 'react';
 import { CheckCircle2, Play, Trash2, XCircle } from 'lucide-react';
-import { runRegression, useDeleteScenario, useScenarios } from '@/lib/outreach/aiReplies';
 import type { RegressionResult, Scenario } from '@/lib/outreach/aiReplies';
+import { runRegressionV2, useDeleteTestConversation, useTestConversations } from '@/lib/outreach/aiRepliesSequence';
+import type { RegressionInput } from '@/lib/outreach/aiRepliesSequence';
 import { Badge, Button, ErrorBox, Spinner, timeAgo } from '@/components/outreach/ui';
 import { ConfirmModal } from '@/components/outreach/settings/shared';
 import { DECISION_LABEL, aiErrorText } from './simModel';
 
-type RunInput = Omit<Parameters<typeof runRegression>[0], 'workspace_id'>;
+type RunInput = RegressionInput;
 type ScenarioResult = RegressionResult['results'][number];
 
 function Changes({ res, stageLabel }: { res: ScenarioResult; stageLabel: (k: string | null | undefined) => string }) {
@@ -45,18 +46,18 @@ function lastResult(s: Scenario): ScenarioResult | undefined {
   return Array.isArray(r.turns) ? (r as unknown as ScenarioResult) : undefined;
 }
 
-/** Saved conversations (the regression set) for the prompt being tested. */
+/** Saved test conversations (the regression set) of the prompt being tested. */
 export default function ScenarioList({ ws, canEdit, masterPromptId, runInput, stageLabel, onOpen }: {
   ws: string;
   canEdit: boolean;
-  /** null = scenarios of the workspace prompt. */
+  /** The prompt the conversations belong to (null = not tied to a prompt). */
   masterPromptId: string | null;
   runInput: RunInput;
   stageLabel: (k: string | null | undefined) => string;
   onOpen: (s: Scenario) => void;
 }) {
-  const scenarios = useScenarios(ws, masterPromptId);
-  const del = useDeleteScenario(ws);
+  const scenarios = useTestConversations(ws, masterPromptId);
+  const del = useDeleteTestConversation(ws);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<RegressionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +66,7 @@ export default function ScenarioList({ ws, canEdit, masterPromptId, runInput, st
   async function runAll() {
     setRunning(true); setError(null);
     try {
-      setResult(await runRegression({ workspace_id: ws, ...runInput }));
+      setResult(await runRegressionV2({ workspace_id: ws, ...runInput }));
       scenarios.refetch();
     } catch (e) { setError(aiErrorText(e).message); } finally { setRunning(false); }
   }
@@ -77,15 +78,15 @@ export default function ScenarioList({ ws, canEdit, masterPromptId, runInput, st
     <section aria-labelledby="ai-sim-scenarios" className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex-1 min-w-0">
-          <h4 id="ai-sim-scenarios" className="text-sm font-semibold text-gray-900">Saved conversations</h4>
-          <p className="text-xs text-gray-500">Every save of the master prompt re-runs these and shows which replies changed.</p>
+          <h4 id="ai-sim-scenarios" className="text-sm font-semibold text-gray-900">Saved test conversations</h4>
+          <p className="text-xs text-gray-500">Run them after a prompt change to see which replies now decide differently.</p>
         </div>
         {result && <span className="text-sm text-gray-700">{result.passed}/{result.total} pass</span>}
         {canEdit && <Button size="sm" variant="secondary" onClick={runAll} loading={running} disabled={!list.length}><Play className="w-3.5 h-3.5" />Run all</Button>}
       </div>
       {error && <ErrorBox message={error} />}
       {scenarios.isLoading ? <Spinner className="py-6" /> : scenarios.isError ? <ErrorBox message={aiErrorText(scenarios.error).message} /> : !list.length ? (
-        <p className="text-sm text-gray-500 rounded-lg border border-dashed border-gray-300 px-3 py-4 text-center">No saved conversations yet. Play one above and save it.</p>
+        <p className="text-sm text-gray-500 rounded-lg border border-dashed border-gray-300 px-3 py-4 text-center">No saved test conversations yet. Play one above and save it.</p>
       ) : (
         <ul className="space-y-2">
           {list.map((s) => {

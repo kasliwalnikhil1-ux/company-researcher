@@ -19,6 +19,7 @@ import LeadPanel from './LeadPanel';
 import { isTypingTarget, useDebounced, useMediaQuery } from './hooks';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { useStageOptions } from './ai/useAiInbox';
+import { useChatAiState } from '@/lib/outreach/aiReplies';
 
 
 /** `?chats=<ids>&label=<text>`: the reports page opens the inbox on exactly these threads. */
@@ -70,10 +71,12 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     if (sequenceId && sequencesQ.data && !sequencesQ.data.some((s) => s.id === sequenceId)) patchFilters({ sequence_id: null });
   }, [sequenceId, sequencesQ.data, patchFilters]);
   const clientsQ = useClients(ws);
-  const stageOptions = useStageOptions(ws);
   const membersQ = useMembers(ws);
   const chatQ = useChat(chatId);
   const messagesQ = useMessages(chatId);
+  // AI replies v2: stages are per sequence prompt; the Stage filter lists the open chat's stages (defaults otherwise)
+  const chatAiQ = useChatAiState(chatId);
+  const stageOptions = useStageOptions(ws, chatAiQ.data?.stages);
 
   const rows = useMemo(() => {
     if (waitingForSeq) return undefined;
