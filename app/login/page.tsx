@@ -249,7 +249,7 @@ export default function Login() {
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-darkgreen-light text-accent-darkgreen-dark">
                     <Check className="h-3 w-3" strokeWidth={2.5} />
                   </span>
-                  Instant access
+                  Custom onboarding
                 </li>
               </ul>
             </>

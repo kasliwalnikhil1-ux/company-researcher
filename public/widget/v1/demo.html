@@ -49,7 +49,7 @@
     g.dataset.api = q.get('api') || '';
     s.parentNode.insertBefore(g, s);
   })(document, 'script');
-  ['ready', 'opened', 'closed', 'message', 'message:sent', 'conversation:started', 'conversation:resolved', 'unread', 'csat:submitted', 'error', 'identified', 'handoff', 'route', 'postback'].forEach(function (ev) {
+  ['ready', 'opened', 'closed', 'message', 'message:sent', 'conversation:started', 'conversation:resolved', 'unread', 'csat:submitted', 'error', 'identified', 'handoff', 'route', 'postback', 'video:opened', 'video:closed', 'video:question', 'video:dismissed'].forEach(function (ev) {
     window.addEventListener('growthxai:' + ev, function (e) { var l = document.getElementById('log'); l.textContent += new Date().toLocaleTimeString() + '  ' + ev + '  ' + JSON.stringify(e.detail) + '\n'; l.scrollTop = l.scrollHeight; });
   });
 </script>

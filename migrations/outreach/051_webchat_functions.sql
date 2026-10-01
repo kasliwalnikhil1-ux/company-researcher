@@ -12,6 +12,7 @@
 -- ===============================================================================================================
 -- Defaults, merge, helpers
 -- ===============================================================================================================
+-- Redefined in 053 (placeholder "Ask a question…", messages.privacy_url, launcher.video): change the defaults there.
 create or replace function outreach_webchat_default_settings() returns jsonb
 language sql immutable set search_path = public, extensions as $$
   select $j${
@@ -1044,6 +1045,7 @@ end $$;
 
 -- Patch: {name, allowed_domains, client_id, is_active, ai_enabled, reply_mailbox_id, enforce_identity, business_hours, settings:{section:{...}}}
 -- settings are merged per section (nested), versioned in settings_history, config_version bumped.
+-- Redefined in 053 (adds outreach_webchat__settings_check): change it there.
 create or replace function outreach_webchat_inbox_update(p_id uuid, p_patch jsonb) returns jsonb
 language plpgsql security definer set search_path = public, extensions as $$
 declare i outreach_webchat_inboxes%rowtype; ns jsonb; d text; doms text[]; mb uuid; accent text;

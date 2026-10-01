@@ -17,12 +17,18 @@ export type AiMode = 'off' | 'first' | 'offline_only';
 export interface LauncherSettings { type: 'icon' | 'button'; size: 'sm' | 'md' | 'lg'; position: 'left' | 'right'; margin_bottom: number; margin_side: number; text: string }
 export interface PreChatField { key: string; label: string; type: 'text' | 'email' | 'phone' | 'number' | 'list' | 'checkbox' | 'date' | 'url' | 'textarea'; visible: boolean; required: boolean; placeholder?: string; options?: string[]; pattern?: string }
 export interface UrlRule { op: 'contains' | 'equals' | 'starts_with' | 'regex'; value: string; action: 'show' | 'hide' }
+/** launcher.video (migration 053): a GIF / video bubble instead of the launcher icon; a click expands it with suggested questions. */
+export interface VideoBubbleSettings {
+  enabled: boolean; url: string | null; kind: 'video' | 'image'; shape: 'circle' | 'rounded' | 'square'; size: number; ratio: string; fit: 'cover' | 'contain';
+  focus_x: number; focus_y: number; zoom: number; border_color: string; border_width: number; expanded_width: number; expanded_ratio: string; sound: boolean;
+  questions: string[]; questions_position: 'over' | 'below'; cta_text: string; question_bg: string; question_color: string; cta_bg: string | null; cta_color: string;
+}
 
 export interface WebchatSettings {
   appearance: { brand_name: string; logo_url: string | null; bot_avatar_url: string | null; welcome_title: string; welcome_tagline: string; accent: string; widget_bg: string; chat_bg: string; font: string; theme: 'light' | 'dark' | 'auto'; mode: WebchatMode; z_index: number; custom_css: string; drawer_side: 'left' | 'right'; panel_width: number; mobile: Record<string, unknown> };
-  launcher: { desktop: LauncherSettings; mobile: LauncherSettings; show_unread_count: boolean; show_unread_previews: boolean; hide: boolean; online_dot: boolean };
+  launcher: { desktop: LauncherSettings; mobile: LauncherSettings; show_unread_count: boolean; show_unread_previews: boolean; hide: boolean; online_dot: boolean; video?: VideoBubbleSettings };
   popup: { enabled: boolean; text: string; image_url: string | null; delay_s: number; position: 'above' | 'left' };
-  messages: { greeting_enabled: boolean; greeting: string; reply_time: 'minutes' | 'hours' | 'day' | 'none'; available_message: string; unavailable_message: string; email_capture_prompt: string; end_message: string; placeholder: string; quick_replies: string[]; handoff_message: string; handoff_offline_message: string };
+  messages: { greeting_enabled: boolean; greeting: string; reply_time: 'minutes' | 'hours' | 'day' | 'none'; available_message: string; unavailable_message: string; email_capture_prompt: string; end_message: string; placeholder: string; privacy_url?: string | null; quick_replies: string[]; handoff_message: string; handoff_offline_message: string };
   pre_chat: { enabled: boolean; message: string; when: 'before_first' | 'offline_only'; fields: PreChatField[]; consent: { enabled: boolean; label: string; link: string | null; text_version: string } };
   features: { file_picker: boolean; emoji_picker: boolean; restart: boolean; end_conversation: boolean; allow_after_resolved: boolean; single_conversation: boolean; sounds: boolean; read_receipts: boolean; show_agent_names: boolean; transcript: boolean; email_capture: boolean; powered_by: boolean; show_offline_status: boolean; hide_outside_hours: boolean; markdown: boolean };
   csat: { enabled: boolean; scale: 'emoji' | 'thumbs'; ask_comment: boolean; by_email: boolean };
@@ -251,6 +257,56 @@ export const INSTALL_GUIDES: Array<{ key: string; label: string; body: (token: s
   { key: 'react', label: 'React SPA', body: (t) => `useEffect(() => {\n  const g = document.createElement('script');\n  g.src = '${loaderUrl()}'; g.async = true;\n  g.dataset.websiteToken = '${t}'; g.dataset.api = '${WEBCHAT_API}';\n  document.body.appendChild(g);\n  return () => { window.growthxai?.destroy?.(); g.remove(); };\n}, []);\n\n// Route changes are picked up automatically (history.pushState hooks).` },
 ];
 
+// ---------------------------------------------------------------------------
+// Launcher clip (launcher.video, migration 053)
+// ---------------------------------------------------------------------------
+export const VIDEO_BUBBLE_DEFAULTS: VideoBubbleSettings = {
+  enabled: true, url: null, kind: 'video', shape: 'circle', size: 120, ratio: '1:1', fit: 'cover', focus_x: 50, focus_y: 50, zoom: 100, border_color: '#ffffff', border_width: 3,
+  expanded_width: 420, expanded_ratio: 'auto', sound: true, questions: [], questions_position: 'over', cta_text: 'Chat with us', question_bg: '#111827', question_color: '#ffffff', cta_bg: null, cta_color: '#ffffff',
+};
+export const WEBCHAT_MEDIA_BUCKET = 'outreach-webchat-media';
+export const WEBCHAT_MEDIA_MAX_MB = 20;
+/** What the bucket accepts, by extension (browsers report '' for some of these). */
+const MEDIA_TYPES: Record<string, { mime: string; kind: 'video' | 'image' }> = {
+  mp4: { mime: 'video/mp4', kind: 'video' }, m4v: { mime: 'video/mp4', kind: 'video' }, webm: { mime: 'video/webm', kind: 'video' }, gif: { mime: 'image/gif', kind: 'image' }, webp: { mime: 'image/webp', kind: 'image' },
+};
+export const WEBCHAT_MEDIA_ACCEPT = 'video/mp4,video/webm,image/gif,image/webp,.mp4,.m4v,.webm,.gif,.webp';
+export function mediaKind(nameOrUrl: string): 'video' | 'image' { return /\.(gif|webp|a?png|jpe?g)(\?|#|$)/i.test(nameOrUrl) ? 'image' : 'video'; }
+/** The address a clip plays from: `preset:<file>` is a built-in clip that ships next to the widget files. */
+export function mediaUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = /^preset:([\w.-]+)$/i.exec(url);
+  return m ? `${widgetOrigin()}/widget/v1/presets/${m[1]}` : /^https:\/\//i.test(url) ? url : null;
+}
+export interface WebchatPreset { file: string; label: string; kind: 'video' | 'image' }
+/** Built-in clips: public/widget/v1/presets/presets.json, written by scripts/outreach-webchat-presets.mjs. */
+export function useWebchatPresets() {
+  return useQuery({ queryKey: ['outreach', 'webchat', 'presets'], staleTime: 10 * 60_000, queryFn: async () => {
+    try { const r = await fetch('/widget/v1/presets/presets.json', { cache: 'no-cache' }); if (!r.ok) return []; const j = await r.json(); return (Array.isArray(j) ? j : []).filter((x) => x && typeof x.file === 'string' && /^[\w.-]+$/.test(x.file)) as WebchatPreset[]; } catch { return []; }
+  } });
+}
+/**
+ * Upload a launcher clip to the public media bucket under `<ws>/<inbox>/<ts>-<name>` and return its public address.
+ * Older uploads of the inbox are removed, except `keep` (the clip the published settings still point at).
+ */
+export async function uploadWebchatMedia(ws: string, inboxId: string, file: File, keep?: string | null): Promise<{ url: string; kind: 'video' | 'image' }> {
+  const ext = (file.name.split('.').pop() ?? '').toLowerCase(), t = MEDIA_TYPES[ext];
+  if (!t) throw new Error('Use an MP4 or WebM video, or a GIF / WebP image.');
+  if (file.size > WEBCHAT_MEDIA_MAX_MB * 1048576) throw new Error(`That file is ${(file.size / 1048576).toFixed(1)} MB. The limit is ${WEBCHAT_MEDIA_MAX_MB} MB.`);
+  const { supabase } = await import('@/utils/supabase/client');
+  const bucket = supabase.storage.from(WEBCHAT_MEDIA_BUCKET), dir = `${ws}/${inboxId}`;
+  const name = `${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_').slice(-80)}`;
+  const { error } = await bucket.upload(`${dir}/${name}`, file, { contentType: t.mime, cacheControl: '31536000', upsert: false });
+  if (error) throw new Error(`Could not upload ${file.name}: ${error.message}`);
+  const url = bucket.getPublicUrl(`${dir}/${name}`).data.publicUrl;
+  try {
+    const { data } = await bucket.list(dir, { limit: 100 });
+    const stale = (data ?? []).map((o) => `${dir}/${o.name}`).filter((path) => !path.endsWith(`/${name}`) && !(keep && keep.endsWith(`/${path}`)));
+    if (stale.length) await bucket.remove(stale);
+  } catch { /* tidy-up only */ }
+  return { url, kind: t.kind };
+}
+
 export const HMAC_SAMPLES: Array<{ label: string; code: (secret: string) => string }> = [
   { label: 'Node.js', code: (s) => `const crypto = require('crypto');\nconst hash = crypto.createHmac('sha256', '${s}').update(String(userId)).digest('hex');\n// in the page:\nwindow.growthxai.setUser(String(userId), { email, name, identifier_hash: hash });` },
   { label: 'Python', code: (s) => `import hmac, hashlib\nhash = hmac.new(b'${s}', str(user_id).encode(), hashlib.sha256).hexdigest()` },
@@ -259,10 +315,11 @@ export const HMAC_SAMPLES: Array<{ label: string; code: (secret: string) => stri
   { label: 'Go', code: (s) => `mac := hmac.New(sha256.New, []byte("${s}"))\nmac.Write([]byte(userID))\nhash := hex.EncodeToString(mac.Sum(nil))` },
 ];
 
-export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false) => [
+export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false, video = false) => [
   `script-src ${appOrigin}${turnstile ? ' https://challenges.cloudflare.com' : ''}`,
   `connect-src ${apiHost} ${apiHost.replace(/^http/, 'ws')}`,
-  `img-src ${apiHost} data:`,
+  `img-src ${apiHost}${video ? ` ${appOrigin}` : ''} data:`,
+  ...(video ? [`media-src ${apiHost} ${appOrigin}  (the launcher clip; add your own host if the clip is on it)`] : []),
   turnstile ? `frame-src https://challenges.cloudflare.com  (Turnstile runs its check in an iframe)` : `frame-src: none needed (the widget uses Shadow DOM, not an iframe)`,
   `style-src: no change needed (styles are constructed stylesheets inside the Shadow root)`,
 ];

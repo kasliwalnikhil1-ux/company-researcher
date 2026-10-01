@@ -12,12 +12,14 @@ import { parseError } from '@/lib/outreach/api';
 import { useDeleteInbox, useWebchatInbox } from '@/lib/outreach/webchat';
 import { Badge, Button, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import { ConfirmModal, SettingsFrame } from '@/components/outreach/settings/shared';
+import VideoBubbleSection from '@/components/outreach/settings/websites/VideoBubbleSection';
 import { AiSection, AppearanceSection, AvailabilitySection, CannedSection, FeaturesSection, GeneralSection, HistorySection, InstallSection, LauncherSection, MessagesSection, PreChatSection, ReportsSection, SecuritySection, TargetingSection, type SectionProps } from '@/components/outreach/settings/websites/sections';
 
 const TABS: Array<{ key: string; label: string; C: (p: SectionProps) => React.ReactNode }> = [
   { key: 'general', label: 'General', C: GeneralSection },
   { key: 'appearance', label: 'Appearance', C: AppearanceSection },
   { key: 'launcher', label: 'Launcher & popup', C: LauncherSection },
+  { key: 'video', label: 'Video bubble', C: VideoBubbleSection },
   { key: 'messages', label: 'Messages', C: MessagesSection },
   { key: 'prechat', label: 'Pre-chat form', C: PreChatSection },
   { key: 'availability', label: 'Availability', C: AvailabilitySection },

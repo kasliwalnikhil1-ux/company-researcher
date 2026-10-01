@@ -21,14 +21,14 @@ import {
 export interface SectionProps { inbox: WebchatInbox; ws: string; canEdit: boolean; toast: (m: string, kind?: 'error') => void }
 
 /** Draft + save helper shared by the sections. The page remounts a section on every config_version, so no reset effect. */
-function useDraft<T>(initial: T) {
+export function useDraft<T>(initial: T) {
   const [draft, setDraft] = useState<T>(initial);
   const [dirty, setDirty] = useState(false);
   const set = (patch: Partial<T> | ((d: T) => T)) => { setDraft((d) => (typeof patch === 'function' ? (patch as (d: T) => T)(d) : { ...d, ...patch })); setDirty(true); };
   return { draft, set, dirty, reset: () => { setDraft(initial); setDirty(false); } };
 }
 
-function SaveBar({ dirty, saving, onSave, onReset, canEdit }: { dirty: boolean; saving: boolean; onSave: () => void; onReset: () => void; canEdit: boolean }) {
+export function SaveBar({ dirty, saving, onSave, onReset, canEdit }: { dirty: boolean; saving: boolean; onSave: () => void; onReset: () => void; canEdit: boolean }) {
   if (!canEdit) return <Note className="mt-4">Only owners and managers can change website settings.</Note>;
   return (
     <div className="flex items-center gap-2 pt-4 mt-4 border-t border-gray-100">
@@ -39,7 +39,7 @@ function SaveBar({ dirty, saving, onSave, onReset, canEdit }: { dirty: boolean; 
   );
 }
 
-function useSaveSettings(p: SectionProps) {
+export function useSaveSettings(p: SectionProps) {
   const upd = useUpdateInbox(p.ws);
   return {
     saving: upd.isPending,
@@ -47,9 +47,9 @@ function useSaveSettings(p: SectionProps) {
   };
 }
 
-const field = 'w-full text-sm rounded-md border border-gray-300 px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400';
-const Label = ({ children, hint }: { children: React.ReactNode; hint?: string }) => <label className="block text-xs font-medium text-gray-700 mb-1">{children}{hint && <span className="font-normal text-gray-400"> · {hint}</span>}</label>;
-const Grid = ({ children }: { children: React.ReactNode }) => <div className="grid gap-3 md:grid-cols-2">{children}</div>;
+export const field = 'w-full text-sm rounded-md border border-gray-300 px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400';
+export const Label = ({ children, hint }: { children: React.ReactNode; hint?: string }) => <label className="block text-xs font-medium text-gray-700 mb-1">{children}{hint && <span className="font-normal text-gray-400"> · {hint}</span>}</label>;
+export const Grid = ({ children }: { children: React.ReactNode }) => <div className="grid gap-3 md:grid-cols-2">{children}</div>;
 
 // ---------------------------------------------------------------- General
 export function GeneralSection(p: SectionProps) {
@@ -197,13 +197,14 @@ export function MessagesSection(p: SectionProps) {
       <Grid>
         {T('greeting', 'Greeting message')}
         <div><Label>Reply-time text</Label><select className={field} value={draft.reply_time} onChange={(e) => set({ reply_time: e.target.value as typeof draft.reply_time })} disabled={!p.canEdit}><option value="minutes">Typically replies in a few minutes</option><option value="hours">Typically replies in a few hours</option><option value="day">Typically replies in a day</option><option value="none">Hidden</option></select></div>
-        <div><Label>Composer placeholder</Label><input className={field} value={draft.placeholder} onChange={(e) => set({ placeholder: e.target.value })} disabled={!p.canEdit} /></div>
+        <div><Label>Composer placeholder</Label><input className={field} value={draft.placeholder} onChange={(e) => set({ placeholder: e.target.value })} disabled={!p.canEdit} placeholder="Ask a question…" /></div>
         {T('available_message', 'Available message', 'shown when online')}
         {T('unavailable_message', 'Unavailable message', 'shown outside business hours or with nobody online')}
         {T('email_capture_prompt', 'Email capture prompt', 'asked once when nobody is online and the visitor is unknown')}
         {T('handoff_message', 'Handoff message', 'when the assistant hands over and someone is online')}
         {T('handoff_offline_message', 'Handoff message (offline)')}
         {T('end_message', 'End-of-chat message', 'with the rating prompt')}
+        <div className="md:col-span-2"><Label hint="https; the link in “By chatting with us, you agree to our Privacy Policy” under the chat. Empty = the platform policy">Privacy policy link</Label><input className={field} type="url" value={draft.privacy_url ?? ''} onChange={(e) => set({ privacy_url: e.target.value.trim() || null })} disabled={!p.canEdit} placeholder="https://your-site.com/privacy" /></div>
         <div className="md:col-span-2"><Label hint="one per line, ≤ 6; shown as chips on the home screen">Quick-reply chips (conversation starters)</Label><textarea className={field} rows={3} value={draft.quick_replies.join('\n')} onChange={(e) => set({ quick_replies: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 6) })} disabled={!p.canEdit} placeholder={'Pricing\nBook a demo\nI need help with my account'} /></div>
       </Grid>
       <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { messages: draft } })} />
@@ -312,7 +313,7 @@ const FEATURES: Array<[keyof WebchatSettings['features'], string, string?]> = [
   ['file_picker', 'File picker', 'Images, PDF, office documents, text and CSV up to 10 MB. Executables are always blocked.'], ['emoji_picker', 'Emoji picker'], ['restart', 'Restart conversation button'],
   ['end_conversation', 'End conversation button', 'The visitor can resolve the conversation and rate it.'], ['allow_after_resolved', 'Allow messages after resolved', 'On: a message reopens the conversation. Off: it starts a new one.'],
   ['single_conversation', 'Lock to a single conversation', 'No conversation list; the visitor always continues the same thread.'], ['sounds', 'Sounds', 'A soft chime when a reply arrives while the tab is hidden.'], ['read_receipts', 'Read receipts', '✓✓ once an agent has seen the message.'],
-  ['show_agent_names', 'Show agent names and avatars'], ['transcript', 'Transcript by email'], ['email_capture', 'Email capture when nobody is online'], ['markdown', 'Render markdown in agent and assistant messages'], ['powered_by', '"Powered by" footer', 'Pro and Agency plans can switch it off.'],
+  ['show_agent_names', 'Show agent names and avatars'], ['transcript', 'Transcript by email'], ['email_capture', 'Email capture when nobody is online'], ['markdown', 'Render markdown in agent and assistant messages'], ['powered_by', '"Powered by" strip', 'Its own band under the chat, in fixed colours. Pro and Agency plans can switch it off.'],
 ];
 export function FeaturesSection(p: SectionProps) {
   const { draft, set, dirty, reset } = useDraft({ features: p.inbox.settings.features, csat: p.inbox.settings.csat, continuity: p.inbox.settings.continuity });
@@ -533,7 +534,7 @@ export function InstallSection(p: SectionProps) {
       </Card>
       <Card title="Content-Security-Policy">
         <p className="text-xs text-gray-500 mb-2">If your site sets a CSP, allow:</p>
-        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled).join('\n')}</pre>
+        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled, !!(p.inbox.settings?.launcher?.video?.enabled !== false && p.inbox.settings?.launcher?.video?.url)).join('\n')}</pre>
       </Card>
       <Card title="SDK">
         <p className="text-xs text-gray-500">Global <code>window.growthxai</code> (alias <code>window.kaptured</code>), ready event <code>growthxai:ready</code>.</p>
@@ -543,7 +544,8 @@ growthxai.setCustomAttributes({ plan: 'pro' })  growthxai.setLabel('pricing-page
 growthxai.setLocale('es')                       growthxai.setColorScheme('dark')
 growthxai.trackEvent('signup_clicked', {...})   growthxai.reset() / destroy()
 growthxai.on('message', cb)   events: ready, opened, closed, message, message:sent, conversation:started,
-                                      conversation:resolved, unread, csat:submitted, identified, handoff, error`}</pre>
+                                      conversation:resolved, unread, csat:submitted, identified, handoff, error,
+                                      video:opened, video:closed, video:question, video:dismissed`}</pre>
       </Card>
     </div>
   );

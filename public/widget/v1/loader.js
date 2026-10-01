@@ -11,7 +11,8 @@
  * Responsibilities (nothing more, to stay small):
  *   1. read the script's data-* + window.growthxaiSettings (alias window.kapturedSettings);
  *   2. paint the launcher at once from the cached config (localStorage), refresh the config in the background (2 s timeout);
- *   3. targeting rules, popup nudge, unread badge, online dot;
+ *   3. targeting rules, popup nudge, unread badge, online dot; a GIF / video bubble instead of the icon when the inbox
+ *      has one (settings.launcher.video) — that code is video.js, fetched only then;
  *   4. expose the SDK global (window.growthxai, alias window.kaptured) with a call queue until chat.js is loaded;
  *   5. lazy-load chat.js: on first open, on launcher hover, on idle for returning visitors (they may have unread messages).
  * Isolation: closed Shadow DOM, constructable stylesheets (work under a strict style-src CSP), host element pointer-events:none.
@@ -29,7 +30,7 @@
   if (!token) return;
   var src = (script && script.src) || "";
   var API = (ds.api || settings.api || "").replace(/\/+$/, "");
-  var CHAT_URL = src.replace(/loader\.js(\?.*)?$/, "chat.js$1");
+  var CHAT_URL = src.replace(/loader\.js(\?.*)?$/, "chat.js$1"), VIDEO_URL = src.replace(/loader\.js(\?.*)?$/, "video.js$1");
   if (!API) { try { console.warn("[growthxai] data-api missing on the widget script tag"); } catch (e) {} return; }
   var LS = "gxwc:" + token + ":";
   var store = {
@@ -139,6 +140,7 @@
       "@keyframes gxin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}" +
       "@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}" +
       "@media(prefers-color-scheme:dark){.pop,.prev{background:#1f2937;color:#f3f4f6}.pop .x{color:#9ca3af}.prev b{color:#9ca3af}}" +
+      (vmod ? vmod.css(e, l, side, accent) : "") +
       ".hidden{display:none!important}";
   }
   function applyStyles(text) {
@@ -166,7 +168,9 @@
     var e = effective(cfg), l = isMobile() ? Object.assign({}, e.launcher.desktop, e.launcher.mobile) : e.launcher.desktop || {};
     applyStyles(css(cfg));
     var show = !hideLauncher && !e.launcher.hide && targeted(cfg) && e.appearance.mode !== "embedded" && !(state.open && (isMobile() || e.appearance.mode !== "bubble"));
-    btn.className = "btn " + (l.type === "button" && !isMobile() ? "pill" : "icon") + (show ? "" : " hidden");
+    var vc = show && !state.open ? vconf(e) : null; if (vc && !vmod) loadVideo();
+    var video = vmod ? vmod.render(vc) : !!vc;   // while video.js is on its way the icon stays hidden, so it does not flash
+    btn.className = "btn " + (l.type === "button" && !isMobile() ? "pill" : "icon") + (show && !video ? "" : " hidden");
     var label = state.open ? (i18n("close")) : (l.text || i18n("chat"));
     btn.setAttribute("aria-label", label); btn.title = label; btn.setAttribute("aria-expanded", state.open ? "true" : "false");
     var inner = state.open ? CLOSE : (e.appearance.logo_url ? '<img src="' + esc(e.appearance.logo_url) + '" alt="">' : ICON);
@@ -176,6 +180,28 @@
     btn.innerHTML = inner;
     if (state.open || !show) hidePopup();
   }
+
+  // ---- GIF / video bubble (settings.launcher.video; see video.js) ----------------------------------------------------
+  var vmod = null, vstate = 0;   // vstate: 0 not requested, 1 requested, 2 unusable (script or media failed) -> normal launcher
+  function sess(k, v) { try { if (v === undefined) return sessionStorage.getItem(LS + k); sessionStorage.setItem(LS + k, v); } catch (x) {} return null; }
+  function vconf(e) { var v = (e.launcher || {}).video; return v && v.enabled !== false && vstate !== 2 && /^(https:\/\/\S+|preset:[\w.-]+)$/i.test(v.url || "") && !sess("vbx") ? v : null; }
+  function loadVideo() {
+    if (vstate) return; vstate = 1;
+    var s = doc.createElement("script"); s.src = VIDEO_URL; s.async = true;
+    s.onload = function () {
+      var f = win.__growthxaiWebchatVideo;
+      if (f) vmod = f({ sdk: sdk, emit: emit, esc: esc, safeColor: safeColor, isMobile: isMobile, i18n: i18n, locale: locale, ICON: ICON, CLOSE: CLOSE, base: src.replace(/loader\.js(\?.*)?$/, ""),
+        prefetchChat: prefetchChat, hidePopup: hidePopup, host: function () { return host; }, wrap: function () { return shadow.querySelector(".wrap"); }, btn: function () { return btn; },
+        unread: function () { return effective(cfg).launcher.show_unread_count !== false ? state.unread : 0; },
+        fail: function () { vstate = 2; renderLauncher(); },
+        dismiss: function () { sess("vbx", "1"); emit("video:dismissed", {}); renderLauncher(); btn.focus(); } });   // X on the bubble: gone for this browser session
+      else vstate = 2;
+      renderLauncher();
+    };
+    s.onerror = function () { vstate = 2; renderLauncher(); };
+    doc.head.appendChild(s);
+  }
+  function anchor() { return (vmod && vmod.node()) || btn; }   // what the popup and the unread previews sit above
   function setUnread(n, previews) {
     state.unread = n || 0; renderLauncher();
     var e = effective(cfg || { settings: {} });
@@ -186,7 +212,7 @@
       var d = doc.createElement("div"); d.className = "prev"; d.setAttribute("role", "button"); d.tabIndex = 0;
       d.innerHTML = "<b>" + esc(p.from || e.appearance.brand_name || "") + "</b>" + esc(String(p.text || "").slice(0, 140));
       d.addEventListener("click", function () { sdk.open(); });
-      wrap.insertBefore(d, btn);
+      wrap.insertBefore(d, anchor());
     });
     emit("unread", { count: state.unread });
   }
@@ -196,13 +222,13 @@
     if (!p.enabled || !p.text || store.get("chatted") || sessionStorage.getItem(LS + "pop")) return;
     clearTimeout(popupTimer);
     popupTimer = setTimeout(function () {
-      if (state.open || !btn || btn.className.indexOf("hidden") >= 0) return;
+      if (state.open || !btn || (vmod && vmod.isOpen()) || /hidden/.test(anchor().className)) return;
       try { sessionStorage.setItem(LS + "pop", "1"); } catch (x) {}
       popupEl = doc.createElement("div"); popupEl.className = "pop"; popupEl.setAttribute("role", "status");
       popupEl.innerHTML = (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="">' : "") + "<div>" + esc(String(p.text).slice(0, 60)) + "</div>" + '<button class="x" type="button" aria-label="' + i18n("dismiss") + '">' + CLOSE + "</button>";
       popupEl.querySelector(".x").addEventListener("click", function (ev) { ev.stopPropagation(); hidePopup(); });
       popupEl.addEventListener("click", function () { hidePopup(); sdk.open({ source: "popup" }); });
-      shadow.querySelector(".wrap").insertBefore(popupEl, btn);
+      shadow.querySelector(".wrap").insertBefore(popupEl, anchor());
     }, Math.max(0, (parseFloat(p.delay_s) || 3) * 1000));
   }
   function hidePopup() { clearTimeout(popupTimer); if (popupEl) { popupEl.remove(); popupEl = null; } }
