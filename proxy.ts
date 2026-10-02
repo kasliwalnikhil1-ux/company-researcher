@@ -2,7 +2,7 @@
  * proxy.ts (Next.js 16: the file that used to be `middleware.ts`)
  *
  * THREE jobs:
- *   0. Product tour. `/product-tour` and `/product-tour/*` are rewritten to the same `/outreach` route files; the browser
+ *   0. Product tour. `/product-tour` and `/product-tour/*` (and the aliases `/tour`, `/demo`, `/product`) are rewritten to the same `/outreach` route files; the browser
  *      URL stays `/product-tour/...`, and the outreach UI switches to its demo backend from that URL (lib/outreach/mode.ts,
  *      docs/outreach/PRODUCT-TOUR.md). Job B never runs for it, and incoming `x-outreach-*` headers are dropped.
  *   A. Product domains. A GrowthxAI domain (lib/whitelabel.ts) serves outreach only: any page it does not serve
@@ -36,6 +36,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { getWhitelabelConfig, productHome, productServesPath } from '@/lib/whitelabel';
+import { DEMO_PREFIXES } from '@/lib/outreach/mode';
 
 export const config = {
   // Keep this literal: it is analysed at build time. Every page, but never `/api`, `/_next` or a file with an extension.
@@ -122,9 +123,10 @@ export async function proxy(request: NextRequest) {
   }
 
   // 0. Product tour: the same pages as /outreach, demo data in the browser.
-  if (pathname === '/product-tour' || pathname.startsWith('/product-tour/')) {
+  const tour = DEMO_PREFIXES.find((p) => pathname === p || pathname.startsWith(`${p}/`));
+  if (tour) {
     const url = request.nextUrl.clone();
-    url.pathname = `/outreach${pathname.slice('/product-tour'.length)}`;
+    url.pathname = `/outreach${pathname.slice(tour.length)}`;
     const headers = new Headers(request.headers);
     for (const h of OUR_HEADERS) headers.delete(h);
     return NextResponse.rewrite(url, { request: { headers } });

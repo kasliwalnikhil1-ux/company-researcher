@@ -112,7 +112,7 @@ function inviteMember(req: FnRequest, ctx: Ctx): unknown {
   }
   audit(ctx.store, ws, ctx.userId, 'member.invited', 'invitation', inv.id, { email: inv.email, role: inv.role, emailed: false });
   ctx.ui.simulated('Simulated. No invitation email was sent.');
-  return { ok: true, invitation: inv, link: `${origin()}/product-tour/invite/${inv.token}`, emailed: true };
+  return { ok: true, invitation: inv, link: `${origin()}${tourPath(`/outreach/invite/${inv.token}`)}`, emailed: true };
 }
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import { usePathname as useBrowserPathname } from 'next/navigation';
 import type { DemoRuntime } from '@/lib/outreach/backend/demo';
 import { loadDemoBackend } from '@/lib/outreach/backend';
 import { setDemoUi, type DemoDialog } from '@/lib/outreach/demoUi';
-import { DEMO_PREFIX, leaveDemo } from '@/lib/outreach/mode';
+import { DEMO_PREFIX, isDemoPath, leaveDemo } from '@/lib/outreach/mode';
 import { usePathname, useRouter } from '@/lib/outreach/nav';
 import { useAuth } from '@/contexts/AuthContext';
 import { PageLoader } from '@/components/outreach/ui';
@@ -70,7 +70,7 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
   // The demo and the product never share a page: if the URL left /product-tour without a full load, reload so the
   // provider in use always matches the URL.
   useEffect(() => {
-    if (browserPath && !browserPath.startsWith(DEMO_PREFIX)) window.location.reload();
+    if (browserPath && !isDemoPath(browserPath)) window.location.reload();
   }, [browserPath]);
 
   // UI bridge for the handlers: toasts and the fake external steps.

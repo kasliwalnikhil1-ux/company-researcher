@@ -5,6 +5,7 @@
 import { demoError, type Ctx } from '../ctx';
 import { tableHooks, type TableHooks } from '../query';
 import type { DemoStore, Row } from '../store';
+import { DEMO_PREFIX, isDemoPath } from '@/lib/outreach/mode';
 
 export type MinRole = 'owner' | 'manager' | 'member' | 'client_viewer';
 const RANK: Record<string, number> = { owner: 0, manager: 1, member: 2, client_viewer: 3 };
@@ -83,11 +84,11 @@ export function defaults(row: Row, d: Row): Row {
 export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export const lowerTrim = (v: unknown) => String(v ?? '').trim().toLowerCase();
 
-/** A same-app path inside the tour (`/outreach/x` → `/product-tour/x`). */
+/** A same-app path inside the tour (`/outreach/x` → `/product-tour/x`, under the prefix the visitor arrived on). */
 export function tourPath(path: string): string {
-  if (path === '/outreach') return '/product-tour';
-  if (path.startsWith('/outreach/') || path.startsWith('/outreach?')) return `/product-tour${path.slice('/outreach'.length)}`;
-  return path.startsWith('/product-tour') ? path : `/product-tour${path.startsWith('/') ? '' : '/'}${path}`;
+  if (path === '/outreach') return DEMO_PREFIX;
+  if (path.startsWith('/outreach/') || path.startsWith('/outreach?')) return `${DEMO_PREFIX}${path.slice('/outreach'.length)}`;
+  return isDemoPath(path) ? path : `${DEMO_PREFIX}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 /** The browser origin when there is one (links the visitor can copy). */

@@ -190,7 +190,7 @@ export function getWhitelabelConfig(hostname?: string): WhitelabelConfig {
 
 /** GrowthxAI sells outreach: these pages (and everything under them) are all its domains serve. */
 const GROWTHXAI_PATHS = [
-  '/outreach', '/product-tour', '/crm', '/admin', '/account',
+  '/outreach', '/product-tour', '/tour', '/demo', '/product', '/crm', '/admin', '/account',
   // sign-in
   '/login', '/signup', '/reset-password', '/auth', '/mfa-challenge', '/oauth',
   // public pages opened from outreach emails

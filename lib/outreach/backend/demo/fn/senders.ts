@@ -16,6 +16,7 @@ import {
 } from '../senders/profile';
 import { addEvent, D, dropFromPools, iso, isMail, senderOr404, setStatus } from '../senders/util';
 import { profileOverview } from '../rpc/senders';
+import { DEMO_PREFIX } from '@/lib/outreach/mode';
 
 const PROVIDERS = ['LINKEDIN', 'INSTAGRAM', 'WHATSAPP', 'GMAIL', 'OUTLOOK', 'IMAP'];
 const WEEKDAYS = { mon: [['09:00', '18:00']], tue: [['09:00', '18:00']], wed: [['09:00', '18:00']], thu: [['09:00', '18:00']], fri: [['09:00', '18:00']], sat: [], sun: [] };
@@ -23,7 +24,7 @@ const ASSETS_BUCKET = 'outreach-profile-assets';
 const assetUrl = (path: string) => storedUrl(ASSETS_BUCKET, path);
 
 /** The page the hosted sign-in would return to. A same-app page: the demo state is saved on pagehide. */
-const landing = (id: string) => `/product-tour/senders/${id}?connected=1`;
+const landing = (id: string) => `${DEMO_PREFIX}/senders/${id}?connected=1`;
 
 /** What the connect screen shows for a provider and a sign-in method. */
 function connectMethod(provider: string, method?: string | null): string {

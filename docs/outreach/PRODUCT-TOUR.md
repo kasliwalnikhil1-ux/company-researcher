@@ -7,6 +7,10 @@ connected accounts, and nothing reaches a production service. Spec: `product-tou
 
 - `proxy.ts` rewrites `/product-tour` and `/product-tour/*` to the same `app/outreach/**` route files. The browser URL
   stays `/product-tour/…`.
+- `/tour`, `/demo` and `/product` are aliases: the same tour, listed in `DEMO_PREFIXES` (`lib/outreach/mode.ts`, read by
+  `proxy.ts`; also in `GROWTHXAI_PATHS`). `DEMO_PREFIX` is the prefix the visitor arrived on, so every link, redirect and
+  return URL in the tour keeps it. Never build a tour path from a literal `/product-tour`: use `DEMO_PREFIX`,
+  `toDemoPath()` or `tourPath()` (demo handlers), and `isDemoPath()` to test one.
 - `lib/outreach/mode.ts`: `IS_DEMO` is read from the browser URL once per page load. Crossing between `/product-tour` and
   `/outreach` is always a full page load (`leaveDemo()`), and `DemoProvider` reloads the page if the URL ever leaves the
   prefix without one.
