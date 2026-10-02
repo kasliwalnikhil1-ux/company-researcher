@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Hourglass } from 'lucide-react';
 import { Badge } from '@/components/outreach/ui';
 import { useRunningDryAlerts, useSenderSequences, type RunningDryAlert, type SenderV2 } from './insights';

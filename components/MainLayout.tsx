@@ -7,8 +7,10 @@ import { supabase } from '@/utils/supabase/client';
 import { getValidAccessToken } from '@/lib/api';
 import { useCountry, COUNTRY_DATA, Country } from '@/contexts/CountryContext';
 import { useOnboarding } from '@/contexts/OnboardingContext';
-import { useRouter, usePathname } from 'next/navigation';
-import Link from 'next/link';
+import { useRouter, usePathname } from '@/lib/outreach/nav';
+import Link from '@/lib/outreach/nav';
+import { DEMO_USER_EMAIL } from '@/lib/outreach/session';
+import { leaveDemo } from '@/lib/outreach/mode';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, LifeBuoy, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Linkedin, Briefcase, SlidersHorizontal } from 'lucide-react';
@@ -43,12 +45,17 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
   'e25d5e21-13fd-46ee-a39a-4c3386b77b65',
 ]);
 
-export default function MainLayout({ children, subnav }: { children: React.ReactNode; subnav?: React.ReactNode }) {
+/**
+ * `demo`: the product tour (`/product-tour`, lib/outreach/mode.ts). Only the outreach menu, a "Demo user" block with
+ * Exit demo / Start your outreach instead of sign-out, room for the demo bar above, and none of this layout's own account
+ * calls or route guards (they belong to a signed-in account, and the visitor may have none).
+ */
+export default function MainLayout({ children, subnav, demo = false }: { children: React.ReactNode; subnav?: React.ReactNode; demo?: boolean }) {
   const { user, signOut } = useAuth();
   const access = useAccess();
   const whitelabel = useWhitelabel();
   // GrowthxAI sells outreach: its sidebar is the Outreach menu. CRM and the fundraising items are CapitalxAI only.
-  const isGrowthxai = whitelabel.product === 'growthxai';
+  const isGrowthxai = demo || whitelabel.product === 'growthxai';
   const { selectedCountry, setSelectedCountry, availableCountries } = useCountry();
   const { onboarding, loading: onboardingLoading, fetchOnboarding } = useOnboarding();
   const { refreshTemplates } = useMessageTemplates();
@@ -72,7 +79,11 @@ export default function MainLayout({ children, subnav }: { children: React.React
     const isFundraising = primaryUse === 'fundraising';
     const isB2B = primaryUse === 'b2b';
     const uid = user?.id ?? '';
-    const { has, isAdmin, crmMember } = access;
+    const { has: realHas, isAdmin: realAdmin, crmMember: realCrm } = access;
+    // the tour shows the outreach product only, whatever the visitor's own account may use
+    const has = demo ? (key: Parameters<typeof realHas>[0]) => key === 'outreach' : realHas;
+    const isAdmin = !demo && realAdmin;
+    const crmMember = !demo && realCrm;
     const fundraisingOn = has('fundraising', true);
     const outreachOn = has('outreach', true);
     const canAccessResearch = has('research', RESEARCH_ALLOWED_USER_IDS.has(uid));
@@ -117,13 +128,13 @@ export default function MainLayout({ children, subnav }: { children: React.React
       fundraisingOn,
       defaultRoute,
     };
-  }, [primaryUse, user?.id, access, isGrowthxai]);
+  }, [primaryUse, user?.id, access, isGrowthxai, demo]);
 
   // Show onboarding flow if onboarding is not completed (null or incomplete)
   // me-data, me-data-prospects, and data-pipelines are accessible irrespective of onboarding
   const isMeDataRoute = pathname === '/me-data' || pathname === '/me-data-prospects' || pathname === '/data-pipelines' || pathname === '/admin-stats' || pathname === '/admin' || pathname === '/linkedin-conversations' || pathname === '/sender-profiles' || pathname.startsWith('/outreach') || pathname.startsWith('/crm');
   // Onboarding belongs to the fundraising / B2B products: an account that may use neither is not asked to complete it.
-  const showOnboarding = !onboardingLoading && !onboarding?.completed && !isMeDataRoute && !access.loading && (routeAccess.fundraisingOn || routeAccess.showCompanies || routeAccess.canAccessResearch);
+  const showOnboarding = !demo && !onboardingLoading && !onboarding?.completed && !isMeDataRoute && !access.loading && (routeAccess.fundraisingOn || routeAccess.showCompanies || routeAccess.canAccessResearch);
 
   // Detect mobile screen size
   useEffect(() => {
@@ -153,6 +164,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
 
   // Route guard: redirect users from inaccessible routes based on primaryUse
   useEffect(() => {
+    if (demo) return;
     if (pathname === '/login' || pathname === '/signup' || pathname === '/auth/callback' || pathname.startsWith('/reset-password')) return;
     // An account with neither the researcher nor fundraising has no home page: send it to what it may use
     // (this runs before onboarding, which belongs to those two products).
@@ -214,7 +226,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
       router.replace(routeAccess.defaultRoute);
       return;
     }
-  }, [pathname, onboardingLoading, onboarding?.completed, routeAccess, router, access.loading]);
+  }, [pathname, onboardingLoading, onboarding?.completed, routeAccess, router, access.loading, demo]);
 
   const handleSignOut = async () => {
     try {
@@ -301,7 +313,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
     <div className="min-h-screen flex">
       {/* Mobile Top Bar */}
       {isMobile && (
-        <header className="fixed top-0 left-0 right-0 z-30 bg-white border-b border-gray-200 flex items-center h-14 px-4 md:hidden">
+        <header className={`fixed ${demo ? 'top-10' : 'top-0'} left-0 right-0 z-30 bg-white border-b border-gray-200 flex items-center h-14 px-4 md:hidden`}>
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="p-1.5 -ml-1.5 rounded-lg hover:bg-gray-100 transition-colors"
@@ -329,7 +341,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
       {/* Mobile Overlay */}
       {isMobile && isMobileMenuOpen && (
         <div
-          className="fixed inset-0 top-14 bg-black bg-opacity-50 z-40 md:hidden"
+          className={`fixed inset-0 ${demo ? 'top-24' : 'top-14'} bg-black bg-opacity-50 z-40 md:hidden`}
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
@@ -337,13 +349,13 @@ export default function MainLayout({ children, subnav }: { children: React.React
       {/* Sidebar */}
       <aside className={`
         ${isMobile 
-          ? `fixed top-14 left-0 w-64 z-40 transform transition-transform duration-300 ${
+          ? `fixed ${demo ? 'top-24' : 'top-14'} left-0 w-64 z-40 transform transition-transform duration-300 ${
               isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
             }`
-          : `fixed top-0 left-0 z-30 h-screen transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
+          : `fixed ${demo ? 'top-10 h-[calc(100vh-2.5rem)]' : 'top-0 h-screen'} left-0 z-30 transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
         }
         bg-white border-r border-gray-200 flex flex-col
-        ${isMobile ? 'h-[calc(100vh-3.5rem)]' : ''}
+        ${isMobile ? (demo ? 'h-[calc(100vh-6rem)]' : 'h-[calc(100vh-3.5rem)]') : ''}
       `}>
         {/* Toggle Button - Desktop only */}
         {!isMobile && (
@@ -773,7 +785,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
           </nav>
 
           {/* Country Dropdown - hidden for fundraising, and Auto option excluded */}
-          {(!isCollapsed || isMobile) && primaryUse !== 'fundraising' && (
+          {!demo && (!isCollapsed || isMobile) && primaryUse !== 'fundraising' && (
             <div className={`px-4 py-2 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
               <p className="text-xs text-gray-500 mb-2">Country Code</p>
               <select
@@ -795,6 +807,32 @@ export default function MainLayout({ children, subnav }: { children: React.React
 
         {/* User info + Logout pinned at bottom */}
         <div className={`shrink-0 p-4 border-t border-gray-200 ${isCollapsed && !isMobile ? 'px-2' : ''}`}>
+          {demo ? (
+            <>
+              {(!isCollapsed || isMobile) && (
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-1">Demo user</p>
+                  <p className="text-sm font-medium text-gray-700 truncate">{DEMO_USER_EMAIL}</p>
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => leaveDemo(user ? '/outreach' : undefined)}
+                className={`w-full flex items-center justify-center ${isCollapsed && !isMobile ? 'px-2' : 'px-4'} py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors`}
+                title={user ? 'Back to my workspace' : 'Start your outreach'}
+              >
+                {isCollapsed && !isMobile ? <span aria-hidden>→</span> : <span>{user ? 'Back to my workspace' : 'Start your outreach'}</span>}
+              </button>
+              <button
+                type="button"
+                onClick={() => leaveDemo('/')}
+                className={`mt-2 w-full flex items-center justify-center ${isCollapsed && !isMobile ? 'px-2' : 'px-4'} py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors`}
+                title="Exit demo"
+              >
+                {isCollapsed && !isMobile ? <span aria-hidden>×</span> : <span>Exit demo</span>}
+              </button>
+            </>
+          ) : (<>
           {user && (!isCollapsed || isMobile) && (
             <div className="mb-3">
               <p className="text-xs text-gray-500 mb-1">Signed in as</p>
@@ -812,6 +850,7 @@ export default function MainLayout({ children, subnav }: { children: React.React
               <span>Logout</span>
             )}
           </button>
+          </>)}
         </div>
       </aside>
 
@@ -821,12 +860,12 @@ export default function MainLayout({ children, subnav }: { children: React.React
       <main className={`
         ${isMobile ? 'ml-0' : isCollapsed ? 'ml-16' : 'ml-64'}
         relative flex-1 flex flex-col overflow-hidden transition-all duration-300
-        ${isMobile ? 'pt-14 isolate' : ''}
+        ${isMobile ? (demo ? 'pt-24 isolate' : 'pt-14 isolate') : demo ? 'pt-10' : ''}
       `}>
         {children}
       </main>
 
-      <BookDemoButton />
+      {!demo && <BookDemoButton />}
 
       <DeleteConfirmationModal
         isOpen={isResetAccountModalOpen}

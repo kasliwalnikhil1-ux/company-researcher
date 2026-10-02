@@ -1,10 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery } from '@tanstack/react-query';
 import { FlaskConical, Wand2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { isFieldsVariable, variableFields } from '@/lib/outreach/aiFields';
 import { hubHref, variableMode } from '@/lib/outreach/aiHub';
@@ -65,7 +65,7 @@ export function GenerateLinesModal({ open, onClose, workspaceId, isManager, sele
   const sampleQ = useQuery({
     queryKey: ['outreach', workspaceId, 'ai-generate-sample', sampleIds], enabled: open && sampleIds.length > 0, staleTime: 60_000,
     queryFn: async () => {
-      const { data, error: err } = await supabase.from('outreach_leads').select('id, full_name, company').in('id', sampleIds);
+      const { data, error: err } = await db.from('outreach_leads').select('id, full_name, company').in('id', sampleIds);
       if (err) throw parseError(err);
       return (data ?? []) as { id: string; full_name: string | null; company: string | null }[];
     },

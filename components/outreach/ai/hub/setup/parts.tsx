@@ -1,7 +1,7 @@
 'use client';
 
 // Small pieces shared by the screens of AI → Setup.
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { HUB_MODES, HUB_MODE_LABEL, type HubMode } from '@/lib/outreach/aiHub';
 import { cn } from '@/lib/utils';
 

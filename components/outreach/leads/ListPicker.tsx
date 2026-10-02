@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk, useLists } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -56,7 +56,7 @@ export function ListPicker({ value, onChange, label = 'Add to list', emptyLabel,
     if (same) { onChange(same.id); setWantNew(false); setName(''); setError(null); return; }
     setBusy(true); setError(null);
     try {
-      const { data, error: err } = await supabase.from('outreach_lists').insert({ workspace_id: ws, name: n }).select('*').single();
+      const { data, error: err } = await db.from('outreach_lists').insert({ workspace_id: ws, name: n }).select('*').single();
       if (err) throw err;
       const row = data as List;
       qc.setQueryData<List[]>(qk.lists(ws), (old) => [...(old ?? []).filter((l) => l.id !== row.id), row].sort((a, b) => a.name.localeCompare(b.name)));

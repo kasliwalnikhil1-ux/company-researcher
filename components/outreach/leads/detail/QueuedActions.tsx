@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Clock, Pencil, SkipForward } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

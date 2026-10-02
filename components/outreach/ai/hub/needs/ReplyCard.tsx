@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Check, MessageSquare, Pencil, Send, SkipForward, X } from 'lucide-react';
 import { applyNoReply, cancelReply, dismissReply, sendReplyDraft, sendReplyNow } from '@/lib/outreach/aiHub';
 import { stopText, warningText } from '@/lib/outreach/aiReplies';

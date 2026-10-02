@@ -3,7 +3,7 @@
 // Knowledge attached to the sequence's prompt (changes doc §9.2): websites, documents, pasted text and Q&A pairs.
 // The sources are the workspace's Knowledge library (AI → Knowledge); this section picks the ones this sequence uses.
 import { useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { FileText, Globe, HelpCircle, Pencil, Plus, Trash2, Type, X } from 'lucide-react';
 import {
   KNOWLEDGE_STATUS_LABEL, uploadKnowledgeFile, useFaqDelete, useFaqSave, useKnowledgeAttach, useKnowledgeDetach, useKnowledgeSourceAdd, useKnowledgeSources,

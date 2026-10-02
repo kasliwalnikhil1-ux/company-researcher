@@ -2,7 +2,7 @@
 
 // Workspace-wide view of profile changes: what is waiting for an owner, what is scheduled, what landed or failed.
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { reasonText } from '@/lib/outreach/reasons';

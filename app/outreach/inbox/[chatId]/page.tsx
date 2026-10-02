@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams } from '@/lib/outreach/nav';
 import InboxView from '@/components/outreach/inbox/InboxView';
 import { useInboxRestrict } from '@/components/outreach/inbox/hooks';
 

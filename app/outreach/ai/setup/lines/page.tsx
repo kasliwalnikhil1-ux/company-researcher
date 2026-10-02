@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from '@/lib/outreach/nav';
 import HubFrame, { SETUP_BACK } from '@/components/outreach/ai/hub/HubFrame';
 import AiReviewView from '@/components/outreach/ai/AiReviewView';
 import LinesViewSwitch from '@/components/outreach/ai/hub/lines/LinesViewSwitch';

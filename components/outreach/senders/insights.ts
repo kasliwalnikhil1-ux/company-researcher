@@ -5,7 +5,7 @@
  * Every number and every sentence comes from an `outreach_*` RPC: nothing is re-computed here.
  */
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import type { ActionType, Sender, SenderStatus } from '@/lib/outreach/types';
 
@@ -129,7 +129,7 @@ export function useRunningDryAlerts(ws: string | null | undefined) {
   return useQuery({
     queryKey: sk.runningDry(ws ?? ''), enabled: !!ws, refetchInterval: 120_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_alerts').select('id, entity_id, label, reason, opened_at, detail')
+      const { data, error } = await db.from('outreach_alerts').select('id, entity_id, label, reason, opened_at, detail')
         .eq('workspace_id', ws!).eq('kind', 'sender_running_dry').is('resolved_at', null).order('opened_at', { ascending: false });
       if (error) throw parseError(error);
       const m = new Map<string, RunningDryAlert>();
@@ -143,7 +143,7 @@ export function useTrackingDomains(ws: string | null | undefined, enabled = true
   return useQuery({
     queryKey: sk.trackingDomains(ws ?? ''), enabled: !!ws && enabled, refetchInterval: 120_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_tracking_domains').select('*').eq('workspace_id', ws!).order('created_at');
+      const { data, error } = await db.from('outreach_tracking_domains').select('*').eq('workspace_id', ws!).order('created_at');
       if (error) throw parseError(error);
       return (data ?? []) as TrackingDomain[];
     },
@@ -155,7 +155,7 @@ export function useSenderSequences(id: string | null | undefined, ws: string | n
   return useQuery({
     queryKey: sk.senderSequences(id ?? ''), enabled: !!id && !!ws && enabled, staleTime: 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_sequences').select('id, name, status').eq('workspace_id', ws!).eq('status', 'active').contains('sender_pool', [id!]).order('name');
+      const { data, error } = await db.from('outreach_sequences').select('id, name, status').eq('workspace_id', ws!).eq('status', 'active').contains('sender_pool', [id!]).order('name');
       if (error) throw parseError(error);
       return (data ?? []) as Array<{ id: string; name: string; status: string }>;
     },

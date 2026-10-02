@@ -3,7 +3,7 @@
 // Reports → Channels (PRD §12): replies per 100 actions by channel, and the block log with the actions that preceded
 // each block. Both come straight from outreach_report_channels / outreach_report_blocks.
 import React, { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ChevronDown, ChevronRight, Radio, ShieldAlert } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge, EmptyState, Table, Td, Th, fmtDate } from '@/components/outreach/ui';

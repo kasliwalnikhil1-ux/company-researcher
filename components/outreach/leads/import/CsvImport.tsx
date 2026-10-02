@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
+import { IS_DEMO } from '@/lib/outreach/mode';
+import { DEMO_SAMPLE_CSV, DEMO_SAMPLE_CSV_NAME } from '@/lib/outreach/demoSampleCsv';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { Badge, Button, ErrorBox, Spinner } from '@/components/outreach/ui';
@@ -135,15 +137,15 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
         }
         const found = new Set<string>();
         if (pubs.size) {
-          const { data, error: err } = await supabase.from('outreach_leads').select('public_identifier').eq('workspace_id', workspace.id).in('public_identifier', Array.from(pubs));
+          const { data, error: err } = await db.from('outreach_leads').select('public_identifier').eq('workspace_id', workspace.id).in('public_identifier', Array.from(pubs));
           if (err) throw err;
           for (const r of (data ?? []) as { public_identifier: string | null }[]) if (r.public_identifier) found.add(`p:${r.public_identifier.toLowerCase()}`);
         }
         if (emails.size) {
           const list = Array.from(emails);
           const [w, p] = await Promise.all([
-            supabase.from('outreach_leads').select('email_work').eq('workspace_id', workspace.id).in('email_work', list),
-            supabase.from('outreach_leads').select('email_personal').eq('workspace_id', workspace.id).in('email_personal', list),
+            db.from('outreach_leads').select('email_work').eq('workspace_id', workspace.id).in('email_work', list),
+            db.from('outreach_leads').select('email_personal').eq('workspace_id', workspace.id).in('email_personal', list),
           ]);
           if (w.error) throw w.error; if (p.error) throw p.error;
           for (const r of (w.data ?? []) as { email_work: string | null }[]) if (r.email_work) found.add(`e:${r.email_work.toLowerCase()}`);
@@ -171,7 +173,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
     try {
       setBusy('Uploading file…');
       const path = `${workspace.id}/${Date.now()}-${parsed.file.name}`;
-      const up = await supabase.storage.from('outreach-imports').upload(path, parsed.file, { contentType: 'text/csv', upsert: false });
+      const up = await db.storage.from('outreach-imports').upload(path, parsed.file, { contentType: 'text/csv', upsert: false });
       if (up.error) throw up.error;
       setBusy('Creating import job…');
       const updateOnly = mode === 'update_only';
@@ -203,6 +205,11 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
           <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-500">Up to {formatNumber(CSV_MAX_ROWS)} rows per file · 25 MB</span>
           <input ref={inputRef} type="file" accept=".csv,text/csv,.tsv,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadFile(f); }} />
         </div>
+        {IS_DEMO && (
+          <p className="text-xs text-gray-500">
+            No file at hand? <button type="button" onClick={() => loadFile(new File([DEMO_SAMPLE_CSV], DEMO_SAMPLE_CSV_NAME, { type: 'text/csv' }))} className="font-medium text-indigo-600 hover:text-indigo-800 hover:underline">Use the sample file</button> (24 fictional people).
+          </p>
+        )}
         {error && <ErrorBox message={error} />}
       </div>
     );

@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertTriangle, Sparkles } from 'lucide-react';
 import { usePoolV2 } from '@/lib/outreach/aiRepliesSequence';
 import { hubHref } from '@/lib/outreach/aiHub';

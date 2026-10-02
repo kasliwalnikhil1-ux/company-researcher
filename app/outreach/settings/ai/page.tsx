@@ -1,7 +1,11 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import ClientRedirect from '@/components/outreach/ClientRedirect';
+
+const to = () => '/outreach/ai/setup/general';
 
 // Settings → AI Personalization moved to the AI hub: the provider, key and finder keys are in AI → Setup → General, the
 // variables in AI → Setup → Personalized lines. Old links keep working for one release.
 export default function AiSettingsMovedPage() {
-  redirect('/outreach/ai/setup/general');
+  return <ClientRedirect to={to} />;
 }

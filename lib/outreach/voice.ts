@@ -6,8 +6,7 @@
 // through the `outreach-voice-admin` edge function, so nobody here ever sees the provider's ids or keys.
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getValidAccessToken } from '@/lib/api';
-import { callFn, fnUrl, OutreachError, rpc } from './api';
+import { callFn, OutreachError, rpc } from './api';
 
 // ---------------------------------------------------------------------------
 // Settings (settings.voice)
@@ -84,10 +83,7 @@ export function useInvalidateVoice(inbox: string) {
 // ---------------------------------------------------------------------------
 /** GET on the admin function with query parameters (callFn posts a JSON body). */
 async function adminGet<T>(path: string, params: Record<string, string | number | null | undefined> = {}): Promise<T> {
-  const token = await getValidAccessToken();
-  if (!token) throw new OutreachError('Your session has expired. Sign in again.', 'E_FORBIDDEN');
-  const qs = Object.entries(params).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');
-  const res = await fetch(`${fnUrl('voice-admin')}${path}${qs ? `?${qs}` : ''}`, { headers: { Authorization: `Bearer ${token}`, apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' } });
+  const res = await callFn<Response>(`voice-admin${path}` as `voice-admin/${string}`, {}, { method: 'GET', raw: true, query: params });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new OutreachError(data?.error ?? `Request failed (${res.status})`, data?.code ?? `E_HTTP_${res.status}`, data);
   return data as T;
@@ -128,9 +124,7 @@ export const voiceCheckResults = (inbox: string, run: CheckRun) =>
 
 /** The recording of a call as an object URL (streamed through our proxy; never stored by us). Throws E_RECORDING_EXPIRED when the provider no longer has it. */
 export async function fetchCallAudio(callId: string): Promise<string> {
-  const token = await getValidAccessToken();
-  if (!token) throw new OutreachError('Your session has expired. Sign in again.', 'E_FORBIDDEN');
-  const res = await fetch(`${fnUrl('voice-admin')}/voice-calls/${callId}/audio`, { headers: { Authorization: `Bearer ${token}`, apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' } });
+  const res = await callFn<Response>(`voice-admin/voice-calls/${callId}/audio`, {}, { method: 'GET', raw: true });
   if (!res.ok) { const j = await res.json().catch(() => null); throw new OutreachError(j?.error ?? 'The recording could not be loaded.', j?.code ?? `E_HTTP_${res.status}`); }
   return URL.createObjectURL(await res.blob());
 }

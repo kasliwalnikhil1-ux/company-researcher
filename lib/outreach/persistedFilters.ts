@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { kv } from '@/lib/outreach/storage';
 
 /**
  * Filters that are remembered in this browser, per workspace, and restored when the page opens again.
@@ -29,7 +30,7 @@ export function usePersistedFilters<T extends object>(name: string, ws: string |
     const { defaults: d, sanitize, overrides } = optsRef.current;
     let value = d;
     try {
-      const raw = localStorage.getItem(filtersKey(name, ws));
+      const raw = kv.getItem(filtersKey(name, ws));
       if (raw) value = (sanitize ?? sanitizeLike)(JSON.parse(raw), d);
     } catch { /* storage unavailable or unreadable */ }
     if (overrides) value = { ...value, ...overrides };
@@ -44,8 +45,8 @@ export function usePersistedFilters<T extends object>(name: string, ws: string |
           const { defaults: d, omit } = optsRef.current;
           const stored = { ...value } as Record<string, unknown>;
           for (const k of omit ?? []) stored[k as string] = (d as Record<string, unknown>)[k as string];
-          if (isDefault(stored as T, d)) localStorage.removeItem(filtersKey(name, s.ws));
-          else localStorage.setItem(filtersKey(name, s.ws), JSON.stringify(stored));
+          if (isDefault(stored as T, d)) kv.removeItem(filtersKey(name, s.ws));
+          else kv.setItem(filtersKey(name, s.ws), JSON.stringify(stored));
         } catch { /* storage unavailable */ }
       }
       return { ...s, value };

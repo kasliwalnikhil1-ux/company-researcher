@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Forward } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { chatTitle } from '@/lib/outreach/channels';
 import type { Chat, Message } from '@/lib/outreach/types';
 import { Avatar, Modal, Spinner, ErrorBox } from '@/components/outreach/ui';
@@ -19,7 +19,7 @@ export default function ForwardDialog({ chat, message, onClose, onForward }: { c
     queryKey: ['outreach', 'forward-targets', chat.sender_id],
     enabled: !!message,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_chats')
+      const { data, error } = await db.from('outreach_chats')
         .select('id, attendee_name, attendee_public_identifier, attendee_picture_url, subject, last_message_at, outreach_leads(full_name, picture_url)')
         .eq('sender_id', chat.sender_id).neq('id', chat.id).not('unipile_chat_id', 'is', null)
         .order('last_message_at', { ascending: false, nullsFirst: false }).limit(300);

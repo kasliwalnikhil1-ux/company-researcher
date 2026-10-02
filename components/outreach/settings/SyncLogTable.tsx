@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ArrowDownLeft, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
 import { Badge, Button, ErrorBox, Spinner, Table, Td, Th, Toggle, fmtDate } from '@/components/outreach/ui';

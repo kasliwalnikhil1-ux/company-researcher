@@ -9,9 +9,10 @@
 //   shared   brand name, persona, topics, knowledge, Q&A, products and handoff rules are the assistant's (Assistant
 //            tab): editing them there updates both.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertTriangle, CheckCircle2, Loader2, Mic, MicOff, Pause, Play, RefreshCw, Square, Wrench, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { IS_DEMO } from '@/lib/outreach/mode';
 import { parseError } from '@/lib/outreach/api';
 import { usePlanFeature } from '@/lib/outreach/billing';
 import {
@@ -345,7 +346,8 @@ function TestPanel({ inbox, draft, languages, domains, onClose, toast }: { inbox
   async function start() {
     setPhase('starting'); setLog([]); setSecs(0); tools.current = {};
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true }).then((st) => st.getTracks().forEach((t) => t.stop()));
+      // product tour: the test call is a sample recording (no microphone, no voice provider)
+      if (!IS_DEMO) await navigator.mediaDevices.getUserMedia({ audio: true }).then((st) => st.getTracks().forEach((t) => t.stop()));
       const [s, mod] = await Promise.all([startTestSession(inbox, { page_url: page, page_title: page.replace(/^https?:\/\/[^/]+/, '') || '/', visitor_name: visitor || undefined, language: lang, draft }), loadVoiceModule()]);
       call.current = s.call_id;
       h.current = await mod.session({

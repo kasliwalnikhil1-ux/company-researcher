@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Check, Info, Minus, Plus, ShieldCheck } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Circle, Mic, Play, Square, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { TEXT_LIMITS } from '@/lib/outreach/nodes';
 import { toMp3 } from '@/lib/outreach/audio';
@@ -62,7 +62,7 @@ export default function VoiceClipRecorder({ workspaceId, sequenceId, nodeId, sen
   const clips = useQuery({
     queryKey: key,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_voice_clips').select('*').eq('sequence_id', sequenceId).eq('node_id', nodeId);
+      const { data, error } = await db.from('outreach_voice_clips').select('*').eq('sequence_id', sequenceId).eq('node_id', nodeId);
       if (error) throw parseError(error);
       return (data ?? []) as VoiceClip[];
     },
@@ -104,7 +104,7 @@ export default function VoiceClipRecorder({ workspaceId, sequenceId, nodeId, sen
       }
       const ext = EXT[type];
       const path = `${workspaceId}/voice/${sequenceId}/${nodeId}/${senderId}.${ext}`;
-      const up = await supabase.storage.from(BUCKET).upload(path, blob, { upsert: true, contentType: type, cacheControl: '0' });
+      const up = await db.storage.from(BUCKET).upload(path, blob, { upsert: true, contentType: type, cacheControl: '0' });
       if (up.error) throw up.error;
       await rpc('save_voice_clip', { p_sequence: sequenceId, p_node_id: nodeId, p_sender: senderId, p_path: path, p_mime: type, p_duration: duration != null ? Math.round(duration * 10) / 10 : null, p_size: blob.size });
       setPlaying(null);
@@ -160,7 +160,7 @@ export default function VoiceClipRecorder({ workspaceId, sequenceId, nodeId, sen
   const play = async (clip: VoiceClip) => {
     if (playing?.senderId === clip.sender_id) { setPlaying(null); return; }
     setError(clip.sender_id, null);
-    const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(clip.path, 300);
+    const { data, error } = await db.storage.from(BUCKET).createSignedUrl(clip.path, 300);
     if (error || !data?.signedUrl) { setError(clip.sender_id, error ? parseError(error).message : 'Could not open the clip.'); return; }
     setPlaying({ senderId: clip.sender_id, url: data.signedUrl });
   };

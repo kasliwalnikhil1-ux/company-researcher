@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, HelpCircle, Loader2, Pencil, RefreshCw, ShieldCheck, SkipForward, Sparkles, Wand2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { editOf, editProblems, editToData, isFieldsVariable, sameEdit, variableFields, type FieldEdit } from '@/lib/outreach/aiFields';
@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { GenerateLinesModal } from './GenerateLinesModal';
 import { FieldValueEditor, FieldValueTable, readFieldData } from './hub/lines/FieldValueEditor';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
+import { kv } from '@/lib/outreach/storage';
 
 const PAGE_SIZE = 50;
 const BLANK_COPY = 'Nothing usable on the profile, so the fallback is used';
@@ -40,8 +41,8 @@ const GUIDE_KEY = 'outreach.ai-review.guide-hidden';
 
 function Guide() {
   // Read when the guide mounts. That is always in the browser: the view renders nothing until the workspace is known.
-  const [hidden, setHidden] = useState(() => { try { return window.localStorage.getItem(GUIDE_KEY) === '1'; } catch { return false; /* storage blocked */ } });
-  const toggle = () => { const next = !hidden; setHidden(next); try { window.localStorage.setItem(GUIDE_KEY, next ? '1' : '0'); } catch { /* storage blocked */ } };
+  const [hidden, setHidden] = useState(() => { try { return kv.getItem(GUIDE_KEY) === '1'; } catch { return false; /* storage blocked */ } });
+  const toggle = () => { const next = !hidden; setHidden(next); try { kv.setItem(GUIDE_KEY, next ? '1' : '0'); } catch { /* storage blocked */ } };
   const steps: Array<{ title: string; body: ReactNode }> = [
     { title: 'Create a variable', body: <>In <Link href={hubHref.setupLines()} className="text-indigo-700 underline">AI → Setup → Personalized lines</Link>, write what the AI should say (for example one sentence about their current role) and a fallback. You get a token like <code className="text-[11px] bg-white border border-indigo-100 rounded px-1">{'{{ai.opener|fallback}}'}</code>.</> },
     { title: 'Choose how lines get approved', body: <><strong>Review</strong> is the only approval mode today: a person approves each line. Lines waiting for a person also show in <Link href={hubHref.needsYou({ type: 'line' })} className="text-indigo-700 underline">AI → Needs you</Link>. Switch a variable <strong>Off</strong> to stop new lines.</> },
@@ -279,7 +280,7 @@ export default function AiReviewView({ batchId, generate, selection, embedded, h
   const fieldDataQ = useQuery({
     queryKey: ['outreach', ws ?? '', 'ai-review', 'field-data', fieldIds], enabled: !!ws && fieldIds.length > 0, placeholderData: (prev) => prev,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_ai_values').select('id, data').in('id', fieldIds);
+      const { data, error } = await db.from('outreach_ai_values').select('id, data').in('id', fieldIds);
       if (error) throw parseError(error);
       return new Map(((data ?? []) as Array<{ id: string; data: unknown }>).map((d) => [d.id, readFieldData(d.data)]));
     },

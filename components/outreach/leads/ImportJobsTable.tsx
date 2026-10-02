@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk, useImportJobs, useSenders } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -51,7 +51,7 @@ export function ImportJobsTable({ toast }: { toast: ToastFn }) {
   const update = async (job: ImportJob, patch: Partial<ImportJob>, msg: string) => {
     setBusy(job.id);
     try {
-      const { error } = await supabase.from('outreach_import_jobs').update(patch).eq('id', job.id);
+      const { error } = await db.from('outreach_import_jobs').update(patch).eq('id', job.id);
       if (error) throw error;
       if (workspace) qc.invalidateQueries({ queryKey: qk.imports(workspace.id) });
       toast(msg);

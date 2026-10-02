@@ -1,7 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { usePathname } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { HUB_TABS, hubHref, useNeedsYouCounts } from '@/lib/outreach/aiHub';
 import { BackLink, ErrorBox, PageHeader, PageLoader } from '@/components/outreach/ui';

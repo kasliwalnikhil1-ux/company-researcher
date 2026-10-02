@@ -3,11 +3,11 @@
 // Portal landing page. A custom domain that is not tied to one client is rewritten here (proxy.ts), and a client viewer
 // who opens /outreach/c lands here too. One visible client → go straight to its report; several → let them pick.
 import React, { useEffect } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { useQuery } from '@tanstack/react-query';
 import { Building2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { Card, EmptyState, ErrorBox, PageHeader, PageLoader } from '@/components/outreach/ui';
@@ -23,7 +23,7 @@ export default function ClientPortalIndex() {
     queryKey: ['outreach', ws ?? '', 'portal-clients'] as const,
     enabled: !!ws,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_clients').select('id, name, slug, timezone').eq('workspace_id', ws!).order('name');
+      const { data, error } = await db.from('outreach_clients').select('id, name, slug, timezone').eq('workspace_id', ws!).order('name');
       if (error) throw parseError(error);
       return (data ?? []) as Pick<Client, 'id' | 'name' | 'slug' | 'timezone'>[];
     },

@@ -2,7 +2,7 @@
 
 // Plan feature gates (pricing-billing-PRD.md §11.3): the small plan tag and the one-line note a locked feature shows next
 // to its disabled control. The server enforces every gate; these only say why a control is off and where to upgrade.
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Lock } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { planLabel, usePlanFeature, type FeatureKey } from '@/lib/outreach/billing';

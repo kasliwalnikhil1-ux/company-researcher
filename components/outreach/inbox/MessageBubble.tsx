@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus, Info, Languages } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';

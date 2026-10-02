@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams } from '@/lib/outreach/nav';
 import HubFrame from '@/components/outreach/ai/hub/HubFrame';
 import CatalogueView from '@/components/outreach/ai/hub/knowledge/CatalogueView';
 import { PageLoader } from '@/components/outreach/ui';

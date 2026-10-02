@@ -2,7 +2,7 @@
 
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
 import { Loader2, X, AlertCircle, Inbox, ChevronDown, Check, Search, ArrowLeft } from 'lucide-react';
 import type { SenderStatus, EnrollmentStatus, Intent } from '@/lib/outreach/types';

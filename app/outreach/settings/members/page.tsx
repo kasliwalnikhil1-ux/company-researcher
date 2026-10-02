@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Mail, RefreshCw, Trash2, UserPlus } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
+import { db } from '@/lib/outreach/backend';
+import { useSessionUser } from '@/lib/outreach/session';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk, useClients, useInvitations, useMembers } from '@/lib/outreach/queries';
@@ -49,7 +49,7 @@ function ClientScope({ value, clients, onChange, disabled }: { value: string[]; 
 
 export default function MembersSettingsPage() {
   const { workspace, isOwner, canWrite } = useWorkspace();
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   const ws = workspace?.id;
   const qc = useQueryClient();
   const toast = useToast();
@@ -106,7 +106,7 @@ export default function MembersSettingsPage() {
 
   async function deleteInvite(inv: Invitation) {
     setBusy(inv.id);
-    try { const { error } = await supabase.from('outreach_invitations').delete().eq('id', inv.id); if (error) throw error; toast.show('Invitation deleted.'); refreshInvites(); }
+    try { const { error } = await db.from('outreach_invitations').delete().eq('id', inv.id); if (error) throw error; toast.show('Invitation deleted.'); refreshInvites(); }
     catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   }

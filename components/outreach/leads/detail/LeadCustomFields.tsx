@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -42,7 +42,7 @@ export function LeadCustomFields({ leadId, custom, toast }: { leadId: string; cu
     try {
       const next: Record<string, unknown> = {};
       for (const r of rows) { const k = r.key.trim(); if (k) next[k] = toValue(r.value); }
-      const { error: err } = await supabase.from('outreach_leads').update({ custom: next }).eq('id', leadId);
+      const { error: err } = await db.from('outreach_leads').update({ custom: next }).eq('id', leadId);
       if (err) throw err;
       qc.invalidateQueries({ queryKey: qk.lead(leadId) });
       toast('Custom fields saved');

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Download, Search, Sparkles } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
 import {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowUpRight, RefreshCw } from 'lucide-react';
 import { adminApi, type BillingCostReport, type BillingOverview, type BillingSwitch } from '@/lib/platform/admin';

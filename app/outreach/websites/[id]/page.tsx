@@ -3,8 +3,8 @@
 // AI Website Chatbots → {inbox}: every §12 section of web-chat-PRD.md as a left-hand section list (?tab=).
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useParams, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { ArrowLeft, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

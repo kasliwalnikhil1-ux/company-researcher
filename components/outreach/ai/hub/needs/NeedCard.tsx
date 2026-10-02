@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { NEEDS_YOU_TYPE_ONE, needsYouReason, whoHref, whoText, type NeedsYouRow, type NeedsYouType } from '@/lib/outreach/aiHub';
 import { Badge, fmtDate, timeAgo } from '@/components/outreach/ui';

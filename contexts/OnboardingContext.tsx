@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, useCallback } from 'rea
 import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
 
+import { IS_DEMO } from '@/lib/outreach/mode';
 export interface OnboardingData {
   flowType?: 'fundraising' | 'b2b';
   step0?: {
@@ -129,7 +130,9 @@ interface OnboardingContextType {
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
 export const OnboardingProvider = ({ children }: { children: React.ReactNode }) => {
-  const { user } = useAuth();
+  const { user: signedIn } = useAuth();
+  // The product tour (/product-tour) runs on its own fictional owner: the visitor's own account data is never loaded there.
+  const user = IS_DEMO ? null : signedIn;
   const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
   const [loading, setLoading] = useState(true);
 

@@ -3,7 +3,7 @@
 // Query hooks and fetch helpers specific to the sequences area (kept out of lib/outreach/queries.ts to avoid
 // concurrent edits to the shared file). Query keys start with ['outreach', ws] so the shell's invalidation applies.
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { LIVE_ENROLLMENT_STATUSES, type ActionType } from '@/lib/outreach/types';
 import type { LeadFilters } from '@/lib/outreach/queries';
@@ -22,7 +22,7 @@ export function useSequenceSummary(ws: string | null | undefined) {
 
 /** Count live enrollments for a sequence (optionally only those sitting at one node). */
 export async function countInflight(sequenceId: string, nodeId?: string): Promise<number> {
-  let q = supabase.from('outreach_enrollments').select('id', { count: 'exact', head: true }).eq('sequence_id', sequenceId).in('status', LIVE_ENROLLMENT_STATUSES);
+  let q = db.from('outreach_enrollments').select('id', { count: 'exact', head: true }).eq('sequence_id', sequenceId).in('status', LIVE_ENROLLMENT_STATUSES);
   if (nodeId) q = q.eq('current_node_id', nodeId);
   const { count, error } = await q;
   if (error) throw parseError(error);
@@ -68,7 +68,7 @@ export async function fetchLeadIds(ws: string, f: LeadFilters, max = 10000, onPr
   const page = 1000;
   for (let from = 0; from < max; from += page) {
     const to = Math.min(from + page, max) - 1;
-    let q = supabase.from('outreach_leads').select(f.tag_id ? 'id, outreach_lead_tags!inner(tag_id)' : 'id').eq('workspace_id', ws);
+    let q = db.from('outreach_leads').select(f.tag_id ? 'id, outreach_lead_tags!inner(tag_id)' : 'id').eq('workspace_id', ws);
     if (f.search) q = q.or(`full_name.ilike.%${f.search}%,company.ilike.%${f.search}%,headline.ilike.%${f.search}%,public_identifier.ilike.%${f.search}%,email_work.ilike.%${f.search}%`);
     if (f.client_id) q = q.eq('client_id', f.client_id);
     if (f.list_id) q = q.eq('list_id', f.list_id);
@@ -107,7 +107,7 @@ export function useEverEnrolled(sequenceId: string | null | undefined) {
     queryKey: sqk.everEnrolled(sequenceId ?? ''),
     enabled: !!sequenceId,
     queryFn: async () => {
-      const { count, error } = await supabase.from('outreach_enrollments').select('id', { count: 'exact', head: true }).eq('sequence_id', sequenceId!);
+      const { count, error } = await db.from('outreach_enrollments').select('id', { count: 'exact', head: true }).eq('sequence_id', sequenceId!);
       if (error) throw parseError(error);
       return (count ?? 0) > 0;
     },
@@ -129,7 +129,7 @@ export function useWaitingInDelay(sequenceId: string, nodeId: string | null, ena
     enabled: enabled && !!nodeId,
     refetchInterval: 30000,
     queryFn: async () => {
-      const { count, error } = await supabase.from('outreach_enrollments').select('id', { count: 'exact', head: true })
+      const { count, error } = await db.from('outreach_enrollments').select('id', { count: 'exact', head: true })
         .eq('sequence_id', sequenceId).eq('current_node_id', nodeId!).eq('status', 'waiting_delay');
       if (error) throw parseError(error);
       return count ?? 0;
@@ -144,7 +144,7 @@ export function useFailedCount(sequenceId: string | null | undefined) {
     enabled: !!sequenceId,
     refetchInterval: 60000,
     queryFn: async () => {
-      const { count, error } = await supabase.from('outreach_enrollments').select('id', { count: 'exact', head: true }).eq('sequence_id', sequenceId!).eq('status', 'failed');
+      const { count, error } = await db.from('outreach_enrollments').select('id', { count: 'exact', head: true }).eq('sequence_id', sequenceId!).eq('status', 'failed');
       if (error) throw parseError(error);
       return count ?? 0;
     },
@@ -168,7 +168,7 @@ export function useFailedCounts(ws: string | null | undefined) {
     enabled: !!ws,
     refetchInterval: 60000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_enrollments').select('sequence_id').eq('workspace_id', ws!).eq('status', 'failed').limit(5000);
+      const { data, error } = await db.from('outreach_enrollments').select('sequence_id').eq('workspace_id', ws!).eq('status', 'failed').limit(5000);
       if (error) throw parseError(error);
       const out: Record<string, number> = {};
       for (const r of (data ?? []) as { sequence_id: string }[]) out[r.sequence_id] = (out[r.sequence_id] ?? 0) + 1;
@@ -190,7 +190,7 @@ export function useAutoEnrolRules(sequenceId: string | null | undefined) {
     queryKey: sqk.autoRules(sequenceId ?? ''),
     enabled: !!sequenceId,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_auto_enroll_rules').select('*').eq('sequence_id', sequenceId!).order('created_at');
+      const { data, error } = await db.from('outreach_auto_enroll_rules').select('*').eq('sequence_id', sequenceId!).order('created_at');
       if (error) throw parseError(error);
       return (data ?? []) as AutoEnrolRule[];
     },
@@ -204,7 +204,7 @@ export function useAutoEnrolLog(sequenceId: string | null | undefined, ruleIds: 
     enabled: !!sequenceId && ruleIds.length > 0,
     refetchInterval: 60000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_auto_enroll_log').select('*').in('rule_id', ruleIds).order('at', { ascending: false }).limit(60);
+      const { data, error } = await db.from('outreach_auto_enroll_log').select('*').in('rule_id', ruleIds).order('at', { ascending: false }).limit(60);
       if (error) throw parseError(error);
       return (data ?? []) as AutoEnrolLogRow[];
     },

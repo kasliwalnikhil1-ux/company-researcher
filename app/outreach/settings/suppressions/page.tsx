@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Ban, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { qk, useClients, useSequences } from '@/lib/outreach/queries';
@@ -133,7 +133,7 @@ export default function BlacklistsSettingsPage() {
     if (!toDelete) return;
     setBusy(toDelete.id);
     try {
-      const { data, error } = await supabase.from('outreach_suppressions').delete().eq('id', toDelete.id).select('id');
+      const { data, error } = await db.from('outreach_suppressions').delete().eq('id', toDelete.id).select('id');
       if (error) throw error;
       if (!data?.length) throw new Error('E_FORBIDDEN: only owners and managers can remove entries');
       toast.show('Removed. Matching leads can be contacted again.');

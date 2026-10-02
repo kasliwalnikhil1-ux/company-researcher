@@ -3,7 +3,7 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { Button, Select } from '@/components/outreach/ui';
 import { useMemo } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { hubHref } from '@/lib/outreach/aiHub';
 import { CONDITION_FIELDS, CONDITION_FIELD_GROUPS, aiConditionFields, conditionFieldMeta, conditionOpsFor } from '@/lib/outreach/nodes';
 import type { ConditionOp, ConditionRule } from '@/lib/outreach/types';

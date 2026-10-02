@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams } from '@/lib/outreach/nav';
 import Builder from '@/components/outreach/sequences/Builder';
 import { PageLoader } from '@/components/outreach/ui';
 

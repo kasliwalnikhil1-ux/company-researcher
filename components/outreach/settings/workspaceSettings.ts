@@ -1,6 +1,6 @@
 'use client';
 
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError } from '@/lib/outreach/api';
 
 /**
@@ -9,12 +9,12 @@ import { parseError } from '@/lib/outreach/api';
  * `ai_auto_send` was removed in migration 015; it is dropped here too in case a cached copy still carries it.
  */
 export async function saveWorkspaceSettings(workspaceId: string, patch: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const cur = await supabase.from('outreach_workspaces').select('settings').eq('id', workspaceId).single();
+  const cur = await db.from('outreach_workspaces').select('settings').eq('id', workspaceId).single();
   if (cur.error) throw parseError(cur.error);
   const next: Record<string, unknown> = { ...((cur.data?.settings as Record<string, unknown> | null) ?? {}), ...patch };
   delete next.ai_auto_send;
   for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
-  const { data, error } = await supabase.from('outreach_workspaces').update({ settings: next }).eq('id', workspaceId).select('id');
+  const { data, error } = await db.from('outreach_workspaces').update({ settings: next }).eq('id', workspaceId).select('id');
   if (error) throw parseError(error);
   if (!data?.length) throw parseError(new Error('E_FORBIDDEN: only the workspace owner can change these settings'));
   return next;

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { LogOut, Pause, Play } from 'lucide-react';
 import { parseError, rpc } from '@/lib/outreach/api';

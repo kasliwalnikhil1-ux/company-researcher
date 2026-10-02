@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useStages } from '@/lib/outreach/queries';
 import { parseError, rpc } from '@/lib/outreach/api';

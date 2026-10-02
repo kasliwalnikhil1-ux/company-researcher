@@ -4,8 +4,8 @@
 // Sources are workspace rows that a sequence links on its prompt and a website in its settings; Q&A pairs are shared
 // unless limited; unanswered questions are answered in Needs you.
 import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { Plus } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { hubHref, useHubKnowledge, type QaPair } from '@/lib/outreach/aiHub';

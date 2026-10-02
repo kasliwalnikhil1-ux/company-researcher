@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useSender } from '@/lib/outreach/queries';
 import { Avatar, BackLink, Badge, ErrorBox, HealthBar, PageLoader, StatusPill, useToast } from '@/components/outreach/ui';

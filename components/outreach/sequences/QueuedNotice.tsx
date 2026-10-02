@@ -4,7 +4,7 @@
 // The builder mounts this above the step settings panel. The "update them too / leave as they are"
 // decision itself is made in the publish dialog.
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Clock, MessageSquare, Pencil } from 'lucide-react';
 import { parseError, rpc } from '@/lib/outreach/api';

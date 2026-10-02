@@ -10,7 +10,7 @@
 //           Lines           off | review                                           outreach_ai_variables.mode
 //           Website         ai_enabled false (= Off) | ai.mode 'review' | 'first' (= Auto · Always) | 'offline_only' (= Auto · Outside hours)
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from './api';
 import { ESCALATION_LABEL, GATE_LABEL, type ReplyMode } from './aiReplies';
 import type { AiFieldValue } from './types';
@@ -257,7 +257,7 @@ export function useNeedsYou(ws: string | null | undefined, f: NeedsYouFilters, u
     queryKey: hk.needsYou(ws ?? '', { ...f, userId: f.mine ? userId : null }), enabled: !!ws && enabled && (!f.mine || !!userId),
     initialPageParam: 0, refetchInterval: 60_000, refetchOnWindowFocus: true,
     queryFn: async ({ pageParam }) => {
-      let q = supabase.from('outreach_ai_needs_you').select('*').eq('workspace_id', ws!);
+      let q = db.from('outreach_ai_needs_you').select('*').eq('workspace_id', ws!);
       if (f.type) q = q.eq('type', f.type);
       if (f.where) q = q.eq('where_id', f.where);
       if (f.mine && userId) q = q.or(`assignee_id.is.null,assignee_id.eq.${userId}`);
@@ -275,7 +275,7 @@ export function useNeedsYouCount(ws: string | null | undefined, type: NeedsYouTy
   return useQuery({
     queryKey: hk.needsYou(ws ?? '', { count: true, type, where: whereId }), enabled: !!ws && !!whereId, staleTime: 30_000,
     queryFn: async () => {
-      const { count, error } = await supabase.from('outreach_ai_needs_you').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).eq('type', type).eq('where_id', whereId!);
+      const { count, error } = await db.from('outreach_ai_needs_you').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).eq('type', type).eq('where_id', whereId!);
       if (error) throw parseError(error);
       return count ?? 0;
     },
@@ -288,7 +288,7 @@ export function useNeedsYouCount(ws: string | null | undefined, type: NeedsYouTy
 export const ACTIVITY_PAGE = 50;
 function activityQuery(ws: string, f: ActivityFilters, head = false) {
   const w = activityWindow(f);
-  let q = supabase.from('outreach_ai_outputs').select('*', head ? { count: 'exact', head: true } : { count: 'exact' }).eq('workspace_id', ws);
+  let q = db.from('outreach_ai_outputs').select('*', head ? { count: 'exact', head: true } : { count: 'exact' }).eq('workspace_id', ws);
   if (f.feature) q = q.eq('feature', f.feature);
   if (f.where) q = q.eq('where_id', f.where);
   if (w.from) q = q.gte('created_at', w.from);
@@ -489,7 +489,7 @@ export function useSuggestionProducts(suggestionId: string | null | undefined, e
   return useQuery({
     queryKey: ['outreach', 'webchat-suggestion-products', suggestionId ?? ''], enabled: !!suggestionId && enabled, staleTime: 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_webchat_ai_suggestions').select('products').eq('id', suggestionId!).maybeSingle();
+      const { data, error } = await db.from('outreach_webchat_ai_suggestions').select('products').eq('id', suggestionId!).maybeSingle();
       if (error) return [] as ProductCard[];
       return (Array.isArray((data as { products?: unknown } | null)?.products) ? (data as { products: ProductCard[] }).products : []) as ProductCard[];
     },
@@ -500,7 +500,7 @@ export function useWebchatSuggestion(chatId: string | null | undefined, enabled:
   return useQuery({
     queryKey: hk.suggestion(chatId ?? ''), enabled: !!chatId && enabled, refetchInterval: 5000,
     queryFn: async () => {
-      const read = (cols: string) => supabase.from('outreach_webchat_ai_suggestions').select(cols).eq('chat_id', chatId!).in('status', ['pending', 'waiting']).order('created_at', { ascending: false }).limit(1);
+      const read = (cols: string) => db.from('outreach_webchat_ai_suggestions').select(cols).eq('chat_id', chatId!).in('status', ['pending', 'waiting']).order('created_at', { ascending: false }).limit(1);
       let { data, error } = await read(`${SUGGESTION_COLUMNS}, products`);
       if (error && /products/.test(error.message ?? '')) ({ data, error } = await read(SUGGESTION_COLUMNS));   // a database from before migration 068
       if (error) throw parseError(error);

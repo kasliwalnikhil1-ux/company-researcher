@@ -5,7 +5,7 @@
 // block actions, data export. Replaces LeadPanel for webchat conversations (the lead itself opens from the link).
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Ban, Download, ExternalLink, Globe, Link2, MapPin, Monitor, ShieldCheck, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rpc } from '@/lib/outreach/api';

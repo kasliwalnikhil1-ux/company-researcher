@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { hubHref } from '@/lib/outreach/aiHub';

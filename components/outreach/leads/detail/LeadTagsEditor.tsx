@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk, useTags } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -24,7 +24,7 @@ export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagI
   const add = async (tagId: string) => {
     setBusy(tagId);
     try {
-      const { error } = await supabase.from('outreach_lead_tags').upsert({ lead_id: leadId, tag_id: tagId }, { onConflict: 'lead_id,tag_id', ignoreDuplicates: true });
+      const { error } = await db.from('outreach_lead_tags').upsert({ lead_id: leadId, tag_id: tagId }, { onConflict: 'lead_id,tag_id', ignoreDuplicates: true });
       if (error) throw error;
       invalidate(); setAdding(false);
     } catch (e) { toast(parseError(e).message, 'error'); }
@@ -33,7 +33,7 @@ export function LeadTagsEditor({ leadId, tagIds, toast }: { leadId: string; tagI
   const remove = async (tagId: string) => {
     setBusy(tagId);
     try {
-      const { error } = await supabase.from('outreach_lead_tags').delete().eq('lead_id', leadId).eq('tag_id', tagId);
+      const { error } = await db.from('outreach_lead_tags').delete().eq('lead_id', leadId).eq('tag_id', tagId);
       if (error) throw error;
       invalidate();
     } catch (e) { toast(parseError(e).message, 'error'); }

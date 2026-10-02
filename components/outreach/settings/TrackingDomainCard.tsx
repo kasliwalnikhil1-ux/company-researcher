@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, Circle, Globe, Plus, Trash2 } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

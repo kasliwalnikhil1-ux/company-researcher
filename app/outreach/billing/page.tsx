@@ -1,11 +1,11 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarClock, CheckCircle2, CreditCard, ExternalLink, Plus, XCircle } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import {
@@ -84,7 +84,7 @@ function BillingInner() {
   const usage = useQuery({
     queryKey: ['outreach', ws ?? '', 'billing-usage', since], enabled: !!ws && isOwner,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_billing_usage').select('day, accounts, accounts_billed, active_senders, active_mailboxes').eq('workspace_id', ws!).gte('day', since).order('day');
+      const { data, error } = await db.from('outreach_billing_usage').select('day, accounts, accounts_billed, active_senders, active_mailboxes').eq('workspace_id', ws!).gte('day', since).order('day');
       if (error) throw parseError(error);
       return (data ?? []) as Array<{ day: string; accounts: number; accounts_billed: number | null; active_senders: number; active_mailboxes: number }>;
     },

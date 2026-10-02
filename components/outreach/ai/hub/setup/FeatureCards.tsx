@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { FileCheck2, Globe, MessageSquareReply, PenLine, Settings2, UserRound, type LucideIcon } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';

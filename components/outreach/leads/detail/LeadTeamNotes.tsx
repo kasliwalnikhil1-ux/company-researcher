@@ -2,7 +2,7 @@
 
 // Lead page: private notes from every conversation of the lead (private-notes-PRD.md §7.2), marked 🔒, each linking to
 // its conversation. Team-only notes never show to client viewers (the RPC applies the same rule as the inbox).
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Lock, ExternalLink, Bot, Cog } from 'lucide-react';
 import { Card, EmptyState, ErrorBox, Spinner, fmtDate } from '@/components/outreach/ui';
 import { channelLabel } from '@/lib/outreach/channels';
@@ -10,11 +10,11 @@ import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { noteLink, useLeadTeamNotes } from '@/lib/outreach/notes';
 import { parseError } from '@/lib/outreach/api';
 import NoteBody from '@/components/outreach/inbox/notes/NoteBody';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSessionUser } from '@/lib/outreach/session';
 
 export default function LeadTeamNotes({ leadId }: { leadId: string }) {
   const q = useLeadTeamNotes(leadId, 50);
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   return (
     <Card title={<span className="inline-flex items-center gap-1.5"><Lock className="w-4 h-4 text-amber-600" /> Team notes</span>} className="[&>div:last-child]:p-0">
       {q.isLoading && <Spinner className="py-6" />}

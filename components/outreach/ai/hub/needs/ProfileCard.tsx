@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { PenLine, Trash2 } from 'lucide-react';
 import { discardProfileDraft } from '@/lib/outreach/aiHub';
 import { Button } from '@/components/outreach/ui';

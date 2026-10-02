@@ -1,7 +1,7 @@
 'use client';
 
 // QA score beside the acceptance rate per sender (PRD §8.4): the evidence for re-weighting the checks.
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Avatar, EmptyState, HealthBar, Spinner, Table, Td, Th } from '@/components/outreach/ui';
 import { useQaCorrelation } from '@/lib/outreach/profile';
 import { QaScoreBadge } from './QaCard';

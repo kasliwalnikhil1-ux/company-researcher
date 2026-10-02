@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Paperclip, Send, X, Lock, CalendarCheck, Smile, MessageSquare, ShoppingBag } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk, useMessages } from '@/lib/outreach/queries';
 import { useAgentTyping } from '@/lib/outreach/webchat';
@@ -180,7 +180,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       const paths: string[] = [];
       for (const f of files) {
         const path = `${workspaceId}/${chat.id}/${Date.now()}-${safeName(f.name)}`;
-        const { error } = await supabase.storage.from('outreach-attachments').upload(path, f, { contentType: f.type || undefined, upsert: false });
+        const { error } = await db.storage.from('outreach-attachments').upload(path, f, { contentType: f.type || undefined, upsert: false });
         if (error) throw new Error(`Upload failed for ${f.name}: ${error.message}`);
         paths.push(path);
       }

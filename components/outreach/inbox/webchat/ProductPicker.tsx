@@ -3,7 +3,7 @@
 // Website chats: the agent's Product button (web-chat-buttons-products-changes.md §9). Search the website's catalogues,
 // pick 1 to 6 products, send them as cards. The cards are built on the server from the catalogue, never from text.
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Check, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';

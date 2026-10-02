@@ -2,7 +2,7 @@
 
 // "Replies  [ Off | Review | Auto ]" plus the notices that explain what will really happen (changes doc §4.1).
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertTriangle, Clock, Info, Sparkles } from 'lucide-react';
 import type { ReplyMode } from '@/lib/outreach/aiReplies';
 import { MODES, MODE_LABEL_V2, useSetSequenceAiReplies, type AiRepliesSetResult, type SequenceAiSettings } from '@/lib/outreach/aiRepliesSequence';

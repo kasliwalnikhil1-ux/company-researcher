@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Repeat, Trash2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useLists, useSenders } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -39,7 +39,7 @@ export function ImportSchedulesTable({ toast }: { toast: ToastFn }) {
     // optimistic: the toggle should not lag behind the click
     if (ws) qc.setQueryData<ImportSchedule[]>(ik.importSchedules(ws), (old) => old?.map((x) => (x.id === s.id ? { ...x, active } : x)));
     try {
-      const { error } = await supabase.from('outreach_import_schedules').update({ active }).eq('id', s.id);
+      const { error } = await db.from('outreach_import_schedules').update({ active }).eq('id', s.id);
       if (error) throw error;
       toast(active ? 'Repeating import switched on' : 'Repeating import paused. Imports that already started keep running.');
     } catch (e) { toast(parseError(e).message, 'error'); }
@@ -50,7 +50,7 @@ export function ImportSchedulesTable({ toast }: { toast: ToastFn }) {
     if (!remove) return;
     setBusy(remove.id);
     try {
-      const { error } = await supabase.from('outreach_import_schedules').delete().eq('id', remove.id);
+      const { error } = await db.from('outreach_import_schedules').delete().eq('id', remove.id);
       if (error) throw error;
       toast('Repeating import deleted');
       setRemove(null);

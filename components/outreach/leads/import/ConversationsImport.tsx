@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSenders } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -28,7 +28,7 @@ export function ConversationsImport({ toast, onCreated }: { toast: ToastFn; onCr
   const countQ = useQuery({
     queryKey: ['outreach', ws ?? '', 'conversations-without-lead', senderId], enabled: !!ws,
     queryFn: async () => {
-      let q = supabase.from('outreach_chats').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).is('lead_id', null).eq('provider', 'LINKEDIN');
+      let q = db.from('outreach_chats').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).is('lead_id', null).eq('provider', 'LINKEDIN');
       if (senderId) q = q.eq('sender_id', senderId);
       const { count, error: err } = await q;
       if (err) throw parseError(err);

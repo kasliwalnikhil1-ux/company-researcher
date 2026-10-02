@@ -3,6 +3,7 @@
 // A private note in the conversation timeline (private-notes-PRD.md §5): amber card, 🔒 label, author, time, Visible to
 // client tag, mention chips, attachments, Seen by, edit / delete / make task / copy link / visibility menu, deleted
 // placeholder, revision history for the author and managers. System / AI notes get a grey tint.
+import { modeHref } from '@/lib/outreach/mode';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Lock, MoreHorizontal, Pencil, Trash2, CheckSquare, Link2, Eye, EyeOff, History, Paperclip, Download, Bot, Cog, Loader2 } from 'lucide-react';
@@ -115,7 +116,7 @@ export default function NoteBubble(p: NoteBubbleProps) {
 
   const run = async (label: string, fn: () => Promise<void>) => { setBusy(label); try { await fn(); } catch (e) { p.onError((e as Error)?.message ?? 'Something went wrong'); } finally { setBusy(null); } };
   const copyLink = async () => {
-    const url = `${window.location.origin}${noteLink(chat.id, note.id)}`;
+    const url = `${window.location.origin}${modeHref(noteLink(chat.id, note.id))}`;
     try { await navigator.clipboard.writeText(url); p.onNotice('Link copied'); } catch { p.onError('Could not copy the link'); }
   };
 

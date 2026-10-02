@@ -1,6 +1,10 @@
-import { redirect } from 'next/navigation';
+'use client';
+
+import ClientRedirect from '@/components/outreach/ClientRedirect';
+
+const to = () => '/outreach/ai/needs-you';
 
 // AI hub: the first page is the queue of things that wait for a person.
 export default function AiHubIndexPage() {
-  redirect('/outreach/ai/needs-you');
+  return <ClientRedirect to={to} />;
 }

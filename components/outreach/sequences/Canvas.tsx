@@ -112,6 +112,7 @@ export const OutreachNode = memo(function OutreachNode({ data, selected }: NodeP
         selected ? 'border-indigo-500 ring-2 ring-indigo-200 shadow-md' : issue === 'error' ? 'border-red-400' : issue === 'warning' ? 'border-amber-400' : 'border-gray-200',
       )}
       style={{ width: NODE_W }}
+      data-tour={node.type === 'send_message' ? 'builder-message-step' : undefined}
     >
       {!isStart && <Handle type="target" position={Position.Top} className={cn(HANDLE_CLS, '!bg-gray-400')} />}
       {/* delay strip: "Wait 3 days, then" */}

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { usePathname, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { CalendarClock, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

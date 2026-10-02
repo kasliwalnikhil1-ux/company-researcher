@@ -8,7 +8,7 @@
 // managers); the mode has its own RPC (useVariableSetMode in lib/outreach/aiHub.ts) because switching off also stops queued lines.
 import { useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { hk } from '@/lib/outreach/aiHub';
 import { fieldDraftOf, fieldListProblems, fieldOf, hasFieldProblems, isFieldsVariable, sameFields, variableFields, type FieldDraft, type FieldProblem } from '@/lib/outreach/aiFields';
 import { ik, type AiVariable } from '@/lib/outreach/intel';
@@ -76,20 +76,20 @@ export async function saveVariable(ws: string, d: VariableDraft): Promise<void> 
     : { name: d.name.trim(), prompt: d.prompt.trim(), fallback: d.fallback.trim(), needs_posts: d.needs_posts, max_chars: Number(d.max_chars) };
   if (d.id) {
     // the key is fixed after creation: sequences already refer to it
-    const { data, error } = await supabase.from('outreach_ai_variables').update({ ...row, updated_at: new Date().toISOString() }).eq('id', d.id).select('id');
+    const { data, error } = await db.from('outreach_ai_variables').update({ ...row, updated_at: new Date().toISOString() }).eq('id', d.id).select('id');
     if (error) throw error;
     if (!data?.length) throw new Error('E_FORBIDDEN: only owners and managers can edit variables');
     return;
   }
-  const { data: u } = await supabase.auth.getUser();
+  const { data: u } = await db.auth.getUser();
   const created = typed ? { output: 'fields', fallback: '', max_chars: FIELDS_MAX_CHARS } : {};
-  const { error } = await supabase.from('outreach_ai_variables').insert({ ...row, ...created, key: d.key, workspace_id: ws, created_by: u.user?.id ?? null });
+  const { error } = await db.from('outreach_ai_variables').insert({ ...row, ...created, key: d.key, workspace_id: ws, created_by: u.user?.id ?? null });
   if (error) throw error;
 }
 
 /** Deletes the variable and every line written for it. */
 export async function deleteVariable(id: string): Promise<void> {
-  const { data, error } = await supabase.from('outreach_ai_variables').delete().eq('id', id).select('id');
+  const { data, error } = await db.from('outreach_ai_variables').delete().eq('id', id).select('id');
   if (error) throw error;
   if (!data?.length) throw new Error('E_FORBIDDEN: only owners and managers can delete variables');
 }

@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { X, ExternalLink, Linkedin, MapPin, Building2, Plus, UserPlus, Ban, CheckSquare, Repeat, Pause, Play, LogOut, Loader2, Phone } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { rpc, parseError } from '@/lib/outreach/api';
 import { qk, useLead, useSequences, useSenders, useStages, useTags, useTasks } from '@/lib/outreach/queries';
 import { ListPicker } from '@/components/outreach/leads/ListPicker';
@@ -24,6 +24,7 @@ import type { LeadConsent } from '@/lib/outreach/types';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import LeadNotesPanel from './ai/LeadNotesPanel';
+import { kv } from '@/lib/outreach/storage';
 
 export interface LeadPanelProps {
   chat: ChatDetail;
@@ -55,7 +56,7 @@ const TAB_STORAGE_KEY = 'outreach.inbox.leadPanelTab';
 
 function readStoredTab(): PanelTab {
   try {
-    const v = window.localStorage.getItem(TAB_STORAGE_KEY);
+    const v = kv.getItem(TAB_STORAGE_KEY);
     if (PANEL_TABS.some((t) => t.key === v)) return v as PanelTab;
   } catch { /* storage blocked */ }
   return 'contact';
@@ -102,7 +103,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const [tab, setTabState] = useState<PanelTab>(readStoredTab);
   const setTab = (t: PanelTab) => {
     setTabState(t);
-    try { window.localStorage.setItem(TAB_STORAGE_KEY, t); } catch { /* storage blocked */ }
+    try { kv.setItem(TAB_STORAGE_KEY, t); } catch { /* storage blocked */ }
   };
   const pendingFocus = useRef<'tag' | 'stage' | null>(null);
   const focusField = (target: 'tag' | 'stage') => {
@@ -168,7 +169,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
     const res = await rpc<Array<{ id: string; created: boolean }> | { id: string; created: boolean }>('upsert_lead', { p_ws: workspaceId, p_lead, p_source: 'inbox' });
     const row = Array.isArray(res) ? res[0] : res;
     if (!row?.id) throw new Error('Lead was not created');
-    const { error } = await supabase.from('outreach_chats').update({ lead_id: row.id }).eq('id', chat.id);
+    const { error } = await db.from('outreach_chats').update({ lead_id: row.id }).eq('id', chat.id);
     if (error) throw parseError(error);
   }, 'Lead created and linked to this conversation');
 
@@ -196,30 +197,30 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
     await run('tag', async () => {
       let tag: Tag | undefined = tagsQ.data?.find((t) => t.name.toLowerCase() === name.toLowerCase());
       if (!tag) {
-        const { data, error } = await supabase.from('outreach_tags').insert({ workspace_id: workspaceId, name }).select('*').single();
+        const { data, error } = await db.from('outreach_tags').insert({ workspace_id: workspaceId, name }).select('*').single();
         if (error) throw parseError(error);
         tag = data as Tag;
         qc.invalidateQueries({ queryKey: qk.tags(workspaceId) });
       }
       if (leadQ.data?.tagIds.includes(tag.id)) return;
-      const { error } = await supabase.from('outreach_lead_tags').insert({ lead_id: lead.id, tag_id: tag.id });
+      const { error } = await db.from('outreach_lead_tags').insert({ lead_id: lead.id, tag_id: tag.id });
       if (error) throw parseError(error);
     });
     setTagInput('');
   };
   const removeTag = (tagId: string) => lead && run(`untag-${tagId}`, async () => {
-    const { error } = await supabase.from('outreach_lead_tags').delete().eq('lead_id', lead.id).eq('tag_id', tagId);
+    const { error } = await db.from('outreach_lead_tags').delete().eq('lead_id', lead.id).eq('tag_id', tagId);
     if (error) throw parseError(error);
   });
   const updateLead = (patch: Record<string, unknown>, success?: string) => lead && run('lead', async () => {
-    const { error } = await supabase.from('outreach_leads').update(patch).eq('id', lead.id);
+    const { error } = await db.from('outreach_leads').update(patch).eq('id', lead.id);
     if (error) throw parseError(error);
   }, success);
 
   const createTask = async (t: CreateTaskInput) => {
     if (!lead) return;
     await run('task', async () => {
-      const { error } = await supabase.from('outreach_tasks').insert({
+      const { error } = await db.from('outreach_tasks').insert({
         workspace_id: workspaceId, client_id: lead.client_id ?? chat.client_id, kind: 'follow_up', lead_id: lead.id, sender_id: chat.sender_id, chat_id: chat.id,
         title: t.title, body: t.body, due_at: t.due_at, assigned_to: t.assigned_to,
       });

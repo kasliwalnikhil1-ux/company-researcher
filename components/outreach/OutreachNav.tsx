@@ -1,7 +1,7 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { usePathname } from '@/lib/outreach/nav';
 import { createPortal } from 'react-dom';
 import { useState } from 'react';
 import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, CreditCard, Settings, BarChart3, Sparkles, Bot, type LucideIcon } from 'lucide-react';

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, MonitorSmartphone, RefreshCw, Save, ShieldCheck, Unplug, XCircle, CalendarClock } from 'lucide-react';
 import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';

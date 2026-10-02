@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { ArrowUpRight, Wrench } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useIsLocalhost } from '@/lib/outreach/platformAdmin';

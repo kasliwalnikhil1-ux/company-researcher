@@ -3,7 +3,7 @@
 // Website assistant → {website} → Assistant → Products (web-chat-buttons-products-changes.md §7). The assistant
 // recommends 1 to 6 products of the picked catalogues as cards. Saved as settings.ai.products (validated in 068);
 // "Recommend products" needs a catalogue that has products in it.
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery } from '@tanstack/react-query';
 import { rpc } from '@/lib/outreach/api';
 import { hubHref } from '@/lib/outreach/aiHub';

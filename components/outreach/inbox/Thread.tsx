@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat, NotebookPen, Eye, EyeOff } from 'lucide-react';
 import NoteBubble from './notes/NoteBubble';
 import { isNoteModeShortcut, readComposerMode, readShowNotes, writeComposerMode, writeShowNotes, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
 import { channelLabel, chatTitle, isMailProvider } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';

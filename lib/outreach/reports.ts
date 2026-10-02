@@ -6,7 +6,7 @@
 
 import { useEffect } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 import { qk } from './queries';
 import type { Provider, SenderStatus } from './types';
@@ -383,10 +383,10 @@ export function useAlertsRealtime(ws: string | null | undefined) {
   const qc = useQueryClient();
   useEffect(() => {
     if (!ws) return;
-    const ch = supabase.channel(`outreach-alerts:${ws}`)
+    const ch = db.channel(`outreach-alerts:${ws}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_alerts', filter: `workspace_id=eq.${ws}` }, () => { qc.invalidateQueries({ queryKey: qk.dashboard(ws) }); })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => { db.removeChannel(ch); };
   }, [ws, qc]);
 }
 
@@ -394,7 +394,7 @@ export function useAlertsRealtime(ws: string | null | undefined) {
 export function useSavedRanges(ws: string | null | undefined) {
   return useQuery({
     queryKey: rk(ws ?? '', 'saved-ranges'), enabled: !!ws,
-    queryFn: async () => { const { data, error } = await supabase.from('outreach_saved_ranges').select('*').eq('workspace_id', ws!).order('created_at', { ascending: false }); if (error) throw parseError(error); return (data ?? []) as SavedRange[]; },
+    queryFn: async () => { const { data, error } = await db.from('outreach_saved_ranges').select('*').eq('workspace_id', ws!).order('created_at', { ascending: false }); if (error) throw parseError(error); return (data ?? []) as SavedRange[]; },
   });
 }
 export function useSaveRange(ws: string | null | undefined) {
@@ -407,7 +407,7 @@ export function useSaveRange(ws: string | null | undefined) {
 export function useDeleteRange(ws: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('outreach_saved_ranges').delete().eq('id', id); if (error) throw parseError(error); },
+    mutationFn: async (id: string) => { const { error } = await db.from('outreach_saved_ranges').delete().eq('id', id); if (error) throw parseError(error); },
     onSuccess: () => qc.invalidateQueries({ queryKey: rk(ws ?? '', 'saved-ranges') }),
   });
 }
@@ -416,7 +416,7 @@ export function useDeleteRange(ws: string | null | undefined) {
 export function useReportSchedules(ws: string | null | undefined, enabled: boolean) {
   return useQuery({
     queryKey: rk(ws ?? '', 'schedules'), enabled: !!ws && enabled,
-    queryFn: async () => { const { data, error } = await supabase.from('outreach_report_schedules').select('*').eq('workspace_id', ws!).order('created_at'); if (error) throw parseError(error); return (data ?? []) as ReportSchedule[]; },
+    queryFn: async () => { const { data, error } = await db.from('outreach_report_schedules').select('*').eq('workspace_id', ws!).order('created_at'); if (error) throw parseError(error); return (data ?? []) as ReportSchedule[]; },
   });
 }
 export type SchedulePatch = Partial<Pick<ReportSchedule, 'cadence' | 'recipients' | 'include_client_viewers' | 'active'>>;
@@ -425,8 +425,8 @@ export function useSaveSchedule(ws: string | null | undefined) {
   return useMutation({
     // The unique key is an expression index, so upsert is "update by id, else insert".
     mutationFn: async (v: { id?: string; kind: ScheduleKind; client_id: string | null; patch: SchedulePatch }) => {
-      if (v.id) { const { error } = await supabase.from('outreach_report_schedules').update(v.patch).eq('id', v.id); if (error) throw parseError(error); return; }
-      const { error } = await supabase.from('outreach_report_schedules').insert({ workspace_id: ws, kind: v.kind, client_id: v.client_id, ...v.patch });
+      if (v.id) { const { error } = await db.from('outreach_report_schedules').update(v.patch).eq('id', v.id); if (error) throw parseError(error); return; }
+      const { error } = await db.from('outreach_report_schedules').insert({ workspace_id: ws, kind: v.kind, client_id: v.client_id, ...v.patch });
       if (error) throw parseError(error);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: rk(ws ?? '', 'schedules') }),
@@ -435,7 +435,7 @@ export function useSaveSchedule(ws: string | null | undefined) {
 export function useDeleteSchedule(ws: string | null | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => { const { error } = await supabase.from('outreach_report_schedules').delete().eq('id', id); if (error) throw parseError(error); },
+    mutationFn: async (id: string) => { const { error } = await db.from('outreach_report_schedules').delete().eq('id', id); if (error) throw parseError(error); },
     onSuccess: () => qc.invalidateQueries({ queryKey: rk(ws ?? '', 'schedules') }),
   });
 }

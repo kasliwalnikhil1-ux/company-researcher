@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, Copy, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError, rpc } from '@/lib/outreach/api';
+import { db } from '@/lib/outreach/backend';
 import { useClients, useMembers } from '@/lib/outreach/queries';
 import { Badge, Button, Card, Spinner, fmtDate, timeAgo } from '@/components/outreach/ui';
 import { CopyButton, CopyField, ConfirmModal, Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
@@ -16,7 +17,7 @@ import { imageHosts, useProductSearch } from '@/lib/outreach/catalogue';
 import { ProductImage } from '@/components/outreach/products/ProductCards';
 import WidgetPreview from './WidgetPreview';
 import { ENDED_BY, fmtCallLength, voiceLanguage, type VoiceReport } from '@/lib/outreach/voice';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import ModeSwitch from '@/components/outreach/ai/hub/ModeSwitch';
 import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
 import { MODE_LINE, WEBSITE_WHEN_LABEL, hubHref, websiteHubMode, type HubMode, type WebsiteWhen } from '@/lib/outreach/aiHub';
@@ -143,7 +144,7 @@ export function AppearanceSection(p: SectionProps) {
         <div className="mt-3"><Label hint="advanced, scoped to the widget; @import and external url() are stripped">Custom CSS</Label><textarea className={cn(field, 'font-mono text-xs')} rows={5} value={draft.custom_css} onChange={(e) => set({ custom_css: e.target.value })} disabled={!p.canEdit} placeholder=".hd { border-radius: 0 }" /></div>
         <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { appearance: draft } })} />
       </Card>
-      <div className="xl:sticky xl:top-4 self-start"><WidgetPreview settings={preview} online={p.inbox.availability.online} brandFallback={p.inbox.name} /></div>
+      <div className="xl:sticky xl:top-4 self-start"><WidgetPreview settings={preview} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} /></div>
     </div>
   );
 }
@@ -218,7 +219,7 @@ export function LauncherSection(p: SectionProps) {
         )}
         <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { launcher: draft.launcher, popup: draft.popup } })} />
       </Card>
-      <div className="xl:sticky xl:top-4 self-start"><WidgetPreview settings={{ ...p.inbox.settings, launcher: draft.launcher, popup: draft.popup }} online={p.inbox.availability.online} brandFallback={p.inbox.name} /></div>
+      <div className="xl:sticky xl:top-4 self-start"><WidgetPreview settings={{ ...p.inbox.settings, launcher: draft.launcher, popup: draft.popup }} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} /></div>
     </div>
   );
 }
@@ -530,7 +531,7 @@ export function SecuritySection(p: SectionProps) {
   const [confirm, setConfirm] = useState(false);
   const [reveal, setReveal] = useState(false);
   const [lang, setLang] = useState(0);
-  const blocks = useQuery({ queryKey: ['outreach', 'webchat', 'inbox', p.inbox.id, 'blocks'], queryFn: async () => { const { supabase } = await import('@/utils/supabase/client'); const { data } = await supabase.from('outreach_webchat_blocks').select('*').eq('inbox_id', p.inbox.id).order('created_at', { ascending: false }); return (data ?? []) as Array<{ kind: string; value: string; note: string | null; created_at: string }>; } });
+  const blocks = useQuery({ queryKey: ['outreach', 'webchat', 'inbox', p.inbox.id, 'blocks'], queryFn: async () => { const { data } = await db.from('outreach_webchat_blocks').select('*').eq('inbox_id', p.inbox.id).order('created_at', { ascending: false }); return (data ?? []) as Array<{ kind: string; value: string; note: string | null; created_at: string }>; } });
   const [blockKind, setBlockKind] = useState<'country' | 'ip_hash'>('country');
   const [blockValue, setBlockValue] = useState('');
   const addBlock = async () => { try { await rpc('webchat_block', { p_inbox: p.inbox.id, p_kind: blockKind, p_value: blockValue.trim(), p_note: null }); setBlockValue(''); blocks.refetch(); } catch (e) { p.toast(parseError(e).message, 'error'); } };

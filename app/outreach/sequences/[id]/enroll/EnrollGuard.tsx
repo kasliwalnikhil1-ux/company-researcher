@@ -4,11 +4,11 @@
 // (RPC enroll_leads) and "generate first lines" (RPC ai_generate_request). Eligibility is never worked out here:
 // every number on screen comes from the database.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Sparkles, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { sequenceAiKeys } from '@/lib/outreach/graph';
 import { SEQUENCE_ASSIGNMENTS, type AiGenerateResult, type AiVariable, type EnrollPreview, type EnrollResult, type Graph, type Sequence } from '@/lib/outreach/types';
@@ -139,7 +139,7 @@ export function useSequenceAiVariables(ws: string | null | undefined, graph: Gra
   const q = useQuery({
     queryKey: ['outreach', ws ?? '', 'ai_variables'], enabled: !!ws && keys.length > 0, staleTime: 60000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_ai_variables').select('*').eq('workspace_id', ws!).order('name');
+      const { data, error } = await db.from('outreach_ai_variables').select('*').eq('workspace_id', ws!).order('name');
       if (error) throw parseError(error);
       return (data ?? []) as AiVariable[];
     },

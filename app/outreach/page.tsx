@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Contact, FileWarning, GitBranch, Hand, Inbox, MessageSquare, PauseCircle, Plus, Sparkles, Upload, CheckSquare, UserMinus, Wand2, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -262,7 +262,7 @@ export default function OutreachDashboardPage() {
 
       {emptyWorkspace ? null : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6" data-tour="dashboard-stats">
             <Stat label="Sent today" value={fmtInt(d.sent_today)} hint="All senders, today in the workspace timezone" />
             <Stat label="Queued (next 24h)" value={fmtInt(d.queued_today)} />
             <Stat label="Live enrollments" value={fmtInt(d.enrollments_live)} />

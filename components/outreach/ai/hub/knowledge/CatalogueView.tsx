@@ -4,7 +4,7 @@
 // table. No product editing: the store is the source of truth. Two things are the team's own and survive every sync:
 // Hide from AI (never recommended) and Pin for… (a few keywords; a pinned product is boosted for questions with them).
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ArrowLeft, EyeOff, Loader2, Pin, RefreshCw, Search, Upload } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { hubHref } from '@/lib/outreach/aiHub';

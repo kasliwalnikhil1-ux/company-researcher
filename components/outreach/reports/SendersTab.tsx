@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ChevronDown, ChevronRight, Contact } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { reasonText } from '@/lib/outreach/reasons';

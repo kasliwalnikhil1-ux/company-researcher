@@ -2,7 +2,7 @@
 
 // "Why isn't this sending?" (plan item 3). Renders rpc why_not_sending for a sequence, a sender or one enrolment.
 // Exported for the sender page and the lead panel: <WhyNotSendingDialog open onClose sequenceId|senderId|enrollmentId />.
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertOctagon, CheckCircle2, Clock, Info, RefreshCw } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
 import { Button, ErrorBox, fmtDate, Modal, Spinner } from '@/components/outreach/ui';

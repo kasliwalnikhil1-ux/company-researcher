@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { FEATURE_LABEL, hubHref } from '@/lib/outreach/aiHub';
 import { cn } from '@/lib/utils';
 

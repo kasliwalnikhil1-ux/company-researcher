@@ -1,6 +1,7 @@
 'use client';
 
 import { useSyncExternalStore } from 'react';
+import { IS_DEMO } from './mode';
 
 /**
  * Platform-operator screens live under Settings → Admin (/outreach/settings/admin) and are shown ONLY when the app runs
@@ -18,9 +19,9 @@ export function isLocalHost(hostname: string): boolean {
 
 const noSubscribe = () => () => {};
 
-/** null until the browser is known (SSR / hydration), then true only on localhost. */
+/** null until the browser is known (SSR / hydration), then true only on localhost. Never in the product tour. */
 export function useIsLocalhost(): boolean | null {
-  return useSyncExternalStore(noSubscribe, () => isLocalHost(window.location.hostname), () => null);
+  return useSyncExternalStore(noSubscribe, () => !IS_DEMO && isLocalHost(window.location.hostname), () => null);
 }
 
 /** True only when the page is served from localhost. False during SSR and on every deployed host. */

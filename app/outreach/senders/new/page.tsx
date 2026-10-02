@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, KeyRound, Linkedin, Mail, MonitorSmartphone } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients } from '@/lib/outreach/queries';

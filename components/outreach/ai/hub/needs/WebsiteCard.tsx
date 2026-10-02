@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { MessageSquare, Pencil, Send } from 'lucide-react';
 import { sendWebsiteSuggestion, useSuggestionProducts } from '@/lib/outreach/aiHub';
 import ProductCards from '@/components/outreach/products/ProductCards';

@@ -13,6 +13,7 @@ import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
 import { useCountry } from './CountryContext';
 
+import { IS_DEMO } from '@/lib/outreach/mode';
 export interface CompanyNews {
   answer: string;
   citations: string[];
@@ -116,7 +117,9 @@ const buildCompanyTextSearchFilter = (rawQuery: string): string | null => {
 };
 
 export const CompaniesProvider = ({ children }: { children: ReactNode }) => {
-  const { user } = useAuth();
+  const { user: signedIn } = useAuth();
+  // The product tour (/product-tour) runs on its own fictional owner: the visitor's own account data is never loaded there.
+  const user = IS_DEMO ? null : signedIn;
   const userId = user?.id ?? null;
 
   const { getEffectiveCountryCode } = useCountry();

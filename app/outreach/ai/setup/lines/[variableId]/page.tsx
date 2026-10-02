@@ -1,6 +1,6 @@
 'use client';
 
-import { useParams } from 'next/navigation';
+import { useParams } from '@/lib/outreach/nav';
 import HubFrame from '@/components/outreach/ai/hub/HubFrame';
 import VariableEditor from '@/components/outreach/ai/hub/lines/VariableEditor';
 import { hubHref } from '@/lib/outreach/aiHub';

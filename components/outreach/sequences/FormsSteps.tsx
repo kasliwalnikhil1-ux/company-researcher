@@ -2,7 +2,7 @@
 
 // Forms for the steps added by the product plan: refresh profile, follow, find email, call task, voice note, A/B split.
 import { useEffect } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Plus, Trash2 } from 'lucide-react';
 import { normalizeNode } from '@/lib/outreach/graph';
 import { syncNodeBranches } from '@/lib/outreach/nodes';

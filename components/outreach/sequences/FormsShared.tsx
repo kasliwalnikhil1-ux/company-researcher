@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { buildContext, type RenderContext } from '@/lib/outreach/render';
 import type { AiVariable, Lead, RenderContextJson } from '@/lib/outreach/types';
@@ -34,7 +34,7 @@ export function useAiVariables(ws: string | null | undefined) {
   return useQuery({
     queryKey: ['outreach', ws ?? '', 'ai_variables'], enabled: !!ws, staleTime: 60000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_ai_variables').select('*').eq('workspace_id', ws!).order('name');
+      const { data, error } = await db.from('outreach_ai_variables').select('*').eq('workspace_id', ws!).order('name');
       if (error) throw parseError(error);
       return (data ?? []) as AiVariable[];
     },
@@ -66,7 +66,7 @@ export function useLeadSearch(ws: string | null | undefined, search: string, ena
   return useQuery({
     queryKey: ['outreach', ws ?? '', 'preview_leads', term], enabled: !!ws && enabled, staleTime: 30000,
     queryFn: async () => {
-      let q = supabase.from('outreach_leads').select('id, full_name, company, public_identifier').eq('workspace_id', ws!);
+      let q = db.from('outreach_leads').select('id, full_name, company, public_identifier').eq('workspace_id', ws!);
       if (term) q = q.or(`full_name.ilike.%${term}%,company.ilike.%${term}%`);
       const { data, error } = await q.order('updated_at', { ascending: false }).limit(8);
       if (error) throw parseError(error);

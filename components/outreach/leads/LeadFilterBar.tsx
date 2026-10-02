@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { Bookmark, BookmarkPlus, Search, SlidersHorizontal, X } from 'lucide-react';
 import type { ToastFn } from './helpers';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
+import { kv } from '@/lib/outreach/storage';
 
 export type ViewFilters = Pick<LeadFilters, 'search' | 'client_id' | 'list_id' | 'stage_id' | 'tag_id' | 'dnc'> & IntelLeadFilters;
 export interface SavedView { id: string; name: string; filters: ViewFilters }
@@ -31,7 +32,7 @@ export function useSavedViews(ws: string | undefined) {
   useEffect(() => {
     if (!ws) return;
     try {
-      const raw = localStorage.getItem(storageKey(ws));
+      const raw = kv.getItem(storageKey(ws));
       const parsed = raw ? (JSON.parse(raw) as SavedView[]) : [];
       setViews(Array.isArray(parsed) ? parsed.filter((v) => v && typeof v.id === 'string' && typeof v.name === 'string' && v.filters) : []);
     } catch { setViews([]); }
@@ -39,7 +40,7 @@ export function useSavedViews(ws: string | undefined) {
   const persist = useCallback((next: SavedView[]) => {
     setViews(next);
     if (!ws) return;
-    try { localStorage.setItem(storageKey(ws), JSON.stringify(next)); } catch { /* storage unavailable */ }
+    try { kv.setItem(storageKey(ws), JSON.stringify(next)); } catch { /* storage unavailable */ }
   }, [ws]);
   const save = useCallback((name: string, filters: ViewFilters) => {
     const id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

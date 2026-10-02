@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowUpCircle, Code2, Eye, LayoutGrid, RotateCcw } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

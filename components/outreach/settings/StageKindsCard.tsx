@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
@@ -38,7 +38,7 @@ export default function StageKindsCard() {
   async function update(row: StageRow, patch: Partial<Pick<StageRow, 'kind' | 'deal_value'>>) {
     setBusy(row.id);
     try {
-      const { data, error } = await supabase.from('outreach_stages').update(patch).eq('id', row.id).select('id');
+      const { data, error } = await db.from('outreach_stages').update(patch).eq('id', row.id).select('id');
       if (error) throw error;
       if (!data?.length) throw new Error('E_FORBIDDEN: you cannot edit stages in this workspace');
       await Promise.all([qc.invalidateQueries({ queryKey: sk.stages(ws ?? '') }), qc.invalidateQueries({ queryKey: qk.stages(ws ?? '') })]);

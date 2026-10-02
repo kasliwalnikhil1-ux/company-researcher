@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useQueryClient } from '@tanstack/react-query';
 import { qk, useLead, useSequences } from '@/lib/outreach/queries';

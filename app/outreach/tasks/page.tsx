@@ -1,14 +1,14 @@
 'use client';
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckSquare, ExternalLink, Phone, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSessionUser } from '@/lib/outreach/session';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError } from '@/lib/outreach/api';
 import { useClients, useMembers, useTasksPage } from '@/lib/outreach/queries';
 import type { Lead, Sender, Task } from '@/lib/outreach/types';
@@ -24,7 +24,7 @@ function TasksPageInner() {
   const router = useRouter();
   const params = useSearchParams();
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   const { workspace, canWrite, role } = useWorkspace();
   const ws = workspace?.id ?? null;
   const toast = useToast();
@@ -78,7 +78,7 @@ function TasksPageInner() {
   const allSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
 
   const assignOne = async (id: string, assigned_to: string | null) => {
-    const { error } = await supabase.from('outreach_tasks').update({ assigned_to }).eq('id', id);
+    const { error } = await db.from('outreach_tasks').update({ assigned_to }).eq('id', id);
     if (error) { toast.show(parseError(error).message, 'error'); return; }
     qc.invalidateQueries({ queryKey: ['outreach', ws ?? '', 'tasks'] });
   };
@@ -86,7 +86,7 @@ function TasksPageInner() {
     if (selected.size === 0) return;
     setBulkBusy(true);
     try {
-      const { error } = await supabase.from('outreach_tasks').update({ assigned_to: bulkAssignee || null }).in('id', Array.from(selected));
+      const { error } = await db.from('outreach_tasks').update({ assigned_to: bulkAssignee || null }).in('id', Array.from(selected));
       if (error) throw parseError(error);
       toast.show(`${selected.size} task${selected.size === 1 ? '' : 's'} assigned to ${memberName(membersQ.data, bulkAssignee || null)}`);
       setSelected(new Set());

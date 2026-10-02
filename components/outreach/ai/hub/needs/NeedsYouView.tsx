@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CheckCircle2 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSessionUser } from '@/lib/outreach/session';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import {
@@ -29,7 +29,7 @@ import { cardKey, lineEditDirty, type CardApi, type LineEdit } from './types';
  * then oldest first, so nothing sits for ever.
  */
 export default function NeedsYouView({ ws, filters, onFilters }: { ws: string; filters: NeedsYouFilters; onFilters: (f: NeedsYouFilters) => void }) {
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   const { canWrite, canReply, isManager } = useWorkspace();
   const toast = useToast();
   const listQ = useNeedsYou(ws, filters, user?.id);

@@ -5,7 +5,7 @@
 // The engine downloads them at send time (execute.ts stepAttachments).
 import { useRef, useState } from 'react';
 import { Paperclip, X } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError } from '@/lib/outreach/api';
 import { Button } from '@/components/outreach/ui';
 import { fmtBytes } from '@/components/outreach/inbox/hooks';
@@ -40,7 +40,7 @@ export function EmailAttachments({ nodeId, value, onChange }: { nodeId: string; 
     try {
       for (const f of picked) {
         const path = `${workspaceId}/sequence-files/${sequenceId}/${nodeId}/${Date.now()}-${safeName(f.name)}`;
-        const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, f, { contentType: f.type || undefined, upsert: false });
+        const { error: upErr } = await db.storage.from(BUCKET).upload(path, f, { contentType: f.type || undefined, upsert: false });
         if (upErr) throw new Error(`Could not upload ${f.name}: ${parseError(upErr).message}`);
         added.push({ path, name: f.name, mime: f.type || null, size: f.size });
       }

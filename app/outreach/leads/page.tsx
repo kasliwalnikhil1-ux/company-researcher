@@ -1,8 +1,8 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { usePathname, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useLists, useStages, useTags } from '@/lib/outreach/queries';
 import { fetchFilteredLeadIds, useLeadCustomKeys, useLeadsIntel } from '@/lib/outreach/intel';
@@ -154,7 +154,7 @@ function LeadsPage() {
             </div>
           ) : (
             <>
-              <div className={leads.isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+              <div className={leads.isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity'} data-tour="leads-table">
                 <LeadsTable rows={rows} total={total} selected={selected} onToggle={toggle} onSelect={select} selecting={selecting} clients={clients.data} lists={lists.data} stages={stages.data} tags={tags.data} selectable={canWrite}
                   customKeys={customKeys.data} layout={columns.layout} onLayoutChange={columns.setLayout} />
               </div>

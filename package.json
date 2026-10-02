@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . && node scripts/check-note-leaks.mjs && node scripts/outreach-widget-size.mjs",
+    "lint": "eslint . && node scripts/check-note-leaks.mjs && node scripts/outreach-widget-size.mjs && node scripts/outreach-demo-check.mjs",
     "lint:notes": "node scripts/check-note-leaks.mjs",
-    "lint:widget": "node scripts/outreach-widget-size.mjs"
+    "lint:widget": "node scripts/outreach-widget-size.mjs",
+    "demo:contract": "node scripts/outreach-demo-contract.mjs",
+    "demo:check": "node scripts/outreach-demo-check.mjs",
+    "demo:check:e2e": "node scripts/outreach-demo-check.mjs --e2e"
   },
   "dependencies": {
     "@babel/runtime": "^7.27.1",

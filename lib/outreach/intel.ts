@@ -5,7 +5,7 @@
 
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 import { applyAiChatFilter, type ChatFilters, type LeadFilters } from './queries';
 import type { ActionType, AiField, AiFieldValue, AiVariableOutput, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
@@ -246,7 +246,7 @@ export function useChatsByIds(ws: string | null | undefined, ids: string[] | nul
       const all: ChatRowWithJoins[] = [];
       const list = (ids ?? []).slice(0, CHAT_IDS_FETCH_LIMIT);
       for (let i = 0; i < list.length; i += 150) {
-        let q = supabase.from('outreach_chats').select('*, outreach_leads(id, full_name, company, headline, picture_url), outreach_senders(id, display_name, provider)').eq('workspace_id', ws!).in('id', list.slice(i, i + 150));
+        let q = db.from('outreach_chats').select('*, outreach_leads(id, full_name, company, headline, picture_url), outreach_senders(id, display_name, provider)').eq('workspace_id', ws!).in('id', list.slice(i, i + 150));
         if (f.archived != null) q = q.eq('archived', !!f.archived);
         if (f.sender_id) q = q.eq('sender_id', f.sender_id);
         if (f.client_id) q = q.eq('client_id', f.client_id);
@@ -281,7 +281,7 @@ export function useLeadQueuedActions(leadId: string | null | undefined) {
 export function useLeadProfile(leadId: string | null | undefined, waiting = false) {
   return useQuery({
     queryKey: ik.profile(leadId ?? ''), enabled: !!leadId, refetchInterval: waiting ? 30_000 : false,
-    queryFn: () => sel<LeadProfile | null>(supabase.from('outreach_lead_profiles').select('*').eq('lead_id', leadId!).maybeSingle()),
+    queryFn: () => sel<LeadProfile | null>(db.from('outreach_lead_profiles').select('*').eq('lead_id', leadId!).maybeSingle()),
   });
 }
 
@@ -322,7 +322,7 @@ function leadsQuery(ws: string, f: LeadListFilters, want: 'rows' | 'ids') {
   const cols = want === 'rows'
     ? `*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS})`
     : `id${f.tag_id ? ', outreach_lead_tags!inner(tag_id)' : ''}${inner ? `, ${P}!inner(lead_id)` : ''}`;
-  let q = supabase.from('outreach_leads').select(`${cols}${identityJoin ? ', outreach_lead_identities!inner(provider)' : ''}`, want === 'rows' ? { count: 'exact' } : undefined).eq('workspace_id', ws);
+  let q = db.from('outreach_leads').select(`${cols}${identityJoin ? ', outreach_lead_identities!inner(provider)' : ''}`, want === 'rows' ? { count: 'exact' } : undefined).eq('workspace_id', ws);
   if (f.channel === 'LINKEDIN') q = q.not('public_identifier', 'is', null);
   else if (identityJoin) q = q.eq('outreach_lead_identities.provider', f.channel!);
   const search = f.search ? cleanSearch(f.search) : '';
@@ -395,10 +395,10 @@ export async function fetchLeadIds(ws: string, src: { list_id?: string | null; t
     const to = Math.min(cap, from + 1000) - 1;
     let rows: string[] = [];
     if (src.tag_id) {
-      const data = await sel<{ lead_id: string }[]>(supabase.from('outreach_lead_tags').select('lead_id, outreach_leads!inner(workspace_id)').eq('tag_id', src.tag_id).eq('outreach_leads.workspace_id', ws).order('lead_id').range(from, to));
+      const data = await sel<{ lead_id: string }[]>(db.from('outreach_lead_tags').select('lead_id, outreach_leads!inner(workspace_id)').eq('tag_id', src.tag_id).eq('outreach_leads.workspace_id', ws).order('lead_id').range(from, to));
       rows = (data ?? []).map((r) => r.lead_id);
     } else if (src.list_id) {
-      const data = await sel<{ id: string }[]>(supabase.from('outreach_leads').select('id').eq('workspace_id', ws).eq('list_id', src.list_id).order('id').range(from, to));
+      const data = await sel<{ id: string }[]>(db.from('outreach_leads').select('id').eq('workspace_id', ws).eq('list_id', src.list_id).order('id').range(from, to));
       rows = (data ?? []).map((r) => r.id);
     }
     ids.push(...rows);
@@ -411,16 +411,16 @@ export async function fetchLeadIds(ws: string, src: { list_id?: string | null; t
 // Item 14: AI variables and the review table
 // ---------------------------------------------------------------------------
 export function useAiVariables(ws: string | null | undefined) {
-  return useQuery({ queryKey: ik.aiVariables(ws ?? ''), enabled: !!ws, queryFn: () => sel<AiVariable[]>(supabase.from('outreach_ai_variables').select('*').eq('workspace_id', ws!).order('name')) });
+  return useQuery({ queryKey: ik.aiVariables(ws ?? ''), enabled: !!ws, queryFn: () => sel<AiVariable[]>(db.from('outreach_ai_variables').select('*').eq('workspace_id', ws!).order('name')) });
 }
 
 export function useAiBatches(ws: string | null | undefined) {
   return useQuery({
     queryKey: ik.aiBatches(ws ?? ''), enabled: !!ws,
     queryFn: async () => {
-      const batches = await sel<AiBatch[]>(supabase.from('outreach_ai_batches').select('*, outreach_ai_variables(key, name)').eq('workspace_id', ws!).order('created_at', { ascending: false }).limit(40));
+      const batches = await sel<AiBatch[]>(db.from('outreach_ai_batches').select('*, outreach_ai_variables(key, name)').eq('workspace_id', ws!).order('created_at', { ascending: false }).limit(40));
       const count = async (batchId: string, status: AiValueStatus) => {
-        const { count: n, error } = await supabase.from('outreach_ai_values').select('id', { count: 'exact', head: true }).eq('batch_id', batchId).eq('status', status);
+        const { count: n, error } = await db.from('outreach_ai_values').select('id', { count: 'exact', head: true }).eq('batch_id', batchId).eq('status', status);
         if (error) throw parseError(error);
         return n ?? 0;
       };
@@ -457,11 +457,11 @@ export function useAiRealtime(ws: string | null | undefined) {
         qc.invalidateQueries({ queryKey: ['outreach', ws, 'ai-review'] });
       }, 1000);
     };
-    const ch = supabase.channel(`outreach-ai:${ws}`);
+    const ch = db.channel(`outreach-ai:${ws}`);
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_ai_batches', filter: `workspace_id=eq.${ws}` }, bump);
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_ai_values', filter: `workspace_id=eq.${ws}` }, bump);
     ch.subscribe();
-    return () => { if (timer) clearTimeout(timer); supabase.removeChannel(ch); };
+    return () => { if (timer) clearTimeout(timer); db.removeChannel(ch); };
   }, [ws, qc]);
 }
 
@@ -491,10 +491,10 @@ export function useImportSchedules(ws: string | null | undefined) {
   return useQuery({
     queryKey: ik.importSchedules(ws ?? ''), enabled: !!ws, refetchInterval: 60_000,
     queryFn: async () => {
-      const rows = await sel<ImportSchedule[]>(supabase.from('outreach_import_schedules').select('*').eq('workspace_id', ws!).order('created_at', { ascending: false }));
+      const rows = await sel<ImportSchedule[]>(db.from('outreach_import_schedules').select('*').eq('workspace_id', ws!).order('created_at', { ascending: false }));
       const jobIds = (rows ?? []).map((r) => r.last_job_id).filter((x): x is string => !!x);
       if (!jobIds.length) return rows ?? [];
-      const jobs = await sel<{ id: string; status: JobStatus; error: string | null }[]>(supabase.from('outreach_import_jobs').select('id, status, error').in('id', jobIds));
+      const jobs = await sel<{ id: string; status: JobStatus; error: string | null }[]>(db.from('outreach_import_jobs').select('id, status, error').in('id', jobIds));
       const byId = new Map((jobs ?? []).map((j) => [j.id, j]));
       return (rows ?? []).map((r) => ({ ...r, last_job: r.last_job_id ? byId.get(r.last_job_id) ?? null : null }));
     },

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk, useClients, useStages } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -46,7 +46,7 @@ export function LeadEditForm({ lead, toast }: { lead: Lead; toast: ToastFn }) {
         phone: form.phone.trim() || null,
       };
       if ((first || last) && (first !== lead.first_name || last !== lead.last_name)) patch.full_name = [first, last].filter(Boolean).join(' ');
-      const { error: err } = await supabase.from('outreach_leads').update(patch).eq('id', lead.id);
+      const { error: err } = await db.from('outreach_leads').update(patch).eq('id', lead.id);
       if (err) throw err;
       qc.invalidateQueries({ queryKey: qk.lead(lead.id) });
       if (workspace) qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'leads'] });

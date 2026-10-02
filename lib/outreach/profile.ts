@@ -4,7 +4,7 @@
 // Profile tab, the Senders → Profiles page and the public owner pages. Every write goes through an RPC or the
 // outreach-profile function; the database is the authority on permission, ceilings and pacing.
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 
 export type FieldGroup = 'headline' | 'about' | 'photo' | 'cover' | 'location' | 'experience' | 'education' | 'skills' | 'custom_link';
@@ -155,7 +155,7 @@ export function useProfileAuthority(senderId: string | null | undefined) {
   return useQuery({ queryKey: pqk.authority(senderId ?? ''), enabled: !!senderId, queryFn: () => rpc<AuthorityList>('profile_authority_list', { p_sender: senderId }) });
 }
 export function useProfileTemplates(ws: string | null | undefined) {
-  return useQuery({ queryKey: pqk.templates(ws ?? ''), enabled: !!ws, queryFn: () => sel<ProfileTemplate[]>(supabase.from('outreach_profile_templates').select('*').eq('workspace_id', ws!).order('name')) });
+  return useQuery({ queryKey: pqk.templates(ws ?? ''), enabled: !!ws, queryFn: () => sel<ProfileTemplate[]>(db.from('outreach_profile_templates').select('*').eq('workspace_id', ws!).order('name')) });
 }
 export function useProfileExperiments(ws: string | null | undefined) {
   return useQuery({ queryKey: pqk.experiments(ws ?? ''), enabled: !!ws, refetchInterval: 60000, queryFn: () => rpc<Experiment[]>('profile_experiments_list', { p_ws: ws }) });
@@ -196,13 +196,13 @@ export async function uploadProfileAsset(ws: string, senderId: string, file: Fil
   if (dim.width > rule.max || dim.height > rule.max) throw new Error(`The image is too large: at most ${rule.max} px on a side`);
   const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
   const path = `${ws}/${senderId}/${crypto.randomUUID()}.${ext}`;
-  const { error } = await supabase.storage.from(PROFILE_ASSETS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  const { error } = await db.storage.from(PROFILE_ASSETS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
   if (error) throw new Error(error.message);
   return { path, ...dim };
 }
 
 export async function signedAssetUrl(path: string): Promise<string | null> {
-  const { data } = await supabase.storage.from(PROFILE_ASSETS_BUCKET).createSignedUrl(path, 600);
+  const { data } = await db.storage.from(PROFILE_ASSETS_BUCKET).createSignedUrl(path, 600);
   return data?.signedUrl ?? null;
 }
 

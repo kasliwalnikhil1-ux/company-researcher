@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery } from '@tanstack/react-query';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSenders } from '@/lib/outreach/queries';

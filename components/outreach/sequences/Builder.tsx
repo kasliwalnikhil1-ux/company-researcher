@@ -1,11 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, History as HistoryIcon } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph, sumNodeStats, validateGraph, type GraphIssue } from '@/lib/outreach/graph';
@@ -438,7 +438,7 @@ export default function Builder({ id }: { id: string }) {
 
   const createTag = useCallback(async (name: string): Promise<Tag> => {
     if (!ws) throw new Error('No workspace');
-    const { data, error } = await supabase.from('outreach_tags').insert({ workspace_id: ws, name }).select('*').single();
+    const { data, error } = await db.from('outreach_tags').insert({ workspace_id: ws, name }).select('*').single();
     if (error) throw parseError(error);
     qc.invalidateQueries({ queryKey: qk.tags(ws) });
     return data as Tag;
@@ -547,7 +547,7 @@ export default function Builder({ id }: { id: string }) {
           </TabPage>
         )}
         {tab === 'steps' && <div className="flex-1 flex min-h-0 relative" role="tabpanel">
-          <div className="flex-1 min-w-0 relative">
+          <div className="flex-1 min-w-0 relative" data-tour="builder-canvas">
             <Canvas
               ref={canvasRef}
               graph={draft.graph} stats={stats} issues={issues} selectedId={selectedId} readOnly={readOnly} lookup={lookup}

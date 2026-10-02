@@ -5,7 +5,7 @@
 // auto-saves to LinkedIn: a draft becomes a change only on Submit, and the database decides whether it is queued
 // (direct permission) or sent to the owner (proposals).
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import Link, { useSearchParams } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Bot, ChevronDown, ChevronRight, Lock, RefreshCw, Save, Send, Sparkles, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -287,7 +287,7 @@ export default function ProfileStudio({ sender, isManager, canWrite, notify }: {
             <ProfilePreview doc={doc} payload={p} name={sender.display_name ?? ''} pictureUrl={previewPhoto ?? doc?.picture_url ?? sender.picture_url} coverUrl={previewCover ?? doc?.cover_url ?? null} connections={doc?.connections_count ?? sender.connections_count} />
             <QaCard qa={d.qa} snapshotAt={d.snapshot?.captured_at ?? null} />
             {needAuth ? <AuthorityCard senderId={sender.id} ws={ws} ownerEmail={d.sender.owner_email} isManager={isManager} canWrite={canWrite} notify={notify} />
-              : <Card title="Owner permission"><p className="text-sm text-gray-600">Off for this workspace: changes are scheduled without the account owner&apos;s sign-off and the owner is not emailed. {isManager ? <>Turn it on in <a href="/outreach/settings/workspace" className="text-indigo-700 underline">Settings, Workspace</a> when senders belong to clients or their employees.</> : 'The workspace owner can turn it on in Settings.'}</p></Card>}
+              : <Card title="Owner permission"><p className="text-sm text-gray-600">Off for this workspace: changes are scheduled without the account owner&apos;s sign-off and the owner is not emailed. {isManager ? <>Turn it on in <Link href="/outreach/settings/workspace" className="text-indigo-700 underline">Settings, Workspace</Link> when senders belong to clients or their employees.</> : 'The workspace owner can turn it on in Settings.'}</p></Card>}
           </div>
         </div>
       </div>

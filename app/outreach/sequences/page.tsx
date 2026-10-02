@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Archive, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph } from '@/lib/outreach/graph';
@@ -197,7 +197,7 @@ export default function SequencesPage() {
     try {
       if (kind === 'archive') { await rpc('set_sequence_status', { p_id: s.id, p_status: 'archived' }); toast.show(`Archived “${s.name}”`); }
       else {
-        const { error } = await supabase.from('outreach_sequences').delete().eq('id', s.id);
+        const { error } = await db.from('outreach_sequences').delete().eq('id', s.id);
         if (error) throw parseError(error);
         toast.show(`Deleted “${s.name}”`);
       }

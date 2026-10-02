@@ -20,7 +20,7 @@ import SendersBlock from './SendersBlock';
 import TestConversationDrawer from './TestConversationDrawer';
 import UnansweredSection from './UnansweredSection';
 import { Section, errText } from './shared';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
 import { hubHref } from '@/lib/outreach/aiHub';
 

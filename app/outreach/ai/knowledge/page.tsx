@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import HubFrame from '@/components/outreach/ai/hub/HubFrame';
 import KnowledgeLibrary from '@/components/outreach/ai/hub/knowledge/KnowledgeLibrary';

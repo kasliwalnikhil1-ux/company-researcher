@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { BarChart3, Building2, ExternalLink, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
@@ -67,8 +67,8 @@ export default function ClientsPage() {
     if (!name) return;
     setBusy(true); setError(null);
     try {
-      if (editing === 'new') { const { error: er } = await supabase.from('outreach_clients').insert({ workspace_id: ws, name, slug, timezone: form.timezone || null }); if (er) throw er; toast.show('Client created.'); }
-      else if (editing) { const { error: er } = await supabase.from('outreach_clients').update({ name, slug, timezone: form.timezone || null }).eq('id', editing.id); if (er) throw er; toast.show('Client updated.'); }
+      if (editing === 'new') { const { error: er } = await db.from('outreach_clients').insert({ workspace_id: ws, name, slug, timezone: form.timezone || null }); if (er) throw er; toast.show('Client created.'); }
+      else if (editing) { const { error: er } = await db.from('outreach_clients').update({ name, slug, timezone: form.timezone || null }).eq('id', editing.id); if (er) throw er; toast.show('Client updated.'); }
       setEditing(null); refresh();
     } catch (er) { const pe = parseError(er); setError(/duplicate|unique/i.test(pe.message) ? 'That slug is already used by another client in this workspace.' : pe.message); }
     finally { setBusy(false); }
@@ -77,7 +77,7 @@ export default function ClientsPage() {
   async function remove() {
     if (!deleteTarget) return;
     setBusy(true);
-    try { const { error: er } = await supabase.from('outreach_clients').delete().eq('id', deleteTarget.id); if (er) throw er; toast.show('Client deleted. Its senders, leads and sequences are now unassigned.'); setDeleteTarget(null); refresh(); }
+    try { const { error: er } = await db.from('outreach_clients').delete().eq('id', deleteTarget.id); if (er) throw er; toast.show('Client deleted. Its senders, leads and sequences are now unassigned.'); setDeleteTarget(null); refresh(); }
     catch (er) { toast.show(parseError(er).message, 'error'); }
     finally { setBusy(false); }
   }

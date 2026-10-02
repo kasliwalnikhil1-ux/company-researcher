@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { supabase } from '@/utils/supabase/client';
 import { useAuth } from './AuthContext';
 
+import { IS_DEMO } from '@/lib/outreach/mode';
 export type TemplateChannel = 'direct' | 'instagram' | 'email' | 'linkedin' | 'ads' | 'jobs' | 'news' | 'replies';
 
 /**
@@ -64,7 +65,9 @@ interface MessageTemplatesContextType {
 const MessageTemplatesContext = createContext<MessageTemplatesContextType | undefined>(undefined);
 
 export const MessageTemplatesProvider = ({ children }: { children: ReactNode }) => {
-  const { user } = useAuth();
+  const { user: signedIn } = useAuth();
+  // The product tour (/product-tour) runs on its own fictional owner: the visitor's own account data is never loaded there.
+  const user = IS_DEMO ? null : signedIn;
   const [templates, setTemplates] = useState<MessageTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [previewCompanies, setPreviewCompanies] = useState<PreviewCompany[]>([]);

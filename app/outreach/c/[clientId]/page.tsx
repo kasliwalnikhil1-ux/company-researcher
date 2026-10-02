@@ -1,10 +1,10 @@
 'use client';
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, BarChart3, Building2, Globe, Inbox, Loader2, MessageSquare, Send } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useChats, useMessages } from '@/lib/outreach/queries';
@@ -122,7 +122,7 @@ function ClientViewerPage() {
   }, [search, pathname, router]);
 
   const branding = useBranding(ws);
-  const client = useQuery({ queryKey: ['outreach', 'client', clientId ?? ''], enabled: !!clientId, queryFn: async () => { const { data, error } = await supabase.from('outreach_clients').select('*').eq('id', clientId!).maybeSingle(); if (error) throw parseError(error); return data as Client | null; } });
+  const client = useQuery({ queryKey: ['outreach', 'client', clientId ?? ''], enabled: !!clientId, queryFn: async () => { const { data, error } = await db.from('outreach_clients').select('*').eq('id', clientId!).maybeSingle(); if (error) throw parseError(error); return data as Client | null; } });
   const chats = useChats(ws, { client_id: clientId });
   const chat = useMemo(() => (chats.data ?? []).find((c) => c.id === selected) ?? null, [chats.data, selected]);
   const messages = useMessages(selected);
@@ -134,7 +134,7 @@ function ClientViewerPage() {
 
   async function markRead() {
     if (!chat || !chat.unread || isViewer) return;
-    await supabase.from('outreach_chats').update({ unread: false, unread_count: 0 }).eq('id', chat.id);
+    await db.from('outreach_chats').update({ unread: false, unread_count: 0 }).eq('id', chat.id);
     qc.invalidateQueries({ queryKey: ['outreach', ws ?? '', 'chats'] });
   }
 

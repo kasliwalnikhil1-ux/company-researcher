@@ -5,7 +5,7 @@ import { Search, Inbox, X, Filter, SlidersHorizontal, Loader2, Lock, Mic } from 
 import MentionsList from './notes/MentionsList';
 import NotificationBell from './notes/NotificationBell';
 import { useNoteSearch, useNotesBadge, noteLink } from '@/lib/outreach/notes';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
 import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel, chatTitle } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
@@ -314,6 +314,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                 return (
                   <button
                     key={c.id}
+                    data-tour={c.last_direction === 'in' ? 'inbox-conversation' : undefined}
                     type="button"
                     role="option"
                     aria-selected={active}

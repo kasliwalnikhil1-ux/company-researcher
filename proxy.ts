@@ -1,7 +1,10 @@
 /**
  * proxy.ts (Next.js 16: the file that used to be `middleware.ts`)
  *
- * TWO jobs:
+ * THREE jobs:
+ *   0. Product tour. `/product-tour` and `/product-tour/*` are rewritten to the same `/outreach` route files; the browser
+ *      URL stays `/product-tour/...`, and the outreach UI switches to its demo backend from that URL (lib/outreach/mode.ts,
+ *      docs/outreach/PRODUCT-TOUR.md). Job B never runs for it, and incoming `x-outreach-*` headers are dropped.
  *   A. Product domains. A GrowthxAI domain (lib/whitelabel.ts) serves outreach only: any page it does not serve
  *      (`productServesPath`) is redirected to `/outreach`, so e.g. growthxai.com/investors opens the outreach dashboard.
  *      Runs for every page (see `config.matcher`); `/_next`, `/api` and static files are never touched.
@@ -116,6 +119,15 @@ export async function proxy(request: NextRequest) {
     url.pathname = productHome(brand);
     url.search = '';
     return NextResponse.redirect(url);
+  }
+
+  // 0. Product tour: the same pages as /outreach, demo data in the browser.
+  if (pathname === '/product-tour' || pathname.startsWith('/product-tour/')) {
+    const url = request.nextUrl.clone();
+    url.pathname = `/outreach${pathname.slice('/product-tour'.length)}`;
+    const headers = new Headers(request.headers);
+    for (const h of OUR_HEADERS) headers.delete(h);
+    return NextResponse.rewrite(url, { request: { headers } });
   }
 
   // B. Custom domains: only `/` and `/outreach/*`.

@@ -6,6 +6,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { rpc } from './api';
+import { db } from './backend';
+import { IS_DEMO } from './mode';
 import type { Provider } from './types';
 
 // ---------------------------------------------------------------------------
@@ -234,7 +236,7 @@ export function useDeleteCanned(ws: string | null | undefined) {
   return useMutation({ mutationFn: (id: string) => rpc<void>('webchat_canned_delete', { p_id: id }), onSuccess: () => { if (ws) qc.invalidateQueries({ queryKey: wk.canned(ws) }); } });
 }
 export function useCampaigns(inbox: string | null | undefined) {
-  return useQuery({ queryKey: wk.campaigns(inbox ?? ''), enabled: !!inbox, queryFn: async () => { const { supabase } = await import('@/utils/supabase/client'); const { data, error } = await supabase.from('outreach_webchat_campaigns').select('*').eq('inbox_id', inbox!).order('created_at'); if (error) throw error; return (data ?? []) as WebchatCampaign[]; } });
+  return useQuery({ queryKey: wk.campaigns(inbox ?? ''), enabled: !!inbox, queryFn: async () => { const { data, error } = await db.from('outreach_webchat_campaigns').select('*').eq('inbox_id', inbox!).order('created_at'); if (error) throw error; return (data ?? []) as WebchatCampaign[]; } });
 }
 export function useSaveCampaign(inbox: string | null | undefined) {
   const qc = useQueryClient();
@@ -275,7 +277,7 @@ export function useWebchatPresence(ws: string | null | undefined, enabled = true
     ['mousemove', 'keydown', 'click', 'touchstart'].forEach((e) => window.addEventListener(e, activity, { passive: true }));
     ping();
     const t = setInterval(ping, 60_000);
-    const off = () => { try { navigator.sendBeacon?.('/api/noop', ''); } catch { /* ignore */ } };
+    const off = () => { if (IS_DEMO) return; try { navigator.sendBeacon?.('/api/noop', ''); } catch { /* ignore */ } };
     window.addEventListener('pagehide', off);
     return () => { stop = true; clearInterval(t); window.removeEventListener('pagehide', off); ['mousemove', 'keydown', 'click', 'touchstart'].forEach((e) => window.removeEventListener(e, activity)); };
   }, [ws, enabled]);
@@ -401,12 +403,13 @@ export function mediaKind(nameOrUrl: string): 'video' | 'image' { return /\.(gif
 export function mediaUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const m = /^preset:([\w.-]+)$/i.exec(url);
-  return m ? `${widgetOrigin()}/widget/v1/presets/${m[1]}` : /^https:\/\//i.test(url) ? url : null;
+  return m ? `${widgetOrigin()}/widget/v1/presets/${m[1]}` : /^https:\/\//i.test(url) || (IS_DEMO && /^blob:/i.test(url)) ? url : null;
 }
 export interface WebchatPreset { file: string; label: string; kind: 'video' | 'image' }
 /** Built-in clips: public/widget/v1/presets/presets.json, written by scripts/outreach-webchat-presets.mjs. */
 export function useWebchatPresets() {
   return useQuery({ queryKey: ['outreach', 'webchat', 'presets'], staleTime: 10 * 60_000, queryFn: async () => {
+    // eslint-disable-next-line no-restricted-globals -- a static file on our own origin (allowed in the product tour too)
     try { const r = await fetch('/widget/v1/presets/presets.json', { cache: 'no-cache' }); if (!r.ok) return []; const j = await r.json(); return (Array.isArray(j) ? j : []).filter((x) => x && typeof x.file === 'string' && /^[\w.-]+$/.test(x.file)) as WebchatPreset[]; } catch { return []; }
   } });
 }
@@ -419,8 +422,7 @@ export async function uploadWebchatMedia(ws: string, inboxId: string, file: File
   const ext = (file.name.split('.').pop() ?? '').toLowerCase(), t = MEDIA_TYPES[ext];
   if (!t) throw new Error('Use an MP4 or WebM video, or a GIF / WebP image.');
   if (file.size > WEBCHAT_MEDIA_MAX_MB * 1048576) throw new Error(`That file is ${(file.size / 1048576).toFixed(1)} MB. The limit is ${WEBCHAT_MEDIA_MAX_MB} MB.`);
-  const { supabase } = await import('@/utils/supabase/client');
-  const bucket = supabase.storage.from(WEBCHAT_MEDIA_BUCKET), dir = `${ws}/${inboxId}`;
+  const bucket = db.storage.from(WEBCHAT_MEDIA_BUCKET), dir = `${ws}/${inboxId}`;
   const name = `${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_').slice(-80)}`;
   const { error } = await bucket.upload(`${dir}/${name}`, file, { contentType: t.mime, cacheControl: '31536000', upsert: false });
   if (error) throw new Error(`Could not upload ${file.name}: ${error.message}`);

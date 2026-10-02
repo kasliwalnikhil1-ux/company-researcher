@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, ExternalLink, RefreshCw, Sparkles, Check, XCircle, MessageSquare, Contact, Loader2, Building2, Phone, Play, LogOut } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { useLead, useMessages, useSender } from '@/lib/outreach/queries';
 import { NODE_CATALOG, TEXT_LIMITS } from '@/lib/outreach/nodes';
@@ -69,7 +69,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
   const taskQ = useQuery({
     queryKey: ['outreach', 'task', taskId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_tasks').select('*').eq('id', taskId).single();
+      const { data, error } = await db.from('outreach_tasks').select('*').eq('id', taskId).single();
       if (error) throw parseError(error);
       return data as Task;
     },
@@ -83,7 +83,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
     queryKey: ['outreach', 'task', taskId, 'enrollment', task?.enrollment_id ?? ''],
     enabled: !!task?.enrollment_id,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_enrollments').select('id, sequence_id, status, outreach_sequences(id, name, graph)').eq('id', task!.enrollment_id!).single();
+      const { data, error } = await db.from('outreach_enrollments').select('id, sequence_id, status, outreach_sequences(id, name, graph)').eq('id', task!.enrollment_id!).single();
       if (error) throw parseError(error);
       return data as unknown as { id: string; sequence_id: string; status: string; outreach_sequences: { id: string; name: string; graph: Graph } | null };
     },
@@ -96,7 +96,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
     queryKey: ['outreach', 'task', taskId, 'held-reply', task?.lead_id ?? ''],
     enabled: kind === 'reply_hold' && !!task?.lead_id,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_messages').select('id, chat_id, text, summary, intent, sent_at, outreach_chats!inner(lead_id)')
+      const { data, error } = await db.from('outreach_messages').select('id, chat_id, text, summary, intent, sent_at, outreach_chats!inner(lead_id)')
         .eq('outreach_chats.lead_id', task!.lead_id!).eq('direction', 'in').order('sent_at', { ascending: false }).limit(1);
       if (error) throw parseError(error);
       return ((data ?? [])[0] ?? null) as unknown as (Pick<Message, 'id' | 'chat_id' | 'text' | 'summary' | 'intent' | 'sent_at'>) | null;
@@ -148,7 +148,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
   };
 
   const assign = (assigned_to: string | null) => run('assign', async () => {
-    const { error } = await supabase.from('outreach_tasks').update({ assigned_to }).eq('id', taskId);
+    const { error } = await db.from('outreach_tasks').update({ assigned_to }).eq('id', taskId);
     if (error) throw parseError(error);
   });
   const regenerate = () => run('regen', async () => {

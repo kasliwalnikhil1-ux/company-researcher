@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
+import type { TableName } from '@/lib/outreach/backend/contract';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { qk, useClients, useLists, useStages, useTags } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
@@ -13,7 +14,7 @@ import { PALETTE, chipStyle, type ToastFn } from './helpers';
 
 export type TaxonomyKind = 'lists' | 'stages' | 'tags';
 
-export const TAXONOMY: Record<TaxonomyKind, { table: string; label: string; singular: string; placeholder: string; blurb: string; deleteHint: string }> = {
+export const TAXONOMY: Record<TaxonomyKind, { table: TableName; label: string; singular: string; placeholder: string; blurb: string; deleteHint: string }> = {
   lists: {
     table: 'outreach_lists', label: 'Lists', singular: 'list', placeholder: 'Q3 SaaS founders',
     blurb: 'Lists group leads by where they came from or what you plan to do with them. A lead belongs to one list, and a list can be limited to one client.',
@@ -52,8 +53,8 @@ function useTaxonomyCounts(ws: string | undefined, kind: TaxonomyKind, ids: stri
     queryFn: async () => {
       const entries = await Promise.all(ids.map(async (id) => {
         const q = kind === 'tags'
-          ? supabase.from('outreach_lead_tags').select('lead_id', { count: 'exact', head: true }).eq('tag_id', id)
-          : supabase.from('outreach_leads').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).eq(kind === 'lists' ? 'list_id' : 'stage_id', id);
+          ? db.from('outreach_lead_tags').select('lead_id', { count: 'exact', head: true }).eq('tag_id', id)
+          : db.from('outreach_leads').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).eq(kind === 'lists' ? 'list_id' : 'stage_id', id);
         const { count, error } = await q;
         if (error) throw error;
         return [id, count ?? 0] as const;
@@ -114,7 +115,7 @@ export function TaxonomyPanel({ kind, toast, onViewLeads }: { kind: TaxonomyKind
       if (kind === 'tags') payload.color = newColor;
       if (kind === 'stages') { payload.color = newColor; payload.position = rows.length ? Math.max(...rows.map((r) => r.position ?? 0)) + 1 : 0; }
       if (kind === 'lists') payload.client_id = newClient || null;
-      const { error: err } = await supabase.from(meta.table).insert(payload);
+      const { error: err } = await db.from(meta.table).insert(payload);
       if (err) throw err;
       setNewName('');
     }, `${meta.singular[0].toUpperCase()}${meta.singular.slice(1)} created`);
@@ -126,14 +127,14 @@ export function TaxonomyPanel({ kind, toast, onViewLeads }: { kind: TaxonomyKind
     run(row.id, async () => {
       const patch: Record<string, unknown> = { name };
       if (kind !== 'lists') patch.color = editColor || null;
-      const { error: err } = await supabase.from(meta.table).update(patch).eq('id', row.id);
+      const { error: err } = await db.from(meta.table).update(patch).eq('id', row.id);
       if (err) throw err;
       setEditing(null);
     }, 'Saved');
   };
 
   const remove = (row: Row) => run(row.id, async () => {
-    const { error: err } = await supabase.from(meta.table).delete().eq('id', row.id);
+    const { error: err } = await db.from(meta.table).delete().eq('id', row.id);
     if (err) throw err;
     setConfirmDelete(null);
   }, 'Deleted');
@@ -145,9 +146,9 @@ export function TaxonomyPanel({ kind, toast, onViewLeads }: { kind: TaxonomyKind
     if (i < 0 || j < 0 || j >= sorted.length) return;
     const other = sorted[j];
     run(row.id, async () => {
-      const a = await supabase.from(meta.table).update({ position: j }).eq('id', row.id);
+      const a = await db.from(meta.table).update({ position: j }).eq('id', row.id);
       if (a.error) throw a.error;
-      const b = await supabase.from(meta.table).update({ position: i }).eq('id', other.id);
+      const b = await db.from(meta.table).update({ position: i }).eq('id', other.id);
       if (b.error) throw b.error;
     });
   };

@@ -1,11 +1,11 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Info, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph } from '@/lib/outreach/graph';
@@ -53,7 +53,7 @@ function TemplatePickerBody({ onClose }: { onClose: () => void }) {
       router.push(`/outreach/sequences/${id}`);
     } catch (e) {
       // the steps could not be saved: do not leave an empty sequence behind
-      if (id) await supabase.from('outreach_sequences').delete().eq('id', id);
+      if (id) await db.from('outreach_sequences').delete().eq('id', id);
       setError(formatGraphError(parseError(e)));
       setBusy(false);
     }

@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { rpc } from './api';
+import { kv } from '@/lib/outreach/storage';
 
 export interface TableLayout { order: string[]; widths: Record<string, number> }
 
@@ -33,11 +34,11 @@ function sanitize(raw: unknown): TableLayout | null {
 function storageKey(table: string, ws: string) { return `outreach-table-layout:${table}:${ws}`; }
 
 function readLocal(table: string, ws: string): TableLayout {
-  try { return sanitize(JSON.parse(localStorage.getItem(storageKey(table, ws)) ?? 'null')) ?? EMPTY_LAYOUT; } catch { return EMPTY_LAYOUT; }
+  try { return sanitize(JSON.parse(kv.getItem(storageKey(table, ws)) ?? 'null')) ?? EMPTY_LAYOUT; } catch { return EMPTY_LAYOUT; }
 }
 function writeLocal(table: string, ws: string, l: TableLayout) {
   try {
-    if (isLayoutEmpty(l)) localStorage.removeItem(storageKey(table, ws)); else localStorage.setItem(storageKey(table, ws), JSON.stringify(l));
+    if (isLayoutEmpty(l)) kv.removeItem(storageKey(table, ws)); else kv.setItem(storageKey(table, ws), JSON.stringify(l));
   } catch { /* storage unavailable */ }
 }
 

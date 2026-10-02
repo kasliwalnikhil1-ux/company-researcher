@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Badge, Button, Card, fmtDate } from '@/components/outreach/ui';
 import type { ConsentSenderV2 } from '@/lib/outreach/aiRepliesSequence';
 import { isPast } from '../format';

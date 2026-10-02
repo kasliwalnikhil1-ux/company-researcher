@@ -37,6 +37,7 @@ export default function FunnelTab({ ws, client, range }: TabProps) {
 
       {q.isLoading ? <ChartSkeleton height={360} /> : q.isError ? <RetryError error={q.error} onRetry={() => q.refetch()} /> : !q.data ? null : (
         <Refreshing active={q.isPlaceholderData}>
+          <div data-tour="reports-funnel">
           <Section
             title={<MetricLabel metric="funnel">Funnel of leads enrolled {fmtRange(range)}</MetricLabel>}
             description="This follows the leads enrolled in the period through every later stage, whenever that stage happened. A lead enrolled on the last day can still reply next week and will then show up here."
@@ -56,6 +57,7 @@ export default function FunnelTab({ ws, client, range }: TabProps) {
               </>
             )}
           </Section>
+          </div>
         </Refreshing>
       )}
     </div>

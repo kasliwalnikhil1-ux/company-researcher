@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Save, X } from 'lucide-react';
 import { parseError, rpc } from '@/lib/outreach/api';

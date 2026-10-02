@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useCallback, useMemo } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import HubFrame from '@/components/outreach/ai/hub/HubFrame';
 import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';

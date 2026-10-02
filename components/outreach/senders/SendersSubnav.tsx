@@ -2,8 +2,8 @@
 
 // Second-level switch inside Senders: the account list, and Profiles (changes, templates, experiments, insights that
 // span senders). Profile Studio has no entry of its own in the main navigation on purpose.
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { usePathname } from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
 
 const ITEMS = [

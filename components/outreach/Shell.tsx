@@ -1,12 +1,12 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, LifeBuoy, BookOpen, Mail, HelpCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useOutreachRealtime } from '@/lib/outreach/queries';
 import { applyAccent, isHexColor, isHttpsUrl, productName, useBranding, type Branding } from '@/lib/outreach/branding';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSessionUser } from '@/lib/outreach/session';
 import { useNotificationsRealtime, type IncomingNotification } from '@/lib/outreach/notes';
 import MentionToast from './inbox/notes/MentionToast';
 import { changeHref, longDate, useBilling } from '@/lib/outreach/billing';
@@ -60,7 +60,7 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
   const billing = useBilling(workspace?.id).data;
   const plan = billing?.plan ?? workspace?.plan;
   const trialDays = billing?.enforced && plan === 'trial' ? billing.trial?.days_left ?? null : null;
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   useOutreachRealtime(workspace?.id);
   // Private notes: the signed-in user's notification stream (bell badge + toast for a fresh @mention)
   const [toasts, setToasts] = useState<IncomingNotification[]>([]);

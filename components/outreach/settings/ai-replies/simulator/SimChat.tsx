@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Loader2, Undo2, User } from 'lucide-react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Button } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import type { SimTurn } from './simModel';

@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download, Save } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useAudit } from '@/lib/outreach/queries';
@@ -32,7 +32,7 @@ export default function WorkspaceSettingsPage() {
   async function rename() {
     if (!ws || !name.trim()) return;
     setBusy('rename');
-    try { const { error } = await supabase.from('outreach_workspaces').update({ name: name.trim() }).eq('id', ws); if (error) throw error; await refresh(); toast.show('Workspace renamed.'); }
+    try { const { error } = await db.from('outreach_workspaces').update({ name: name.trim() }).eq('id', ws); if (error) throw error; await refresh(); toast.show('Workspace renamed.'); }
     catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   }

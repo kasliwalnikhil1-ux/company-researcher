@@ -6,9 +6,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from './api';
 import type { Member, Provider } from './types';
+import { kv } from '@/lib/outreach/storage';
 
 // ---------------------------------------------------------------------------------------------------- types
 export type NoteVisibility = 'team' | 'team_and_client';
@@ -126,10 +127,10 @@ export function membersWhoCanRead(members: Member[] | undefined, chatClientId: s
 // ---------------------------------------------------------------------------------------------------- drafts (per chat, per mode, survive reload)
 const draftKey = (chatId: string, mode: 'reply' | 'note') => `outreach.inbox.draft:${chatId}:${mode}`;
 export function readDraft(chatId: string, mode: 'reply' | 'note'): string {
-  try { return window.localStorage.getItem(draftKey(chatId, mode)) ?? ''; } catch { return ''; }
+  try { return kv.getItem(draftKey(chatId, mode)) ?? ''; } catch { return ''; }
 }
 export function writeDraft(chatId: string, mode: 'reply' | 'note', text: string): void {
-  try { if (text.trim()) window.localStorage.setItem(draftKey(chatId, mode), text); else window.localStorage.removeItem(draftKey(chatId, mode)); } catch { /* storage blocked */ }
+  try { if (text.trim()) kv.setItem(draftKey(chatId, mode), text); else kv.removeItem(draftKey(chatId, mode)); } catch { /* storage blocked */ }
 }
 /** Text state that restores from localStorage and saves (debounced) on change. */
 export function useDraftText(chatId: string, mode: 'reply' | 'note'): [string, (v: string) => void] {
@@ -146,17 +147,17 @@ export function useDraftText(chatId: string, mode: 'reply' | 'note'): [string, (
 
 const NOTE_MODE_KEY = 'outreach.inbox.composerMode';
 export function readComposerMode(): 'reply' | 'note' {
-  try { return window.localStorage.getItem(NOTE_MODE_KEY) === 'note' ? 'note' : 'reply'; } catch { return 'reply'; }
+  try { return kv.getItem(NOTE_MODE_KEY) === 'note' ? 'note' : 'reply'; } catch { return 'reply'; }
 }
 export function writeComposerMode(mode: 'reply' | 'note'): void {
-  try { window.localStorage.setItem(NOTE_MODE_KEY, mode); } catch { /* ignore */ }
+  try { kv.setItem(NOTE_MODE_KEY, mode); } catch { /* ignore */ }
 }
 const SHOW_NOTES_KEY = 'outreach.inbox.showNotes';
 export function readShowNotes(): boolean {
-  try { return window.localStorage.getItem(SHOW_NOTES_KEY) !== '0'; } catch { return true; }
+  try { return kv.getItem(SHOW_NOTES_KEY) !== '0'; } catch { return true; }
 }
 export function writeShowNotes(v: boolean): void {
-  try { window.localStorage.setItem(SHOW_NOTES_KEY, v ? '1' : '0'); } catch { /* ignore */ }
+  try { kv.setItem(SHOW_NOTES_KEY, v ? '1' : '0'); } catch { /* ignore */ }
 }
 
 /** Alt+P / ⌥P switches Reply ↔ Private note. Matched on the physical key so it works where ⌥P types a symbol. */
@@ -270,7 +271,7 @@ export function useSetNotificationPref(ws: string) {
 export async function uploadNoteFile(chatId: string, file: File): Promise<NoteAttachment> {
   if (file.size > NOTE_MAX_ATTACHMENT_BYTES) throw new Error(`${file.name} is larger than 25 MB.`);
   const r = await callFn<{ path: string; token: string; name: string }>('note-attachment', { action: 'upload_url', chat_id: chatId, name: file.name, size: file.size, mime: file.type || undefined });
-  const { error } = await supabase.storage.from('outreach-chat-notes').uploadToSignedUrl(r.path, r.token, file, { contentType: file.type || undefined, upsert: false });
+  const { error } = await db.storage.from('outreach-chat-notes').uploadToSignedUrl(r.path, r.token, file, { contentType: file.type || undefined, upsert: false });
   if (error) throw new Error(`Upload failed for ${file.name}: ${error.message}`);
   let width: number | undefined, height: number | undefined;
   if (file.type.startsWith('image/')) {
@@ -315,7 +316,7 @@ export function useNotificationsRealtime(ws: string | null | undefined, userId: 
   useEffect(() => { cb.current = onNew; }, [onNew]);
   useEffect(() => {
     if (!ws || !userId) return;
-    const ch = supabase.channel(`outreach-notifications:${userId}`)
+    const ch = db.channel(`outreach-notifications:${userId}`)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'outreach_notifications', filter: `user_id=eq.${userId}` }, (p: any) => {
         const row = p?.new as (IncomingNotification & { workspace_id?: string }) | undefined;
@@ -328,7 +329,7 @@ export function useNotificationsRealtime(ws: string | null | undefined, userId: 
         qc.invalidateQueries({ queryKey: ['outreach', ws, 'notes'] });
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    return () => { db.removeChannel(ch); };
   }, [ws, userId, qc]);
 }
 

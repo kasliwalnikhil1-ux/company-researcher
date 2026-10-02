@@ -2,7 +2,7 @@
 
 // Questions the AI could not answer from the prompt or knowledge (changes doc §9.3), grouped, with "Add answer" and "Dismiss".
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ExternalLink, MessageCircleQuestion } from 'lucide-react';
 import { useUnanswered, useUnansweredAnswer, useUnansweredDismiss, type UnansweredGroup } from '@/lib/outreach/aiRepliesSequence';
 import { hubHref } from '@/lib/outreach/aiHub';

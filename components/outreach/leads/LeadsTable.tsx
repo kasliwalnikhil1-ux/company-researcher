@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import type { Client, Lead, List, Stage, Tag } from '@/lib/outreach/types';
 import { Avatar, Badge, Td, Th, fmtDate } from '@/components/outreach/ui';
 import { MessageSquare, ShieldOff, Sparkles } from 'lucide-react';

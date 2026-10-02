@@ -23,6 +23,13 @@
         "Implement proper error handling",
         "Write clean, maintainable code"
       ]
-    }
+    },
+    "productTour": [
+      "The outreach product also runs as a no-login demo at /product-tour (docs/outreach/PRODUCT-TOUR.md). It uses the same pages and components; only the data provider changes.",
+      "A feature change includes its contract entry (npm run demo:contract), its demo handler (lib/outreach/backend/demo/rpc|fn/<area>.ts), seed data, and, if it adds a screen, its route manifest entry (lib/outreach/backend/demo/routes.ts).",
+      "In app/outreach, components/outreach and lib/outreach: data only through db / rpc / callFn, links and routing through @/lib/outreach/nav, browser storage through kv from @/lib/outreach/storage. Never import @/utils/supabase/client, @/lib/api, next/link or next/navigation there.",
+      "Demo code (lib/outreach/backend/demo) never touches the network, uses relative imports only and the store's seeded random.",
+      "A PR that changes app/outreach or lib/outreach runs npm run demo:check (part of npm run lint) and npm run demo:check:e2e against a running app."
+    ]
   }
 }

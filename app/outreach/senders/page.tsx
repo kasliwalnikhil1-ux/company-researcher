@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { AlertTriangle, Contact, Lock, Plus, Search, X } from 'lucide-react';
 import { RunningDryBadge } from '@/components/outreach/senders/RunningDry';
 import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/senders/insights';
@@ -184,14 +184,14 @@ export default function SendersPage() {
             <Th>Sender</Th><Th>Status</Th><Th>Health</Th><Th>Profile</Th><Th>Level</Th><Th>Proxy</Th><Th>Client</Th><Th>Schedule</Th><Th>Last sync</Th><Th className="text-right">Used today</Th>
           </tr></thead>
           <tbody>
-            {pageRows.map((s) => {
+            {pageRows.map((s, rowIndex) => {
               const today = todayById.get(s.id);
               const locked = isFuture(s.warmup_locked_until);
               const dryAlert = dry.data?.get(s.id);
               const isDry = !!s.running_dry_at || !!dryAlert;
               const hint = blockedHint(s);
               return (
-                <tr key={s.id} onClick={() => router.push(`/outreach/senders/${s.id}`)} className="cursor-pointer hover:bg-gray-50" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/outreach/senders/${s.id}`); }}>
+                <tr key={s.id} data-tour={rowIndex === 0 ? 'sender-card' : undefined} onClick={() => router.push(`/outreach/senders/${s.id}`)} className="cursor-pointer hover:bg-gray-50" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/outreach/senders/${s.id}`); }}>
                   <Td>
                     <div className="flex items-center gap-3 min-w-[200px]">
                       <div className="relative shrink-0">

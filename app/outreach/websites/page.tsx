@@ -3,7 +3,7 @@
 // Website assistant (web-chat-PRD.md §12): one website inbox per site. List + create; everything else on /websites/[id].
 
 import { useState } from 'react';
-import Link from 'next/link';
+import Link, { modeHref } from '@/lib/outreach/nav';
 import { Globe, Plus } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
@@ -31,7 +31,7 @@ export default function WebsitesPage() {
       const r = await create.mutateAsync({ name: name.trim(), domains: domains.split(/[\s,]+/).map((d) => d.trim()).filter(Boolean), client_id: client || null });
       setOpen(false); setName(''); setDomains(''); setClient('');
       toast.show('Website added. Install the snippet to go live.');
-      window.location.href = `${WEBSITES_PATH}/${r.id}?tab=install`;
+      window.location.href = modeHref(`${WEBSITES_PATH}/${r.id}?tab=install`);
     } catch (e) { toast.show(parseError(e).message, 'error'); }
   };
 

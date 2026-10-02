@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from '@/lib/outreach/nav';
 import InboxView from '@/components/outreach/inbox/InboxView';
 import { useInboxRestrict } from '@/components/outreach/inbox/hooks';
 import type { ChatFilters } from '@/lib/outreach/queries';

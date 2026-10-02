@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseError, rpc } from '@/lib/outreach/api';
 import type { Graph } from '@/lib/outreach/types';
 import type { SaveDraftResult } from './publishTypes';
+import { kv } from '@/lib/outreach/storage';
 
 export const AUTOSAVE_DELAY_MS = 2000;
 const LOCAL_DELAY_MS = 400;
@@ -34,7 +35,7 @@ const localKey = (sequenceId: string) => `outreach:draft:${sequenceId}`;
 
 export function readLocalDraft<M = Record<string, unknown>>(sequenceId: string): LocalDraftCopy<M> | null {
   try {
-    const raw = window.localStorage.getItem(localKey(sequenceId));
+    const raw = kv.getItem(localKey(sequenceId));
     if (!raw) return null;
     const v = JSON.parse(raw) as LocalDraftCopy<M>;
     if (!v || typeof v.ts !== 'number' || !v.graph || typeof v.graph !== 'object' || typeof v.graph.nodes !== 'object' || !v.graph.start || !v.graph.nodes[v.graph.start]) return null;
@@ -43,11 +44,11 @@ export function readLocalDraft<M = Record<string, unknown>>(sequenceId: string):
 }
 
 export function writeLocalDraft<M>(sequenceId: string, copy: LocalDraftCopy<M>): boolean {
-  try { window.localStorage.setItem(localKey(sequenceId), JSON.stringify(copy)); return true; } catch { return false; }
+  try { kv.setItem(localKey(sequenceId), JSON.stringify(copy)); return true; } catch { return false; }
 }
 
 export function clearLocalDraft(sequenceId: string): void {
-  try { window.localStorage.removeItem(localKey(sequenceId)); } catch { /* storage unavailable */ }
+  try { kv.removeItem(localKey(sequenceId)); } catch { /* storage unavailable */ }
 }
 
 // ---------------------------------------------------------------------------

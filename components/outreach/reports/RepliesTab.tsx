@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '@/lib/outreach/nav';
 import { MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { EmptyState, Select, Table, Td, Th } from '@/components/outreach/ui';

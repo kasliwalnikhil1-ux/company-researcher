@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Info } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { Button, Table, Td, Th } from '@/components/outreach/ui';
@@ -31,7 +31,7 @@ function DefaultCostEditor({ report, onNotice }: { report: CostReport; onNotice:
     try {
       const next: Record<string, unknown> = { ...(workspace.settings ?? {}) };
       if (parsed === null) delete next.sender_monthly_cost; else next.sender_monthly_cost = parsed;
-      const { error } = await supabase.from('outreach_workspaces').update({ settings: next }).eq('id', workspace.id);
+      const { error } = await db.from('outreach_workspaces').update({ settings: next }).eq('id', workspace.id);
       if (error) throw error;
       await refresh();
       await qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'reports', 'cost'] });

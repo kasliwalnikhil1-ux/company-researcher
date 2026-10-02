@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSenders } from '@/lib/outreach/queries';
 import type { LeadSenderState, Relation } from '@/lib/outreach/types';

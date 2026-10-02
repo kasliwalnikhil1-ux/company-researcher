@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertTriangle, ChevronDown, ChevronRight, FlaskConical, GitBranch, Trophy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge, Button, EmptyState, Modal, Table, Td, Th } from '@/components/outreach/ui';

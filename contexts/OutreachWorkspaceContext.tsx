@@ -1,9 +1,10 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSessionUser } from '@/lib/outreach/session';
 import { rpc, parseError } from '@/lib/outreach/api';
 import type { Workspace, Role } from '@/lib/outreach/types';
+import { kv } from '@/lib/outreach/storage';
 
 interface Ctx {
   workspaces: Workspace[];
@@ -29,7 +30,7 @@ const WorkspaceContext = createContext<Ctx | undefined>(undefined);
 const LS_KEY = 'outreach-workspace-id';
 
 export function OutreachWorkspaceProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -53,7 +54,7 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
       setWorkspaces(rows);
       loadedFor.current = user.id;
       let stored: string | null = null;
-      try { stored = localStorage.getItem(LS_KEY); } catch { /* ignore */ }
+      try { stored = kv.getItem(LS_KEY); } catch { /* ignore */ }
       const pick = rows.find((w) => w.id === stored) ?? rows[0] ?? null;
       setCurrentId((cur) => (!first && cur && rows.some((w) => w.id === cur) ? cur : pick?.id ?? null));
     } catch (e) {
@@ -67,7 +68,7 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
 
   const switchWorkspace = useCallback((id: string) => {
     setCurrentId(id);
-    try { localStorage.setItem(LS_KEY, id); } catch { /* ignore */ }
+    try { kv.setItem(LS_KEY, id); } catch { /* ignore */ }
   }, []);
 
   const createWorkspace = useCallback(async (name: string) => {

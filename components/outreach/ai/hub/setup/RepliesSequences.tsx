@@ -4,7 +4,7 @@
 // The switch does what the mode header of a sequence's AI tab does (components/outreach/sequences/ai/ModeHeader.tsx):
 // the same call, the plan gate on Auto, the note after an automatic switch-off and the consent requests that come back.
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Clock, GitBranch, Info, type LucideIcon } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

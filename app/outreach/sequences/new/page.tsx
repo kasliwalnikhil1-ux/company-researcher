@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import Link from '@/lib/outreach/nav';
+import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { LayoutTemplate } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

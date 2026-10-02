@@ -3,7 +3,7 @@
 // Toast for a fresh notification (private-notes-PRD.md §6.1): "Aarushi mentioned you in Priya Nair (Razorpay): '…'" →
 // opens the note. Mounted once in the outreach Shell; auto-dismisses after 8 s.
 import { useEffect } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Lock, X } from 'lucide-react';
 import { noteLink, type IncomingNotification } from '@/lib/outreach/notes';
 

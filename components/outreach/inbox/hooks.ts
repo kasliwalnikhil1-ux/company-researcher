@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { fnUrl } from '@/lib/outreach/api';
-import { getValidAccessToken } from '@/lib/api';
+import { useSearchParams } from '@/lib/outreach/nav';
+import { callFn } from '@/lib/outreach/api';
 import type { Intent, Member, Message } from '@/lib/outreach/types';
 
 export const INTENTS: Intent[] = ['interested', 'question', 'not_now', 'not_interested', 'ooo', 'wrong_person', 'unclear', 'unclassified'];
@@ -96,8 +95,8 @@ export function fmtRemaining(ms: number): string {
 // ---------------------------------------------------------------------------
 const urlCache = new Map<string, string>();
 
-export function attachmentProxyUrl(messageId: string, attachmentId: string): string {
-  return `${fnUrl('attachment-proxy')}?message_id=${encodeURIComponent(messageId)}&attachment_id=${encodeURIComponent(attachmentId)}`;
+function fetchAttachment(messageId: string, attachmentId: string): Promise<Response> {
+  return callFn<Response>('attachment-proxy', {}, { method: 'GET', raw: true, query: { message_id: messageId, attachment_id: attachmentId } });
 }
 
 export function useAttachmentUrl(messageId: string, attachmentId: string) {
@@ -114,11 +113,7 @@ export function useAttachmentUrl(messageId: string, attachmentId: string) {
     setLoading(true);
     setError(null);
     try {
-      const token = await getValidAccessToken();
-      if (!token) throw new Error('Not signed in');
-      const res = await fetch(attachmentProxyUrl(messageId, attachmentId), {
-        headers: { Authorization: `Bearer ${token}`, apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '' },
-      });
+      const res = await fetchAttachment(messageId, attachmentId);
       if (!res.ok) {
         let msg = `Download failed (${res.status})`;
         try { const j = await res.json(); msg = j?.message ?? j?.error ?? msg; } catch { /* non-JSON body */ }

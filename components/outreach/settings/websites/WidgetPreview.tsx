@@ -3,9 +3,10 @@
 // Live preview of the widget (web-chat-PRD.md §12.2): a faithful, static rendering of the launcher + panel from the
 // settings draft. Desktop / mobile switch mirrors the launcher's per-device options.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ArrowUp, ExternalLink, MessageSquare, Paperclip, Smile, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { IS_DEMO } from '@/lib/outreach/mode';
 import { VIDEO_BUBBLE_DEFAULTS, flagUrl, mediaUrl, videoClips, videoQuestions, type VideoBubbleSettings, type WebchatSettings } from '@/lib/outreach/webchat';
 
 function contrast(hex: string): string {
@@ -97,9 +98,21 @@ export function VideoBubbleFrame({ v, accent, expanded = false, scale = 1, maxWi
   );
 }
 
-export default function WidgetPreview({ settings, online = true, brandFallback }: { settings: WebchatSettings; online?: boolean; brandFallback?: string }) {
+/**
+ * Product tour only: the real widget on a sample page in an iframe, answered in the browser by the demo backend
+ * (lib/outreach/backend/demo/webchat/widget.ts installs `window.__growthxaiDemoWidget`). Not rendered on /outreach.
+ */
+function DemoLiveWidget({ inboxId, mobile }: { inboxId: string; mobile: boolean }) {
+  const html = useMemo(() => (window as unknown as { __growthxaiDemoWidget?: { page(id: string): string | null } }).__growthxaiDemoWidget?.page(inboxId) ?? null, [inboxId]);
+  if (!html) return <div className="h-[600px] flex items-center justify-center text-sm text-gray-500">The live preview is loading…</div>;
+  return <iframe title="Live widget preview" srcDoc={html} className={cn('block h-[600px] border-0 bg-white', mobile ? 'w-[320px] mx-auto' : 'w-full')} />;
+}
+
+export default function WidgetPreview({ settings, online = true, brandFallback, inboxId }: { settings: WebchatSettings; online?: boolean; brandFallback?: string; inboxId?: string }) {
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [open, setOpen] = useState(true);
+  const [live, setLive] = useState(false);
+  const showLive = IS_DEMO && !!inboxId && live;
   const ap = settings.appearance, la = device === 'mobile' ? { ...settings.launcher.desktop, ...settings.launcher.mobile } : settings.launcher.desktop, ms = settings.messages;
   const accent = HEX.test(ap.accent) ? ap.accent : '#4f46e5', on = contrast(accent);
   const dark = ap.theme === 'dark';
@@ -114,9 +127,11 @@ export default function WidgetPreview({ settings, online = true, brandFallback }
         <span className="text-gray-500">Preview</span>
         <div className="flex gap-1">
           {(['desktop', 'mobile'] as const).map((d) => <button key={d} type="button" onClick={() => setDevice(d)} className={cn('px-2 py-0.5 rounded', device === d ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}>{d}</button>)}
-          <button type="button" onClick={() => setOpen((o) => !o)} className="px-2 py-0.5 rounded text-gray-600 hover:bg-gray-100">{open ? 'closed state' : 'open state'}</button>
+          {!showLive && <button type="button" onClick={() => setOpen((o) => !o)} className="px-2 py-0.5 rounded text-gray-600 hover:bg-gray-100">{open ? 'closed state' : 'open state'}</button>}
+          {IS_DEMO && inboxId && <button type="button" onClick={() => setLive((l) => !l)} className={cn('px-2 py-0.5 rounded', live ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-50')} title="Try the real widget with your saved settings">{live ? 'live' : 'try it live'}</button>}
         </div>
       </div>
+      {showLive ? <DemoLiveWidget key={`${inboxId}:${device}`} inboxId={inboxId!} mobile={device === 'mobile'} /> : (
       <div className={cn('relative bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]', device === 'mobile' ? 'h-[600px] w-[320px] mx-auto' : 'h-[600px]')} style={{ fontFamily: `${ap.font && ap.font !== 'Inter' ? ap.font + ',' : ''}Inter, system-ui, sans-serif` }}>
         {/* launcher */}
         {!(settings.launcher.hide) && !(open && device === 'mobile') && (
@@ -164,6 +179,7 @@ export default function WidgetPreview({ settings, online = true, brandFallback }
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

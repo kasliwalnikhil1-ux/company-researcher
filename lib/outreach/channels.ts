@@ -4,7 +4,7 @@
 // Every hook maps to exactly one RPC named in docs/outreach/CHANNELS-BUILD-CONTRACT.md §3. Nothing here recomputes a number.
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 import { qk } from './queries';
 import type { ChannelCapabilities, ConsentBasis, LeadConsent, LeadIdentity, Provider, SenderStatus } from './types';
@@ -160,7 +160,7 @@ export function useChannelCaps() {
   return useQuery({
     queryKey: ck.caps(), staleTime: 5 * 60_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_channel_capabilities').select('*');
+      const { data, error } = await db.from('outreach_channel_capabilities').select('*');
       if (error) throw parseError(error);
       return (data ?? []) as ChannelCapabilities[];
     },
@@ -188,7 +188,7 @@ export function useLeadConsent(leadId: string | null | undefined, ws?: string | 
 }
 
 async function leadWorkspace(leadId: string): Promise<string> {
-  const { data, error } = await supabase.from('outreach_leads').select('workspace_id').eq('id', leadId).single();
+  const { data, error } = await db.from('outreach_leads').select('workspace_id').eq('id', leadId).single();
   if (error) throw parseError(error);
   return (data as { workspace_id: string }).workspace_id;
 }

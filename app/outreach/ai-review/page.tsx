@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useEffect } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { hubHref } from '@/lib/outreach/aiHub';
 import { PageLoader } from '@/components/outreach/ui';
 

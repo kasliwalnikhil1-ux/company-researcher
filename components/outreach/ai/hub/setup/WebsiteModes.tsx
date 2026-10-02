@@ -2,7 +2,7 @@
 
 // AI → Setup → Website assistant: every website with its mode, When (Auto) and how long a suggestion waits (Review).
 import { useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { Globe } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';

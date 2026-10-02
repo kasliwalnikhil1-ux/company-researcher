@@ -2,7 +2,7 @@
 
 // Reports → Consent (PRD §12): who was contacted on WhatsApp in the period and on what basis, with evidence links.
 // This is the artefact a client hands over if a number is challenged, so it exports as it is shown.
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { AlertTriangle, ExternalLink, ShieldCheck } from 'lucide-react';
 import { Badge, EmptyState, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
 import { csvFileName, downloadCsv, fmtInt, fmtRate } from '@/lib/outreach/reports';

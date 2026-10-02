@@ -3,7 +3,7 @@
 // Failed and skipped leads for a step or a whole sequence (plan item 8).
 // Lists rpc failed_leads with the plain-language reason, and recovers failed leads in bulk with rpc enrollment_recover.
 import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, ChevronRight, LogOut, RotateCw, SkipForward } from 'lucide-react';
 import { cn } from '@/lib/utils';

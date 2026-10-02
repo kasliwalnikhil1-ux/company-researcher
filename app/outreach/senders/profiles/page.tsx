@@ -4,7 +4,7 @@
 // changes, templates + bulk apply, experiments, and the profile-score vs acceptance view. Per-sender editing lives
 // on each sender's Profile tab. Reached from the Senders page, not from the main navigation.
 import { Suspense, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { ErrorBox, PageHeader, PageLoader, useToast } from '@/components/outreach/ui';
 import { SendersSubnav } from '@/components/outreach/senders/SendersSubnav';

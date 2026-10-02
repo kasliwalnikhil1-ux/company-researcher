@@ -5,7 +5,7 @@
 // website source with "Also find products" on. Every hook maps to one `outreach_hub_*` RPC.
 
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 
 export type CatalogueProvider = 'shopify' | 'woocommerce' | 'feed' | 'csv' | 'crawl';
@@ -123,7 +123,7 @@ export async function uploadCatalogueCsv(ws: string, file: File): Promise<string
   if (!/\.(csv|tsv|txt)$/i.test(file.name)) throw new Error('Use a .csv or .tsv file.');
   if (file.size > CATALOGUE_CSV_MAX_MB * 1048576) throw new Error(`That file is ${(file.size / 1048576).toFixed(1)} MB. The limit is ${CATALOGUE_CSV_MAX_MB} MB.`);
   const path = `${ws}/catalogue/${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_').slice(-80)}`;
-  const { error } = await supabase.storage.from('outreach-knowledge').upload(path, file, { contentType: /\.tsv$/i.test(file.name) ? 'text/tab-separated-values' : 'text/csv', upsert: false });
+  const { error } = await db.storage.from('outreach-knowledge').upload(path, file, { contentType: /\.tsv$/i.test(file.name) ? 'text/tab-separated-values' : 'text/csv', upsert: false });
   if (error) throw new Error(`Could not upload ${file.name}: ${parseError(error).message}`);
   return path;
 }

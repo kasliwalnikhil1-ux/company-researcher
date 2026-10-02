@@ -4,7 +4,7 @@
 // Q&A, knowledge, unanswered questions, simulate, test conversations) and the settings-page hooks (workspace defaults,
 // library prompts, consent list). The inbox hooks and the shared v1.1 types stay in ./aiReplies.ts.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from './api';
 import type {
   Decision, FactUsed, MasterPrompt, Metrics, PromptSections, PromptSettings, PromptVersion, RegressionResult, ReplyMode,
@@ -372,7 +372,7 @@ export async function uploadKnowledgeFile(ws: string, sequenceId: string, file: 
   const ext = (file.name.split('.').pop() ?? '').toLowerCase();
   const contentType = ext === 'md' || ext === 'markdown' ? 'text/markdown' : ext === 'html' || ext === 'htm' ? 'text/html' : ext === 'txt' ? 'text/plain'
     : ext === 'pdf' ? 'application/pdf' : ext === 'docx' ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : (file.type.split(';')[0] || 'application/octet-stream');
-  const { error } = await supabase.storage.from(KNOWLEDGE_BUCKET).upload(path, file, { contentType, upsert: false });
+  const { error } = await db.storage.from(KNOWLEDGE_BUCKET).upload(path, file, { contentType, upsert: false });
   if (error) throw new Error(`Could not upload ${file.name}: ${parseError(error).message}`);
   return path;
 }

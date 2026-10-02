@@ -5,7 +5,7 @@
 // A product catalogue (migration 068) is what the Website assistant recommends products from; a website source can
 // also collect the products its pages describe ("Also find products").
 import { Fragment, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { ArrowRight, BookOpen, FileText, Globe, HelpCircle, Loader2, MessageCircleQuestion, Plus, ShoppingBag, Type } from 'lucide-react';
 import { PROVIDER_LABEL, catalogueHref, useCatalogueUpdate } from '@/lib/outreach/catalogue';
 import { KNOWLEDGE_STATUS_LABEL, useKnowledgeSourceDelete } from '@/lib/outreach/aiRepliesSequence';

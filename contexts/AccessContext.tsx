@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchMyAccess, type FeatureKey, type MyAccess } from '@/lib/platform/access';
 
+import { IS_DEMO } from '@/lib/outreach/mode';
 interface Ctx {
   /** true until the first load for the signed-in user finishes (false when signed out) */
   loading: boolean;
@@ -24,7 +25,9 @@ const AccessContext = createContext<Ctx | undefined>(undefined);
 type Loaded = { userId: string; access: MyAccess | null; error: string | null };
 
 export function AccessProvider({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user: signedIn } = useAuth();
+  // The product tour (/product-tour) runs on its own fictional owner: the visitor's own account data is never loaded there.
+  const user = IS_DEMO ? null : signedIn;
   // Everything derives from "what was loaded for which user", so a user change never needs a synchronous reset.
   const [loaded, setLoaded] = useState<Loaded | null>(null);
 

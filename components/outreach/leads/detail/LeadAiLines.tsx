@@ -1,10 +1,10 @@
 'use client';
 
 import { useMemo } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { useQuery } from '@tanstack/react-query';
 import { Wand2 } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import { isFieldsVariable, variableFields } from '@/lib/outreach/aiFields';
@@ -29,7 +29,7 @@ export function LeadAiLines({ leadId }: { leadId: string }) {
   const values = useQuery({
     queryKey: ['outreach', ws ?? '', 'ai-review', 'lead', leadId], enabled: allowed && !!leadId, staleTime: 30_000,
     queryFn: async () => {
-      const { data, error } = await supabase.from('outreach_ai_values').select('id, text, data, status, variable_id').eq('lead_id', leadId).eq('status', 'approved');
+      const { data, error } = await db.from('outreach_ai_values').select('id, text, data, status, variable_id').eq('lead_id', leadId).eq('status', 'approved');
       if (error) throw parseError(error);
       return (data ?? []) as ApprovedValue[];
     },

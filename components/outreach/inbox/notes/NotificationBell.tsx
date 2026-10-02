@@ -2,7 +2,7 @@
 
 // Bell (private-notes-PRD.md §6.1): unread mentions + other notifications, newest first; opens the note; Mark all read.
 import { useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Bell, Check, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { timeAgo } from '@/components/outreach/ui';

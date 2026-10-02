@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import Link from '@/lib/outreach/nav';
 import { Building2, ExternalLink } from 'lucide-react';
 import { Button, EmptyState, Table, Td, Th } from '@/components/outreach/ui';
 import { csvFileName, downloadCsv, fmtInt, fmtRate, totalsCsvColumns, useReportClients, type ClientRow, type DateRange } from '@/lib/outreach/reports';

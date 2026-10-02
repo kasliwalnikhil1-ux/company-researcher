@@ -2,7 +2,7 @@
 
 // Enrolment and the enrolled leads live in the builder now (the "Leads" tab). Old links land there.
 import { useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter } from '@/lib/outreach/nav';
 import { PageLoader } from '@/components/outreach/ui';
 
 export default function EnrollPage() {

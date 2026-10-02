@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Plug, X } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { usePlanFeature } from '@/lib/outreach/billing';
+import { IS_DEMO } from '@/lib/outreach/mode';
 import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Badge, Button, ErrorBox, Spinner, timeAgo } from '@/components/outreach/ui';
 import { IntegrationsSubTabs } from '@/components/outreach/settings/SettingsTabs';
@@ -60,7 +61,8 @@ export default function IntegrationsSettingsPage() {
     setBusy(provider); setCardError({ ...cardError, [provider]: undefined });
     try {
       const r = await callFn<{ url?: string }>('crm-oauth', { action: 'start', workspace_id: ws, provider, return_url: `${window.location.origin}${PATH}` });
-      if (!r?.url || !/^https:\/\//i.test(r.url)) throw new Error('The sign-in link is missing. Try again in a minute.');
+      // the product tour answers with a same-app path after its fake consent step (never an external URL)
+      if (!r?.url || !(/^https:\/\//i.test(r.url) || (IS_DEMO && r.url.startsWith('/product-tour/')))) throw new Error('The sign-in link is missing. Try again in a minute.');
       window.location.href = r.url;     // full-page redirect to the CRM; never an iframe
     } catch (e) {
       const pe = parseError(e);

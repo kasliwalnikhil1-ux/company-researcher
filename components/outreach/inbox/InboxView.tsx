@@ -1,15 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { notePreview } from './notes/NoteBody';
 import { useChatNotes, useCreateNote, useDeleteNote, useMarkNoteRead, useUpdateNote, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import { useQueryClient } from '@tanstack/react-query';
 import { MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/contexts/AuthContext';
+import { useSessionUser } from '@/lib/outreach/session';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { supabase } from '@/utils/supabase/client';
+import { db } from '@/lib/outreach/backend';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { patchChatInLists, qk, useChat, useChats, useClients, useMembers, useMessages, useSenders, useSequences, type ChatFilters } from '@/lib/outreach/queries';
 import { CHAT_IDS_FETCH_LIMIT, useChatsByIds, useSequenceChatIds } from '@/lib/outreach/intel';
@@ -35,7 +35,7 @@ const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, 
 export default function InboxView({ chatId, initialFilters, restrict }: { chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null }) {
   const router = useRouter();
   const qc = useQueryClient();
-  const { user } = useAuth();
+  const { user } = useSessionUser();
   const { workspace, canWrite, canReply, suspended, isManager, isClientViewer } = useWorkspace();
   const ws = workspace?.id ?? null;
   const toast = useToast();
@@ -118,7 +118,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     const listKey = ['outreach', ws ?? '', 'chats'] as const;
     qc.setQueryData(qk.chat(id), (old: any) => (old ? { ...old, ...patch } : old));
     patchChatInLists(qc, ws ?? '', id, patch);
-    const { error } = await supabase.from('outreach_chats').update(patch).eq('id', id);
+    const { error } = await db.from('outreach_chats').update(patch).eq('id', id);
     if (error) {
       qc.invalidateQueries({ queryKey: qk.chat(id) });
       qc.invalidateQueries({ queryKey: listKey });
