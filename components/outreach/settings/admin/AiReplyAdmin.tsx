@@ -44,7 +44,7 @@ function EditModal({ row, onClose }: { row: AdminRow; onClose: () => void }) {
   });
 
   return (
-    <Modal open onClose={onClose} title={`AI Auto Replies: ${row.workspace_name}`} size="sm"
+    <Modal open onClose={onClose} title={`Replies: ${row.workspace_name}`} size="sm"
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!changed || parsed === undefined || !note.trim()}>Save</Button>
@@ -76,7 +76,7 @@ export default function AiReplyAdmin() {
   }, [list.data, q]);
 
   return (
-    <Card className="mt-6" title="AI Auto Replies by workspace"
+    <Card className="mt-6" title="Replies by workspace"
       actions={<label className="relative block"><Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a workspace" aria-label="Find a workspace" className="pl-8 pr-3 py-1.5 text-xs rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48" /></label>}>
       <p className="text-xs text-gray-500 mb-3">The monthly limit caps AI drafts on the platform AI key. Every change needs a note and is logged.</p>
       {list.isLoading ? <Spinner /> : list.isError ? <ErrorBox message={parseError(list.error).message} /> : rows.length === 0 ? <div className="text-sm text-gray-500 py-2">{q ? 'No workspace matches.' : 'No workspaces yet.'}</div> : (

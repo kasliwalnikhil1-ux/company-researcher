@@ -6,7 +6,8 @@ import Link from 'next/link';
 import { X, ExternalLink, Linkedin, MapPin, Building2, Plus, UserPlus, Ban, CheckSquare, Repeat, Pause, Play, LogOut, Loader2, Phone } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { rpc, parseError } from '@/lib/outreach/api';
-import { qk, useLead, useLists, useSequences, useSenders, useStages, useTags, useTasks } from '@/lib/outreach/queries';
+import { qk, useLead, useSequences, useSenders, useStages, useTags, useTasks } from '@/lib/outreach/queries';
+import { ListPicker } from '@/components/outreach/leads/ListPicker';
 import { NODE_CATALOG } from '@/lib/outreach/nodes';
 import { LIVE_ENROLLMENT_STATUSES, type Enrollment, type Member, type Relation, type Tag } from '@/lib/outreach/types';
 import { ik, type EnrollmentWithHold, type LeadWithIntel } from '@/lib/outreach/intel';
@@ -79,7 +80,6 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
   const leadQ = useLead(leadId);
   const tagsQ = useTags(workspaceId);
   const stagesQ = useStages(workspaceId);
-  const listsQ = useLists(workspaceId);
   const seqQ = useSequences(workspaceId);
   const sendersQ = useSenders(workspaceId);
   const tasksQ = useTasks(workspaceId, { lead_id: leadId ?? null, open: true });
@@ -417,13 +417,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                     {stagesQ.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </label>
-                <label className="block">
-                  <span className="block text-[11px] text-gray-500 mb-1">List</span>
-                  <select value={lead.list_id ?? ''} disabled={!canWrite} onChange={(e) => updateLead({ list_id: e.target.value || null }, 'List updated')} className="w-full text-xs px-2 py-1.5 rounded-md border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                    <option value="">No list</option>
-                    {listsQ.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                  </select>
-                </label>
+                <ListPicker compact label="List" emptyLabel="No list" value={lead.list_id ?? ''} disabled={!canWrite} onChange={(id) => updateLead({ list_id: id || null }, 'List updated')} />
               </div>
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-xs text-gray-600 inline-flex items-center gap-1"><Ban className="w-3 h-3 text-gray-400" /> Do not contact</span>

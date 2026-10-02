@@ -6,8 +6,10 @@ import { AlertTriangle, BookOpen, KeyRound, Plus } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { useClients, useMembers } from '@/lib/outreach/queries';
+import { usePlanFeature } from '@/lib/outreach/billing';
+import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Badge, Button, Card, EmptyState, ErrorBox, Input, Modal, Select, Spinner, Table, Td, Th, fmtDate, timeAgo, useToast } from '@/components/outreach/ui';
-import { ApiSubTabs } from '@/components/outreach/settings/SettingsTabs';
+import { IntegrationsSubTabs } from '@/components/outreach/settings/SettingsTabs';
 import { ConfirmModal, CopyField, Note, SettingsFrame } from '@/components/outreach/settings/shared';
 import { sk, useApiKeys } from '@/components/outreach/settings/hooks';
 import type { ApiKeyRow, CreatedApiKey } from '@/components/outreach/settings/types';
@@ -37,6 +39,8 @@ export default function ApiKeysSettingsPage() {
   const keys = useApiKeys(allowed ? ws : null);
   const clients = useClients(allowed ? ws : null);
   const members = useMembers(allowed ? ws : null);
+  // The public API belongs to Enterprise (billing v2). Without it existing keys are kept but answer 402, and no key can be created.
+  const gate = usePlanFeature(ws, 'public_api');
 
   const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState('');
@@ -89,12 +93,14 @@ export default function ApiKeysSettingsPage() {
 
   return (
     <SettingsFrame min="manager">
-      <ApiSubTabs />
+      <IntegrationsSubTabs />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2" title={<span className="flex items-center gap-2"><KeyRound className="w-4 h-4" /> API keys</span>} actions={canWrite && <Button size="sm" onClick={openCreate}><Plus className="w-3.5 h-3.5" /> Create key</Button>}>
+        <Card className="lg:col-span-2" title={<span className="flex items-center gap-2"><KeyRound className="w-4 h-4" /> API keys</span>} actions={canWrite && <Button size="sm" onClick={openCreate} disabled={!gate.enabled}><Plus className="w-3.5 h-3.5" /> Create key</Button>}>
           <p className="text-xs text-gray-500 mb-4">A key acts as the member who created it, limited to the role and clients you pick. It runs the same rules as the app: caps, schedules, blacklists and reply-stop all apply, so the API cannot send more than the app would. If that member leaves the workspace, their keys stop working.</p>
+          <UpgradeNote feature="public_api" what="The public API" className="mb-4" />
+          {!gate.enabled && active.length > 0 && <Note className="mb-4">Your keys are kept; they work again after an upgrade. Until then requests with them are refused.</Note>}
           {keys.isLoading ? <Spinner /> : keys.isError ? <ErrorBox message={parseError(keys.error).message} /> : !keys.data?.length ? (
-            <EmptyState icon={<KeyRound className="w-6 h-6" />} title="No API keys yet" description="Create a key to connect Zapier, Make, n8n, Clay or your own code." action={canWrite ? <Button onClick={openCreate}><Plus className="w-4 h-4" /> Create key</Button> : undefined} />
+            <EmptyState icon={<KeyRound className="w-6 h-6" />} title="No API keys yet" description="Create a key to connect Zapier, Make, n8n, Clay or your own code." action={canWrite ? <Button onClick={openCreate} disabled={!gate.enabled}><Plus className="w-4 h-4" /> Create key</Button> : undefined} />
           ) : (
             <>
               {visible.length === 0 ? <div className="text-sm text-gray-500 py-4">No active keys.</div> : (

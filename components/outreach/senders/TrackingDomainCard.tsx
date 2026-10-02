@@ -4,8 +4,11 @@ import { useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, Copy, Globe, Sparkles, Trash2, XCircle } from 'lucide-react';
+import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
+import { usePlanFeature } from '@/lib/outreach/billing';
 import { Badge, Button, Card, ErrorBox, Input, Modal, Spinner, timeAgo } from '@/components/outreach/ui';
+import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { cn } from '@/lib/utils';
 import { copyText } from './helpers';
 import { sk, useTrackingDomains, type SenderV2, type TrackingDomain } from './insights';
@@ -52,7 +55,7 @@ function CopyField({ label, value, notify }: { label: string; value: string; not
   );
 }
 
-function DomainRow({ d, own, canManage, notify, onRemove }: { d: TrackingDomain; own: boolean; canManage: boolean; notify: Notify; onRemove: (d: TrackingDomain) => void }) {
+function DomainRow({ d, own, canManage, notify, onRemove, planPaused }: { d: TrackingDomain; own: boolean; canManage: boolean; notify: Notify; onRemove: (d: TrackingDomain) => void; planPaused?: boolean }) {
   const step = STEPS.find((s) => s.key === d.status);
   return (
     <div className="space-y-4">
@@ -66,7 +69,8 @@ function DomainRow({ d, own, canManage, notify, onRemove }: { d: TrackingDomain;
       <Progress status={d.status} />
       {d.status === 'failed'
         ? <div className="flex items-start gap-2 text-sm text-red-800 bg-red-50 border border-red-200 rounded-lg p-3"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" aria-hidden /><span>{d.note || 'The domain could not be verified.'} Check the CNAME record, or remove the domain and add it again.</span></div>
-        : <p className="text-sm text-gray-700">{step?.help}{d.note && d.status !== 'active' ? ` ${d.note}` : ''}</p>}
+        : <p className="text-sm text-gray-700">{planPaused && d.status === 'active' ? 'Verified and kept. It is not in use on this plan.' : step?.help}{d.note && d.status !== 'active' ? ` ${d.note}` : ''}</p>}
+      {planPaused && <p className="text-xs text-gray-500">The domain is kept. Links use the default tracking domain until the plan includes custom ones.</p>}
       {d.status !== 'active' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div><div className="text-xs font-medium text-gray-600 mb-1">Type</div><div className="px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-gray-50 text-gray-800">CNAME</div></div>
@@ -86,7 +90,10 @@ function DomainRow({ d, own, canManage, notify, onRemove }: { d: TrackingDomain;
 /** Custom open / click tracking domain of one mailbox (falls back to the workspace default, then to the platform default). */
 export default function TrackingDomainCard({ sender, canManage, notify }: { sender: SenderV2; canManage: boolean; notify: Notify }) {
   const qc = useQueryClient();
+  const { isOwner } = useWorkspace();
   const domains = useTrackingDomains(sender.workspace_id);
+  // Custom tracking domains belong to Scale (billing v2). Without the feature a saved domain is kept but links use the default one.
+  const gate = usePlanFeature(sender.workspace_id, 'tracking_domains');
   const [hostname, setHostname] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,24 +130,25 @@ export default function TrackingDomainCard({ sender, canManage, notify }: { send
     <Card title="Tracking domain">
       {domains.isLoading ? <Spinner className="py-6" /> : domains.isError ? <ErrorBox message={parseError(domains.error).message} /> : (
         <div className="space-y-5">
-          {own ? <DomainRow d={own} own canManage={canManage} notify={notify} onRemove={setRemoving} />
-            : fallback ? <DomainRow d={fallback} own={false} canManage={canManage} notify={notify} onRemove={setRemoving} />
+          {own ? <DomainRow d={own} own canManage={canManage} notify={notify} onRemove={setRemoving} planPaused={!gate.enabled} />
+            : fallback ? <DomainRow d={fallback} own={false} canManage={canManage} notify={notify} onRemove={setRemoving} planPaused={!gate.enabled} />
             : <p className="text-sm text-gray-700">Opens and clicks are tracked under the default tracking domain. With your own domain, for example <span className="font-mono text-xs">link.agency.com</span>, tracked links carry your name instead.</p>}
 
           {!own && canManage && (
             <form onSubmit={add} className="space-y-2 pt-4 border-t border-gray-100">
               <div className="flex flex-col sm:flex-row sm:items-end gap-2">
-                <div className="flex-1"><Input label={fallback ? 'Use a different domain for this mailbox' : 'Your tracking domain'} value={hostname} onChange={(e) => { setHostname(e.target.value); setError(null); }} placeholder="link.agency.com" autoComplete="off" spellCheck={false} error={error ?? undefined} hint="A subdomain you control. You add one CNAME record, then the email provider approves it." /></div>
-                <Button type="submit" loading={busy} disabled={!hostname.trim() || busy} className="sm:mb-5">Add domain</Button>
+                <div className="flex-1"><Input label={fallback ? 'Use a different domain for this mailbox' : 'Your tracking domain'} value={hostname} onChange={(e) => { setHostname(e.target.value); setError(null); }} placeholder="link.agency.com" autoComplete="off" spellCheck={false} error={error ?? undefined} hint="A subdomain you control. You add one CNAME record, then the email provider approves it." disabled={!gate.enabled} /></div>
+                <Button type="submit" loading={busy} disabled={!hostname.trim() || busy || !gate.enabled} className="sm:mb-5">Add domain</Button>
               </div>
               {upsell && (
                 <div role="note" className="flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
                   <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0 text-indigo-600" aria-hidden />
-                  <div><span className="first-letter:uppercase inline-block">{upsell}.</span> <Link href="/outreach/billing" className="font-medium underline">See plans</Link></div>
+                  <div>{upsell} {isOwner ? <Link href={gate.upgradeHref} className="font-medium underline">Upgrade</Link> : 'Ask the workspace owner to upgrade.'}</div>
                 </div>
               )}
             </form>
           )}
+          <UpgradeNote feature="tracking_domains" what="A custom tracking domain" />
           {!own && !canManage && !fallback && <p className="text-xs text-gray-500">A manager can add a tracking domain.</p>}
         </div>
       )}

@@ -1,12 +1,22 @@
 'use client';
 
-/** Types + calls behind /admin. SQL side: migrations/platform/001_admin.sql. GoTrue side: app/api/admin/users/route.ts. */
+/**
+ * Types + calls behind /admin. SQL side: migrations/platform/001_admin.sql and 003_billing_admin.sql (outreach billing v2).
+ * GoTrue side: app/api/admin/users/route.ts.
+ */
 import { getValidAccessToken } from '@/lib/api';
 import { rpc, PlatformError, type AccessStatus } from '@/lib/platform/access';
 
-export type OutreachPlan = 'trial' | 'team' | 'agency' | 'agency_plus' | 'suspended';
+/** Every plan a workspace can be on. `trial_expired` and `cancelled` are reached by the billing job / Stripe, never set by hand. */
+export type OutreachPlan = 'trial' | 'trial_expired' | 'launch' | 'scale' | 'enterprise' | 'suspended' | 'cancelled';
+/** The plans an admin can set. A paid plan set by hand makes a comp workspace (no Stripe subscription). */
+export type OutreachSettablePlan = Exclude<OutreachPlan, 'trial_expired' | 'cancelled'>;
 export type OutreachRole = 'owner' | 'manager' | 'member' | 'client_viewer';
-export const OUTREACH_PLANS: OutreachPlan[] = ['trial', 'team', 'agency', 'agency_plus', 'suspended'];
+export type OutreachBillingPeriod = 'monthly' | 'quarterly' | 'annual';
+export type EarlySupporterDiscount = 0 | 0.1 | 0.3 | 0.5;
+export const OUTREACH_PLANS: OutreachSettablePlan[] = ['trial', 'launch', 'scale', 'enterprise', 'suspended'];
+export const OUTREACH_BILLING_PERIODS: OutreachBillingPeriod[] = ['monthly', 'quarterly', 'annual'];
+export const EARLY_SUPPORTER_DISCOUNTS: EarlySupporterDiscount[] = [0, 0.1, 0.3, 0.5];
 export const OUTREACH_ROLES: OutreachRole[] = ['owner', 'manager', 'member', 'client_viewer'];
 export const FUNDRAISING_PLANS = ['free', 'basic', 'pro'] as const;
 export const BILLING_STATUSES = ['active', 'inactive', 'cancelled', 'past_due'] as const;
@@ -73,6 +83,105 @@ export interface AdminWorkspace {
   id: string; name: string; slug: string; plan: OutreachPlan; trial_ends_at: string; stripe_status: string | null; past_due_since: string | null;
   created_at: string; deleted_at: string | null; plan_before_suspension: string | null; owner_email: string | null;
   members: AdminWorkspaceMember[]; senders: number; senders_ok: number; leads: number; sequences: number; clients: number; actions_7d: number;
+  // billing v2 (003_billing_admin.sql)
+  billing_period: OutreachBillingPeriod | null;
+  /** accounts the plan allows; null = no limit (comp / custom deals) */
+  accounts_billed: number | null;
+  accounts_requested: number | null;
+  /** accounts connected right now */
+  accounts_used: number;
+  trial_account_limit: number;
+  /** plan set by an admin, no Stripe subscription */
+  billing_comp: boolean;
+  custom_price_id: string | null;
+  early_supporter_discount: number;
+  early_supporter_tier: number | null;
+  early_supporter_position: number | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean | null;
+  scheduled_change: AdminScheduledChange | null;
+  data_delete_after: string | null;
+  stripe_customer_id: string | null;
+  stripe_subscription_id: string | null;
+  /** a Stripe subscription is live: plan, accounts and period follow it and cannot be edited by hand */
+  has_subscription: boolean;
+}
+
+export interface AdminScheduledChange { plan?: string | null; accounts_billed?: number | null; accounts_requested?: number | null; billing_period?: OutreachBillingPeriod | null; effective_at?: string | null }
+
+/** Keys of platform_admin_outreach_set_workspace's patch. Send only what changed. */
+export interface AdminWorkspacePatch {
+  name?: string;
+  trial_ends_at?: string;
+  plan?: OutreachSettablePlan;
+  /** null = no limit */
+  accounts_billed?: number | null;
+  billing_period?: OutreachBillingPeriod | null;
+  /** a Stripe price made for this workspace (price_…), null to clear */
+  custom_price_id?: string | null;
+  early_supporter_discount?: EarlySupporterDiscount;
+}
+
+/** A plan / accounts / period state as stored on a billing change. Self-serve rows use `accounts`, admin rows `accounts_billed`. */
+export type AdminBillingStateSnapshot = { plan?: string | null; accounts_billed?: number | null; accounts?: number | null; billing_period?: OutreachBillingPeriod | null; period?: OutreachBillingPeriod | null; cancel?: boolean } & Record<string, unknown>;
+
+export interface AdminBillingChange {
+  id: string;
+  /** change | checkout | cancel | resume | cancel_scheduled | admin */
+  kind: string;
+  /** applied | scheduled | pending_payment | failed | cancelled */
+  status: string;
+  from_state: AdminBillingStateSnapshot | null;
+  to_state: AdminBillingStateSnapshot | null;
+  /** the part applied at once */
+  immediate: AdminBillingStateSnapshot | null;
+  /** the part applied at renewal */
+  scheduled: AdminBillingStateSnapshot | null;
+  quote: ({ charge_today_cents?: number | null; admin?: Record<string, unknown> } & Record<string, unknown>) | null;
+  created_at: string;
+  applied_at: string | null;
+  requested_by_email: string | null;
+  error: string | null;
+  stripe_invoice_id: string | null;
+}
+
+export interface AdminBillingEvent { id: string; type: string; received_at: string; processed_at: string | null; error: string | null }
+export interface AdminBillingSlots { billed: number | null; used: number; reserved: number; available: number | null; over_limit: number }
+export interface AdminEarlySupporter { workspace_id: string; position: number; tier: number; discount: number; assigned_at: string; forfeited_at: string | null; note: string | null }
+export interface AdminWorkspaceBilling { changes: AdminBillingChange[]; events: AdminBillingEvent[]; slots: AdminBillingSlots; early_supporter: AdminEarlySupporter | null }
+
+// the rollout switches (Settings → Admin on localhost)
+export type BillingSwitch = 'billing_enforced' | 'billing_data_deletion';
+export interface BillingTrialRow { workspace_id: string; name: string; trial_ends_at: string | null; accounts: number; limit?: number | null }
+export interface BillingPaidOverLimitRow { workspace_id: string; name: string; plan: string; limit: number | null; accounts: number }
+export interface BillingDeletionRow { workspace_id: string; name: string; plan: string; data_delete_after: string }
+export interface BillingCostReport {
+  /** accounts paid for on Launch / Scale / Enterprise */
+  accounts_billed?: number | null;
+  /** accounts the running trials include */
+  trial_accounts?: number | null;
+  /** accounts connected in the app */
+  connected?: number | null;
+  /** accounts on the connector; absent when the connector could not be read that day */
+  connector_accounts?: number | null;
+  /** connector accounts minus accounts paid for */
+  gap?: number | null;
+  swaps?: Array<{ workspace_id: string; name: string | null; swaps: number }>;
+  connector_orphans?: Array<{ id: string; name: string | null; type: string | null; created_at: string | null }>;
+  deletions_pending?: number | null;
+  paused_over_limit?: number | null;
+  connector_error?: string | null;
+}
+export interface BillingOverview {
+  enforced: boolean;
+  data_deletion: boolean;
+  price_version: string;
+  trials_that_would_expire: BillingTrialRow[];
+  trials_over_limit: BillingTrialRow[];
+  paid_over_limit: BillingPaidOverLimitRow[];
+  due_for_deletion: BillingDeletionRow[];
+  deletions_pending: number;
+  latest_cost_report: { day: string; report: BillingCostReport } | null;
 }
 
 export interface CrmMemberRow { user_id: string; email: string | null; display_name: string; is_active: boolean; created_at: string; deals_owned: number; meetings: number }
@@ -105,7 +214,13 @@ export const adminApi = {
   adjustCredits: (id: string, change: { delta?: number; set?: number; note?: string }) =>
     rpc<AdminUser>('admin_adjust_credits', { p_user: id, p_delta: change.delta ?? null, p_set: change.set ?? null, p_note: change.note ?? null }),
   workspaces: (search = '', includeDeleted = false) => rpc<AdminWorkspace[]>('admin_outreach_workspaces', { p_search: search || null, p_include_deleted: includeDeleted }),
-  setWorkspace: (ws: string, patch: { plan?: OutreachPlan; trial_ends_at?: string; name?: string }) => rpc<AdminWorkspace>('admin_outreach_set_workspace', { p_ws: ws, p_patch: patch }),
+  setWorkspace: (ws: string, patch: AdminWorkspacePatch) => rpc<AdminWorkspace>('admin_outreach_set_workspace', { p_ws: ws, p_patch: patch }),
+  /** Plan changes, Stripe events and the account slots of one workspace. */
+  outreachBilling: (ws: string, limit = 50) => rpc<AdminWorkspaceBilling>('admin_outreach_billing', { p_ws: ws, p_limit: limit }),
+  /** What turning the billing switches on would do right now, and the latest cost report. */
+  billingOverview: () => rpc<BillingOverview>('admin_billing_overview'),
+  /** Raises E_CONFIRM_REQUIRED (PlatformError.code) when workspaces would be affected and `confirm` is not true. */
+  billingSet: (key: BillingSwitch, value: boolean, confirm = false) => rpc<BillingOverview>('admin_billing_set', { p_key: key, p_value: value, p_confirm: confirm }),
   setWorkspaceMember: (ws: string, user: string, role: OutreachRole | null, clientIds?: string[]) =>
     rpc<AdminUser>('admin_outreach_set_member', { p_ws: ws, p_user: user, p_role: role, p_client_ids: clientIds ?? null }),
   createWorkspaceFor: (user: string, name?: string) => rpc<AdminUser>('admin_outreach_create_workspace', { p_user: user, p_name: name ?? null }),
@@ -125,7 +240,7 @@ export const adminApi = {
 export function actionLabel(action: string): string {
   const map: Record<string, string> = {
     'access.updated': 'Access updated', 'admin.granted': 'Made admin', 'admin.revoked': 'Admin removed', 'setting.updated': 'Setting changed',
-    'billing.updated': 'Plan / billing updated', 'credits.adjusted': 'Credits adjusted', 'outreach.workspace_updated': 'Outreach workspace updated',
+    'billing.updated': 'Plan / billing updated', 'credits.adjusted': 'Credits adjusted', 'outreach.workspace_updated': 'Outreach workspace updated', 'outreach.billing_switch': 'Outreach billing switch changed',
     'outreach.workspace_created': 'Outreach workspace created', 'outreach.member_added': 'Added to workspace', 'outreach.member_updated': 'Workspace role changed',
     'outreach.member_removed': 'Removed from workspace', 'crm.member_added': 'Added to CRM team', 'crm.member_updated': 'CRM membership updated',
     'account.created': 'Account created', 'account.banned': 'Sign-in banned', 'account.unbanned': 'Ban lifted', 'account.recovery_link': 'Recovery link issued', 'account.deleted': 'Account deleted',

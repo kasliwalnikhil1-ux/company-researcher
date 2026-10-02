@@ -16,6 +16,7 @@ import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, PageHeader, PageL
 import TaskDrawer, { TASK_KINDS, memberName, parseCallBody, taskKindLabel, taskKindTone } from '@/components/outreach/tasks/TaskDrawer';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { LIST_PAGE_SIZE, PaginationBar } from '@/components/outreach/Pagination';
+import { NEEDS_YOU_RULE, hubHref } from '@/lib/outreach/aiHub';
 
 type TaskRow = Task & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 
@@ -44,6 +45,12 @@ function TasksPageInner() {
   const [bulkAssignee, setBulkAssignee] = useState('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [openTask, setOpenTask] = useState<string | null>(null);
+
+  // Old links to the AI kinds that moved out of Tasks (dashboard cards, emails) go to their new home.
+  useEffect(() => {
+    if (urlKind === 'review_ai_draft') router.replace(hubHref.needsYou({ type: 'draft', mine: false }));
+    else if (urlKind === 'ai_escalation') router.replace(hubHref.needsYou({ type: 'reply', mine: false }));
+  }, [urlKind, router]);
 
   // Deep link (?task=<id>) from the inbox lead panel.
   useEffect(() => { const t = params.get('task'); if (t) setOpenTask(t); }, [params]);
@@ -95,7 +102,7 @@ function TasksPageInner() {
 
   return (
     <div>
-      <PageHeader title="Tasks" subtitle="Manual steps, calls, AI Personalization drafts to review, leads held after a reply, follow-ups and sender reconnects." actions={
+      <PageHeader title="Tasks" subtitle={<>Things you do yourself: manual steps, calls, follow-ups, leads held after a reply, conversations the AI handed over and sender reconnects. What the AI wrote and waits for your approval is in <Link href={hubHref.needsYou()} className="text-indigo-700 hover:underline">AI → Needs you</Link>.</>} actions={
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {(['open', 'completed'] as const).map((t) => (
             <button key={t} type="button" onClick={() => setTab(t)} className={cn('px-3 py-1.5 text-sm rounded-md capitalize', tab === t ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{t}{t === 'open' && openCount != null && tasksQ.data ? ` (${openCount})` : ''}</button>
@@ -135,7 +142,8 @@ function TasksPageInner() {
       {(!filtersReady || tasksQ.isLoading) && <Spinner className="min-h-[50vh]" />}
       {tasksQ.error && <ErrorBox message={parseError(tasksQ.error).message} />}
       {tasksQ.data && rows.length === 0 && (
-        <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? 'Tasks appear here when a sequence reaches a manual step or a call, an AI Personalization draft needs approval, a lead is held after a reply, a reply needs a follow-up, or a sender needs reconnecting.' : 'Completed tasks will be listed here.'} />
+        <EmptyState icon={<CheckSquare className="w-6 h-6" />} title={tab === 'open' ? 'No open tasks' : 'No completed tasks'} description={tab === 'open' ? `Tasks appear here when a sequence reaches a manual step or a call, a lead is held after a reply, a reply needs a follow-up, the AI hands a conversation over, or a sender needs reconnecting. ${NEEDS_YOU_RULE}` : 'Completed tasks will be listed here.'}
+          action={tab === 'open' ? <Link href={hubHref.needsYou()} className="text-sm font-medium text-indigo-700 hover:underline">Open AI → Needs you</Link> : undefined} />
       )}
       {rows.length > 0 && (
         <div className={cn('transition-opacity', tasksQ.isPlaceholderData && 'opacity-60')}>
@@ -161,7 +169,6 @@ function TasksPageInner() {
                   <Td><Badge tone={taskKindTone(t.kind)}>{taskKindLabel(t.kind)}</Badge></Td>
                   <Td className="max-w-[320px]">
                     <div className="font-medium text-gray-900 truncate">{t.title}</div>
-                    {t.kind === 'review_ai_draft' && !t.ai_draft && !t.completed_at && <div className="text-xs text-fuchsia-600">Drafting…</div>}
                     {(t.kind as string) === 'call'
                       ? <div className="text-xs text-gray-500 truncate inline-flex items-center gap-1"><Phone className="w-3 h-3" />{parseCallBody(t.body).phone ?? 'No number on file'}</div>
                       : t.body && <div className="text-xs text-gray-500 truncate">{t.body}</div>}

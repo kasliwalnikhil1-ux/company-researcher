@@ -287,7 +287,8 @@ export function useTasksPage(ws: string | null | undefined, f: { open: boolean; 
     queryFn: async () => {
       let q = supabase.from('outreach_tasks').select('*, outreach_leads(id, full_name, company, public_identifier, picture_url), outreach_senders(id, display_name)', { count: 'exact' }).eq('workspace_id', ws!);
       if (f.open) q = q.is('completed_at', null); else q = q.not('completed_at', 'is', null);
-      if (f.kind) q = q.eq('kind', f.kind);
+      // AI review items are not tasks: an AI-written step message and a reply the AI handed over wait in AI → Needs you.
+      if (f.kind) q = q.eq('kind', f.kind); else q = q.not('kind', 'in', '(review_ai_draft,ai_escalation)');
       if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
       if (f.client_id) q = q.eq('client_id', f.client_id);
       // Open tasks: soonest due first; completed: most recently completed first. id breaks ties so pages never overlap.

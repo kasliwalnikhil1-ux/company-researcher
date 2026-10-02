@@ -6,7 +6,8 @@ import { ShieldCheck, ShieldOff, Ban, KeyRound, Trash2, Plus, Minus } from 'luci
 import { Badge, Button, Input, Select, Table, Th, Td, Textarea, fmtDate, ErrorBox, PageLoader } from '@/components/outreach/ui';
 import { useAccess } from '@/contexts/AccessContext';
 import { FEATURES } from '@/lib/platform/access';
-import { adminApi, actionLabel, describeDetails, BILLING_CYCLES, BILLING_STATUSES, FUNDRAISING_PLANS, OUTREACH_PLANS, OUTREACH_ROLES, type AdminUserDetail, type OutreachPlan, type OutreachRole } from '@/lib/platform/admin';
+import { adminApi, actionLabel, describeDetails, BILLING_CYCLES, BILLING_STATUSES, FUNDRAISING_PLANS, OUTREACH_PLANS, OUTREACH_ROLES, type AdminUserDetail, type OutreachPlan, type OutreachRole, type OutreachSettablePlan } from '@/lib/platform/admin';
+import { planLabel } from '@/lib/outreach/billing';
 import { AccessChips, ConfirmModal, CopyField, Drawer, KV, PlanBadge, Section, StatusBadge, TriState, WsPlanBadge, errMsg, fmtDay, fmtNum, toDateInput, useAdminToast } from './shared';
 
 export default function UserDrawer({ userId, onClose }: { userId: string | null; onClose: () => void }) {
@@ -261,7 +262,7 @@ function OutreachSection({ u, onSaved }: { u: AdminUserDetail; onSaved: () => vo
         <div className="mb-4 flex flex-wrap items-end gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
           <Select label="Workspace" value={addWs} onChange={(e) => setAddWs(e.target.value)} className="min-w-[240px]">
             <option value="">{allWs.isLoading ? 'Loading…' : 'Choose a workspace'}</option>
-            {candidates.map((w) => <option key={w.id} value={w.id}>{w.name} · {w.owner_email ?? 'no owner'} · {w.plan}</option>)}
+            {candidates.map((w) => <option key={w.id} value={w.id}>{w.name} · {w.owner_email ?? 'no owner'} · {planLabel(w.plan)}</option>)}
           </Select>
           <Select label="Role" value={addRole} onChange={(e) => setAddRole(e.target.value as OutreachRole)} className="w-auto">{OUTREACH_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</Select>
           <Button size="md" disabled={!addWs} loading={busy === 'add'} onClick={() => act('add', 'Added to workspace', async () => { await adminApi.setWorkspaceMember(addWs, u.id, addRole); setAdding(false); setAddWs(''); })}>Add</Button>
@@ -275,6 +276,8 @@ function OutreachSection({ u, onSaved }: { u: AdminUserDetail; onSaved: () => vo
     </Section>
   );
 }
+
+const isSettable = (p: string): p is OutreachSettablePlan => (OUTREACH_PLANS as string[]).includes(p);
 
 function WorkspaceRow({ w, userId, busy, act }: { w: AdminUserDetail['outreach'][number]; userId: string; busy: string | null; act: (key: string, label: string, fn: () => Promise<unknown>) => Promise<void> }) {
   // the row is keyed on the saved values, so plain initial state is enough
@@ -290,11 +293,18 @@ function WorkspaceRow({ w, userId, busy, act }: { w: AdminUserDetail['outreach']
         <span className="text-xs text-gray-400">{w.members} member{w.members === 1 ? '' : 's'} · {w.senders} sender{w.senders === 1 ? '' : 's'}{w.stripe_status ? ` · stripe ${w.stripe_status}` : ''}</span>
       </div>
       <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 items-end">
-        <Select label="Plan" value={plan} onChange={(e) => setPlan(e.target.value as OutreachPlan)}>{OUTREACH_PLANS.map((p) => <option key={p} value={p}>{p === 'agency_plus' ? 'agency+' : p}</option>)}</Select>
+        <Select label="Plan" value={plan} onChange={(e) => setPlan(e.target.value as OutreachPlan)}>
+          {!isSettable(w.plan) && <option value={w.plan} disabled>{planLabel(w.plan)} (now)</option>}
+          {OUTREACH_PLANS.map((p) => <option key={p} value={p}>{planLabel(p)}</option>)}
+        </Select>
         <Input label="Trial ends" type="date" value={trial} onChange={(e) => setTrial(e.target.value)} />
         <Select label="Their role" value={w.role} onChange={(e) => act(k + 'role', 'Role updated', () => adminApi.setWorkspaceMember(k, userId, e.target.value as OutreachRole))}>{OUTREACH_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</Select>
         <div className="flex gap-2">
-          {dirty && <Button size="sm" loading={busy === k} onClick={() => act(k, 'Workspace updated', () => adminApi.setWorkspace(k, { plan, trial_ends_at: trial ? new Date(trial + 'T00:00:00Z').toISOString() : undefined }))}>Save</Button>}
+          {dirty && <Button size="sm" loading={busy === k} onClick={() => act(k, 'Workspace updated', () => adminApi.setWorkspace(k, {
+            // only what changed: the RPC refuses a plan it cannot set (trial ended, cancelled) even when it is the current one
+            plan: plan !== w.plan && isSettable(plan) ? plan : undefined,
+            trial_ends_at: trial && trial !== toDateInput(w.trial_ends_at) ? new Date(trial + 'T00:00:00Z').toISOString() : undefined,
+          }))}>Save</Button>}
           <Button size="sm" variant="ghost" loading={busy === k + 'rm'} onClick={() => act(k + 'rm', 'Removed from workspace', () => adminApi.setWorkspaceMember(k, userId, null))}>Remove</Button>
         </div>
       </div>

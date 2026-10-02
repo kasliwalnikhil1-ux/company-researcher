@@ -1,5 +1,5 @@
 // F22 — CSV export (leads | messages | actions | audit) to the private exports bucket; returns a signed URL (manager+).
-import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit } from "../_shared/outreach/supabase.ts";
+import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit, requireFeature } from "../_shared/outreach/supabase.ts";
 
 function csvEscape(v: unknown): string {
   if (v === null || v === undefined) return "";
@@ -15,6 +15,7 @@ serve("exports-create", async (req) => {
   const m = await membership(user.id, body.workspace_id);
   requireRole(m, "manager");
   const ws = body.workspace_id;
+  if (body.client_id) await requireFeature(ws, "client_reports", "A per-client export");
   // private-notes-PRD §8.5: internal notes are excluded by default; a manager may tick "Include private notes" on the
   // messages export. The rows are marked type=note and the file name carries -with-notes (audited below).
   const includeNotes = body.kind === "messages" && body.include_notes === true;

@@ -4,7 +4,8 @@
 // the proposed value, the character count, the owner's permission and the changes left this period. Nothing here
 // auto-saves to LinkedIn: a draft becomes a change only on Submit, and the database decides whether it is queued
 // (direct permission) or sent to the owner (proposals).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Bot, ChevronDown, ChevronRight, Lock, RefreshCw, Save, Send, Sparkles, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -105,6 +106,16 @@ export default function ProfileStudio({ sender, isManager, canWrite, notify }: {
     setOpen((o) => ({ ...o, ...Object.fromEntries(groups.map((g) => [g, true])) }));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+  // ?change=<id> (AI → Needs you → Edit and apply): open that draft in the editor once the page has loaded it
+  const wanted = useSearchParams()?.get('change') ?? null;
+  const openedChange = useRef<string | null>(null);
+  useEffect(() => {
+    if (!wanted || openedChange.current === wanted || !d) return;
+    const c = d.pending.find((x) => x.id === wanted && x.status === 'draft');
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time open of the linked draft once it has loaded
+    if (c) { openedChange.current = wanted; loadDraft(c); }
+  }, [wanted, d]);
+
   async function aiDraft() {
     if (!ai) return;
     setBusy('ai');

@@ -19,13 +19,9 @@ export const SETTINGS_TABS: Array<{ href: string; label: string; min: Role; also
   { href: '/outreach/settings/members', label: 'Members', min: 'owner' },
   { href: '/outreach/settings/safety', label: 'Safety', min: 'member' },
   { href: '/outreach/settings/suppressions', label: 'Blacklists', min: 'member' },
-  { href: '/outreach/settings/ai', label: 'AI Personalization', min: 'manager' },
-  { href: '/outreach/settings/ai-replies', label: 'AI Auto Replies', min: 'member' },
   { href: '/outreach/settings/notifications', label: 'Notifications', min: 'client_viewer' },
   { href: '/outreach/settings/email', label: 'Email & booking', min: 'manager' },
-  { href: '/outreach/settings/websites', label: 'Websites', min: 'member' },
-  { href: '/outreach/settings/api', label: 'API & webhooks', min: 'manager', also: ['/outreach/settings/webhooks'] },
-  { href: '/outreach/settings/integrations', label: 'Integrations', min: 'manager' },
+  { href: '/outreach/settings/integrations', label: 'Integrations', min: 'manager', also: ['/outreach/settings/api', '/outreach/settings/webhooks'] },
   { href: '/outreach/settings/branding', label: 'White-label', min: 'owner' },
   { href: '/outreach/settings/admin', label: 'Admin', min: 'member', localOnly: true },
 ];
@@ -52,12 +48,12 @@ export default function SettingsTabs() {
   );
 }
 
-/** Second-level switch between the two halves of "API & webhooks". */
-export function ApiSubTabs() {
+/** Second-level switch between the three parts of "Integrations": connected apps, API keys and webhooks. */
+export function IntegrationsSubTabs() {
   const pathname = usePathname();
-  const items = [{ href: '/outreach/settings/api', label: 'API keys' }, { href: '/outreach/settings/webhooks', label: 'Webhooks' }];
+  const items = [{ href: '/outreach/settings/integrations', label: 'Connected apps' }, { href: '/outreach/settings/api', label: 'API keys' }, { href: '/outreach/settings/webhooks', label: 'Webhooks' }];
   return (
-    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 mb-5" role="tablist" aria-label="API and webhooks">
+    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 mb-5" role="tablist" aria-label="Integrations sections">
       {items.map((i) => {
         const active = pathname === i.href;
         return <Link key={i.href} href={i.href} role="tab" aria-selected={active} className={cn('px-3 py-1.5 text-sm font-medium rounded-md', active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{i.label}</Link>;

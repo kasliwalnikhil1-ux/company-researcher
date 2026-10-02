@@ -56,5 +56,5 @@ Filters on overview / funnel / intents: `client_id`, `sequence_id`, `sender_id`;
 | `import_failed` | an import stopped | `import_status(job_id)` |
 | `held_leads` | replied, held for review | `enrollment_hold_list` |
 | `failed_leads` | need retry / skip / exit | `enrollments_failed` → `enrollment_recover` |
-| `ai_review` | AI lines wait for a person | `ai_review_list` |
+| `ai_review` | Personalized lines wait for a person (AI → Needs you) | `ai_review_list` |
 | `ai_lines_auto_paused` | Auto-approve paused itself for a variable (people rejected too many of its lines) | show the reason and example lines; resuming is a manager's call with a note |

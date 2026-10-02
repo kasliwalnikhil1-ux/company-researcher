@@ -26,7 +26,11 @@
 #   HUBSPOT_CLIENT_ID / HUBSPOT_CLIENT_SECRET           CRM sync (item 22): OAuth app credentials, one pair per CRM you offer.
 #   PIPEDRIVE_CLIENT_ID / PIPEDRIVE_CLIENT_SECRET       Redirect URL of each app: <functions base>/outreach-crm-oauth/callback
 #   SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET     A CRM whose pair is missing shows as "not available" in Settings → Integrations.
-#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PRICE_*   billing; without them usage is recorded but nothing is suspended or charged.
+#   STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, STRIPE_PORTAL_CONFIGURATION   billing v2 (prices are found by lookup key, created by
+#                             scripts/stripe-setup.ts; the old STRIPE_PRICE_* variables are no longer read). Optional:
+#                             STRIPE_TAX_ENABLED=true (after a Stripe Tax registration), STRIPE_API_VERSION.
+#                             Limits and plan gates only apply once the platform flag billing_enforced is on (Settings → Admin → Billing).
+#   OUTREACH_PLATFORM_ALERT_EMAIL   where operator alerts go (card disputes, connector deletes stuck for a day, account swaps).
 #
 # Secrets take effect on the next invocation of each function (no redeploy needed).
 # Optional env: OUTREACH_PROJECT_REF (default ktwqkvjuzsunssudqnrt)

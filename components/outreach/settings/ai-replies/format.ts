@@ -1,16 +1,6 @@
-// Settings → AI replies: small formatting helpers shared by the panels (no React).
+// Replies (AI → Setup → Replies / General, the sequence AI tab): small formatting helpers shared by the panels (no React).
 import { COUNTRIES } from '@/components/outreach/senders/helpers';
 import { ESCALATION_LABEL, GATE_LABEL, CANCEL_REASONS, type RunSummary } from '@/lib/outreach/aiReplies';
-
-/** The page's sub-tabs, in display order. `defaults` is the default. Prompts and limits live on each sequence's AI replies tab. */
-export const AI_TABS = [
-  { key: 'defaults', label: 'Defaults' },
-  { key: 'consent', label: 'Consent' },
-  { key: 'activity', label: 'Activity' },
-  { key: 'reports', label: 'Reports' },
-] as const;
-export type AiTab = (typeof AI_TABS)[number]['key'];
-export const isAiTab = (v: string | null | undefined): v is AiTab => AI_TABS.some((t) => t.key === v);
 
 /** EU member states + Iceland, Liechtenstein and Norway: the default autopilot block while no disclosure is set. */
 export const EU_EEA = ['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO'];

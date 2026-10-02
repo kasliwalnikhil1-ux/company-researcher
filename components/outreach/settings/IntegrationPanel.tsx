@@ -5,8 +5,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, RefreshCw, Save, Unplug } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
-import { qk, useClients, useLists } from '@/lib/outreach/queries';
+import { qk, useClients } from '@/lib/outreach/queries';
 import { Button, Card, ErrorBox, Select, Spinner, timeAgo, useToast } from '@/components/outreach/ui';
+import { ListPicker } from '@/components/outreach/leads/ListPicker';
 import { cn } from '@/lib/utils';
 import { ConfirmModal, Note, SettingRow, Switch } from './shared';
 import MappingEditor, { fromPairs, pairProblems, toPairs, type Pair } from './MappingEditor';
@@ -91,7 +92,6 @@ export default function IntegrationPanel({ integration }: { integration: Integra
   const [segmentId, setSegmentId] = useState('');
   const [listId, setListId] = useState('');
   const [clientId, setClientId] = useState('');
-  const lists = useLists(segmentsOpen ? ws : null);
   const clients = useClients(segmentsOpen ? ws : null);
   const segments = useQuery({
     queryKey: ['outreach', 'integration', integration.id, 'segments'], enabled: segmentsOpen && live, staleTime: 5 * 60_000, retry: 0,
@@ -100,10 +100,10 @@ export default function IntegrationPanel({ integration }: { integration: Integra
 
   async function importSegment() {
     const seg = (segments.data ?? []).find((s) => s.id === segmentId);
-    if (!seg) return;
+    if (!seg || !listId) return;
     setBusy('import');
     try {
-      await callFn('crm-oauth', { action: 'import_segment', integration_id: integration.id, segment_id: seg.id, segment_name: seg.name, list_id: listId || null, client_id: clientId || null });
+      await callFn('crm-oauth', { action: 'import_segment', integration_id: integration.id, segment_id: seg.id, segment_name: seg.name, list_id: listId, client_id: clientId || null });
       toast.show(`Importing "${seg.name}". People we already have are updated, not duplicated. The sync log shows the result.`);
       setSegmentId('');
       setTimeout(() => qc.invalidateQueries({ queryKey: ['outreach', 'integration', integration.id] }), 4000);
@@ -158,11 +158,13 @@ export default function IntegrationPanel({ integration }: { integration: Integra
         {!live ? <Note>Connect {name} again to import from it.</Note> : !segmentsOpen ? (
           <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-gray-600">Bring a {meta.segmentNoun} of {name} contacts in as leads. People we already have are updated, not duplicated, and blacklists still apply.</p><Button variant="secondary" onClick={() => setSegmentsOpen(true)} disabled={!canWrite}><Download className="w-4 h-4" /> Choose a {meta.segmentNoun}</Button></div>
         ) : segments.isLoading ? <Spinner className="py-6" /> : segments.isError ? <ErrorBox message={parseError(segments.error).message} /> : !segments.data?.length ? <div className="text-sm text-gray-500">No {meta.segmentNoun}s found in {name}. Create one there, then come back.</div> : (
-          <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_auto] gap-3 md:items-end">
-            <Select label={`${name} ${meta.segmentNoun}`} value={segmentId} onChange={(e) => setSegmentId(e.target.value)}><option value="">Choose…</option>{segments.data.map((s) => <option key={s.id} value={s.id}>{s.name}{s.count != null ? ` (${Number(s.count).toLocaleString()})` : ''}</option>)}</Select>
-            <Select label="Add to list (optional)" value={listId} onChange={(e) => setListId(e.target.value)}><option value="">No list</option>{(lists.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</Select>
-            <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">No client</option>{(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
-            <Button onClick={importSegment} loading={busy === 'import'} disabled={!segmentId || !canWrite}>Import</Button>
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:items-start">
+              <Select label={`${name} ${meta.segmentNoun}`} value={segmentId} onChange={(e) => setSegmentId(e.target.value)}><option value="">Choose…</option>{segments.data.map((s) => <option key={s.id} value={s.id}>{s.name}{s.count != null ? ` (${Number(s.count).toLocaleString()})` : ''}</option>)}</Select>
+              <ListPicker value={listId} onChange={setListId} disabled={!canWrite} />
+              <Select label="Client (optional)" value={clientId} onChange={(e) => setClientId(e.target.value)}><option value="">No client</option>{(clients.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+            </div>
+            <Button onClick={importSegment} loading={busy === 'import'} disabled={!segmentId || !listId || !canWrite}>Import</Button>
           </div>
         )}
       </Card>

@@ -16,7 +16,7 @@ const REASON_SECTION: Record<string, string> = {
 };
 
 /** Cancelled AI replies grouped by the prompt rule the AI followed, so each points at the section to fix. */
-export default function CancelReport({ ws, days, onOpenRun }: { ws: string; days: number; onOpenRun: (id: string) => void }) {
+export default function CancelReport({ ws, days, onOpenRun }: { ws: string; days: number; onOpenRun?: (id: string) => void }) {
   const q = useCancelReportV2(ws, days);
   const groups = useMemo(() => {
     const map = new Map<string, { rule: string | null; total: number; reasons: Array<{ reason: string; n: number }>; runIds: string[] }>();
@@ -47,12 +47,15 @@ export default function CancelReport({ ws, days, onOpenRun }: { ws: string; days
               <div className="mt-1.5 flex flex-wrap gap-1.5">
                 {g.reasons.map((r) => <Badge key={r.reason} tone={r.reason === 'wrong_facts' || r.reason === 'too_early_to_pitch' ? 'amber' : 'gray'}>{cancelReasonLabel(r.reason)} · {r.n}</Badge>)}
               </div>
-              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                {section && <span className="text-gray-600">Review &ldquo;{section}&rdquo; in the sequence&apos;s prompt</span>}
-                {g.runIds.slice(0, 5).map((id, i) => (
-                  <button key={id} type="button" onClick={() => onOpenRun(id)} className="text-gray-600 hover:text-gray-900 hover:underline">Example {i + 1}</button>
-                ))}
-              </div>
+              {/* Without a place to open a run, its examples are left out: "Example 1" as plain text says nothing. */}
+              {(section || (onOpenRun && g.runIds.length > 0)) && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                  {section && <span className="text-gray-600">Review &ldquo;{section}&rdquo; in the sequence&apos;s prompt</span>}
+                  {onOpenRun && g.runIds.slice(0, 5).map((id, i) => (
+                    <button key={id} type="button" onClick={() => onOpenRun(id)} className="text-gray-600 hover:text-gray-900 hover:underline">Example {i + 1}</button>
+                  ))}
+                </div>
+              )}
             </li>
           );
         })}

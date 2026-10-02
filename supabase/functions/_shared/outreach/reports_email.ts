@@ -113,7 +113,7 @@ export interface DigestInput { overview: Row; sequences: Row[]; attention: Row[]
 
 const ATTENTION_LABEL: Record<string, string> = {
   sequence_stalled: "Sequence stopped sending", sender_running_dry: "Sender running out of leads", import_failed: "Import failed",
-  held_leads: "Replies held for review", failed_leads: "Failed leads", sender: "Sender", sequence: "Sequence slowed down", ai_review: "AI Personalization lines to review",
+  held_leads: "Replies held for review", failed_leads: "Failed leads", sender: "Sender", sequence: "Sequence slowed down", ai_review: "Personalized lines to review",
 };
 
 function attentionLink(a: Row, origin: string): string {
@@ -121,7 +121,7 @@ function attentionLink(a: Row, origin: string): string {
   if (k === "sequence_stalled" || k === "sequence" || k === "held_leads" || k === "failed_leads") return `${origin}/outreach/sequences/${a.id}`;
   if (k === "sender_running_dry" || k === "sender") return `${origin}/outreach/senders/${a.id}`;
   if (k === "import_failed") return `${origin}/outreach/leads/import`;
-  if (k === "ai_review") return `${origin}/outreach/ai-review`;
+  if (k === "ai_review") return `${origin}/outreach/ai/needs-you?type=line`;
   return `${origin}/outreach`;
 }
 

@@ -7,7 +7,9 @@ export type Provider = 'LINKEDIN' | 'INSTAGRAM' | 'WHATSAPP' | 'GMAIL' | 'OUTLOO
 export const CHANNEL_PROVIDERS: Provider[] = ['LINKEDIN', 'INSTAGRAM', 'WHATSAPP'];
 export const MAIL_PROVIDERS: Provider[] = ['GMAIL', 'OUTLOOK', 'IMAP'];
 export type AuthMethod = 'credentials' | 'cookie' | 'oauth' | 'browser';
-export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paused' | 'disabled';
+/** `disconnected` (billing v2): the connected account was removed (trial ended, plan has fewer accounts, billing, or a teammate did it)
+ *  while the sender, its conversations and its leads stay. It comes back with Reconnect, onto the same sender. */
+export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paused' | 'disabled' | 'disconnected';
 /** For Instagram, `first` means "follows the sender back"; for WhatsApp, `invalid` means "number is not on WhatsApp". */
 export type Relation = 'none' | 'pending_out' | 'pending_in' | 'first' | 'blocked' | 'invalid';
 export type ActionType =
@@ -44,6 +46,7 @@ export interface Workspace {
   id: string;
   name: string;
   slug: string;
+  /** trial | trial_expired | launch | scale | enterprise | suspended | cancelled (billing v2; details come from useBilling) */
   plan: string;
   role: Role;
   client_ids: string[];
@@ -97,6 +100,10 @@ export interface Sender {
   owner_email: string | null;
   provider: Provider;
   unipile_account_id: string | null;
+  /** billing v2: the account this sender had before it was disconnected; since when it is disconnected / paused for billing */
+  previous_unipile_account_id?: string | null;
+  disconnected_at?: string | null;
+  billing_paused_at?: string | null;
   auth_method: AuthMethod;
   display_name: string | null;
   public_identifier: string | null;
@@ -133,6 +140,8 @@ export interface Sender {
   booking_link: string | null;
   /** HTML signature, used as {{sender.signature}}. */
   signature: string | null;
+  /** 067: optional name of the sender for messages ({{ sender_label }}); the display name is used when empty. */
+  label?: string | null;
   bcc_address: string | null;
   /** Set on a mailbox that belongs to a person (a LinkedIn sender): "the sender's own mailboxes". */
   parent_sender_id: string | null;
@@ -466,8 +475,8 @@ export interface Chat {
   /** Web chat (049): set on WEBCHAT threads; `status` exists on every chat (default open). */
   webchat_inbox_id?: string | null; visitor_id?: string | null; status?: 'open' | 'pending' | 'snoozed' | 'resolved'; snoozed_until?: string | null;
   priority?: 'urgent' | 'high' | 'medium' | 'low' | null; labels?: string[]; custom_attributes?: Record<string, unknown>; csat?: { rating: number; comment?: string | null; at?: string } | null;
-  ai_handled?: boolean; handed_off_at?: string | null; handoff_reason?: string | null; first_response_at?: string | null; resolved_at?: string | null; resolved_by?: string | null; source?: string | null;
-  visitor_last_seen_at?: string | null; visitor_typing_at?: string | null; visitor_typing_text?: string | null; ai_mode?: 'off' | 'first' | 'offline_only' | null; continuity_stopped?: boolean; last_continuity_email_at?: string | null;
+  ai_handled?: boolean; handed_off_at?: string | null; /** web chat (069): voice calls the visitor had in this conversation */ voice_calls?: number; handoff_reason?: string | null; first_response_at?: string | null; resolved_at?: string | null; resolved_by?: string | null; source?: string | null;
+  visitor_last_seen_at?: string | null; visitor_typing_at?: string | null; visitor_typing_text?: string | null; ai_mode?: 'off' | 'first' | 'offline_only' | 'review' | null; continuity_stopped?: boolean; last_continuity_email_at?: string | null;
   created_at: string;
   /** AI replies (036 / 040): autopilot pause state, conversation stage, active run mirror. `reply_mode_override` was dropped in v2. */
   autopilot_state?: 'active' | 'paused_escalated' | 'paused_bot';
@@ -690,6 +699,22 @@ export interface LeadProfile {
   updated_at: string;
 }
 
+export type AiVariableOutput = 'text' | 'fields';
+export type AiFieldType = 'text' | 'number' | 'yes_no' | 'choice';
+/** One field of a Fields variable, used in templates as {{ai.<variable>.<key>}} and in a Condition step as ai.<variable>.<key>. */
+export interface AiField {
+  key: string;
+  name: string;
+  type: AiFieldType;
+  description?: string;
+  /** choice: 2 to 12 options. */
+  options?: string[];
+  /** text: 20 to 1000 (default 200). */
+  max_chars?: number;
+}
+/** The stored value of one field: text and choice are strings, number a number, yes/no a boolean, empty null. */
+export type AiFieldValue = string | number | boolean | null;
+
 /** A saved prompt + fallback, used in templates as {{ai.<key>|fallback}}. Only approved values are ever rendered. */
 export interface AiVariable {
   id: string;
@@ -700,6 +725,14 @@ export interface AiVariable {
   fallback: string;
   needs_posts: boolean;
   max_chars: number;
+  /** 063: off = no new lines are written; review = a person approves each line. */
+  mode: 'off' | 'review';
+  /** 066: text = one line per lead; fields = several typed fields from one AI call. Fixed once the variable exists. */
+  output: AiVariableOutput;
+  /** 066: the field list of a Fields variable (1 to 8), [] for a one-line variable. */
+  fields: AiField[];
+  /** 067: a platform variable every workspace has. It is written without a person and can only be switched on or off. */
+  builtin: boolean;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -712,6 +745,8 @@ export interface AiValue {
   variable_id: string;
   batch_id: string | null;
   text: string | null;
+  /** 066: a Fields variable's typed object; `text` then holds its readable summary. */
+  data?: Record<string, AiFieldValue> | null;
   /** The profile facts the line relied on (shown in the review table). */
   facts: unknown[];
   status: AiValueStatus;
@@ -745,7 +780,11 @@ export interface RenderContextJson {
   lead: Record<string, unknown>;
   sender: Record<string, unknown>;
   enrich: Record<string, unknown>;
-  ai: Record<string, string>;
+  /** ai.<key> is a string for a one-line variable and an object of field values for a Fields variable. */
+  ai: Record<string, unknown>;
+  /** 067: the lead's current company ({} when none is stored) and today's date parts in the lead's timezone. */
+  account?: Record<string, unknown>;
+  now?: Record<string, unknown>;
   seed: string;
 }
 

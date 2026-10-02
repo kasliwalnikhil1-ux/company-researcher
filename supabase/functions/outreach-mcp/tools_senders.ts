@@ -1,6 +1,6 @@
 // outreach-mcp/tools_senders.ts — sender reads (PRD §5.1). All read-only, any member.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
-import { type Ctx, tool, z, wsParam, resolveWs, urpc, unwrap, McpError, short } from "./ctx.ts";
+import { type Ctx, tool, z, wsParam, resolveWs, urpc, unwrap, McpError, short, callFn } from "./ctx.ts";
 
 type Row = Record<string, any>;
 const LIST_COLS = "id, workspace_id, client_id, display_name, provider, status, status_reason, health_score, warmup_level, is_premium, has_sales_nav, timezone, paused_until, invite_blocked_until, connections_count, last_ok_at, updated_at, outreach_allowed_from, provider_warning";
@@ -56,7 +56,7 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "senders_list", title: "List senders", cls: "read", minRole: "client_viewer",
     description: "List the sender accounts of a workspace (LinkedIn, Instagram, WhatsApp, mailboxes) with status, health, level and today's used/cap per action type (`new_chat` = conversations that did not exist yet, metered on every channel). Instagram rows carry `hour` (10 metered actions an hour); WhatsApp rows carry `quiet_until` while a freshly connected number waits 24 h, and `level` is the new-chat governor level (0–4 = 2/5/10/20/35 new chats a day). `provider_warning` = the provider flagged automated behaviour; the sender rests 48 h and only a human may resume it. ≤50 rows. Start here for any capacity or health question; channel_capacity gives the per-channel remaining view.",
-    input: { ...wsParam, status: z.enum(["connecting", "ok", "credentials", "error", "paused", "disabled"]).optional(), client_id: z.string().optional(), provider: z.enum(PROVIDERS).optional() },
+    input: { ...wsParam, status: z.enum(["connecting", "ok", "credentials", "error", "paused", "disabled", "disconnected"]).optional(), client_id: z.string().optional(), provider: z.enum(PROVIDERS).optional() },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     let q = ctx.user.from("outreach_senders").select(LIST_COLS).eq("workspace_id", ws.id).is("deleted_at", null).order("display_name").limit(50);
@@ -69,6 +69,20 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
       Promise.all(rows.map((r) => senderHour(ctx, r))),
     ]);
     return { workspace: ws.name, count: rows.length, senders: rows.map((r, i) => senderBrief(r, today[i], hours[i])) };
+  });
+
+  tool(server, ctx, {
+    name: "sender_reconnect_link", title: "Sign-in link for a sender", cls: "write", minRole: "manager",
+    description: "A sign-in link for the owner of a sender that is signed out (`credentials`, `error`) or `disconnected` (its connected account was removed: trial ended, plan has fewer accounts, billing, or a teammate disconnected it). Give the link to the account owner; they sign in and the same sender carries on with its conversations and leads. A disconnected sender needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise: an owner fixes that on the Billing page) and must be reconnected with the SAME account. The link works for about an hour (7 days for a signed-out sender).",
+    input: { sender_id: z.string() },
+  }, async (a) => {
+    const s = unwrap<Row | null>(await ctx.user.from("outreach_senders").select("id, display_name, provider, status, status_reason").eq("id", a.sender_id).is("deleted_at", null).maybeSingle());
+    if (!s) throw new McpError("E_NOT_FOUND", "no such sender (or it is not visible to you)");
+    if (s.status === "ok" || s.status === "paused") return { sender: s.display_name, status: s.status, note: "This sender is connected; no sign-in is needed." };
+    if (s.status === "disabled") throw new McpError("E_SENDER_NOT_OK", "This sender is disabled. A manager re-enables it in the app first.");
+    const r = await callFn<Row>(ctx, "sender-manage", { sender_id: s.id, action: "reconnect_link", mode: "copy" });
+    return { sender: s.display_name, provider: s.provider, status: s.status, reason: s.status_reason ?? undefined, link: r.link,
+      note: s.status === "disconnected" ? "Valid for about an hour. The owner must sign in with the same account this sender had; a different account is refused." : "Valid for 7 days. Send it to the account owner." };
   });
 
   tool(server, ctx, {

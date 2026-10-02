@@ -19,6 +19,7 @@ import { LeadEnrollments } from '@/components/outreach/leads/detail/LeadEnrollme
 import { LeadChats, LeadRecentActions, LeadTasks, LeadTimeline } from '@/components/outreach/leads/detail/LeadActivity';
 import LeadTeamNotes from '@/components/outreach/leads/detail/LeadTeamNotes';
 import { EnrichmentCard } from '@/components/outreach/leads/detail/EnrichmentCard';
+import { LeadAiLines } from '@/components/outreach/leads/detail/LeadAiLines';
 import { LeadIdentitiesCard } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
 import { LeadConsentCard } from '@/components/outreach/leads/detail/LeadConsentCard';
 import { QueuedActions } from '@/components/outreach/leads/detail/QueuedActions';
@@ -73,6 +74,7 @@ export default function LeadDetailPage() {
         </div>
         <div className="space-y-4 min-w-0">
           <EnrichmentCard lead={l} toast={toast.show} />
+          <LeadAiLines leadId={l.id} />
           <LeadIdentitiesCard leadId={l.id} ws={workspace?.id} canWrite={canWrite} toast={toast.show} />
           <LeadConsentCard leadId={l.id} ws={workspace?.id} canWrite={canWrite} toast={toast.show} />
           <LeadEditForm lead={l} toast={toast.show} />

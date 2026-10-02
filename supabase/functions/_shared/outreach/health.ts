@@ -59,7 +59,7 @@ export function scoreHealth(i: HealthInputs): { score: number; breakdown: Record
 /** Recompute health for one sender and apply effects. trigger: 'nightly' | 'disconnect' | 'reject' | 'reconnect' */
 export async function healthForSender(senderId: string, trigger: string): Promise<{ score: number; breakdown: Record<string, number> } | null> {
   const { data: s } = await admin.from("outreach_senders").select("*").eq("id", senderId).maybeSingle();
-  if (!s || s.deleted_at || s.status === "disabled") return null;
+  if (!s || s.deleted_at || s.status === "disabled" || s.status === "disconnected") return null;
   if (trigger !== "nightly") {
     // debounce inline recomputes to once per 10 minutes
     const { data: last } = await admin.from("outreach_sender_events").select("at").eq("sender_id", senderId).eq("kind", "health").order("at", { ascending: false }).limit(1).maybeSingle();

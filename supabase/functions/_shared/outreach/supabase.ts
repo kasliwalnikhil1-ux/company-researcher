@@ -36,7 +36,7 @@ export function errorResponse(e: unknown): Response {
   if (e instanceof HttpError) return json({ error: e.message, code: e.code, details: e.details }, e.status);
   const msg = (e as any)?.message ?? String(e);
   const m = /^(E_[A-Z_]+)(?::\s*(.*))?$/s.exec(msg.trim());
-  if (m) return json({ error: m[2] || m[1], code: m[1] }, m[1] === "E_FORBIDDEN" ? 403 : m[1] === "E_NOT_FOUND" ? 404 : 400);
+  if (m) return json({ error: m[2] || m[1], code: m[1] }, m[1] === "E_FORBIDDEN" || m[1] === "E_PLAN_SUSPENDED" ? 403 : m[1] === "E_NOT_FOUND" ? 404 : m[1] === "E_PLAN_REQUIRED" || m[1] === "E_ACCOUNT_LIMIT" ? 402 : 400);
   console.error("unhandled", e);
   return json({ error: msg, code: "E_INTERNAL" }, 500);
 }
@@ -99,12 +99,38 @@ export async function membership(userId: string, workspaceId: string): Promise<M
   if (error) throw new HttpError(500, "E_INTERNAL", error.message);
   if (!data) throw new HttpError(403, "E_FORBIDDEN", "not a member of this workspace");
   const plan = (data as any).outreach_workspaces?.plan ?? "trial";
+  // a client viewer's login is disabled (not deleted) while the agency's plan has no client access
+  if (data.role === "client_viewer" && !(await hasFeature(workspaceId, "client_viewer"))) throw new HttpError(403, "E_PLAN_REQUIRED", "Your agency's plan no longer includes client access.");
   return { workspace_id: data.workspace_id, role: data.role, client_ids: data.client_ids ?? [], can_reply: data.can_reply, plan };
+}
+
+/** Plans on which nothing may be written or sent: the workspace is read-only until billing is sorted out. */
+export const INACTIVE_PLANS = ["suspended", "cancelled", "trial_expired"];
+export function inactivePlanMessage(plan: string): string {
+  if (plan === "trial_expired") return "Your trial has ended. Subscribe to keep going; everything is still here.";
+  if (plan === "cancelled") return "This subscription has ended. Subscribe again to continue; your data is kept for 90 days.";
+  return "This workspace is paused because of a billing issue. An owner can fix it on the Billing page.";
+}
+
+/** Is a plan feature on for this workspace (pricing-billing-PRD §7)? Always true while billing is not enforced. */
+export async function hasFeature(workspaceId: string, feature: string): Promise<boolean> {
+  const { data, error } = await admin.rpc("outreach_has_feature", { ws: workspaceId, p_feature: feature });
+  if (error) { log({ fn: "hasFeature", error: error.message, feature }); return true; }   // a broken lookup never locks a customer out
+  return data !== false;
+}
+
+/** Refuse with 402 E_PLAN_REQUIRED, naming the plan that unlocks the feature ("Available on Scale. …"). */
+export async function requireFeature(workspaceId: string, feature: string, what: string): Promise<void> {
+  const { error } = await admin.rpc("outreach_require_feature", { ws: workspaceId, p_feature: feature, p_what: what });
+  if (!error) return;
+  const m = /^E_PLAN_REQUIRED:\s*(.*)$/s.exec(error.message.trim());
+  if (m) throw new HttpError(402, "E_PLAN_REQUIRED", m[1]);
+  log({ fn: "requireFeature", error: error.message, feature });
 }
 
 export function requireRole(m: Membership, min: "owner" | "manager" | "member" | "client_viewer"): void {
   const order: Role[] = ["client_viewer", "member", "manager", "owner"];
-  if (m.plan === "suspended" && min !== "client_viewer") throw new HttpError(403, "E_PLAN_SUSPENDED", "workspace suspended");
+  if (INACTIVE_PLANS.includes(m.plan) && min !== "client_viewer") throw new HttpError(403, "E_PLAN_SUSPENDED", inactivePlanMessage(m.plan));
   if (order.indexOf(m.role) < order.indexOf(min)) throw new HttpError(403, "E_FORBIDDEN", `${min} role required`);
 }
 

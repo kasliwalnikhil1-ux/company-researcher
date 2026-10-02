@@ -5,6 +5,7 @@ import { notifyReturned } from "./ai_reply.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending, hostedBrowserOptions } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
 import { healthForSender } from "./health.ts";
+import { dropConnectorAccount } from "./disconnect.ts";
 import { fillChatPicture, persistPictureUrl } from "./avatars.ts";
 import { instagramHandle, phoneDigits, phoneFromAttendeeId, whatsappPhoneOf, isWhatsappGroup, visibleName, PROVIDER_WARNING_RE } from "./channels.ts";
 
@@ -396,6 +397,9 @@ export async function reconnectLink(sender: Sender, method?: "credentials" | "br
     const r = await unipile.hosted.link({ type: "reconnect", reconnect_account: sender.unipile_account_id, ...common });
     return r.url;
   }
+  // Billing v2: a sender with no live account (disconnected, or its account is gone) needs a free account for the new sign-in.
+  // The link holds one for its lifetime; E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED when the workspace has none (the caller shows it).
+  await rpc("slot_reserve", { p_ws: sender.workspace_id, p_purpose: "reconnect", p_sender: sender.id, p_minutes: RECONNECT_LINK_TTL_MIN });
   const providers = sender.provider === "LINKEDIN" ? ["LINKEDIN"] : sender.provider === "INSTAGRAM" ? ["INSTAGRAM"] : sender.provider === "WHATSAPP" ? ["WHATSAPP"] : sender.provider === "GMAIL" ? ["GOOGLE"] : sender.provider === "OUTLOOK" ? ["OUTLOOK"] : ["MAIL"];
   const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).maybeSingle();
   const recruiter = !!(ws?.settings?.recruiter_enabled) && !!sender.has_recruiter;
@@ -423,6 +427,33 @@ async function reconnectQuietPeriod(sender: Sender): Promise<void> {
 export const SIGN_IN_INCOMPLETE = "SIGN_IN_INCOMPLETE";   // the hosted page was opened (or never opened) and the link expired
 export const SIGN_IN_FAILED = "SIGN_IN_FAILED";           // the hosted page reported CREATION_FAIL / a failed reconnect
 
+/** Billing v2 reasons written by the sign-in flow: the plan had no free account when the sign-in finished; a disconnected sender was reconnected with another account. */
+export const NO_FREE_ACCOUNT = "NO_FREE_ACCOUNT";
+export const RECONNECT_WRONG_ACCOUNT = "RECONNECT_WRONG_ACCOUNT";
+
+/** Does the freshly signed-in account belong to someone other than this sender's own identity? null = same account, or no identity on record to compare. */
+async function reconnectIdentityMismatch(s: Sender, accountId: string): Promise<{ expected: string; got: string } | null> {
+  const mail = s.provider === "GMAIL" || s.provider === "OUTLOOK" || s.provider === "IMAP";
+  const expected = String((mail ? s.public_identifier ?? s.owner_email : s.provider_user_id) ?? "").trim().toLowerCase();
+  if (!expected) return null;
+  try {
+    const me = await unipile.users.me(accountId);
+    let got = "";
+    if (s.provider === "LINKEDIN") got = String(me.provider_id ?? "");
+    else if (s.provider === "INSTAGRAM") got = String(me.provider_id ?? me.id ?? "");
+    else if (s.provider === "WHATSAPP") {
+      // the id may be a phone id or a privacy id: compare the number when both sides have one
+      const digits = phoneDigits(me.phone_number ?? me.phone ?? phoneFromAttendeeId(me.id ?? me.provider_id) ?? "");
+      const mine = phoneDigits(String(s.public_identifier ?? ""));
+      if (digits && mine) return digits === mine ? null : { expected: `+${mine}`, got: `+${digits}` };
+      got = String(me.id ?? me.provider_id ?? "");
+    } else got = String(me.email ?? "");
+    got = got.trim().toLowerCase();
+    if (!got) return null;                       // the connector told us nothing to compare: do not refuse a legitimate reconnect
+    return got === expected ? null : { expected, got };
+  } catch (e) { log({ fn: "hosted_notify", warn: "identity check failed", error: String(e) }); return null; }
+}
+
 /** The hosted page reported a failure. A failed *create* leaves an orphan account on the DSN (it is billed): remove it unless a
  *  sender already owns that id (a failed *reconnect* reports the existing account id, which must stay). */
 async function handleHostedFailure(s: Sender, accountId: string | null, status: string): Promise<void> {
@@ -431,6 +462,7 @@ async function handleHostedFailure(s: Sender, accountId: string | null, status: 
   // a first sign-in that failed is an error the manager has to act on; a failed re-login keeps its current (credentials/error) status
   if (s.status === "connecting") { patch.status = "error"; patch.status_reason = SIGN_IN_FAILED; }
   await admin.from("outreach_senders").update(patch).eq("id", s.id);
+  await rpc("slot_release_sender", { p_sender: s.id, p_reason: "failed" }).catch(() => null);   // the account the link was holding is free again
   await admin.from("outreach_sender_events").insert({ sender_id: s.id, kind: "reconnect", data: { result: "failed", hosted_status: status, account_id: accountId, orphan_removed: !!accountId && !owner } });
   await audit(s.workspace_id, "sender.hosted_auth", "sender", s.id, { status, account_id: accountId, failed: true });
   if (accountId && !owner) {
@@ -482,7 +514,20 @@ export async function handleHostedNotify(payload: any): Promise<void> {
   const patch: Record<string, unknown> = { unipile_account_id: accountId };
   if (status === "RECONNECTED") { patch.status = s.status === "paused" || s.status === "disabled" ? s.status : "ok"; patch.status_reason = null; patch.reconnect_attempts = 0; }
   // a first sign-in that completes after an earlier failure / expired link starts the normal connecting → ok path again
-  if (status === "CREATION_SUCCESS") { patch.status_reason = null; if (s.status === "error" || s.status === "credentials") patch.status = "connecting"; }
+  if (status === "CREATION_SUCCESS") { patch.status_reason = null; if (s.status === "error" || s.status === "credentials" || s.status === "disconnected") patch.status = "connecting"; }
+  // Reconnecting a disconnected sender must bring back the SAME account: its conversations and relations belong to it
+  // (pricing-billing-PRD §12.1, #24e). Another account is refused and removed; it can be connected as a new sender instead.
+  if (status === "CREATION_SUCCESS" && (s.status === "disconnected" || s.previous_unipile_account_id) && !s.unipile_account_id) {
+    const mismatch = await reconnectIdentityMismatch(s as Sender, accountId);
+    if (mismatch) {
+      await dropConnectorAccount(accountId, s.workspace_id, "reconnect_wrong_account");
+      await rpc("slot_release_sender", { p_sender: s.id, p_reason: "failed" }).catch(() => null);
+      await admin.from("outreach_senders").update({ status_reason: RECONNECT_WRONG_ACCOUNT }).eq("id", s.id);
+      await admin.from("outreach_sender_events").insert({ sender_id: s.id, kind: "reconnect", data: { result: "wrong_account", expected: mismatch.expected, got: mismatch.got } });
+      await audit(s.workspace_id, "sender.reconnect_wrong_account", "sender", s.id, { account_id: accountId });
+      return;
+    }
+  }
   // A manager-chosen sign-in method on the latest reconnect link (last 25h) becomes the sender's auth_method.
   if ((status === "RECONNECTED" || status === "CREATION_SUCCESS") && s.provider === "LINKEDIN") {
     const { data: ev } = await admin.from("outreach_sender_events").select("data").eq("sender_id", senderId).eq("kind", "reconnect")
@@ -497,6 +542,15 @@ export async function handleHostedNotify(payload: any): Promise<void> {
     // owner turned out to be a tombstone whose id was just freed
     if (await foldIntoAccountOwner(s as Sender, accountId, status)) return;
     ({ error } = await admin.from("outreach_senders").update(patch).eq("id", senderId));
+  }
+  if (error && /E_ACCOUNT_LIMIT|E_PLAN_SUSPENDED/.test(error.message)) {
+    // the sign-in finished after its reservation ran out and the account was taken, or the plan lapsed meanwhile: the new
+    // connector account is removed and the owner is told to add an account and connect again (PRD #10)
+    await dropConnectorAccount(accountId, s.workspace_id, "no_free_account");
+    await admin.from("outreach_senders").update({ status_reason: NO_FREE_ACCOUNT, ...(s.status === "connecting" ? { status: "error" } : {}) }).eq("id", senderId);
+    await admin.from("outreach_sender_events").insert({ sender_id: senderId, kind: "reconnect", data: { result: "no_free_account", account_id: accountId, error: error.message.slice(0, 200) } });
+    await audit(s.workspace_id, "sender.no_free_account", "sender", senderId, { account_id: accountId });
+    return;
   }
   if (error) { log({ fn: "hosted_notify", error: error.message, sender_id: senderId }); return; }
   await audit(s.workspace_id, "sender.hosted_auth", "sender", senderId, { status, account_id: accountId, ...(patch.auth_method ? { auth_method: patch.auth_method } : {}) });

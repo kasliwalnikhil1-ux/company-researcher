@@ -137,9 +137,66 @@ FAIL credits +10: ' || (j->>'credits_remaining') || ' (was ' || n || ')'; end if
   ok := outreach_role_in(ws) = 'owner' and outreach_plan_active(ws) = false;
   if not ok then fails := fails + 1; log := log || E'\nFAIL suspended: plan_active false, role kept'; end if;
   perform set_config('request.jwt.claims', json_build_object('sub', admin_id, 'email', 'founders@capitalxai.com', 'role', 'authenticated')::text, true);
-  j := platform_admin_outreach_set_workspace(ws, '{"plan":"team","name":"Smoke WS","trial_ends_at":"2030-01-01T00:00:00Z"}');
-  ok := j->>'plan' = 'team' and j->>'name' = 'Smoke WS' and j->>'plan_before_suspension' is null and (j->>'trial_ends_at')::date = '2030-01-01';
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"launch","name":"Smoke WS","trial_ends_at":"2030-01-01T00:00:00Z"}');
+  ok := j->>'plan' = 'launch' and j->>'name' = 'Smoke WS' and j->>'plan_before_suspension' is null and (j->>'trial_ends_at')::date = '2030-01-01' and (j->>'billing_comp')::boolean;
   if not ok then fails := fails + 1; log := log || E'\nFAIL resume/rename: ' || j::text; end if;
+  begin
+    perform platform_admin_outreach_set_workspace(ws, '{"plan":"team"}'); ok := false;
+  exception when others then ok := sqlerrm like 'E_PAYLOAD_INVALID%'; end;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL the old plan name team should be refused'; end if;
+
+  -- 11b. billing v2: comp workspace with a custom deal, early-supporter discount, history, the enforcement switch
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"enterprise","accounts_billed":120,"billing_period":"annual","early_supporter_discount":0.3,"custom_price_id":"price_abc123"}');
+  ok := j->>'plan' = 'enterprise' and (j->>'accounts_billed')::int = 120 and (j->>'billing_comp')::boolean and j->>'billing_period' = 'annual'
+        and (j->>'early_supporter_discount')::numeric = 0.3 and (j->>'early_supporter_tier')::int = 2 and j->>'custom_price_id' = 'price_abc123' and (j->>'has_subscription')::boolean = false;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL comp workspace: ' || j::text; end if;
+  j := platform_admin_outreach_set_workspace(ws, '{"accounts_billed":null,"early_supporter_discount":0}');
+  ok := j->>'accounts_billed' is null and (j->>'early_supporter_discount')::numeric = 0;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL comp workspace without a limit: ' || j::text; end if;
+  begin
+    perform platform_admin_outreach_set_workspace(ws, '{"custom_price_id":"not-a-price"}'); ok := false;
+  exception when others then ok := sqlerrm like 'E_PAYLOAD_INVALID%'; end;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL bad custom price should raise'; end if;
+  -- sending back what the workspace already has is never refused; a trial's account limit can be raised
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"enterprise","accounts_billed":null,"trial_account_limit":3}');
+  ok := j->>'plan' = 'enterprise' and (j->>'trial_account_limit')::int = 3;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL unchanged values / trial account limit: ' || j::text; end if;
+  -- a workspace billed through Stripe cannot have its plan or count edited here (Stripe would overwrite it)
+  update outreach_workspaces set stripe_subscription_id = 'sub_smoke_admin', stripe_status = 'active' where id = ws;
+  begin
+    perform platform_admin_outreach_set_workspace(ws, '{"plan":"launch"}'); ok := false;
+  exception when others then ok := sqlerrm like 'E_PAYLOAD_INVALID: this workspace is billed through Stripe%'; end;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL stripe-billed workspace plan edit should be refused'; end if;
+  -- …except suspending it and lifting the suspension, which returns it to the plan its subscription has
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"enterprise","accounts_billed":null}');
+  ok := j->>'plan' = 'enterprise';
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"suspended"}');
+  ok := ok and j->>'plan' = 'suspended';
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"launch"}');
+  ok := ok and j->>'plan' = 'enterprise';
+  if not ok then fails := fails + 1; log := log || E'\nFAIL stripe-billed workspace: unchanged values accepted, suspension lifted back to its own plan: ' || j::text; end if;
+  update outreach_workspaces set stripe_subscription_id = null, stripe_status = null where id = ws;
+  j := platform_admin_outreach_billing(ws);
+  ok := jsonb_array_length(j->'changes') >= 2 and j->'changes'->0->>'kind' = 'admin' and j ? 'events' and j->'slots' ? 'used';
+  if not ok then fails := fails + 1; log := log || E'\nFAIL billing history: ' || left(j::text, 300); end if;
+  -- the switch: a trial that is already over makes "on" ask for confirmation
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"trial","trial_ends_at":"2020-01-01T00:00:00Z"}');
+  update outreach_workspaces set billing_comp = false where id = ws;
+  update outreach_flags set value = 'false'::jsonb where key = 'billing_enforced';
+  j := platform_admin_billing_overview();
+  ok := (j->>'enforced')::boolean = false and exists (select 1 from jsonb_array_elements(j->'trials_that_would_expire') x where (x->>'workspace_id')::uuid = ws);
+  if not ok then fails := fails + 1; log := log || E'\nFAIL billing overview: ' || left(j::text, 300); end if;
+  begin
+    perform platform_admin_billing_set('billing_enforced', true, false); ok := false;
+  exception when others then ok := sqlerrm like 'E_CONFIRM_REQUIRED%'; end;
+  if not ok then fails := fails + 1; log := log || E'\nFAIL turning enforcement on with lapsed trials should ask for confirmation'; end if;
+  j := platform_admin_billing_set('billing_enforced', true, true);
+  ok := (j->>'enforced')::boolean and outreach_billing_enforced();
+  if not ok then fails := fails + 1; log := log || E'\nFAIL enforcement switch on'; end if;
+  j := platform_admin_billing_set('billing_enforced', false);
+  ok := not outreach_billing_enforced();
+  if not ok then fails := fails + 1; log := log || E'\nFAIL enforcement switch off'; end if;
+  j := platform_admin_outreach_set_workspace(ws, '{"plan":"launch","trial_ends_at":"2030-01-01T00:00:00Z"}');
   begin
     perform platform_admin_outreach_set_workspace(ws, '{"plan":"gold"}'); ok := false;
   exception when others then ok := sqlerrm like 'E_PAYLOAD_INVALID%'; end;

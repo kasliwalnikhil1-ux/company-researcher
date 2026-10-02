@@ -1,12 +1,15 @@
 'use client';
 
 // Knowledge attached to the sequence's prompt (changes doc §9.2): websites, documents, pasted text and Q&A pairs.
+// The sources are the workspace's Knowledge library (AI → Knowledge); this section picks the ones this sequence uses.
 import { useRef, useState } from 'react';
+import Link from 'next/link';
 import { FileText, Globe, HelpCircle, Pencil, Plus, Trash2, Type, X } from 'lucide-react';
 import {
   KNOWLEDGE_STATUS_LABEL, uploadKnowledgeFile, useFaqDelete, useFaqSave, useKnowledgeAttach, useKnowledgeDetach, useKnowledgeSourceAdd, useKnowledgeSources,
   type Faq, type KnowledgeRef, type KnowledgeSource,
 } from '@/lib/outreach/aiRepliesSequence';
+import { KNOWLEDGE_FILE_ACCEPT, hubHref, useQaList } from '@/lib/outreach/aiHub';
 import { Badge, Button, ErrorBox, Input, Modal, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
 import { ConfirmModal, Note } from '@/components/outreach/settings/shared';
 import { cn } from '@/lib/utils';
@@ -29,7 +32,8 @@ export default function KnowledgeSection({ sequenceId, ws, knowledge, faqs, canE
   const fail = (e: unknown) => notify(errText(e), 'error');
 
   return (
-    <Section title="Knowledge" help="Websites, documents and Q&A the AI may answer from. Everything it finds here counts as an allowed fact."
+    <Section title="Knowledge"
+      help={<>Sources come from the workspace&rsquo;s Knowledge library and are picked here. Everything the AI finds in them counts as an allowed fact. <Link href={hubHref.knowledge()} className="text-indigo-600 hover:underline whitespace-nowrap">Open Knowledge</Link></>}
       actions={canEdit && <Button size="sm" variant="secondary" onClick={() => setAddOpen(true)}><Plus className="w-3.5 h-3.5" />Add</Button>}>
       <div className="flex flex-wrap items-center gap-2">
         {knowledge.map((k) => {
@@ -54,13 +58,13 @@ export default function KnowledgeSection({ sequenceId, ws, knowledge, faqs, canE
         </ul>
       )}
       {addOpen && <AddKnowledgeModal sequenceId={sequenceId} ws={ws} attached={knowledge.map((k) => k.id)} onClose={() => setAddOpen(false)} notify={notify} />}
-      {faqOpen && <FaqModal sequenceId={sequenceId} faqs={faqs} canEdit={canEdit} onClose={() => setFaqOpen(false)} notify={notify} />}
+      {faqOpen && <FaqModal sequenceId={sequenceId} ws={ws} faqs={faqs} canEdit={canEdit} onClose={() => setFaqOpen(false)} notify={notify} />}
     </Section>
   );
 }
 
 type Tab = 'website' | 'document' | 'text' | 'existing';
-const ACCEPT = '.txt,.md,.markdown,.html,.htm,text/plain,text/markdown,text/html';
+const ACCEPT = KNOWLEDGE_FILE_ACCEPT;
 
 function AddKnowledgeModal({ sequenceId, ws, attached, onClose, notify }: { sequenceId: string; ws: string; attached: string[]; onClose: () => void; notify: (m: string, t?: 'success' | 'error') => void }) {
   const add = useKnowledgeSourceAdd(ws);
@@ -145,7 +149,8 @@ function AddKnowledgeModal({ sequenceId, ws, attached, onClose, notify }: { sequ
               <p className="text-sm text-gray-500">Nothing yet.</p>
             ) : (
               <ul className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
-                {(existing.data ?? []).map((s) => {
+                {/* a product catalogue is for websites only (the server refuses to attach one to a sequence) */}
+                {(existing.data ?? []).filter((s) => s.kind !== 'catalogue').map((s) => {
                   const on = attached.includes(s.id);
                   return (
                     <li key={s.id} className="flex items-center gap-3 py-2">
@@ -167,9 +172,12 @@ function AddKnowledgeModal({ sequenceId, ws, attached, onClose, notify }: { sequ
   );
 }
 
-function FaqModal({ sequenceId, faqs, canEdit, onClose, notify }: { sequenceId: string; faqs: Faq[]; canEdit: boolean; onClose: () => void; notify: (m: string, t?: 'success' | 'error') => void }) {
+function FaqModal({ sequenceId, ws, faqs, canEdit, onClose, notify }: { sequenceId: string; ws: string; faqs: Faq[]; canEdit: boolean; onClose: () => void; notify: (m: string, t?: 'success' | 'error') => void }) {
   const save = useFaqSave(sequenceId);
   const del = useFaqDelete(sequenceId);
+  // shared pairs of the Knowledge library that this sequence also answers from: everywhere, or limited to it (switched-off pairs do not count)
+  const library = useQaList(ws);
+  const shared = (library.data ?? []).filter((p) => p.owner === 'library' && p.enabled && ((p.targets ?? []).length === 0 || (p.targets ?? []).some((t) => t.kind === 'sequence' && t.id === sequenceId))).length;
   const [editing, setEditing] = useState<{ id: string | null; question: string; answer: string } | null>(null);
   const [toDelete, setToDelete] = useState<Faq | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +194,11 @@ function FaqModal({ sequenceId, faqs, canEdit, onClose, notify }: { sequenceId: 
     <Modal open onClose={onClose} title={`Q&A (${faqs.length})`} size="lg" footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
       <div className="space-y-3">
         <p className="text-sm text-gray-600">Questions prospects ask and the answer the AI may give. Up to 30 pairs go into every reply; above that the AI looks up the matching ones.</p>
+        {shared > 0 && (
+          <p className="text-sm text-gray-600">
+            {shared} shared {shared === 1 ? 'answer' : 'answers'} from Knowledge also {shared === 1 ? 'applies' : 'apply'} to this sequence. <Link href={hubHref.knowledge('qa')} className="text-indigo-600 hover:underline whitespace-nowrap">Open them in Knowledge</Link>
+          </p>
+        )}
         {canEdit && !editing && <Button size="sm" variant="secondary" onClick={() => setEditing({ id: null, question: '', answer: '' })}><Plus className="w-3.5 h-3.5" />Add Q&amp;A</Button>}
         {editing && (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 space-y-2">

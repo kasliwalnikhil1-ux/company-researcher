@@ -9,6 +9,7 @@ import TemplateField from './TemplateField';
 import { useBuilder } from './context';
 import { nodeTitle, senderName } from './helpers';
 import { Note } from './FormsShared';
+import { ListPicker } from '@/components/outreach/leads/ListPicker';
 import type { FormProps } from './FormsOutreach';
 
 export function DelayEditor({ value, onChange, label }: { value: Partial<NodeDelay>; onChange: (d: NodeDelay) => void; label?: string }) {
@@ -119,13 +120,8 @@ export function TagForm({ cfg, set, verb }: FormProps & { verb: 'add' | 'remove'
 }
 
 export function ChangeListForm({ cfg, set }: FormProps) {
-  const { lists } = useBuilder();
-  return (
-    <Select label="Move lead to list" value={cfg.list_id ?? ''} onChange={(e) => set('list_id', e.target.value)}>
-      <option value="">Select a list…</option>
-      {lists.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-    </Select>
-  );
+  // the list can be made right in the step: the builder reads the same list data, so the new one shows everywhere at once
+  return <ListPicker label="Move lead to list" value={cfg.list_id ?? ''} onChange={(id) => set('list_id', id)} />;
 }
 
 export function ChangeStageForm({ cfg, set }: FormProps) {
@@ -146,7 +142,7 @@ export function CallWebhookForm({ cfg, set }: FormProps) {
         <option value="">Select a webhook…</option>
         {webhooks.map((w) => <option key={w.id} value={w.id}>{w.url}{!w.active ? ' (inactive)' : ''}</option>)}
       </Select>
-      {webhooks.length === 0 && <Note>No outbound webhooks configured. The workspace owner can add them under Settings → Webhooks.</Note>}
+      {webhooks.length === 0 && <Note>No outbound webhooks configured. The workspace owner can add them under Settings → Integrations → Webhooks.</Note>}
       <Note>Sends the lead, the sender and where the lead is in the sequence to your webhook. The request is signed so your system can trust it.</Note>
     </div>
   );

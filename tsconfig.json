@@ -38,6 +38,12 @@
   "exclude": [
     "node_modules",
     "supabase/functions",
-    "scripts/outreach-parity-test.ts"
+    "scripts/outreach-parity-test.ts",
+    "scripts/stripe-setup.ts",
+    "scripts/outreach-billing-e2e.ts",
+    "scripts/outreach-fake-stripe.ts",
+    "scripts/outreach-voice-e2e.ts",
+    "scripts/outreach-fake-elevenlabs.ts",
+    "widget-src"
   ]
 }

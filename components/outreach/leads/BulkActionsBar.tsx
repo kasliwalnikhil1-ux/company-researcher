@@ -4,12 +4,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useClients, useLists, useStages, useTags } from '@/lib/outreach/queries';
+import { useClients, useStages, useTags } from '@/lib/outreach/queries';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { Button, ErrorBox, Modal, Select } from '@/components/outreach/ui';
 import { AlertTriangle, GitBranch, ShieldCheck, ShieldOff, Sparkles, Tag as TagIcon, Trash2, Wand2, X } from 'lucide-react';
 import { requestEnrichment, stashSelection, type EnrichResult } from '@/lib/outreach/intel';
 import { BULK_CAP, type ToastFn } from './helpers';
+import { ListPicker } from './ListPicker';
 
 type Op = 'add_tag' | 'remove_tag' | 'set_list' | 'set_stage' | 'set_client' | 'set_dnc' | 'clear_dnc' | 'delete';
 const OP_LABEL: Record<Op, string> = { add_tag: 'Add tag', remove_tag: 'Remove tag', set_list: 'Set list', set_stage: 'Set stage', set_client: 'Set client', set_dnc: 'Mark do-not-contact', clear_dnc: 'Clear do-not-contact', delete: 'Delete leads' };
@@ -18,11 +19,11 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
   const { workspace } = useWorkspace();
   const qc = useQueryClient();
   const tags = useTags(workspace?.id);
-  const lists = useLists(workspace?.id);
   const stages = useStages(workspace?.id);
   const clients = useClients(workspace?.id);
   const [op, setOp] = useState<Op | null>(null);
   const [value, setValue] = useState('');
+  const [namingList, setNamingList] = useState(false);   // a new list is being named: Apply waits until it exists (or is cancelled)
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -34,9 +35,10 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
   const overCap = n > BULK_CAP;
   if (n === 0) return null;
 
-  const open = (o: Op) => { setOp(o); setValue(''); setError(null); };
+  const open = (o: Op) => { setOp(o); setValue(''); setNamingList(false); setError(null); };
   const needsValue = op === 'add_tag' || op === 'remove_tag';
-  const options = op === 'add_tag' || op === 'remove_tag' ? tags.data : op === 'set_list' ? lists.data : op === 'set_stage' ? stages.data : op === 'set_client' ? clients.data : undefined;
+  // the list has its own picker (below): a new list can be made right in this dialog
+  const options = op === 'add_tag' || op === 'remove_tag' ? tags.data : op === 'set_stage' ? stages.data : op === 'set_client' ? clients.data : undefined;
 
   const run = async () => {
     if (!workspace || !op || overCap) return;
@@ -70,7 +72,7 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
     finally { setBusy(false); }
   };
   // AI lines: at most 2000 leads per batch (outreach_ai_generate_request). The selection travels in sessionStorage, not the URL.
-  const toAiReview = () => { const key = stashSelection(selected.slice(0, 2000)); router.push(`/outreach/ai-review?generate=1&selection=${key}`); };
+  const toAiReview = () => { const key = stashSelection(selected.slice(0, 2000)); router.push(`/outreach/ai/setup/lines?view=lines&generate=1&selection=${key}`); };
 
   const valueLabel = op === 'add_tag' || op === 'remove_tag' ? 'Tag' : op === 'set_list' ? 'List' : op === 'set_stage' ? 'Stage' : op === 'set_client' ? 'Client' : '';
 
@@ -88,7 +90,7 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
           <BulkBtn onClick={() => open('set_dnc')} title="Mark as do not contact — exclude these leads from every sequence"><ShieldOff className="w-3.5 h-3.5" /> Mark DNC</BulkBtn>
           <BulkBtn onClick={() => open('clear_dnc')} title="Clear do not contact — make these leads eligible for outreach again"><ShieldCheck className="w-3.5 h-3.5" /> Clear DNC</BulkBtn>
           <BulkBtn onClick={openEnrich}><Sparkles className="w-3.5 h-3.5" /> Enrich</BulkBtn>
-          <BulkBtn onClick={toAiReview}><Wand2 className="w-3.5 h-3.5" /> Generate AI lines</BulkBtn>
+          <BulkBtn onClick={toAiReview}><Wand2 className="w-3.5 h-3.5" /> Generate lines</BulkBtn>
           <BulkBtn onClick={onEnroll}><GitBranch className="w-3.5 h-3.5" /> Enrol in sequence</BulkBtn>
           <BulkBtn onClick={() => open('delete')} danger><Trash2 className="w-3.5 h-3.5" /> Delete</BulkBtn>
         </div>
@@ -98,7 +100,7 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
       <Modal open={!!op} onClose={() => !busy && setOp(null)} title={op ? `${OP_LABEL[op]} — ${n.toLocaleString()} lead${n === 1 ? '' : 's'}` : ''} size="sm"
         footer={<>
           <Button variant="secondary" onClick={() => setOp(null)} disabled={busy}>Cancel</Button>
-          <Button variant={op === 'delete' ? 'danger' : 'primary'} loading={busy} disabled={overCap || (needsValue && !value)} onClick={run}>{op === 'delete' ? 'Delete permanently' : 'Apply'}</Button>
+          <Button variant={op === 'delete' ? 'danger' : 'primary'} loading={busy} disabled={overCap || (needsValue && !value) || namingList} onClick={run}>{op === 'delete' ? 'Delete permanently' : 'Apply'}</Button>
         </>}>
         {overCap && <ErrorBox className="mb-3" message={`Select at most ${BULK_CAP.toLocaleString()} leads per bulk action.`} />}
         {op === 'delete' && (
@@ -106,6 +108,7 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
         )}
         {op === 'set_dnc' && <p className="text-sm text-gray-700">Marked leads are excluded from every sequence; live enrollments exit with <em>suppressed</em> and queued actions are cancelled.</p>}
         {op === 'clear_dnc' && <p className="text-sm text-gray-700">Leads become eligible for outreach again. Existing enrollments are not restarted.</p>}
+        {op === 'set_list' && <ListPicker label="List" emptyLabel="None (clear)" value={value} onChange={setValue} disabled={busy} onNaming={setNamingList} />}
         {options && (
           <div className="space-y-2">
             <Select label={valueLabel} value={value} onChange={(e) => setValue(e.target.value)}>

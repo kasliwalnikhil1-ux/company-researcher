@@ -100,7 +100,7 @@ export function SearchUrlImport({ toast, onCreated }: { toast: ToastFn; onCreate
           <Button onClick={runEstimate} loading={busy === 'estimate'} disabled={!urlOk || !senderId}>Check search</Button>
         ) : (
           <>
-            <Button onClick={create} loading={busy === 'create'}>Start import</Button>
+            <Button onClick={create} loading={busy === 'create'} disabled={!common.listId}>Start import</Button>
             <Button variant="secondary" onClick={() => setEstimate(null)} disabled={busy === 'create'}>Edit</Button>
           </>
         )}

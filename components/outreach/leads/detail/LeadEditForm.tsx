@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { qk, useClients, useLists, useStages } from '@/lib/outreach/queries';
+import { qk, useClients, useStages } from '@/lib/outreach/queries';
 import { parseError } from '@/lib/outreach/api';
 import type { Lead } from '@/lib/outreach/types';
 import { Button, Card, ErrorBox, Input, Select } from '@/components/outreach/ui';
 import type { ToastFn } from '../helpers';
+import { ListPicker } from '../ListPicker';
 
 type Form = { first_name: string; last_name: string; headline: string; company: string; title: string; location: string; email_work: string; email_personal: string; phone: string; client_id: string; list_id: string; stage_id: string };
 
@@ -23,7 +24,6 @@ export function LeadEditForm({ lead, toast }: { lead: Lead; toast: ToastFn }) {
   const { workspace, canWrite } = useWorkspace();
   const qc = useQueryClient();
   const clients = useClients(workspace?.id);
-  const lists = useLists(workspace?.id);
   const stages = useStages(workspace?.id);
   const [form, setForm] = useState<Form>(() => fromLead(lead));
   const [busy, setBusy] = useState(false);
@@ -81,10 +81,7 @@ export function LeadEditForm({ lead, toast }: { lead: Lead; toast: ToastFn }) {
             <option value="">No client</option>
             {clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <Select label="List" value={form.list_id} onChange={set('list_id')} disabled={ro}>
-            <option value="">No list</option>
-            {lists.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </Select>
+          <ListPicker label="List" emptyLabel="No list" value={form.list_id} onChange={(id) => setForm((f) => ({ ...f, list_id: id }))} disabled={ro} />
           <Select label="Stage" value={form.stage_id} onChange={set('stage_id')} disabled={ro}>
             <option value="">No stage</option>
             {stages.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

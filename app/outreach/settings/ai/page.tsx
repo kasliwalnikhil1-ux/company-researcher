@@ -1,18 +1,7 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { SettingsFrame } from '@/components/outreach/settings/shared';
-import LlmKeyCard from '@/components/outreach/settings/LlmKeyCard';
-import AiVariablesCard from '@/components/outreach/settings/AiVariablesCard';
-import FinderKeysCard from '@/components/outreach/settings/FinderKeysCard';
-
-export default function AiSettingsPage() {
-  return (
-    <SettingsFrame min="manager">
-      <div className="space-y-6 max-w-4xl">
-        <AiVariablesCard />
-        <LlmKeyCard />
-        <FinderKeysCard />
-      </div>
-    </SettingsFrame>
-  );
+// Settings → AI Personalization moved to the AI hub: the provider, key and finder keys are in AI → Setup → General, the
+// variables in AI → Setup → Personalized lines. Old links keep working for one release.
+export default function AiSettingsMovedPage() {
+  redirect('/outreach/ai/setup/general');
 }

@@ -350,7 +350,8 @@ export interface Pool { month: string; used: number; limit: number | null; own_k
 // ---------------------------------------------------------------------------
 // Labels (customer copy — never name the connector vendor)
 // ---------------------------------------------------------------------------
-export const MODE_LABEL: Record<ReplyMode, string> = { off: 'Off', draft: 'Draft', autopilot: 'Auto' };
+/** Off · Review · Auto (AI hub). The stored value `draft` is shown as Review. */
+export const MODE_LABEL: Record<ReplyMode, string> = { off: 'Off', draft: 'Review', autopilot: 'Auto' };
 
 /** Why the AI stopped in a chat ("AI handed off · calendar link sent · 2 Oct"). */
 export const HANDOFF_LABEL: Record<HandoffReason, string> = {
@@ -414,7 +415,7 @@ export const ESCALATION_LABEL: Record<string, string> = {
 };
 
 export const GATE_LABEL: Record<string, string> = {
-  G2: 'Group chat', G3: 'They wrote to us first (inbound cold)', G4: 'Lead is blacklisted or do-not-contact', G5: 'Chat archived or autopilot paused',
+  G2: 'Group chat', G3: 'They wrote to us first (inbound cold)', G4: 'Lead is blacklisted or do-not-contact', G5: 'Chat archived or Auto paused',
   G6: 'Sender not connected', G7: 'Their message is older than the stale limit', G11: 'Sender reached its AI send limit today',
   G12: 'Workspace AI allowance used up', G14: 'Lead is in a region that needs a disclosure line', other_sender: 'Another sender is about to reply to the same lead',
 };

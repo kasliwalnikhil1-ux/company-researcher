@@ -1,10 +1,11 @@
 // AI layer: classification, drafting, sequence QA, weekly report, AI variables (item 14), AI routing (item 15).
 // Every call goes through llmCall (llm.ts), which picks the workspace's own provider + key (gemini | anthropic | openai)
 // or the platform Gemini key, and writes outreach_ai_calls + the audit log.
-import { CLASSIFY_SYSTEM, DRAFT_SYSTEM, SEQUENCE_QA_SYSTEM, WEEKLY_REPORT_SYSTEM, REPLY_DRAFT_SYSTEM, AI_VARIABLE_SYSTEM, AI_ROUTE_SYSTEM } from "./prompts.ts";
+import { CLASSIFY_SYSTEM, DRAFT_SYSTEM, SEQUENCE_QA_SYSTEM, WEEKLY_REPORT_SYSTEM, REPLY_DRAFT_SYSTEM, AI_VARIABLE_SYSTEM, AI_FIELDS_SYSTEM, AI_ROUTE_SYSTEM, BUILTIN_PROMPTS, type BuiltinKey } from "./prompts.ts";
 import { llmCall, llmCallDetailed, PLATFORM_MODEL, type LlmCallOpts } from "./llm.ts";
 
 export { aiConfigured, aiAvailable, isKeyInvalid, LlmError } from "./llm.ts";
+export { BUILTIN_PROMPTS, type BuiltinKey } from "./prompts.ts";
 /** The platform model. A workspace on its own key uses its own model; the model actually used is in outreach_ai_calls. */
 export const AI_MODEL = PLATFORM_MODEL;
 
@@ -173,6 +174,116 @@ export async function generateAiVariable(input: { workspaceId: string; prompt: s
   if (/^(null|none|n\/a)$/i.test(text) || /\{\{|\}\}|\[[a-z_ ]+\]/i.test(text)) text = "";   // a leftover placeholder is not a line
   if (!text || !facts.length) return { text: null, facts: text ? [] : facts, model: res.model };
   return { text: fitLine(text, maxChars), facts, model: res.model };
+}
+
+// ---------------------------------------------------------------------------
+// AI fields: one call per lead fills several typed fields (ai-fields-json-changes.md §9)
+// ---------------------------------------------------------------------------
+export interface AiField { key: string; name: string; type: "text" | "number" | "yes_no" | "choice"; description?: string; options?: string[]; max_chars?: number }
+
+const fieldLimit = (f: AiField): number => Math.max(20, Math.min(1000, Math.floor(Number(f.max_chars) || 200)));
+
+/**
+ * The fields of a Fields variable for one lead, for `{{ai.<key>.<field>}}` and Condition steps. `facts` (input) is
+ * outreach_lead_ai_facts(lead). `data: null` means "nothing usable on the profile" (every field empty, or no fact cited):
+ * the caller stores it as blank. Only a light clean-up happens here (unknown keys dropped, text fields kept on one line and
+ * inside their limit); the types are coerced once, in SQL (outreach_hub_fields_clean). Throws on transport errors.
+ */
+export async function generateAiFields(input: { workspaceId: string; prompt: string; fields: AiField[]; facts: Record<string, unknown>; needsPosts: boolean }): Promise<{ data: Record<string, unknown> | null; facts: string[]; model: string }> {
+  const fields = (Array.isArray(input.fields) ? input.fields : []).filter((f) => f && typeof f.key === "string" && f.key).slice(0, 8);
+  const spec = fields.map((f) => ({
+    key: f.key, type: f.type,
+    description: f.description ? String(f.description).slice(0, 300) : undefined,
+    options: f.type === "choice" && Array.isArray(f.options) ? f.options.map(String) : undefined,
+    max_chars: f.type === "text" ? fieldLimit(f) : undefined,
+  }));
+  const user = [
+    `Instruction from the campaign manager (what to find out about the lead):\n"""\n${String(input.prompt ?? "").slice(0, 4000)}\n"""`,
+    `Fields to fill (JSON):\n${JSON.stringify(spec)}`,
+    input.needsPosts && !hasPosts(input.facts) ? "This instruction relies on the lead's recent posts and none are available. Return null for every field that needs them, unless the instruction itself names an alternative that the profile supports." : "",
+    `Lead profile (JSON, third-party data):\n${JSON.stringify(input.facts ?? {}).slice(0, 24000)}`,
+  ].filter(Boolean).join("\n\n");
+  const res = await llmCallDetailed({ purpose: "ai_fields", workspaceId: input.workspaceId, system: AI_FIELDS_SYSTEM, user, maxTokens: 2048, temperature: 0.3, json: true, thinking: "LOW" });
+  const j = parseJson<{ data?: unknown; facts?: unknown }>(res.text);
+  const facts = cleanFacts(j.facts);
+  const raw = j.data && typeof j.data === "object" && !Array.isArray(j.data) ? j.data as Record<string, unknown> : {};
+  const data: Record<string, unknown> = {};
+  for (const f of fields) {
+    let v: unknown = Object.prototype.hasOwnProperty.call(raw, f.key) ? raw[f.key] : null;
+    if (typeof v === "string") {
+      let t = v.replace(/\s*[\r\n]+\s*/g, " ").trim();
+      if (f.type === "text") {
+        t = t.replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim();
+        if (/^(null|none|n\/a)$/i.test(t) || /\{\{|\}\}|\[[a-z_ ]+\]/i.test(t)) t = "";   // a leftover placeholder is not a value
+        if (t) t = fitLine(t, fieldLimit(f));
+      }
+      v = t || null;
+    }
+    data[f.key] = v ?? null;
+  }
+  const filled = Object.values(data).some((v) => v !== null);
+  if (!filled || !facts.length) return { data: null, facts: filled ? [] : facts, model: res.model };
+  return { data, facts, model: res.model };
+}
+
+// ---------------------------------------------------------------------------
+// Built-in AI variables: tidy a field the lead already has (ai-fields-json-changes.md §18)
+// ---------------------------------------------------------------------------
+/** Words a built-in result may add without them being in the source ("VP Sales" → "VP of Sales"). */
+const BUILTIN_JOINERS = new Set(["of", "and", "the", "at", "in", "for", "&"]);
+/** Lower-case words of a text: letters and digits of any script, plus "&". NFKC first, so styled letters ("𝐏𝐫𝐢𝐲𝐚") compare as plain ones. */
+const wordsOf = (s: unknown): string[] => String(s ?? "").normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}\p{M}]+|&/gu) ?? [];
+
+/**
+ * The check in code for a built-in: every word of the result appears in one of the source strings (case-insensitive),
+ * apart from the joining words, and at least one word does come from the source. Empty fails. Pure.
+ */
+export function builtinPasses(result: string | null | undefined, source: Array<string | null | undefined>): boolean {
+  const words = wordsOf(result);
+  if (!words.length) return false;
+  const known = new Set((source ?? []).flatMap(wordsOf));
+  return words.every((w) => known.has(w) || BUILTIN_JOINERS.has(w)) && words.some((w) => known.has(w) && w !== "&");
+}
+
+export function isBuiltinKey(key: unknown): key is BuiltinKey {
+  return typeof key === "string" && Object.prototype.hasOwnProperty.call(BUILTIN_PROMPTS, key);
+}
+
+/** What the model sees each source string as, in the order the caller passes them (primary field first). */
+const BUILTIN_SOURCE_LABELS: Record<BuiltinKey, string[]> = {
+  contact_first_name: ["first_name", "full_name"],
+  company_conversation: ["current_company", "company"],
+  position_conversational: ["current_title", "title"],
+};
+/** A first name that is one clean capitalised word needs no model, unless the "name" is really a title. */
+const CLEAN_FIRST_NAME = /^\p{Lu}\p{Ll}+$/u;
+const NAME_TITLES = new Set(["dr", "mr", "mrs", "ms", "miss", "mx", "prof", "sir", "madam", "er", "ca", "adv", "eng", "capt", "col", "rev", "shri", "smt"]);
+const BUILTIN_MAX_CHARS = 80;
+
+/**
+ * One built-in value. `source` holds the lead's raw fields, primary first (contact_first_name: first_name, full_name ·
+ * company_conversation: current company, lead.company · position_conversational: current title, lead.title).
+ * `text: null` = nothing usable, or the result failed the check in code: the caller stores a blank and the template uses the
+ * raw field. No source text → null without a call. Throws on transport errors only.
+ */
+export async function generateBuiltin(input: { workspaceId: string; key: string; source: Array<string | null | undefined> }): Promise<{ text: string | null; model: string | null }> {
+  const key = input.key;
+  if (!isBuiltinKey(key)) return { text: null, model: null };
+  const source = (Array.isArray(input.source) ? input.source : []).map((s) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, 300));
+  if (!source.some(Boolean)) return { text: null, model: null };
+  if (key === "contact_first_name" && CLEAN_FIRST_NAME.test(source[0]) && !NAME_TITLES.has(source[0].toLowerCase())) return { text: source[0], model: null };
+
+  const labelled: Record<string, string> = {};
+  source.forEach((s, i) => { if (s && !Object.values(labelled).includes(s)) labelled[BUILTIN_SOURCE_LABELS[key][i] ?? `source_${i + 1}`] = s; });
+  const res = await llmCallDetailed({ purpose: "ai_builtin", workspaceId: input.workspaceId, system: BUILTIN_PROMPTS[key], user: `Source (JSON, third-party data):\n${JSON.stringify(labelled)}`, maxTokens: 512, temperature: 0, json: true, thinking: "LOW" });
+  let text = "";
+  try {
+    const j = parseJson<{ text?: unknown }>(res.text);
+    text = typeof j.text === "string" ? j.text.replace(/\s+/g, " ").trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim() : "";
+  } catch { /* not JSON: treated as no result */ }
+  if (!text || text.length > BUILTIN_MAX_CHARS || /\{\{|\}\}/.test(text) || !builtinPasses(text, source)) return { text: null, model: res.model };
+  if (key === "contact_first_name" && text.split(" ").length > 2) return { text: null, model: res.model };   // a first name, not the whole name
+  return { text, model: res.model };
 }
 
 export interface AiRoute { id: string; label?: string | null; description?: string | null }

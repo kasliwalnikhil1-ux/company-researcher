@@ -13,6 +13,9 @@ import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDow
 import { channelLabel, fixMojibake, isMailProvider } from '@/lib/outreach/channels';
 import AiOriginBadge, { hasOriginBadge, isAiOrigin } from './ai/AiOriginBadge';
 import { languageName } from './ai/useAiInbox';
+import ProductCards, { cardsOf } from '@/components/outreach/products/ProductCards';
+import VoiceCallCard from './webchat/VoiceCallCard';
+import { isCallCard } from '@/lib/outreach/voice';
 
 export function isVoiceNote(att: MessageAttachment): boolean {
   const mime = att.mimetype ?? att.type ?? '';
@@ -340,6 +343,8 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   const isEmail = isMailProvider(provider);
   const safeHtml = useMemo(() => (isEmail && m.html && !m.text ? sanitizeHtml(m.html) : ''), [isEmail, m.html, m.text]);
   const atts = useMemo(() => (m.attachments ?? []) as MessageAttachment[], [m.attachments]);
+  // product cards are only ever drawn on what the assistant or an agent sent, never on a visitor's message
+  const products = useMemo(() => (m.direction === 'out' ? cardsOf(m.content_attributes) : []), [m.direction, m.content_attributes]);
   const voiceNotes = useMemo(() => atts.filter((a) => isVoiceNote(a)), [atts]);
   const media = useMemo(() => atts.filter((a) => !isVoiceNote(a) && mediaKind(a)), [atts]);
   const otherAttachments = useMemo(() => atts.filter((a) => !isVoiceNote(a) && !mediaKind(a)), [atts]);
@@ -366,6 +371,8 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   }, [picker]);
 
   if (m.event_type != null) return <EventPill m={m} />;
+  // a voice call with the website assistant (069): its card, where the call started
+  if (m.content_type === 'event' && isCallCard(m.content_attributes)) return <VoiceCallCard a={m.content_attributes} id={m.id} />;
 
   const save = async () => {
     if (!draft.trim() || draft === m.text) { setEditing(false); return; }
@@ -458,10 +465,12 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
               </div>
             </div>
           ) : (
-            <span className={cn(deleted && 'line-through')}>{m.text ? <RichText text={fixMojibake(m.text) ?? ''} format={wa} dark={dark} /> : atts.length ? '' : m.unsupported
+            <span className={cn(deleted && 'line-through')}>{m.text ? <RichText text={fixMojibake(m.text) ?? ''} format={wa} dark={dark} /> : atts.length || products.length ? '' : m.unsupported
               ? <span className={cn('inline-flex items-center gap-1.5 italic', dark ? 'text-white/80' : 'text-gray-500')}><Info className="w-3.5 h-3.5 shrink-0" /> This message can&apos;t be shown here. Open {channelLabel(provider)} to see it.</span>
               : <em className="opacity-70">(empty message)</em>}</span>
           )}
+          {/* web chat: the product cards the assistant recommended or an agent sent, as the visitor sees them */}
+          {!hideDeletedText && products.length > 0 && <ProductCards cards={products} className={m.text ? 'mt-2' : ''} />}
           {!hideDeletedText && voiceNotes.length > 0 && (
             <div className={cn('space-y-1.5', m.text ? 'mt-2' : '')}>
               {voiceNotes.map((a, i) => <VoiceNote key={a.id ?? `v${i}`} messageId={m.id} att={a} dark={dark} />)}
@@ -489,6 +498,10 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
         </div>
         {toolbar}
       </div>
+      {/* a turn of a voice call: spoken, and "live transcript" until the provider's signed copy replaces it */}
+      {m.content_attributes?.voice && m.content_type === 'text' && (
+        <div className={cn('flex items-center gap-1 text-[10px] text-gray-400 mt-0.5', mine ? 'justify-end mr-1' : 'ml-1')}><Mic className="w-2.5 h-2.5" />{m.content_attributes.voice.live ? 'Spoken · live transcript' : 'Spoken'}</div>
+      )}
       {reactionGroups.length > 0 && (
         <div className={cn('flex flex-wrap gap-1 -mt-1.5 relative z-[1]', mine ? 'justify-end mr-2' : 'ml-2')} aria-label="Reactions">
           {reactionGroups.map((g) => (

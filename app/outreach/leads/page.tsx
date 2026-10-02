@@ -1,16 +1,19 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useLists, useStages, useTags } from '@/lib/outreach/queries';
-import { useLeadsIntel } from '@/lib/outreach/intel';
+import { fetchFilteredLeadIds, useLeadCustomKeys, useLeadsIntel } from '@/lib/outreach/intel';
+import { isLayoutEmpty, useTableLayout } from '@/lib/outreach/tableLayout';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { cn } from '@/lib/utils';
 import { Button, EmptyState, ErrorBox, PageHeader, PageLoader, Spinner, useToast } from '@/components/outreach/ui';
 import { LeadFilterBar, EMPTY_FILTERS, isFilterEmpty, usePersistedLeadFilters } from '@/components/outreach/leads/LeadFilterBar';
 import { LeadsTable } from '@/components/outreach/leads/LeadsTable';
+import { BULK_CAP } from '@/components/outreach/leads/helpers';
+import type { SelectionRequest } from '@/components/outreach/leads/SelectionMenu';
 import { BulkActionsBar } from '@/components/outreach/leads/BulkActionsBar';
 import { EnrollModal } from '@/components/outreach/leads/EnrollModal';
 import { CreateLeadModal } from '@/components/outreach/leads/CreateLeadModal';
@@ -42,6 +45,8 @@ function LeadsPage() {
   const { filters, setFilters, ready } = usePersistedLeadFilters(ws);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selecting, setSelecting] = useState(false);
+  const selectRun = useRef(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -52,9 +57,12 @@ function LeadsPage() {
   const lists = useLists(ws);
   const stages = useStages(ws);
   const tags = useTags(ws);
+  const customKeys = useLeadCustomKeys(tab === 'leads' ? ws : undefined);
+  // Column order and widths, saved per person and workspace every time a header is dragged.
+  const columns = useTableLayout(ws, 'leads');
 
   // Reset paging + selection when filters or workspace change
-  useEffect(() => { setPage(0); setSelected(new Set()); }, [filters, ws]);
+  useEffect(() => { setPage(0); setSelected(new Set()); selectRun.current++; setSelecting(false); }, [filters, ws]);
 
   const rows = leads.data?.rows ?? [];
   const total = leads.data?.count ?? 0;
@@ -63,12 +71,26 @@ function LeadsPage() {
   const to = Math.min(total, (page + 1) * PAGE_SIZE);
 
   const toggle = useCallback((id: string) => setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }), []);
-  const toggleAll = useCallback(() => setSelected((s) => {
-    const n = new Set(s);
-    const all = rows.length > 0 && rows.every((r) => n.has(r.id));
-    if (all) rows.forEach((r) => n.delete(r.id)); else rows.forEach((r) => n.add(r.id));
-    return n;
-  }), [rows]);
+  // The header checkbox: this page is added to the selection; "all" and "the first N" replace it with leads from every page of the
+  // current filters, whose ids are fetched (only one page of rows is loaded). A bulk action takes at most BULK_CAP leads.
+  const select = useCallback(async (req: SelectionRequest) => {
+    if (req.kind === 'none') { setSelected(new Set()); return; }
+    if (req.kind === 'page') { setSelected((s) => { const n = new Set(s); rows.forEach((r) => n.add(r.id)); return n; }); return; }
+    if (!ws) return;
+    const asked = req.kind === 'all' ? total : Math.min(req.count, total);
+    const run = ++selectRun.current;
+    setSelecting(true);
+    try {
+      const ids = await fetchFilteredLeadIds(ws, filters, Math.min(asked, BULK_CAP));
+      if (run !== selectRun.current) return;   // the filters changed while the ids were on their way
+      setSelected(new Set(ids));
+      if (asked > BULK_CAP) toast.show(`Selected the first ${BULK_CAP.toLocaleString()} leads. A bulk action takes at most ${BULK_CAP.toLocaleString()} at a time.`);
+    } catch (e) {
+      if (run === selectRun.current) toast.show(parseError(e).message, 'error');
+    } finally {
+      if (run === selectRun.current) setSelecting(false);
+    }
+  }, [rows, ws, total, filters, toast]);
   const selectedIds = useMemo(() => Array.from(selected), [selected]);
 
   /** From a list / stage / tag row: jump back to the lead table filtered on just that row. */
@@ -133,10 +155,12 @@ function LeadsPage() {
           ) : (
             <>
               <div className={leads.isFetching ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
-                <LeadsTable rows={rows} selected={selected} onToggle={toggle} onToggleAll={toggleAll} clients={clients.data} lists={lists.data} stages={stages.data} tags={tags.data} selectable={canWrite} />
+                <LeadsTable rows={rows} total={total} selected={selected} onToggle={toggle} onSelect={select} selecting={selecting} clients={clients.data} lists={lists.data} stages={stages.data} tags={tags.data} selectable={canWrite}
+                  customKeys={customKeys.data} layout={columns.layout} onLayoutChange={columns.setLayout} />
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-gray-600">
-                <span>Showing <span className="font-medium text-gray-900">{from.toLocaleString()}–{to.toLocaleString()}</span> of <span className="font-medium text-gray-900">{total.toLocaleString()}</span>{selected.size > 0 && <> · {selected.size.toLocaleString()} selected</>}</span>
+                <span>Showing <span className="font-medium text-gray-900">{from.toLocaleString()}–{to.toLocaleString()}</span> of <span className="font-medium text-gray-900">{total.toLocaleString()}</span>{selected.size > 0 && <> · {selected.size.toLocaleString()} selected</>}
+                  {!isLayoutEmpty(columns.layout) && <> · <button type="button" onClick={columns.reset} className="text-indigo-600 hover:text-indigo-800 hover:underline" title="Back to the default column order and widths">Reset columns</button></>}</span>
                 <div className="flex items-center gap-1">
                   <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}><ChevronLeft className="w-4 h-4" /> Prev</Button>
                   <span className="px-2 tabular-nums">Page {page + 1} / {pageCount}</span>

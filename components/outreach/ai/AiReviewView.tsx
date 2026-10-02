@@ -1,20 +1,26 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, HelpCircle, Loader2, RefreshCw, ShieldCheck, SkipForward, Sparkles, Wand2 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, ChevronDown, ChevronLeft, ChevronRight, HelpCircle, Loader2, Pencil, RefreshCw, ShieldCheck, SkipForward, Sparkles, Wand2 } from 'lucide-react';
+import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
-import { factLines, ik, useAiBatches, useAiRealtime, useAiReviewList, type AiBatch, type AiGenerateResult, type AiReviewAction, type AiReviewRow, type AiValueStatus } from '@/lib/outreach/intel';
+import { editOf, editProblems, editToData, isFieldsVariable, sameEdit, variableFields, type FieldEdit } from '@/lib/outreach/aiFields';
+import { FEATURE_LABEL, editLineFields, hk, hubHref, linesHref, variableMode } from '@/lib/outreach/aiHub';
+import { factLines, ik, useAiBatches, useAiRealtime, useAiReviewList, useAiVariables, type AiBatch, type AiGenerateResult, type AiReviewAction, type AiReviewRow, type AiValueStatus } from '@/lib/outreach/intel';
 import { Badge, Button, EmptyState, ErrorBox, Modal, PageHeader, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
+import type { AiField, AiFieldValue } from '@/lib/outreach/types';
 import { cn } from '@/lib/utils';
 import { GenerateLinesModal } from './GenerateLinesModal';
+import { FieldValueEditor, FieldValueTable, readFieldData } from './hub/lines/FieldValueEditor';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const PAGE_SIZE = 50;
-const BLANK_COPY = 'Nothing usable on the profile — the fallback will be used';
+const BLANK_COPY = 'Nothing usable on the profile, so the fallback is used';
+const VARIABLE_OFF_COPY = 'This variable is switched off, so its lines cannot be written again. Switch it to Review under AI → Setup → Personalized lines.';
 
 const STATUS_FILTERS: Array<{ id: string; label: string }> = [
   { id: 'generated', label: 'To review' }, { id: 'approved', label: 'Approved' }, { id: 'skipped', label: 'Skipped' },
@@ -33,21 +39,21 @@ const STATUS_HINTS: Record<string, string> = {
 const GUIDE_KEY = 'outreach.ai-review.guide-hidden';
 
 function Guide() {
-  const [hidden, setHidden] = useState(false);
-  useEffect(() => { try { setHidden(window.localStorage.getItem(GUIDE_KEY) === '1'); } catch { /* storage blocked */ } }, []);
+  // Read when the guide mounts. That is always in the browser: the view renders nothing until the workspace is known.
+  const [hidden, setHidden] = useState(() => { try { return window.localStorage.getItem(GUIDE_KEY) === '1'; } catch { return false; /* storage blocked */ } });
   const toggle = () => { const next = !hidden; setHidden(next); try { window.localStorage.setItem(GUIDE_KEY, next ? '1' : '0'); } catch { /* storage blocked */ } };
   const steps: Array<{ title: string; body: ReactNode }> = [
-    { title: 'Create an AI variable', body: <>In <Link href="/outreach/settings/ai" className="text-indigo-700 underline">Settings → AI Personalization</Link>, write what the AI should say (for example one sentence about their current role) and a fallback. You get a token like <code className="text-[11px] bg-white border border-indigo-100 rounded px-1">{'{{ai.opener|fallback}}'}</code>.</> },
-    { title: 'Choose how lines get approved', body: <><strong>Review</strong>: you approve each line. <strong>Auto</strong>: lines that pass the checks are approved for you, and the rest come here. Auto starts with 20 lines for you to review.</> },
+    { title: 'Create a variable', body: <>In <Link href={hubHref.setupLines()} className="text-indigo-700 underline">AI → Setup → Personalized lines</Link>, write what the AI should say (for example one sentence about their current role) and a fallback. You get a token like <code className="text-[11px] bg-white border border-indigo-100 rounded px-1">{'{{ai.opener|fallback}}'}</code>.</> },
+    { title: 'Choose how lines get approved', body: <><strong>Review</strong> is the only approval mode today: a person approves each line. Lines waiting for a person also show in <Link href={hubHref.needsYou({ type: 'line' })} className="text-indigo-700 underline">AI → Needs you</Link>. Switch a variable <strong>Off</strong> to stop new lines.</> },
     { title: 'Generate lines', body: <>Click <strong>Generate lines</strong>, pick the variable and a list, a tag or the leads you selected. Use <strong>Try it</strong> on one lead first to check the prompt. Lines are written in the background, up to 2,000 leads per batch.</> },
-    { title: 'Review what needs you', body: <>Each row shows the profile facts the AI used, the line it wrote and any check it failed. <strong>Approve</strong> it, type over it and press <strong>Save and approve</strong> (or Ctrl+Enter), <strong>regenerate</strong> it, or <strong>skip</strong> it to use the fallback. Auto-approved lines can be revoked until they are sent.</> },
+    { title: 'Review what needs you', body: <>Each row shows the profile facts the AI used and the line it wrote. <strong>Approve</strong> it, type over it and press <strong>Save and approve</strong> (or Ctrl+Enter), <strong>regenerate</strong> it, or <strong>skip</strong> it to use the fallback.</> },
     { title: 'Use it in a message', body: <>Paste the token into a sequence step. To make leads wait for their line instead of sending the fallback, turn on <strong>Hold leads until AI-written lines are approved</strong> in the sequence settings, and set how long they may wait.</> },
   ];
   return (
     <div className="rounded-xl border border-indigo-200 bg-indigo-50 mb-4 text-sm text-indigo-900" role="note">
       <div className="flex items-start gap-2 px-4 py-3">
         <ShieldCheck className="w-4 h-4 mt-0.5 flex-shrink-0" />
-        <span className="flex-1"><span className="font-semibold">Only approved lines are ever sent, approved by you or by the checks. Everything else uses the fallback.</span> A lead whose sequence waits for review starts as soon as its line is approved, skipped or blank.</span>
+        <span className="flex-1"><span className="font-semibold">Only approved lines are ever sent. Everything else uses the fallback.</span> A lead whose sequence waits for review starts as soon as its line is approved, skipped or blank.</span>
         <button type="button" onClick={toggle} aria-expanded={!hidden} className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 hover:underline whitespace-nowrap">
           <HelpCircle className="w-3.5 h-3.5" /> {hidden ? 'How it works' : 'Hide guide'}<ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !hidden && 'rotate-180')} />
         </button>
@@ -98,13 +104,71 @@ function BatchItem({ b, active, onSelect }: { b: AiBatch; active: boolean; onSel
   );
 }
 
-function Row({ row, canWrite, checked, onCheck, draft, onDraft, busy, onAct }: {
-  row: AiReviewRow; canWrite: boolean; checked: boolean; onCheck: () => void; draft: string | undefined; onDraft: (v: string | undefined) => void;
+/** A row of a Fields variable: its field list and the stored values (`data` is undefined until they have been read). */
+interface TypedRow { fields: AiField[]; data: Record<string, AiFieldValue> | null | undefined }
+/** What a row is editing: the text of a one-line variable, or the typed inputs of a Fields variable. */
+type RowDraft = string | FieldEdit;
+
+/**
+ * The "Generated line" cell of a Fields variable: the Field · Value table, and the typed editor behind Edit.
+ * A blank row can be filled in by hand; saving approves, like typing over a line.
+ */
+function FieldsCell({ row, typed, edit, onEdit, canWrite, working, isBlank, canApprove, onApprove, onSave }: {
+  row: AiReviewRow; typed: TypedRow; edit: FieldEdit | undefined; onEdit: (e: FieldEdit | undefined) => void; canWrite: boolean; working: boolean;
+  isBlank: boolean; canApprove: boolean; onApprove: () => void; onSave: (data: Record<string, AiFieldValue>) => void;
+}) {
+  // What does not fit is said after the first try to save, not while the person is still typing.
+  const [tried, setTried] = useState(false);
+  const { fields, data } = typed;
+  const discard = () => { setTried(false); onEdit(undefined); };
+  const save = () => {
+    if (!edit || working) return;
+    if (Object.keys(editProblems(fields, edit)).length > 0) { setTried(true); return; }
+    // Nothing changed: a plain approve when there is something to approve, else the editor just closes.
+    if (sameEdit(fields, edit, data)) { discard(); if (canApprove) onApprove(); return; }
+    onSave(editToData(fields, edit));
+  };
+
+  if (edit) {
+    return (
+      <div>
+        <FieldValueEditor fields={fields} edit={edit} onChange={onEdit} onSave={save} onDiscard={discard} showProblems={tried} who={row.lead_name ?? 'lead'} autoFocus disabled={working} />
+        <div className="flex items-center gap-2 mt-2">
+          <Button size="sm" loading={working} onClick={save}><Check className="w-3.5 h-3.5" /> Save and approve</Button>
+          <button type="button" onClick={discard} className="text-xs text-gray-500 hover:underline">Discard edit</button>
+        </div>
+      </div>
+    );
+  }
+  const loaded = data !== undefined;
+  return (
+    <div>
+      {isBlank ? <p className="text-xs text-gray-500 mb-1">Nothing usable on the profile, so every field is empty and the fallback in the message is used.</p>
+        : loaded ? <FieldValueTable fields={fields} data={data} compact />
+        : <p className="text-sm text-gray-700 break-words">{row.body}</p>}
+      {canWrite && (
+        <Button size="sm" variant="ghost" className="mt-1 -ml-1" disabled={!loaded || working} onClick={() => { setTried(false); onEdit(editOf(fields, data)); }}
+          aria-label={`${isBlank ? 'Fill in the fields' : 'Edit the fields'} for ${row.lead_name ?? 'lead'}`} title="Saving approves the value. Ctrl+Enter saves, Esc discards the edit.">
+          <Pencil className="w-3.5 h-3.5" /> {isBlank ? 'Fill in by hand' : 'Edit'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function Row({ row, canWrite, checked, onCheck, draft: anyDraft, onDraft, busy, onAct, variableOff, typed, onSaveFields }: {
+  row: AiReviewRow; canWrite: boolean; checked: boolean; onCheck: () => void; draft: RowDraft | undefined; onDraft: (v: RowDraft | undefined) => void;
   busy: string | null; onAct: (action: AiReviewAction, text?: string) => void;
+  /** The row's variable is switched off: its lines can still be approved, edited or skipped, but not written again. */
+  variableOff: boolean;
+  /** Set when the row's variable writes fields: the cell shows a Field · Value table instead of the text box. */
+  typed?: TypedRow; onSaveFields: (data: Record<string, AiFieldValue>) => void;
 }) {
   const stored = row.body ?? '';
+  const draft = typeof anyDraft === 'string' ? anyDraft : undefined;
+  const fieldEdit = typed && anyDraft !== undefined && typeof anyDraft !== 'string' ? anyDraft : undefined;
   const value = draft ?? stored;
-  const dirty = draft !== undefined && draft.trim() !== stored.trim();
+  const dirty = typed ? !!fieldEdit && !sameEdit(typed.fields, fieldEdit, typed.data) : draft !== undefined && draft.trim() !== stored.trim();
   const facts = factLines(row.facts);
   const meta = STATUS_META[row.status] ?? STATUS_META.generated;
   const isBlank = row.status === 'blank' || (row.status !== 'pending' && row.status !== 'failed' && !stored.trim());
@@ -131,6 +195,8 @@ function Row({ row, canWrite, checked, onCheck, draft, onDraft, busy, onAct }: {
           <span className="inline-flex items-center gap-1.5 text-xs text-gray-500"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Writing…</span>
         ) : row.status === 'failed' ? (
           <span className="text-xs text-red-600">The line could not be written. The fallback will be used unless you regenerate it.</span>
+        ) : typed ? (
+          <FieldsCell row={row} typed={typed} edit={fieldEdit} onEdit={onDraft} canWrite={canWrite} working={working} isBlank={isBlank} canApprove={canApprove} onApprove={() => onAct('approve')} onSave={onSaveFields} />
         ) : (
           <>
             {isBlank && draft === undefined && <p className="text-xs text-gray-500 mb-1">{BLANK_COPY}{row.fallback ? <>: <span className="text-gray-700">{row.fallback}</span></> : '.'}</p>}
@@ -155,7 +221,7 @@ function Row({ row, canWrite, checked, onCheck, draft, onDraft, busy, onAct }: {
         <Td className="text-right whitespace-nowrap">
           <div className="inline-flex items-center gap-1">
             {canApprove && !dirty && <Button size="sm" loading={working} onClick={() => onAct('approve')} title="Approve this line"><Check className="w-3.5 h-3.5" /> Approve</Button>}
-            {row.status !== 'pending' && <Button size="sm" variant="secondary" disabled={working} onClick={() => onAct('regenerate')} title="Write a new line"><RefreshCw className="w-3.5 h-3.5" /><span className="sr-only">Regenerate</span></Button>}
+            {row.status !== 'pending' && <Button size="sm" variant="secondary" disabled={working || variableOff} onClick={() => onAct('regenerate')} title={variableOff ? 'This variable is switched off, so its lines cannot be written again' : 'Write a new line'}><RefreshCw className="w-3.5 h-3.5" /><span className="sr-only">Regenerate</span></Button>}
             {row.status !== 'skipped' && row.status !== 'pending' && row.status !== 'blank' && row.status !== 'failed' && <Button size="sm" variant="ghost" disabled={working} onClick={() => onAct('skip')} title="Skip: the fallback is used for this lead"><SkipForward className="w-3.5 h-3.5" /> Skip</Button>}
           </div>
         </Td>
@@ -164,7 +230,14 @@ function Row({ row, canWrite, checked, onCheck, draft, onDraft, busy, onAct }: {
   );
 }
 
-export default function AiReviewView({ batchId, generate, selection }: { batchId: string | null; generate: boolean; selection: string[] }) {
+/**
+ * Every line of every variable: batches on the left, the lines with a status filter on the right, "Generate lines".
+ * It is the "All lines" view of AI → Setup → Personalized lines (`embedded`: the hub's frame is the page, `header` is the
+ * left side of the first row, next to "Generate lines"). Without `embedded` it is a page of its own with a title.
+ */
+export default function AiReviewView({ batchId, generate, selection, embedded, header }: {
+  batchId: string | null; generate: boolean; selection: string[]; embedded?: boolean; header?: ReactNode;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
@@ -177,32 +250,66 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
   const setStatus = (v: string) => patchReviewFilters({ status: v });
   const [page, setPage] = useState(0);
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmAll, setConfirmAll] = useState(false);
   const [generateOpen, setGenerateOpen] = useState(generate);
   const generatedRef = useRef(false);
 
+  // Another batch, status or workspace starts again on the first page with nothing ticked or typed; another page drops
+  // the ticks. Done while rendering (React renders again at once), so the list is never asked for the old page.
+  const viewKey = `${ws ?? ''}|${batchId ?? ''}|${status}`;
+  const [seen, setSeen] = useState({ viewKey, page });
+  if (seen.viewKey !== viewKey) { setSeen({ viewKey, page: 0 }); setPage(0); setChecked(new Set()); setDrafts({}); }
+  else if (seen.page !== page) { setSeen({ viewKey, page }); setChecked(new Set()); }
+
   useAiRealtime(ws);
   const batchesQ = useAiBatches(ws);
+  const variablesQ = useAiVariables(ws);
   const listQ = useAiReviewList(filtersReady ? ws : null, { batch: batchId, status, page, pageSize: PAGE_SIZE });
-
-  useEffect(() => { setPage(0); setChecked(new Set()); setDrafts({}); }, [batchId, status, ws]);
-  useEffect(() => { setChecked(new Set()); }, [page]);
+  // A row carries its variable's key (unique in a workspace), not its mode.
+  const offKeys = useMemo(() => new Set((variablesQ.data ?? []).filter((v) => variableMode(v) === 'off').map((v) => v.key)), [variablesQ.data]);
+  // The variables that write fields, by key: their rows show a Field · Value table.
+  const fieldVars = useMemo(() => new Map((variablesQ.data ?? []).filter((v) => isFieldsVariable(v)).map((v) => [v.key, variableFields(v)])), [variablesQ.data]);
 
   const rows = useMemo(() => listQ.data?.rows ?? [], [listQ.data]);
+  // The list gives a Fields value as its summary line. The typed values of the rows on this page are read in one query
+  // (its key sits under 'ai-review', so every refresh of the list reads them again).
+  const fieldIds = useMemo(() => rows.filter((r) => fieldVars.has(r.variable_key)).map((r) => r.value_id), [rows, fieldVars]);
+  const fieldDataQ = useQuery({
+    queryKey: ['outreach', ws ?? '', 'ai-review', 'field-data', fieldIds], enabled: !!ws && fieldIds.length > 0, placeholderData: (prev) => prev,
+    queryFn: async () => {
+      const { data, error } = await supabase.from('outreach_ai_values').select('id, data').in('id', fieldIds);
+      if (error) throw parseError(error);
+      return new Map(((data ?? []) as Array<{ id: string; data: unknown }>).map((d) => [d.id, readFieldData(d.data)]));
+    },
+  });
+  const typedOf = (r: AiReviewRow): TypedRow | undefined => {
+    const fields = fieldVars.get(r.variable_key);
+    if (!fields) return undefined;
+    return { fields, data: fieldDataQ.data?.has(r.value_id) ? fieldDataQ.data.get(r.value_id) ?? null : undefined };
+  };
+  // A row with an edit that is not saved: typed text, or typed inputs that differ from what is stored.
+  const isUnsaved = (r: AiReviewRow): boolean => {
+    const d = drafts[r.value_id];
+    if (d === undefined) return false;
+    if (typeof d === 'string') return true;
+    const t = typedOf(r);
+    return !t || !sameEdit(t.fields, d, t.data);
+  };
   const total = listQ.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const batch = batchesQ.data?.find((b) => b.id === batchId) ?? null;
   const awaitingAll = useMemo(() => (batchesQ.data ?? []).reduce((a, b) => a + (b.awaiting_review ?? 0), 0), [batchesQ.data]);
 
-  const selectBatch = useCallback((id: string | null) => router.replace(id ? `/outreach/ai-review?batch=${id}` : '/outreach/ai-review'), [router]);
+  const selectBatch = useCallback((id: string | null) => router.replace(linesHref(id)), [router]);
 
   const refresh = useCallback(() => {
     if (!ws) return;
     qc.invalidateQueries({ queryKey: ['outreach', ws, 'ai-review'] });
     qc.invalidateQueries({ queryKey: ik.aiBatches(ws) });
     qc.invalidateQueries({ queryKey: ['outreach', ws, 'dashboard'] });
+    qc.invalidateQueries({ queryKey: hk.all(ws) });   // Needs you (list and badge) and the counts on Setup show the same lines
   }, [qc, ws]);
 
   const act = async (ids: string[], action: AiReviewAction, text?: string, busyKey?: string) => {
@@ -220,14 +327,31 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
       const word = action === 'approve' ? 'approved' : action === 'edit' ? 'saved and approved' : action === 'skip' ? 'skipped. The fallback is used for them' : 'queued to be written again';
       toast.show(`${updated.toLocaleString()} line${updated === 1 ? '' : 's'} ${word}.${updated < ids.length ? ` ${(ids.length - updated).toLocaleString()} had no line to approve.` : ''}`);
       refresh();
-    } catch (e) { toast.show(parseError(e).message, 'error'); }
+    } catch (e) {
+      const pe = parseError(e);
+      toast.show(pe.code === 'E_AI_VARIABLE_OFF' ? VARIABLE_OFF_COPY : pe.message, 'error');
+      if (pe.code === 'E_AI_VARIABLE_OFF' && ws) qc.invalidateQueries({ queryKey: ik.aiVariables(ws) });
+    }
     finally { setBusy(null); }
   };
 
-  const approvable = useMemo(() => rows.filter((r) => (r.status === 'generated' || r.status === 'skipped') && !!(r.body ?? '').trim() && drafts[r.value_id] === undefined), [rows, drafts]);
-  const unsaved = rows.filter((r) => drafts[r.value_id] !== undefined).length;
+  const approvable = rows.filter((r) => (r.status === 'generated' || r.status === 'skipped') && !!(r.body ?? '').trim() && !isUnsaved(r));
+  const unsaved = rows.filter(isUnsaved).length;
   const skippable = useMemo(() => rows.filter((r) => checked.has(r.value_id) && r.status !== 'pending'), [rows, checked]);
   const allChecked = rows.length > 0 && rows.every((r) => checked.has(r.value_id));
+
+  /** Fields: save the typed values of one row. It approves, like typing over a line. */
+  const saveFields = async (id: string, data: Record<string, AiFieldValue>) => {
+    setBusy(id);
+    try {
+      await editLineFields(id, data);
+      setDrafts((d) => { const n = { ...d }; delete n[id]; return n; });
+      setChecked((s) => { const n = new Set(s); n.delete(id); return n; });
+      toast.show('Fields saved and approved.');
+      refresh();
+    } catch (e) { toast.show(parseError(e).message, 'error'); }   // the database names the field that does not fit
+    finally { setBusy(null); }
+  };
 
   const onGenerated = (r: AiGenerateResult) => {
     generatedRef.current = true;   // the URL now points at the new batch; closing the dialog must not put the old one back
@@ -238,11 +362,15 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
   };
 
   if (!ws) return null;
-  if (role === 'client_viewer') return <ErrorBox message="AI Personalization is not available for client viewers." />;
+  if (role === 'client_viewer') return <ErrorBox message={`${FEATURE_LABEL.line} are not available for client viewers.`} />;
+
+  const generateButton = canWrite ? <Button onClick={() => setGenerateOpen(true)}><Wand2 className="w-4 h-4" /> Generate lines</Button> : null;
 
   return (
     <div>
-      <PageHeader title="AI Personalization" subtitle="Lines the AI wrote ahead of time for each lead. Approve them yourself, or let the checks approve the good ones." actions={canWrite ? <Button onClick={() => setGenerateOpen(true)}><Wand2 className="w-4 h-4" /> Generate lines</Button> : undefined} />
+      {embedded
+        ? <div className="flex flex-wrap items-center justify-between gap-3 mb-4">{header ?? <span />}{generateButton}</div>
+        : <PageHeader title={FEATURE_LABEL.line} subtitle="Lines the AI wrote ahead of time for each lead. A person approves each line before a message can use it." actions={generateButton ?? undefined} />}
 
       <Guide />
 
@@ -295,14 +423,15 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
                       {canWrite && <Th className="w-8"><input type="checkbox" aria-label="Select all shown" checked={allChecked} onChange={() => setChecked(allChecked ? new Set() : new Set(rows.map((r) => r.value_id)))} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /></Th>}
                       <Th>Lead</Th>
                       <Th title="What the AI read on the lead's profile. It may only use these facts.">Source facts used</Th>
-                      <Th title="Type over a line to change it, then Save and approve (Ctrl+Enter). Esc discards the edit.">Generated line</Th>
+                      <Th title="Type over a line to change it, then Save and approve (Ctrl+Enter). Esc discards the edit. A variable that writes fields shows them as a table: use Edit to change them.">Generated line</Th>
                       <Th>Status</Th>
                       {canWrite && <Th className="text-right">Actions</Th>}
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((r) => (
-                      <Row key={r.value_id} row={r} canWrite={canWrite} checked={checked.has(r.value_id)} busy={busy}
+                      <Row key={r.value_id} row={r} canWrite={canWrite} checked={checked.has(r.value_id)} busy={busy} variableOff={offKeys.has(r.variable_key)}
+                        typed={typedOf(r)} onSaveFields={(data) => void saveFields(r.value_id, data)}
                         onCheck={() => setChecked((s) => { const n = new Set(s); if (n.has(r.value_id)) n.delete(r.value_id); else n.add(r.value_id); return n; })}
                         draft={drafts[r.value_id]} onDraft={(v) => setDrafts((d) => { const n = { ...d }; if (v === undefined) delete n[r.value_id]; else n[r.value_id] = v; return n; })}
                         onAct={(action, text) => act([r.value_id], action, text, r.value_id)} />
@@ -331,7 +460,7 @@ export default function AiReviewView({ batchId, generate, selection }: { batchId
         </div>
       </Modal>
 
-      {generateOpen && <GenerateLinesModal open onClose={() => { setGenerateOpen(false); if (generate && !generatedRef.current) router.replace(batchId ? `/outreach/ai-review?batch=${batchId}` : '/outreach/ai-review'); generatedRef.current = false; }} workspaceId={ws} isManager={isManager} selection={selection} onGenerated={onGenerated} />}
+      {generateOpen && <GenerateLinesModal open onClose={() => { setGenerateOpen(false); if (generate && !generatedRef.current) router.replace(linesHref(batchId)); generatedRef.current = false; }} workspaceId={ws} isManager={isManager} selection={selection} onGenerated={onGenerated} />}
       {toast.node}
     </div>
   );

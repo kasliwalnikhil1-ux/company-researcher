@@ -17,8 +17,11 @@ const GROUPS: Array<{ v: Group; label: string }> = [
 const TRIGGER_LABEL: Record<string, string> = { auto: 'Automatic', manual: 'Draft with AI' };
 const n = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleString());
 
-/** AI reply metrics for a date range plus hand-offs and the cancel-reason report by prompt rule. */
-export default function ReportsPanel({ ws, onOpenRun }: { ws: string; onOpenRun: (id: string) => void }) {
+/**
+ * AI reply metrics for a date range plus hand-offs and the cancel-reason report by prompt rule.
+ * `onOpenRun` opens one run; without it (AI → Setup → Replies, where the run drawer is gone) the report shows no run links.
+ */
+export default function ReportsPanel({ ws, onOpenRun }: { ws: string; onOpenRun?: (id: string) => void }) {
   const [range, setRange] = useState(() => ({ from: isoDaysAgo(29), to: isoDaysAgo(0) }));
   const [group, setGroup] = useState<Group>('none');
   const bad = !range.from || !range.to || range.from > range.to;

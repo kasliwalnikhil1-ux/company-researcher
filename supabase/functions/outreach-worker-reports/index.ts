@@ -7,7 +7,7 @@
 // If that hour was missed (deploy, outage) the next two hourly runs catch up; `last_sent_at` is claimed atomically before sending so a
 // schedule can never go out twice. Manual run: POST {schedule_id, force:true} or {schedule_id, dry_run:true} (returns the HTML, sends nothing).
 // Every number in these emails comes from the report RPCs; nothing is counted here.
-import { admin, json, serve, requireCron, readJson, localParts, addDays, log, rpc, WEB_ORIGIN } from "../_shared/outreach/supabase.ts";
+import { admin, json, serve, requireCron, readJson, localParts, addDays, log, rpc, WEB_ORIGIN, hasFeature, INACTIVE_PLANS } from "../_shared/outreach/supabase.ts";
 import { notifyWorkspace, workspaceBranding, workspaceRecipients, brandName, emailConfigured, type Branding, type NotifyResult } from "../_shared/outreach/notify.ts";
 import { senderReportHtml, digestHtml, clientReportHtml, type SenderSection } from "../_shared/outreach/reports_email.ts";
 import { weeklyReport, aiConfigured } from "../_shared/outreach/ai.ts";
@@ -108,7 +108,9 @@ serve("worker-reports", async (req) => {
 
   for (const s of schedules ?? []) {
     const ws = (s as any).outreach_workspaces;
-    if (!ws || ws.deleted_at || ws.plan === "suspended") continue;
+    if (!ws || ws.deleted_at || INACTIVE_PLANS.includes(ws.plan)) continue;
+    // per-client reports stop on a plan without them (the schedule is kept and resumes after an upgrade)
+    if (s.kind === "client_report" && !(await hasFeature(ws.id, "client_reports"))) continue;
     const tz = String(ws.settings?.timezone ?? "UTC");
     let lp: ReturnType<typeof localParts>;
     try { lp = localParts(tz); } catch { lp = localParts("UTC"); }

@@ -83,7 +83,7 @@ export default function LlmKeyCard() {
     <Card title={<span className="flex items-center gap-2"><Sparkles className="w-4 h-4" /> AI provider</span>}>
       {settings.isLoading ? <Spinner /> : settings.isError ? <ErrorBox message={parseError(settings.error).message} /> : (
         <div className="space-y-4">
-          <p className="text-xs text-gray-500">The AI provider writes reply drafts, classifies replies, fills AI variables and decides AI routing steps. With your own key the usage is billed to your account and your data goes to the provider you choose.</p>
+          <p className="text-xs text-gray-500">The AI provider writes reply drafts, classifies replies, writes Personalized lines and decides AI routing steps. With your own key the usage is billed to your account and your data goes to the provider you choose.</p>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 px-4 py-3">
             {own ? (
               <div className="min-w-0">
@@ -117,7 +117,7 @@ export default function LlmKeyCard() {
         </div>
       )}
       <ConfirmModal open={confirmRemove} onClose={() => setConfirmRemove(false)} onConfirm={remove} loading={busy === 'remove'} title="Remove your AI key?" confirmLabel="Remove key">
-        <p>The stored key is deleted and the workspace goes back to the platform default (Gemini). Nothing else changes: approved AI lines and drafts stay as they are.</p>
+        <p>The stored key is deleted and the workspace goes back to the platform default (Gemini). Nothing else changes: approved lines and drafts stay as they are.</p>
       </ConfirmModal>
       {toast.node}
     </Card>

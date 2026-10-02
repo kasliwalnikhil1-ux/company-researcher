@@ -5,6 +5,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { ExternalLink, MessageCircleQuestion } from 'lucide-react';
 import { useUnanswered, useUnansweredAnswer, useUnansweredDismiss, type UnansweredGroup } from '@/lib/outreach/aiRepliesSequence';
+import { hubHref } from '@/lib/outreach/aiHub';
 import { Badge, Button, ErrorBox, Modal, Spinner, Textarea, timeAgo } from '@/components/outreach/ui';
 import { Section, errText, shortDate } from './shared';
 
@@ -33,7 +34,8 @@ export default function UnansweredSection({ sequenceId, canEdit, notify }: { seq
   }
 
   return (
-    <Section title="Unanswered questions" help="What prospects asked that the AI could not answer from the prompt or knowledge. Add the answer once and it is used from then on."
+    <Section title="Unanswered questions"
+      help={<>What prospects asked that the AI could not answer from the prompt or knowledge. Add the answer once and it is used from then on. <Link href={hubHref.needsYou({ type: 'question', where: sequenceId, mine: false })} className="text-indigo-600 hover:underline whitespace-nowrap">Answer them in AI → Needs you</Link></>}
       actions={(
         <label className="flex items-center gap-1.5 text-xs text-gray-600">
           <input type="checkbox" className="rounded border-gray-300" checked={all} onChange={(e) => setAll(e.target.checked)} />Show answered and dismissed

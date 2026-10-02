@@ -19,13 +19,15 @@
 <main>
   <h1>Web chat demo page</h1>
   <p>This page installs the widget with the token and API from the query string: <code>demo.html?token=&lt;website_token&gt;&amp;api=&lt;functions base&gt;/outreach-webchat</code>.
-     Add <code>localhost</code> to the inbox's allowed domains (Settings → Websites → Security → "Allow localhost").</p>
+     Add <code>localhost</code> to the inbox's allowed domains (AI Website Chatbots → your website → Security → "Allow localhost").</p>
   <div class="row">
     <button onclick="growthxai.open()">open()</button>
     <button onclick="growthxai.close()">close()</button>
     <button onclick="growthxai.toggle()">toggle()</button>
     <select onchange="growthxai.setMode(this.value)"><option>bubble</option><option>drawer</option><option>sidebar</option><option>modal</option><option>inline</option></select>
     <button onclick="growthxai.send('Hello from the SDK')">send()</button>
+    <button onclick="growthxai.ask('Do you ship to Dubai?', { context: 'Asked from the demo page' })">ask()</button>
+    <button onclick="growthxai.ask('A quote for a custom order: ', { prefill: true, mode: 'sidebar' })">ask({ prefill, mode })</button>
     <button onclick="growthxai.setUser('demo-user-1', {name:'Demo User', email:'demo@example.com'})">setUser (unverified)</button>
     <button onclick="growthxai.setCustomAttributes({plan:'pro', seats:12})">setCustomAttributes</button>
     <button onclick="growthxai.setLabel('pricing-page')">setLabel</button>
@@ -34,6 +36,15 @@
     <button onclick="growthxai.trackEvent('demo_click', {at: Date.now()})">trackEvent</button>
     <button onclick="growthxai.reset()">reset()</button>
     <button onclick="history.pushState({}, '', '?token=' + new URLSearchParams(location.search).get('token') + '&api=' + encodeURIComponent(new URLSearchParams(location.search).get('api')) + '&page=' + Math.random().toString(36).slice(2, 6))">SPA navigation</button>
+  </div>
+  <p>Your own buttons, no JavaScript: <code>data-growthxai</code> attributes on any element (add <code>?gx=open</code> or <code>?gx_q=…</code> to this page's address to open the chat from a link).</p>
+  <div class="row">
+    <button data-growthxai="open">Chat with us <span data-growthxai-unread></span></button>
+    <button data-growthxai="toggle">toggle</button>
+    <a href="#" data-growthxai-ask="What's your return policy?">Returns question?</a>
+    <button data-growthxai-prefill="I'd like a quote for " data-growthxai-mode="sidebar">Get a quote (sidebar)</button>
+    <a href="#ask-ai">#ask-ai link</a>
+    <form data-growthxai="ask-form" style="display:inline-flex;gap:6px"><input name="q" placeholder="Ask AI anything"><button>Ask</button></form>
   </div>
   <p>Events fired by the widget appear below (also dispatched as <code>window</code> CustomEvents <code>growthxai:&lt;event&gt;</code>).</p>
   <div id="log"></div>
@@ -49,7 +60,7 @@
     g.dataset.api = q.get('api') || '';
     s.parentNode.insertBefore(g, s);
   })(document, 'script');
-  ['ready', 'opened', 'closed', 'message', 'message:sent', 'conversation:started', 'conversation:resolved', 'unread', 'csat:submitted', 'error', 'identified', 'handoff', 'route', 'postback', 'video:opened', 'video:closed', 'video:question', 'video:dismissed'].forEach(function (ev) {
+  ['ready', 'opened', 'closed', 'message', 'message:sent', 'conversation:started', 'conversation:resolved', 'unread', 'csat:submitted', 'error', 'identified', 'handoff', 'route', 'postback', 'trigger', 'product:shown', 'product:clicked', 'product:added_to_cart', 'video:opened', 'video:closed', 'video:question', 'video:dismissed'].forEach(function (ev) {
     window.addEventListener('growthxai:' + ev, function (e) { var l = document.getElementById('log'); l.textContent += new Date().toLocaleTimeString() + '  ' + ev + '  ' + JSON.stringify(e.detail) + '\n'; l.scrollTop = l.scrollHeight; });
   });
 </script>

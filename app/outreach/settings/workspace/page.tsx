@@ -1,18 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { Download, Save } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useAudit } from '@/lib/outreach/queries';
+import { longDate, planLabel, useBilling } from '@/lib/outreach/billing';
 import { Badge, Button, Card, ErrorBox, fmtDate, Input, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { BehaviourCard, RegionalCard } from '@/components/outreach/settings/WorkspacePreferences';
 import StageKindsCard from '@/components/outreach/settings/StageKindsCard';
-
-const PLAN_LABEL: Record<string, string> = { trial: 'Trial', team: 'Team', agency: 'Agency', agency_plus: 'Agency Plus', suspended: 'Suspended' };
 
 export default function WorkspaceSettingsPage() {
   const { workspace, isOwner, isManager, canWrite, refresh } = useWorkspace();
@@ -23,6 +23,8 @@ export default function WorkspaceSettingsPage() {
   const [busy, setBusy] = useState<string | null>(null);
   useEffect(() => setName(workspace?.name ?? ''), [workspace?.name]);
   const audit = useAudit(isManager ? ws : null);
+  // The plan card reads billing v2: the plan label always, the trial and payment lines only once billing is switched on.
+  const billing = useBilling(ws);
   const [auditOpen, setAuditOpen] = useState<Record<number, boolean>>({});
   // private-notes-PRD §8.5: managers may include internal notes in the messages export (file name gets -with-notes, audited)
   const [includeNotes, setIncludeNotes] = useState(false);
@@ -43,7 +45,10 @@ export default function WorkspaceSettingsPage() {
   }
 
   if (!workspace) return <PageLoader />;
-  const trialDaysLeft = workspace.trial_ends_at ? Math.ceil((new Date(workspace.trial_ends_at).getTime() - Date.now()) / 86_400_000) : null;
+  const b = billing.data;
+  const enforced = !!b?.enforced;
+  const trial = enforced && b?.plan === 'trial' ? b.trial ?? null : null;
+  const trialAccounts = trial?.account_limit ?? 1;
 
   return (
     <div>
@@ -66,10 +71,10 @@ export default function WorkspaceSettingsPage() {
 
         <div className="space-y-6">
           <Card title="Plan">
-            <div className="flex items-center gap-2"><span className="text-2xl font-bold text-gray-900">{PLAN_LABEL[workspace.plan] ?? workspace.plan}</span>{workspace.stripe_status && <Badge tone={workspace.stripe_status === 'active' || workspace.stripe_status === 'trialing' ? 'green' : 'amber'}>{workspace.stripe_status}</Badge>}</div>
-            {workspace.plan === 'trial' && <div className="text-sm text-gray-600 mt-2">Trial ends {fmtDate(workspace.trial_ends_at, false)}{trialDaysLeft != null && <span className="text-gray-400"> ({trialDaysLeft > 0 ? `${trialDaysLeft} day${trialDaysLeft === 1 ? '' : 's'} left` : 'expired'})</span>}. Up to 3 senders, no card required.</div>}
-            {workspace.past_due_since && <div className="text-sm text-amber-700 mt-2">Payment past due since {fmtDate(workspace.past_due_since, false)}.</div>}
-            {isOwner && <a href="/outreach/billing" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Manage billing</a>}
+            <div className="flex items-center gap-2"><span className="text-2xl font-bold text-gray-900">{planLabel(b?.plan ?? workspace.plan)}</span>{enforced && workspace.stripe_status && <Badge tone={workspace.stripe_status === 'active' || workspace.stripe_status === 'trialing' ? 'green' : 'amber'}>{workspace.stripe_status}</Badge>}</div>
+            {trial && <div className="text-sm text-gray-600 mt-2">{trial.ends_at && <>Trial ends {longDate(trial.ends_at)}{trial.days_left != null && <span className="text-gray-400"> ({trial.days_left > 0 ? `${trial.days_left} day${trial.days_left === 1 ? '' : 's'} left` : 'ends today'})</span>}. </>}{trialAccounts} account{trialAccounts === 1 ? '' : 's'}, no card required.</div>}
+            {enforced && workspace.past_due_since && <div className="text-sm text-amber-700 mt-2">Payment past due since {fmtDate(workspace.past_due_since, false)}.</div>}
+            {isOwner && <Link href="/outreach/billing" className="inline-block mt-3 text-sm text-indigo-600 hover:underline">Billing</Link>}
           </Card>
 
           {isManager && (

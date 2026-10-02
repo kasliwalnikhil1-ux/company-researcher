@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import type { Graph, Lead, List, OutboundWebhook, Sender, Sequence, Stage, Tag } from '@/lib/outreach/types';
+import type { AiVariable, Graph, Lead, List, OutboundWebhook, Sender, Sequence, Stage, Tag } from '@/lib/outreach/types';
 
 export interface BuilderCtx {
   workspaceId: string;
@@ -18,6 +18,8 @@ export interface BuilderCtx {
   sequences: Sequence[];
   sampleLead: Lead | null;
   customKeys: string[];
+  /** The workspace's AI variables (Personalized lines): the "AI fields" of a Condition step and the builder's checks. */
+  aiVariables: AiVariable[];
   createTag: (name: string) => Promise<Tag>;
   focusNode: (id: string) => void;
 }

@@ -65,7 +65,7 @@ The table lists the original 29. The 10 added by the product plan (`outreach-wor
 | `outreach-unipile-webhook` | Unipile → HTTP | header `unipile-auth` == `UNIPILE_WEBHOOK_SECRET` | persist raw event to `outreach_inbound_events`, ack |
 | `outreach-sender-notify` | Unipile hosted-auth `notify_url` | sender id in `name`/`?sid=` must exist | bind `unipile_account_id`, sync profile, onboarding gate |
 | `outreach-cookie-sync` | Chrome extension | `Bearer <sender_token>` (sha256 in `outreach_sender_tokens`), 1/10 min/sender | encrypt + store `li_at`/`li_a`, switch to cookie mode, reconnect if in `credentials` |
-| `outreach-stripe-webhook` | Stripe → HTTP; also web | Stripe signature; or user JWT (owner) for `{action:'checkout'|'portal'}` | subscription lifecycle → `outreach_workspaces.plan`; checkout / portal links |
+| `outreach-stripe-webhook` | Stripe → HTTP | Stripe signature | subscription lifecycle → `outreach_workspaces.plan`; checkout / portal links |
 | `outreach-process-inbound` | cron 10 s | `x-cron-secret` | dispatch inbound events (account status, messaging, new_relation, mail, tracking, hosted notify); dead-letter after 5 attempts |
 | `outreach-worker-tick` | cron 1 min | cron | `release_waits`, `claim_due_actions(200)`, execute via Unipile, `complete_action` / `fail_action`, fill pending AI drafts; skips when flag `tick_enabled=false` or lock held |
 | `outreach-worker-planner` | cron hourly (`nightly`, senders at local 00:xx) + every 20 min (`{"mode":"topup"}`) | cron | budgets + jittered action slots; skips when `planner_enabled=false` |
@@ -75,7 +75,7 @@ The table lists the original 29. The 10 added by the product plan (`outreach-wor
 | `outreach-worker-withdraw` | cron hourly | cron | once per sender-day (local 10:00–16:00) queue withdrawals for stale `pending_out` invites |
 | `outreach-worker-relations-poll` | cron hourly | cron | ≤3 runs/day/sender for no-note invites: diff `invite/sent`, verify via profile fetch |
 | `outreach-outbound-webhooks` | cron 30 s | cron | deliver `outreach_outbound_webhook_deliveries` with `x-signature` HMAC, 5 attempts, disable webhook after 50 failures |
-| `outreach-billing-sync` | cron daily 03:15 UTC | cron | usage rows, past-due (7 d) / trial-expiry suspension, Stripe quantities |
+| `outreach-billing-sync` | cron hourly (+ daily 03:15 UTC) | cron | trial expiry → disconnect, past-due day-7 suspension, connector deletes, billing emails; daily: usage rows, cost report, deletion of lapsed workspaces. Never sets a Stripe quantity |
 | `outreach-ai-classify` | cron 15 s | cron | consume `outreach_ai_classify_queue` → intent + summary, follow-up tasks |
 | `outreach-ai-draft` | web (JWT) or cron | JWT (member) / cron | draft for a review task, ad-hoc draft, or fill pending drafts |
 | `outreach-sender-connect` | web | JWT, manager | insert sender row, Unipile hosted-auth link (trial: max 3 senders) |
@@ -108,7 +108,8 @@ Shared modules (`supabase/functions/_shared/outreach/`): `supabase.ts` (client, 
 | `outreach-withdraw` | `40 * * * *` | `outreach-worker-withdraw` |
 | `outreach-relations-poll` | `50 * * * *` | `outreach-worker-relations-poll` |
 | `outreach-outbound-hooks` | every 30 s | `outreach-outbound-webhooks` |
-| `outreach-billing` | `15 3 * * *` | `outreach-billing-sync` |
+| `outreach-billing` | `7 * * * *` | `outreach-billing-sync` `{mode:"hourly"}` |
+| `outreach-billing-daily` | `15 3 * * *` | `outreach-billing-sync` `{mode:"daily"}` |
 | `outreach-sweep` | `*/5 * * * *` | `select outreach_sweep_stale_reservations()` (SQL only) |
 | `outreach-cleanup` | `0 4 * * *` | deletes processed inbound events > 30 d, delivered webhook rows > 30 d, expired rate-limit rows, audit > 90 d, `cron.job_run_details` > 7 d |
 | `outreach-agent-gc` | `10 4 * * *` | `select outreach_agent_gc()` — expired MCP confirmation/preview/draft tokens, agent call log > 90 d (from `008_agent_mcp.sql`) |
@@ -183,14 +184,12 @@ It registers one webhook per source, all pointing at `…/functions/v1/outreach-
 Existing webhooks with the same source and URL are kept, so Register is idempotent. The hosted-auth callback (`outreach-sender-notify?sid=<sender>`) is passed per link and needs no registration.
 
 ### 2.5 Stripe
-1. Create recurring **per-seat** prices: team sender, agency sender, agency-plus sender, mailbox add-on. Give them `lookup_key`s containing `agency_plus`, `agency`, `team` and `mailbox` — `planFromSub()` maps a subscription to a plan by `lookup_key` / `nickname` regex or by equality with `STRIPE_PRICE_*`, and `billing-sync` picks the mailbox item by `/mailbox/i`.
-2. Put the price ids in `.env.local` (`STRIPE_PRICE_TEAM_SENDER`, …) and re-run the secrets script.
-3. Add a webhook endpoint **`https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/outreach-stripe-webhook`** with events:
-   `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`.
-   Copy its signing secret to `STRIPE_WEBHOOK_SECRET`.
-4. Checkout sessions created by the function carry `client_reference_id` and `metadata.workspace_id`, which is how events are matched to a workspace (fallback: `stripe_customer_id`).
+Billing v2 (plans Launch / Scale / Enterprise, accounts bought up front) is described in [BILLING.md](BILLING.md): what is where, the rollout order, and what to verify in Stripe test mode. In short:
+1. `scripts/stripe-setup.ts` creates the 3 products, 9 volume-tiered prices (lookup keys `{plan}_{period}_v1`), 3 early-supporter coupons, the customer-portal configuration and the webhook endpoint from `pricing/v1.json`. Nothing is created by hand, and the old `STRIPE_PRICE_*` variables are no longer read.
+2. Secrets: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PORTAL_CONFIGURATION`; optional `STRIPE_TAX_ENABLED=true` (after a Stripe Tax registration) and `OUTREACH_PLATFORM_ALERT_EMAIL`.
+3. Events are matched to a workspace through the subscription or customer id stored on the workspace; `client_reference_id` / metadata are only the fallback for the first checkout.
 
-Plan effects: `active`/`trialing` → plan from prices, un-suspend senders paused for billing; `past_due`/`unpaid` → `past_due_since` set, suspended by `billing-sync` after 7 days (senders paused with `status_reason='billing_suspended'`); `canceled`/deleted → `plan='suspended'`. Trial workspaces (14 days, max 3 senders) are suspended by `billing-sync` when the trial ends without a subscription.
+Limits, trial expiry and plan features apply only after the platform flag `billing_enforced` is turned on (Settings → Admin → Billing, localhost only). Until then every workspace is unlimited, as before.
 
 ### 2.6 Resend
 Verify the sending domain in Resend, set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM` (e.g. `CapitalxAI Outreach <no-reply@capitalxai.com>`). Without a key the functions log `RESEND_API_KEY unset` and continue. The full list of emails (sender notices, invitation, stall and running-dry alerts, weekly sender report, digest, client reports) and how to verify each is in §9.2.
@@ -251,7 +250,7 @@ curl -s -X POST "$BASE/outreach-worker-tick" -H "x-cron-secret: $OUTREACH_CRON_S
 | `ANTHROPIC_API_KEY` | `GEMINI_API_KEY` (Gemini replaces Claude here, matching the rest of the app) | secrets | optional |
 | — | `OUTREACH_AI_MODEL` | secrets | default `gemini-3-flash-preview` |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | same | secrets | optional — while unset, billing enforcement (trial sender cap, trial-expiry and past-due suspension) is disabled entirely |
-| `STRIPE_PRICE_*` | `STRIPE_PRICE_TEAM_SENDER`, `STRIPE_PRICE_AGENCY_SENDER`, `STRIPE_PRICE_AGENCY_PLUS_SENDER`, `STRIPE_PRICE_MAILBOX_ADDON` | secrets | |
+| `STRIPE_PORTAL_CONFIGURATION`, `STRIPE_TAX_ENABLED`, `STRIPE_API_VERSION` | same | secrets | printed by `scripts/stripe-setup.ts`; tax only after a Stripe Tax registration. Prices are found by lookup key (`STRIPE_PRICE_*` is no longer read) |
 | `RESEND_API_KEY` | same | secrets | optional |
 | `EMAIL_FROM` | `OUTREACH_EMAIL_FROM` (falls back to `EMAIL_FROM`) | secrets | default `CapitalxAI Outreach <no-reply@capitalxai.com>` |
 | `WEB_ORIGIN` | `OUTREACH_WEB_ORIGIN` | secrets | default `https://app.capitalxai.com`; used for redirects and email links (CORS itself is `*`) |
@@ -369,7 +368,7 @@ Outbound webhooks: `select * from outreach_outbound_webhook_deliveries where del
 ```sql
 update outreach_workspaces set plan='suspended' where id=…;          -- RLS/RPCs become read-only, senders keep status
 update outreach_senders set status='paused', status_reason='billing_suspended' where workspace_id=… and status='ok';
--- restore: one call does both updates, restores the plan the workspace had (settings.plan_before_suspension, else 'team'), audits and emits workspace.billing_recovered
+-- restore: one call does both updates, restores the plan the workspace had (plan_before_suspension, else 'launch'), audits and emits workspace.billing_recovered
 select outreach_resume_after_billing('<workspace id>');
 ```
 
@@ -483,32 +482,14 @@ Added 20 Sep 2026. It mirrors the "Phase 1 switch-on checklist" in `outreach-pro
 
 ### 9.1 Stripe
 
-While `STRIPE_SECRET_KEY` is unset, billing enforcement is off: usage is recorded, nothing is charged and nothing is suspended (trial sender cap, trial expiry and past-due suspension all skip).
+Follow [BILLING.md §5 Rollout](BILLING.md#5-rollout) and [§6 Verify in Stripe test mode](BILLING.md#6-verify-in-stripe-test-mode). The checks that matter before going live:
 
-1. **Keys.** In Stripe: Developers → API keys. Put the secret key in `.env.local` as `STRIPE_SECRET_KEY`.
-2. **Products and prices.** Create recurring **per-seat** prices: team sender, agency sender, agency-plus sender, and the mailbox add-on. Give each price a **lookup key** containing `team`, `agency`, `agency_plus` or `mailbox`. `planFromSub()` maps a subscription to a plan by lookup key or nickname, or by equality with a `STRIPE_PRICE_*` value; `outreach-billing-sync` finds the mailbox item by `/mailbox/i`. Put the price ids in `STRIPE_PRICE_TEAM_SENDER`, `STRIPE_PRICE_AGENCY_SENDER`, `STRIPE_PRICE_AGENCY_PLUS_SENDER`, `STRIPE_PRICE_MAILBOX_ADDON`. The amounts are a business decision and are not in this repo (see [POLICIES.md](POLICIES.md)).
-3. **Webhook endpoint.** Add `https://ktwqkvjuzsunssudqnrt.supabase.co/functions/v1/outreach-stripe-webhook` with the events `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`, `invoice.paid`. Copy the signing secret to `STRIPE_WEBHOOK_SECRET`.
-4. **Customer portal.** In Stripe: Settings → Billing → Customer portal. Allow cancelling and changing quantity or plan. The app's "Manage billing" button opens it.
-5. **Failed-payment emails.** Turn on Stripe's own emails for failed payments and upcoming renewals (Settings → Billing → Subscriptions and emails). This repo does not send them.
-6. Run `./scripts/outreach-set-secrets.sh`, then check **Settings → Workspace → Platform setup** shows `stripe` and `stripe_webhook` as present.
-7. **Confirm the trial cap and the nightly quantity sync**, in Stripe test mode:
-   * A trial workspace cannot connect a fourth sender (`outreach-sender-connect` refuses).
-   * Subscribe with 2 active senders, connect a third, then run `select outreach_invoke('outreach-billing-sync');`. The subscription item quantity becomes 3 (`proration_behavior: none`), and `outreach_billing_usage` has today's row.
-8. **Test that senders resume on their own after a recovered payment.** This is the claim we make against GetSales, so test it, do not assume it.
-   1. In test mode, subscribe a workspace that has at least one sender with status `ok`.
-   2. Make the payment fail: replace the customer's card with the test card `4000 0000 0000 0341`, then advance a Stripe test clock past the renewal. `invoice.payment_failed` arrives and `outreach_workspaces.past_due_since` is set.
-   3. Suspension happens 7 days after `past_due_since`, in `outreach-billing-sync`. To avoid waiting: `update outreach_workspaces set past_due_since = now() - interval '8 days' where id = '<ws>';` then `select outreach_invoke('outreach-billing-sync');`.
-   4. Check: `plan = 'suspended'`, `settings->>'plan_before_suspension'` holds the old plan, and the senders are `paused` with `status_reason = 'billing_suspended'`.
-   5. Recover the payment: set a working test card (`4242 4242 4242 4242`) and pay the open invoice in the Stripe dashboard. `invoice.paid` (or `customer.subscription.updated` with status `active`) arrives.
-   6. **Pass** = without touching anything in the app:
-      ```sql
-      select plan, past_due_since, settings->>'plan_before_suspension' from outreach_workspaces where id = '<ws>';   -- old plan back, past_due_since null
-      select display_name, status, status_reason from outreach_senders where workspace_id = '<ws>';                   -- ok, null
-      select at, diff from outreach_audit_log where workspace_id = '<ws>' and action = 'workspace.billing_recovered' order by at desc limit 1;   -- senders_resumed = n
-      ```
-      The webhook calls `outreach_resume_after_billing(p_ws)`, which restores the plan, sets every sender paused for `billing_suspended` or `trial_expired` back to `ok`, audits, and emits the `workspace.billing_recovered` event. Senders a person paused (`user_paused`) stay paused, on purpose.
-   7. Within one planner top-up (20 minutes) the senders have new queued actions. Sequences were never paused, so there is nothing to restart.
-   8. If it fails, by hand: `select outreach_resume_after_billing('<ws>');` from the SQL editor, and read the `outreach-stripe-webhook` logs for `resume_after_billing failed`.
+1. **A trial workspace cannot connect a second account** once `billing_enforced` is on (`outreach-sender-connect` answers `E_ACCOUNT_LIMIT`).
+2. **The amount charged equals the quote** for 5 → 10 accounts, Launch → Scale, monthly → annual and +10 accounts on an annual plan (Stripe test clocks at day 1, 15 and 29). Each quote stores `proration_check`; a `proration_mismatch` log line means Stripe prorated differently from the PRD's formula.
+3. **Scheduled changes land at renewal** (fewer accounts, a lower plan, a shorter period), and "Cancel this change" releases the schedule.
+4. **Senders resume on their own after a recovered payment.** In test mode: subscribe a workspace with a sender in status `ok`; make the renewal fail (test card `4000 0000 0000 0341`, advance the test clock); `update outreach_workspaces set past_due_since = now() - interval '8 days' where id = '<ws>';` then `select outreach_invoke('outreach-billing-sync', '{"mode":"hourly"}'::jsonb);` → the workspace is suspended and its senders paused (`billing_suspended`); pay the invoice → the plan returns and the senders are `ok` again with nobody touching them.
+5. **Cancel, undo, and the end of the period**: cancelling keeps access until the period ends; then the plan is `cancelled`, senders pause (`billing_cancelled`) and `data_delete_after` is 90 days out.
+6. The usage job never changes a Stripe quantity: `outreach_billing_usage` gets one row per workspace per day, for information only.
 
 ### 9.2 Resend
 

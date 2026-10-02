@@ -50,7 +50,7 @@ export function Drawer({ open, onClose, title, subtitle, children, wide }: { ope
 /** Error text for a failed call, in plain words. */
 export function errText(e: unknown): string {
   const err = parseError(e);
-  if (err.code === 'E_AI_UNAVAILABLE') return 'AI is not set up for this workspace yet. Add an AI key in Settings, or ask the platform team to switch it on.';
+  if (err.code === 'E_AI_UNAVAILABLE') return 'AI is not set up for this workspace yet. Add an AI key in AI → Setup → General, or ask the platform team to switch it on.';
   return err.message || 'Something went wrong';
 }
 

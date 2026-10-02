@@ -10,12 +10,16 @@
 //   POST /visitor/reset                         POST /page-view          POST /events
 //   GET  /conversations                         POST /conversations      GET  /conversations/:id     GET  /conversations/:id/messages
 //   POST /conversations/:id/messages            POST /conversations/:id/typing|read|heartbeat|resolve|csat|transcript
+//   POST /conversations/:id/voice/start|turns|switch|end   (voice calls with the website assistant; docs/outreach/WEBCHAT.md "Voice")
+//   GET  /conversations/:id/transcript          (every message, for the widget's "Download transcript")
 //   POST /uploads                               GET  /attachments/:conversation/:attachment
-//   POST /chat  (SSE: meta, token, done)        POST /feedback           POST /campaigns/:id/hit
+//   POST /chat  (SSE: meta, token, products, done)   POST /feedback      POST /campaigns/:id/hit
 //   GET  /continuity/stop?t=                    GET  /resume?t=  (standalone page deep link from continuity emails)
 import { admin, ANON_KEY, CORS, HttpError, json, log, rateLimit, readJson, rpc, serve, SUPABASE_URL, timingSafeEqual, WEB_ORIGIN } from "../_shared/outreach/supabase.ts";
 import { hmacSha256Hex } from "../_shared/outreach/crypto.ts";
-import { buildAnswerPrompt, clientIp, parseAnswer, requestMeta, retrieveForInbox, sanitizeQuery, sendTranscript, signVisitorToken, streamAnswer, verifyResumeToken, verifyVisitorToken, type AiContext } from "../_shared/outreach/webchat.ts";
+import { elAccount, ElError, logEl } from "../_shared/outreach/elevenlabs.ts";
+import { dv, mintCallToken, mintSession, todayIn } from "../_shared/outreach/voice.ts";
+import { buildAnswerPrompt, clientIp, parseAnswer, pickCards, recommendProducts, requestMeta, retrieveForInbox, sanitizeQuery, sendTranscript, signVisitorToken, stripCardLinks, streamAnswer, verifyResumeToken, verifyVisitorToken, writeSuggestion, type AiContext, type ProductCard } from "../_shared/outreach/webchat.ts";
 
 const FN = "outreach-webchat";
 const API_VERSION = "1.0.0";
@@ -26,6 +30,15 @@ const TURNSTILE_SITE_KEY = Deno.env.get("OUTREACH_TURNSTILE_SITE_KEY") ?? "";
 const TURNSTILE_ACTION = "webchat_start";   // the widget renders with this action; siteverify echoes it
 const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]);
 const BLOCKED_EXT = /\.(exe|msi|bat|cmd|com|scr|ps1|sh|js|jar|vbs|dll|apk|dmg|pkg|deb|rpm|html?|svg)$/i;
+
+// How a conversation started (outreach_chats.source): the launcher and its nudges, the site's own buttons / inputs / links
+// and the Ask AI buttons the widget places (web-chat-buttons-products-changes.md §2–§4).
+const SOURCES = ["launcher", "popup", "campaign", "sdk", "standalone", "email", "button", "ask", "input", "link", "header_button", "element_button", "selection", "voice"];   // voice: the conversation began with a call
+/** A short text field from the widget: trimmed, control characters out, cut to `max`; null when empty. */
+function textField(v: unknown, max: number): string | null {
+  const s = typeof v === "string" ? [...v].filter((ch) => ch === "\n" || ch === "\t" || ch.charCodeAt(0) >= 32).join("").trim().slice(0, max) : "";
+  return s || null;
+}
 
 interface Inbox { id: string; workspace_id: string; is_active: boolean; enforce_identity: boolean; hmac_token: string; settings: Record<string, any>; website_token: string }
 const inboxCache = new Map<string, { at: number; inbox: Inbox | null }>();
@@ -97,6 +110,12 @@ async function verifyTurnstile(token: string | undefined, ip: string): Promise<b
   } catch (e) { log({ fn: FN, warn: "turnstile siteverify failed", error: String((e as any)?.message ?? e) }); return false; }
 }
 
+/** Work that outlives the response: the runtime keeps the instance alive for it when it can. */
+function background(p: Promise<unknown>): void {
+  const rt = (globalThis as any).EdgeRuntime;
+  if (rt && typeof rt.waitUntil === "function") rt.waitUntil(p); else p.catch(() => {});
+}
+
 function safeName(n: string): string { return String(n ?? "file").replace(/[^\w.\-]+/g, "_").slice(0, 120); }
 
 serve(FN, async (req) => {
@@ -132,7 +151,8 @@ serve(FN, async (req) => {
     return json({ ...full, api_version: API_VERSION, realtime: { url: REALTIME_URL, anon_key: ANON_KEY } }, 200, { "cache-control": "public, max-age=300", vary: "Origin" });
   }
 
-  await ipLimits(req, inbox);
+  // the live transcript of a call is many small posts: it has its own limit per call (SQL), not the per-IP one
+  if (!(m === "POST" && /\/voice\/turns$/.test(path))) await ipLimits(req, inbox);
   if (!inbox.is_active) throw new HttpError(403, "E_INACTIVE", "widget is off");
 
   // ---------------------------------------------------------------- GET /resume?t=  (standalone page after a continuity email)
@@ -213,10 +233,10 @@ serve(FN, async (req) => {
     const b = await readJson<any>(req);
     await rateLimit(`webchat:cs:${vid}`, 10, 600);
     if (turnstileRequired(inbox) && !(await verifyTurnstile(b.turnstile_token, clientIp(req)))) throw new HttpError(403, "E_TURNSTILE", "verification failed");
-    const r = await rpc<any>("webchat_v_conversation_start", { p_inbox: inbox.id, p_visitor: vid, p_form: b.form ?? null, p_source: ["launcher", "popup", "campaign", "sdk", "standalone", "email"].includes(b.source) ? b.source : "launcher", p_page: b.page ?? null });
+    const r = await rpc<any>("webchat_v_conversation_start", { p_inbox: inbox.id, p_visitor: vid, p_form: b.form ?? null, p_source: SOURCES.includes(b.source) ? b.source : "launcher", p_page: b.page ?? null });
     return json(r);
   }
-  const conv = path.match(/^\/conversations\/([0-9a-f-]{36})(?:\/([a-z]+))?$/);
+  const conv = path.match(/^\/conversations\/([0-9a-f-]{36})(?:\/([a-z]+(?:\/[a-z]+)?))?$/);
   if (conv) {
     const chat = conv[1], action = conv[2] ?? "";
     if (m === "GET" && !action) return json({ conversation: await rpc("webchat_v_conversation", { p_visitor: vid, p_chat: chat }) });
@@ -234,7 +254,21 @@ serve(FN, async (req) => {
         attachments = (ups ?? []).map((u) => ({ id: u.path, name: u.name, type: u.mime, size: u.size, storage: true }));
         if (!attachments.length) throw new HttpError(400, "E_PAYLOAD_INVALID", "attachments not found");
       }
-      const r = await rpc<any>("webchat_v_message", { p_visitor: vid, p_chat: chat, p_echo: b.echo_id ? String(b.echo_id).slice(0, 64) : null, p_text: b.text ?? null, p_attachments: attachments, p_content_type: b.content_type ?? "text", p_attrs: b.content_attributes ?? {}, p_source: "widget" });
+      // The visitor's own attributes are form answers and nothing else: `products`, `items`, `ai` … on a visitor message
+      // would be drawn as cards and links in the agent's inbox. `internal` is written here only: what the button the
+      // visitor clicked said about the question (context) and the product the page names; it never goes back to the widget.
+      const given = b.content_attributes && typeof b.content_attributes === "object" ? b.content_attributes : {};
+      const attrs: Record<string, unknown> = {};
+      for (const k of ["form", "values", "message_id"]) if (given[k] !== undefined) attrs[k] = given[k];
+      const context = textField(b.context, 700), product = textField(b.product, 300);
+      if (context || product) attrs.internal = { ...(context ? { context } : {}), ...(product ? { product } : {}) };
+      const r = await rpc<any>("webchat_v_message", { p_visitor: vid, p_chat: chat, p_echo: b.echo_id ? String(b.echo_id).slice(0, 64) : null, p_text: b.text ?? null, p_attachments: attachments, p_content_type: b.content_type ?? "text", p_attrs: attrs, p_source: "widget" });
+      // Review mode (docs/outreach/AI-HUB.md §6): the assistant writes a suggestion for the agent once this response has
+      // gone out. The widget is told nothing about it (to the visitor the chat is a live chat); the cron worker finishes
+      // the suggestion if this instance is shut down first.
+      const suggest: string | null = r?.suggest ?? null;
+      if (r && typeof r === "object") delete r.suggest;
+      if (suggest) background(writeSuggestion(suggest));
       return json(r);
     }
     if (m === "POST" && action === "typing") { const b = await readJson<any>(req); await rpc("webchat_v_typing", { p_visitor: vid, p_chat: chat, p_on: !!b.on, p_preview: b.preview ?? null }); return json({ ok: true }); }
@@ -242,11 +276,65 @@ serve(FN, async (req) => {
     if (m === "POST" && action === "heartbeat") return json(await rpc("webchat_v_heartbeat", { p_visitor: vid, p_chat: chat }));
     if (m === "POST" && action === "resolve") return json({ conversation: await rpc("webchat_v_resolve", { p_visitor: vid, p_chat: chat }) });
     if (m === "POST" && action === "csat") { const b = await readJson<any>(req); return json({ conversation: await rpc("webchat_v_csat", { p_visitor: vid, p_chat: chat, p_rating: Number(b.rating), p_comment: b.comment ?? null }) }); }
+    // ------------------------------------------------------------ voice (web-chat-voice-elevenlabs-PRD.md §5.4, §6, §7.1)
+    // start: every check in SQL, then a conversation token from the voice provider; {ok:false, reason} keeps the widget in chat
+    if (m === "POST" && action === "voice/start") {
+      const b = await readJson<any>(req);
+      await rateLimit(`webchat:vs:${vid}`, 12, 600);
+      const page = b.page && typeof b.page === "object" ? { url: textField(b.page.url, 500), title: textField(b.page.title, 200) } : {};
+      const s = await rpc<any>("webchat_v_voice_start", { p_visitor: vid, p_chat: chat, p_consent: b.consent === true, p_page: page });
+      if (!s?.ok) return json({ ok: false, reason: s?.reason ?? "off" });
+      let tok: { token: string; conversation_id: string };
+      try { tok = await mintCallToken(await elAccount(s.workspace_id, s.account), s.el_agent_id, `visitor-${String(s.visitor_id).slice(0, 8)}`); }
+      catch (e) { logEl(FN, e, { chat, step: "voice token" }); return json({ ok: false, reason: e instanceof ElError && e.status === 429 ? "busy" : "unavailable" }); }
+      // the visitor's language when the agent speaks it; otherwise the agent's main language
+      const want = String(b.locale ?? "").toLowerCase(), langs: string[] = Array.isArray(s.languages) ? s.languages : [];
+      const language = langs.find((l) => l === want) ?? langs.find((l) => l === want.split("-")[0]) ?? null;
+      const started = await rpc<any>("webchat_v_voice_started", { p_visitor: vid, p_chat: chat, p_el_conversation: tok.conversation_id, p_el_agent: s.el_agent_id, p_account: s.account,
+        p_language: language ?? langs[0] ?? null, p_max_minutes: s.max_minutes, p_page_url: s.page_url || null });
+      const session = await mintSession({ call_id: started.call_id, inbox_id: s.inbox_id, chat_id: chat, visitor_id: s.visitor_id, el_conversation_id: tok.conversation_id }, (Number(s.max_minutes) + 2) * 60);
+      return json({ ok: true, call_id: started.call_id, conversation_token: tok.token, el_conversation_id: tok.conversation_id, max_minutes: s.max_minutes, ...(language ? { language } : {}),
+        dynamic_variables: { brand: dv(s.brand, 80), page_title: dv(s.page_title, 200), page_url: dv(s.page_url, 500), visitor_name: dv(s.visitor_name, 80) || "not known yet",
+          recent_chat: dv(s.recent_chat, 1500) || "nothing yet", today: todayIn(s.timezone), secret__session: session } });
+    }
+    if (m === "POST" && (action === "voice/turns" || action === "voice/switch" || action === "voice/end")) {
+      const b = await readJson<any>(req);
+      const call = String(b.call_id ?? "");
+      if (!/^[0-9a-f-]{36}$/.test(call)) throw new HttpError(400, "E_PAYLOAD_INVALID", "call_id");
+      if (action === "voice/turns") return json(await rpc("webchat_v_voice_turns", { p_visitor: vid, p_call: call, p_turns: Array.isArray(b.turns) ? b.turns.slice(0, 20) : [] }));
+      if (action === "voice/switch") return json(await rpc("webchat_v_voice_switch", { p_visitor: vid, p_call: call, p_handoff: b.handoff === true, p_reason: textField(b.reason, 40) }));
+      return json(await rpc("webchat_v_voice_end", { p_visitor: vid, p_call: call, p_reason: textField(b.reason, 40) }));
+    }
+    if (m === "GET" && action === "transcript") {
+      // the whole conversation for the widget's "Download transcript": every message in the /messages shape, oldest first
+      if (inbox.settings?.features?.transcript === false) throw new HttpError(403, "E_FORBIDDEN", "transcripts are off");
+      await rateLimit(`webchat:trd:${chat}`, 6, 60);
+      const all: any[] = [];
+      let before: string | null = null;
+      for (let page = 0; page < 25; page++) {
+        const rows: any[] = (await rpc<any[]>("webchat_v_messages", { p_visitor: vid, p_chat: chat, p_before: before, p_after: null, p_limit: 200 })) ?? [];
+        all.unshift(...rows);
+        if (rows.length < 200) break;
+        before = rows[0].sent_at;
+      }
+      return json({ messages: all });
+    }
     if (m === "POST" && action === "transcript") {
       await rateLimit(`webchat:tr:${chat}`, 1, 15);
       if (!inbox.settings?.features?.transcript && inbox.settings?.features?.transcript !== undefined) throw new HttpError(403, "E_FORBIDDEN", "transcripts are off");
       const b = await readJson<any>(req);
-      if (b.email) await rpc("webchat_v_attrs", { p_visitor: vid, p_chat: null, p_custom: null, p_delete: null, p_conv_custom: null, p_conv_delete: null, p_add_labels: null, p_remove_labels: null }).catch(() => {});
+      // the address typed in the widget becomes the visitor's email when they have none (same rule as the in-chat email
+      // form, without posting a message: a resolved conversation must not reopen because someone asked for a copy)
+      const em = String(b.email ?? "").trim().toLowerCase();
+      if (em) {
+        if (em.length > 254 || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) throw new HttpError(400, "E_PAYLOAD_INVALID", "email");
+        await rpc("webchat_v_conversation", { p_visitor: vid, p_chat: chat });   // ownership
+        const { data: ch } = await admin.from("outreach_chats").select("visitor_id").eq("id", chat).maybeSingle();
+        if (ch?.visitor_id) {
+          const { data: set } = await admin.from("outreach_webchat_visitors").update({ email: em, email_invalid: false }).eq("id", ch.visitor_id).is("email", null).select("id");
+          if (set?.length) await rpc("webchat__link_lead", { p_visitor: ch.visitor_id, p_create: false }).catch((e) => log({ fn: FN, warn: "link_lead", error: String((e as any)?.message ?? e) }));
+        }
+      }
       const ok = await sendTranscript(chat, vid, "transcript");
       return json({ ok });
     }
@@ -291,18 +379,24 @@ serve(FN, async (req) => {
     const headers = { ...CORS, "content-type": "text/event-stream", "cache-control": "no-cache", "x-accel-buffering": "no" };
     if (!ctx?.ok) return new Response(new ReadableStream({ start(c) { c.enqueue(sse("skip", { reason: "handled" })); c.close(); } }), { headers });
     const clean = sanitizeQuery(ctx.query);
-    const page = b.page && typeof b.page === "object" ? { url: String(b.page.url ?? "").slice(0, 2000), title: String(b.page.title ?? "").slice(0, 300), text: String(b.page.text ?? "").slice(0, 4000) } : null;
+    const jp = b.page?.product && typeof b.page.product === "object" ? b.page.product : null;   // the page's JSON-LD product
+    const page = b.page && typeof b.page === "object" ? { url: String(b.page.url ?? "").slice(0, 2000), title: String(b.page.title ?? "").slice(0, 300), text: String(b.page.text ?? "").slice(0, 4000),
+      product: jp ? { name: textField(jp.name, 200) ?? undefined, sku: textField(jp.sku, 120) ?? undefined, url: textField(jp.url, 300) ?? undefined } : null } : null;
+    // what the button said about this question: stored with the message when it was sent; the request may repeat it
+    const context = ctx.context ?? textField(b.context, 700), productRef = ctx.product_ref ?? textField(b.product, 300);
     const stream = new ReadableStream({
       async start(c) {
         try {
           let answer = "", confidence = "high", handoff = false, sources: Array<{ url: string | null; title: string }> = [], model = "rules", usage = { tokens_in: null as number | null, tokens_out: null as number | null };
+          let cards: ProductCard[] = [], currentProduct: string | null = null, productSearch: Record<string, unknown> | null = null;
           if (!clean.ok) {
             answer = clean.reason === "injection" ? `I can only help with questions about ${ctx.brand}.` : "Could you say a bit more? I didn't catch that.";
             confidence = "refused";
             c.enqueue(sse("meta", { sources: [] })); c.enqueue(sse("token", answer));
           } else {
-            const chunks = await retrieveForInbox(ctx, clean.query, 6);
-            const prompt = buildAnswerPrompt(ctx, chunks, page);
+            // knowledge and products are looked up together; the one model call that writes the answer also picks the cards
+            const [chunks, rec] = await Promise.all([retrieveForInbox(ctx, clean.query, 6), recommendProducts(ctx, clean.query, page, { context, product: productRef })]);
+            const prompt = buildAnswerPrompt(ctx, chunks, page, rec, context);
             const seen = new Set<string>();
             sources = ctx.show_sources ? chunks.filter((k) => { const key = k.url ?? k.title; if (!key || seen.has(key)) return false; seen.add(key); return true; }).map((k) => ({ url: k.url, title: k.title })) : [];
             c.enqueue(sse("meta", { sources }));
@@ -311,13 +405,21 @@ serve(FN, async (req) => {
             if (parsed.answer && parsed.answer !== answer) { answer = parsed.answer; }
             confidence = parsed.confidence; handoff = parsed.handoff; model = r.model; usage = { tokens_in: r.tokens_in, tokens_out: r.tokens_out };
             if (parsed.used_sources.length) sources = parsed.used_sources.map((n) => chunks[n - 1]).filter(Boolean).map((k) => ({ url: k.url, title: k.title }));
+            if (rec) {
+              cards = pickCards(parsed.products, rec, ctx.products?.max ?? 3, confidence);
+              answer = stripCardLinks(answer, cards);
+              currentProduct = rec.current?.id ?? null;
+              productSearch = { ...rec.search, shopping: parsed.shopping || cards.length > 0 };
+              if (cards.length) c.enqueue(sse("products", { items: cards }));
+            }
           }
           // "agent message wins": a person may have answered while we streamed
           const again = await rpc<AiContext>("webchat_v_ai_context", { p_chat: chat, p_message: qid });
           if (!again?.ok) { c.enqueue(sse("cancelled", { reason: "agent_replied" })); c.close(); return; }
           const lowStreak = (ctx.recent_low ?? 0) + (confidence !== "high" ? 1 : 0) >= (ctx.low_confidence_streak ?? 2);
           const doHandoff = handoff || lowStreak;
-          const rec = await rpc<any>("webchat_v_ai_record", { p_chat: chat, p_message: qid, p_turn: { query: ctx.query, answer, sources, confidence, handoff: doHandoff ? (handoff ? "intent" : "low_confidence") : null, page_url: page?.url ?? ctx.page_url, model, latency_ms: Date.now() - started, ...usage } });
+          const rec = await rpc<any>("webchat_v_ai_record", { p_chat: chat, p_message: qid, p_turn: { query: ctx.query, answer, sources, confidence, handoff: doHandoff ? (handoff ? "intent" : "low_confidence") : null, page_url: page?.url ?? ctx.page_url, model, latency_ms: Date.now() - started, ...usage,
+            products: cards, context, product_id: currentProduct, product_search: productSearch } });
           let ho: any = null;
           if (doHandoff) ho = await rpc("webchat_v_handoff", { p_chat: chat, p_reason: handoff ? "ai_intent" : "low_confidence" });
           c.enqueue(sse("done", { message: rec?.message ?? null, turn_id: rec?.turn_id ?? null, confidence, handoff: !!ho }));

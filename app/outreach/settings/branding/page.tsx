@@ -6,8 +6,10 @@ import { Palette, Save } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { DEFAULT_ACCENT, brandingKey, isHexColor, isHttpsUrl, useBranding, type Branding } from '@/lib/outreach/branding';
+import { usePlanFeature } from '@/lib/outreach/billing';
 import { Button, Card, ErrorBox, Input, Spinner, useToast } from '@/components/outreach/ui';
-import { SettingRow, SettingsFrame, Switch, isEmail } from '@/components/outreach/settings/shared';
+import { UpgradeNote } from '@/components/outreach/PlanGate';
+import { Note, SettingRow, SettingsFrame, Switch, isEmail } from '@/components/outreach/settings/shared';
 import BrandingPreview from '@/components/outreach/settings/BrandingPreview';
 import DomainsCard from '@/components/outreach/settings/DomainsCard';
 
@@ -36,6 +38,8 @@ function BrandingForm() {
   const qc = useQueryClient();
   const toast = useToast();
   const branding = useBranding(ws);
+  // White-label belongs to Enterprise (billing v2). Without it the saved branding is kept and shown, but cannot be changed.
+  const gate = usePlanFeature(ws, 'white_label');
   const [form, setForm] = useState<Form>(toForm(undefined));
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -70,11 +74,13 @@ function BrandingForm() {
 
   if (branding.isLoading) return <Card title="Branding"><Spinner /></Card>;
   if (branding.isError) return <Card title="Branding"><ErrorBox message={parseError(branding.error).message} /></Card>;
-  const ro = !canWrite;
+  const ro = !canWrite || !gate.enabled;
+  const hasSaved = savedPrint !== JSON.stringify(toForm(undefined));
 
   return (
     <Card title={<span className="flex items-center gap-2"><Palette className="w-4 h-4" /> Branding</span>}>
       <p className="text-xs text-gray-500 mb-4">What your clients see: in the client portal, on the invitation page and in every email they get from us. Your own team keeps the normal look.</p>
+      {!gate.enabled && hasSaved && <Note className="mb-4">Your branding is kept, and used again after an upgrade. Until then clients see the default look.</Note>}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
         <form onSubmit={save} className="lg:col-span-3 space-y-4" noValidate>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -103,6 +109,7 @@ function BrandingForm() {
             <SettingRow title="Hide the platform name from clients" description="The words GrowthxAI never appear in the portal, on the invitation page or in client emails. Set a product name too, otherwise clients see the workspace name." control={<Switch label="Hide the platform name from clients" checked={form.hide_platform_name} onChange={(v) => set('hide_platform_name', v)} disabled={ro} />} />
           </div>
           {saveError && <ErrorBox message={saveError} />}
+          <UpgradeNote feature="white_label" what="White-label branding" className="justify-end" />
           <div className="flex items-center justify-end gap-2">
             {dirty && <Button type="button" variant="secondary" onClick={() => setForm(JSON.parse(savedPrint) as Form)} disabled={busy}>Undo</Button>}
             <Button type="submit" loading={busy} disabled={ro || !dirty || blocking}><Save className="w-4 h-4" /> Save branding</Button>
@@ -115,12 +122,28 @@ function BrandingForm() {
   );
 }
 
+/**
+ * Custom domains are part of white-label too. The card is shared, so the gate sits around it: a disabled fieldset switches
+ * off its add form (and its remove buttons) while the plan has no white-label; the domains stay listed.
+ */
+function GatedDomains() {
+  const { workspace } = useWorkspace();
+  const gate = usePlanFeature(workspace?.id, 'white_label');
+  return (
+    <fieldset disabled={!gate.enabled} className="min-w-0 space-y-3">
+      <DomainsCard />
+      <UpgradeNote feature="white_label" what="Your own app domain" />
+      {!gate.enabled && <p className="text-xs text-gray-500">Domains you added are kept, and used again after an upgrade. Until then they redirect to the default address.</p>}
+    </fieldset>
+  );
+}
+
 export default function BrandingSettingsPage() {
   return (
     <SettingsFrame min="owner" deniedMessage="Only the workspace owner can change white-label settings.">
       <div className="space-y-6">
         <BrandingForm />
-        <DomainsCard />
+        <GatedDomains />
       </div>
     </SettingsFrame>
   );

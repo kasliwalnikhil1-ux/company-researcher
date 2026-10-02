@@ -40,3 +40,10 @@ Deno.test("two seeds can give different text, one seed always gives the same", (
   if (outs.size < 5) throw new Error(`expected variety across seeds, got ${outs.size}`);
   same(renderTemplate(t, { lead: {}, seed: "seed-3" }), renderTemplate(t, { lead: {}, seed: "seed-3" }), "stable");
 });
+
+Deno.test("quoted spintax picks what native spintax picks, for any seed", () => {
+  for (let i = 0; i < 25; i++) {
+    same(renderTemplate('{{ "Hey|Hello|Bonjour" | spintax }} {a|b|c}', { lead: {}, seed: `seed-${i}` }),
+      renderTemplate("{Hey|Hello|Bonjour} {a|b|c}", { lead: {}, seed: `seed-${i}` }), `seed-${i}`);
+  }
+});

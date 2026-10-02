@@ -5,7 +5,7 @@
 //   POST {action:"import_segment", integration_id, segment_id, segment_name?, list_id?, client_id?, cursor?}
 //   POST {action:"sync_now", integration_id}     POST {action:"test", integration_id}
 // Tokens are encrypted with crypto.ts and live only in outreach_integration_secrets.
-import { admin, audit, CRON_SECRET, FUNCTIONS_BASE, HttpError, json, membership, rateLimit, readJson, requireRole, requireUser, serve, SERVICE_ROLE_KEY, WEB_ORIGIN } from "../_shared/outreach/supabase.ts";
+import { admin, audit, CRON_SECRET, FUNCTIONS_BASE, HttpError, json, membership, rateLimit, readJson, requireFeature, requireRole, requireUser, serve, SERVICE_ROLE_KEY, WEB_ORIGIN } from "../_shared/outreach/supabase.ts";
 import { hmacSha256Hex } from "../_shared/outreach/crypto.ts";
 import { getProvider, isProviderName, notConfiguredMessage, CrmError, type ProviderName } from "../_shared/outreach/crm/index.ts";
 import { plainError } from "../_shared/outreach/crm/http.ts";
@@ -154,6 +154,7 @@ serve("crm-oauth", async (req) => {
     if (!body.workspace_id || !isProviderName(body.provider)) throw new HttpError(400, "E_PAYLOAD_INVALID", "workspace_id and provider (hubspot, pipedrive or salesforce) required");
     const providerName: ProviderName = body.provider;
     requireRole(await membership(user.id, body.workspace_id), "manager");
+    await requireFeature(body.workspace_id, "crm_sync", "CRM sync");
     const provider = getProvider(providerName);
     if (!provider.configured()) throw new HttpError(503, "E_NOT_CONFIGURED", notConfiguredMessage(providerName));
     if (!Deno.env.get("OUTREACH_COOKIE_KEY")) throw new HttpError(503, "E_NOT_CONFIGURED", "The encryption key (OUTREACH_COOKIE_KEY) is not set, so CRM tokens cannot be stored safely.");

@@ -20,12 +20,12 @@ type Speed = 'instant' | 'hours' | 'days' | 'slowest';
 
 // Each source says honestly what it costs the sender's LinkedIn account and how long it takes.
 const SOURCES: Array<{ id: Source; label: string; description: string; cost: string; speed: Speed; icon: typeof Search }> = [
+  { id: 'csv', label: 'CSV file', description: 'Create leads from a spreadsheet, or update chosen columns of existing leads.', cost: 'No LinkedIn calls', speed: 'instant', icon: FileSpreadsheet },
   { id: 'search_url', label: 'Search URL', description: 'Paste a LinkedIn or Sales Navigator people search.', cost: 'Uses daily search pages', speed: 'days', icon: Search },
   { id: 'post_engagement', label: 'Post engagement', description: 'People who reacted to or commented on a post. High intent.', cost: 'Uses daily search pages, no profile views', speed: 'hours', icon: ThumbsUp },
   { id: 'sales_nav', label: 'Sales Navigator lists', description: 'Pick a saved search or a lead list instead of pasting a link.', cost: 'Uses daily search pages, needs a Sales Navigator seat', speed: 'days', icon: Compass },
   { id: 'company_people', label: 'People in target companies', description: 'Start from a company list and find people by title.', cost: 'One lookup plus up to three searches per company', speed: 'slowest', icon: Building2 },
   { id: 'conversations', label: 'Conversations as leads', description: 'Create leads from inbox conversations that have no lead yet.', cost: 'No LinkedIn calls', speed: 'instant', icon: MessageSquare },
-  { id: 'csv', label: 'CSV file', description: 'Create leads from a spreadsheet, or update chosen columns of existing leads.', cost: 'No LinkedIn calls', speed: 'instant', icon: FileSpreadsheet },
   { id: 'relations', label: 'Connections', description: 'A sender’s existing 1st-degree connections.', cost: 'One page of 100 per hour, no invite or message allowance', speed: 'hours', icon: Users },
 ];
 const SPEED: Record<Speed, { label: string; cls: string }> = {
@@ -38,7 +38,7 @@ const SPEED: Record<Speed, { label: string; cls: string }> = {
 export default function LeadsImportPage() {
   const { canWrite, suspended } = useWorkspace();
   const toast = useToast();
-  const [source, setSource] = useState<Source>('search_url');
+  const [source, setSource] = useState<Source>('csv');
   const jobsRef = useRef<HTMLDivElement>(null);
   const onCreated = () => { jobsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   const current = SOURCES.find((s) => s.id === source);

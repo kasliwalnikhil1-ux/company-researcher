@@ -27,7 +27,9 @@ export interface KnowledgeRef {
   id: string; kind: 'website' | 'document' | 'text'; title: string; url: string | null; status: KnowledgeStatus; error: string | null;
   pages: number | null; chunks: number | null; crawled_at: string | null;
 }
-export interface KnowledgeSource extends KnowledgeRef {
+/** A row of the workspace's library. 'catalogue' = a product catalogue (migration 068): websites use it, a sequence never does. */
+export interface KnowledgeSource extends Omit<KnowledgeRef, 'kind'> {
+  kind: KnowledgeRef['kind'] | 'catalogue';
   storage_path: string | null; content_type: string | null; refresh_days: number | null; created_at: string; updated_at: string | null; used_by: number;
 }
 
@@ -135,9 +137,9 @@ export type MetricsGroup = 'none' | 'sequence' | 'sender' | 'stage' | 'master_pr
 export interface Pool { month: string; used: number; limit: number | null; own_key: boolean; ok: boolean }
 
 // ---------------------------------------------------------------------------
-// Labels (customer copy never names the connector vendor; mode labels are Off · Draft · Auto)
+// Labels (customer copy never names the connector vendor; mode labels are Off · Review · Auto, `draft` is stored)
 // ---------------------------------------------------------------------------
-export const MODE_LABEL_V2: Record<ReplyMode, string> = { off: 'Off', draft: 'Draft', autopilot: 'Auto' };
+export const MODE_LABEL_V2: Record<ReplyMode, string> = { off: 'Off', draft: 'Review', autopilot: 'Auto' };
 export const MODES: ReplyMode[] = ['off', 'draft', 'autopilot'];
 
 export const HANDOFF_REASON_LABEL: Record<string, string> = {
@@ -292,9 +294,13 @@ export function scenariosFromText(text: string): Promise<ScenarioDraft[]> {
 // ---------------------------------------------------------------------------
 type FaqWrite = { id?: string; faqs: Faq[] };
 
+/** The AI hub (Knowledge, Needs you, Setup) reads the same sources, Q&A and questions: its lists are stale after a write here. */
+const invalidateAiHub = (qc: ReturnType<typeof useQueryClient>) => qc.invalidateQueries({ predicate: (q) => q.queryKey[0] === 'outreach' && q.queryKey[2] === 'ai-hub' });
+
 function useAfterFaqWrite(sequenceId: string) {
   const qc = useQueryClient();
   return (r: FaqWrite | undefined) => {
+    invalidateAiHub(qc);
     if (r?.faqs) qc.setQueryData(aisqk.seqSettings(sequenceId), (old: SequenceAiSettings | undefined) => (old ? { ...old, prompt: { ...old.prompt, faqs: r.faqs } } : old));
     qc.invalidateQueries({ queryKey: aisqk.seqSettings(sequenceId) });
     qc.invalidateQueries({ queryKey: ['outreach', 'ai-prompt-versions'] });
@@ -330,20 +336,21 @@ export function useKnowledgeSourceAdd(ws: string) {
     mutationFn: (a: KnowledgeAddInput) => rpc<KnowledgeSource>('knowledge_source_add', {
       p_ws: ws, p_kind: a.kind, p_title: a.title, p_url: a.url ?? null, p_storage_path: a.storage_path ?? null, p_text: a.text ?? null, p_refresh_days: a.refresh_days ?? null,
     }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: aisqk.knowledge(ws) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: aisqk.knowledge(ws) }); invalidateAiHub(qc); },
   });
 }
 export function useKnowledgeSourceDelete(ws: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => rpc<void>('knowledge_source_delete', { p_id: id }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: aisqk.knowledge(ws) }); qc.invalidateQueries({ queryKey: ['outreach', 'sequence'] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: aisqk.knowledge(ws) }); qc.invalidateQueries({ queryKey: ['outreach', 'sequence'] }); qc.invalidateQueries({ queryKey: ['outreach', 'webchat'] }); invalidateAiHub(qc); },
   });
 }
 type KnowledgeWrite = { knowledge: KnowledgeRef[] };
 function useAfterKnowledgeWrite(sequenceId: string) {
   const qc = useQueryClient();
   return (r: KnowledgeWrite | undefined) => {
+    invalidateAiHub(qc);
     if (r?.knowledge) qc.setQueryData(aisqk.seqSettings(sequenceId), (old: SequenceAiSettings | undefined) => (old ? { ...old, prompt: { ...old.prompt, knowledge: r.knowledge, knowledge_source_ids: r.knowledge.map((k) => k.id) } } : old));
     qc.invalidateQueries({ queryKey: aisqk.seqSettings(sequenceId) });
     qc.invalidateQueries({ queryKey: ['outreach', 'ai-prompt-versions'] });
@@ -382,6 +389,7 @@ export function useUnanswered(sequenceId: string | null | undefined, status: 'op
 function useAfterUnansweredWrite(sequenceId: string) {
   const qc = useQueryClient();
   return () => {
+    invalidateAiHub(qc);
     qc.invalidateQueries({ queryKey: ['outreach', 'sequence', sequenceId, 'ai-unanswered'] });
     qc.invalidateQueries({ queryKey: aisqk.seqSettings(sequenceId) });
     qc.invalidateQueries({ queryKey: aisqk.seqSummary(sequenceId) });

@@ -8,7 +8,7 @@ import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { useLead, useMessages, useSender } from '@/lib/outreach/queries';
 import { NODE_CATALOG, TEXT_LIMITS } from '@/lib/outreach/nodes';
-import { renderTemplate } from '@/lib/outreach/render';
+import { buildContext, renderTemplate } from '@/lib/outreach/render';
 import { enrollmentStatusText } from '@/lib/outreach/reasons';
 import type { Graph, Member, Message, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, ErrorBox, IntentBadge, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
@@ -16,9 +16,10 @@ import { cn } from '@/lib/utils';
 
 type KindTone = 'blue' | 'amber' | 'purple' | 'red' | 'green' | 'indigo' | 'gray';
 // Keyed by string so a task kind added to the database later still renders.
-export const TASK_KINDS = ['manual_node', 'follow_up', 'review_ai_draft', 'reconnect', 'call', 'reply_hold'] as const;
-export const TASK_KIND_LABEL: Record<string, string> = { manual_node: 'Manual step', follow_up: 'Follow-up', review_ai_draft: 'Review AI Personalization', reconnect: 'Reconnect sender', call: 'Call', reply_hold: 'Held after a reply' };
-export const TASK_KIND_TONE: Record<string, KindTone> = { manual_node: 'blue', follow_up: 'amber', review_ai_draft: 'purple', reconnect: 'red', call: 'green', reply_hold: 'indigo' };
+// Things a person does. What the AI wrote and a person approves (review_ai_draft, ai_escalation) lives in AI → Needs you.
+export const TASK_KINDS = ['manual_node', 'follow_up', 'ai_handoff', 'reconnect', 'call', 'reply_hold'] as const;
+export const TASK_KIND_LABEL: Record<string, string> = { manual_node: 'Manual step', follow_up: 'Follow-up', ai_handoff: 'Over to you', review_ai_draft: 'Step draft', ai_escalation: 'Reply needs a person', reconnect: 'Reconnect sender', call: 'Call', reply_hold: 'Held after a reply' };
+export const TASK_KIND_TONE: Record<string, KindTone> = { manual_node: 'blue', follow_up: 'amber', ai_handoff: 'amber', review_ai_draft: 'purple', ai_escalation: 'amber', reconnect: 'red', call: 'green', reply_hold: 'indigo' };
 export function taskKindLabel(kind: string): string { return TASK_KIND_LABEL[kind] ?? kind.replace(/_/g, ' '); }
 export function taskKindTone(kind: string): KindTone { return TASK_KIND_TONE[kind] ?? 'gray'; }
 
@@ -115,6 +116,13 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
     return g && task?.node_id ? g.nodes[task.node_id] : undefined;
   }, [enrollmentQ.data, task?.node_id]);
   const isOutreachNode = !!node && OUTREACH_TEXT_TYPES.has(node.type);
+  // The context the executor renders with (profile data, company, approved AI values, dates), so the text of a manual
+  // step reads the same as an automatic one. Until it has loaded, the lead and sender fields alone are used.
+  const renderCtxQ = useQuery({
+    queryKey: ['outreach', 'render_context', task?.lead_id ?? '', task?.sender_id ?? '', task?.enrollment_id ?? ''], staleTime: 60000,
+    enabled: task?.kind === 'manual_node' && isOutreachNode && !!task?.lead_id,
+    queryFn: () => rpc<Record<string, unknown>>('render_context', { p_lead: task!.lead_id, p_sender: task!.sender_id ?? null, p_enrollment: task!.enrollment_id ?? null }),
+  });
 
   // Seed the editable text: AI draft for review tasks, rendered node template for outreach manual nodes.
   useEffect(() => {
@@ -122,9 +130,9 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
     if (task.kind === 'review_ai_draft') { if (task.ai_draft) setText(task.ai_draft); return; }
     if (task.kind === 'manual_node' && isOutreachNode && node) {
       const tpl = node.config?.text ?? node.config?.note ?? node.config?.html ?? '';
-      setText(renderTemplate(String(tpl), { lead: lead ?? {}, sender: senderQ.data ?? null }));
+      setText(renderTemplate(String(tpl), renderCtxQ.data ? buildContext(renderCtxQ.data) : { lead: lead ?? {}, sender: senderQ.data ?? null }));
     }
-  }, [task, dirty, isOutreachNode, node, lead, senderQ.data]);
+  }, [task, dirty, isOutreachNode, node, lead, senderQ.data, renderCtxQ.data]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['outreach', 'task', taskId] });

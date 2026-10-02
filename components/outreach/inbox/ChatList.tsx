@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Search, Inbox, X, Filter, SlidersHorizontal, Loader2, Lock } from 'lucide-react';
+import { Search, Inbox, X, Filter, SlidersHorizontal, Loader2, Lock, Mic } from 'lucide-react';
 import MentionsList from './notes/MentionsList';
 import NotificationBell from './notes/NotificationBell';
 import { useNoteSearch, useNotesBadge, noteLink } from '@/lib/outreach/notes';
@@ -233,7 +233,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                 </FilterField>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <FilterField label="AI Auto Replies" value={filters.ai ?? ''} onChange={(v) => onFilters({ ai: (v || null) as AiChatFilter | null })}>
+                <FilterField label="AI replies" value={filters.ai ?? ''} onChange={(v) => onFilters({ ai: (v || null) as AiChatFilter | null })}>
                   <option value="">Any</option>
                   {AI_FILTERS.map((a) => <option key={a} value={a}>{AI_FILTER_LABEL[a]}</option>)}
                 </FilterField>
@@ -332,6 +332,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                         {c.outreach_senders?.display_name && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[45%]">{c.outreach_senders.display_name}</span>}
                         {c.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: the person has not accepted the conversation yet, so they may not have seen it">Request</span>}
                         {c.provider === 'WEBCHAT' && c.status && c.status !== 'open' && <span className={cn('text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0', c.status === 'resolved' ? 'bg-emerald-50 text-emerald-700' : c.status === 'snoozed' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700')} title={`Web chat conversation is ${c.status}`}>{c.status}</span>}
+                        {c.provider === 'WEBCHAT' && (c.voice_calls ?? 0) > 0 && <span className="flex-shrink-0 text-gray-400" title={`${c.voice_calls} voice call${c.voice_calls === 1 ? '' : 's'} with the website assistant`} aria-label="Had a voice call"><Mic className="w-3 h-3" /></span>}
                         {c.provider === 'WEBCHAT' && c.ai_handled && !c.handed_off_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap flex-shrink-0" title="The website assistant is answering this visitor">AI</span>}
                         {c.provider === 'WEBCHAT' && c.handed_off_at && c.status === 'open' && !c.assigned_to && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 whitespace-nowrap flex-shrink-0" title="A visitor is waiting for a person">Waiting</span>}
                         {c.intent && c.intent !== 'unclassified' && <IntentBadge intent={c.intent} />}

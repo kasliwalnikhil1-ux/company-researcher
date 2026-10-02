@@ -252,3 +252,43 @@ Call from the web app with `rpc('<name without outreach_>', args)`, from edge fu
 | `outreach_notes_purge` | `` | `jsonb` | service |
 | `outreach__team_notes_for_ai` | `p_chat uuid, p_limit int DEFAULT 10` | `jsonb` | internal (gate_facts) |
 | `outreach__note_on_ai_handoff` | `p_chat uuid, p_reason text, p_rule text, p_assignee uuid, p_label text` | `uuid` | internal (ai_handoff) |
+
+## AI fields + Insert Variables (066 / 067, docs/outreach/AI-FIELDS.md)
+
+| Function | Arguments | Returns | Caller |
+|---|---|---|---|
+| `outreach_hub_line_fields_edit` | `p_value uuid, p_data jsonb` | `jsonb {updated, data, text}` | user (member; approves the value) |
+| `outreach_hub_fields_valid` | `p jsonb` | `boolean` | user (check constraint of `outreach_ai_variables`) |
+| `outreach_hub_fields_clean` | `p_fields jsonb, p_data jsonb, p_strict boolean DEFAULT false` | `jsonb` | user / service |
+| `outreach_hub_fields_summary` | `p_fields jsonb, p_data jsonb` | `text` | user / service |
+| `outreach_ai_value_result_fields` | `p_id uuid, p_data jsonb, p_facts jsonb, p_model text, p_error text DEFAULT null` | `void` | service |
+| `outreach_ai_value_result_builtin` | `p_id uuid, p_text text, p_model text` | `void` | service |
+| `outreach_seed_builtin_variables` | `p_ws uuid DEFAULT null` | `int` | service (migration, workspace trigger) |
+| `outreach_company_due` | `p_ws uuid, p_linkedin_id text` | `boolean` | service |
+| `outreach_company_save` | `p_ws uuid, p jsonb` | `uuid` | service |
+| `outreach_template_normalize` | `p_text text` | `text` | user / service |
+| `outreach_country_name` / `outreach_country_code` / `outreach_country_tz` | `text` | `text` | user / service |
+| `outreach_location_parts` | `p_location text, p_country_code text` | `jsonb {city, region, country}` | user / service |
+| `outreach__render_account` / `outreach__render_now` / `outreach__sender_email` / `outreach__lead_tags` / `outreach__builtin_keys` | | | internal (render context, enrolment) |
+
+## Web chat: own buttons, Ask AI buttons, product catalogue (068, docs/outreach/WEBCHAT.md "Widget update 5")
+
+| Function | Arguments | Returns | Caller |
+|---|---|---|---|
+| `outreach_hub_catalogue_add` | `p_ws uuid, p_provider text, p_title text DEFAULT null, p_url text DEFAULT null, p_storage_path text DEFAULT null, p_currency text DEFAULT null` | `jsonb` (the source) | user (manager). provider: `shopify`, `woocommerce`, `feed`, `csv` |
+| `outreach_hub_catalogue_update` | `p_source uuid, p_patch jsonb` | `jsonb` (the source) | user (manager). `{title, currency, refresh_days, storage_path, sync}`; on a website source `{detect_products}` |
+| `outreach_hub_catalogue_products` | `p_source uuid, p_query text DEFAULT null, p_limit int DEFAULT 50, p_offset int DEFAULT 0` | `jsonb {source, total, hidden, products}` | user (member, workspace-wide) |
+| `outreach_hub_product_set` | `p_id uuid, p_ai_hidden boolean DEFAULT null, p_pinned_keywords text[] DEFAULT null` | `jsonb {id, ai_hidden, pinned_keywords}` | user (manager) |
+| `outreach_hub_product_search` | `p_ws uuid, p_query text DEFAULT null, p_max_price numeric DEFAULT null, p_source uuid DEFAULT null, p_inbox uuid DEFAULT null, p_limit int DEFAULT 20` | `jsonb` (products) | user (member) |
+| `outreach_hub_webchat_send_products` | `p_chat uuid, p_product_ids uuid[], p_text text DEFAULT null, p_suggestion uuid DEFAULT null` | `jsonb` (the message) | user (member with replies on) |
+| `outreach_product_search` | `p_ws uuid, p_sources uuid[], p_query text, p_filters jsonb DEFAULT '{}', p_current uuid DEFAULT null, p_limit int DEFAULT 12` | `jsonb` (products, best first) | service. filters: `min_price, max_price, lt_price, gt_price, include_oos, include_hidden, complement, browse` |
+| `outreach_product_resolve` | `p_ws uuid, p_sources uuid[], p_ref text` | `uuid` | service. `product:<handle or sku or url or id>` or a page address |
+| `outreach_product_get` | `p_ws uuid, p_id uuid` | `jsonb` | service |
+| `outreach_catalogue_begin` | `p_source uuid` | `jsonb {started_at, page, seen, rejected}` | service (sync worker) |
+| `outreach_catalogue_upsert` | `p_source uuid, p_products jsonb, p_started timestamptz` | `jsonb {received, upserted, rejected}` | service (sync worker) |
+| `outreach_catalogue_progress` | `p_source uuid, p_cursor jsonb` | `void` | service (sync worker) |
+| `outreach_catalogue_finish` | `p_source uuid, p_started timestamptz, p_complete boolean, p_meta jsonb DEFAULT '{}', p_error text DEFAULT null` | `jsonb {status, products, removed}` | service (sync worker) |
+| `outreach_webchat__buttons_check` | `ns jsonb` | `void` | internal (`outreach_webchat__settings_check`) |
+| `outreach_webchat__products_fix` | `p_ws uuid, ns jsonb, p_patch jsonb` | `jsonb` | internal (`outreach_webchat_inbox_update`) |
+| `outreach_webchat__products_ctx` / `__products_public` / `__product_sources` / `__add_to_cart_ok` | `p_inbox uuid, st jsonb` (sources: `p_ws uuid, st jsonb`) | `jsonb` / `uuid[]` / `boolean` | internal (assistant context, public config) |
+| `outreach_webchat__products_report` | `p_ws uuid, p_inbox uuid, f timestamptz, t timestamptz` | `jsonb` | internal (`outreach_webchat_report`) |

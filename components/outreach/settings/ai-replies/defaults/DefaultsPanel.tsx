@@ -1,6 +1,6 @@
 'use client';
 
-// Settings → AI replies → Defaults: the per-sender daily AI send cap, the default library prompt and the library itself.
+// AI → Setup → General (was Settings → AI replies → Defaults): the per-sender daily AI send cap, the default library prompt and the library itself.
 import { useState } from 'react';
 import { BookOpen, Plus, Star, Trash2 } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
@@ -48,7 +48,7 @@ export default function DefaultsPanel({ ws, canEdit, notify }: { ws: string; can
       <Card title="Library prompts"
         actions={canEdit && <Button size="sm" onClick={() => setEditing({ id: null, key: Date.now() })}><Plus className="w-3.5 h-3.5" />New prompt</Button>}>
         <div className="space-y-3">
-          <p className="text-sm text-gray-600">Starting points for sequences. A new sequence copies the default; any sequence can copy a library prompt from its AI Auto Replies tab. Copies are independent: editing a library prompt never changes a sequence.</p>
+          <p className="text-sm text-gray-600">Starting points for sequences. A new sequence copies the default; any sequence can copy a library prompt from its AI tab. Copies are independent: editing a library prompt never changes a sequence.</p>
           {w && (
             <div className="flex flex-wrap items-end gap-3">
               <Select label="Default for new sequences" value={w.default_prompt_id ?? ''} disabled={!canEdit || setSettings.isPending} className="w-72"

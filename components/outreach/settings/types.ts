@@ -37,10 +37,15 @@ export interface AiSettings {
   finders: Array<KeyHint<FinderProvider>>;
   verifier: KeyHint<VerifierProvider> | null;
   booking_webhook_secret: string | null;   // owner only
+  /** 069: the workspace's own voice account for the website assistant (last 4 characters), and whether the plan allows one */
+  elevenlabs_key_hint?: string | null;
+  voice_own_key_allowed?: boolean;
 }
 export interface AiVariable {
   id: string; workspace_id: string; key: string; name: string; prompt: string; fallback: string;
   needs_posts: boolean; max_chars: number; created_at: string; updated_at: string;
+  /** 063: off = no new lines are written; review = a person approves each line. */
+  mode: 'off' | 'review';
 }
 
 // ---- email (item 20) -------------------------------------------------------

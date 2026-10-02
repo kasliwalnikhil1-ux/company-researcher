@@ -15,6 +15,7 @@ interface Ctx {
   isManager: boolean;   // owner or manager
   canWrite: boolean;    // owner/manager/member and plan active
   canReply: boolean;
+  /** read-only workspace: suspended for billing, subscription ended, or trial ended */
   suspended: boolean;
   isClientViewer: boolean;
   /** IANA timezone of the workspace. Reports and "today" use it. */
@@ -78,7 +79,7 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
 
   const workspace = useMemo(() => workspaces.find((w) => w.id === currentId) ?? null, [workspaces, currentId]);
   const role = workspace?.role ?? null;
-  const suspended = workspace?.plan === 'suspended';
+  const suspended = ['suspended', 'cancelled', 'trial_expired'].includes(workspace?.plan ?? '');
   const tz = (workspace?.settings as Record<string, unknown> | undefined)?.timezone;
 
   const value: Ctx = {

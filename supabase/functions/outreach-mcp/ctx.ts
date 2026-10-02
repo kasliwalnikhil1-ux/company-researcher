@@ -106,12 +106,14 @@ export const short = (s: string | null | undefined, n = 120) => (s == null ? und
 
 const REMEDIES: Record<string, string> = {
   E_FORBIDDEN: "Your role in this workspace does not allow this. Ask an owner/manager, or use a read tool instead.",
-  E_PLAN_SUSPENDED: "The workspace is suspended (billing). Only reads work until billing is fixed in the app.",
+  E_PLAN_SUSPENDED: "The workspace is read-only: suspended for billing, its subscription ended, or its trial ended. Only reads work until an owner sorts it out on the Billing page of the app. Billing cannot be changed from here.",
+  E_ACCOUNT_LIMIT: "Every account on the plan is in use (LinkedIn accounts, mailboxes, Instagram accounts and WhatsApp numbers all count). An owner adds accounts on the Billing page of the app; it cannot be done from here.",
   E_NOT_FOUND: "Check the id; it may belong to a workspace you are not a member of.",
   E_PAYLOAD_INVALID: "Fix the arguments as described in `message` and retry.",
   E_BUDGET_EXHAUSTED: "Do not escalate volume. Wait for the next planner run, or add another healthy sender to the pool.",
   E_OUT_OF_SCHEDULE: "Sends resume in the sender's next schedule window; nothing to fix.",
   E_SENDER_NOT_OK: "The sender must be reconnected by a human in the app (Senders → Reconnect).",
+  E_SENDER_DISCONNECTED: "The account was disconnected (trial ended, plan has fewer accounts, billing, or by a teammate). Its leads wait. sender_reconnect_link gives a sign-in link for the account owner; it needs an active plan with a free account.",
   E_LEAD_SUPPRESSED: "Suppressed leads cannot be contacted. Do not work around suppression.",
   E_POOL_EMPTY: "Add at least one connected sender to the sequence pool (sequence_update with pool).",
   E_SENDER_NOT_IN_POOL: "Pick a sender that is in the sequence pool, or omit sender_id.",
@@ -130,8 +132,9 @@ const REMEDIES: Record<string, string> = {
   E_AMBIGUOUS_TARGET: "Pass workspace_id explicitly (see the workspaces list in the detail).",
   E_DRAFT_STALE: "Reply draft: the prospect wrote again, so read inbox_thread and draft a new reply. Sequence draft: someone else published while this draft was open, so call the tool again without a token to see the fresh impact, show it, and publish with force:true only after the human agrees.",
   E_VARIANT_INVALID: "Fix the A/B variants of the named step: every variant needs a unique id, a weight of 0 or more, and at most 5 variants per step. Then validate again.",
-  E_PLAN_REQUIRED: "This feature belongs to a higher plan (agency / white-label). Tell the user; an owner changes the plan in Settings → Billing.",
-  E_AI_KEY_INVALID: "The workspace's own AI key was rejected by the provider. A manager re-enters it in Settings → AI, or switches back to the platform key. Until then the fallback text is used.",
+  E_PLAN_REQUIRED: "This feature belongs to a higher plan (the message names it: Scale or Enterprise). Tell the user; an owner upgrades on the Billing page of the app. Plans cannot be changed from here.",
+  E_AI_KEY_INVALID: "The workspace's own AI key was rejected by the provider. A manager re-enters it in AI → Setup → General, or switches back to the platform key. Until then the fallback text is used.",
+  E_AI_VARIABLE_OFF: "This Personalized-lines variable is switched off, so no new lines are written for it. A manager turns it back on in AI → Setup → Personalized lines (or ai_variable_set_mode with mode review). Do not switch it on to unblock leads unless the user asks for that.",
   E_NODE_OCCUPIED: "Leads sit on a step you removed. Publish with removed_mode 'skip' (move them to the next step) or 'exit'.",
   E_DRAFT_EXPIRED: "Drafts live 30 minutes; call draft_reply again.",
   E_DRAFT_ALREADY_SENT: "This draft was already sent; nothing to do.",
@@ -265,7 +268,9 @@ export function resolveWs(ctx: Ctx, workspaceId?: string | null): Membership {
 }
 
 export function requireRole(m: Membership, min: Role): void {
-  if (m.plan === "suspended" && min !== "client_viewer") throw new McpError("E_PLAN_SUSPENDED", "workspace suspended");
+  if (["suspended", "cancelled", "trial_expired"].includes(m.plan) && min !== "client_viewer") {
+    throw new McpError("E_PLAN_SUSPENDED", m.plan === "trial_expired" ? "the trial has ended" : m.plan === "cancelled" ? "the subscription has ended" : "workspace suspended");
+  }
   if (!roleAtLeast(m.role, min)) throw new McpError("E_FORBIDDEN", `${min} role required in workspace "${m.name}" (you are ${m.role})`);
 }
 

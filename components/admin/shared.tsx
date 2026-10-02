@@ -6,6 +6,7 @@ import { X, Search, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Modal, useToast } from '@/components/outreach/ui';
 import { adminApi, type AdminUser } from '@/lib/platform/admin';
+import { planLabel } from '@/lib/outreach/billing';
 import type { AccessStatus } from '@/lib/platform/access';
 
 // ─── toast shared by every tab ───────────────────────────────────────
@@ -68,9 +69,13 @@ export function PlanBadge({ plan }: { plan: string | null | undefined }) {
   return <Badge tone={tone} className="capitalize">{p}</Badge>;
 }
 
+const WS_PLAN_TONE: Record<string, 'gray' | 'red' | 'amber' | 'blue' | 'indigo' | 'purple'> = {
+  trial: 'amber', trial_expired: 'gray', launch: 'blue', scale: 'indigo', enterprise: 'purple', suspended: 'red', cancelled: 'gray',
+};
+
+/** Outreach workspace plan: Trial, Trial ended, Launch, Scale, Enterprise, Suspended, Cancelled. */
 export function WsPlanBadge({ plan }: { plan: string }) {
-  const tone = plan === 'suspended' ? 'red' : plan === 'trial' ? 'amber' : plan === 'team' ? 'blue' : 'indigo';
-  return <Badge tone={tone}>{plan === 'agency_plus' ? 'agency+' : plan}</Badge>;
+  return <Badge tone={WS_PLAN_TONE[plan] ?? 'gray'}>{planLabel(plan)}</Badge>;
 }
 
 /** The three products + admin, at a glance. */

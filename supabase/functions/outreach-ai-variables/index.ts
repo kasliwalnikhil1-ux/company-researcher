@@ -1,8 +1,10 @@
 // Items 14 + 15 — AI variables and AI routing.
-// Cron (every minute, x-cron-secret): writes pending {{ai.<key>}} lines and decides pending ai_route steps.
+// Cron (every minute, x-cron-secret): writes pending {{ai.<key>}} values and decides pending ai_route steps.
+//   A variable writes one line (output text), several typed fields from one call (output fields, migration 066) or, for
+//   the three built-ins (migration 067), a tidied copy of a field the lead already has, checked in code and never reviewed.
 // User (JWT, manager): {action:"route_test"} = "test on 20 leads" (nothing stored), {action:"preview_variable"} = try a prompt on one lead (nothing stored).
 import { admin, json, serve, requireUser, requireCron, membership, requireRole, readJson, HttpError, rateLimit, rpc, log, errorResponse } from "../_shared/outreach/supabase.ts";
-import { generateAiVariable, routeLead, aiAvailable, isKeyInvalid, type AiRoute } from "../_shared/outreach/ai.ts";
+import { generateAiVariable, generateAiFields, generateBuiltin, isBuiltinKey, routeLead, aiAvailable, isKeyInvalid, type AiRoute, type AiField } from "../_shared/outreach/ai.ts";
 
 type Row = Record<string, any>;
 const PARALLEL = 4;
@@ -14,6 +16,62 @@ const clampInt = (v: unknown, dflt: number, min: number, max: number) => Math.ma
 
 async function leadFacts(leadId: string): Promise<Record<string, unknown>> {
   return (await rpc<Record<string, unknown>>("lead_ai_facts", { p_lead: leadId })) ?? {};
+}
+
+// ---------------------------------------------------------------------------
+// What a variable writes: one line, fields, or a built-in
+// ---------------------------------------------------------------------------
+const VARIABLE_COLS = "id, workspace_id, key, prompt, fallback, needs_posts, max_chars";
+
+/** A variable with its output, field list and built-in flag. Before migrations 066 / 067 those columns do not exist: every variable writes one line. */
+async function loadVariable(id: string): Promise<Row | null> {
+  let r: { data: Row | null; error: { code?: string; message: string } | null } = await admin.from("outreach_ai_variables").select(`${VARIABLE_COLS}, output, fields, builtin`).eq("id", id).maybeSingle();
+  if (r.error && (r.error.code === "42703" || /column .* does not exist/i.test(r.error.message))) r = await admin.from("outreach_ai_variables").select(VARIABLE_COLS).eq("id", id).maybeSingle();
+  if (r.error) throw new Error(r.error.message);
+  return r.data;
+}
+
+type Kind = "text" | "fields" | "builtin";
+const kindOf = (v: Row | null): Kind => (v?.builtin && isBuiltinKey(v.key) ? "builtin" : v?.output === "fields" ? "fields" : "text");
+
+/** The lead's own fields a built-in tidies, primary first (the order generateBuiltin expects). */
+async function builtinSource(key: string, leadId: string): Promise<Array<string | null>> {
+  const [lead, prof] = await Promise.all([
+    admin.from("outreach_leads").select("first_name, full_name, company, title").eq("id", leadId).maybeSingle(),
+    admin.from("outreach_lead_profiles").select("current_company, current_title").eq("lead_id", leadId).maybeSingle(),
+  ]);
+  if (lead.error) throw new Error(lead.error.message);
+  if (prof.error) throw new Error(prof.error.message);
+  const l: Row = lead.data ?? {}, p: Row = prof.data ?? {};
+  if (key === "contact_first_name") return [l.first_name ?? null, l.full_name ?? null];
+  if (key === "company_conversation") return [p.current_company ?? null, l.company ?? null];
+  return [p.current_title ?? null, l.title ?? null];
+}
+
+const TYPES = ["text", "number", "yes_no", "choice"];
+
+/** A light check of a field list from the unsaved form (the database's own check runs when the variable is saved). */
+function cleanFields(value: unknown): AiField[] {
+  const bad = (why: string): never => { throw new HttpError(400, "E_PAYLOAD_INVALID", why); };
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) return bad("a Fields variable needs 1 to 8 fields");
+  const seen = new Set<string>();
+  return value.map((f: Row): AiField => {
+    if (!f || typeof f !== "object" || Array.isArray(f)) return bad("each field is an object with key, name and type");
+    const key = String(f.key ?? ""), name = String(f.name ?? "").trim(), type = String(f.type ?? "");
+    if (!/^[a-z][a-z0-9_]{1,29}$/.test(key) || seen.has(key)) return bad(`field key "${key.slice(0, 40)}" is not valid, or is used twice`);
+    seen.add(key);
+    if (!name || name.length > 40) return bad(`field "${key}" needs a name of up to 40 characters`);
+    if (!TYPES.includes(type)) return bad(`field "${name}" has an unknown type; use text, number, yes_no or choice`);
+    const out: AiField = { key, name, type: type as AiField["type"] };
+    if (typeof f.description === "string" && f.description.trim()) out.description = f.description.trim().slice(0, 300);
+    if (type === "text" && f.max_chars != null && f.max_chars !== "") out.max_chars = clampInt(f.max_chars, 200, 20, 1000);
+    if (type === "choice") {
+      const options = Array.isArray(f.options) ? f.options.filter((o: unknown) => typeof o === "string" && o.trim()).map((o: string) => o.trim().slice(0, 40)) : [];
+      if (options.length < 2 || options.length > 12) return bad(`choice field "${name}" needs 2 to 12 options`);
+      out.options = options;
+    }
+    return out;
+  });
 }
 
 /** Run `job` over `items`, `PARALLEL` at a time, until the items or the time run out. */
@@ -31,14 +89,43 @@ async function pool<T>(items: T[], started: number, job: (item: T) => Promise<vo
 // hits the time guard never leaves claimed-but-untouched rows locked for 10 minutes.
 async function runVariables(limit: number, started: number): Promise<Row> {
   let generated = 0, blank = 0, failed = 0, retry_later = 0, taken = 0;
+  let fields_generated = 0, fields_blank = 0, builtin_approved = 0, builtin_blank = 0;
   const errors: string[] = [];
   const deadWorkspaces = new Map<string, string>();   // workspace → final error seen in this run: do not call again
+  // The claim RPC keeps its return type, so what each variable writes is read here, once per variable per run.
+  const variables = new Map<string, Row | null>();
+  const variableOf = async (id: string): Promise<Row | null> => {
+    if (!variables.has(id)) variables.set(id, await loadVariable(id));
+    return variables.get(id) ?? null;
+  };
 
   const one = async (v: Row): Promise<void> => {
-    const dead = deadWorkspaces.get(v.workspace_id);
-    if (dead) { await rpc("ai_value_result", { p_id: v.value_id, p_text: null, p_facts: [], p_model: null, p_error: dead }); failed++; return; }
+    let kind: Kind = "text";
+    // A value that will not be written: a Fields value goes through its own result path (its typed data is cleared too).
+    const fail = (msg: string) => kind === "fields"
+      ? rpc("ai_value_result_fields", { p_id: v.value_id, p_data: null, p_facts: [], p_model: null, p_error: msg })
+      : rpc("ai_value_result", { p_id: v.value_id, p_text: null, p_facts: [], p_model: null, p_error: msg });
     try {
+      const variable = await variableOf(v.variable_id);
+      kind = kindOf(variable);
+      const dead = deadWorkspaces.get(v.workspace_id);
+      if (dead) { await fail(dead); failed++; return; }
+      if (kind === "builtin") {
+        // No review: a result that passes the check in code is approved at once and the lead starts. Anything else is
+        // stored as blank, and the template then uses the lead's own field.
+        const out = await generateBuiltin({ workspaceId: v.workspace_id, key: variable!.key, source: await builtinSource(variable!.key, v.lead_id) });
+        if (out.text) { await rpc("ai_value_result_builtin", { p_id: v.value_id, p_text: out.text, p_model: out.model }); builtin_approved++; }
+        else { await rpc("ai_value_result", { p_id: v.value_id, p_text: null, p_facts: [], p_model: out.model, p_error: null }); builtin_blank++; }
+        return;
+      }
       const facts = await leadFacts(v.lead_id);
+      if (kind === "fields") {
+        const out = await generateAiFields({ workspaceId: v.workspace_id, prompt: v.prompt, fields: Array.isArray(variable!.fields) ? variable!.fields : [], facts, needsPosts: !!v.needs_posts });
+        // SQL coerces the values to the declared types and writes the summary; every field empty → "blank", like a line
+        await rpc("ai_value_result_fields", { p_id: v.value_id, p_data: out.data, p_facts: out.facts, p_model: out.model, p_error: null });
+        if (out.data) fields_generated++; else fields_blank++;
+        return;
+      }
       const out = await generateAiVariable({ workspaceId: v.workspace_id, prompt: v.prompt, maxChars: v.max_chars, facts, needsPosts: !!v.needs_posts });
       // text null → stored as "blank": needs no review, the fallback is used, the lead is not kept waiting
       await rpc("ai_value_result", { p_id: v.value_id, p_text: out.text, p_facts: out.facts, p_model: out.model, p_error: null });
@@ -56,7 +143,7 @@ async function runVariables(limit: number, started: number): Promise<Row> {
         final = !!row?.updated_at && Date.now() - new Date(row.updated_at).getTime() > 2 * 3600_000;
       }
       if (final) {
-        try { await rpc("ai_value_result", { p_id: v.value_id, p_text: null, p_facts: [], p_model: null, p_error: msg }); failed++; } catch (e2) { log({ fn: "ai-variables", warn: "ai_value_result failed", error: errText(e2) }); }
+        try { await fail(msg); failed++; } catch (e2) { log({ fn: "ai-variables", warn: "ai_value_result failed", error: errText(e2) }); }
       } else retry_later++;
     }
   };
@@ -69,7 +156,8 @@ async function runVariables(limit: number, started: number): Promise<Row> {
       await one(rows[0]);
     }
   }));
-  return { generated, blank, failed, retry_later, ...(errors.length ? { errors } : {}) };
+  // generated / blank count one-line values; failed and retry_later count every kind
+  return { generated, blank, fields_generated, fields_blank, builtin_approved, builtin_blank, failed, retry_later, ...(errors.length ? { errors } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -190,20 +278,32 @@ async function previewVariable(userId: string, body: Row): Promise<Response> {
   const m = await membership(userId, ws); requireRole(m, "manager");
   await rateLimit("ai_preview_variable:" + userId, 60, 3600);
 
-  let prompt = "", maxChars = 220, needsPosts = false, fallback = "";
+  let prompt = "", maxChars = 220, needsPosts = false, fallback = "", output = "text", builtinKey: string | null = null;
+  let fieldList: unknown = null;
   if (body.variable_id) {
-    const { data: v } = await admin.from("outreach_ai_variables").select("workspace_id, prompt, fallback, needs_posts, max_chars").eq("id", body.variable_id).maybeSingle();
+    const v = await loadVariable(String(body.variable_id));
     if (!v || v.workspace_id !== ws) throw new HttpError(404, "E_NOT_FOUND", "variable not found");
     prompt = v.prompt; maxChars = v.max_chars; needsPosts = v.needs_posts; fallback = v.fallback ?? "";
+    output = v.output === "fields" ? "fields" : "text"; fieldList = v.fields ?? null;
+    if (kindOf(v) === "builtin") builtinKey = v.key;
   }
   // Unsaved edits win over the saved variable, so a manager can tune the prompt before saving it.
+  // (Not for a built-in: its prompt lives in code. Not the output of a saved variable: it is fixed once the variable exists.)
   const draft: Row = body.variable && typeof body.variable === "object" ? body.variable : body;
-  if (typeof draft.prompt === "string" && draft.prompt.trim()) prompt = draft.prompt;
-  if (draft.max_chars != null) maxChars = clampInt(draft.max_chars, 220, 20, 1000);
-  if (draft.needs_posts != null) needsPosts = !!draft.needs_posts;
-  if (typeof draft.fallback === "string") fallback = draft.fallback;
-  if (!prompt.trim()) throw new HttpError(400, "E_PAYLOAD_INVALID", "variable_id or prompt required");
-  if (prompt.length > 4000) throw new HttpError(400, "E_PAYLOAD_INVALID", "prompt is longer than 4000 characters");
+  if (!builtinKey) {
+    if (typeof draft.prompt === "string" && draft.prompt.trim()) prompt = draft.prompt;
+    if (draft.max_chars != null) maxChars = clampInt(draft.max_chars, 220, 20, 1000);
+    if (draft.needs_posts != null) needsPosts = !!draft.needs_posts;
+    if (typeof draft.fallback === "string") fallback = draft.fallback;
+    if (!body.variable_id && draft.output != null) {
+      if (draft.output !== "text" && draft.output !== "fields") throw new HttpError(400, "E_PAYLOAD_INVALID", "output must be text or fields");
+      output = draft.output;
+    }
+    if (output === "fields" && draft.fields != null) fieldList = draft.fields;
+    if (!prompt.trim()) throw new HttpError(400, "E_PAYLOAD_INVALID", "variable_id or prompt required");
+    if (prompt.length > 4000) throw new HttpError(400, "E_PAYLOAD_INVALID", "prompt is longer than 4000 characters");
+  }
+  const fields = !builtinKey && output === "fields" ? cleanFields(fieldList) : null;
 
   const { data: lead } = await admin.from("outreach_leads").select("id, workspace_id, full_name").eq("id", body.lead_id).maybeSingle();
   if (!lead || lead.workspace_id !== ws) throw new HttpError(404, "E_NOT_FOUND", "lead not found");
@@ -211,6 +311,21 @@ async function previewVariable(userId: string, body: Row): Promise<Response> {
 
   const facts = await leadFacts(lead.id);
   try {
+    if (builtinKey) {
+      // The built-in path of the worker: the lead's own field, tidied, then the check in code. `used` is what a message
+      // would show: the tidied text, else the raw field.
+      const source = await builtinSource(builtinKey, lead.id);
+      const out = await generateBuiltin({ workspaceId: ws, key: builtinKey, source });
+      const raw = source.map((s) => String(s ?? "").trim()).find(Boolean) ?? "";
+      return json({ lead_id: lead.id, name: lead.full_name ?? null, text: out.text, blank: out.text === null, facts: [], fallback: raw, used: out.text ?? raw, model: out.model, enriched: !!(facts as any).enriched, builtin: true, stored: false });
+    }
+    if (fields) {
+      const out = await generateAiFields({ workspaceId: ws, prompt, fields, facts, needsPosts });
+      // the same coercion and summary the worker's result path applies, so the preview shows what would be stored
+      const data = await rpc<Row>("hub_fields_clean", { p_fields: fields, p_data: out.data, p_strict: false });
+      const text = await rpc<string | null>("hub_fields_summary", { p_fields: fields, p_data: data });
+      return json({ lead_id: lead.id, name: lead.full_name ?? null, data, text: text ?? null, blank: !text, facts: out.facts, model: out.model, enriched: !!(facts as any).enriched, stored: false });
+    }
     const out = await generateAiVariable({ workspaceId: ws, prompt, maxChars, facts, needsPosts });
     return json({ lead_id: lead.id, name: lead.full_name ?? null, text: out.text, blank: out.text === null, facts: out.facts, fallback, used: out.text ?? fallback, model: out.model, enriched: !!(facts as any).enriched, stored: false });
   } catch (e) {

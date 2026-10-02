@@ -48,12 +48,15 @@ WEBHOOK_FUNCS=(
   outreach-unipile-webhook   # header unipile-auth == UNIPILE_WEBHOOK_SECRET
   outreach-sender-notify     # Unipile hosted-auth notify_url callback (sender id in `name`)
   outreach-cookie-sync       # Bearer <sender_token> from the Chrome extension
-  outreach-stripe-webhook    # Stripe signature (also user JWT for checkout/portal)
+  outreach-stripe-webhook    # Stripe signature (events only; owner actions are in outreach-billing)
+  outreach-public            # public read-only pricing + early-supporter count for the marketing website
   outreach-booking-webhook   # Calendly / Cal.com: ?ws=<workspace>&k=<booking_secret> checked in code (constant time)
   outreach-unsubscribe       # public one-click unsubscribe: signed token (HMAC, OUTREACH_CRON_SECRET) checked in code
   outreach-relogin           # public re-login link from emails: signed token (HMAC, OUTREACH_CRON_SECRET), redirects to a fresh hosted sign-in link
   outreach-crm-oauth         # OAuth callback is public (state checked in code); the start call validates the user JWT
   outreach-webchat           # public widget API: website token + Origin + visitor token checked in code (web-chat-PRD.md §13)
+  outreach-voice-tools       # the voice agent's tools: per-agent secret + signed session token checked in code (web-chat-voice-elevenlabs-PRD.md §5.3)
+  outreach-elevenlabs-webhook # voice provider's post-call webhook: HMAC signature (OUTREACH_ELEVENLABS_WEBHOOK_SECRET) checked in code
 )
 # Cron workers (x-cron-secret via outreach_invoke / pg_net):
 CRON_FUNCS=(
@@ -78,7 +81,7 @@ CRON_FUNCS=(
   outreach-worker-channels   # Instagram / WhatsApp: followers poll (35 * * * *), identifier check (*/30), block detect (55 * * * *), transcribe (* * * * *), wa_governor
   outreach-ai-reply-worker   # AI replies: draft (15 s), dispatch (1 min), maintenance (*/15), breakers (hourly), daily (graduation + digests)
   outreach-notes-worker      # private notes: mention emails (every minute), purge of deleted notes (daily)
-  outreach-webchat-worker    # web chat: continuity email digests (every minute), maintenance (every 5 min)
+  outreach-webchat-worker    # web chat: continuity email digests (every minute), maintenance (every 5 min), review (every minute), voice (every minute)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
@@ -99,6 +102,8 @@ USER_FUNCS=(
   outreach-workspace-secrets # stores the workspace's own AI / finder keys (encrypted); owner JWT
   outreach-api               # public REST API: the API key is checked in code (outreach_api_authenticate)
   outreach-profile           # Profile Studio: user actions (JWT) + the owner's public token pages (authority / approve / revert)
+  outreach-billing           # billing v2: quote / change / checkout / cancel / resume / portal (owner JWT)
+  outreach-voice-admin       # website assistant voice: voices, draft / live agent sync, test calls, recording proxy (JWT)
   outreach-ai-reply          # AI replies: send now, simulator, regression, prompt save (JWT) + the owner's public consent pages (token)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")

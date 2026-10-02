@@ -1,5 +1,5 @@
 // Create a workspace invitation (owner) and email it. Acceptance is the SQL RPC outreach_accept_invitation(token).
-import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, WEB_ORIGIN } from "../_shared/outreach/supabase.ts";
+import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, WEB_ORIGIN, requireFeature } from "../_shared/outreach/supabase.ts";
 import { notifyInvitation } from "../_shared/outreach/notify.ts";
 
 serve("invite-member", async (req) => {
@@ -19,6 +19,7 @@ serve("invite-member", async (req) => {
     const email = (body.email ?? "").trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, "E_PAYLOAD_INVALID", "valid email required");
     if (!["owner", "manager", "member", "client_viewer"].includes(body.role)) throw new HttpError(400, "E_PAYLOAD_INVALID", "bad role");
+    if (body.role === "client_viewer") await requireFeature(body.workspace_id, "client_viewer", "The client-viewer portal");
     const { data, error } = await admin.from("outreach_invitations").insert({ workspace_id: body.workspace_id, email, role: body.role, client_ids: body.client_ids ?? [], created_by: user.id }).select("*").single();
     if (error) throw new HttpError(500, "E_INTERNAL", error.message);
     inv = data;

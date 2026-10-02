@@ -4,10 +4,11 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useClients, useLists, useStages } from '@/lib/outreach/queries';
+import { useClients, useStages } from '@/lib/outreach/queries';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { Button, ErrorBox, Input, Modal, Select } from '@/components/outreach/ui';
-import { normalizePublicIdentifier, type ToastFn } from './helpers';
+import { linkedInProfileUrl, normalizePublicIdentifier, type ToastFn } from './helpers';
+import { ListPicker } from './ListPicker';
 
 const EMPTY = { identifier: '', first_name: '', last_name: '', company: '', title: '', headline: '', email_work: '', email_personal: '', client_id: '', list_id: '', stage_id: '' };
 
@@ -16,7 +17,6 @@ export function CreateLeadModal({ open, onClose, toast }: { open: boolean; onClo
   const router = useRouter();
   const qc = useQueryClient();
   const clients = useClients(workspace?.id);
-  const lists = useLists(workspace?.id);
   const stages = useStages(workspace?.id);
   const [form, setForm] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
@@ -34,7 +34,7 @@ export function CreateLeadModal({ open, onClose, toast }: { open: boolean; onClo
     setBusy(true); setError(null);
     try {
       const lead: Record<string, unknown> = {
-        public_identifier: pub, profile_url: pub ? `https://www.linkedin.com/in/${pub}` : null,
+        public_identifier: pub, profile_url: pub ? linkedInProfileUrl(pub) : null,
         first_name: form.first_name.trim() || null, last_name: form.last_name.trim() || null,
         company: form.company.trim() || null, title: form.title.trim() || null, headline: form.headline.trim() || null,
         email_work: form.email_work.trim() || null, email_personal: form.email_personal.trim() || null,
@@ -62,9 +62,9 @@ export function CreateLeadModal({ open, onClose, toast }: { open: boolean; onClo
         <Button onClick={() => submit(false)} loading={busy} disabled={!hasKey || identifierInvalid}>Create</Button>
       </>}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); submit(false); }}>
-        <Input label="LinkedIn URL or public identifier" placeholder="https://www.linkedin.com/in/jane-doe or jane-doe" value={form.identifier} onChange={set('identifier')}
-          error={identifierInvalid ? 'Paste a linkedin.com/in/… URL or a bare identifier' : undefined}
-          hint={pub ? `Identifier: ${pub}` : 'Required unless you provide an email. Existing leads with the same identifier are merged.'} />
+        <Input label="LinkedIn URL / identifier" placeholder="https://www.linkedin.com/in/jane-doe, in/jane-doe or jane-doe" value={form.identifier} onChange={set('identifier')}
+          error={identifierInvalid ? 'Paste a linkedin.com/in/… URL, in/name or just the name from the profile link' : undefined}
+          hint={pub ? `Profile: ${linkedInProfileUrl(pub)}` : 'Required unless you provide an email. Existing leads with the same profile are merged.'} />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Input label="First name" value={form.first_name} onChange={set('first_name')} autoComplete="off" />
           <Input label="Last name" value={form.last_name} onChange={set('last_name')} autoComplete="off" />
@@ -81,10 +81,7 @@ export function CreateLeadModal({ open, onClose, toast }: { open: boolean; onClo
             <option value="">No client</option>
             {clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
-          <Select label="List" value={form.list_id} onChange={set('list_id')}>
-            <option value="">No list</option>
-            {lists.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-          </Select>
+          <ListPicker label="List" emptyLabel="No list" value={form.list_id} onChange={(id) => setForm((f) => ({ ...f, list_id: id }))} />
           <Select label="Stage" value={form.stage_id} onChange={set('stage_id')}>
             <option value="">No stage</option>
             {stages.data?.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

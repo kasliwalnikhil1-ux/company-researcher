@@ -1,0 +1,11 @@
+-- =============================================================================
+-- Outreach Platform — 056 billing v2 enums (pricing-billing-PRD.md §9)
+-- Run on its own, before 057: a new enum value cannot be used in the transaction that adds it.
+--
+-- 'disconnected' = the connected account was removed on the connector side (so it stops costing us) while the sender row,
+-- its conversations, relations and enrolments stay. The owner signs in again later onto the same sender (PRD §12.1).
+--
+-- No new enrolment status: enrolments on a disconnected sender keep their status and wait, exactly like enrolments on a
+-- signed-out sender (the planner and the executor only work for senders whose status is 'ok'). See docs/outreach/BILLING.md.
+-- =============================================================================
+alter type outreach_sender_status_t add value if not exists 'disconnected';

@@ -1,4 +1,5 @@
 import type { ActionType, Provider, Schedule, ScheduleWindow, SenderStatus, AuthMethod } from '@/lib/outreach/types';
+import { addAccountEstimate, billingReasonText, changeHref, isPaidPlan, money, type BillingState } from '@/lib/outreach/billing';
 
 export const WEEKDAYS: Array<{ key: keyof Schedule; label: string; short: string }> = [
   { key: 'mon', label: 'Monday', short: 'Mon' },
@@ -39,7 +40,38 @@ const SIGN_IN_REASONS: Record<string, string> = {
 };
 export function statusReasonText(reason: string | null | undefined): string | null {
   if (!reason) return null;
-  return SIGN_IN_REASONS[reason] ?? reason;
+  return SIGN_IN_REASONS[reason] ?? billingReasonText(reason) ?? reason;
+}
+/** Why a sender is disconnected, in plain words. A sender paused for billing is disconnected after 14 days and keeps its
+ *  reason, so those three read as what happened rather than "Paused"; everything else is the billing wording. */
+export function disconnectedReasonText(reason: string | null | undefined): string | null {
+  switch (reason) {
+    case 'over_plan_limit': return 'The plan has fewer accounts than were connected';
+    case 'billing_suspended': return 'An invoice stayed unpaid';
+    case 'billing_cancelled': return 'The subscription ended';
+    default: return statusReasonText(reason);
+  }
+}
+/** A sender the plan paused (not a person): Resume is not a manual action for these. */
+export const BILLING_PAUSE_REASONS = ['billing_suspended', 'billing_cancelled', 'over_plan_limit', 'trial_expired'];
+
+/** The owner's way out when every account is in use: "Add an account — $X today" to the change screen with one more account
+ *  (the amount is left out when there is no estimate); on a trial, "Subscribe to add accounts" with one more than the trial has. */
+export function addAccountAction(b: BillingState | undefined): { href: string; label: string } {
+  if (b?.plan === 'trial' || b?.accounts?.trial) return { href: changeHref({ accounts: (b?.accounts?.billed ?? 1) + 1 }), label: 'Subscribe to add accounts' };
+  if (!isPaidPlan(b?.plan)) return { href: changeHref(), label: 'Subscribe' };
+  const est = addAccountEstimate(b);
+  const accounts = est?.accounts ?? (b?.accounts?.billed ?? b?.accounts_billed ?? 0) + 1;
+  return { href: changeHref({ accounts }), label: `Add an account${est?.cents != null ? ` — ${money(est.cents)} today` : ''}` };
+}
+/** The two refusals a connect, reconnect or re-enable gets from billing. */
+export const isBillingRefusal = (code: string | null | undefined): boolean => code === 'E_ACCOUNT_LIMIT' || code === 'E_PLAN_SUSPENDED';
+/** What to offer next to such a refusal: the owner gets a link (add an account, or Billing when the plan is not active);
+ *  everyone else is told who can sort it out (`href` is null). */
+export function billingRefusalRemedy(code: string, b: BillingState | undefined, isOwner: boolean): { href: string | null; label: string } {
+  if (!isOwner) return { href: null, label: code === 'E_PLAN_SUSPENDED' ? 'The workspace owner can sort this out on the Billing page.' : 'Ask the workspace owner to add an account on the Billing page.' };
+  if (code === 'E_PLAN_SUSPENDED') return { href: '/outreach/billing', label: 'Open Billing' };
+  return addAccountAction(b);
 }
 /** A first sign-in that never finished: the row has no account and the sweep (or the failure redirect) flagged it, or it is
  *  simply older than the 15-minute link. These count as "needs attention", not "connecting". */
@@ -54,7 +86,7 @@ export function isAbandonedSignIn(s: { status: SenderStatus; status_reason: stri
 
 export const STATUS_OPTIONS: Array<{ value: SenderStatus; label: string }> = [
   { value: 'ok', label: 'Connected' }, { value: 'connecting', label: 'Connecting' }, { value: 'credentials', label: 'Re-login needed' },
-  { value: 'error', label: 'Error' }, { value: 'paused', label: 'Paused' }, { value: 'disabled', label: 'Disabled' },
+  { value: 'error', label: 'Error' }, { value: 'paused', label: 'Paused' }, { value: 'disconnected', label: 'Disconnected' }, { value: 'disabled', label: 'Disabled' },
 ];
 
 export function normalizeSchedule(s: Partial<Schedule> | null | undefined): Schedule {

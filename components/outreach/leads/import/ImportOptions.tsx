@@ -3,22 +3,24 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Repeat, Sparkles } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { qk, useClients, useLists, useTags } from '@/lib/outreach/queries';
+import { qk, useClients, useTags } from '@/lib/outreach/queries';
 import { callFn } from '@/lib/outreach/api';
 import { REPEATABLE_KINDS, ik, saveImportSchedule, type ImportCadence, type ImportKindV2 } from '@/lib/outreach/intel';
 import { Select } from '@/components/outreach/ui';
 import { TagMultiSelect } from './TagMultiSelect';
+import { ListPicker } from '../ListPicker';
 
 /** Options every import shares: where the leads go, enrichment, and repeating. */
 export interface ImportCommon { clientId: string; listId: string; tagIds: string[]; enrich: boolean; cadence: '' | ImportCadence }
 export const EMPTY_COMMON: ImportCommon = { clientId: '', listId: '', tagIds: [], enrich: false, cadence: '' };
+/** Every import that creates leads needs a list. Shown next to a start button that waits for one, and thrown by createImport as the last check. */
+export const LIST_REQUIRED = 'Choose the list these leads go into, or make a new one.';
 
 const CADENCE_LABEL: Record<ImportCadence, string> = { daily: 'Every day', weekly: 'Every week', monthly: 'Every month' };
 
 export function ImportOptions({ kind, value, onChange, enrichHint }: { kind: ImportKindV2; value: ImportCommon; onChange: (v: ImportCommon) => void; enrichHint?: string }) {
   const { workspace } = useWorkspace();
   const clients = useClients(workspace?.id);
-  const lists = useLists(workspace?.id);
   const tags = useTags(workspace?.id);
   const repeatable = REPEATABLE_KINDS.includes(kind);
   const set = <K extends keyof ImportCommon>(k: K, v: ImportCommon[K]) => onChange({ ...value, [k]: v });
@@ -30,10 +32,7 @@ export function ImportOptions({ kind, value, onChange, enrichHint }: { kind: Imp
           <option value="">No client</option>
           {clients.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
-        <Select label="Add to list (optional)" value={value.listId} onChange={(e) => set('listId', e.target.value)}>
-          <option value="">No list</option>
-          {lists.data?.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-        </Select>
+        <ListPicker value={value.listId} onChange={(id) => set('listId', id)} />
       </div>
       <TagMultiSelect tags={tags.data ?? []} value={value.tagIds} onChange={(v) => set('tagIds', v)} />
 
@@ -81,6 +80,8 @@ export interface CreateImportResult { scheduled: boolean; scheduleError: string 
  */
 export async function createImport(ws: string, input: CreateImportInput, common: ImportCommon, qc: QueryClient): Promise<CreateImportResult> {
   const fields = input.fields ?? {};
+  // a CSV in update mode creates no lead, so it is the one import without a list
+  if (!common.listId && fields.mode !== 'update_only') throw new Error(LIST_REQUIRED);
   const body = {
     ...fields, ...(Object.keys(fields).length ? { params: fields } : {}),
     workspace_id: ws, kind: input.kind, sender_id: input.sender_id ?? null,

@@ -71,7 +71,7 @@ export function PostEngagementImport({ toast, onCreated }: { toast: ToastFn; onC
       <SenderPicker senders={ready} allSenders={senders.data ?? []} value={senderId} onChange={setSenderId} hint="The post is read from this account." />
       <ImportOptions kind="post_engagement" value={common} onChange={setCommon} />
       {error && <ErrorBox message={error} />}
-      <Button onClick={submit} loading={busy} disabled={!urlOk || !senderId || include.length === 0}>Start import</Button>
+      <Button onClick={submit} loading={busy} disabled={!urlOk || !senderId || include.length === 0 || !common.listId}>Start import</Button>
     </div>
   );
 }

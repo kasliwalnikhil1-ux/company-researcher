@@ -1,43 +1,54 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { FlaskConical, Wand2 } from 'lucide-react';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
+import { isFieldsVariable, variableFields } from '@/lib/outreach/aiFields';
+import { hubHref, variableMode } from '@/lib/outreach/aiHub';
 import { useLists, useTags } from '@/lib/outreach/queries';
 import { factLines, fetchLeadIds, useAiVariables, type AiGenerateResult, type AiPreviewResult } from '@/lib/outreach/intel';
 import { Button, ErrorBox, Modal, Select } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
+import { FieldValueTable, fieldDataEmpty, readFieldData } from './hub/lines/FieldValueEditor';
 
 const MAX_LEADS = 2000;   // outreach_ai_generate_request
 type SourceKind = 'selection' | 'list' | 'tag';
 
-export function GenerateLinesModal({ open, onClose, workspaceId, isManager, selection, onGenerated }: {
+/** "Generate lines". Render it only while it is open (`{open && <GenerateLinesModal open … />}`): it starts fresh each time. */
+export function GenerateLinesModal({ open, onClose, workspaceId, isManager, selection, variableId: presetVariableId, onGenerated }: {
   open: boolean; onClose: () => void; workspaceId: string; isManager: boolean;
   /** Lead ids handed over from the leads list (may be empty). */
   selection: string[];
+  /** The variable to start on (the variable's own page). It can still be changed in the dialog. */
+  variableId?: string;
   onGenerated: (r: AiGenerateResult) => void;
 }) {
   const variables = useAiVariables(workspaceId);
+  // Lines are generated for the workspace's own variables. The built-in ones are written without a person, when a
+  // sequence uses them, so they are not offered here.
+  const own = useMemo(() => variables.data?.filter((v) => !v.builtin), [variables.data]);
   const lists = useLists(workspaceId);
   const tags = useTags(workspaceId);
-  const [variableId, setVariableId] = useState('');
+  const [pickedVariable, setVariableId] = useState(presetVariableId ?? '');
+  // The picked variable. Until one is picked: the first that can be generated for (one that is not switched off).
+  const variableId = useMemo(() => {
+    const list = own ?? [];
+    if (list.some((v) => v.id === pickedVariable)) return pickedVariable;
+    return (list.find((v) => variableMode(v) !== 'off') ?? list[0])?.id ?? '';
+  }, [own, pickedVariable]);
   const [source, setSource] = useState<SourceKind>(selection.length ? 'selection' : 'list');
   const [listId, setListId] = useState('');
   const [tagId, setTagId] = useState('');
   const [regenerate, setRegenerate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [sampleLead, setSampleLead] = useState('');
-  const [preview, setPreview] = useState<AiPreviewResult | null>(null);
+  const [pickedSample, setSampleLead] = useState('');
+  // A try-out belongs to the variable and the lead it was made for: with another variable or lead it is not shown.
+  const [tried, setTried] = useState<{ key: string; result?: AiPreviewResult; error?: string } | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
-  useEffect(() => { if (open) { setSource(selection.length ? 'selection' : 'list'); setError(null); setPreview(null); setPreviewError(null); } }, [open, selection.length]);
-  useEffect(() => { if (!variableId && variables.data?.length) setVariableId(variables.data[0].id); }, [variables.data, variableId]);
-  useEffect(() => { setPreview(null); setPreviewError(null); }, [variableId, sampleLead]);
 
   // Lead ids of the chosen list or tag (capped: a batch takes at most 2000 leads).
   const sourceKey = source === 'list' ? listId : source === 'tag' ? tagId : 'selection';
@@ -59,55 +70,81 @@ export function GenerateLinesModal({ open, onClose, workspaceId, isManager, sele
       return (data ?? []) as { id: string; full_name: string | null; company: string | null }[];
     },
   });
-  useEffect(() => { if (sampleQ.data?.length && !sampleQ.data.some((l) => l.id === sampleLead)) setSampleLead(sampleQ.data[0].id); }, [sampleQ.data, sampleLead]);
+  // The picked lead while it is among the samples, else the first sample.
+  const sampleLead = sampleQ.data?.some((l) => l.id === pickedSample) ? pickedSample : sampleQ.data?.[0]?.id ?? '';
+  const triedKey = `${variableId}:${sampleLead}`;
+  const preview = tried?.key === triedKey ? tried.result ?? null : null;
+  const previewError = tried?.key === triedKey ? tried.error ?? null : null;
 
-  const variable = variables.data?.find((v) => v.id === variableId);
+  const variable = own?.find((v) => v.id === variableId);
+  // A Fields variable returns several named values per lead instead of one line.
+  const typed = isFieldsVariable(variable);
+  const fields = variableFields(variable);
+  // An off variable writes no new lines (outreach_ai_generate_request raises E_AI_VARIABLE_OFF): say so before the click.
+  const variableOff = !!variable && variableMode(variable) === 'off';
 
   const tryPrompt = async () => {
     if (!variableId || !sampleLead) return;
-    setPreviewBusy(true); setPreviewError(null); setPreview(null);
+    const key = triedKey;
+    setPreviewBusy(true); setTried(null);
     try {
-      setPreview(await callFn<AiPreviewResult>('ai-variables', { action: 'preview_variable', workspace_id: workspaceId, variable_id: variableId, lead_id: sampleLead }));
-    } catch (e) { setPreviewError(parseError(e).message); }
+      const result = await callFn<AiPreviewResult>('ai-variables', { action: 'preview_variable', workspace_id: workspaceId, variable_id: variableId, lead_id: sampleLead });
+      setTried({ key, result });
+    } catch (e) { setTried({ key, error: parseError(e).message }); }
     finally { setPreviewBusy(false); }
   };
 
   const submit = async () => {
-    if (!variableId || leadIds.length === 0) return;
+    if (!variableId || variableOff || leadIds.length === 0) return;
     setBusy(true); setError(null);
     try {
       const r = await rpc<AiGenerateResult>('ai_generate_request', { p_ws: workspaceId, p_variable: variableId, p_lead_ids: leadIds, p_sequence: null, p_regenerate: regenerate });
       onGenerated(r);
       onClose();
-    } catch (e) { setError(parseError(e).message); }
+    } catch (e) {
+      const pe = parseError(e);
+      if (pe.code === 'E_AI_VARIABLE_OFF') {
+        // someone switched it off while this dialog was open: read the modes again so the picker shows it
+        variables.refetch();
+        setError('This variable is switched off, so no lines were written. Switch it to Review under AI → Setup → Personalized lines, or pick another variable.');
+      } else setError(pe.message);
+    }
     finally { setBusy(false); }
   };
 
   const previewText = (preview?.text ?? preview?.line ?? '').trim();
   const previewFacts = factLines(preview?.facts);
-  const noVariables = variables.isSuccess && (variables.data?.length ?? 0) === 0;
+  const previewData = preview ? readFieldData(preview.data) : null;
+  const noVariables = variables.isSuccess && (own?.length ?? 0) === 0;
 
   return (
-    <Modal open={open} onClose={() => !busy && onClose()} title="Generate AI lines" size="lg"
-      footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button loading={busy} disabled={!variableId || leadIds.length === 0} onClick={submit}><Wand2 className="w-4 h-4" /> Generate for {leadIds.length.toLocaleString()} lead{leadIds.length === 1 ? '' : 's'}</Button></>}>
+    <Modal open={open} onClose={() => !busy && onClose()} title="Generate lines" size="lg"
+      footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button loading={busy} disabled={!variableId || variableOff || leadIds.length === 0} onClick={submit}><Wand2 className="w-4 h-4" /> Generate for {leadIds.length.toLocaleString()} lead{leadIds.length === 1 ? '' : 's'}</Button></>}>
       <div className="space-y-4">
-        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">Lines are written ahead of time and wait in the review table. Only approved lines are ever sent. Everything else uses the fallback. The AI may only use facts that are on the profile, and leaves the line blank when there is nothing usable.</p>
+        <p className="text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">Lines are written ahead of time and wait for a person to approve them. Only approved lines are ever sent. Everything else uses the fallback. The AI may only use facts that are on the profile, and leaves the line blank when there is nothing usable.</p>
 
         {variables.error && <ErrorBox message={parseError(variables.error).message} />}
         {noVariables ? (
           <div className="text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-            There are no AI variables yet. {isManager ? <>Create one under <Link href="/outreach/settings/ai" className="text-indigo-600 hover:underline">Settings → AI Personalization</Link>: a prompt plus a fallback, used in messages as <code className="text-xs bg-white px-1 rounded border border-amber-200">{'{{ai.icebreaker|fallback}}'}</code>.</> : 'Ask a manager to create one under Settings → AI Personalization.'}
+            There are no variables yet. {isManager ? <>Create one under <Link href={hubHref.setupLines()} className="text-indigo-600 hover:underline">AI → Setup → Personalized lines</Link>: a prompt plus a fallback, used in messages as <code className="text-xs bg-white px-1 rounded border border-amber-200">{'{{ai.icebreaker|fallback}}'}</code>.</> : 'Ask a manager to create one under AI → Setup → Personalized lines.'}
           </div>
         ) : (
-          <Select label="AI variable" value={variableId} onChange={(e) => setVariableId(e.target.value)} disabled={variables.isLoading}>
+          <Select label="Variable" value={variableId} onChange={(e) => setVariableId(e.target.value)} disabled={variables.isLoading}>
             {variables.isLoading && <option value="">Loading…</option>}
-            {variables.data?.map((v) => <option key={v.id} value={v.id}>{v.name} · {`{{ai.${v.key}}}`}</option>)}
+            {own?.map((v) => <option key={v.id} value={v.id}>{v.name} · {isFieldsVariable(v) ? `Fields (${variableFields(v).length})` : `{{ai.${v.key}}}`}{variableMode(v) === 'off' ? ' (off)' : ''}</option>)}
           </Select>
+        )}
+        {variableOff && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-2" role="status">
+            This variable is switched off, so no new lines are written for it. {isManager ? <>Switch it to Review under <Link href={hubHref.setupLine(variableId)} className="text-indigo-700 underline">AI → Setup → Personalized lines</Link>.</> : 'Ask a manager to switch it to Review.'}
+          </p>
         )}
         {variable && (
           <div className="text-xs text-gray-500 -mt-2 space-y-0.5">
             <p className="line-clamp-2"><span className="font-medium text-gray-600">Prompt:</span> {variable.prompt}</p>
-            <p><span className="font-medium text-gray-600">Fallback:</span> {variable.fallback || <span className="italic">empty</span>} · up to {variable.max_chars} characters{variable.needs_posts ? ' · uses recent posts' : ''}</p>
+            {typed
+              ? <p><span className="font-medium text-gray-600">Fields:</span> {fields.map((f) => f.name).join(', ')}{variable.needs_posts ? ' · uses recent posts' : ''}</p>
+              : <p><span className="font-medium text-gray-600">Fallback:</span> {variable.fallback || <span className="italic">empty</span>} · up to {variable.max_chars} characters{variable.needs_posts ? ' · uses recent posts' : ''}</p>}
           </div>
         )}
 
@@ -119,7 +156,7 @@ export function GenerateLinesModal({ open, onClose, workspaceId, isManager, sele
                 className={cn('px-3 py-1.5 text-sm rounded-md disabled:opacity-40 disabled:cursor-not-allowed', source === id ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>
             ))}
           </div>
-          {source === 'selection' && selection.length === 0 && <p className="text-xs text-gray-500">Select leads on the <Link href="/outreach/leads" className="text-indigo-600 hover:underline">leads page</Link> and choose “Generate AI lines” to pass them here.</p>}
+          {source === 'selection' && selection.length === 0 && <p className="text-xs text-gray-500">Select leads on the <Link href="/outreach/leads" className="text-indigo-600 hover:underline">leads page</Link> and choose “Generate lines” to pass them here.</p>}
           {source === 'list' && (
             <Select aria-label="List" value={listId} onChange={(e) => setListId(e.target.value)}>
               <option value="">Choose a list…</option>
@@ -155,11 +192,16 @@ export function GenerateLinesModal({ open, onClose, workspaceId, isManager, sele
               </div>
               <Button variant="secondary" loading={previewBusy} disabled={!sampleLead} onClick={tryPrompt}>Try it</Button>
             </div>
-            <p className="text-xs text-gray-500">Writes one line and shows it here. Nothing is saved and nothing is sent.</p>
+            <p className="text-xs text-gray-500">{typed ? 'Fills the fields for this lead and shows them here.' : 'Writes one line and shows it here.'} Nothing is saved and nothing is sent.</p>
             {previewError && <ErrorBox message={previewError} />}
             {preview && (
               <div className="text-sm bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg p-3 space-y-1.5">
-                {previewText ? <p className="text-gray-900 whitespace-pre-wrap">{previewText}</p> : <p className="text-gray-600">Nothing usable on the profile — the fallback will be used{(preview.fallback ?? variable?.fallback) ? <>: <span className="text-gray-900">{preview.fallback ?? variable?.fallback}</span></> : '.'}</p>}
+                {typed ? (
+                  <>
+                    <FieldValueTable fields={fields} data={previewData} />
+                    {(preview.blank || fieldDataEmpty(fields, previewData)) && <p className="text-gray-600">Nothing usable on the profile, so every field stays empty. Messages use the fallback written in each token.</p>}
+                  </>
+                ) : previewText ? <p className="text-gray-900 whitespace-pre-wrap">{previewText}</p> : <p className="text-gray-600">Nothing usable on the profile, so the fallback is used{(preview.fallback ?? variable?.fallback) ? <>: <span className="text-gray-900">{preview.fallback ?? variable?.fallback}</span></> : '.'}</p>}
                 {previewFacts.length > 0 && <div className="text-xs text-gray-600"><span className="font-medium">Facts used:</span> {previewFacts.join(' · ')}</div>}
               </div>
             )}

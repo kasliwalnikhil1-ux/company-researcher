@@ -37,6 +37,13 @@ for (const c of cases) {
 // the pick must be stable: rendering twice with the same seed gives the same text
 for (const c of cases) if ((c.kind === 'render' || !c.kind) && JSON.stringify(actual(c)) !== JSON.stringify(actual(c))) { failed++; console.error(`FAIL not deterministic: ${c.name}`); }
 
+// quoted spintax is the same spintax: for any seed it picks what the native form picks
+for (let i = 0; i < 25; i++) {
+  const quoted = renderTemplate('{{ "Hey|Hello|Bonjour" | spintax }} {a|b|c}', { lead: {}, seed: `seed-${i}` });
+  const native = renderTemplate('{Hey|Hello|Bonjour} {a|b|c}', { lead: {}, seed: `seed-${i}` });
+  if (quoted !== native) { failed++; console.error(`FAIL quoted spintax differs from native for seed-${i}: ${quoted} / ${native}`); }
+}
+
 if (cases.length < 25) { failed++; console.error(`FAIL expected at least 25 cases, found ${cases.length}`); }
 if (failed) { console.error(`${failed} of ${cases.length} render cases failed (lib/outreach/render.ts)`); process.exit(1); }
 console.log(`ok: ${cases.length} render cases pass (lib/outreach/render.ts)`);

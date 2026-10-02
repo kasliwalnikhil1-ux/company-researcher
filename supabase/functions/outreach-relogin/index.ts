@@ -30,6 +30,8 @@ serve("relogin", async (req) => {
   }
   const { data: s } = await admin.from("outreach_senders").select("*").eq("id", sid).maybeSingle();
   if (!s || s.deleted_at || s.status === "disabled") return redirect(senderPage);
+  // a disconnected sender reconnects from the app (the workspace needs a plan and a free account first), not from an old email link
+  if (s.status === "disconnected") return redirect(senderPage);
   if (s.status === "ok" || s.status === "paused") return redirect(`${senderPage}?connected=1`);
   if (!unipileConfigured()) return redirect(`${senderPage}?connected=0`);
   try {

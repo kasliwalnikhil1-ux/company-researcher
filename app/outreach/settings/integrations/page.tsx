@@ -6,7 +6,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Plug, X } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
+import { usePlanFeature } from '@/lib/outreach/billing';
+import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Badge, Button, ErrorBox, Spinner, timeAgo } from '@/components/outreach/ui';
+import { IntegrationsSubTabs } from '@/components/outreach/settings/SettingsTabs';
 import { Note, SettingsFrame } from '@/components/outreach/settings/shared';
 import IntegrationPanel from '@/components/outreach/settings/IntegrationPanel';
 import { sk, useIntegrations } from '@/components/outreach/settings/hooks';
@@ -26,6 +29,8 @@ export default function IntegrationsSettingsPage() {
   const qc = useQueryClient();
   const allowed = role === 'owner' || role === 'manager';
   const integrations = useIntegrations(allowed ? ws : null);
+  // CRM sync belongs to Enterprise (billing v2). Without it a connection is kept but nothing syncs, and no CRM can be connected.
+  const gate = usePlanFeature(ws, 'crm_sync');
   const [busy, setBusy] = useState<CrmProvider | null>(null);
   const [selected, setSelected] = useState<CrmProvider | null>(null);
   const [banner, setBanner] = useState<{ tone: 'green' | 'red'; text: string } | null>(null);
@@ -68,6 +73,7 @@ export default function IntegrationsSettingsPage() {
 
   return (
     <SettingsFrame min="manager">
+      <div><IntegrationsSubTabs /></div>
       {banner && (
         <div role="status" className={cn('flex items-start gap-2 rounded-xl border px-4 py-3 mb-6 text-sm', banner.tone === 'green' ? 'bg-green-50 border-green-200 text-green-900' : 'bg-red-50 border-red-200 text-red-800')}>
           {banner.tone === 'green' ? <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />}
@@ -77,6 +83,7 @@ export default function IntegrationsSettingsPage() {
       )}
 
       <p className="text-sm text-gray-600 mb-4 max-w-3xl">Connect your CRM and leads flow in both directions. We push contacts, companies, messages, stages and deals. We pull lists to import and the customers you never want to contact. By default only leads who replied are pushed, so your CRM does not fill up with cold contacts.</p>
+      <UpgradeNote feature="crm_sync" what="CRM sync" className="mb-4" />
 
       {integrations.isLoading ? <Spinner /> : integrations.isError ? <ErrorBox message={parseError(integrations.error).message} /> : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
@@ -94,12 +101,13 @@ export default function IntegrationsSettingsPage() {
                 </div>
                 <p className="text-xs text-gray-500 mt-3 flex-1">{p.blurb}</p>
                 {live && <div className="text-xs text-gray-500 mt-3">Last sync: {i!.last_sync_at ? timeAgo(i!.last_sync_at) : 'not yet'}{i!.last_pull_at ? ` · last pull ${timeAgo(i!.last_pull_at)}` : ''}</div>}
+                {live && !gate.enabled && <div className="text-xs text-gray-500 mt-1">Sync is paused on this plan. The connection is kept and picks up where it stopped after an upgrade.</div>}
                 {live && i!.last_error && <div className="mt-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-2" title={i!.last_error}>{plainCrmError(i!.last_error, p.value)}</div>}
                 {i?.status === 'connecting' && <div className="mt-2 text-xs text-gray-500">Waiting for you to finish the {p.label} sign-in. If you closed that window, press Connect again.</div>}
                 {err && <div className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">{err}</div>}
                 <div className="flex flex-wrap gap-2 mt-4">
                   {live && <Button size="sm" variant={isSelected ? 'primary' : 'secondary'} onClick={() => setSelected(p.value)} aria-pressed={isSelected}>{isSelected ? 'Showing settings' : 'Settings and log'}</Button>}
-                  {(!live || i!.status === 'error') && <Button size="sm" variant={live ? 'secondary' : 'primary'} onClick={() => connect(p.value)} loading={busy === p.value} disabled={!canWrite || (!!busy && busy !== p.value)}><Plug className="w-3.5 h-3.5" /> {live ? 'Connect again' : i?.status === 'disconnected' ? 'Connect again' : 'Connect'}</Button>}
+                  {(!live || i!.status === 'error') && <Button size="sm" variant={live ? 'secondary' : 'primary'} onClick={() => connect(p.value)} loading={busy === p.value} disabled={!canWrite || !gate.enabled || (!!busy && busy !== p.value)}><Plug className="w-3.5 h-3.5" /> {live ? 'Connect again' : i?.status === 'disconnected' ? 'Connect again' : 'Connect'}</Button>}
                   {i?.status === 'disconnected' && <Button size="sm" variant="ghost" onClick={() => setSelected(p.value)}>Sync log</Button>}
                 </div>
               </div>

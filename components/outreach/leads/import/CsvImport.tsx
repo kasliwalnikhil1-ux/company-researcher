@@ -8,7 +8,8 @@ import { Badge, Button, ErrorBox, Spinner } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import { FileSpreadsheet, UploadCloud, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { EMPTY_COMMON, ImportOptions, importStartedMessage, useImportCreator, type ImportCommon } from './ImportOptions';
-import { LEAD_FIELDS, dedupeKey, formatNumber, guessField, toCustomKey, type ToastFn } from '../helpers';
+import { FieldPicker } from './FieldPicker';
+import { CSV_MAX_ROWS, LEAD_FIELDS, LINKEDIN_FIELD, csvKeyStats, dedupeKey, formatNumber, guessField, linkedInProfileUrl, normalizePublicIdentifier, toCustomKey, type ToastFn } from '../helpers';
 
 // papaparse ships without type definitions in this repo; keep a minimal local contract.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -22,7 +23,8 @@ interface Dedupe { checked: number; existing: number; fresh: number; unkeyed: nu
 
 const PREVIEW = 5;
 const DEDUPE_SAMPLE = 200;
-const MAX_BYTES = 50 * 1024 * 1024;
+// One import: up to CSV_MAX_ROWS rows and 25 MB. The import worker reads the whole file into memory and stops a larger one, so both are checked here first.
+const MAX_BYTES = 25 * 1024 * 1024;
 
 type CsvMode = 'upsert' | 'update_only';
 // Same list as outreach-imports-create / outreach_update_lead_fields. Custom fields (custom.<key>) can always be updated.
@@ -63,14 +65,23 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
   const [updateFields, setUpdateFields] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fewPeopleOkFor, setFewPeopleOkFor] = useState<string | null>(null);   // the mapping the "really this few people" tick was given for
 
   const mapping = useMemo(() => (parsed ? resolveMapping(parsed.headers, cols) : {}), [parsed, cols]);
   const mappedFields = useMemo(() => new Set(Object.values(mapping)), [mapping]);
+  // Rows that share a LinkedIn URL or email become one lead. Counted over the whole file, so a wrong key column shows before the import runs.
+  const keyStats = useMemo(() => (parsed ? csvKeyStats(parsed.rows, mapping) : null), [parsed, mapping]);
+  const keyColumns = useMemo(() => Object.entries(mapping).filter(([, f]) => f === LINKEDIN_FIELD || f.startsWith('email_')).map(([h]) => `“${h}”`).join(', '), [mapping]);
+  // Which column holds each lead field: the picker shows it next to the field (custom fields are told apart by their key).
+  const takenBy = useMemo(() => { const m = new Map<string, string>(); for (const [h, f] of Object.entries(mapping)) if (!f.startsWith('custom.') && !m.has(f)) m.set(f, h); return m; }, [mapping]);
+  const collapsing = !!keyStats?.collapsing;
+  const mappingKey = useMemo(() => JSON.stringify(mapping), [mapping]);
+  const fewPeopleOk = fewPeopleOkFor === mappingKey;   // changing the mapping clears the tick
   // Update mode: which mapped columns may change. Columns that are mapped later start ticked; unmapped ones drop out.
   const updatable = useMemo(() => Array.from(mappedFields).filter(isUpdatable).sort(), [mappedFields]);
   const updatableKey = updatable.join('|');
   useEffect(() => { setUpdateFields((cur) => { const keep = cur.filter((f) => updatable.includes(f)); const known = new Set(cur); return [...keep, ...updatable.filter((f) => !known.has(f) && !f.startsWith('email_'))]; }); }, [updatableKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const hasKey = mappedFields.has('linkedin_url') || mappedFields.has('public_identifier') || mappedFields.has('email_work') || mappedFields.has('email_personal');
+  const hasKey = mappedFields.has(LINKEDIN_FIELD) || mappedFields.has('email_work') || mappedFields.has('email_personal');
   const duplicateFields = useMemo(() => {
     const seen = new Map<string, number>();
     for (const f of Object.values(mapping)) seen.set(f, (seen.get(f) ?? 0) + 1);
@@ -80,7 +91,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
   const loadFile = useCallback((file: File) => {
     setError(null); setDedupe(null);
     if (!/\.(csv|txt|tsv)$/i.test(file.name) && !/csv|text/i.test(file.type)) { setError('Choose a .csv file.'); return; }
-    if (file.size > MAX_BYTES) { setError('File is larger than 50 MB. Split it into smaller files.'); return; }
+    if (file.size > MAX_BYTES) { setError('File is larger than 25 MB. Split it into smaller files.'); return; }
     setParsing(true);
     Papa.parse(file, {
       header: true, skipEmptyLines: 'greedy',
@@ -88,6 +99,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
         setParsing(false);
         const headers = (r.meta.fields ?? []).filter((h) => h != null);
         if (headers.length === 0 || r.data.length === 0) { setError('The file has no header row or no data rows.'); return; }
+        if (r.data.length > CSV_MAX_ROWS) { setError(`This file has ${formatNumber(r.data.length)} rows. One import takes up to ${formatNumber(CSV_MAX_ROWS)} rows: split the file and import the parts one after another.`); return; }
         const warnings = r.errors.slice(0, 3).map((e) => `${e.message}${e.row != null ? ` (row ${e.row + 2})` : ''}`);
         if (r.errors.length > 3) warnings.push(`…and ${r.errors.length - 3} more parse warnings`);
         setParsed({ file, headers, rows: r.data, warnings });
@@ -153,7 +165,8 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
 
   const submit = async () => {
     if (!parsed || !workspace || !hasKey || duplicateFields.length) return;
-    if (mode === 'update_only' && updateFields.length === 0) return;
+    if (mode === 'update_only' ? updateFields.length === 0 : !common.listId) return;
+    if (collapsing && !fewPeopleOk) return;
     setError(null);
     try {
       setBusy('Uploading file…');
@@ -186,7 +199,8 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
           className={cn('flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-6 py-12 text-center cursor-pointer transition-colors', dragging ? 'border-indigo-500 bg-indigo-50' : 'border-gray-300 hover:border-indigo-400 hover:bg-gray-50')}>
           {parsing ? <Spinner className="py-0" /> : <UploadCloud className="w-8 h-8 text-indigo-500" />}
           <p className="text-sm font-medium text-gray-900">{parsing ? 'Reading file…' : 'Drop a CSV here or click to choose'}</p>
-          <p className="text-xs text-gray-500">First row must be a header. Include a LinkedIn profile URL or an email column so leads can be de-duplicated. Up to 50 MB.</p>
+          <p className="text-xs text-gray-500">First row must be a header. Include a LinkedIn profile URL or an email column so leads can be de-duplicated.</p>
+          <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] text-gray-500">Up to {formatNumber(CSV_MAX_ROWS)} rows per file · 25 MB</span>
           <input ref={inputRef} type="file" accept=".csv,text/csv,.tsv,.txt" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) loadFile(f); }} />
         </div>
         {error && <ErrorBox message={error} />}
@@ -194,7 +208,12 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
     );
   }
 
-  const sel = 'w-full px-2 py-1.5 text-sm rounded-md border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500';
+  // A lead field sits on one column: choosing a field that another column holds moves it here and leaves that column unmapped.
+  const setField = (h: string, field: string) => setCols((m) => {
+    const next = { ...m, [h]: { ...(m[h] ?? { customKey: toCustomKey(h) }), field } };
+    if (field && field !== 'custom') for (const [other, c] of Object.entries(next)) if (other !== h && c.field === field) next[other] = { ...c, field: '' };
+    return next;
+  });
 
   return (
     <div className="space-y-5">
@@ -202,7 +221,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
         <FileSpreadsheet className="w-5 h-5 text-indigo-600" />
         <div className="min-w-0 flex-1">
           <div className="text-sm font-medium text-gray-900 truncate">{parsed.file.name}</div>
-          <div className="text-xs text-gray-500">{formatNumber(parsed.rows.length)} data rows · {parsed.headers.length} columns · {(parsed.file.size / 1024).toFixed(0)} KB</div>
+          <div className="text-xs text-gray-500">{formatNumber(parsed.rows.length)} data rows · {parsed.headers.length} columns · {(parsed.file.size / 1024).toFixed(0)} KB <span className="ml-1 inline-flex items-center rounded-full border border-gray-200 bg-white px-1.5 py-px text-[11px] text-gray-400">limit {formatNumber(CSV_MAX_ROWS)} rows</span></div>
         </div>
         <Button variant="ghost" size="sm" onClick={reset} title="Choose another file"><X className="w-4 h-4" /> Change file</Button>
       </div>
@@ -222,7 +241,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
 
       <section>
         <h3 className="text-sm font-semibold text-gray-900 mb-1">1. Map columns</h3>
-        <p className="text-xs text-gray-500 mb-3">We guessed from the header names — adjust as needed. Unmapped columns are ignored. Choose “Custom field” to keep a column under a key of your choice.</p>
+        <p className="text-xs text-gray-500 mb-3">We guessed from the header names — adjust as needed. Unmapped columns are ignored. Choose “Custom field” to keep a column under a key of your choice. Each field goes on one column: picking a field that another column has moves it. “LinkedIn URL / identifier” takes any form: a full profile link, <code>in/name</code> or just <code>name</code>.</p>
         <div className="overflow-x-auto border border-gray-200 rounded-xl">
           <table className="min-w-full text-sm">
             <thead>
@@ -236,13 +255,12 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
               {parsed.headers.map((h) => {
                 const c = cols[h] ?? { field: '', customKey: toCustomKey(h) };
                 const dup = c.field && c.field !== 'custom' && duplicateFields.includes(c.field);
+                const isLinkedIn = c.field === LINKEDIN_FIELD;
                 return (
                   <tr key={h} className="align-top border-b border-gray-100 last:border-0">
                     <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap max-w-[200px] truncate" title={h}>{h || <span className="text-gray-400 italic">(empty header)</span>}</td>
                     <td className="px-3 py-2">
-                      <select aria-label={`Field for ${h}`} value={c.field} onChange={(e) => setCols((m) => ({ ...m, [h]: { ...c, field: e.target.value } }))} className={cn(sel, dup && 'border-red-400')}>
-                        {LEAD_FIELDS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                      </select>
+                      <FieldPicker column={h} value={c.field} onChange={(field) => setField(h, field)} takenBy={takenBy} invalid={!!dup} />
                       {c.field === 'custom' && (
                         <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">custom.<input aria-label="Custom field key" value={c.customKey} onChange={(e) => setCols((m) => ({ ...m, [h]: { ...c, customKey: e.target.value } }))} className="flex-1 px-2 py-1 text-xs rounded-md border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="key" /></div>
                       )}
@@ -250,7 +268,12 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
                     </td>
                     <td className="px-3 py-2 text-xs text-gray-600">
                       <div className="flex flex-col gap-0.5 max-w-[360px]">
-                        {parsed.rows.slice(0, PREVIEW).map((r, i) => <span key={i} className="truncate">{r[h] || <span className="text-gray-300">∅</span>}</span>)}
+                        {parsed.rows.slice(0, PREVIEW).map((r, i) => {
+                          // the LinkedIn column shows what each cell resolves to: the person's profile URL, whichever way the file wrote it
+                          const id = isLinkedIn && r[h]?.trim() ? normalizePublicIdentifier(r[h]) : null;
+                          if (isLinkedIn && r[h]?.trim()) return id ? <span key={i} className="truncate" title={r[h]}>{linkedInProfileUrl(id)}</span> : <span key={i} className="truncate text-amber-700" title="Not a LinkedIn profile, so this row is matched on its email or skipped">{r[h]} (not a profile)</span>;
+                          return <span key={i} className="truncate">{r[h] || <span className="text-gray-300">∅</span>}</span>;
+                        })}
                       </div>
                     </td>
                   </tr>
@@ -259,7 +282,7 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
             </tbody>
           </table>
         </div>
-        {!hasKey && <p className="text-xs text-amber-700 mt-2 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Map a LinkedIn URL / identifier or an email column — it is the de-duplication key.</p>}
+        {!hasKey && <p className="text-xs text-amber-700 mt-2 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Map a LinkedIn URL / identifier or an email column.</p>}
       </section>
 
       <section>
@@ -269,10 +292,28 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
             {mode === 'update_only'
               ? <><Badge tone="blue">{formatNumber(dedupe.existing)} found (will be updated)</Badge><Badge tone="amber">{formatNumber(dedupe.fresh)} not found (skipped)</Badge></>
               : <><Badge tone="green">{formatNumber(dedupe.fresh)} new</Badge><Badge tone="blue">{formatNumber(dedupe.existing)} existing (will be merged)</Badge></>}
-            {dedupe.unkeyed > 0 && <Badge tone="amber">{formatNumber(dedupe.unkeyed)} without identifier (skipped)</Badge>}
             <span className="text-xs text-gray-500">based on the first {formatNumber(dedupe.checked)} of {formatNumber(parsed.rows.length)} rows. {mode === 'update_only' ? 'Only the columns you pick below change.' : 'Existing leads keep their data; empty fields are filled from the file.'}</span>
           </div>
         ) : null}
+        {hasKey && keyStats && (
+          <div className="mt-2 space-y-2">
+            <p className="text-xs text-gray-600">
+              The whole file: <span className="font-semibold text-gray-900">{formatNumber(keyStats.people)} {keyStats.people === 1 ? 'person' : 'people'}</span> in {formatNumber(parsed.rows.length)} rows.
+              {keyStats.repeated > 0 && !collapsing && <> {formatNumber(keyStats.repeated)} rows repeat a LinkedIn URL or email from an earlier row and are merged into that lead.</>}
+              {keyStats.unkeyed > 0 && <> {formatNumber(keyStats.unkeyed)} rows have no LinkedIn URL and no email, so they are skipped.</>}
+            </p>
+            {collapsing && (
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 space-y-1.5">
+                <p className="flex items-start gap-1.5 font-semibold"><AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" /> This import would {mode === 'update_only' ? 'touch' : 'create'} at most {formatNumber(keyStats.people)} leads, not {formatNumber(keyStats.keyed)}.</p>
+                <p>Rows with the same LinkedIn URL or email become one lead, and {keyColumns || 'the mapped identifier column'} holds only {formatNumber(keyStats.people)} different values. That usually means the column belongs to someone else, for example the account owner. In step 1, set “LinkedIn URL” on the column with each lead’s own profile.</p>
+                <label className="flex items-center gap-2 cursor-pointer text-red-900">
+                  <input type="checkbox" checked={fewPeopleOk} onChange={(e) => setFewPeopleOkFor(e.target.checked ? mappingKey : null)} className="rounded border-red-300 text-red-600 focus:ring-red-500" />
+                  The mapping is right, this file really has {formatNumber(keyStats.people)} people.
+                </label>
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {mode === 'update_only' ? (
@@ -300,13 +341,12 @@ export function CsvImport({ toast, onCreated }: { toast: ToastFn; onCreated: () 
         <section className="space-y-3">
           <h3 className="text-sm font-semibold text-gray-900">3. Options</h3>
           <ImportOptions kind="csv" value={common} onChange={setCommon} />
-          {mappedFields.has('phone') && <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Phone numbers are only written in “Update existing leads only” mode for now. Import the file first, then run it again in update mode with Phone ticked.</p>}
         </section>
       )}
 
       {error && <ErrorBox message={error} />}
       <div className="flex flex-wrap items-center gap-3">
-        <Button onClick={submit} loading={!!busy} disabled={!hasKey || duplicateFields.length > 0 || (mode === 'update_only' && updateFields.length === 0)}>{busy ?? <><CheckCircle2 className="w-4 h-4" /> {mode === 'update_only' ? 'Update from' : 'Import'} {formatNumber(parsed.rows.length)} rows</>}</Button>
+        <Button onClick={submit} loading={!!busy} disabled={!hasKey || duplicateFields.length > 0 || (mode === 'update_only' ? updateFields.length === 0 : !common.listId) || (collapsing && !fewPeopleOk)}>{busy ?? <><CheckCircle2 className="w-4 h-4" /> {mode === 'update_only' ? 'Update from' : 'Import'} {formatNumber(parsed.rows.length)} rows</>}</Button>
         <span className="text-xs text-gray-500">The file is processed in the background; progress shows in the jobs table below.</span>
       </div>
     </div>

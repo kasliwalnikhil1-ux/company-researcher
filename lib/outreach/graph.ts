@@ -2,8 +2,8 @@
 import { z } from 'zod';
 import type { AbBranch, AiRouteOption, ConditionRule, Graph, GraphNode, MessageVariant, NodeStats, NodeType, Provider } from './types';
 import { AI_ROUTE_ELSE, CALL_OUTCOMES, CHANNEL_PROVIDERS, MAX_VARIANTS } from './types';
-import { EXECUTABLE_TYPES, MESSAGE_TYPES, NODE_CATALOG, OPTIONAL_EXIT_TYPES, optionalExit, TEXT_LIMITS, VARIANT_TEXT_KEY, WAIT_TYPES, messageTextLimit, nodeChannels, nodeExits } from './nodes';
-import { spintaxInfo } from './render';
+import { EXECUTABLE_TYPES, MESSAGE_TYPES, NODE_CATALOG, OPTIONAL_EXIT_TYPES, optionalExit, TEXT_LIMITS, VARIANT_TEXT_KEY, WAIT_TYPES, messageTextLimit, nodeChannels, nodeExits, type AiConditionVariable } from './nodes';
+import { normalizeTemplate, spintaxInfo, TEMPLATE_FILTERS } from './render';
 
 export { nodeExits, exitLabel, syncNodeBranches } from './nodes';
 
@@ -188,6 +188,90 @@ export interface ValidateOptions {
   poolProviders?: Provider[];
   /** The sequence setting `channel_independent_continuation` (warned about when the pool spans two channels). */
   channelIndependent?: boolean;
+  /** The workspace's AI variables (066). When given, {{ai.…}} tokens and AI-field conditions are checked against them. */
+  aiVariables?: AiConditionVariable[];
+}
+
+// ---------------------------------------------------------------------------
+// Template checks: AI fields (066) and filters (067)
+// ---------------------------------------------------------------------------
+const PRINT_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*(?:\|\s*([^}]*?))?\s*\}\}/g;
+const IF_RE = /\{\{\s*#if\s+([a-zA-Z0-9_.]+)/g;
+
+/** Every text of a step that can carry a template: its config, walked through (variants, headers, bodies). */
+function templateTexts(value: unknown, out: string[] = []): string[] {
+  if (typeof value === 'string') { if (value.indexOf('{') !== -1) out.push(value); }
+  else if (Array.isArray(value)) for (const v of value) templateTexts(v, out);
+  else if (value && typeof value === 'object') for (const [k, v] of Object.entries(value)) { if (k !== 'rules') templateTexts(v, out); }
+  return out;
+}
+
+/** True when `a` is one insert, delete, replace or swap of two neighbours away from `b` (and not equal to it). */
+function oneEditAway(a: string, b: string): boolean {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1) || (a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2));
+  const [long, short] = a.length > b.length ? [a, b] : [b, a];
+  return long.slice(i + 1) === short.slice(i);
+}
+
+/**
+ * The issues of one step's templates and Condition rules:
+ *  E_AI_FIELDS_BARE          {{ai.research}} where `research` writes fields: there is no single text to print (blocks publish)
+ *  W_AI_FIELD_UNKNOWN        ai.research.pains: the variable has no such field (or writes one line, or does not exist)
+ *  W_AI_FIELD_YESNO_PRINTED  a Yes/No field printed as {{ai.x.y}}: it reads "true" / "false"
+ *  W_TEMPLATE_UNKNOWN_FILTER {{ position | lowrcase }}: one letter away from a filter, so it is read as a fallback
+ */
+function templateIssues(n: GraphNode, vars: AiConditionVariable[] | undefined): { errors: GraphIssue[]; warnings: GraphIssue[] } {
+  const errors: GraphIssue[] = [];
+  const warnings: GraphIssue[] = [];
+  const seen = new Set<string>();
+  const once = (list: GraphIssue[], code: string, message: string) => { if (!seen.has(code + message)) { seen.add(code + message); list.push({ node_id: n.id, code, message }); } };
+  const byKey = new Map((vars ?? []).map((v) => [v.key, v]));
+
+  /** `printed`: the token prints its value ({{…}}), as opposed to a condition ({{#if …}} or a Condition rule). */
+  const checkAi = (path: string, printed: boolean) => {
+    if (!vars || !path.startsWith('ai.')) return;
+    const [, key, field, ...rest] = path.split('.');
+    if (!key) return;
+    const v = byKey.get(key);
+    if (!v) { once(warnings, 'W_AI_FIELD_UNKNOWN', `There is no AI variable with the key “${key}”. Create it under AI → Setup → Personalized lines, or fix the name`); return; }
+    if (v.output === 'fields') {
+      const fields = Array.isArray(v.fields) ? v.fields : [];
+      if (!field) {
+        if (printed) once(errors, 'E_AI_FIELDS_BARE', `${v.name} writes fields, so {{ai.${key}}} has nothing to print. Pick a field: ${fields.slice(0, 3).map((f) => `{{ai.${key}.${f.key}}}`).join(', ')}${fields.length > 3 ? ', …' : ''}`);
+        return;
+      }
+      const f = fields.find((x) => x.key === field);
+      if (!f || rest.length > 0) { once(warnings, 'W_AI_FIELD_UNKNOWN', `${v.name} has no field “${[field, ...rest].join('.')}”`); return; }
+      if (printed && f.type === 'yes_no') once(warnings, 'W_AI_FIELD_YESNO_PRINTED', `{{ai.${key}.${field}}} prints true or false. Use it as {{#if ai.${key}.${field}}}…{{/if}} instead`);
+    } else if (field) {
+      once(warnings, 'W_AI_FIELD_UNKNOWN', `${v.name} writes one line, so it has no field “${[field, ...rest].join('.')}”. Use {{ai.${key}}}`);
+    }
+  };
+
+  for (const raw of templateTexts(n.config)) {
+    const text = normalizeTemplate(raw);
+    let m: RegExpExecArray | null;
+    const pr = new RegExp(PRINT_RE.source, 'g');
+    while ((m = pr.exec(text))) {
+      if (m[1] === 'else') continue;
+      checkAi(m[1], true);
+      for (const seg of (m[2] ?? '').split('|')) {
+        const t = seg.trim();
+        if (!t || /\s/.test(t) || TEMPLATE_FILTERS.includes(t)) continue;
+        const near = TEMPLATE_FILTERS.find((f) => oneEditAway(t.toLowerCase(), f));
+        if (near) once(warnings, 'W_TEMPLATE_UNKNOWN_FILTER', `“${t}” is not a filter, so it is used as the fallback text. Did you mean ${near}?`);
+      }
+    }
+    const ir = new RegExp(IF_RE.source, 'g');
+    while ((m = ir.exec(text))) checkAi(m[1], false);
+  }
+  if (n.type === 'condition' && Array.isArray(n.config?.rules)) {
+    for (const r of n.config!.rules as ConditionRule[]) if (typeof r?.field === 'string') checkAi(r.field, false);
+  }
+  return { errors, warnings };
 }
 
 /** Which platform a message limit belongs to, for the "X allows N characters" sentence. */
@@ -292,6 +376,9 @@ export function validateGraph(graph: Graph, opts: ValidateOptions = {}): { error
         if (n.type === 'send_email' && opts.strict && t.text !== '' && !t.text.includes('unsubscribe_link')) warnings.push({ node_id: k, code: 'W_NO_UNSUBSCRIBE', message: `The email${t.label} has no unsubscribe link. Add {{unsubscribe_link}} so people can opt out` });
       }
     }
+
+    // AI fields and filters in this step's templates and rules
+    { const t = templateIssues(n, opts.aiVariables); errors.push(...t.errors); warnings.push(...t.warnings); }
 
     if (n.type === 'condition' && !(n.branches?.true !== undefined && n.branches?.false !== undefined)) warnings.push({ node_id: k, code: 'W_BRANCH_MISSING', message: 'Give both the “true” and “false” branches a next step' });
     if (n.type === 'wait_connection' && !n.branches?.connected) errors.push({ node_id: k, code: 'E_GRAPH_INVALID', message: 'Add what happens once the lead connects (the “connected” branch)' });
@@ -472,14 +559,25 @@ export function sumNodeStats(rows: NodeStats[] | null | undefined): Record<strin
   return out;
 }
 
-/** The {{ai.<key>}} variables a graph uses (mirror of outreach_sequence_ai_keys). */
+/**
+ * The AI variables a graph uses (mirror of outreach_sequence_ai_keys, 067): printed as {{ai.<key>…}}, inside
+ * {{#if ai.<key>…}} or {% if ai.<key>… %}, read by a Condition rule ("field": "ai.<key>…"), and the three built-ins
+ * written as {{ ai_contact_first_name }}.
+ */
 export function sequenceAiKeys(graph: Graph | null | undefined): string[] {
   const out = new Set<string>();
-  const re = /\{\{\s*ai\.([a-z][a-z0-9_]*)/g;
   const text = JSON.stringify(graph ?? {});
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) out.add(m[1]);
-  return [...out];
+  const patterns = [
+    /\{\{\s*#?(?:if\s+)?ai\.([a-z][a-z0-9_]*)/g,
+    /\{%-?\s*if\s+ai\.([a-z][a-z0-9_]*)/g,
+    /"field"\s*:\s*"ai\.([a-z][a-z0-9_]*)/g,
+    /(?:\{\{\s*(?:#if\s+)?|\{%-?\s*if\s+)ai_(contact_first_name|company_conversation|position_conversational)(?![a-z0-9_])/g,
+  ];
+  for (const re of patterns) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) out.add(m[1]);
+  }
+  return [...out].sort();
 }
 
 /** Steps that can run an A/B test on their copy. */

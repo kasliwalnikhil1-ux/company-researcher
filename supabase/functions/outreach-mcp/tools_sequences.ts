@@ -69,7 +69,7 @@ async function poolInfo(ctx: Ctx, pool: string[]): Promise<Row[]> {
 }
 
 /**
- * AI replies block of a sequence (AI-REPLIES-V2-CONTRACT §5 sequence_ai_summary): mode, effective mode, open conversations per
+ * Replies block of a sequence (AI-REPLIES-V2-CONTRACT §5 sequence_ai_summary): mode, effective mode, open conversations per
  * stage, hand-offs in the last 7 days. Member-only RPC: a client_viewer (or a failure) gets no block, never a broken row.
  */
 async function aiRepliesOf(ctx: Ctx, sequenceId: string): Promise<Row | undefined> {
@@ -83,9 +83,9 @@ async function aiRepliesOf(ctx: Ctx, sequenceId: string): Promise<Row | undefine
 }
 
 const aiRepliesCreate = z.object({
-  mode: z.enum(["off", "draft"]).optional().describe("Every new sequence starts in draft (the AI drafts every eligible reply; a person sends). Auto is turned on later with sequence_ai_replies_set (consent, confirmation)."),
-  copy_prompt_from: z.string().optional().describe("Sequence id whose AI replies prompt, scenario cards, knowledge links and Q&A are copied as an independent copy (default: the workspace default prompt or the template)"),
-}).strict().describe("AI replies of the new sequence: {mode: off | draft, copy_prompt_from?: sequence_id}");
+  mode: z.enum(["off", "review", "draft"]).optional().describe("Every new sequence starts on Review (the AI drafts every eligible reply; a person sends). `draft` is the stored name of Review and means the same. Auto is turned on later with sequence_ai_replies_set (consent, confirmation)."),
+  copy_prompt_from: z.string().optional().describe("Sequence id whose Replies prompt, scenario cards, knowledge links and Q&A are copied as an independent copy (default: the workspace default prompt or the template)"),
+}).strict().describe("Replies of the new sequence: {mode: off | review, copy_prompt_from?: sequence_id}");
 
 function nodeTextField(n: GraphNode): "text" | "note" | "html" | null {
   switch (n.type) { case "send_invite": return "note"; case "send_message": case "send_inmail": case "comment_latest_post": case "send_voice_note": return "text"; case "send_email": return "html"; default: return null; }
@@ -164,7 +164,7 @@ async function publishFlow(ctx: Ctx, toolName: string, s: Row, graph: Graph | nu
 export function registerSequences(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "sequences_list", title: "List sequences", cls: "read", minRole: "client_viewer",
-    description: "Sequences of a workspace with status, pool size, live/completed/replied counts, throttle reason, stalled reason (the stall alert), whether an unpublished draft exists, and ai_replies = {mode (off | draft | autopilot), effective_mode (when lower: paused / archived sequences run at most in draft), open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open} (members; included for up to 50 rows, or always with include_ai:true).",
+    description: "Sequences of a workspace with status, pool size, live/completed/replied counts, throttle reason, stalled reason (the stall alert), whether an unpublished draft exists, and ai_replies = {mode (stored: off | draft | autopilot; the app says Off | Review | Auto), effective_mode (when lower: paused / archived sequences run at most on Review), open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open} (members; included for up to 50 rows, or always with include_ai:true).",
     input: { ...wsParam, status: z.enum(["draft", "active", "paused", "archived"]).optional(), client_id: z.string().optional(), include_ai: z.boolean().optional().describe("Force the ai_replies block on every row (one extra read per sequence)") },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
@@ -262,8 +262,8 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
       catch (e) { aiNotes.push(`prompt copy failed: ${e instanceof Error ? e.message : String(e)} — the sequence keeps the default prompt (master_prompt_copy to retry)`); }
     }
     if (a.ai_replies?.mode) {
-      try { const r = await urpc<Row>(ctx, "sequence_ai_replies_set", { p_sequence: id, p_patch: { mode: a.ai_replies.mode }, p_note: null }); aiNotes.push(`mode ${r?.mode ?? a.ai_replies.mode}`); }
-      catch (e) { aiNotes.push(`mode change failed: ${e instanceof Error ? e.message : String(e)} — the sequence stays in draft mode (sequence_ai_replies_set to retry)`); }
+      try { const r = await urpc<Row>(ctx, "sequence_ai_replies_set", { p_sequence: id, p_patch: { mode: a.ai_replies.mode === "review" ? "draft" : a.ai_replies.mode }, p_note: null }); aiNotes.push(`mode ${r?.mode ?? a.ai_replies.mode}`); }
+      catch (e) { aiNotes.push(`mode change failed: ${e instanceof Error ? e.message : String(e)} — the sequence stays on Review (sequence_ai_replies_set to retry)`); }
     }
     const aiSummary = await aiRepliesOf(ctx, id);
     return { created: true, sequence_id: id, version, status: "draft", source: g.source, warnings: v.warnings, compiler_notes: g.notes, pool: await poolInfo(ctx, pool), ai_replies: aiSummary ? { ...aiSummary, notes: aiNotes.length ? aiNotes : undefined } : undefined, rendered: renderGraph(g.graph), next: pool.length ? "sequence_project → enroll_preview → enroll_commit; then sequence_activate (confirmation) when ready." : "Add senders with sequence_update(pool) before activating." };

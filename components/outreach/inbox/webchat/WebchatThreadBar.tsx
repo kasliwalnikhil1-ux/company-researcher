@@ -35,7 +35,9 @@ export default function WebchatThreadBar({ chat, messages, members, workspaceId,
     try { await upd.mutateAsync({ chat: chat.id, patch: p }); if (notice) onNotice?.(notice); }
     catch (e) { onError((e as Error).message); }
   };
-  const toggleAi = async (on: boolean) => { try { await rpc('webchat_agent_ai', { p_chat: chat.id, p_on: on }); onNotice?.(on ? 'The assistant will answer again' : 'The assistant stopped for this conversation'); } catch (e) { onError((e as Error).message); } };
+  // Review mode: the assistant writes a suggestion into the reply box; a person sends it
+  const review = chat.ai_mode === 'review';
+  const toggleAi = async (on: boolean) => { try { await rpc('webchat_agent_ai', { p_chat: chat.id, p_on: on }); onNotice?.(on ? (review ? 'The assistant will suggest answers again' : 'The assistant will answer again') : 'The assistant stopped for this conversation'); } catch (e) { onError((e as Error).message); } };
   const aiOn = !!chat.ai_mode && chat.ai_mode !== 'off' && !chat.handed_off_at;
   const sel = 'text-xs rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-60';
 
@@ -69,8 +71,8 @@ export default function WebchatThreadBar({ chat, messages, members, workspaceId,
         {canWrite && <input value={labelDraft} onChange={(e) => setLabelDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && labelDraft.trim()) { e.preventDefault(); patch({ labels: [...(chat.labels ?? []), labelDraft.trim()] }); setLabelDraft(''); } }} placeholder="+ label" aria-label="Add label" className="w-20 text-xs border-b border-dashed border-gray-300 bg-transparent px-1 py-0.5 focus:outline-none focus:border-indigo-500" />}
       </span>
       {chat.ai_mode && chat.ai_mode !== 'off' && canWrite && (
-        <button type="button" onClick={() => toggleAi(!aiOn)} className={cn('inline-flex items-center gap-1 px-2 py-1 rounded-md border', aiOn ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50')} title={aiOn ? 'The assistant answers this visitor. Click to stop it.' : chat.handoff_reason ? `Handed off: ${chat.handoff_reason.replace(/_/g, ' ')}. Click to let the assistant continue.` : 'Let the assistant continue'}>
-          {aiOn ? <Bot className="w-3.5 h-3.5" /> : <BotOff className="w-3.5 h-3.5" />}{aiOn ? 'AI answering' : 'Let AI continue'}
+        <button type="button" onClick={() => toggleAi(!aiOn)} className={cn('inline-flex items-center gap-1 px-2 py-1 rounded-md border', aiOn ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50')} title={aiOn ? (review ? 'The assistant suggests answers for you to send. Click to stop it.' : 'The assistant answers this visitor. Click to stop it.') : chat.handoff_reason ? `Handed off: ${chat.handoff_reason.replace(/_/g, ' ')}. Click to let the assistant continue.` : 'Let the assistant continue'}>
+          {aiOn ? <Bot className="w-3.5 h-3.5" /> : <BotOff className="w-3.5 h-3.5" />}{aiOn ? (review ? 'AI suggesting' : 'AI answering') : 'Let AI continue'}
         </button>
       )}
       {chat.csat && <Badge tone="green">CSAT {chat.csat.rating}/5</Badge>}
@@ -80,7 +82,7 @@ export default function WebchatThreadBar({ chat, messages, members, workspaceId,
         </button>
         {cannedOpen && (
           <div className="absolute right-0 top-6 z-20 w-72 max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg p-2 text-xs">
-            {(canned.data ?? []).length === 0 && <p className="text-gray-500 p-1">No canned responses yet. Add them in Settings → Websites → Canned responses.</p>}
+            {(canned.data ?? []).length === 0 && <p className="text-gray-500 p-1">No canned responses yet. Add them in Website assistant → your website → Canned responses.</p>}
             {(canned.data ?? []).map((c) => (
               <button key={c.id} type="button" className="block w-full text-left p-1.5 rounded hover:bg-gray-50" onClick={async () => { try { await navigator.clipboard.writeText(`/${c.short_code}`); onNotice?.(`Copied /${c.short_code} — paste it in the reply box`); } catch { /* ignore */ } setCannedOpen(false); }}>
                 <span className="font-mono text-indigo-700">/{c.short_code}</span> <span className="text-gray-600">{c.content.slice(0, 80)}</span>

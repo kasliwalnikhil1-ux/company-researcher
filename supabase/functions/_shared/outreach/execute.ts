@@ -4,7 +4,7 @@
 //   - "did they reply?" and "are they blacklisted?" are asked of the database at SEND time (reply_blocked / suppression_reason)
 //   - text is rendered at SEND time with outreach_render_context, so enrichment that arrived with the prefetch is used
 //   - every LinkedIn read reserves a budget first (profile_view, post_fetch); no budget means "later", never "call anyway"
-import { admin, log, rpc, emitEvent, randInt, sha256Hex, FUNCTIONS_BASE } from "./supabase.ts";
+import { admin, log, rpc, emitEvent, randInt, sha256Hex, FUNCTIONS_BASE, hasFeature } from "./supabase.ts";
 import { unipile, UnipileError, distanceToRelation, invitationPending } from "./unipile.ts";
 import { handleUnipileError, isRejectCode, type Decision } from "./errors.ts";
 import { renderTemplate, buildContext, type RenderContext } from "./render.ts";
@@ -857,6 +857,8 @@ export async function executeAction(action: Row): Promise<ExecResult> {
         // Profile Studio (PRD §7): pre-snapshot → one PATCH → provisional applied; outreach-worker-profile verifies ≥60 s later.
         return await applyProfileChange(action, sender);
       case "call_api": {
+        // signed webhooks are an Enterprise feature: on a plan without them the step is skipped and the lead moves on
+        if (!(await hasFeature(sender.workspace_id, "webhooks"))) return { ok: false, decision: branchOrSkip("error", "plan_required"), code: "E_PLAN_REQUIRED" };
         const url = renderTemplate(cfg.url ?? "", rctx);
         if (!url) return { ok: false, decision: branchOrSkip("error", "no_url"), code: "E_PAYLOAD_INVALID" };
         const u = new URL(url);

@@ -8,6 +8,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { qk, useClients, useInvitations, useMembers } from '@/lib/outreach/queries';
+import { usePlanFeature } from '@/lib/outreach/billing';
+import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Badge, Button, Card, EmptyState, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, Select, Spinner, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import { copyText } from '@/components/outreach/senders/helpers';
@@ -54,6 +56,9 @@ export default function MembersSettingsPage() {
   const members = useMembers(isOwner ? ws : null);
   const invitations = useInvitations(isOwner ? ws : null);
   const clients = useClients(ws);
+  // Client viewers belong to Scale (billing v2): on a plan without them the role cannot be given, and existing viewers' logins are paused (not deleted).
+  const viewerGate = usePlanFeature(ws, 'client_viewer');
+  const viewerLocked = (r: Role) => r === 'client_viewer' && !viewerGate.enabled;
   const [busy, setBusy] = useState<string | null>(null);
   const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
   const [invite, setInvite] = useState<{ email: string; role: Role; client_ids: string[] }>({ email: '', role: 'member', client_ids: [] });
@@ -130,8 +135,9 @@ export default function MembersSettingsPage() {
                     <Td><div className="font-medium text-gray-900">{m.display_name ?? m.email ?? m.user_id.slice(0, 8)}{me && <Badge tone="indigo" className="ml-2">you</Badge>}</div>{m.display_name && m.email && <div className="text-xs text-gray-500">{m.email}</div>}</Td>
                     <Td>
                       <Select value={m.role} onChange={(e) => updateMember(m, { role: e.target.value as Role })} disabled={me || !canWrite || busy === m.user_id} aria-label={`Role for ${m.email ?? m.user_id}`} className="w-40">
-                        {ROLES.map((r) => <option key={r.value} value={r.value} title={r.hint}>{r.label}</option>)}
+                        {ROLES.map((r) => <option key={r.value} value={r.value} title={r.hint} disabled={viewerLocked(r.value) && m.role !== 'client_viewer'}>{r.label}</option>)}
                       </Select>
+                      {viewerLocked(m.role) && <div className="text-xs text-gray-400 mt-1">Access paused by plan</div>}
                     </Td>
                     <Td>{scoped ? <ClientScope value={m.client_ids} clients={clientList} onChange={(ids) => updateMember(m, { client_ids: ids })} disabled={!canWrite || busy === m.user_id} /> : <span className="text-xs text-gray-400">all</span>}</Td>
                     <Td><Toggle checked={m.can_reply} onChange={(v) => updateMember(m, { can_reply: v })} disabled={!canWrite || busy === m.user_id} /></Td>
@@ -150,7 +156,8 @@ export default function MembersSettingsPage() {
         <Card title={<span className="flex items-center gap-2"><UserPlus className="w-4 h-4" /> Invite</span>}>
           <form onSubmit={sendInvite} className="space-y-3">
             <Input label="Email" type="email" required value={invite.email} onChange={(e) => setInvite({ ...invite, email: e.target.value })} placeholder="colleague@company.com" disabled={!canWrite} />
-            <Select label="Role" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value as Role })} disabled={!canWrite}>{ROLES.map((r) => <option key={r.value} value={r.value}>{r.label} — {r.hint}</option>)}</Select>
+            <Select label="Role" value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value as Role })} disabled={!canWrite}>{ROLES.map((r) => <option key={r.value} value={r.value} disabled={viewerLocked(r.value)}>{r.label} — {r.hint}</option>)}</Select>
+            <UpgradeNote feature="client_viewer" what="The client viewer role" />
             {(invite.role === 'member' || invite.role === 'client_viewer') && (
               <div><div className="text-xs font-medium text-gray-600 mb-1">Client scope</div><ClientScope value={invite.client_ids} clients={clientList} onChange={(ids) => setInvite({ ...invite, client_ids: ids })} disabled={!canWrite} />{invite.role === 'client_viewer' && invite.client_ids.length === 0 && clientList.length > 0 && <div className="text-xs text-amber-600 mt-1">Client viewers should be scoped to one client.</div>}</div>
             )}

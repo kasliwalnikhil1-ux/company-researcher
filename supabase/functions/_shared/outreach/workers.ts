@@ -1,5 +1,5 @@
 // Secondary workers: reconnect (F6), imports (F7), withdraw (F8), relations poll (F9), outbound webhooks (F23), billing (F25), classify (F18).
-import { admin, log, rpc, emitEvent, localParts, zonedToUtc, randInt, rand, audit } from "./supabase.ts";
+import { admin, log, rpc, emitEvent, localParts, zonedToUtc, randInt, rand, audit, hasFeature } from "./supabase.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending } from "./unipile.ts";
 import { decrypt, hmacSha256Hex } from "./crypto.ts";
 import { notifySender } from "./notify.ts";
@@ -192,9 +192,10 @@ async function finishJob(job: Row, patch: Row = {}): Promise<void> {
   await enrichAfterImport(job);
 }
 
-export async function runImportJob(job: Row): Promise<void> {
+/** Runs one step of an import job. Returns true when a CSV file has rows left for the next worker call. */
+export async function runImportJob(job: Row, deadline = Date.now() + CSV_SLICE_MS): Promise<boolean | void> {
   try {
-    if (job.kind === "csv") { await runCsvImport(job); return; }
+    if (job.kind === "csv") return await runCsvImport(job, deadline);
     if (job.kind === "conversations") {
       // no LinkedIn call: the chats are already in the database
       await rpc("import_conversations", { p_job: job.id });
@@ -339,16 +340,60 @@ export async function runImportJob(job: Row): Promise<void> {
   }
 }
 
-async function runCsvImport(job: Row): Promise<void> {
+/**
+ * The public identifier in a CSV cell, however the file writes the person's LinkedIn profile: a profile URL (with or without a trailing
+ * slash or a query such as `?isSelfProfile=true`), `in/<id>` (same extras) or the bare identifier. Percent-encoded names are decoded
+ * (LinkedIn links to non-Latin names that way, the identifier itself is the decoded text). Anything else gives null: a URL that is not a
+ * profile (a company page, a search), a name with spaces, an email. The upload screen applies the same rule (normalizePublicIdentifier in
+ * components/outreach/leads/helpers.ts); both are tested on the same values.
+ */
+export function csvPublicIdentifier(v: string): string | null {
+  const s = v.trim();
+  let id = /linkedin\.com\/(?:mwlite\/)?in\/([^/?#\s]+)/i.exec(s)?.[1] ?? null;
+  if (!id) {
+    if (/^https?:\/\//i.test(s) || /linkedin\.com/i.test(s)) return null;
+    id = s.replace(/^@/, "").replace(/^\/?in\//i, "").replace(/[/?#].*$/, "");
+    if (/[\s@.]/.test(id)) return null;
+  }
+  try { id = decodeURIComponent(id); } catch { /* not percent-encoded after all: keep as written */ }
+  return id.toLowerCase() || null;
+}
+
+/** The mapping field of the person's LinkedIn profile. `public_identifier` is its older second name: both mean the same column. */
+export const CSV_LINKEDIN_FIELDS = ["linkedin_url", "public_identifier"];
+
+// CSV imports. A file is worked through in slices: one worker call writes up to CSV_SLICE_ROWS rows (or for CSV_SLICE_MS), saves where
+// it stopped and calls the worker again; the 5-minute cron is the fallback. Two limits shape a slice: an edge function gets about two
+// seconds of CPU per call, and the cron's own call times out after 60 s.
+/** Most data rows one CSV import takes. The upload screen shows and checks the same number (CSV_MAX_ROWS in components/outreach/leads/helpers.ts). */
+export const CSV_MAX_ROWS = 25_000;
+const CSV_MAX_BYTES = 25 * 1024 * 1024;   // the whole file is held in memory while a slice runs
+const CSV_BATCH = 100;          // rows in one database call
+const CSV_PARALLEL = 4;         // database calls in flight at once; a checkpoint follows every CSV_BATCH * CSV_PARALLEL rows
+const CSV_SLICE_ROWS = 5_000;   // rows one worker call writes before it hands over
+const CSV_SLICE_MS = 30_000;    // … or this long, whichever comes first
+const CSV_LEASE_MS = 120_000;   // a claimed file is left alone by other worker calls for this long; renewed at every checkpoint
+const LIVE = ["queued", "running"];
+
+/** Runs one slice of a CSV import. Returns true when rows are left for the next worker call. */
+async function runCsvImport(job: Row, deadline: number): Promise<boolean> {
+  // claim the file: the cron tick and the hand-over call can both find it due, only one of them may write its rows
+  const { data: claimed } = await admin.from("outreach_import_jobs").update({ status: "running", next_run_at: new Date(Date.now() + CSV_LEASE_MS).toISOString() })
+    .eq("id", job.id).in("status", LIVE).lte("next_run_at", new Date().toISOString()).select("*").maybeSingle();
+  if (!claimed) return false;
+  Object.assign(job, claimed);
   const p = job.params ?? {};
   const path = p.storage_path as string;
   const mapping = (p.mapping ?? {}) as Record<string, string>; // csv column → lead field
   if (!path) throw new ImportFatal("This CSV import has no file attached. Upload the file again.");
   const { data: file, error } = await admin.storage.from("outreach-imports").download(path);
   if (error || !file) throw new ImportFatal(`The uploaded CSV file could not be read (${error?.message ?? "file missing"}). Upload it again.`);
+  if (file.size > CSV_MAX_BYTES) throw new ImportFatal("This file is larger than 25 MB. Split it into smaller files and import them one after another.");
   const text = await file.text();
   const rows = parseCsv(text);
-  if (!rows.length) { await finishJob(job, { total_expected: 0 }); return; }
+  if (!rows.length) { await finishJob(job, { total_expected: 0 }); return false; }
+  const total = rows.length - 1;
+  if (total > CSV_MAX_ROWS) throw new ImportFatal(`This file has ${total.toLocaleString("en-US")} rows. One import takes up to ${CSV_MAX_ROWS.toLocaleString("en-US")} rows: split the file and import the parts one after another.`);
   const header = rows[0];
   const fieldIdx: Record<string, number> = {};
   header.forEach((h, i) => { const f = mapping[h] ?? mapping[h.trim()]; if (f) fieldIdx[f] = i; });
@@ -357,72 +402,159 @@ async function runCsvImport(job: Row): Promise<void> {
   if (!hasKey) throw new ImportFatal("None of the mapped columns exist in this file. Map the LinkedIn URL or the email column and start again.");
   const allowed: string[] = (job.update_fields ?? []).map(String);
   if (updateOnly && !allowed.length) throw new ImportFatal("Update mode needs at least one column to update. Choose the columns and start again.");
-  let created = 0, updated = 0, fetched = 0, notFound = 0, rowErrors = 0;
-  let firstError: string | null = null;
-  const start = job.next_offset ?? 0;
-  for (let i = 1 + start; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r.length || r.every((c) => !c)) continue;
+  const fields = Object.entries(fieldIdx);
+  const tagIds: string[] = job.tag_ids ?? [];
+
+  const build = (r: string[]): { lead: Row; flat: Record<string, string>; email: string | null } => {
     const lead: Row = { client_id: job.client_id, list_id: job.list_id, custom: {} };
     const flat: Record<string, string> = {};   // update mode: field → value, custom fields keep their "custom." prefix
-    for (const [field, idx] of Object.entries(fieldIdx)) {
+    for (const [field, idx] of fields) {
       const v = (r[idx] ?? "").trim();
       if (!v) continue;
       if (field.startsWith("custom.")) { lead.custom[field.slice(7)] = v; flat[field] = v; }
-      else if (field === "linkedin_url" || field === "public_identifier") lead.public_identifier = inboundInternal.pubIdFromUrl(v) ?? v.replace(/^in\//, "").toLowerCase();
+      // every form resolves to the identifier and to the one profile URL of that person
+      else if (CSV_LINKEDIN_FIELDS.includes(field)) { const id = csvPublicIdentifier(v); if (id) { lead.public_identifier = id; lead.profile_url = `https://www.linkedin.com/in/${id}`; } }
       // Channels: an Instagram handle / WhatsApp number column becomes an identity (verified: the operator supplied it). upsert_lead normalises
       // and rejects a phone without a country code (E_PAYLOAD_INVALID), which surfaces as a row error rather than a guessed number.
       else if (field === "instagram_handle") (lead.identities ??= []).push({ provider: "INSTAGRAM", identifier: v, verified: true, source: "import" });
       else if (field === "whatsapp_phone") (lead.identities ??= []).push({ provider: "WHATSAPP", identifier: v, verified: true, source: "import" });
       else { lead[field] = v; flat[field] = v; }
     }
-    const email = lead.email_work ?? lead.email_personal ?? lead.email ?? null;
-    if (lead.public_identifier || email) {
-      try {
-        if (updateOnly) {
-          // match on LinkedIn URL or email and change ONLY the chosen columns; never creates a lead, never blanks a field
-          const ok = await rpc<boolean>("update_lead_fields", { p_ws: job.workspace_id, p_match: { public_identifier: lead.public_identifier ?? null, email }, p_fields: flat, p_allowed: allowed });
-          if (ok) updated++; else notFound++;
-        } else {
-          const res = await rpc<any>("upsert_lead", { p_ws: job.workspace_id, p_lead: lead, p_source: "csv", p_import_job: job.id });
-          const row = Array.isArray(res) ? res[0] : res;
-          if (row?.created) created++; else updated++;
-          if (row?.id && job.tag_ids?.length) await admin.from("outreach_lead_tags").upsert(job.tag_ids.map((t: string) => ({ lead_id: row.id, tag_id: t })), { onConflict: "lead_id,tag_id", ignoreDuplicates: true });
-        }
-      } catch (e) { rowErrors++; firstError = firstError ?? String((e as any)?.message ?? e).slice(0, 160); log({ fn: "csv", warn: String(e) }); }
+    // a file with one name column: first and last name come from it, so {{first_name}} and the leads table have them
+    if (lead.full_name && !lead.first_name && !lead.last_name) { const parts = String(lead.full_name).split(/\s+/); lead.first_name = parts[0]; lead.last_name = parts.slice(1).join(" ") || null; }
+    return { lead, flat, email: lead.email_work ?? lead.email_personal ?? lead.email ?? null };
+  };
+
+  // The matching keys of every row, read from the file itself so the answer is the same in every slice. A row whose LinkedIn URL or
+  // email already appeared higher up lands on that earlier lead: it is counted as merged, so "N new · M updated" counts leads and a
+  // wrongly mapped key column shows up as merged rows instead of hundreds of "updates".
+  const keyFields = fields.filter(([f]) => ["public_identifier", "linkedin_url", "email_work", "email_personal", "email"].includes(f));
+  const keysOf = (r: string[]): string[] => {
+    let pub: string | null = null; const emails: Row = {};
+    for (const [f, idx] of keyFields) {
+      const v = (r[idx] ?? "").trim();
+      if (!v) continue;
+      if (CSV_LINKEDIN_FIELDS.includes(f)) pub = csvPublicIdentifier(v) ?? pub; else emails[f] = v.toLowerCase();
     }
-    fetched++;
-    if (fetched % 500 === 0) await updateJob(job, { fetched: (job.fetched ?? 0) + fetched, created_leads: (job.created_leads ?? 0) + created, updated_leads: (job.updated_leads ?? 0) + updated, next_offset: i, status: "running" });
+    const email = emails.email_work ?? emails.email_personal ?? emails.email ?? null;
+    return [pub ? `p:${pub}` : "", email ? `e:${email}` : ""].filter(Boolean);
+  };
+  const keys: string[][] = [[]];
+  const repeat = new Uint8Array(rows.length);
+  const seenKeys = new Set<string>();
+  for (let i = 1; i <= total; i++) {
+    const ks = keysOf(rows[i]);
+    keys.push(ks);
+    if (ks.some((k) => seenKeys.has(k))) repeat[i] = 1;
+    for (const k of ks) seenKeys.add(k);
   }
+
+  // counters carry on from the last checkpoint; every checkpoint stores the totals
+  let offset = Number(job.next_offset ?? 0);          // data rows done
+  let fetched = Number(job.fetched ?? 0), created = Number(job.created_leads ?? 0), updated = Number(job.updated_leads ?? 0);
   const st = stateOf(job);
-  if (updateOnly) { st.updated = Number(st.updated ?? 0) + updated; st.not_found = Number(st.not_found ?? 0) + notFound; }
-  if (rowErrors) { st.row_errors = Number(st.row_errors ?? 0) + rowErrors; st.first_row_error = st.first_row_error ?? firstError; }
-  if (fetched > 0 && rowErrors === fetched) throw new ImportFatal(`No row of this file could be imported. First error: ${firstError ?? "unknown"}`);
-  await finishJob(job, { fetched: (job.fetched ?? 0) + fetched, created_leads: (job.created_leads ?? 0) + created, updated_leads: (job.updated_leads ?? 0) + updated, total_expected: rows.length - 1, params: withState(job, st) });
+  const bump = (k: string) => { st[k] = Number(st[k] ?? 0) + 1; };
+
+  // One database call writes a batch of rows and answers with one entry per row, in order (migration 055). A call per row costs the
+  // worker more CPU than an edge function has: it was stopped after about 4,400 rows.
+  const writeBatch = async (idx: number[], tagged: Set<string>): Promise<void> => {
+    const built = idx.map((i) => build(rows[i]));
+    const call = () => updateOnly
+      // match on LinkedIn URL or email and change ONLY the chosen columns; never creates a lead, never blanks a field
+      ? rpc<any[]>("csv_update_rows", { p_ws: job.workspace_id, p_rows: built.map((b) => ({ match: { public_identifier: b.lead.public_identifier ?? null, email: b.email }, fields: b.flat })), p_allowed: allowed })
+      : rpc<any[]>("csv_upsert_rows", { p_ws: job.workspace_id, p_job: job.id, p_leads: built.map((b) => b.lead) });
+    let res: any[];
+    try { res = await call(); } catch { await new Promise((r) => setTimeout(r, 800)); res = await call(); }   // one retry: writing a row twice is harmless
+    if (!Array.isArray(res) || res.length !== idx.length) throw new Error(`the database answered ${Array.isArray(res) ? res.length : "nothing"} for a batch of ${idx.length} rows`);
+    idx.forEach((i, n) => {
+      const r = res[n];
+      if (r && typeof r === "object" && r.error) { bump("row_errors"); st.first_row_error = st.first_row_error ?? String(r.error).slice(0, 160); log({ fn: "csv", warn: String(r.error) }); return; }
+      if (updateOnly) { if (r === true) { updated++; bump("updated"); } else bump("not_found"); return; }
+      if (repeat[i]) bump("merged_rows"); else if (r?.created) created++; else updated++;
+      if (r?.id) tagged.add(r.id);
+    });
+  };
+
+  let sliceRows = 0;
+  while (offset < total) {
+    const end = Math.min(total, offset + CSV_BATCH * CSV_PARALLEL);
+    // rows that share a key go into the same batch, in file order: two calls must never write the same lead at the same time
+    const groups: number[][] = []; const groupOf = new Map<string, number>();
+    for (let i = offset + 1; i <= end; i++) {
+      const r = rows[i];
+      if (!r.length || r.every((c) => !c)) continue;
+      fetched++;
+      if (!keys[i].length) { bump("skipped_rows"); continue; }
+      let g = keys[i].map((k) => groupOf.get(k)).find((x) => x !== undefined);
+      if (g === undefined) { g = groups.length; groups.push([]); }
+      groups[g].push(i);
+      for (const k of keys[i]) if (!groupOf.has(k)) groupOf.set(k, g);
+    }
+    const batches: number[][] = Array.from({ length: CSV_PARALLEL }, () => []);
+    for (const g of groups) batches.reduce((a, b) => (b.length < a.length ? b : a)).push(...g);
+    const tagged = new Set<string>();
+    await Promise.all(batches.filter((b) => b.length).map((b) => writeBatch(b, tagged)));
+    if (tagIds.length && tagged.size) {
+      const links = [...tagged].flatMap((id) => tagIds.map((t) => ({ lead_id: id, tag_id: t })));
+      for (let k = 0; k < links.length; k += 1000) await admin.from("outreach_lead_tags").upsert(links.slice(k, k + 1000), { onConflict: "lead_id,tag_id", ignoreDuplicates: true });
+    }
+    sliceRows += end - offset;
+    offset = end;
+    job.params = withState(job, st);
+    if (offset >= total) break;
+    // checkpoint. The progress is saved whatever happened to the job meanwhile; the lease is renewed only while the job is still live,
+    // so a pause or a cancel from the jobs table stops the import here instead of being overwritten.
+    await updateJob(job, { fetched, created_leads: created, updated_leads: updated, next_offset: offset, total_expected: total, params: job.params, error: null });
+    const handOver = sliceRows >= CSV_SLICE_ROWS || Date.now() >= deadline;
+    const { data: live } = await admin.from("outreach_import_jobs").update({ next_run_at: new Date(Date.now() + (handOver ? 0 : CSV_LEASE_MS)).toISOString() })
+      .eq("id", job.id).in("status", LIVE).select("id").maybeSingle();
+    if (!live) return false;
+    if (handOver) return true;
+  }
+  if (fetched > 0 && Number(st.row_errors ?? 0) >= fetched) throw new ImportFatal(`No row of this file could be imported. First error: ${st.first_row_error ?? "unknown"}`);
+  await finishJob(job, { fetched, created_leads: created, updated_leads: updated, next_offset: offset, total_expected: total, params: job.params });
+  return false;
 }
 
+/**
+ * RFC 4180 reader. Cells are cut out of the text in whole pieces (`from` marks where the current piece starts): building a cell one
+ * character at a time costs about twenty times the file size in memory, which a 25,000-row file does not have in an edge function.
+ */
 export function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
-  let row: string[] = [], cur = "", q = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
+  const n = text.length;
+  let row: string[] = [], cur = "", q = false, from = 0;
+  for (let i = 0; i < n; i++) {
+    const c = text.charCodeAt(i);
     if (q) {
-      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
-      else cur += c;
-    } else if (c === '"') q = true;
-    else if (c === ",") { row.push(cur); cur = ""; }
-    else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cur); rows.push(row); row = []; cur = ""; }
-    else cur += c;
+      if (c !== 34) continue;                                                              // "
+      if (text.charCodeAt(i + 1) === 34) { cur += text.slice(from, i + 1); i++; from = i + 1; }   // "" inside quotes is one quote
+      else { cur += text.slice(from, i); from = i + 1; q = false; }
+    } else if (c === 34) { cur += text.slice(from, i); from = i + 1; q = true; }
+    else if (c === 44) { row.push(cur + text.slice(from, i)); cur = ""; from = i + 1; }      // ,
+    else if (c === 10 || c === 13) {                                                        // \n, \r, \r\n
+      row.push(cur + text.slice(from, i));
+      if (c === 13 && text.charCodeAt(i + 1) === 10) i++;
+      rows.push(row); row = []; cur = ""; from = i + 1;
+    }
   }
+  cur += text.slice(from);
   if (cur.length || row.length) { row.push(cur); rows.push(row); }
   return rows.filter((r) => r.length > 1 || (r.length === 1 && r[0] !== ""));
 }
 
 export async function runImports(): Promise<Row> {
+  const deadline = Date.now() + CSV_SLICE_MS;
   const { data: jobs } = await admin.from("outreach_import_jobs").select("*").in("status", ["queued", "running"]).lte("next_run_at", new Date().toISOString()).order("next_run_at").limit(20);
-  let ran = 0;
-  for (const j of jobs ?? []) { await runImportJob(j); ran++; }
-  return { ran };
+  let ran = 0, more = false;
+  for (const j of jobs ?? []) {
+    if (j.kind === "csv" && Date.now() >= deadline) { more = true; continue; }   // out of time: the file stays due for the next call
+    if (await runImportJob(j, deadline)) more = true;
+    ran++;
+  }
+  // rows are left in a CSV file: hand over to a fresh worker call now instead of waiting for the next cron tick
+  if (more) { try { await rpc("invoke", { p_name: "outreach-worker-imports" }); } catch (e) { log({ fn: "imports", warn: `hand-over call failed, the cron tick continues: ${String((e as any)?.message ?? e)}` }); } }
+  return { ran, more };
 }
 
 // ---------------------------------------------------------------------------
@@ -534,9 +666,12 @@ export async function runRelationsPoll(): Promise<Row> {
 export async function runOutboundWebhooks(): Promise<Row> {
   const { data: rows } = await admin.from("outreach_outbound_webhook_deliveries").select("*, outreach_outbound_webhooks(url, secret, active, failures)").is("delivered_at", null).lte("next_at", new Date().toISOString()).lt("attempts", 5).order("next_at").limit(50);
   let delivered = 0, failed = 0;
+  const hookPlan = new Map<string, boolean>();
   for (const d of rows ?? []) {
     const wh = (d as any).outreach_outbound_webhooks;
     if (!wh || !wh.active) { await admin.from("outreach_outbound_webhook_deliveries").update({ attempts: 5, last_error: "webhook inactive" }).eq("id", d.id); continue; }
+    if (!hookPlan.has(d.workspace_id)) hookPlan.set(d.workspace_id, await hasFeature(d.workspace_id, "webhooks"));
+    if (!hookPlan.get(d.workspace_id)) { await admin.from("outreach_outbound_webhook_deliveries").update({ attempts: 5, last_error: "E_PLAN_REQUIRED: the plan has no webhooks" }).eq("id", d.id); continue; }
     const body = JSON.stringify(d.payload ?? {});
     const sig = await hmacSha256Hex(wh.secret, body);
     let status = 0, err: string | null = null;
@@ -645,61 +780,4 @@ export async function runClassify(limit = 20): Promise<Row> {
   return errors.length ? { done, failed, errors } : { done, failed };
 }
 
-// ---------------------------------------------------------------------------
-// F25 billing sync (usage → Stripe quantity)
-// ---------------------------------------------------------------------------
-const STRIPE_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
-
-export async function stripeRequest(method: string, path: string, params?: Record<string, string>): Promise<any> {
-  if (!STRIPE_KEY) throw new Error("STRIPE_SECRET_KEY not set");
-  const res = await fetch(`https://api.stripe.com/v1${path}`, { method, headers: { authorization: `Bearer ${STRIPE_KEY}`, "content-type": "application/x-www-form-urlencoded" }, body: params ? new URLSearchParams(params).toString() : undefined });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error?.message ?? `stripe ${res.status}`);
-  return data;
-}
-
-export async function runBillingSync(): Promise<Row> {
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: workspaces } = await admin.from("outreach_workspaces").select("id, plan, settings, stripe_subscription_id, stripe_status, past_due_since, trial_ends_at").is("deleted_at", null);
-  let synced = 0, suspended = 0;
-  for (const w of workspaces ?? []) {
-    const { data: senders } = await admin.from("outreach_senders").select("provider, status").eq("workspace_id", w.id).is("deleted_at", null).neq("status", "disabled");
-    const li = (senders ?? []).filter((s) => s.provider === "LINKEDIN").length;
-    const mb = (senders ?? []).length - li;
-    await admin.from("outreach_billing_usage").upsert({ workspace_id: w.id, day: today, active_senders: li, active_mailboxes: mb }, { onConflict: "workspace_id,day" });
-    // Billing enforcement only runs when Stripe is configured; otherwise usage is recorded but nothing is suspended.
-    if (!STRIPE_KEY) continue;
-    // past-due → suspend after 7 days (senders paused, not deleted)
-    if (w.stripe_status === "past_due" && w.past_due_since && Date.now() - new Date(w.past_due_since).getTime() > 7 * 86400_000 && w.plan !== "suspended") {
-      // remember the plan so outreach_resume_after_billing can put it back when the payment recovers
-      await admin.from("outreach_workspaces").update({ plan: "suspended", settings: { ...(w.settings ?? {}), ...(w.plan && w.plan !== "trial" ? { plan_before_suspension: w.plan } : {}) } }).eq("id", w.id);
-      await admin.from("outreach_senders").update({ status: "paused", status_reason: "billing_suspended" }).eq("workspace_id", w.id).eq("status", "ok");
-      await audit(w.id, "workspace.suspended", "workspace", w.id, { reason: "past_due_7d" });
-      suspended++;
-    }
-    // trial expiry: pause senders beyond trial (no card): mark suspended-lite? keep read-only via plan
-    if (w.plan === "trial" && w.trial_ends_at && new Date(w.trial_ends_at).getTime() < Date.now() && !w.stripe_subscription_id) {
-      await admin.from("outreach_workspaces").update({ plan: "suspended" }).eq("id", w.id);
-      await admin.from("outreach_senders").update({ status: "paused", status_reason: "trial_expired" }).eq("workspace_id", w.id).eq("status", "ok");
-      await audit(w.id, "workspace.trial_expired", "workspace", w.id);
-      suspended++;
-    }
-    if (w.stripe_subscription_id && STRIPE_KEY) {
-      try {
-        // peak active senders in the current period
-        const sub = await stripeRequest("GET", `/subscriptions/${w.stripe_subscription_id}`);
-        const start = new Date((sub.current_period_start ?? 0) * 1000).toISOString().slice(0, 10);
-        const { data: usage } = await admin.from("outreach_billing_usage").select("active_senders, active_mailboxes").eq("workspace_id", w.id).gte("day", start);
-        const peak = Math.max(0, ...(usage ?? []).map((u) => u.active_senders));
-        const peakMb = Math.max(0, ...(usage ?? []).map((u) => u.active_mailboxes));
-        for (const item of sub.items?.data ?? []) {
-          const lookup = item.price?.lookup_key ?? item.price?.nickname ?? "";
-          const qty = /mailbox/i.test(lookup) ? peakMb : peak;
-          if (item.quantity !== qty) await stripeRequest("POST", `/subscription_items/${item.id}`, { quantity: String(qty), proration_behavior: "none" });
-        }
-        synced++;
-      } catch (e) { log({ fn: "billing", workspace: w.id, error: String(e) }); }
-    }
-  }
-  return { synced, suspended };
-}
+// F25 billing sync moved to ./billing_sync.ts (billing v2: usage never sets a Stripe quantity; pricing-billing-PRD.md §10.3).

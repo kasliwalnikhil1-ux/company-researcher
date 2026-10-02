@@ -5,6 +5,7 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Contact, FileWarning, GitBranch, Hand, Inbox, MessageSquare, PauseCircle, Plus, Sparkles, Upload, CheckSquare, UserMinus, Wand2, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useSequences } from '@/lib/outreach/queries';
+import { hubHref, useNeedsYouCounts } from '@/lib/outreach/aiHub';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
 import { MetricLabel } from '@/components/outreach/reports/primitives';
 import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
@@ -37,8 +38,8 @@ const CAPACITY_LABELS: Array<{ key: string; label: string }> = [
 const isAutoPaused = (s: DashSender) => !!s.paused_until && new Date(s.paused_until).getTime() > Date.now();
 function healthGroup(s: DashSender): HealthGroup {
   // A first sign-in that never finished (page closed, link expired, or the hosted page reported a failure) is not "connecting":
-  // nothing will change until a manager sends a fresh link.
-  if (s.status === 'credentials' || s.status === 'error' || isAbandonedSignIn(s) || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
+  // nothing will change until a manager sends a fresh link. A disconnected sender sends nothing until it is reconnected.
+  if (s.status === 'credentials' || s.status === 'error' || s.status === 'disconnected' || isAbandonedSignIn(s) || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
   if (s.status === 'paused' || s.status === 'disabled' || isAutoPaused(s)) return 'paused';
   if (s.running_dry) return 'dry';
   if (s.status === 'connecting') return 'connecting';
@@ -172,7 +173,7 @@ function attentionView(a: AttentionItem): { icon: React.ReactNode; title: string
     case 'failed_leads':
       return { icon: <XCircle className={cn(cls, 'text-red-500')} />, title: `${a.label ?? 'A sequence'}: failed leads`, actions: [{ label: 'Open failed leads', href: `/outreach/sequences/${a.id}?failed=1` }] };
     case 'ai_review':
-      return { icon: <Wand2 className={cn(cls, 'text-purple-500')} />, title: `AI Personalization lines for “${a.label ?? 'a variable'}” are ready`, actions: [{ label: 'Open AI Personalization', href: `/outreach/ai-review?batch=${a.id}` }] };
+      return { icon: <Wand2 className={cn(cls, 'text-purple-500')} />, title: `Personalized lines for “${a.label ?? 'a variable'}” are waiting for you`, actions: [{ label: 'Open Needs you', href: hubHref.needsYou({ type: 'line', mine: false }) }] };
     case 'sequence':
       return { icon: <GitBranch className={cn(cls, 'text-gray-400')} />, title: a.label ?? 'Sequence', actions: [{ label: 'Open sequence', href: `/outreach/sequences/${a.id}` }] };
     default:
@@ -226,6 +227,8 @@ export default function OutreachDashboardPage() {
   }), [d, sequences.data]);
   const allDone = steps.sender && steps.leads && steps.sequence;
   const isViewer = role === 'client_viewer';
+  // everything the AI wrote that waits for this person (AI → Needs you, the same number as the sidebar badge)
+  const needsYou = useNeedsYouCounts(workspace?.id, true, !isViewer).data?.total ?? 0;
 
   if (dash.isLoading) return <PageLoader />;
   if (dash.isError) return <ErrorBox message={(dash.error as Error).message} />;
@@ -310,13 +313,9 @@ export default function OutreachDashboardPage() {
                         <span className="flex items-center gap-2 text-sm text-gray-700"><CheckSquare className="w-4 h-4 text-amber-600" /> Open tasks</span>
                         <Badge tone={d.tasks_open > 0 ? 'amber' : 'gray'}>{d.tasks_open}</Badge>
                       </Link>
-                      <Link href="/outreach/tasks?kind=review_ai_draft" className="flex items-center justify-between py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
-                        <span className="flex items-center gap-2 text-sm text-gray-700"><Sparkles className="w-4 h-4 text-purple-600" /> Review AI Personalization tasks</span>
-                        <Badge tone={d.drafts_awaiting > 0 ? 'purple' : 'gray'}>{d.drafts_awaiting}</Badge>
-                      </Link>
-                      <Link href="/outreach/ai-review" className="flex items-center justify-between py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
-                        <span className="flex items-center gap-2 text-sm text-gray-700"><Wand2 className="w-4 h-4 text-purple-600" /> AI Personalization lines to review</span>
-                        <Badge tone={(d.ai_lines_awaiting ?? 0) > 0 ? 'purple' : 'gray'}>{d.ai_lines_awaiting ?? 0}</Badge>
+                      <Link href={hubHref.needsYou()} className="flex items-center justify-between py-2.5 hover:bg-gray-50 -mx-2 px-2 rounded-lg">
+                        <span className="flex items-center gap-2 text-sm text-gray-700"><Sparkles className="w-4 h-4 text-purple-600" /> AI: needs you</span>
+                        <Badge tone={needsYou > 0 ? 'purple' : 'gray'}>{needsYou}</Badge>
                       </Link>
                     </>
                   )}

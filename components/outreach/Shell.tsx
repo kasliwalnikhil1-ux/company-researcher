@@ -2,33 +2,14 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, LifeBuoy, BookOpen, Mail, HelpCircle } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useOutreachRealtime } from '@/lib/outreach/queries';
 import { applyAccent, isHexColor, isHttpsUrl, productName, useBranding, type Branding } from '@/lib/outreach/branding';
-import { aiReviewCountKey } from './OutreachNav';
 import { useAuth } from '@/contexts/AuthContext';
 import { useNotificationsRealtime, type IncomingNotification } from '@/lib/outreach/notes';
 import MentionToast from './inbox/notes/MentionToast';
-
-/** Keeps the "AI review" badge fresh: `outreach_ai_values` is in the realtime publication. */
-function useAiReviewRealtime(ws: string | null | undefined, enabled: boolean) {
-  const qc = useQueryClient();
-  useEffect(() => {
-    if (!ws || !enabled) return;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const ch = supabase.channel(`outreach-ai-review:${ws}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_ai_values', filter: `workspace_id=eq.${ws}` }, () => {
-        // a batch writes many rows at once: refresh once per second at most
-        if (timer) return;
-        timer = setTimeout(() => { timer = null; qc.invalidateQueries({ queryKey: aiReviewCountKey(ws) }); }, 1000);
-      })
-      .subscribe();
-    return () => { if (timer) clearTimeout(timer); supabase.removeChannel(ch); };
-  }, [ws, enabled, qc]);
-}
+import { changeHref, longDate, useBilling } from '@/lib/outreach/billing';
 
 function BrandMark({ branding, fallback }: { branding: Branding; fallback: string }) {
   const [failed, setFailed] = useState(false);
@@ -74,10 +55,13 @@ function HelpMenu({ branding }: { branding: Branding }) {
 }
 
 export default function OutreachShell({ children }: { children: React.ReactNode }) {
-  const { workspace, suspended, isClientViewer } = useWorkspace();
+  const { workspace, suspended, isClientViewer, isOwner } = useWorkspace();
+  // plan state for the banners (billing v2): trial ending, trial ended, subscription ended, client access not on the plan
+  const billing = useBilling(workspace?.id).data;
+  const plan = billing?.plan ?? workspace?.plan;
+  const trialDays = billing?.enforced && plan === 'trial' ? billing.trial?.days_left ?? null : null;
   const { user } = useAuth();
   useOutreachRealtime(workspace?.id);
-  useAiReviewRealtime(workspace?.id, !isClientViewer);
   // Private notes: the signed-in user's notification stream (bell badge + toast for a fresh @mention)
   const [toasts, setToasts] = useState<IncomingNotification[]>([]);
   useNotificationsRealtime(workspace?.id, user?.id, (n) => setToasts((t) => [...t.filter((x) => x.id !== n.id), n].slice(-3)));
@@ -109,7 +93,22 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           {isClientViewer
             ? <span>This workspace is paused. Your data is safe and read-only for now.{branding.support_email ? <> Questions: <a className="underline font-medium" href={`mailto:${branding.support_email}`}>{branding.support_email}</a></> : null}</span>
-            : <span>This workspace is suspended for non-payment. Senders are paused and the workspace is read-only. They resume on their own once billing is fixed. <Link href="/outreach/billing" className="underline font-medium">Update billing</Link></span>}
+            : plan === 'trial_expired'
+              ? <span>The trial has ended. The account is disconnected and nothing is being sent. Everything is kept{billing?.data_delete_after ? ` until ${longDate(billing.data_delete_after)}` : ' for 30 days'}. {isOwner ? <Link href={changeHref()} className="underline font-medium">Subscribe</Link> : 'The workspace owner can subscribe on the Billing page.'}</span>
+              : plan === 'cancelled'
+                ? <span>This subscription has ended. Senders are paused and the workspace is read-only{billing?.data_delete_after ? `; your data is kept until ${longDate(billing.data_delete_after)}` : ''}. {isOwner ? <Link href={changeHref()} className="underline font-medium">Subscribe again</Link> : 'The workspace owner can subscribe again on the Billing page.'}</span>
+                : <span>This workspace is suspended for non-payment. Senders are paused and the workspace is read-only. They resume on their own once billing is fixed. {isOwner ? <Link href="/outreach/billing" className="underline font-medium">Update billing</Link> : 'The workspace owner can fix it on the Billing page.'}</span>}
+        </div>
+      )}
+      {trialDays != null && trialDays <= 2 && !isClientViewer && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-sm px-6 py-2 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span>{trialDays <= 0 ? 'Your trial ends today.' : `Your trial ends in ${trialDays} day${trialDays === 1 ? '' : 's'}.`} Subscribe to keep your account connected. {isOwner ? <Link href={changeHref()} className="underline font-medium">Subscribe</Link> : 'The workspace owner can subscribe on the Billing page.'}</span>
+        </div>
+      )}
+      {billing?.cancel_at_period_end && !suspended && isOwner && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-sm px-6 py-2 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>Your subscription ends on {longDate(billing.current_period_end)}. <Link href="/outreach/billing" className="underline font-medium">Keep it</Link></span>
         </div>
       )}
       {workspace?.stripe_status === 'past_due' && !suspended && !isClientViewer && (
@@ -118,7 +117,14 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
         </div>
       )}
       <div className="flex-1 overflow-auto">
-        <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto w-full">{children}</div>
+        <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto w-full">
+          {billing?.access_blocked === 'client_viewer_plan' ? (
+            <div className="max-w-xl mx-auto mt-16 text-center">
+              <h1 className="text-lg font-semibold text-gray-900">Your agency&apos;s plan no longer includes client access</h1>
+              <p className="text-sm text-gray-600 mt-2">Nothing was deleted. Your access comes back as soon as the agency&apos;s plan includes it again.{branding.support_email ? <> Questions: <a className="underline" href={`mailto:${branding.support_email}`}>{branding.support_email}</a></> : null}</p>
+            </div>
+          ) : children}
+        </div>
       </div>
       <MentionToast items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>

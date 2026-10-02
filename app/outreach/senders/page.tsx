@@ -3,13 +3,14 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Contact, Lock, Plus, Search, X } from 'lucide-react';
+import { AlertTriangle, Contact, Lock, Plus, Search, X } from 'lucide-react';
 import { RunningDryBadge } from '@/components/outreach/senders/RunningDry';
 import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/senders/insights';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
-import { PROVIDER_LABELS, STATUS_OPTIONS, isAbandonedSignIn, isFuture, scheduleSummary, statusReasonText } from '@/components/outreach/senders/helpers';
+import { PROVIDER_LABELS, STATUS_OPTIONS, addAccountAction, disconnectedReasonText, isAbandonedSignIn, isFuture, scheduleSummary, statusReasonText } from '@/components/outreach/senders/helpers';
+import { accountsMeter, changeHref, useBilling } from '@/lib/outreach/billing';
 import type { Provider, Sender } from '@/lib/outreach/types';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn } from '@/lib/utils';
@@ -39,6 +40,7 @@ function Budget({ label, b }: { label: string; b?: Usage }) {
 /** Why a connected sender may still be sending little or nothing, from the sender row itself. */
 function blockedHint(s: SenderV2): string | null {
   if (isAbandonedSignIn(s)) return `${statusReasonText(s.status_reason) ?? 'Sign-in not completed'}: open the sender and send a fresh link`;
+  if (s.status === 'disconnected') return disconnectedReasonText(s.status_reason) ?? 'The connected account was removed';
   if (s.status !== 'ok') return s.status === 'connecting' || s.status === 'error' ? statusReasonText(s.status_reason) : null;   // the pill says the state; a sign-in reason goes under it
   if (s.provider_warning) return 'Paused after an Instagram warning';
   if (isFuture(s.paused_until)) return `Resting until ${fmtDate(s.paused_until)}`;
@@ -64,8 +66,9 @@ function HourRemaining({ senderId }: { senderId: string }) {
 
 export default function SendersPage() {
   const router = useRouter();
-  const { workspace, isManager, canWrite } = useWorkspace();
+  const { workspace, isManager, isOwner, canWrite } = useWorkspace();
   const ws = workspace?.id;
+  const billing = useBilling(ws);
   const senders = useSenders(ws);
   const clients = useClients(ws);
   const dash = useDashboard(ws);
@@ -102,11 +105,41 @@ export default function SendersPage() {
   }, [senders.data]);
   const channels = (Object.keys(PROVIDER_LABELS) as Provider[]).filter((p) => channelCounts.has(p) || p === channel);
 
+  // Accounts are bought up front: the meter, and what Connect turns into once every account on the plan is in use.
+  const slots = billing.data?.accounts;
+  const limit = accountsMeter(slots);
+  const meter = limit && limit.billed > 0 ? limit : null;   // a lapsed plan has no accounts to show; the banner at the top covers it
+  const atLimit = !!limit?.full;
+  const addAccount = addAccountAction(billing.data);
+  const connect = !isManager || !canWrite ? null
+    : !atLimit ? <Link href="/outreach/senders/new"><Button><Plus className="w-4 h-4" /> Connect sender</Button></Link>
+      : isOwner ? <Link href={addAccount.href}><Button><Plus className="w-4 h-4" /> {addAccount.label}</Button></Link>
+        : <span title="Every account on the plan is in use. The workspace owner can add accounts on the Billing page."><Button disabled><Plus className="w-4 h-4" /> Connect sender</Button></span>;
+
   return (
     <div>
       <PageHeader title="Senders" subtitle="LinkedIn, Instagram and WhatsApp accounts and mailboxes that run your outreach"
-        actions={isManager && canWrite ? <Link href="/outreach/senders/new"><Button><Plus className="w-4 h-4" /> Connect sender</Button></Link> : null} />
+        actions={meter || connect ? (
+          <>
+            {meter && (
+              <div className="min-w-[150px]" title="An account is a LinkedIn account, a mailbox, an Instagram account or a WhatsApp number">
+                <div className="text-xs text-gray-500 whitespace-nowrap"><span className="font-medium text-gray-900 tabular-nums">{meter.text}</span>{slots?.reserved ? ` · ${slots.reserved} being connected` : ''}</div>
+                <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={meter.billed} aria-valuenow={meter.used} aria-label="Accounts used">
+                  <div className={cn('h-full rounded-full', meter.used > meter.billed ? 'bg-red-500' : meter.full ? 'bg-amber-500' : 'bg-indigo-500')} style={{ width: `${meter.pct}%` }} />
+                </div>
+              </div>
+            )}
+            {connect}
+          </>
+        ) : null} />
       <SendersSubnav />
+
+      {!!slots?.over_limit && limit && (
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 mb-4 rounded-xl border text-sm bg-amber-50 text-amber-800 border-amber-200">
+          <div className="flex items-start gap-2 flex-1 min-w-0"><AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" /><div className="min-w-0">{slots.over_limit} account{slots.over_limit === 1 ? ' is' : 's are'} paused because your plan has {limit.billed}. Add accounts or remove some.{!isOwner && ' The workspace owner can add accounts on the Billing page.'}</div></div>
+          {isOwner && <Link href={changeHref({ accounts: Math.max(slots.used, limit.billed + 1) })} className="shrink-0"><Button size="sm">Add accounts</Button></Link>}
+        </div>
+      )}
 
       {channels.length > 1 || channel ? (
         <div className="flex flex-wrap items-center gap-2 mb-3" role="group" aria-label="Channel">
@@ -143,7 +176,7 @@ export default function SendersPage() {
       {senders.isLoading ? <Spinner className="min-h-[50vh]" /> : senders.isError ? <ErrorBox message={(senders.error as Error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<Contact className="w-6 h-6" />} title={senders.data?.length ? 'No senders match these filters' : 'No senders connected'}
           description={senders.data?.length ? 'Try clearing the search, channel, status or client filter.' : 'Connect a LinkedIn, Instagram or WhatsApp account, or a mailbox, to start sending. The account owner signs in through a hosted page; you never handle their password.'}
-          action={senders.data?.length ? <Button variant="secondary" onClick={clearFilters}>Clear filters</Button> : isManager && canWrite ? <Link href="/outreach/senders/new"><Button>Connect sender</Button></Link> : undefined} />
+          action={senders.data?.length ? <Button variant="secondary" onClick={clearFilters}>Clear filters</Button> : isManager && canWrite ? (atLimit ? connect : <Link href="/outreach/senders/new"><Button>Connect sender</Button></Link>) : undefined} />
       ) : (
         <>
         <Table>
@@ -173,10 +206,12 @@ export default function SendersPage() {
                   </Td>
                   <Td>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <StatusPill status={s.status} reason={s.status_reason} />
+                      <StatusPill status={s.status} reason={statusReasonText(s.status_reason)} />
+                      {s.status === 'paused' && s.status_reason === 'over_plan_limit' && <Badge tone="amber" className="cursor-help"><span title="The plan has fewer accounts than are connected. It resumes once the plan has room for it.">Paused by plan</span></Badge>}
                       {isDry && <RunningDryBadge alert={dryAlert} />}
                     </div>
                     {hint && <div className="text-[11px] text-amber-700 mt-1 max-w-[220px]">{hint}</div>}
+                    {s.status === 'disconnected' && isManager && <Link href={`/outreach/senders/${s.id}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="inline-block text-xs font-medium text-indigo-600 hover:underline mt-0.5">Reconnect</Link>}
                   </Td>
                   <Td><HealthBar score={s.health_score} /></Td>
                   <Td>{s.provider === 'LINKEDIN'

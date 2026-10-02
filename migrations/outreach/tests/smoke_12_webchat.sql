@@ -13,7 +13,7 @@ begin
   select user_id into u_viewer from platform_user_access where status = 'active' order by created_at limit 1 offset 2;
   if u_viewer is null then raise exception 'SMOKE FAIL: this test needs three active app users'; end if;
 
-  insert into outreach_workspaces(name, slug, created_by, plan) values ('smoke12', 'smoke12-' || encode(gen_random_bytes(4),'hex'), u_owner, 'agency') returning id into ws;
+  insert into outreach_workspaces(name, slug, created_by, plan) values ('smoke12', 'smoke12-' || encode(gen_random_bytes(4),'hex'), u_owner, 'scale') returning id into ws;
   perform outreach_seed_workspace_defaults(ws);
   insert into outreach_clients(workspace_id, name) values (ws, 'Client A') returning id into ca;
   insert into outreach_clients(workspace_id, name) values (ws, 'Client B') returning id into cb;

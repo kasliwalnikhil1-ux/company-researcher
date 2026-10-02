@@ -3,19 +3,27 @@
 // Settings → Websites → {inbox}: one component per §12 section of web-chat-PRD.md. Each section edits a draft copy of its
 // part of the settings and saves through outreach_webchat_inbox_update (nested merge, versioned, config_version bump).
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Copy, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { useClients, useMembers } from '@/lib/outreach/queries';
 import { Badge, Button, Card, Spinner, fmtDate, timeAgo } from '@/components/outreach/ui';
-import { CopyField, ConfirmModal, Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
+import { CopyButton, CopyField, ConfirmModal, Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
+import { WEBSITES_PATH } from './WebsitesFrame';
+import { imageHosts, useProductSearch } from '@/lib/outreach/catalogue';
+import { ProductImage } from '@/components/outreach/products/ProductCards';
 import WidgetPreview from './WidgetPreview';
+import { ENDED_BY, fmtCallLength, voiceLanguage, type VoiceReport } from '@/lib/outreach/voice';
+import Link from 'next/link';
+import ModeSwitch from '@/components/outreach/ai/hub/ModeSwitch';
+import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
+import { MODE_LINE, WEBSITE_WHEN_LABEL, hubHref, websiteHubMode, type HubMode, type WebsiteWhen } from '@/lib/outreach/aiHub';
 import {
-  CSP_NOTES, HMAC_SAMPLES, INSTALL_GUIDES, SUPABASE_URL, fmtSeconds, snippetHtml, standaloneUrl, useAiTurns, useCampaigns, useCannedResponses, useDeleteCampaign, useDeleteCanned,
+  CSP_NOTES, HMAC_SAMPLES, INSTALL_GUIDES, OWN_BUTTON_ATTRIBUTES, OWN_BUTTON_SNIPPETS, SOURCE_LABELS, SUPABASE_URL, fmtSeconds, snippetHtml, standaloneUrl, useCampaigns, useCannedResponses, useDeleteCampaign, useDeleteCanned,
   useRegenerateHmac, useRestoreSettings, useSaveCampaign, useSaveCanned, useSetInboxMembers, useSettingsHistory, useUpdateInbox, useWebchatMailboxes, useWebchatReport,
-  type BusinessHours, type InboxPatch, type PreChatField, type UrlRule, type WebchatCampaign, type WebchatInbox, type WebchatSettings,
+  type BusinessHours, type InboxPatch, type PreChatField, type ProductsReport, type ProductsReportRow, type UrlRule, type WebchatCampaign, type WebchatInbox, type WebchatSettings,
 } from '@/lib/outreach/webchat';
 
 export interface SectionProps { inbox: WebchatInbox; ws: string; canEdit: boolean; toast: (m: string, kind?: 'error') => void }
@@ -121,7 +129,7 @@ export function AppearanceSection(p: SectionProps) {
           <div><Label>Font</Label><select className={field} value={draft.font} onChange={(e) => set({ font: e.target.value })} disabled={!p.canEdit}>{FONTS.map((f) => <option key={f}>{f}</option>)}</select></div>
           <div><Label hint="≤ 50">Welcome heading</Label><input className={field} maxLength={50} value={draft.welcome_title} onChange={(e) => set({ welcome_title: e.target.value })} disabled={!p.canEdit} /></div>
           <div><Label hint="≤ 50">Welcome tagline</Label><input className={field} maxLength={50} value={draft.welcome_tagline} onChange={(e) => set({ welcome_tagline: e.target.value })} disabled={!p.canEdit} /></div>
-          <div><Label hint="50×50, https">Logo URL</Label><input className={field} value={draft.logo_url ?? ''} onChange={(e) => set({ logo_url: e.target.value || null })} disabled={!p.canEdit} placeholder="https://…/logo.png" /></div>
+          <div><Label hint="https; any proportions, shown whole">Logo URL</Label><input className={field} value={draft.logo_url ?? ''} onChange={(e) => set({ logo_url: e.target.value || null })} disabled={!p.canEdit} placeholder="https://…/logo.png" /></div>
           <div><Label hint="50×50, https">Bot avatar URL</Label><input className={field} value={draft.bot_avatar_url ?? ''} onChange={(e) => set({ bot_avatar_url: e.target.value || null })} disabled={!p.canEdit} /></div>
           <div><Label>Accent colour</Label><div className="flex items-center gap-2"><input type="color" value={/^#[0-9a-f]{6}$/i.test(draft.accent) ? draft.accent : '#4f46e5'} onChange={(e) => set({ accent: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Accent colour" /><input className={field} value={draft.accent} onChange={(e) => set({ accent: e.target.value })} disabled={!p.canEdit} /></div>{!contrastOk && <p className="text-xs text-amber-700 mt-1">Contrast below 4.5:1 with both white and dark text — pick a darker or lighter accent (WCAG AA).</p>}</div>
           <div><Label>Widget background</Label><div className="flex items-center gap-2"><input type="color" value={draft.widget_bg} onChange={(e) => set({ widget_bg: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Widget background" /><input className={field} value={draft.widget_bg} onChange={(e) => set({ widget_bg: e.target.value })} disabled={!p.canEdit} /></div></div>
@@ -161,15 +169,44 @@ export function LauncherSection(p: SectionProps) {
   const { draft, set, dirty, reset } = useDraft({ launcher: p.inbox.settings.launcher, popup: p.inbox.settings.popup });
   const { save, saving } = useSaveSettings(p);
   const dev = (k: 'desktop' | 'mobile', patch: Partial<WebchatSettings['launcher']['desktop']>) => set((d) => ({ ...d, launcher: { ...d.launcher, [k]: { ...d.launcher[k], ...patch } } }));
+  // "My own buttons" is the launcher's `hide`: nothing shows or opens by itself, the site's own buttons and links open the chat
+  const own = !!draft.launcher.hide;
+  const setOwn = (v: boolean) => set((d) => ({ ...d, launcher: { ...d.launcher, hide: v } }));
+  const how = 'flex items-start gap-2.5 rounded-lg border p-3 text-left';
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
       <Card title="Launcher & popup">
-        <div className="space-y-3"><LauncherDevice k="desktop" v={draft.launcher.desktop} dev={dev} canEdit={p.canEdit} /><LauncherDevice k="mobile" v={draft.launcher.mobile} dev={dev} canEdit={p.canEdit} /></div>
+        <fieldset className="mb-4">
+          <legend className="mb-2 text-sm font-medium text-gray-900">How visitors open the chat</legend>
+          <div className="grid gap-2 md:grid-cols-2">
+            <label className={cn(how, p.canEdit && 'cursor-pointer', !own ? 'border-indigo-500 bg-indigo-50/50' : 'border-gray-200')}>
+              <input type="radio" name="open-how" className="mt-0.5" checked={!own} onChange={() => setOwn(false)} disabled={!p.canEdit} />
+              <span><span className="block text-sm font-medium text-gray-900">Our launcher</span><span className="block text-xs text-gray-500">The floating button in the corner of your site.</span></span>
+            </label>
+            <label className={cn(how, p.canEdit && 'cursor-pointer', own ? 'border-indigo-500 bg-indigo-50/50' : 'border-gray-200')}>
+              <input type="radio" name="open-how" className="mt-0.5" checked={own} onChange={() => setOwn(true)} disabled={!p.canEdit} />
+              <span>
+                <span className="block text-sm font-medium text-gray-900">My own buttons</span>
+                <span className="block text-xs text-gray-500">No floating button. The chat opens only when a visitor clicks a button or link on your site.</span>
+                <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=install#own-button`} className="mt-1 inline-block text-xs font-medium text-indigo-700 hover:underline">Show me the code</Link>
+              </span>
+            </label>
+          </div>
+        </fieldset>
+        {own && (
+          <div className="mb-4">
+            <div className="divide-y divide-gray-100">
+              <SettingRow title="Let campaigns open the chat" description="Off: a proactive campaign stays silent, because there is no launcher to show it on. On: it opens the chat with its message."
+                control={<Switch checked={!!draft.launcher.campaigns_open} onChange={(v) => set((d) => ({ ...d, launcher: { ...d.launcher, campaigns_open: v } }))} label="Let campaigns open the chat" disabled={!p.canEdit} />} />
+            </div>
+            <Note className="mt-2">With your own buttons the launcher, the video bubble, the popup message and the unread previews are not shown, and the chat never opens by itself. A reply that arrives while the chat is closed shows on your own badge element (<code>data-growthxai-unread</code>). The launcher settings below apply again when you switch back to our launcher.</Note>
+          </div>
+        )}
+        <div className={cn('space-y-3', own && 'opacity-50')}><LauncherDevice k="desktop" v={draft.launcher.desktop} dev={dev} canEdit={p.canEdit} /><LauncherDevice k="mobile" v={draft.launcher.mobile} dev={dev} canEdit={p.canEdit} /></div>
         <div className="divide-y divide-gray-100 mt-2">
           <SettingRow title="Show unread count" control={<Switch checked={draft.launcher.show_unread_count} onChange={(v) => set((d) => ({ ...d, launcher: { ...d.launcher, show_unread_count: v } }))} label="Show unread count" disabled={!p.canEdit} />} />
           <SettingRow title="Show unread message previews" description="Cards above the launcher when the panel is closed." control={<Switch checked={draft.launcher.show_unread_previews} onChange={(v) => set((d) => ({ ...d, launcher: { ...d.launcher, show_unread_previews: v } }))} label="Show previews" disabled={!p.canEdit} />} />
           <SettingRow title="Online indicator dot" control={<Switch checked={draft.launcher.online_dot} onChange={(v) => set((d) => ({ ...d, launcher: { ...d.launcher, online_dot: v } }))} label="Online dot" disabled={!p.canEdit} />} />
-          <SettingRow title="Hide the launcher" description="Open the chat only from your own button (growthxai.open())." control={<Switch checked={draft.launcher.hide} onChange={(v) => set((d) => ({ ...d, launcher: { ...d.launcher, hide: v } }))} label="Hide launcher" disabled={!p.canEdit} />} />
           <SettingRow title="Popup message" description="A nudge above the launcher, once per session, never after the visitor has chatted." control={<Switch checked={draft.popup.enabled} onChange={(v) => set((d) => ({ ...d, popup: { ...d.popup, enabled: v } }))} label="Popup" disabled={!p.canEdit} />} />
         </div>
         {draft.popup.enabled && (
@@ -204,7 +241,7 @@ export function MessagesSection(p: SectionProps) {
         {T('handoff_message', 'Handoff message', 'when the assistant hands over and someone is online')}
         {T('handoff_offline_message', 'Handoff message (offline)')}
         {T('end_message', 'End-of-chat message', 'with the rating prompt')}
-        <div className="md:col-span-2"><Label hint="https; the link in “By chatting with us, you agree to our Privacy Policy” under the chat. Empty = the platform policy">Privacy policy link</Label><input className={field} type="url" value={draft.privacy_url ?? ''} onChange={(e) => set({ privacy_url: e.target.value.trim() || null })} disabled={!p.canEdit} placeholder="https://your-site.com/privacy" /></div>
+        <div className="md:col-span-2"><Label hint="https; the link in “By chatting with us, you agree to our Privacy Policy”, shown under the chat until the visitor sends their first message. Empty = the platform policy">Privacy policy link</Label><input className={field} type="url" value={draft.privacy_url ?? ''} onChange={(e) => set({ privacy_url: e.target.value.trim() || null })} disabled={!p.canEdit} placeholder="https://your-site.com/privacy" /></div>
         <div className="md:col-span-2"><Label hint="one per line, ≤ 6; shown as chips on the home screen">Quick-reply chips (conversation starters)</Label><textarea className={field} rows={3} value={draft.quick_replies.join('\n')} onChange={(e) => set({ quick_replies: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean).slice(0, 6) })} disabled={!p.canEdit} placeholder={'Pricing\nBook a demo\nI need help with my account'} /></div>
       </Grid>
       <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { messages: draft } })} />
@@ -352,33 +389,60 @@ export function FeaturesSection(p: SectionProps) {
   );
 }
 
-// ---------------------------------------------------------------- AI assistant
-export function AiSection(p: SectionProps) {
+// ---------------------------------------------------------------- Website assistant
+// Off · Review · Auto, the same switch as every AI feature (AI hub). Stored as before: Off = ai_enabled false,
+// Review = ai.mode 'review', Auto · Always = 'first', Auto · Outside business hours = 'offline_only'.
+export function AiSection(p: SectionProps & { between?: React.ReactNode }) {
   const { draft, set, dirty, reset } = useDraft({ enabled: p.inbox.ai_enabled, ai: p.inbox.settings.ai });
   const { save, saving } = useSaveSettings(p);
   const sources = useQuery({ queryKey: ['outreach', p.ws, 'knowledge-sources'], queryFn: () => rpc<Array<{ id: string; title: string; kind: string; status: string; chunks: number; url: string | null }>>('knowledge_sources_list', { p_ws: p.ws }) });
-  const turns = useAiTurns(p.inbox.id, 30);
   const toggleSrc = (id: string) => set((x) => ({ ...x, ai: { ...x.ai, knowledge_source_ids: x.ai.knowledge_source_ids.includes(id) ? x.ai.knowledge_source_ids.filter((s) => s !== id) : [...x.ai.knowledge_source_ids, id] } }));
+  const hub = websiteHubMode({ ai_enabled: draft.enabled, mode: draft.ai.mode });
+  const setMode = (m: HubMode) => set((x) => (m === 'off' ? { ...x, enabled: false }
+    : { ...x, enabled: true, ai: { ...x.ai, mode: m === 'review' ? 'review' : hub.when === 'outside_hours' ? 'offline_only' : 'first' } }));
+  const setWhen = (w: WebsiteWhen) => set((x) => ({ ...x, ai: { ...x.ai, mode: w === 'outside_hours' ? 'offline_only' : 'first' } }));
   return (
     <div className="space-y-4">
-      <Card title="AI assistant">
-        <div className="divide-y divide-gray-100">
-          <SettingRow title="Assistant on" description="Answers visitors from your knowledge sources and the page they are on. Each answer uses one AI action from the workspace allowance; when the allowance is used up the widget quietly becomes live chat." control={<Switch checked={draft.enabled} onChange={(v) => set({ enabled: v })} label="Assistant" disabled={!p.canEdit} />} />
+      <Card title="Website assistant">
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-4 mb-4 border-b border-gray-100">
+          <ModeSwitch label="Website assistant mode" value={hub.mode} onChange={setMode} lines={MODE_LINE.website} disabled={!p.canEdit} />
+          {hub.mode === 'auto' && (
+            <div>
+              <Label hint="also covers times when nobody on your team is online">When</Label>
+              <select className={field} aria-label="When the assistant answers" value={hub.when} onChange={(e) => setWhen(e.target.value as WebsiteWhen)} disabled={!p.canEdit}>
+                <option value="always">{WEBSITE_WHEN_LABEL.always}</option><option value="outside_hours">{WEBSITE_WHEN_LABEL.outside_hours}</option>
+              </select>
+            </div>
+          )}
+          {hub.mode === 'review' && (
+            <div>
+              <Label hint="then the visitor gets your offline message">A suggestion waits (minutes)</Label>
+              <input type="number" min={1} max={240} className={field} aria-label="Minutes a suggestion waits for an agent" value={draft.ai.review_timeout_min ?? 10}
+                onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, review_timeout_min: Math.min(240, Math.max(1, Math.round(Number(e.target.value)) || 10)) } }))} disabled={!p.canEdit} />
+            </div>
+          )}
         </div>
+        <p className="text-xs text-gray-500 mb-3">
+          {hub.mode === 'review'
+            ? 'In Review the suggestion appears in the reply box of the chat and in AI → Needs you. The AI never sends it. Each suggestion uses one AI action from the workspace allowance.'
+            : 'The assistant answers from your knowledge sources, the shared Q&A and the page the visitor is on. Each answer uses one AI action from the workspace allowance; when the allowance is used up the widget quietly becomes live chat.'}
+        </p>
         <Grid>
-          <div><Label>Mode</Label><select className={field} value={draft.ai.mode} onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, mode: e.target.value as 'off' | 'first' | 'offline_only' } }))} disabled={!p.canEdit}><option value="off">Off</option><option value="first">AI answers first, hands off by rule</option><option value="offline_only">AI only outside business hours / when nobody is online</option></select></div>
           <div><Label hint="protects the allowance">Answers per visitor per hour</Label><input type="number" min={1} max={200} className={field} value={draft.ai.hourly_cap_per_visitor} onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, hourly_cap_per_visitor: Number(e.target.value) || 30 } }))} disabled={!p.canEdit} /></div>
           <div className="md:col-span-2"><Label hint="tone, name, what to say about pricing, links to include">Persona / brand instructions</Label><textarea className={field} rows={4} value={draft.ai.persona} onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, persona: e.target.value } }))} disabled={!p.canEdit} placeholder="You are Acme's assistant. Friendly, concise. Never quote enterprise pricing; offer a call instead." /></div>
           <div className="md:col-span-2"><Label hint="optional; anything else is politely declined">Allowed topics</Label><input className={field} value={draft.ai.allowed_topics} onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, allowed_topics: e.target.value } }))} disabled={!p.canEdit} placeholder="Acme products, pricing, onboarding, billing" /></div>
         </Grid>
         <div className="mt-4">
-          <Label hint="crawled sites, files and FAQ from Settings → AI Auto Replies → Knowledge">Knowledge sources</Label>
+          <Label hint="websites and documents from AI → Knowledge">Knowledge sources</Label>
           {sources.isLoading && <Spinner />}
-          {sources.data?.length === 0 && <p className="text-xs text-gray-500">No knowledge sources yet. Add a website crawl or files under AI Auto Replies → Knowledge, then pick them here.</p>}
+          {sources.data?.length === 0 && <p className="text-xs text-gray-500">No knowledge sources yet. Add a website or a document in <Link href={hubHref.knowledge()} className="text-indigo-700 hover:underline">AI → Knowledge</Link>, then pick it here.</p>}
           <ul className="space-y-1">
-            {(sources.data ?? []).map((s) => <li key={s.id}><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.ai.knowledge_source_ids.includes(s.id)} disabled={!p.canEdit} onChange={() => toggleSrc(s.id)} /><span className="truncate">{s.title}</span><span className="text-xs text-gray-400">{s.kind} · {s.status} · {s.chunks} chunks</span></label></li>)}
+            {/* a product catalogue is not a text to answer from: it is picked in the Products card below */}
+            {(sources.data ?? []).filter((s) => s.kind !== 'catalogue').map((s) => <li key={s.id}><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.ai.knowledge_source_ids.includes(s.id)} disabled={!p.canEdit} onChange={() => toggleSrc(s.id)} /><span className="truncate">{s.title}</span><span className="text-xs text-gray-400">{s.kind} · {s.status} · {s.chunks} chunks</span></label></li>)}
           </ul>
+          {(sources.data?.length ?? 0) > 0 && <p className="text-xs text-gray-500 mt-2">Shared Q&amp;A pairs are used too, unless a pair is limited to other places. Sources and Q&amp;A are managed in <Link href={hubHref.knowledge()} className="text-indigo-700 hover:underline">AI → Knowledge</Link>.</p>}
         </div>
+        {hub.mode !== 'auto' && <p className="text-xs text-gray-500 mt-4">The hand-off rules below apply when the assistant is on Auto.</p>}
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <div className="md:col-span-2"><Label hint="one per line; a message containing one hands off to a person">Handoff keywords</Label><textarea className={field} rows={3} value={draft.ai.handoff.keywords.join('\n')} onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, handoff: { ...x.ai.handoff, keywords: e.target.value.split('\n').map((s) => s.trim()).filter(Boolean) } } }))} disabled={!p.canEdit} /></div>
           <div><Label>Hand off after N assistant turns</Label><input type="number" min={1} max={50} className={field} value={draft.ai.handoff.max_turns} onChange={(e) => set((x) => ({ ...x, ai: { ...x.ai, handoff: { ...x.ai.handoff, max_turns: Number(e.target.value) || 6 } } }))} disabled={!p.canEdit} /></div>
@@ -388,15 +452,14 @@ export function AiSection(p: SectionProps) {
           <SettingRow title="Hand leads in an active sequence straight to a person" control={<Switch checked={draft.ai.handoff.leads_in_sequence} onChange={(v) => set((x) => ({ ...x, ai: { ...x.ai, handoff: { ...x.ai.handoff, leads_in_sequence: v } } }))} label="Leads to a person" disabled={!p.canEdit} />} />
           <SettingRow title="Show sources under answers" control={<Switch checked={draft.ai.show_sources} onChange={(v) => set((x) => ({ ...x, ai: { ...x.ai, show_sources: v } }))} label="Show sources" disabled={!p.canEdit} />} />
         </div>
-        <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ ai_enabled: draft.enabled, settings: { ai: draft.ai } })} />
+        {/* the product settings have their own card and their own save: they are left out of this one */}
+        <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => { const { products: _products, ...ai } = draft.ai; void _products; return save({ ai_enabled: draft.enabled, settings: { ai } }); }} />
       </Card>
-      <Card title="Recent answers">
-        <p className="text-xs text-gray-500 mb-2">Low-confidence and refused answers are the best candidates for new FAQ entries. Test the assistant on the Installation tab (demo page).</p>
-        {turns.isLoading && <Spinner />}
-        {turns.data?.length === 0 && <p className="text-sm text-gray-500">No answers yet.</p>}
-        <ul className="divide-y divide-gray-100 text-sm">
-          {(turns.data ?? []).map((t) => <li key={t.id} className="py-2"><div className="flex items-center gap-2 flex-wrap"><span className="font-medium text-gray-900 truncate">{t.query}</span><Badge tone={t.confidence === 'high' ? 'green' : t.confidence === 'low' ? 'amber' : 'red'}>{t.confidence}</Badge>{t.handoff && <Badge tone="gray">handoff: {t.handoff}</Badge>}{t.feedback === 1 && <span>👍</span>}{t.feedback === -1 && <span>👎</span>}<span className="text-xs text-gray-400 ml-auto">{timeAgo(t.created_at)}{t.latency_ms ? ` · ${t.latency_ms} ms` : ''}</span></div><div className="text-xs text-gray-600 mt-0.5 line-clamp-2">{t.answer}</div></li>)}
-        </ul>
+      {p.between}
+      {/* What the assistant wrote for this website: the Activity table, pre-filtered (it replaced "Recent answers"). */}
+      <Card title="What the assistant wrote" actions={<Link href={hubHref.activity({ feature: 'website', where: p.inbox.id })} className="text-xs font-medium text-indigo-700 hover:underline">Open in Activity</Link>}>
+        <p className="text-xs text-gray-500 mb-3">Answers sent to visitors and suggestions written for your agents. Questions the assistant could not answer wait in <Link href={hubHref.needsYou({ type: 'question', where: p.inbox.id, mine: false })} className="text-indigo-700 hover:underline">AI → Needs you</Link>. Test the assistant on the Installation tab (demo page).</p>
+        <ActivityTable ws={p.ws} fixed={{ feature: 'website', where: p.inbox.id }} pageSize={20} emptyText="The assistant has not written anything for this website in this period." />
       </Card>
     </div>
   );
@@ -518,6 +581,12 @@ export function InstallSection(p: SectionProps) {
   const g = INSTALL_GUIDES.find((x) => x.key === guide) ?? INSTALL_GUIDES[0];
   const apiHost = SUPABASE_URL;
   const [copied, setCopied] = useState(false);
+  // "Show me the code" on the Launcher tab links here
+  useEffect(() => { if (window.location.hash === '#own-button') document.getElementById('own-button')?.scrollIntoView({ block: 'start' }); }, []);
+  // product pictures on the cards come from the catalogue's own image hosts: a site with a CSP has to allow them
+  const recommends = (p.inbox.settings.ai.products?.catalogue_ids?.length ?? 0) > 0;
+  const sample = useProductSearch(p.ws, p.inbox.id, '', recommends);
+  const productHosts = recommends ? imageHosts((sample.data ?? []).map((x) => x.image)) : [];
   return (
     <div className="space-y-4">
       <Card title="Install">
@@ -527,6 +596,29 @@ export function InstallSection(p: SectionProps) {
           {seen.length ? <div className="text-emerald-700">Seen on {seen.slice(0, 3).map(([o, at]) => <span key={o} className="mr-2"><b>{o.replace(/^https?:\/\//, '')}</b> {timeAgo(at)}</span>)}</div> : <div className="text-amber-700">Not seen on any site yet. Reload a page with the snippet installed and this updates within a minute.</div>}
         </div>
       </Card>
+      <div id="own-button" className="scroll-mt-4">
+        <Card title="Use your own button">
+          <p className="text-xs text-gray-500 mb-3">Any element of your site can open the chat: add an attribute, no JavaScript needed. Buttons added later by your site (single-page apps, popups, carts) work too. To have nothing but your own buttons, choose <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=launcher`} className="text-indigo-700 hover:underline">My own buttons</Link> on the Launcher tab.</p>
+          <div className="space-y-2">
+            {OWN_BUTTON_SNIPPETS.map((s) => (
+              <div key={s.key}>
+                <div className="mb-1 flex items-center justify-between gap-2"><span className="text-xs font-medium text-gray-700">{s.label}</span><CopyButton value={s.code} /></div>
+                <pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{s.code}</pre>
+              </div>
+            ))}
+          </div>
+          <table className="mt-4 w-full text-xs">
+            <thead><tr className="text-left text-gray-500"><th className="py-1 pr-3 font-medium">Attribute</th><th className="py-1 font-medium">What a click does</th></tr></thead>
+            <tbody className="divide-y divide-gray-100">{OWN_BUTTON_ATTRIBUTES.map(([a, d]) => <tr key={a}><td className="py-1.5 pr-3 align-top whitespace-nowrap"><code>{a}</code></td><td className="py-1.5 text-gray-600">{d}</td></tr>)}</tbody>
+          </table>
+          <ul className="mt-3 list-disc pl-5 text-xs text-gray-500 space-y-1">
+            <li><b>Webflow / Framer:</b> add the attribute under the element&rsquo;s Custom attributes (name <code>data-growthxai</code>, value <code>open</code>).</li>
+            <li>While the chat is open, <code>&lt;html&gt;</code> has the class <code>growthxai-open</code>, and every <code>open</code> / <code>toggle</code> element has <code>aria-expanded=&quot;true&quot;</code>, so you can style both states.</li>
+            <li>If your own click handler calls <code>preventDefault()</code>, yours wins and the chat stays closed.</li>
+            <li>A <code>?gx_q=</code> link only fills the message box. It never sends a message for the visitor.</li>
+          </ul>
+        </Card>
+      </div>
       <Card title="Standalone page">
         <p className="text-xs text-gray-500 mb-2">A hosted full-page chat for link-in-bio, email signatures and the &quot;continue the chat&quot; link in continuity emails.</p>
         <CopyField value={standaloneUrl(p.inbox.website_token)} />
@@ -534,18 +626,25 @@ export function InstallSection(p: SectionProps) {
       </Card>
       <Card title="Content-Security-Policy">
         <p className="text-xs text-gray-500 mb-2">If your site sets a CSP, allow:</p>
-        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled, !!(p.inbox.settings?.launcher?.video?.enabled !== false && p.inbox.settings?.launcher?.video?.url)).join('\n')}</pre>
+        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled, !!(p.inbox.settings?.launcher?.video?.enabled !== false && p.inbox.settings?.launcher?.video?.url), productHosts, !!p.inbox.settings?.voice?.enabled).join('\n')}</pre>
       </Card>
       <Card title="SDK">
         <p className="text-xs text-gray-500">Global <code>window.growthxai</code> (alias <code>window.kaptured</code>), ready event <code>growthxai:ready</code>.</p>
-        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto mt-2">{`growthxai.open() / close() / toggle()          growthxai.setMode('drawer')
+        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto mt-2">{`growthxai.open({ mode }) / close() / toggle()   growthxai.setMode('drawer')
+growthxai.ask('Do you ship to Dubai?', { context, mode, prefill, label })
+growthxai.call()                                (a voice call with the assistant, when Voice is on)
 growthxai.send('Hi!')                           growthxai.setUser('u-42', { email, name, identifier_hash })
 growthxai.setCustomAttributes({ plan: 'pro' })  growthxai.setLabel('pricing-page')
 growthxai.setLocale('es')                       growthxai.setColorScheme('dark')
 growthxai.trackEvent('signup_clicked', {...})   growthxai.reset() / destroy()
 growthxai.on('message', cb)   events: ready, opened, closed, message, message:sent, conversation:started,
                                       conversation:resolved, unread, csat:submitted, identified, handoff, error,
-                                      video:opened, video:closed, video:question, video:dismissed`}</pre>
+                                      trigger { kind, text? }  (fired before the chat opens: button, ask, input, link,
+                                      header_button, element_button, selection, shortcut),
+                                      product:shown { ids }, product:clicked { id, action }, product:added_to_cart { id, variant_id },
+                                      video:opened, video:closed, video:question, video:dismissed,
+                                      voice:started { call_id }, voice:ended { call_id, duration_s, reason },
+                                      voice:switched { handoff }, voice:error { code }`}</pre>
       </Card>
     </div>
   );
@@ -591,7 +690,7 @@ export function ReportsSection(p: SectionProps) {
       {d && (
         <div className="space-y-4">
           <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
-            <S l="Conversations" v={d.conversations} h={Object.entries(d.by_source).map(([k, v]) => `${k} ${v}`).join(' · ')} />
+            <S l="Conversations" v={d.conversations} h={Object.entries(d.by_source).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${SOURCE_LABELS[k] ?? k} ${v}`).join(' · ')} />
             <S l="Resolved" v={d.resolved} h={`${d.ai_resolved} by the assistant alone`} />
             <S l="First response (median / p90)" v={`${fmtSeconds(d.first_response_median_s)} / ${fmtSeconds(d.first_response_p90_s)}`} />
             <S l="Resolution time (median)" v={fmtSeconds(d.resolution_median_s)} />
@@ -600,12 +699,89 @@ export function ReportsSection(p: SectionProps) {
             <S l="Visitors → leads" v={d.visitor_to_lead} h={`${d.sequences_stopped} sequences stopped by a chat`} />
             <S l="Continuity emails" v={d.continuity.sent} h={d.continuity.failed ? `${d.continuity.failed} failed` : undefined} />
           </div>
+          {Object.keys(d.by_source).length > 1 && (
+            <div><Label hint="how the conversation was opened">Conversations by source</Label>
+              <ul className="text-sm grid gap-x-6 sm:grid-cols-2">{Object.entries(d.by_source).sort((a, b) => b[1] - a[1]).map(([k, v]) => <li key={k} className="py-0.5 flex justify-between gap-3"><span className="truncate">{SOURCE_LABELS[k] ?? k}</span><span className="text-gray-500 tabular-nums">{v}</span></li>)}</ul>
+            </div>
+          )}
+          {d.products && (d.products.answers_with_products > 0 || d.products.cards_shown > 0 || d.products.not_found.length > 0) && <ProductsReportBlock r={d.products} />}
+          {d.voice && (d.voice.calls > 0 || !!p.inbox.settings.voice?.enabled) && <VoiceReportBlock r={d.voice} />}
           {d.csat_by_agent.length > 0 && <div><Label>CSAT by agent</Label><ul className="text-sm">{d.csat_by_agent.map((a) => <li key={a.user_id}>{a.name}: {a.avg} / 5 ({a.n})</li>)}</ul></div>}
           {d.top_unanswered.length > 0 && <div><Label hint="candidates for new FAQ entries">Top unanswered questions</Label><ul className="text-sm divide-y divide-gray-100">{d.top_unanswered.map((u) => <li key={u.query} className="py-1 flex justify-between gap-3"><span className="truncate">{u.query}</span><span className="text-gray-400">{u.n}</span></li>)}</ul></div>}
           {d.by_day.length > 0 && <div><Label>Conversations per day</Label><div className="flex items-end gap-0.5 h-16">{d.by_day.map((x) => { const max = Math.max(...d.by_day.map((y) => y.n)); return <div key={x.day} title={`${x.day}: ${x.n}`} className="flex-1 bg-indigo-500/80 rounded-sm" style={{ height: `${Math.max(4, (x.n / max) * 100)}%` }} />; })}</div></div>}
         </div>
       )}
     </Card>
+  );
+}
+
+/** Reports → Voice (069): calls, how they ended, what was asked, what it cost. */
+function VoiceReportBlock({ r }: { r: VoiceReport }) {
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+  const rows = (o: Record<string, number>, label: (k: string) => string) => Object.entries(o).sort((a, b) => b[1] - a[1]).map(([k, v]) => <li key={k} className="py-0.5 flex justify-between gap-3"><span className="truncate">{label(k)}</span><span className="text-gray-500 tabular-nums">{v} · {pct(v, r.calls)}</span></li>);
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+      <div className="text-sm font-medium text-gray-900">Voice</div>
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <S l="Calls" v={r.calls} h={r.per_100_visitors != null ? `${r.per_100_visitors} per 100 visitors` : undefined} />
+        <S l="Minutes" v={r.minutes} h={r.avg_seconds != null ? `average ${fmtCallLength(r.avg_seconds)}` : undefined} />
+        <S l="Resolved" v={pct(r.resolved, r.judged)} h={`${r.judged} calls judged after the call`} />
+        <S l="Phone numbers collected" v={r.with_phone} h={`${r.with_name} names · ${r.leads} leads`} />
+      </div>
+      <div className="text-xs text-gray-600">This month: {r.pool.used}{r.pool.limit != null ? ` of ${r.pool.limit}` : ''} minutes{r.pool.test_used ? ` (${r.pool.test_used} in tests)` : ''}{r.cost_usd != null ? ` · $${Number(r.cost_usd).toFixed(2)} billed to your own voice account in this period` : ''}.</div>
+      {r.calls > 0 && (
+        <div className="grid gap-4 md:grid-cols-3">
+          <div><Label>How calls ended</Label><ul className="text-sm">{rows(r.ended_by, (k) => ENDED_BY[k] ?? k)}</ul></div>
+          <div><Label hint={`${pct(r.switched, r.calls)} went on in chat`}>Handed to the team</Label><ul className="text-sm">{Object.keys(r.handoff_reasons).length ? rows(r.handoff_reasons, (k) => k.replace(/_/g, ' ')) : <li className="text-gray-500">None</li>}</ul></div>
+          <div><Label>Languages</Label><ul className="text-sm">{rows(r.languages, (k) => voiceLanguage(k))}</ul></div>
+        </div>
+      )}
+      {(r.top_questions.length > 0 || r.unanswered.length > 0) && (
+        <div className="grid gap-4 md:grid-cols-2">
+          {r.top_questions.length > 0 && <div><Label>Asked by voice</Label><ul className="text-sm divide-y divide-gray-100">{r.top_questions.slice(0, 8).map((x) => <li key={x.query} className="py-1 flex justify-between gap-3"><span className="truncate">{x.query}</span><span className="text-gray-400">{x.n}</span></li>)}</ul></div>}
+          {r.unanswered.length > 0 && <div><Label hint="add a Q&A or a source for these">Not answered by voice</Label><ul className="text-sm divide-y divide-gray-100">{r.unanswered.slice(0, 8).map((x) => <li key={x.query} className="py-1 flex justify-between gap-3"><span className="truncate">{x.query}</span><span className="text-gray-400">{x.n}</span></li>)}</ul></div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProductsReportList({ title, rows }: { title: string; rows: ProductsReportRow[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="min-w-0"><Label>{title}</Label>
+      <ul className="text-sm divide-y divide-gray-100">{rows.slice(0, 5).map((x) => (
+        <li key={x.id} className="py-1.5 flex items-center gap-2">
+          <ProductImage src={x.image} title={x.title} className="h-8 w-8 flex-shrink-0 rounded text-xs" />
+          <a href={x.url} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate hover:text-indigo-700 hover:underline" title={x.title}>{x.title}</a>
+          {x.removed && <Badge tone="gray">no longer sold</Badge>}
+          <span className="text-gray-500 tabular-nums">{x.n}</span>
+        </li>))}</ul>
+    </div>
+  );
+}
+/** Reports → Products: what the assistant recommended, what visitors did with it, and what they asked for that was not found. */
+function ProductsReportBlock({ r }: { r: ProductsReport }) {
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : '—');
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+      <div className="text-sm font-medium text-gray-900">Products</div>
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+        <S l="Answers with products" v={r.answers_with_products} h={`${pct(r.answers_with_products, r.answers)} of AI answers`} />
+        <S l="Cards shown" v={r.cards_shown} />
+        <S l="Clicks" v={r.clicks} h={`${pct(r.clicks, r.cards_shown)} click rate`} />
+        <S l="Add-to-carts" v={r.add_to_carts} />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2"><ProductsReportList title="Top recommended" rows={r.top_recommended} /><ProductsReportList title="Top clicked" rows={r.top_clicked} /></div>
+      {r.not_found.length > 0 && (
+        <div><Label hint="add the product, or a Q&A that says what you offer instead">Asked for, not found</Label>
+          <ul className="text-sm divide-y divide-gray-100">{r.not_found.slice(0, 10).map((x, i) => (
+            <li key={i} className="py-1 flex items-center justify-between gap-3"><span className="truncate" title={x.query}>{x.query}</span>
+              <span className="flex flex-shrink-0 items-center gap-3 text-xs text-gray-400">{timeAgo(x.at)}{x.chat_id && <Link href={`/outreach/inbox/${x.chat_id}`} className="text-indigo-700 hover:underline">Open chat</Link>}</span>
+            </li>))}</ul>
+        </div>
+      )}
+    </div>
   );
 }
 

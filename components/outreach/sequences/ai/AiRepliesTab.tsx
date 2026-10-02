@@ -1,6 +1,6 @@
 'use client';
 
-// Sequence builder → AI replies: the whole settings UI for one sequence (changes doc §4.1, contract §8).
+// Sequence builder → AI tab: the Replies settings of one sequence (changes doc §4.1, contract §8) and what the AI wrote for it.
 import { useCallback, useState } from 'react';
 import { MessageSquareText } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -19,7 +19,10 @@ import ScenariosSection from './ScenariosSection';
 import SendersBlock from './SendersBlock';
 import TestConversationDrawer from './TestConversationDrawer';
 import UnansweredSection from './UnansweredSection';
-import { errText } from './shared';
+import { Section, errText } from './shared';
+import Link from 'next/link';
+import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
+import { hubHref } from '@/lib/outreach/aiHub';
 
 export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null | undefined }) {
   const { workspace, isManager, canWrite } = useWorkspace();
@@ -37,8 +40,8 @@ export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null
 
   if (!sequenceId) {
     return (
-      <TabPage title="AI Auto Replies" wide>
-        <Note>Save the sequence first. AI Auto Replies are set per sequence once it exists.</Note>
+      <TabPage title="Replies" wide>
+        <Note>Save the sequence first. Replies are set per sequence once it exists.</Note>
       </TabPage>
     );
   }
@@ -73,6 +76,11 @@ export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null
           <UnansweredSection sequenceId={sequenceId} canEdit={canEdit} notify={toast.show} />
 
           <SendersBlock sequenceId={sequenceId} ws={ws} senders={s.senders ?? []} canEdit={canEdit} notify={toast.show} />
+
+          {/* The Activity table, pre-filtered to this sequence's replies (it replaced the run log in Settings). */}
+          <Section title="What the AI wrote" help="Every reply the AI drafted or sent for this sequence." actions={<Link href={hubHref.activity({ feature: 'reply', where: sequenceId })} className="text-xs font-medium text-indigo-700 hover:underline">Open in Activity</Link>}>
+            <ActivityTable ws={ws} fixed={{ feature: 'reply', where: sequenceId }} pageSize={20} emptyText="The AI has not written a reply for this sequence in this period." />
+          </Section>
 
           <TestConversationDrawer open={testOpen} onClose={() => setTestOpen(false)} ws={ws} s={s} draft={draft} canEdit={canEdit} />
         </div>

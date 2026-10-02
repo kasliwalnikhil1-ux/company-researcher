@@ -50,7 +50,7 @@ async function announceAlerts(): Promise<Row> {
 serve("worker-health", async (req) => {
   requireCron(req);
   const body = await readJson<{ sender_id?: string; all?: boolean; skip_alerts?: boolean }>(req);
-  const q = admin.from("outreach_senders").select("id, timezone, status").is("deleted_at", null).neq("status", "disabled");
+  const q = admin.from("outreach_senders").select("id, timezone, status").is("deleted_at", null).not("status", "in", "(disabled,disconnected)");
   const { data: senders } = body.sender_id ? await q.eq("id", body.sender_id) : await q;
   const out: unknown[] = [];
   let snapshots = 0;

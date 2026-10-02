@@ -16,6 +16,7 @@ import {
   runEngine, contextFromFacts, patchFromResult, floorSha, settingsOf, parseJsonLoose, stopRulesOf, effectiveBody, fillPrompt,
   type EngineInput, type EngineOpts, type ThreadLine, type DraftState, type ScenarioCard, type Faq, type PipelineResult,
 } from "./ai_reply_engine.ts";
+import { BATCH as CATALOGUE_BATCH, CATALOGUE_MAX_PRODUCTS, CatalogueError, productsFromHtml, syncCatalogue, type CatalogueProduct, type SyncCursor, type SyncIo } from "./catalogue.ts";
 
 type Row = Record<string, any>;
 /** v1 policy: AI replies on LinkedIn only (PRD §2.2). The SQL resolver enforces the same. */
@@ -387,9 +388,11 @@ function chunkText(text: string, url: string | null): Array<{ url: string | null
   flush();
   return out;
 }
-async function crawlWebsite(root: string, maxPages = 60): Promise<{ chunks: Array<{ url: string; heading: string | null; text: string }>; pages: number }> {
+/** `findProducts`: also keep the products the pages describe (JSON-LD Product / og:type=product), for "Also find products". */
+async function crawlWebsite(root: string, maxPages = 60, findProducts = false): Promise<{ chunks: Array<{ url: string; heading: string | null; text: string }>; pages: number; products: CatalogueProduct[]; exhausted: boolean }> {
   const start = new URL(root);
   const seen = new Set<string>(); const queue = [start.toString()]; const chunks: Array<{ url: string; heading: string | null; text: string }> = [];
+  const products = new Map<string, CatalogueProduct>();
   let pages = 0;
   while (queue.length && pages < maxPages) {
     const u = queue.shift()!;
@@ -403,6 +406,7 @@ async function crawlWebsite(root: string, maxPages = 60): Promise<{ chunks: Arra
     pages++;
     const { text } = htmlToText(html);
     for (const c of chunkText(text, u)) chunks.push({ ...c, url: u });
+    if (findProducts) for (const p of productsFromHtml(html, u)) if (!products.has(p.external_id) && products.size < CATALOGUE_MAX_PRODUCTS) products.set(p.external_id, p);
     for (const m of html.matchAll(/href=["']([^"'#?]+)[^"']*["']/gi)) {
       try {
         const link = new URL(m[1], u);
@@ -414,19 +418,70 @@ async function crawlWebsite(root: string, maxPages = 60): Promise<{ chunks: Arra
       } catch { /* skip */ }
     }
   }
-  return { chunks: chunks.slice(0, 2000), pages };
+  // every link was followed = the whole site was read: only then may products it no longer shows be removed
+  return { chunks: chunks.slice(0, 2000), pages, products: [...products.values()], exhausted: queue.length === 0 };
 }
+
+// ---- product catalogues (web-chat-buttons-products-changes.md §5): synced here, where websites are crawled
+/** The database side of a catalogue sync (catalogue.ts reads the store, this writes the rows). */
+function catalogueIo(sourceId: string, startedAt: string): SyncIo {
+  return {
+    upsert: async (batch) => { const r = await rpc<Row>("catalogue_upsert", { p_source: sourceId, p_products: batch, p_started: startedAt }); return { upserted: Number(r?.upserted ?? 0), rejected: Number(r?.rejected ?? 0) }; },
+    progress: async (cursor) => { await rpc("catalogue_progress", { p_source: sourceId, p_cursor: cursor }); },
+    readFile: async (path) => {
+      const { data: blob, error } = await admin.storage.from("outreach-knowledge").download(path);
+      if (error || !blob) throw new CatalogueError(`The file could not be read (${error?.message ?? "no file"}).`);
+      return (await blob.text()).slice(0, 40 * 1024 * 1024);
+    },
+  };
+}
+/** One catalogue, one worker run. "more" = it keeps its place and is claimed again on the next tick. */
+async function syncCatalogueSource(s: Row, deadline: number): Promise<"done" | "more" | "failed"> {
+  const cat = (s.catalogue ?? {}) as Row;
+  const cursor = await rpc<SyncCursor>("catalogue_begin", { p_source: s.id });
+  try {
+    const r = await syncCatalogue({ provider: String(cat.provider ?? ""), url: cat.url ?? s.url, storage_path: s.storage_path }, cursor, catalogueIo(s.id, cursor.started_at), deadline);
+    if (!r.done) return "more";
+    await rpc("catalogue_finish", { p_source: s.id, p_started: cursor.started_at, p_complete: r.complete, p_meta: { currency: r.currency, store: r.store, pages: r.pages, warning: r.warning } });
+    return "done";
+  } catch (e) {
+    const msg = String((e as any)?.message ?? e).slice(0, 500);
+    const tries = Number(cursor.errors ?? 0) + 1;
+    // a store that is busy or briefly unreachable: keep the place and try again on the next ticks, five times at most
+    if (e instanceof CatalogueError && !e.final && tries < 5) { await rpc("catalogue_progress", { p_source: s.id, p_cursor: { ...cursor, errors: tries } }); log({ fn: "catalogue-sync", source: s.id, retry: tries, warn: msg }); return "more"; }
+    await rpc("catalogue_finish", { p_source: s.id, p_started: cursor.started_at, p_complete: false, p_meta: {}, p_error: msg });
+    log({ fn: "catalogue-sync", source: s.id, error: msg });
+    return "failed";
+  }
+}
+/** "Also find products" on a website source: what the crawl found becomes that source's products. Never fails the crawl. */
+async function storeCrawledProducts(s: Row, products: CatalogueProduct[], complete: boolean): Promise<void> {
+  try {
+    const cursor = await rpc<SyncCursor>("catalogue_begin", { p_source: s.id });
+    const io = catalogueIo(s.id, cursor.started_at);
+    let rejected = 0;
+    for (let i = 0; i < products.length; i += CATALOGUE_BATCH) rejected += (await io.upsert(products.slice(i, i + CATALOGUE_BATCH))).rejected;
+    await rpc("catalogue_finish", { p_source: s.id, p_started: cursor.started_at, p_complete: complete, p_meta: { currency: products.find((p) => p.currency)?.currency ?? null, warning: rejected ? `${rejected} products were left out: a catalogue holds 10,000 products at most.` : null } });
+  } catch (e) { log({ fn: "catalogue-crawl", source: s.id, error: String((e as any)?.message ?? e).slice(0, 300) }); }
+}
+
 export async function runKnowledge(budgetMs = 50_000): Promise<Row> {
   const started = Date.now();
   const sources = await rpc<Row[]>("knowledge_claim", { p_limit: 2 });
-  let done = 0, failed = 0;
+  let done = 0, failed = 0, more = 0;
   for (const s of sources ?? []) {
     if (Date.now() - started > budgetMs) break;
     try {
+      if (s.kind === "catalogue") {
+        const r = await syncCatalogueSource(s, started + budgetMs - 8000);
+        if (r === "done") done++; else if (r === "more") more++; else failed++;
+        continue;
+      }
       if (s.kind === "website") {
-        const r = await crawlWebsite(String(s.url), 60);
+        const r = await crawlWebsite(String(s.url), 60, !!s.detect_products);
         if (!r.pages) throw new Error("no page could be fetched");
         await rpc("knowledge_store", { p_source: s.id, p_chunks: r.chunks, p_pages: r.pages });
+        if (s.detect_products) await storeCrawledProducts(s, r.products, r.exhausted);
       } else if (s.kind === "text") {
         await rpc("knowledge_store", { p_source: s.id, p_chunks: chunkText(String(s.text_inline ?? ""), null), p_pages: 1 });
       } else {
@@ -441,7 +496,7 @@ export async function runKnowledge(budgetMs = 50_000): Promise<Row> {
       done++;
     } catch (e) { failed++; await rpc("knowledge_store", { p_source: s.id, p_chunks: [], p_pages: 0, p_error: String((e as any)?.message ?? e).slice(0, 500) }).catch(() => null); }
   }
-  return { claimed: sources?.length ?? 0, done, failed, ms: Date.now() - started };
+  return { claimed: sources?.length ?? 0, done, failed, continuing: more, ms: Date.now() - started };
 }
 
 // ============================================================================================ F33 dispatcher
@@ -659,7 +714,7 @@ async function notifyBreaker(it: Row): Promise<void> {
   if (it.kind === "downgrade_cancels" || it.kind === "downgrade_bot_questions") {
     const { data: q } = await admin.from("outreach_sequences").select("name").eq("id", it.sequence_id).maybeSingle();
     const name = q?.name ?? "a sequence";
-    subject = `Auto switched to Draft for ${name}`;
+    subject = `Auto switched to Review for ${name}`;
     const reasons = (it.reasons ?? []).map((x: Row) => `<li>${esc(String(x.reason).replace(/_/g, " "))}${x.rule ? ` — rule "${esc(x.rule)}"` : ""}: ${esc(x.n)}</li>`).join("");
     body = it.kind === "downgrade_cancels"
       ? `<p>${esc(it.bad)} of the last ${esc(it.n)} AI replies in <b>${esc(name)}</b> were cancelled or edited during the hold, above the ${Math.round(Number(it.threshold) * 100)}% limit. Replies there are drafts for a person again.</p>${reasons ? `<p>What people changed:</p><ul>${reasons}</ul>` : ""}<p>Fix the prompt rules named above, then turn Auto back on with a note.</p>`
@@ -667,9 +722,9 @@ async function notifyBreaker(it: Row): Promise<void> {
     const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/sequences/${it.sequence_id}?tab=ai`, "Open the sequence", branding)}</p>`, branding, { audience: "team" });
     for (const e of to) await sendEmail(e, subject, html, undefined, { branding });
   } else if (it.kind === "too_early_to_pitch") {
-    subject = "AI replies are pitching too early";
+    subject = "Replies are pitching too early";
     body = `<p>${esc(it.n)} AI replies were cancelled this week as "too early to pitch". Consider raising <b>Pitch after</b> in the sequence's AI replies, or making the early stages ask more.</p>`;
-    const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/settings/ai-replies?tab=reports`, "Open AI replies", branding)}</p>`, branding, { audience: "team" });
+    const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/setup/replies?tab=reports`, "Open Replies", branding)}</p>`, branding, { audience: "team" });
     for (const e of to) await sendEmail(e, subject, html, undefined, { branding });
   }
 }
@@ -682,11 +737,11 @@ async function sendManagerDigests(): Promise<number> {
     if (!to.length) continue;
     const branding = await workspaceBranding(w.workspace_id);
     const reasons = (w.reasons ?? []).map((x: Row) => `<li>${esc(String(x.reason ?? "other").replace(/_/g, " "))}: ${esc(x.n)}</li>`).join("");
-    const downs = (w.downgrades ?? []).length ? `<p><b>${(w.downgrades ?? []).length}</b> sequence(s) were switched back to Draft.</p>` : "";
-    const html = layout("AI replies — last 24 hours",
+    const downs = (w.downgrades ?? []).length ? `<p><b>${(w.downgrades ?? []).length}</b> sequence(s) were switched back to Review.</p>` : "";
+    const html = layout("Replies: last 24 hours",
       `<p><b>${esc(w.sent_ai)}</b> sent on Auto · <b>${esc(w.sent_draft)}</b> AI drafts sent by your team · <b>${esc(w.handed_off ?? 0)}</b> handed off · <b>${esc(w.escalated)}</b> handed to a person · <b>${esc(w.cancelled)}</b> cancelled · <b>${esc(w.no_reply)}</b> needed no reply.</p>${reasons ? `<p>Why things were cancelled or handed over:</p><ul>${reasons}</ul>` : ""}${downs}
-       <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/settings/ai-replies?tab=activity`, "Open the activity log", branding)}</p>`, branding, { audience: "team" });
-    for (const e of to) if (await sendEmail(e, "AI replies: daily summary", html, undefined, { branding })) n++;
+       <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/activity?feature=reply`, "Open Activity", branding)}</p>`, branding, { audience: "team" });
+    for (const e of to) if (await sendEmail(e, "Replies: daily summary", html, undefined, { branding })) n++;
   }
   return n;
 }
@@ -723,6 +778,11 @@ async function requireManager(user: AuthedUser, workspaceId: string): Promise<vo
   requireRole(m, "manager");
 }
 
+/** Shared Q&A (AI → Knowledge) that applies to a sequence, as the live engine reads it (outreach_ai_reply_gate_facts). */
+async function libraryFaqs(ws: string, sequenceId: string | null | undefined): Promise<Faq[]> {
+  return ((await rpc<Faq[]>("knowledge_qa_for", { p_ws: ws, p_kind: "sequence", p_target: sequenceId ?? null, p_question: null }).catch(() => [])) ?? []);
+}
+
 /** The prompt a simulation runs against: an unsaved draft, a saved version, the sequence's or a library prompt. */
 async function resolveSimPrompt(b: SimulateBody): Promise<{ body: string; settings: ReturnType<typeof settingsOf>; editorMode: "guided" | "raw"; version: number; id: string | null; scenarios: ScenarioCard[]; faqs: Faq[]; knowledge: string[] }> {
   if (b.draft_prompt) {
@@ -732,7 +792,7 @@ async function resolveSimPrompt(b: SimulateBody): Promise<{ body: string; settin
       ? await rpc<string>("_compile_master_prompt", { p_sections: b.draft_prompt.sections ?? {}, p_settings: settings, p_scenarios: scen })
       : String(b.draft_prompt.body ?? "");
     if (body.trim().length < 20) throw new HttpError(400, "E_PAYLOAD_INVALID", "the prompt is too short");
-    return { body, settings: settingsOf(settings), editorMode: b.draft_prompt.editor_mode, version: 0, id: null, scenarios: scen, faqs: (b.draft_prompt.faqs ?? []).map((f, i) => ({ id: f.id || `draft-${i}`, question: String(f.question ?? ""), answer: String(f.answer ?? "") })), knowledge: (settings as Row).knowledge_source_ids ?? [] };
+    return { body, settings: settingsOf(settings), editorMode: b.draft_prompt.editor_mode, version: 0, id: null, scenarios: scen, faqs: [...(b.draft_prompt.faqs ?? []).map((f, i) => ({ id: f.id || `draft-${i}`, question: String(f.question ?? ""), answer: String(f.answer ?? "") })), ...(await libraryFaqs(b.workspace_id, b.sequence_id))], knowledge: (settings as Row).knowledge_source_ids ?? [] };
   }
   let mpId = b.master_prompt_id ?? b.library_id ?? null;
   if (!mpId && b.sequence_id) {
@@ -748,6 +808,7 @@ async function resolveSimPrompt(b: SimulateBody): Promise<{ body: string; settin
   if (!mp) throw new HttpError(404, "E_NOT_FOUND", "prompt not found");
   const { data: cards } = await admin.from("outreach_master_prompt_scenarios").select("id, title, when_text, do_text, enabled").eq("master_prompt_id", mp.id).eq("enabled", true).order("position");
   const { data: faqs } = await admin.from("outreach_master_prompt_faqs").select("id, question, answer").eq("master_prompt_id", mp.id).eq("enabled", true).order("created_at");
+  const shared = await libraryFaqs(b.workspace_id, mp.scope === "sequence" ? mp.sequence_id : b.sequence_id);
   let settings = settingsOf(mp.settings);
   if (mp.scope === "sequence") {
     const { data: srs } = await admin.from("outreach_sequence_reply_settings").select("pitch_after_replies, max_ai_replies_per_chat, handoff_stage_id, languages").eq("sequence_id", mp.sequence_id).maybeSingle();
@@ -757,9 +818,9 @@ async function resolveSimPrompt(b: SimulateBody): Promise<{ body: string; settin
     const { data: v } = await admin.from("outreach_master_prompt_versions").select("version, body, editor_mode, settings, scenarios, faqs").eq("master_prompt_id", mp.id).eq("version", b.version).maybeSingle();
     if (!v) throw new HttpError(404, "E_NOT_FOUND", `version ${b.version} not found`);
     return { body: v.body, settings: { ...settings, ...settingsOf(v.settings), min_exchanges_before_pitch: settings.min_exchanges_before_pitch, max_ai_replies_per_chat: settings.max_ai_replies_per_chat }, editorMode: v.editor_mode, version: v.version, id: mp.id,
-      scenarios: ((v.scenarios ?? []) as ScenarioCard[]).filter((s) => s.enabled !== false).map((s, i) => ({ ...s, id: s.id ?? `v-${i}` })), faqs: (v.faqs ?? []) as Faq[], knowledge: mp.knowledge_source_ids ?? [] };
+      scenarios: ((v.scenarios ?? []) as ScenarioCard[]).filter((s) => s.enabled !== false).map((s, i) => ({ ...s, id: s.id ?? `v-${i}` })), faqs: [...((v.faqs ?? []) as Faq[]), ...shared], knowledge: mp.knowledge_source_ids ?? [] };
   }
-  return { body: mp.body, settings, editorMode: mp.editor_mode, version: mp.version, id: mp.id, scenarios: (cards ?? []) as ScenarioCard[], faqs: (faqs ?? []) as Faq[], knowledge: mp.knowledge_source_ids ?? [] };
+  return { body: mp.body, settings, editorMode: mp.editor_mode, version: mp.version, id: mp.id, scenarios: (cards ?? []) as ScenarioCard[], faqs: [...((faqs ?? []) as Faq[]), ...shared], knowledge: mp.knowledge_source_ids ?? [] };
 }
 
 export async function simulate(user: AuthedUser | null, b: SimulateBody): Promise<Row> {

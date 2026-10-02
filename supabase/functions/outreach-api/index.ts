@@ -83,6 +83,8 @@ app.use("*", async (c, next) => {
 app.get("/", (c) => c.json({ name: "Outreach API", version: "v1", api_version: API_VERSION, auth: "Authorization: Bearer ok_live_…", start_here: "GET /v1/me" }));
 
 // ---- /v1: authenticate, rate limit, body, idempotency ------------------------------------------------------
+const planName = (p: unknown): string => ({ launch: "Launch", scale: "Scale", enterprise: "Enterprise" } as Record<string, string>)[String(p ?? "")] ?? "a higher plan";
+
 app.use("/v1/*", async (c, next) => {
   const method = c.req.method.toUpperCase();
   const route = c.req.path.slice(BASE.length).replace(/\/+$/, "");
@@ -92,6 +94,7 @@ app.use("/v1/*", async (c, next) => {
   if (!presented.startsWith("ok_")) throw new HttpError(401, "E_UNAUTHORIZED", "Send your API key as: Authorization: Bearer ok_live_…");
   const key = await rpc<KeyCtx | null>("api_authenticate", { p_key: presented });
   if (!key?.key_id) throw new HttpError(401, "E_UNAUTHORIZED", "This API key is not valid. It may have been revoked or expired, or the member who created it left the workspace.");
+  if (key.api_enabled === false) throw new HttpError(402, "E_PLAN_REQUIRED", `The public API is available on ${planName(key.min_plan)}. This key is kept and works again after an upgrade.`);
   c.get("ctx").key = key;
 
   // 2. rate limit, per key and class, on the shared outreach_rate_limit counter

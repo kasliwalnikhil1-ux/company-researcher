@@ -23,6 +23,8 @@ import VersionsPanel from './VersionsPanel';
 import ValidationBar from './ValidationBar';
 import { ConfirmModal, QaModal, UnsavedModal, type QaState } from './Modals';
 import { BuilderContext, type BuilderCtx } from './context';
+import { useAiVariables } from './FormsShared';
+import type { AiVariable } from '@/lib/outreach/types';
 import { draftFromSequence, saveArgs, type Draft } from './draft';
 import { clearLocalDraft, readLocalDraft, stableStringify, useDraftAutosave, writeLocalDraft, type LocalDraftCopy } from './DraftAutosave';
 import { sqk, useEverEnrolled, useFailedCount, useInflightCount } from './hooks';
@@ -37,6 +39,7 @@ import AiRepliesTab from './ai/AiRepliesTab';
 import { useSequenceAiSummary } from '@/lib/outreach/aiRepliesSequence';
 
 const EMPTY: never[] = [];
+const NO_AI_VARIABLES: AiVariable[] = [];
 
 type Meta = Omit<Draft, 'graph'>;
 const META_FIELDS: Array<[keyof Meta, string]> = [
@@ -180,7 +183,10 @@ export default function Builder({ id }: { id: string }) {
   const poolProviders = useMemo(() => Array.from(new Set(poolSenders.map((s) => s.provider))), [poolSenders]);
   const channelIndependent = draft?.settings?.channel_independent_continuation === true;
 
-  const validation = useMemo(() => (draft ? validateGraph(draft.graph, { hasFreeSender, hasMailbox, strict: true, poolProviders, channelIndependent }) : { errors: [] as GraphIssue[], warnings: [] as GraphIssue[] }), [draft, hasFreeSender, hasMailbox, poolProviders, channelIndependent]);
+  // AI variables: the Condition step's "AI fields" and the checks on {{ai.…}} tokens. Until they load, those checks are skipped.
+  const aiVarsQ = useAiVariables(ws);
+  const aiVariables = aiVarsQ.data;
+  const validation = useMemo(() => (draft ? validateGraph(draft.graph, { hasFreeSender, hasMailbox, strict: true, poolProviders, channelIndependent, aiVariables }) : { errors: [] as GraphIssue[], warnings: [] as GraphIssue[] }), [draft, hasFreeSender, hasMailbox, poolProviders, channelIndependent, aiVariables]);
   const issues = useMemo(() => {
     const m: Record<string, IssueLevel> = {};
     for (const w of validation.warnings) if (w.node_id) m[w.node_id] = 'warning';
@@ -467,8 +473,8 @@ export default function Builder({ id }: { id: string }) {
   const ctx = useMemo<BuilderCtx | null>(() => (draft && sequence && ws ? {
     workspaceId: ws, sequenceId: sequence.id, sequence, graph: draft.graph, readOnly, senders, poolSenders,
     tags: lookup.tags ?? [], lists: lookup.lists ?? [], stages: lookup.stages ?? [], webhooks: lookup.webhooks ?? [], sequences: lookup.sequences ?? [],
-    sampleLead, customKeys, createTag, focusNode,
-  } : null), [draft, sequence, ws, readOnly, senders, poolSenders, lookup, sampleLead, customKeys, createTag, focusNode]);
+    sampleLead, customKeys, aiVariables: aiVariables ?? NO_AI_VARIABLES, createTag, focusNode,
+  } : null), [draft, sequence, ws, readOnly, senders, poolSenders, lookup, sampleLead, customKeys, aiVariables, createTag, focusNode]);
 
   if (seqQ.isLoading || (sequence && !draft)) return <PageLoader />;
   if (seqQ.error) return <div className="p-6"><ErrorBox message={parseError(seqQ.error).message} /></div>;

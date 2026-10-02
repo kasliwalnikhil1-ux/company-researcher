@@ -58,7 +58,7 @@ export function SalesNavImport({ toast, onCreated }: { toast: ToastFn; onCreated
 
   const urlOk = SN_URL.test(url.trim());
   const chosen = options.find((o) => o.id === pick);
-  const canSubmit = !!senderId && !!sender?.has_sales_nav && (!!pick || urlOk);
+  const canSubmit = !!senderId && !!sender?.has_sales_nav && (!!pick || urlOk) && !!common.listId;
   const noun = mode === 'sn_saved_search' ? 'saved search' : 'lead list';
 
   const submit = async () => {

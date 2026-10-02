@@ -15,6 +15,9 @@ export type Role = "owner" | "manager" | "member" | "client_viewer";
 
 /** What outreach_api_authenticate returns for a valid key. */
 export interface KeyCtx {
+  /** false when the workspace's plan has no public API (billing v2): every call answers 402 E_PLAN_REQUIRED */
+  api_enabled?: boolean;
+  min_plan?: string | null;
   key_id: string;
   workspace_id: string;
   user_id: string;

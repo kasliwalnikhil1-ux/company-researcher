@@ -4,6 +4,8 @@
 //   search_url       {sender_id, url, max_results?}
 //   relations        {sender_id}
 //   csv              {storage_path, mapping, row_count?, mode?: 'upsert'|'update_only', update_fields?: string[]}
+//                    mapping = csv column → lead field. `linkedin_url` is the person's profile in any form (URL, in/<id>, bare identifier);
+//                    one column only (`public_identifier` is accepted as the same field)
 //   post_engagement  {sender_id, post_url, include?: ['reactions','comments','reposts'], max_results?}   (reposts: LinkedIn does not share who reposted, see below)
 //   sn_saved_search  {sender_id, saved_search_id | url (a Sales Navigator URL with savedSearchId=…), name?, max_results?}
 //   sn_lead_list     {sender_id, lead_list_id | url (…/sales/lists/people/<id>), name?, max_results?}
@@ -14,7 +16,7 @@
 // GET ?action=sn_options&sender_id=<id>  → {saved_searches:[{id,title}], lead_lists:[{id,title}]} for the picker (needs has_sales_nav).
 //   Two budgeted LinkedIn lookups (search_page), cached for 6 hours per sender; `&refresh=1` forces a new lookup.
 import { admin, json, serve, requireUser, membership, requireRole, clientVisible, readJson, HttpError, rpc, audit, rateLimit } from "../_shared/outreach/supabase.ts";
-import { parseSearchUrl } from "../_shared/outreach/workers.ts";
+import { parseSearchUrl, CSV_MAX_ROWS, CSV_LINKEDIN_FIELDS } from "../_shared/outreach/workers.ts";
 import { sources, postIdFromUrl, salesNavIdsFromUrl, companyIdentFromUrl, postEngagementSupport } from "../_shared/outreach/unipile_sources.ts";
 import { UnipileError } from "../_shared/outreach/unipile.ts";
 
@@ -153,8 +155,17 @@ serve("imports-create", async (req) => {
   } else if (body.kind === "csv") {
     if (!body.storage_path || !body.mapping) throw new HttpError(400, "E_PAYLOAD_INVALID", "storage_path and mapping required");
     if (!body.storage_path.startsWith(`${body.workspace_id}/`)) throw new HttpError(403, "E_FORBIDDEN", "bad storage path");
-    const fields = new Set(Object.values(body.mapping));
-    if (!fields.has("public_identifier") && !fields.has("linkedin_url") && !fields.has("email_work") && !fields.has("email_personal")) throw new HttpError(400, "E_PAYLOAD_INVALID", "map a LinkedIn URL or an email column");
+    // One LinkedIn field: a column with the profile URL, `in/<id>` or the bare identifier. `public_identifier` is its older second name
+    // and is stored as linkedin_url; two columns on it would be two different people on one row, so that is refused.
+    const mapping: Record<string, string> = {};
+    for (const [col, f] of Object.entries(body.mapping)) mapping[col] = CSV_LINKEDIN_FIELDS.includes(String(f)) ? "linkedin_url" : String(f);
+    const linkedinCols = Object.keys(mapping).filter((col) => mapping[col] === "linkedin_url");
+    if (linkedinCols.length > 1) throw new HttpError(400, "E_PAYLOAD_INVALID", `Only one column can be the LinkedIn URL / identifier. ${linkedinCols.map((c) => `"${c}"`).join(" and ")} are both mapped to it: keep the one with each lead's own profile.`);
+    body.mapping = mapping;
+    const fields = new Set(Object.values(mapping));
+    if (!fields.has("linkedin_url") && !fields.has("email_work") && !fields.has("email_personal")) throw new HttpError(400, "E_PAYLOAD_INVALID", "map a LinkedIn URL or an email column");
+    // the worker counts the rows of the file itself and stops a longer one; this is the early answer for a caller that knows its row count
+    if (Number(body.row_count ?? 0) > CSV_MAX_ROWS) throw new HttpError(400, "E_TOO_MANY", `One CSV import takes up to ${CSV_MAX_ROWS.toLocaleString("en-US")} rows. Split the file and import the parts one after another.`);
     if (body.mode === "update_only") {
       mode = "update_only";
       updateFields = [...new Set((body.update_fields ?? []).map(String))];

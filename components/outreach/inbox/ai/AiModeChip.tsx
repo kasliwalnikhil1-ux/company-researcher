@@ -49,7 +49,7 @@ export default function AiModeChip({ chatId, onError, onNotice }: { chatId: stri
     <>
       <div className="relative">
         <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
-          title={[`AI Auto Replies: ${MODE_LABEL[st.mode]}`, why, stage, repliesLeftText(st)].filter(Boolean).join(' · ')}
+          title={[`Replies: ${MODE_LABEL[st.mode]}`, why, stage, repliesLeftText(st)].filter(Boolean).join(' · ')}
           className={cn('inline-flex items-center gap-1.5 text-xs pl-1.5 pr-1.5 py-1 rounded-full border max-w-[340px] min-w-0', st.handed_off ? 'bg-amber-50 border-amber-200 text-amber-900' : MODE_TONE[st.mode])}>
           {busy ? <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin flex-shrink-0" /> : st.handed_off ? <Hand className="w-3.5 h-3.5 flex-shrink-0" /> : <Bot className="w-3.5 h-3.5 flex-shrink-0" />}
           {st.handed_off
@@ -64,7 +64,7 @@ export default function AiModeChip({ chatId, onError, onNotice }: { chatId: stri
               <div className="px-3 py-2 border-b border-gray-100 space-y-0.5">
                 {st.handed_off
                   ? <div className="text-xs font-semibold text-amber-900">{handoff}</div>
-                  : <div className="text-xs font-semibold text-gray-900">AI Auto Replies: {MODE_LABEL[st.mode]}</div>}
+                  : <div className="text-xs font-semibold text-gray-900">Replies: {MODE_LABEL[st.mode]}</div>}
                 {st.handed_off?.rule && <div className="text-[11px] text-gray-500">Rule: {st.handed_off.rule}</div>}
                 {why && !st.handed_off && <div className="text-[11px] text-gray-500">{why}</div>}
                 {st.requested_mode !== st.mode && !st.handed_off && <div className="text-[11px] text-amber-700">Sequence set to {MODE_LABEL[st.requested_mode]}, running as {MODE_LABEL[st.mode]}: {st.reason}</div>}
@@ -88,7 +88,7 @@ export default function AiModeChip({ chatId, onError, onNotice }: { chatId: stri
               )}
               {!canStop && !canResume && (
                 <div className="px-3 py-1.5 text-[11px] text-gray-500">
-                  {st.handed_off ? 'Only owners and managers can resume the AI in a handed-off chat.' : st.mode === 'off' ? 'AI Auto Replies are turned on per sequence, in the sequence builder.' : 'You can view this setting but not change it.'}
+                  {st.handed_off ? 'Only owners and managers can resume the AI in a handed-off chat.' : st.mode === 'off' ? 'Replies are turned on per sequence, on its AI tab.' : 'You can view this setting but not change it.'}
                 </div>
               )}
             </div>

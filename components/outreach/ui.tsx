@@ -270,7 +270,7 @@ export function Badge({ children, tone = 'gray', className }: { children: React.
 export function StatusPill({ status, reason }: { status: SenderStatus; reason?: string | null }) {
   const map: Record<SenderStatus, { tone: any; label: string }> = {
     ok: { tone: 'green', label: 'Connected' }, connecting: { tone: 'blue', label: 'Connecting' }, credentials: { tone: 'red', label: 'Re-login needed' },
-    error: { tone: 'red', label: 'Error' }, paused: { tone: 'amber', label: 'Paused' }, disabled: { tone: 'gray', label: 'Disabled' },
+    error: { tone: 'red', label: 'Error' }, paused: { tone: 'amber', label: 'Paused' }, disabled: { tone: 'gray', label: 'Disabled' }, disconnected: { tone: 'gray', label: 'Disconnected' },
   };
   const m = map[status] ?? { tone: 'gray', label: status };
   return <Badge tone={m.tone} className={reason ? 'cursor-help' : ''}><span title={reason ?? undefined}>{m.label}</span></Badge>;
@@ -336,7 +336,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
       <div className={cn('relative bg-white rounded-xl shadow-xl w-full max-h-[90vh] flex flex-col', sizes[size])}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
           <h3 className="text-base font-semibold text-gray-900">{title}</h3>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><X className="w-4 h-4" /></button>
+          <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><X className="w-4 h-4" /></button>
         </div>
         <div className="px-5 py-4 overflow-y-auto">{children}</div>
         {footer && <div className="px-5 py-3 border-t border-gray-100 flex items-center justify-end gap-2">{footer}</div>}

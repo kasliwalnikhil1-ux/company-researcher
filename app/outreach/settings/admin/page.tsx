@@ -9,6 +9,7 @@ import { useIsLocalhost } from '@/lib/outreach/platformAdmin';
 import { Card, PageHeader, PageLoader } from '@/components/outreach/ui';
 import SettingsTabs from '@/components/outreach/settings/SettingsTabs';
 import PlatformSetupCard from '@/components/outreach/settings/admin/PlatformSetupCard';
+import BillingAdminCard from '@/components/outreach/settings/admin/BillingAdminCard';
 import PlatformLimits from '@/components/outreach/settings/admin/PlatformLimits';
 import AiReplyAdmin from '@/components/outreach/settings/admin/AiReplyAdmin';
 
@@ -42,6 +43,7 @@ export default function AdminSettingsPage() {
         </Card>
       </div>
 
+      <BillingAdminCard />
       <PlatformLimits />
       <AiReplyAdmin />
     </div>

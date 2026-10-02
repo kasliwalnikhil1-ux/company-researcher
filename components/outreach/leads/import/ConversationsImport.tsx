@@ -65,7 +65,7 @@ export function ConversationsImport({ toast, onCreated }: { toast: ToastFn; onCr
       </p>
       <ImportOptions kind="conversations" value={common} onChange={setCommon} />
       {error && <ErrorBox message={error} />}
-      <Button onClick={submit} loading={busy} disabled={countQ.data === 0}>Create leads</Button>
+      <Button onClick={submit} loading={busy} disabled={countQ.data === 0 || !common.listId}>Create leads</Button>
     </div>
   );
 }

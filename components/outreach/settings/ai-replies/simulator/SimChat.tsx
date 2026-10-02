@@ -61,7 +61,7 @@ export default function SimChat({ turns, stageLabel, busy, canRun, error, nextSc
 
       {error && (
         <div role="alert" className="mx-4 mb-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800">
-          {error.message}{error.setup && <> <Link href="/outreach/settings/ai" className="underline underline-offset-2 font-medium">Open Settings → AI</Link></>}
+          {error.message}{error.setup && <> <Link href="/outreach/ai/setup/general" className="underline underline-offset-2 font-medium">Open AI → Setup → General</Link></>}
         </div>
       )}
 

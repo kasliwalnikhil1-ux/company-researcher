@@ -120,10 +120,11 @@ export async function commitEnrollment(sequenceId: string, leadIds: string[], o:
 
 export interface AiBatchLink { variable: AiVariable; batch_id: string; to_generate: number; kept_existing: number }
 
-/** "Generate first lines for these leads": one request per AI variable the sequence uses (in slices of 2,000 leads). */
+/** "Generate first lines for these leads": one request per variable the sequence uses (in slices of 2,000 leads). A variable that is switched off is left out: it writes no new lines. */
 export async function requestAiLines(ws: string, sequenceId: string, variables: AiVariable[], leadIds: string[]): Promise<AiBatchLink[]> {
   const out: AiBatchLink[] = [];
   for (const variable of variables) {
+    if (variable.mode === 'off') continue;
     for (let i = 0; i < leadIds.length; i += AI_CHUNK) {
       const r = await rpc<AiGenerateResult>('ai_generate_request', { p_ws: ws, p_variable: variable.id, p_lead_ids: leadIds.slice(i, i + AI_CHUNK), p_sequence: sequenceId, p_regenerate: false });
       out.push({ variable, batch_id: r.batch_id, to_generate: r.to_generate, kept_existing: r.kept_existing });
@@ -143,9 +144,12 @@ export function useSequenceAiVariables(ws: string | null | undefined, graph: Gra
       return (data ?? []) as AiVariable[];
     },
   });
-  const used = useMemo(() => (q.data ?? []).filter((v) => keys.includes(v.key)), [q.data, keys]);
-  const missing = useMemo(() => (q.data ? keys.filter((k) => !q.data!.some((v) => v.key === k)) : []), [q.data, keys]);
-  return { keys, used, missing, isLoading: q.isLoading, error: q.error };
+  // Built-in variables (067) are written at enrolment without a person: nothing to generate or review, so they are left out here.
+  const builtin = useMemo(() => new Set((q.data ?? []).filter((v) => v.builtin).map((v) => v.key)), [q.data]);
+  const own = useMemo(() => keys.filter((k) => !builtin.has(k)), [keys, builtin]);
+  const used = useMemo(() => (q.data ?? []).filter((v) => own.includes(v.key)), [q.data, own]);
+  const missing = useMemo(() => (q.data ? own.filter((k) => !q.data!.some((v) => v.key === k)) : []), [q.data, own]);
+  return { keys: own, used, missing, isLoading: q.isLoading, error: q.error };
 }
 
 /** Runs the preview whenever its inputs change (debounced), and drops answers that arrive out of order. */
@@ -339,12 +343,13 @@ export function EnrollOptions({ sequence, value, onChange, ai, disabled }: Optio
           </label>
           <p className="text-xs text-gray-600 pl-6">
             {holds
-              ? 'This sequence holds for AI Personalization: leads wait at “waiting for review” until their lines are approved, skipped or come back blank. They do not start on their own, so review the lines soon.'
-              : 'This sequence does not hold for AI Personalization: leads start right away, and a message that goes out before its line is approved uses the fallback. Turn on “Hold leads until AI-written lines are approved” in the sequence settings to make leads wait.'}
+              ? 'This sequence holds for Personalized lines: leads wait at “waiting for review” until their lines are approved, skipped or come back blank. They do not start on their own, so review the lines soon.'
+              : 'This sequence does not hold for Personalized lines: leads start right away, and a message that goes out before its line is approved uses the fallback. Turn on “Hold leads until AI-written lines are approved” in the sequence settings to make leads wait.'}
           </p>
-          {ai.isLoading && <p className="text-xs text-gray-400 pl-6">Loading AI variables…</p>}
+          {ai.isLoading && <p className="text-xs text-gray-400 pl-6">Loading variables…</p>}
+          {ai.used.some((v) => v.mode === 'off') && <p className="text-xs text-amber-700 pl-6">{ai.used.filter((v) => v.mode === 'off').map((v) => `{{ai.${v.key}}}`).join(', ')} {ai.used.filter((v) => v.mode === 'off').length === 1 ? 'is' : 'are'} switched off: no new lines are written, so leads without an approved line get the fallback. Turn it on under <Link href="/outreach/ai/setup/lines" className="underline">AI → Setup → Personalized lines</Link>.</p>}
           {ai.error != null && <p className="text-xs text-red-600 pl-6">{parseError(ai.error).message}</p>}
-          {ai.missing.length > 0 && <p className="text-xs text-amber-700 pl-6">No saved AI variable for {ai.missing.map((k) => `{{ai.${k}}}`).join(', ')}. Those always use the fallback. Create them under <Link href="/outreach/settings/ai" className="underline">Settings → AI Personalization</Link>.</p>}
+          {ai.missing.length > 0 && <p className="text-xs text-amber-700 pl-6">No saved variable for {ai.missing.map((k) => `{{ai.${k}}}`).join(', ')}. Those always use the fallback. Create them under <Link href="/outreach/ai/setup/lines" className="underline">AI → Setup → Personalized lines</Link>.</p>}
         </div>
       )}
     </fieldset>
@@ -383,7 +388,7 @@ export function EnrollResultPanel({ result, aiBatches, aiError, partialError }: 
             {aiBatches.map((b) => (
               <li key={b.batch_id} className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-gray-700">{b.variable.name} <Badge tone="purple">{`{{ai.${b.variable.key}}}`}</Badge> <span className="text-xs text-gray-500">{b.to_generate.toLocaleString()} to write{b.kept_existing > 0 ? `, ${b.kept_existing.toLocaleString()} already had one` : ''}</span></span>
-                {b.to_generate > 0 && <Link href={`/outreach/ai-review?batch=${b.batch_id}`} className="text-indigo-600 hover:underline text-sm font-medium">Review lines</Link>}
+                {b.to_generate > 0 && <Link href={`/outreach/ai/setup/lines?view=lines&batch=${b.batch_id}`} className="text-indigo-600 hover:underline text-sm font-medium">Review lines</Link>}
               </li>
             ))}
           </ul>

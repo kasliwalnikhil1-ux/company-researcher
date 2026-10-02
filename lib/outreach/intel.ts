@@ -8,7 +8,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/utils/supabase/client';
 import { parseError, rpc } from './api';
 import { applyAiChatFilter, type ChatFilters, type LeadFilters } from './queries';
-import type { ActionType, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
+import type { ActionType, AiField, AiFieldValue, AiVariableOutput, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -104,7 +104,11 @@ export interface LeadProfile {
 
 export interface EnrichResult { queued: number; skipped_fresh?: number; skipped_no_linkedin_id?: number; note?: string }
 
-export interface AiVariable { id: string; workspace_id: string; key: string; name: string; prompt: string; fallback: string; needs_posts: boolean; max_chars: number; created_at: string; updated_at: string }
+/** The same row as `AiVariable` in types.ts. `output`, `fields` (066) and `builtin` (067) are absent on a database without those migrations. */
+export interface AiVariable {
+  id: string; workspace_id: string; key: string; name: string; prompt: string; fallback: string; needs_posts: boolean; max_chars: number; mode: 'off' | 'review';
+  output?: AiVariableOutput; fields?: AiField[]; builtin?: boolean; created_at: string; updated_at: string;
+}
 export type AiBatchStatus = 'generating' | 'review' | 'done' | 'cancelled';
 export interface AiBatch {
   id: string; workspace_id: string; variable_id: string; sequence_id: string | null; requested_by: string | null; total: number; status: AiBatchStatus;
@@ -120,8 +124,8 @@ export interface AiReviewRow {
 }
 export type AiReviewAction = 'approve' | 'skip' | 'edit' | 'regenerate';
 export interface AiGenerateResult { batch_id: string; to_generate: number; kept_existing: number; note?: string }
-/** Assumed response of `outreach-ai-variables` with action `preview_variable` (nothing is stored). */
-export interface AiPreviewResult { text?: string | null; line?: string | null; facts?: unknown; blank?: boolean; fallback?: string | null; model?: string | null }
+/** Response of `outreach-ai-variables` with action `preview_variable` (nothing is stored). `data` is set for a Fields variable; `text` is then its summary. */
+export interface AiPreviewResult { text?: string | null; line?: string | null; data?: Record<string, AiFieldValue> | null; facts?: unknown; blank?: boolean; fallback?: string | null; model?: string | null }
 
 export type ImportKindV2 = 'search_url' | 'csv' | 'relations' | 'post_engagement' | 'conversations' | 'sn_saved_search' | 'sn_lead_list' | 'company_people';
 export type ImportCadence = 'daily' | 'weekly' | 'monthly';
@@ -305,46 +309,82 @@ function cleanSearch(s: string): string { return s.replace(/[,()"\\]/g, ' ').tri
 
 const PROFILE_COLS = 'follower_count, connections_count, last_posted_at, current_started_on, profile_language, enriched_at';
 
+/**
+ * The leads list query with every filter applied and the list's order (newest first), without a range. `rows` asks for what the
+ * table shows plus the exact count; `ids` asks for the ids alone. Leads created by one import share their created_at, so the id
+ * breaks the tie: without it the pages of the list, and the ids of a selection, would not line up.
+ */
+function leadsQuery(ws: string, f: LeadListFilters, want: 'rows' | 'ids') {
+  const inner = needsProfileJoin(f);
+  const P = 'outreach_lead_profiles';
+  // LinkedIn lives on the lead itself; Instagram / WhatsApp only as identity rows, so those need an inner join.
+  const identityJoin = f.channel && f.channel !== 'LINKEDIN';
+  const cols = want === 'rows'
+    ? `*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS})`
+    : `id${f.tag_id ? ', outreach_lead_tags!inner(tag_id)' : ''}${inner ? `, ${P}!inner(lead_id)` : ''}`;
+  let q = supabase.from('outreach_leads').select(`${cols}${identityJoin ? ', outreach_lead_identities!inner(provider)' : ''}`, want === 'rows' ? { count: 'exact' } : undefined).eq('workspace_id', ws);
+  if (f.channel === 'LINKEDIN') q = q.not('public_identifier', 'is', null);
+  else if (identityJoin) q = q.eq('outreach_lead_identities.provider', f.channel!);
+  const search = f.search ? cleanSearch(f.search) : '';
+  if (search) q = q.or(`full_name.ilike.%${search}%,company.ilike.%${search}%,headline.ilike.%${search}%,public_identifier.ilike.%${search}%,email_work.ilike.%${search}%`);
+  if (f.client_id) q = q.eq('client_id', f.client_id);
+  if (f.list_id) q = q.eq('list_id', f.list_id);
+  if (f.stage_id) q = q.eq('stage_id', f.stage_id);
+  if (f.dnc != null) q = q.eq('do_not_contact', f.dnc);
+  if (f.tag_id) q = q.not('outreach_lead_tags', 'is', null).eq('outreach_lead_tags.tag_id', f.tag_id);
+  if (f.enriched === true) q = q.not('enriched_at', 'is', null);
+  if (f.enriched === false) q = q.is('enriched_at', null);
+  if (f.replied === true) q = q.not('last_replied_at', 'is', null);
+  if (f.replied === false) q = q.is('last_replied_at', null);
+  if (f.posted_30d) q = q.gte(`${P}.last_posted_at`, new Date(Date.now() - 30 * 86_400_000).toISOString());
+  if (f.min_followers != null && f.min_followers > 0) q = q.gte(`${P}.follower_count`, f.min_followers);
+  if (f.time_in_role === 'lt6') q = q.gt(`${P}.current_started_on`, monthsAgo(6));
+  if (f.time_in_role === '6to12') q = q.lte(`${P}.current_started_on`, monthsAgo(6)).gt(`${P}.current_started_on`, monthsAgo(12));
+  if (f.time_in_role === '1to3') q = q.lte(`${P}.current_started_on`, monthsAgo(12)).gt(`${P}.current_started_on`, monthsAgo(36));
+  if (f.time_in_role === 'gt3') q = q.lte(`${P}.current_started_on`, monthsAgo(36));
+  // companies_text / skills_text are lower-cased search columns kept by a trigger: matching is case-insensitive and partial.
+  const like = (v: string) => `%${v.trim().toLowerCase().replace(/[%_,()]/g, ' ')}%`;
+  if (f.past_company?.trim()) q = q.ilike(`${P}.companies_text`, like(f.past_company));
+  if (f.skill?.trim()) q = q.ilike(`${P}.skills_text`, like(f.skill));
+  if (f.language?.trim()) q = q.ilike(`${P}.profile_language`, `${f.language.trim().replace(/[%_]/g, '')}%`);
+  return q.order('created_at', { ascending: false }).order('id', { ascending: false });
+}
+
 /** The leads list with the item-13 filters (join on outreach_lead_profiles, inner only when a profile filter is set). */
 export function useLeadsIntel(ws: string | null | undefined, f: LeadListFilters) {
   return useQuery({
     queryKey: ['outreach', ws ?? '', 'leads', 'intel', f] as const, enabled: !!ws, placeholderData: (prev) => prev,
     queryFn: async () => {
       const page = f.page ?? 0; const size = f.pageSize ?? 50;
-      const inner = needsProfileJoin(f);
-      const P = 'outreach_lead_profiles';
-      // LinkedIn lives on the lead itself; Instagram / WhatsApp only as identity rows, so those need an inner join.
-      const identityJoin = f.channel && f.channel !== 'LINKEDIN';
-      let q = supabase.from('outreach_leads').select(`*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS})${identityJoin ? ', outreach_lead_identities!inner(provider)' : ''}`, { count: 'exact' }).eq('workspace_id', ws!);
-      if (f.channel === 'LINKEDIN') q = q.not('public_identifier', 'is', null);
-      else if (identityJoin) q = q.eq('outreach_lead_identities.provider', f.channel!);
-      const search = f.search ? cleanSearch(f.search) : '';
-      if (search) q = q.or(`full_name.ilike.%${search}%,company.ilike.%${search}%,headline.ilike.%${search}%,public_identifier.ilike.%${search}%,email_work.ilike.%${search}%`);
-      if (f.client_id) q = q.eq('client_id', f.client_id);
-      if (f.list_id) q = q.eq('list_id', f.list_id);
-      if (f.stage_id) q = q.eq('stage_id', f.stage_id);
-      if (f.dnc != null) q = q.eq('do_not_contact', f.dnc);
-      if (f.tag_id) q = q.not('outreach_lead_tags', 'is', null).eq('outreach_lead_tags.tag_id', f.tag_id);
-      if (f.enriched === true) q = q.not('enriched_at', 'is', null);
-      if (f.enriched === false) q = q.is('enriched_at', null);
-      if (f.replied === true) q = q.not('last_replied_at', 'is', null);
-      if (f.replied === false) q = q.is('last_replied_at', null);
-      if (f.posted_30d) q = q.gte(`${P}.last_posted_at`, new Date(Date.now() - 30 * 86_400_000).toISOString());
-      if (f.min_followers != null && f.min_followers > 0) q = q.gte(`${P}.follower_count`, f.min_followers);
-      if (f.time_in_role === 'lt6') q = q.gt(`${P}.current_started_on`, monthsAgo(6));
-      if (f.time_in_role === '6to12') q = q.lte(`${P}.current_started_on`, monthsAgo(6)).gt(`${P}.current_started_on`, monthsAgo(12));
-      if (f.time_in_role === '1to3') q = q.lte(`${P}.current_started_on`, monthsAgo(12)).gt(`${P}.current_started_on`, monthsAgo(36));
-      if (f.time_in_role === 'gt3') q = q.lte(`${P}.current_started_on`, monthsAgo(36));
-      // companies_text / skills_text are lower-cased search columns kept by a trigger: matching is case-insensitive and partial.
-      const like = (v: string) => `%${v.trim().toLowerCase().replace(/[%_,()]/g, ' ')}%`;
-      if (f.past_company?.trim()) q = q.ilike(`${P}.companies_text`, like(f.past_company));
-      if (f.skill?.trim()) q = q.ilike(`${P}.skills_text`, like(f.skill));
-      if (f.language?.trim()) q = q.ilike(`${P}.profile_language`, `${f.language.trim().replace(/[%_]/g, '')}%`);
-      q = q.order('created_at', { ascending: false }).range(page * size, page * size + size - 1);
-      const { data, error, count } = await q;
+      const { data, error, count } = await leadsQuery(ws!, f, 'rows').range(page * size, page * size + size - 1);
       if (error) throw parseError(error);
       return { rows: (data ?? []) as unknown as LeadListRow[], count: count ?? 0 };
     },
+  });
+}
+
+/**
+ * Ids of the leads the list shows under these filters, in the list's order, at most `limit` of them: "Select all" and "the first N"
+ * on the leads page. Paged by what each request brings back, because PostgREST returns at most 1000 rows per request.
+ */
+export async function fetchFilteredLeadIds(ws: string, f: LeadListFilters, limit: number): Promise<string[]> {
+  const ids = new Set<string>();
+  for (let from = 0; from < limit;) {
+    const { data, error } = await leadsQuery(ws, f, 'ids').range(from, Math.min(limit, from + 1000) - 1);
+    if (error) throw parseError(error);
+    const rows = (data ?? []) as unknown as { id: string }[];
+    if (rows.length === 0) break;
+    for (const r of rows) ids.add(r.id);
+    from += rows.length;
+  }
+  return [...ids];
+}
+
+/** Custom-field names used by the workspace's leads, most used first (054). Each one is a column of the leads table. */
+export function useLeadCustomKeys(ws: string | null | undefined) {
+  return useQuery({
+    queryKey: ['outreach', ws ?? '', 'leads', 'custom-keys'] as const, enabled: !!ws, staleTime: 5 * 60_000, retry: false,
+    queryFn: async () => (await rpc<string[] | null>('lead_custom_keys', { p_ws: ws })) ?? [],
   });
 }
 
@@ -470,7 +510,7 @@ export function saveImportSchedule(p: SaveScheduleInput): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Selections handed from the leads list to /outreach/ai-review (too long for a URL beyond a few dozen ids)
+// Selections handed from the leads list to AI → Setup → Personalized lines (too long for a URL beyond a few dozen ids)
 // ---------------------------------------------------------------------------
 const SELECTION_PREFIX = 'outreach-selection:';
 export function stashSelection(ids: string[]): string {

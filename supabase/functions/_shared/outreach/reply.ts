@@ -28,6 +28,8 @@ export interface ReplyInput {
   quote_message_id?: string;
   /** The AI reply run whose draft the composer held (AI replies §12.1): the server works out ai_draft_sent vs ai_edited. */
   ai_run_id?: string;
+  /** Web chat in Review mode: the assistant's suggestion this text started from (docs/outreach/AI-HUB.md §6). */
+  suggestion_id?: string;
   /** Set for API keys: narrows the member's rights to the key's role and client scope. */
   scope?: { workspaceId: string; role: Role; clientIds: string[] };
 }
@@ -153,7 +155,7 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
   // web chat (web-chat-PRD.md): no connector; the message is a row + a Realtime broadcast, written by the same RPC the inbox uses
   if (sender?.provider === "WEBCHAT") {
     const stored = await storedAttachments(chat, input);
-    const msg = await rpc<Record<string, unknown>>("webchat_agent_send", { p_chat: chat.id, p_text: input.text ?? "", p_content_type: stored.length ? "attachment" : "text", p_attrs: {}, p_attachments: stored, p_actor: input.userId });
+    const msg = await rpc<Record<string, unknown>>("webchat_agent_send", { p_chat: chat.id, p_text: input.text ?? "", p_content_type: stored.length ? "attachment" : "text", p_attrs: input.suggestion_id ? { internal: { suggestion_id: input.suggestion_id } } : {}, p_attachments: stored, p_actor: input.userId });
     return msg;
   }
   if (!sender || sender.status !== "ok" || !sender.unipile_account_id) throw new HttpError(409, "E_SENDER_NOT_OK", "sender is not connected");

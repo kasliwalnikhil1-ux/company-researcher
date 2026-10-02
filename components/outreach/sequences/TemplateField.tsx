@@ -1,23 +1,18 @@
 'use client';
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Braces, Eye, GitBranch, Loader2, Search, Shuffle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';
-import { TEMPLATE_VARIABLE_GROUPS, type TemplateVariableGroup } from '@/lib/outreach/nodes';
+import { useLeadCustomKeys } from '@/lib/outreach/intel';
 import { missingVariables, renderTemplate, spintaxInfo } from '@/lib/outreach/render';
+import { VARIABLE_CATALOG, visibleRows, workspaceRows, type CatalogVariable } from '@/lib/outreach/variables';
 import { useBuilder } from './context';
 import { senderName } from './helpers';
+import { hubHref, useHubSetup } from '@/lib/outreach/aiHub';
 import { setPreviewTarget, useAiVariables, useLeadSearch, usePreviewTarget, useRenderContext, type PreviewLead } from './FormsShared';
-
-const BUILT_IN_FALLBACKS: Record<string, string> = Object.fromEntries(
-  TEMPLATE_VARIABLE_GROUPS.flatMap((g) => g.variables).filter((v) => v.fallback).map((v) => [v.name, v.fallback as string]),
-);
-
-export function tokenFor(variable: string, fallback?: string): string {
-  const fb = fallback ?? BUILT_IN_FALLBACKS[variable];
-  return fb ? `{{${variable}|${fb}}}` : `{{${variable}}}`;
-}
+import InsertVariablesModal from './InsertVariablesModal';
 
 interface Props {
   label: string;
@@ -30,7 +25,7 @@ interface Props {
   hint?: string;
   placeholder?: string;
   className?: string;
-  /** 'email' also offers {{unsubscribe_link}} and {{sender.signature}}. */
+  /** 'email' also offers {{ unsubscribe_link }} and {{ sender_signature }}. */
   channel?: 'linkedin' | 'email';
   /** Hide the spintax / conditional helpers (URLs, JSON bodies). */
   plain?: boolean;
@@ -43,8 +38,13 @@ function leadLabel(l: PreviewLead | null | undefined): string {
   return [l.full_name || l.public_identifier || 'Unnamed lead', l.company].filter(Boolean).join(' · ');
 }
 
+/** The name inside a token: "{{ first_name }}" → "first_name". Tokens with a filter or a quoted list have none. */
+const tokenName = (token: string): string | null => /^\{\{\s*([a-zA-Z0-9_.]+)\s*(?:\|[^}]*)?\}\}$/.exec(token)?.[1] ?? null;
+const USES_AI_RE = /\{\{\s*(?:#if\s+)?ai\.|\{%-?\s*if\s+ai\./;
+const AI_KEY_RE = /(?:\{\{\s*(?:#if\s+)?|\{%-?\s*if\s+)ai\.([a-z0-9_]+)/g;
+
 /**
- * Text input / textarea for message templates: grouped variable picker, spintax and conditional helpers,
+ * Text input / textarea for message templates: the Insert Variables popup, spintax and conditional helpers,
  * a counter that uses the longest spintax combination, and "Preview as lead" rendered from the same context the executor uses.
  */
 export default function TemplateField({ label, value, onChange, max, multiline = true, rows = 4, hint, placeholder, className, channel = 'linkedin', plain = false }: Props) {
@@ -52,29 +52,29 @@ export default function TemplateField({ label, value, onChange, max, multiline =
   const ref = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const fieldId = useId();
   const [panel, setPanel] = useState<Panel>(null);
-  const [customKey, setCustomKey] = useState('');
   const [leadSearch, setLeadSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const aiVars = useAiVariables(workspaceId);
   const target = usePreviewTarget();
+  const varsOpen = panel === 'vars';
+  // every custom field of the workspace's leads (the sample lead's own keys until that list has loaded)
+  const wsKeys = useLeadCustomKeys(varsOpen || panel === 'cond' ? workspaceId : null).data;
+  const allCustomKeys = useMemo(() => Array.from(new Set([...(wsKeys ?? []), ...customKeys])), [wsKeys, customKeys]);
 
   useEffect(() => { const t = setTimeout(() => setDebounced(leadSearch), 250); return () => clearTimeout(t); }, [leadSearch]);
   useEffect(() => {
-    if (!panel) return;
+    if (!panel || panel === 'vars') return;   // the popup handles its own keys
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setPanel(null); } };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, [panel]);
 
-  const groups = useMemo<TemplateVariableGroup[]>(() => TEMPLATE_VARIABLE_GROUPS.map((g) => {
-    if (g.id === 'custom') return { ...g, variables: customKeys.map((k) => ({ name: `custom.${k}`, label: k })) };
-    if (g.id === 'ai') return { ...g, variables: (aiVars.data ?? []).map((v) => ({ name: `ai.${v.key}`, label: v.name, fallback: v.fallback || undefined })) };
-    return { ...g, variables: g.variables.filter((v) => channel === 'email' || !v.emailOnly) };
-  }), [customKeys, aiVars.data, channel]);
-
   // --- editing helpers -------------------------------------------------------
+  // A box nobody has clicked into reports its cursor at 0: a variable then goes to the end of the text, not in front of it.
+  const touched = useRef(false);
   const selection = (): { start: number; end: number } => {
     const el = ref.current;
+    if (!touched.current) return { start: value.length, end: value.length };
     const start = el?.selectionStart ?? value.length;
     return { start, end: el?.selectionEnd ?? start };
   };
@@ -88,7 +88,18 @@ export default function TemplateField({ label, value, onChange, max, multiline =
       try { el.setSelectionRange(start + caret, start + caret); } catch { /* input types without selection support */ }
     });
   };
-  const insert = (token: string) => { const { start, end } = selection(); replaceRange(start, end, token, token.length); };
+  /** A click on a row of the popup. A conditional wraps the selected text and leaves the cursor inside the `if`. */
+  const insertVariable = (v: CatalogVariable) => {
+    const { start, end } = selection();
+    if (v.insert === 'if' && v.open) {
+      const picked = value.slice(start, end);
+      replaceRange(start, end, v.open + picked + v.token.slice(v.open.length), v.open.length + picked.length);
+    } else replaceRange(start, end, v.token, v.token.length);
+  };
+  const closeVariables = () => {
+    setPanel(null);
+    requestAnimationFrame(() => ref.current?.focus());
+  };
   const wrapSpintax = () => {
     const { start, end } = selection();
     const picked = value.slice(start, end);
@@ -107,14 +118,18 @@ export default function TemplateField({ label, value, onChange, max, multiline =
   // --- counter ---------------------------------------------------------------
   const info = useMemo(() => spintaxInfo(value), [value]);
   const over = max != null && info.maxLen > max;
-  const usesAi = /\{\{\s*(?:#if\s+)?ai\./.test(value);
+  const usesAi = USES_AI_RE.test(value);
+  // "opener: 312 ready · 14 waiting for you" for every {{ai.<key>}} this step uses (AI hub §4.4)
+  const aiKeys = useMemo(() => Array.from(new Set(Array.from(value.matchAll(AI_KEY_RE), (m) => m[1]))), [value]);
+  const lineStats = useHubSetup(usesAi ? workspaceId : null).data?.variables;
 
   // --- preview ---------------------------------------------------------------
   const previewOpen = panel === 'preview';
   const lead: PreviewLead | null = target.lead ?? sampleLead;
   const senderOptions = poolSenders.length ? poolSenders : senders;
   const senderId = target.senderId && senderOptions.some((s) => s.id === target.senderId) ? target.senderId : senderOptions[0]?.id ?? null;
-  const ctxQ = useRenderContext(lead?.id, senderId, previewOpen);
+  // the popup's Example column shows the same lead and sender as the Preview panel
+  const ctxQ = useRenderContext(lead?.id, senderId, previewOpen || varsOpen);
   const found = useLeadSearch(workspaceId, debounced, previewOpen);
   const rendered = ctxQ.data ? renderTemplate(value, ctxQ.data) : '';
   const missing = ctxQ.data ? missingVariables(value, ctxQ.data) : [];
@@ -122,7 +137,12 @@ export default function TemplateField({ label, value, onChange, max, multiline =
 
   const inputCls = cn('w-full px-3 py-2 text-sm rounded-lg border bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:bg-gray-50', over ? 'border-red-400' : 'border-gray-300', className);
   const toolCls = 'inline-flex items-center gap-1 text-[11px] rounded px-1.5 py-0.5 disabled:opacity-50';
-  const condPaths = useMemo(() => groups.filter((g) => g.id !== 'links').flatMap((g) => g.variables.map((v) => v.name)), [groups]);
+  // "If": every field a sentence can depend on (the same names the popup lists, without the links and the filter examples)
+  const condPaths = useMemo(() => {
+    const list = visibleRows([...VARIABLE_CATALOG, ...workspaceRows(aiVars.data, allCustomKeys)], { channel, plain: false });
+    const names = list.filter((v) => v.tab !== 'advanced' && !v.emailOnly).map((v) => (v.insert === 'if' ? /#if\s+([a-zA-Z0-9_.]+)/.exec(v.token)?.[1] ?? null : tokenName(v.token)));
+    return Array.from(new Set(names.filter((n): n is string => !!n && !n.endsWith('booking_link'))));
+  }, [aiVars.data, allCustomKeys, channel]);
 
   return (
     <div className="block relative">
@@ -134,50 +154,39 @@ export default function TemplateField({ label, value, onChange, max, multiline =
               {info.maxLen.toLocaleString()}/{max.toLocaleString()}
             </span>
           )}
-          <button type="button" onClick={() => setPanel(panel === 'vars' ? null : 'vars')} aria-haspopup="dialog" aria-expanded={panel === 'vars'} title="Insert a variable" className={cn(toolCls, 'text-indigo-600 hover:bg-indigo-50')}><Braces className="w-3 h-3" aria-hidden /> Variable</button>
+          <button type="button" onClick={() => setPanel(varsOpen ? null : 'vars')} aria-haspopup="dialog" aria-expanded={varsOpen} title="Insert a variable: lead, company, sender, AI and date fields" className={cn(toolCls, 'text-indigo-600 hover:bg-indigo-50')}><Braces className="w-3 h-3" aria-hidden /> Insert Variables</button>
           {!plain && <button type="button" onClick={wrapSpintax} title="Rotate wording: select text and click to turn it into {a|b}" className={cn(toolCls, 'text-indigo-600 hover:bg-indigo-50')}><Shuffle className="w-3 h-3" aria-hidden /> Spintax</button>}
           {!plain && <button type="button" onClick={() => setPanel(panel === 'cond' ? null : 'cond')} aria-haspopup="dialog" aria-expanded={panel === 'cond'} title="Show text only when a field has a value" className={cn(toolCls, 'text-indigo-600 hover:bg-indigo-50')}><GitBranch className="w-3 h-3" aria-hidden /> If</button>}
           <button type="button" onClick={() => setPanel(previewOpen ? null : 'preview')} aria-expanded={previewOpen} title="Preview as a real lead" className={cn(toolCls, previewOpen ? 'bg-gray-200 text-gray-800' : 'text-gray-600 hover:bg-gray-100')}><Eye className="w-3 h-3" aria-hidden /> Preview</button>
         </span>
       </div>
       {multiline ? (
-        <textarea id={fieldId} ref={(el) => { ref.current = el; }} value={value} onChange={(e) => onChange(e.target.value)} rows={rows} placeholder={placeholder} aria-invalid={over || undefined} className={cn(inputCls, 'min-h-[80px]')} />
+        <textarea id={fieldId} ref={(el) => { ref.current = el; }} value={value} onChange={(e) => onChange(e.target.value)} onFocus={() => { touched.current = true; }} rows={rows} placeholder={placeholder} aria-invalid={over || undefined} className={cn(inputCls, 'min-h-[80px]')} />
       ) : (
-        <input id={fieldId} ref={(el) => { ref.current = el; }} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-invalid={over || undefined} className={inputCls} />
+        <input id={fieldId} ref={(el) => { ref.current = el; }} value={value} onChange={(e) => onChange(e.target.value)} onFocus={() => { touched.current = true; }} placeholder={placeholder} aria-invalid={over || undefined} className={inputCls} />
       )}
       {over && <span className="block text-xs text-red-600 mt-1">The longest version is {info.maxLen.toLocaleString()} characters. The limit is {max!.toLocaleString()}. Shorten the text or the longest spintax option.</span>}
       {info.combinations > 1 && <span className="block text-xs text-gray-500 mt-1">{info.combinations >= 1000000000 ? 'Over a billion' : info.combinations.toLocaleString()} combinations. Each lead always gets the same one. The counter uses the longest.</span>}
       {usesAi && <span className="block text-xs text-fuchsia-700 mt-1">Only approved lines are used. Anything not approved falls back.</span>}
+      {usesAi && aiKeys.map((k) => {
+        const v = lineStats?.find((x) => x.key === k);
+        if (!v) return null;
+        return (
+          <span key={k} className="block text-xs text-gray-600 mt-0.5">
+            <span className="font-mono">{k}</span>: {v.approved.toLocaleString()} ready
+            {v.waiting > 0 && <> · <Link href={hubHref.needsYou({ type: 'line', where: v.id, mine: false })} target="_blank" className="text-indigo-700 hover:underline">{v.waiting.toLocaleString()} waiting for you</Link></>}
+            {v.mode === 'off' && ' · switched off, no new lines are written'}
+          </span>
+        );
+      })}
       {hint && <span className="block text-xs text-gray-500 mt-1">{hint}</span>}
 
-      {(panel === 'vars' || panel === 'cond') && <div className="fixed inset-0 z-20" onClick={() => setPanel(null)} aria-hidden />}
-      {panel === 'vars' && (
-        <div role="dialog" aria-label="Insert a variable" className="absolute right-0 z-30 mt-1 w-72 max-w-[90vw] bg-white border border-gray-200 rounded-lg shadow-lg py-1 max-h-80 overflow-y-auto">
-          {groups.map((g) => (
-            <div key={g.id}>
-              <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">{g.label}</div>
-              {g.note && <p className="px-3 pb-1 text-[11px] text-gray-500 leading-4">{g.note}</p>}
-              {g.id === 'ai' && aiVars.isLoading && <p className="px-3 py-1 text-xs text-gray-400">Loading…</p>}
-              {g.id === 'ai' && aiVars.error && <p className="px-3 py-1 text-xs text-red-600">{parseError(aiVars.error).message}</p>}
-              {g.id === 'ai' && !aiVars.isLoading && !aiVars.error && g.variables.length === 0 && <p className="px-3 py-1 text-xs text-gray-500">No AI variables yet. Create one under Settings → AI Personalization.</p>}
-              {g.id === 'custom' && g.variables.length === 0 && <p className="px-3 py-1 text-xs text-gray-500">No custom fields found on recent leads. Type a key below.</p>}
-              {g.variables.map((v) => (
-                <button key={v.name} type="button" onClick={() => insert(tokenFor(v.name, v.fallback))} className="w-full text-left px-3 py-1.5 text-xs hover:bg-gray-50 focus:bg-gray-50 focus:outline-none flex items-center justify-between gap-2">
-                  <span className="min-w-0"><span className="block text-gray-800 truncate">{v.label}</span><span className="block font-mono text-[10px] text-gray-400 truncate">{`{{${v.name}}}`}</span></span>
-                  {(v.fallback ?? BUILT_IN_FALLBACKS[v.name]) && <span className="text-gray-400 truncate max-w-[45%]">or “{v.fallback ?? BUILT_IN_FALLBACKS[v.name]}”</span>}
-                </button>
-              ))}
-              {g.id === 'custom' && (
-                <div className="px-3 py-1.5 flex gap-1">
-                  <input value={customKey} onChange={(e) => setCustomKey(e.target.value)} placeholder="custom field key" aria-label="Custom field key" className="flex-1 min-w-0 px-2 py-1 text-xs rounded border border-gray-300" onKeyDown={(e) => { if (e.key === 'Enter' && customKey.trim()) { e.preventDefault(); insert(`{{custom.${customKey.trim()}}}`); } }} />
-                  <button type="button" disabled={!customKey.trim()} onClick={() => insert(`{{custom.${customKey.trim()}}}`)} className="text-xs px-2 py-1 rounded bg-indigo-600 text-white disabled:opacity-50">Insert</button>
-                </div>
-              )}
-            </div>
-          ))}
-          <p className="px-3 py-2 mt-1 border-t border-gray-100 text-[11px] text-gray-500 leading-4">Add a fallback after a pipe: <span className="font-mono">{'{{first_name|there}}'}</span>. It is used when the field is empty.</p>
-        </div>
+      {varsOpen && (
+        <InsertVariablesModal onClose={closeVariables} onInsert={insertVariable} channel={channel} plain={plain} aiVars={aiVars} customKeys={allCustomKeys}
+          ctx={ctxQ.data ?? null} ctxLoading={!!lead && ctxQ.isLoading} leadName={lead ? lead.full_name || lead.public_identifier || null : null} />
       )}
+
+      {panel === 'cond' && <div className="fixed inset-0 z-20" onClick={() => setPanel(null)} aria-hidden />}
       {panel === 'cond' && (
         <div role="dialog" aria-label="Conditional text" className="absolute right-0 z-30 mt-1 w-72 max-w-[90vw] bg-white border border-gray-200 rounded-lg shadow-lg py-1 max-h-72 overflow-y-auto">
           <p className="px-3 py-2 text-[11px] text-gray-500 leading-4">Pick a field. The selected text is shown only when that field has a value, so a missing field never leaves a broken sentence. Add <span className="font-mono">{'{{else}}'}</span> inside for a second wording.</p>

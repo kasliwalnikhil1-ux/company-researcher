@@ -7,9 +7,11 @@ import { supabase } from '@/utils/supabase/client';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { qk, useWebhooks } from '@/lib/outreach/queries';
+import { usePlanFeature } from '@/lib/outreach/billing';
+import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Badge, Button, Card, EmptyState, ErrorBox, Input, Modal, Spinner, Table, Td, Th, Toggle, fmtDate, useToast } from '@/components/outreach/ui';
-import { ApiSubTabs } from '@/components/outreach/settings/SettingsTabs';
-import { ConfirmModal, CopyButton, SettingsFrame, Switch } from '@/components/outreach/settings/shared';
+import { IntegrationsSubTabs } from '@/components/outreach/settings/SettingsTabs';
+import { ConfirmModal, CopyButton, Note, SettingsFrame, Switch } from '@/components/outreach/settings/shared';
 import { sk, useDeliveries } from '@/components/outreach/settings/hooks';
 import { NEW_EVENT_NAMES, type Delivery } from '@/components/outreach/settings/types';
 import { EVENT_NAMES, type OutboundWebhook } from '@/lib/outreach/types';
@@ -32,6 +34,8 @@ export default function WebhooksSettingsPage() {
   const allowed = role === 'owner' || role === 'manager';
   const hooks = useWebhooks(allowed ? ws : null);
   const deliveries = useDeliveries(allowed ? ws : null);
+  // Signed webhooks belong to Enterprise (billing v2). Without them the webhooks stay listed, nothing is delivered, and none can be added or switched on.
+  const gate = usePlanFeature(ws, 'webhooks');
 
   const [url, setUrl] = useState('');
   const [all, setAll] = useState(true);
@@ -88,21 +92,22 @@ export default function WebhooksSettingsPage() {
     finally { setBusy(null); }
   }
 
-  const canReplay = (d: Delivery) => canWrite && !!d.webhook_id && !!hookById.get(d.webhook_id)?.active;
+  const canReplay = (d: Delivery) => canWrite && gate.enabled && !!d.webhook_id && !!hookById.get(d.webhook_id)?.active;
 
   return (
     <SettingsFrame min="manager">
-      <ApiSubTabs />
+      <IntegrationsSubTabs />
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2" title={<span className="flex items-center gap-2"><Webhook className="w-4 h-4" /> Outbound webhooks</span>}>
           <p className="text-xs text-gray-500 mb-4">Each delivery is a JSON POST. The header <code>x-signature</code> holds the hex HMAC-SHA256 of the raw body, keyed with the webhook&apos;s secret; <code>x-event</code> and <code>x-delivery-id</code> name the event and the delivery. Failed deliveries are retried with growing pauses. After repeated failures a webhook is switched off. Fix the endpoint, switch it on again, then replay what it missed.</p>
+          {!gate.enabled && !!hooks.data?.length && <Note className="mb-2">Delivery is paused on this plan. Your webhooks are kept and receive new events again after an upgrade.</Note>}
           {hooks.isLoading ? <Spinner /> : hooks.isError ? <ErrorBox message={parseError(hooks.error).message} /> : !hooks.data?.length ? <EmptyState icon={<Webhook className="w-6 h-6" />} title="No webhooks yet" description="Add an HTTPS endpoint to receive events such as invite.accepted, message.received or meeting.booked." /> : (
             <div className="divide-y divide-gray-100">
               {hooks.data.map((h) => (
                 <div key={h.id} className="py-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <code className="text-sm text-gray-900 break-all flex-1 min-w-[200px]">{h.url}</code>
-                    {canManage ? <span className="flex items-center gap-2 text-xs text-gray-500"><Switch label={`Webhook ${h.url} is ${h.active ? 'on' : 'off'}`} checked={h.active} onChange={(v) => setActive(h, v)} disabled={!canWrite || busy === h.id} />{h.active ? 'on' : 'off'}</span> : <Badge tone={h.active ? 'green' : 'gray'}>{h.active ? 'on' : 'off'}</Badge>}
+                    {canManage ? <span className="flex items-center gap-2 text-xs text-gray-500"><Switch label={`Webhook ${h.url} is ${h.active ? 'on' : 'off'}`} checked={h.active} onChange={(v) => setActive(h, v)} disabled={!canWrite || busy === h.id || (!gate.enabled && !h.active)} />{h.active ? 'on' : 'off'}</span> : <Badge tone={h.active ? 'green' : 'gray'}>{h.active ? 'on' : 'off'}</Badge>}
                     {canWrite && <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(h)} aria-label={`Delete webhook ${h.url}`}><Trash2 className="w-4 h-4 text-red-500" /></Button>}
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 mt-2">
@@ -125,8 +130,8 @@ export default function WebhooksSettingsPage() {
 
         <Card title="Add webhook">
           <form onSubmit={create} className="space-y-3" noValidate>
-            <Input label="Endpoint URL" placeholder="https://example.com/hooks/outreach" value={url} onChange={(e) => { setUrl(e.target.value); setFormError(null); }} error={url && !urlOk ? 'The URL must start with https://' : undefined} disabled={!canWrite} spellCheck={false} />
-            <Toggle checked={all} onChange={setAll} label="Send every event" disabled={!canWrite} />
+            <Input label="Endpoint URL" placeholder="https://example.com/hooks/outreach" value={url} onChange={(e) => { setUrl(e.target.value); setFormError(null); }} error={url && !urlOk ? 'The URL must start with https://' : undefined} disabled={!canWrite || !gate.enabled} spellCheck={false} />
+            <Toggle checked={all} onChange={setAll} label="Send every event" disabled={!canWrite || !gate.enabled} />
             {!all && (
               <fieldset className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-2">
                 <legend className="sr-only">Events to send</legend>
@@ -145,7 +150,8 @@ export default function WebhooksSettingsPage() {
             )}
             {!all && events.length === 0 && <div className="text-xs text-amber-700">Tick at least one event.</div>}
             {formError && <ErrorBox message={formError} />}
-            <Button type="submit" className="w-full" loading={busy === 'create'} disabled={!canWrite || !urlOk || (!all && events.length === 0)}><Plus className="w-4 h-4" /> Create webhook</Button>
+            <UpgradeNote feature="webhooks" what="Webhook delivery" />
+            <Button type="submit" className="w-full" loading={busy === 'create'} disabled={!canWrite || !gate.enabled || !urlOk || (!all && events.length === 0)}><Plus className="w-4 h-4" /> Create webhook</Button>
           </form>
         </Card>
       </div>

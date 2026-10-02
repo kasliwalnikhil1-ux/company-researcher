@@ -1,6 +1,6 @@
 // Item 22 — CRM sync worker (cron, every 5 minutes). For every active integration: push the waiting events to the CRM,
 // then, at most every 6 hours, refresh the "customers and open deals" blacklist. Every write lands in outreach_crm_sync_log.
-import { admin, json, log, requireCron, serve } from "../_shared/outreach/supabase.ts";
+import { admin, hasFeature, json, log, requireCron, serve } from "../_shared/outreach/supabase.ts";
 import { INTEGRATION_COLUMNS, pruneEvents, syncIntegration, toIntegration, type SyncSummary } from "../_shared/outreach/crm/worker.ts";
 
 const RUN_BUDGET_MS = 50_000;
@@ -16,6 +16,8 @@ serve("crm-sync", async (req) => {
   if (error) throw new Error(error.message);
   const integrations = (data ?? []).map(toIntegration);
 
+  const crmByWs = new Map<string, boolean>();
+  const planHasCrm = async (ws: string): Promise<boolean> => { if (!crmByWs.has(ws)) crmByWs.set(ws, await hasFeature(ws, "crm_sync")); return crmByWs.get(ws)!; };
   const results: SyncSummary[] = [];
   const workspaces = new Set<string>();
   for (let i = 0; i < integrations.length; i++) {
@@ -23,6 +25,8 @@ serve("crm-sync", async (req) => {
     if (left < 4_000) break; // the rest goes first next time (oldest last_sync_at)
     const share = Math.min(left, Math.max(MIN_SHARE_MS, Math.floor(left / (integrations.length - i))));
     const integ = integrations[i];
+    // a plan without CRM sync pauses it: nothing is pushed or pulled, and it resumes from where it stopped after an upgrade
+    if (!(await planHasCrm(integ.workspace_id))) continue;
     try {
       const r = await syncIntegration(integ, { deadline: Date.now() + share, pull: "auto" });
       results.push(r);

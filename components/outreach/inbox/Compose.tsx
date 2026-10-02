@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Paperclip, Send, X, Lock, CalendarCheck, Smile, MessageSquare } from 'lucide-react';
+import { Paperclip, Send, X, Lock, CalendarCheck, Smile, MessageSquare, ShoppingBag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/utils/supabase/client';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
@@ -17,6 +17,10 @@ import { isMailProvider, messageMaxLength } from '@/lib/outreach/channels';
 import { aiqk } from '@/lib/outreach/aiReplies';
 import AiComposerPanel, { AiComposerActions, AiDraftMeta, AssistWarnings, useDraftWithAi, type AssistUndo } from './ai/AiComposerPanel';
 import { useComposerAi } from './ai/useAiInbox';
+import { useComposerSuggestion, WebchatSuggestionBar } from './webchat/WebchatSuggestion';
+import ProductPicker from './webchat/ProductPicker';
+import { sendProducts } from '@/lib/outreach/catalogue';
+import { hk } from '@/lib/outreach/aiHub';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
@@ -100,6 +104,8 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   const ai = useComposerAi(chat.id, text, setText);
   // Draft with AI (draft_now) for this chat, plus the Improve / Translate undo state.
   const draft = useDraftWithAi(ai, chat.id, onError);
+  // Website assistant on Review: its suggested answer pre-fills the box; sending it (edited or not) marks it used.
+  const sug = useComposerSuggestion(chat, text, setText);
   const [undo, setUndo] = useState<AssistUndo | null>(null);
   // the prospect's language (for the Translate menu): the latest received message's classification, from the thread already loaded
   const messagesQ = useMessages(chat.id);
@@ -110,6 +116,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [sendingBooking, setSendingBooking] = useState(false);
+  const [pickProducts, setPickProducts] = useState(false);   // web chat: the Product button's picker
   const bookingLink = ((sender as (Sender & { booking_link?: string | null }) | null)?.booking_link ?? '').trim() || null;
   const interested = chat.intent === 'interested';
   const fileRef = useRef<HTMLInputElement>(null);
@@ -157,6 +164,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     if (ai.aiSent && !window.confirm('The AI already sent its version of this reply. Send yours as well?')) return;
     ai.clearAiSent();
     const aiRunId = ai.runIdForSend();   // only when the text started as that run's draft (edited or not)
+    const suggestionId = chat.provider === 'WEBCHAT' && !files.length ? sug.idForSend() : null;
     if (booking) setSendingBooking(true); else setSending(true);
     const tempId = `temp-${Date.now()}`;
     const optimistic = {
@@ -184,12 +192,17 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       if (aiRunId) payload.ai_run_id = aiRunId;
       if (chat.provider === 'WEBCHAT') {
         // web chat: no connector; the row + Realtime broadcast come from the RPC (web-chat-PRD.md §8). "/shortcut" expands there.
-        await rpc('webchat_agent_send', { p_chat: chat.id, p_text: body, p_content_type: paths.length ? 'attachment' : 'text', p_attrs: {}, p_attachments: paths.map((path, i) => ({ id: path, storage: true, name: files[i]?.name ?? path.split('/').pop(), type: files[i]?.type ?? null, size: files[i]?.size ?? null })) });
+        // a Review suggestion that recommends products goes out with the cards the agent kept (built on the server from the suggestion's own snapshot)
+        const cardIds = suggestionId ? sug.cardIdsForSend() : [];
+        if (suggestionId && cardIds.length) await sendProducts({ chatId: chat.id, productIds: cardIds, text: body, suggestionId });
+        else await rpc('webchat_agent_send', { p_chat: chat.id, p_text: body, p_content_type: paths.length ? 'attachment' : 'text', p_attrs: suggestionId ? { internal: { suggestion_id: suggestionId } } : {}, p_attachments: paths.map((path, i) => ({ id: path, storage: true, name: files[i]?.name ?? path.split('/').pop(), type: files[i]?.type ?? null, size: files[i]?.size ?? null })) });
       } else {
         await callFn('send-reply', payload);
       }
       setText('');
       ai.dropTag();
+      sug.dropTag();
+      if (chat.provider === 'WEBCHAT') { qc.invalidateQueries({ queryKey: hk.suggestion(chat.id) }); qc.invalidateQueries({ queryKey: hk.all(workspaceId) }); }
       setUndo(null);
       setFiles([]);
       onCancelReply?.();
@@ -257,6 +270,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     <div className="border-t border-gray-200 bg-white p-3 space-y-2">
       {tabs}
       <AiComposerPanel ai={ai} chat={chat} canCompose onError={onError} onRegenerate={aiChannel ? () => { void draft.request({ regenerate: true }); } : undefined} regenerating={draft.busy} />
+      <WebchatSuggestionBar sug={sug} text={text} />
       {bookingLink && interested && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2">
           <CalendarCheck className="w-4 h-4 text-green-700 flex-shrink-0" />
@@ -320,6 +334,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
             </div>
           )}
           <Button type="button" variant="ghost" size="sm" onClick={() => fileRef.current?.click()} title="Attach files"><Paperclip className="w-4 h-4" /> Attach</Button>
+          {chat.provider === 'WEBCHAT' && <Button type="button" variant="ghost" size="sm" onClick={() => setPickProducts(true)} disabled={sending} title="Send products from the website's catalogue as cards"><ShoppingBag className="w-4 h-4" /> Product</Button>}
           <span className="text-[11px] text-gray-400 hidden sm:inline">Replies don't count against outbound caps.</span>
           {maxLength && <span className={`text-[11px] tabular-nums ${text.length >= maxLength ? 'text-red-600 font-medium' : 'text-gray-400'}`}>{text.length}/{maxLength}</span>}
         </div>
@@ -330,6 +345,17 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
           <Button type="button" size="sm" loading={sending} disabled={(!text.trim() && !files.length) || sendingBooking} onClick={() => send(false)} title="Send reply"><Send className="w-4 h-4" /> Send</Button>
         </div>
       </div>
+      {pickProducts && (
+        <ProductPicker ws={workspaceId} chatId={chat.id} inboxId={chat.webchat_inbox_id ?? null} text={sug.inBox ? '' : text} onClose={() => setPickProducts(false)}
+          onSent={(usedText) => {
+            setPickProducts(false);
+            if (usedText) setText('');
+            qc.invalidateQueries({ queryKey: qk.messages(chat.id) });
+            qc.invalidateQueries({ queryKey: ['outreach', workspaceId, 'chats'] });
+            qc.invalidateQueries({ queryKey: hk.suggestion(chat.id) });
+            onSent?.();
+          }} />
+      )}
     </div>
   );
 }

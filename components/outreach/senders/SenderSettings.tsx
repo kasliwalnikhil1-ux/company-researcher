@@ -74,10 +74,10 @@ export default function SenderSettings({ sender, isManager, canWrite, notify, wo
 
   const alertKey = (sender.alert_emails ?? []).join(',');   // a refetch returns a new array: compare by content so typing is not reset
   const initial = useMemo(() => ({
-    alert_emails: alertKey ? alertKey.split(',') : [], booking_link: sender.booking_link ?? '', monthly_cost: costText(sender.monthly_cost),
+    alert_emails: alertKey ? alertKey.split(',') : [], booking_link: sender.booking_link ?? '', monthly_cost: costText(sender.monthly_cost), label: sender.label ?? '',
     parent_sender_id: sender.parent_sender_id ?? '', signature: sender.signature ?? '', bcc_address: sender.bcc_address ?? '',
     track_replies: sender.track_replies == null ? 'default' : sender.track_replies ? 'on' : 'off',
-  }), [alertKey, sender.booking_link, sender.monthly_cost, sender.parent_sender_id, sender.signature, sender.bcc_address, sender.track_replies]);
+  }), [alertKey, sender.booking_link, sender.monthly_cost, sender.label, sender.parent_sender_id, sender.signature, sender.bcc_address, sender.track_replies]);
   const [form, setForm] = useState(initial);
   useEffect(() => { setForm(initial); }, [initial]);
   const [busy, setBusy] = useState<'general' | 'mailbox' | null>(null);
@@ -97,6 +97,7 @@ export default function SenderSettings({ sender, isManager, canWrite, notify, wo
     if (!sameList(form.alert_emails, initial.alert_emails)) p.alert_emails = form.alert_emails;
     if (form.booking_link.trim() !== initial.booking_link) p.booking_link = form.booking_link.trim() || null;
     if (form.monthly_cost.trim() !== initial.monthly_cost) p.monthly_cost = form.monthly_cost.trim() === '' ? null : Number(form.monthly_cost);
+    if (form.label.trim() !== initial.label) p.label = form.label.trim();   // empty clears it: the sender's name is used again
     return p;
   }, [form, initial]);
   const mailboxPatch = useMemo(() => {
@@ -141,6 +142,8 @@ export default function SenderSettings({ sender, isManager, canWrite, notify, wo
               placeholder={defaultCost != null && defaultCost !== '' ? `${String(defaultCost)} (workspace default)` : 'Not set'}
               hint="What this sender costs you per month: seat, LinkedIn plan, proxy. It feeds cost per reply on the Reports page. Leave it empty to use the workspace default." />
           </div>
+          <Input label="Label in messages (optional)" value={form.label} onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))} disabled={!canManage} maxLength={80} placeholder={sender.display_name ?? 'Naman from GrowthX'}
+            hint="How this sender is named when a message uses {{ sender_label }}, for example “Naman from GrowthX”. Leave it empty to use the sender’s name." />
           {errors.general && <ErrorBox message={errors.general} />}
         </div>
       </Card>

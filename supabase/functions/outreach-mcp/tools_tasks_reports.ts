@@ -34,7 +34,7 @@ export function registerTasksReports(server: McpServer, ctx: Ctx): void {
   // ---------------------------------------------------------------- tasks
   tool(server, ctx, {
     name: "tasks_list", title: "List tasks", cls: "read", minRole: "client_viewer",
-    description: "Open (default) or completed tasks: follow_up (created from interested/question replies), review_ai_draft (AI copy awaiting approval), manual_node, reconnect, reply_hold (a lead replied in a hold-for-review sequence and waits for resume or exit), call (call-task step with a script). Filter by kind, assignee ('me'), lead.",
+    description: "Open (default) or completed tasks: follow_up (created from interested/question replies), review_ai_draft (AI copy awaiting approval), manual_node, reconnect, reply_hold (a lead replied in a hold-for-review sequence and waits for resume or exit), call (call-task step with a script). Filter by kind, assignee ('me'), lead. review_ai_draft tasks still exist and still work through these tools, but in the app they are no longer on the Tasks page: they are Step drafts in AI → Needs you (ai_needs_you_list, type draft). ai_escalation tasks are no longer created: a reply the AI hands to a person is a card in Needs you.",
     input: { ...wsParam, open: z.boolean().optional(), kind: z.enum(["manual_node", "follow_up", "review_ai_draft", "reconnect", "reply_hold", "call"]).optional(), assigned_to: z.string().optional(), lead_id: z.string().optional(), limit: z.number().int().min(1).max(100).optional() },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
@@ -49,7 +49,7 @@ export function registerTasksReports(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "task_get", title: "Get task", cls: "read", minRole: "client_viewer",
-    description: "One task in full, including the AI draft awaiting review (review_ai_draft) and the node it belongs to.",
+    description: "One task in full, including the AI draft awaiting review (review_ai_draft) and the node it belongs to. In the app a review_ai_draft task is a Step draft in AI → Needs you, no longer on the Tasks page; the task id is that card's id.",
     input: { task_id: z.string() },
   }, async (a) => {
     const t = unwrap<Row | null>(await ctx.user.from("outreach_tasks").select("*, outreach_leads(full_name, company, headline), outreach_senders(display_name, is_premium)").eq("id", a.task_id).maybeSingle());
@@ -70,7 +70,7 @@ export function registerTasksReports(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "task_complete", title: "Complete task", cls: "write", minRole: "member",
-    description: "Complete a task. review_ai_draft: decision 'approve' queues the real invite/message/comment with result_text (or the stored ai_draft when omitted) through the normal budget + schedule path; 'reject' skips that step. The human decides: show the draft first, approve only after a yes. manual_node: the enrollment continues (result_text overrides the step's copy). reply_hold (the lead replied and is held for review): decision 'resume' continues the sequence, 'exit' ends it as replied. call: pass outcome connected | voicemail | no_answer | wrong_number and the sequence follows that branch. Idempotent.",
+    description: "Complete a task. review_ai_draft (in the app a Step draft in AI → Needs you, no longer on the Tasks page; it still completes here with the same id): decision 'approve' queues the real invite/message/comment with result_text (or the stored ai_draft when omitted) through the normal budget + schedule path; 'reject' skips that step. The human decides: show the draft first, approve only after a yes. manual_node: the enrollment continues (result_text overrides the step's copy). reply_hold (the lead replied and is held for review): decision 'resume' continues the sequence, 'exit' ends it as replied. call: pass outcome connected | voicemail | no_answer | wrong_number and the sequence follows that branch. Idempotent.",
     input: { task_id: z.string(), result_text: z.string().max(8000).optional(), decision: z.enum(["approve", "reject", "resume", "exit"]).optional(), outcome: z.enum(["connected", "voicemail", "no_answer", "wrong_number"]).optional().describe("Call tasks only") },
   }, async (a) => {
     const { data: t } = await ctx.user.from("outreach_tasks").select("id, kind, completed_at, ai_draft").eq("id", a.task_id).maybeSingle();

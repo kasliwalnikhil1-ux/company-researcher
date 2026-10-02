@@ -1,6 +1,9 @@
 // Sender management actions (manager+): set_cookie (pasted li_at), resync, reconnect_link (credentials mode), checkpoint (OTP), refresh_profile, recompute_health, plan_now,
+// disconnect (remove the connected account, keep the sender and its history; frees the account slot) and enable (a disabled sender comes back as
+// disconnected, ready for Reconnect; needs a free account),
 // and the channel actions attest_account_age {months} (WhatsApp), resume_after_warning (Instagram provider warning), check_identifiers (WhatsApp numbers).
-import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit } from "../_shared/outreach/supabase.ts";
+import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit, rpc } from "../_shared/outreach/supabase.ts";
+import { disconnectSender } from "../_shared/outreach/disconnect.ts";
 import { encrypt } from "../_shared/outreach/crypto.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
 import { reconnectLink, reloginUrl, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames, SIGN_IN_INCOMPLETE } from "../_shared/outreach/inbound.ts";
@@ -29,7 +32,9 @@ serve("sender-manage", async (req) => {
       if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
       const method = body.connect_method === "browser" || body.connect_method === "credentials" ? body.connect_method : undefined;
       // copy = the durable re-login URL for the owner (a fresh hosted link is made when they open it); otherwise the hosted link itself ("Sign in now")
-      if (body.mode === "copy") {
+      // a disconnected sender has no account to re-login to: its link is a fresh sign-in bound to this sender, valid for an hour,
+      // and it needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise)
+      if (body.mode === "copy" && s.status !== "disconnected") {
         const relogin_url = await reloginUrl(s, method);
         await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, { mode: "copy", ...(method ? { connect_method: method } : {}) }, "user");
         return json({ link: relogin_url, relogin_url });
@@ -37,6 +42,33 @@ serve("sender-manage", async (req) => {
       const link = await reconnectLink(s, method);
       await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, method ? { connect_method: method } : null, "user");
       return json({ link });
+    }
+    case "disconnect": {
+      // The connected account is removed on the connector side (it stops counting towards the plan); conversations, relations and
+      // enrolments stay on this sender and carry on after a later Reconnect.
+      if (s.provider === "WEBCHAT") throw new HttpError(400, "E_PAYLOAD_INVALID", "a website inbox has no connected account");
+      if (s.status === "disabled") throw new HttpError(409, "E_SENDER_NOT_OK", "This sender is disabled.");
+      const r = await disconnectSender(s.id, "user_disconnected");
+      await audit(s.workspace_id, "sender.disconnect", "sender", s.id, { by: user.id, account_deleted: r.deleted }, "user");
+      const { data: fresh } = await admin.from("outreach_senders").select("*").eq("id", s.id).single();
+      return json({ ok: true, account_deleted: r.deleted, sender: fresh });
+    }
+    case "enable": {
+      // A disabled sender comes back without its connected account (that was removed when it was disabled): it becomes
+      // "disconnected" and the owner signs in again. Re-enabling needs a free account, like connecting a new one (PRD #29).
+      if (s.status !== "disabled" || s.deleted_at) throw new HttpError(409, "E_SENDER_NOT_OK", "Only a disabled sender can be re-enabled.");
+      const slots = await rpc<{ available: number | null }>("slots", { p_ws: s.workspace_id });
+      if (slots.available != null && slots.available < 1) throw new HttpError(402, "E_ACCOUNT_LIMIT", "There is no free account on your plan. Add an account to bring this sender back.", { slots });
+      if (s.unipile_account_id) {
+        // disabled before billing v2: the account is still connected. Disconnect it so it comes back through a normal sign-in.
+        await disconnectSender(s.id, "user_disconnected");
+      } else {
+        const { error } = await admin.from("outreach_senders").update({ status: "disconnected", status_reason: "user_disconnected" }).eq("id", s.id);
+        if (error) throw new HttpError(500, "E_INTERNAL", error.message);
+      }
+      await audit(s.workspace_id, "sender.enabled", "sender", s.id, { by: user.id }, "user");
+      const { data: fresh } = await admin.from("outreach_senders").select("*").eq("id", s.id).single();
+      return json({ ok: true, sender: fresh });
     }
     case "reconnect_cookie": {
       const r = await reconnectSender(s);
@@ -47,6 +79,7 @@ serve("sender-manage", async (req) => {
       // closed or expired page is flagged from here (the sweep would catch it within the hour anyway).
       if (s.status !== "connecting" || s.unipile_account_id || s.status_reason) return json({ ok: false });
       await admin.from("outreach_senders").update({ status_reason: SIGN_IN_INCOMPLETE }).eq("id", s.id);
+      await rpc("slot_release_sender", { p_sender: s.id, p_reason: "failed" }).catch(() => null);   // the account the link was holding is free again
       await admin.from("outreach_sender_events").insert({ sender_id: s.id, kind: "reconnect", data: { result: "incomplete", via: "failure_redirect" } });
       return json({ ok: true });
     }

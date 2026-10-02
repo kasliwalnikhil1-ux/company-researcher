@@ -16,8 +16,15 @@ export async function workspaceContext(ctx: Ctx, ws: Membership) {
     ctx.user.from("outreach_lists").select("id, name, client_id").eq("workspace_id", ws.id).order("name"),
     urpc<Row[]>(ctx, "workspace_members", { p_ws: ws.id }).catch(() => null),
   ]);
+  // plan and accounts (billing v2): accounts = LinkedIn accounts + mailboxes + Instagram accounts + WhatsApp numbers; billed null = no limit
+  const billing = await urpc<Row>(ctx, "billing_state", { p_ws: ws.id }).catch(() => null);
+  const acc = billing?.accounts as Row | undefined;
   return {
-    workspace: { id: ws.id, name: ws.name, slug: ws.slug, plan: ws.plan, settings: ws.settings },
+    workspace: { id: ws.id, name: ws.name, slug: ws.slug, plan: billing?.plan ?? ws.plan, settings: ws.settings,
+      ...(billing ? { read_only: billing.read_only || undefined, billing_period: billing.billing_period ?? undefined,
+        accounts: acc ? { billed: acc.billed ?? null, used: acc.used, available: acc.available ?? null, paused_over_plan_limit: acc.over_limit || undefined } : undefined,
+        trial_ends_at: billing.plan === "trial" ? billing.trial?.ends_at : undefined,
+        features_off: billing.features ? Object.entries(billing.features as Record<string, Row>).filter(([, v]) => v.enabled === false).map(([k, v]) => `${k} (on ${v.min_plan})`) : undefined } : {}) },
     you: { user_id: ctx.userId, email: ctx.email, role: ws.role, can_reply: ws.can_reply, client_scope: ws.client_ids.length ? ws.client_ids : "all" },
     clients: clients ?? [], stages: stages ?? [], tags: tags ?? [], lists: lists ?? [],
     members: members ? members.map((m) => ({ user_id: m.user_id, email: m.email, name: m.display_name, role: m.role })) : undefined,

@@ -10,7 +10,7 @@ import RebalanceDialog from './RebalanceDialog';
 import type { SetPoolResult } from './publishTypes';
 
 const STATUS_REASON: Record<Sender['status'], string> = {
-  ok: '', connecting: 'still connecting', credentials: 'needs re-login', error: 'in error', paused: 'paused', disabled: 'disabled',
+  ok: '', connecting: 'still connecting', credentials: 'needs re-login', error: 'in error', paused: 'paused', disabled: 'disabled', disconnected: 'disconnected',
 };
 
 const samePool = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');

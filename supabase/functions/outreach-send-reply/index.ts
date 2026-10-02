@@ -5,7 +5,7 @@ import { sendReply } from "../_shared/outreach/reply.ts";
 serve("send-reply", async (req) => {
   const user = await requireUser(req);
   await rateLimit(`user:${user.id}:send-reply`, 60, 60);
-  const body = await readJson<{ chat_id: string; text?: string; attachments?: string[]; subject?: string; booking?: boolean; quote_message_id?: string; ai_run_id?: string }>(req);
+  const body = await readJson<{ chat_id: string; text?: string; attachments?: string[]; subject?: string; booking?: boolean; quote_message_id?: string; ai_run_id?: string; suggestion_id?: string }>(req);
   const message = await sendReply({ userId: user.id, ...body });
   return json({ ok: true, message });
 });

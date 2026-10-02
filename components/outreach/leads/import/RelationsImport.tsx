@@ -45,7 +45,7 @@ export function RelationsImport({ toast, onCreated }: { toast: ToastFn; onCreate
       )}
       <ImportOptions kind="relations" value={common} onChange={setCommon} />
       {error && <ErrorBox message={error} />}
-      <Button onClick={create} loading={busy} disabled={!senderId}>Import connections</Button>
+      <Button onClick={create} loading={busy} disabled={!senderId || !common.listId}>Import connections</Button>
     </div>
   );
 }

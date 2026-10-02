@@ -41,7 +41,7 @@ export function CompanyPeopleImport({ toast, onCreated }: { toast: ToastFn; onCr
   const capInvalid = !/^\d+$/.test(perCompany.trim()) || parseInt(perCompany, 10) < 1 || parseInt(perCompany, 10) > MAX_PER_COMPANY;
   const tooMany = companies.length > MAX_COMPANIES;
   const badUrl = companies.find((c) => /^https?:\/\//i.test(c) && !COMPANY_URL.test(c));
-  const canSubmit = !!senderId && companies.length > 0 && !tooMany && !capInvalid && titleKeywords.length > 0 && titleKeywords.length <= MAX_TITLES && !badUrl;
+  const canSubmit = !!senderId && companies.length > 0 && !tooMany && !capInvalid && titleKeywords.length > 0 && titleKeywords.length <= MAX_TITLES && !badUrl && !!common.listId;
 
   const submit = async () => {
     if (!canSubmit) return;

@@ -10,7 +10,7 @@ const PLATFORM_NAME = "GrowthxAI Outreach";
 export function emailConfigured(): boolean { return !!RESEND_KEY; }
 
 export type NotifyKind = "reconnect_needed" | "reconnect_needed_manual" | "sender_paused" | "sender_error" | "invite" | "digest" | "level_up";
-export type WorkspaceNotifyKind = "sequence_stalled" | "sender_running_dry" | "import_failed" | "weekly_digest" | "client_report" | "sender_weekly";
+export type WorkspaceNotifyKind = "sequence_stalled" | "sender_running_dry" | "import_failed" | "weekly_digest" | "client_report" | "sender_weekly" | "voice_minutes";
 
 export interface Branding {
   workspace_name?: string | null;

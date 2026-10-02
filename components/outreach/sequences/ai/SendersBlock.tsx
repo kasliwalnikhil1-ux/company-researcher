@@ -21,7 +21,7 @@ export default function SendersBlock({ sequenceId, ws, senders, canEdit, notify 
     setBusy(s.sender_id);
     try {
       const r: ConsentRequestResult = await req.mutateAsync(s.sender_id);
-      if (r.granted) notify(r.already ? `${s.sender_name ?? 'This account'} had already approved AI Auto Replies.` : `Approved for ${s.sender_name ?? 'your account'}.`);
+      if (r.granted) notify(r.already ? `${s.sender_name ?? 'This account'} had already approved AI replies.` : `Approved for ${s.sender_name ?? 'your account'}.`);
       else if (r.emailed) notify(`Approval link emailed to ${s.owner_email ?? 'the owner'}.`);
       else if (r.link) setLink({ name: s.sender_name ?? 'Sender', url: r.link, expires: r.expires_at });
       else notify('Request sent.');
@@ -30,7 +30,7 @@ export default function SendersBlock({ sequenceId, ws, senders, canEdit, notify 
   }
 
   return (
-    <Section title="Senders" help="Auto sends as a real person, so the owner of each account approves once: the approval covers every sequence your team turns on. Draft never needs approval.">
+    <Section title="Senders" help="Auto sends as a real person, so the owner of each account approves once: the approval covers every sequence your team turns on. Review never needs approval.">
       {senders.length === 0 ? (
         <p className="text-sm text-gray-500">No LinkedIn sender in the pool yet. Add one under Senders.</p>
       ) : (

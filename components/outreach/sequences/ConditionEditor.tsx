@@ -2,7 +2,10 @@
 
 import { Plus, Trash2 } from 'lucide-react';
 import { Button, Select } from '@/components/outreach/ui';
-import { CONDITION_FIELDS, CONDITION_FIELD_GROUPS, conditionFieldMeta, conditionOpsFor } from '@/lib/outreach/nodes';
+import { useMemo } from 'react';
+import Link from 'next/link';
+import { hubHref } from '@/lib/outreach/aiHub';
+import { CONDITION_FIELDS, CONDITION_FIELD_GROUPS, aiConditionFields, conditionFieldMeta, conditionOpsFor } from '@/lib/outreach/nodes';
 import type { ConditionOp, ConditionRule } from '@/lib/outreach/types';
 import { useBuilder } from './context';
 
@@ -16,13 +19,15 @@ const inputCls = 'flex-1 min-w-0 px-2 py-1 text-xs rounded border border-gray-30
 function isCustom(field: string) { return field.startsWith('custom.'); }
 
 export default function ConditionEditor({ rules, match, onChange }: { rules: ConditionRule[]; match: 'all' | 'any'; onChange: (rules: ConditionRule[], match: 'all' | 'any') => void }) {
-  const { tags, stages } = useBuilder();
+  const { tags, stages, aiVariables } = useBuilder();
+  // AI fields (066): one entry per field of a Fields variable, typed; a one-line variable as "has a line"
+  const aiFields = useMemo(() => aiConditionFields(aiVariables), [aiVariables]);
   const setRule = (i: number, patch: Partial<ConditionRule>) => onChange(rules.map((r, idx) => (idx === i ? { ...r, ...patch } : r)), match);
   const remove = (i: number) => onChange(rules.filter((_, idx) => idx !== i), match);
   const add = () => onChange([...rules, { field: 'replied', op: 'eq', value: 'true' }], match);
 
   const changeField = (i: number, field: string) => {
-    const meta = conditionFieldMeta(field);
+    const meta = conditionFieldMeta(field, aiFields);
     const value = meta?.kind === 'boolean' ? 'true' : meta?.kind === 'select' ? meta.options?.[0]?.value ?? '' : field === 'enrich.posted_within_days' ? '30' : '';
     setRule(i, { field, op: meta?.defaultOp ?? 'eq', value });
   };
@@ -39,9 +44,10 @@ export default function ConditionEditor({ rules, match, onChange }: { rules: Con
       </div>
       {rules.length === 0 && <p className="text-xs text-gray-500">No rules: every lead takes the <span className="font-medium">true</span> branch.</p>}
       {rules.map((r, i) => {
-        const meta = conditionFieldMeta(r.field);
+        const meta = conditionFieldMeta(r.field, aiFields);
         const selectValue = isCustom(r.field) ? 'custom.' : r.field;
-        const ops = conditionOpsFor(r.field);
+        const ops = conditionOpsFor(r.field, aiFields);
+        const isAi = meta?.group === 'AI fields' || r.field.startsWith('ai.');
         const opList = ops.includes(r.op) ? ops : [r.op, ...ops];   // keep an operator saved by an older version selectable
         const showValue = !NO_VALUE.includes(r.op);
         const kind = meta?.kind ?? 'text';
@@ -56,6 +62,11 @@ export default function ConditionEditor({ rules, match, onChange }: { rules: Con
                     {CONDITION_FIELDS.filter((f) => f.group === g).map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
                   </optgroup>
                 ))}
+                {aiFields.length > 0 && (
+                  <optgroup label="AI fields">
+                    {aiFields.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </optgroup>
+                )}
               </Select>
               <button type="button" onClick={() => remove(i)} className="p-1 rounded text-gray-400 hover:text-red-600 hover:bg-red-50" aria-label={`Remove rule ${i + 1}`}><Trash2 className="w-3.5 h-3.5" /></button>
             </div>
@@ -88,7 +99,10 @@ export default function ConditionEditor({ rules, match, onChange }: { rules: Con
                 </Select>
               ) : kind === 'number' ? (
                 <span className="flex-1 min-w-0 flex items-center gap-1">
-                  <input type="number" min={0} step={1} inputMode="numeric" value={r.value ?? ''} onChange={(e) => setRule(i, { value: e.target.value === '' ? '' : String(Math.max(0, Math.round(Number(e.target.value)) || 0)) })} placeholder="0" aria-label={`Value${meta?.unit ? ` in ${meta.unit}` : ''}`} className={`${inputCls} tabular-nums`} />
+                  {isAi
+                    // an AI number can be negative or have decimals; the profile counters above are whole numbers from 0
+                    ? <input type="number" step="any" inputMode="decimal" value={r.value ?? ''} onChange={(e) => setRule(i, { value: e.target.value })} placeholder="0" aria-label="Value" className={`${inputCls} tabular-nums`} />
+                    : <input type="number" min={0} step={1} inputMode="numeric" value={r.value ?? ''} onChange={(e) => setRule(i, { value: e.target.value === '' ? '' : String(Math.max(0, Math.round(Number(e.target.value)) || 0)) })} placeholder="0" aria-label={`Value${meta?.unit ? ` in ${meta.unit}` : ''}`} className={`${inputCls} tabular-nums`} />}
                   {meta?.unit && <span className="text-[11px] text-gray-500 flex-shrink-0">{meta.unit}</span>}
                 </span>
               ) : (
@@ -96,6 +110,8 @@ export default function ConditionEditor({ rules, match, onChange }: { rules: Con
               ))}
             </div>
             {meta?.hint && <p className="text-[11px] text-gray-500 leading-4">{meta.hint}</p>}
+            {isAi && meta && <p className="text-[11px] text-gray-500 leading-4">Reads the approved value only. A lead without one counts as empty, so this rule is false unless it is “is empty”.</p>}
+            {isAi && !meta && <p className="text-[11px] text-amber-700 leading-4">This AI field no longer exists, so the rule is false for everyone. Pick another field, or add it back under <Link href={hubHref.setupLines()} target="_blank" className="underline">AI → Setup → Personalized lines</Link>.</p>}
             {kind === 'number' && showValue && (r.value ?? '') === '' && <p className="text-[11px] text-amber-700">Enter a number, or the rule is false for everyone.</p>}
           </div>
         );

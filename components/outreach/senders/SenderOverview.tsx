@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, MonitorSmartphone, RefreshCw, Save, ShieldCheck, XCircle, CalendarClock } from 'lucide-react';
+import { Activity, CheckCircle2, Copy, ExternalLink, KeyRound, Lock, MonitorSmartphone, RefreshCw, Save, ShieldCheck, Unplug, XCircle, CalendarClock } from 'lucide-react';
 import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
+import { accountsMeter, changeHref, useBilling, useInvalidateBilling } from '@/lib/outreach/billing';
 import { reasonText } from '@/lib/outreach/reasons';
 import { qk, useActions } from '@/lib/outreach/queries';
+import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { Badge, Button, Card, EmptyState, Input, Select, StatusPill, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
-import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, copyText, healthTextClass, healthTone, isAbandonedSignIn, isFuture, statusReasonText } from './helpers';
+import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, billingRefusalRemedy, copyText, disconnectedReasonText, healthTextClass, healthTone, isAbandonedSignIn, isBillingRefusal, isFuture, statusReasonText } from './helpers';
 import { cn, normalizeEmail } from '@/lib/utils';
 import type { Client, Sender } from '@/lib/outreach/types';
 
@@ -68,10 +70,102 @@ function AccountAgeAttestation({ sender, canManage, notify, onDone }: { sender: 
   );
 }
 
+type Refusal = { code: string; message: string };
+
+/** The plan refused a sign-in link (no free account, or the plan is not active): the server's message and the way out. */
+function RefusalNote({ refused, workspaceId, className }: { refused: Refusal; workspaceId: string; className?: string }) {
+  const { isOwner } = useWorkspace();
+  const billing = useBilling(workspaceId);
+  const remedy = billingRefusalRemedy(refused.code, billing.data, isOwner);
+  return (
+    <div className={cn('rounded-lg border border-amber-300 bg-white p-3 text-sm text-gray-800', className)} role="alert">
+      {refused.message && <div className="font-medium">{refused.message}</div>}
+      <div className={refused.message ? 'mt-2' : undefined}>{remedy.href ? <Link href={remedy.href}><Button size="sm">{remedy.label}</Button></Link> : remedy.label}</div>
+    </div>
+  );
+}
+
+/** A disconnected sender (billing v2): the connected account was removed (the trial ended, the plan has fewer accounts, billing,
+ *  or a teammate did it) while the sender, its conversations and its leads stay. Reconnect is a fresh sign-in bound to this
+ *  sender; it needs an active plan and a free account, and the same account has to sign in. Shown above the tabs. */
+export function DisconnectedPanel({ sender, isManager, canWrite, notify }: { sender: Sender; isManager: boolean; canWrite: boolean; notify: Notify }) {
+  const { isOwner } = useWorkspace();
+  const billing = useBilling(sender.workspace_id);
+  const invalidateBilling = useInvalidateBilling();
+  const [busy, setBusy] = useState<'redirect' | 'copy' | null>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Refusal | null>(null);
+  if (sender.status !== 'disconnected') return null;
+
+  /** "Reconnect" opens the sign-in here. "Copy" gives the same kind of link to send to the owner; it lasts an hour. */
+  async function reconnect(mode: 'redirect' | 'copy') {
+    setBusy(mode); setRefused(null);
+    try {
+      let url = mode === 'copy' ? link : null;
+      if (!url) {
+        const method = BROWSER_SIGNIN_ENABLED && sender.auth_method === 'browser' ? 'browser' : 'credentials';
+        const r = await callFn<{ link: string }>('sender-manage', { sender_id: sender.id, action: 'reconnect_link', ...(sender.provider === 'LINKEDIN' ? { connect_method: method } : {}), ...(mode === 'copy' ? { mode: 'copy' } : {}) });
+        url = String(r.link ?? '');
+        if (!url) throw new Error('No sign-in link came back. Try again.');
+        invalidateBilling(sender.workspace_id);   // the link holds one account until it is used or expires
+      }
+      if (mode === 'redirect') { window.location.href = url; return; }
+      setLink(url);
+      const ok = await copyText(url);
+      notify(ok ? 'Link copied. It works for 1 hour.' : 'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
+    } catch (e) {
+      const err = parseError(e);
+      if (isBillingRefusal(err.code)) { setRefused({ code: err.code, message: err.message }); invalidateBilling(sender.workspace_id); }
+      else notify(err.message, 'error');
+    } finally { setBusy(null); }
+  }
+
+  const reason = disconnectedReasonText(sender.status_reason);
+  const plan = billing.data?.plan;
+  // the last sign-in finished with no free account and there is still none: offer the way out before another attempt
+  const stillFull = sender.status_reason === 'NO_FREE_ACCOUNT' && !!accountsMeter(billing.data?.accounts)?.full;
+  const note = refused ?? (stillFull ? { code: 'E_ACCOUNT_LIMIT', message: '' } : null);
+
+  return (
+    <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4">
+      <div className="flex items-start gap-3">
+        <Unplug className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+        <div className="min-w-0 flex-1 text-sm text-amber-900">
+          <div className="font-semibold">Disconnected{sender.disconnected_at ? ` since ${fmtDate(sender.disconnected_at, false)}` : ''}</div>
+          {reason && <p className="mt-1">{reason}.</p>}
+          <p className="mt-1">The connected account was removed from this workspace. Its conversations and leads are kept; they carry on after you reconnect.</p>
+          {isManager && canWrite ? (
+            <>
+              <p className="mt-1">Sign in with the account this sender had; a different account is refused. Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <Button onClick={() => reconnect('redirect')} loading={busy === 'redirect'} disabled={!!busy}><ExternalLink className="w-4 h-4" /> Reconnect</Button>
+                <Button variant="secondary" onClick={() => reconnect('copy')} loading={busy === 'copy'} disabled={!!busy}><Copy className="w-4 h-4" /> Copy sign-in link</Button>
+              </div>
+              {note && <RefusalNote refused={note} workspaceId={sender.workspace_id} className="mt-3" />}
+              {link && (
+                <div className="mt-3">
+                  <div className="text-xs text-amber-800 mb-1">Sign-in link (works for 1 hour)</div>
+                  <input readOnly value={link} onFocus={(e) => e.currentTarget.select()} aria-label="Sign-in link" className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-white text-gray-700" />
+                </div>
+              )}
+            </>
+          ) : !canWrite ? (
+            <p className="mt-1">Reconnecting needs an active plan. {!isOwner ? 'The workspace owner can sort this out on the Billing page.'
+              : plan === 'trial_expired' || plan === 'cancelled' ? <Link href={changeHref()} className="underline font-medium">Subscribe to reconnect</Link>
+                : <Link href="/outreach/billing" className="underline font-medium">Open Billing</Link>}</p>
+          ) : <p className="mt-1">Ask an owner or manager to reconnect it.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function SenderOverview({ sender, clients, isManager, canWrite, connected, notify }: { sender: Sender; clients: Client[]; isManager: boolean; canWrite: boolean; connected: string | null; notify: Notify }) {
   const qc = useQueryClient();
+  const invalidateBilling = useInvalidateBilling();
   const canManage = isManager && canWrite;
   const [busy, setBusy] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Refusal | null>(null);
   const [reloginLink, setReloginLink] = useState<string | null>(null);
   const [reconnectChoice, setReconnectMethod] = useState<'credentials' | 'browser'>(sender.auth_method === 'browser' ? 'browser' : 'credentials');
   const reconnectMethod = BROWSER_SIGNIN_ENABLED ? reconnectChoice : 'credentials';
@@ -120,11 +214,12 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   /** "Sign in now" opens a fresh hosted sign-in link here. "Copy" gives the owner a re-login link that lasts 7 days and creates
    *  the hosted link only when they open it. One copied link per method choice. */
   async function reconnect(mode: 'redirect' | 'copy') {
-    setBusy(`reconnect_${mode}`);
+    setBusy(`reconnect_${mode}`); setRefused(null);
     try {
       const args = { sender_id: sender.id, action: 'reconnect_link', ...(isLinkedIn ? { connect_method: reconnectMethod } : {}) };
       if (mode === 'redirect') {
         const r = await callFn<{ link: string }>('sender-manage', args);
+        invalidateBilling(sender.workspace_id);   // a sign-in for a sender with no live account holds one account
         window.location.href = String(r.link ?? '');
         return;
       }
@@ -136,7 +231,12 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
       }
       const ok = await copyText(link);
       notify(ok ? 'Link copied. It works for 7 days.' : 'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
-    } catch (e) { notify(parseError(e).message, 'error'); }
+    } catch (e) {
+      const err = parseError(e);
+      // no free account on the plan, or the plan is not active: shown in the card with the way out
+      if (isBillingRefusal(err.code)) { setRefused({ code: err.code, message: err.message }); invalidateBilling(sender.workspace_id); }
+      else notify(err.message, 'error');
+    }
     finally { setBusy(null); }
   }
 
@@ -150,9 +250,14 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   }
 
   const needsRelogin = sender.status === 'credentials';
+  // disconnected: the connected account is gone. Reconnect lives in the panel above the tabs; nothing here may assume a live account.
+  const isDisconnected = sender.status === 'disconnected';
+  // the sign-in finished, but the plan had no free account by then, so nothing was connected
+  const noFreeAccount = sender.status_reason === 'NO_FREE_ACCOUNT';
+  const reasonWords = isDisconnected ? disconnectedReasonText(sender.status_reason) : statusReasonText(sender.status_reason);
   // a first sign-in that never finished, or that the hosted page reported as failed: the card is highlighted like a re-login
   const signInFailed = isAbandonedSignIn(sender) || (sender.status === 'error' && !sender.unipile_account_id);
-  const canReconnect = sender.status !== 'disabled' && (sender.status === 'connecting' || sender.status === 'error' || sender.auth_method === 'cookie');
+  const canReconnect = sender.status !== 'disabled' && !isDisconnected && (sender.status === 'connecting' || sender.status === 'error' || sender.auth_method === 'cookie');
   const urgent = needsRelogin || signInFailed;
   const checkpointHint = /checkpoint|otp|2fa|in_app|validation|captcha|phone/i.test(sender.status_reason ?? '');
   const breakdown = HEALTH_KEYS.map((k) => ({ ...k, value: typeof sender.health_breakdown?.[k.key] === 'number' ? Math.round(sender.health_breakdown[k.key]) : null }));
@@ -166,11 +271,14 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
 
   return (
     <div className="space-y-6">
-      {connected === '1' && (
+      {connected === '1' && !isDisconnected && (
         <div className="flex items-start gap-2 p-3 rounded-lg bg-green-50 text-green-800 text-sm border border-green-200"><CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login completed. The account is syncing — the profile, connections count and inbox backfill arrive within a few minutes.</span></div>
       )}
+      {connected === '1' && isDisconnected && !noFreeAccount && sender.status_reason !== 'RECONNECT_WRONG_ACCOUNT' && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 text-blue-800 text-sm border border-blue-200"><CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>The sign-in finished. The account is being attached to this sender; this page updates within a minute.</span></div>
+      )}
       {connected === '0' && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-800 text-sm border border-red-200"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login did not complete. {canManage ? 'Create a fresh sign-in link below (copied links work for 7 days) or disable this sender.' : 'Ask a manager to generate a fresh link.'}</span></div>
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-800 text-sm border border-red-200"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login did not complete. {isDisconnected ? (canManage ? 'Use Reconnect above to try again.' : 'Ask a manager to reconnect it.') : canManage ? 'Create a fresh sign-in link below (copied links work for 7 days) or disable this sender.' : 'Ask a manager to generate a fresh link.'}</span></div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -178,13 +286,13 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => manage('refresh_profile', {}, 'Profile refreshed.')} loading={busy === 'refresh_profile'} disabled={!!busy || !sender.unipile_account_id} title="Update this sender's details shown here (name, photo, connections count, Premium / Sales Navigator / Recruiter). Use after you change your LinkedIn profile. Does not touch the inbox."><RefreshCw className="w-3.5 h-3.5" /> Refresh profile</Button>
             <Button size="sm" variant="secondary" onClick={() => manage('resync', {}, 'Conversations are being refreshed. New messages arrive over the next few minutes.')} loading={busy === 'resync'} disabled={!!busy || !sender.unipile_account_id} title="Re-import this account's conversations from LinkedIn so the inbox catches up. Use when messages look missing or stale, or after reconnecting. New messages arrive over the next few minutes; you do not need to press it again."><RefreshCw className="w-3.5 h-3.5" /> Refresh conversations</Button>
-            <Button size="sm" variant="secondary" onClick={() => manage('recompute_health')} loading={busy === 'recompute_health'} disabled={!!busy}><Activity className="w-3.5 h-3.5" /> Recheck health</Button>
+            <Button size="sm" variant="secondary" onClick={() => manage('recompute_health')} loading={busy === 'recompute_health'} disabled={!!busy || isDisconnected} title={isDisconnected ? 'Available once the sender is reconnected' : undefined}><Activity className="w-3.5 h-3.5" /> Recheck health</Button>
             <Button size="sm" variant="secondary" onClick={() => manage('plan_now')} loading={busy === 'plan_now'} disabled={!!busy || sender.status !== 'ok'} title="Schedule this sender's remaining actions for today right now, from its active sequences, within its schedule and daily limits. Runs automatically every 20 minutes anyway; use this after enrolling leads, changing the schedule or reconnecting when you do not want to wait. Safe to press more than once."><CalendarClock className="w-3.5 h-3.5" /> Schedule today’s actions</Button>
           </div>
         ) : undefined}>
           <div className="flex flex-wrap items-center gap-3">
-            <StatusPill status={sender.status} reason={statusReasonText(sender.status_reason)} />
-            {sender.status_reason && <span className="text-sm text-gray-600">{statusReasonText(sender.status_reason)}</span>}
+            <StatusPill status={sender.status} reason={reasonWords} />
+            {sender.status_reason && <span className="text-sm text-gray-600">{reasonWords}</span>}
             {isFuture(sender.paused_until) && <Badge tone="amber">{sender.provider_warning ? 'paused after a warning until' : 'auto-paused until'} {fmtDate(sender.paused_until)}</Badge>}
             {isFuture(sender.outreach_allowed_from) && <Badge tone="blue">quiet period: outreach starts {fmtDate(sender.outreach_allowed_from)}</Badge>}
             {isFuture(sender.invite_blocked_until) && <Badge tone="amber">invites blocked until {fmtDate(sender.invite_blocked_until, false)}</Badge>}
@@ -202,8 +310,9 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
 
           {(needsRelogin || canReconnect) && canManage && (
             <div className={cn('mt-5 rounded-xl border p-4', urgent ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-gray-50')}>
-              <div className={cn('text-sm font-semibold flex items-center gap-2', urgent ? 'text-red-900' : 'text-gray-900')}><KeyRound className="w-4 h-4" /> {needsRelogin ? 'This account needs a fresh login' : signInFailed ? 'The sign-in was not completed' : 'Reconnect with a secure sign-in'}</div>
+              <div className={cn('text-sm font-semibold flex items-center gap-2', urgent ? 'text-red-900' : 'text-gray-900')}><KeyRound className="w-4 h-4" /> {needsRelogin ? 'This account needs a fresh login' : noFreeAccount ? 'Nothing was connected' : signInFailed ? 'The sign-in was not completed' : 'Reconnect with a secure sign-in'}</div>
               <p className={cn('text-sm mt-1', urgent ? 'text-red-800' : 'text-gray-600')}>{needsRelogin ? `${channelName} ended the session. Actions are held until the owner signs in again.`
+                : noFreeAccount ? `${statusReasonText(sender.status_reason)}.`
                 : signInFailed ? `${sender.status_reason === 'SIGN_IN_FAILED' || sender.status_reason === 'CREATION_FAIL' ? `${channelName} rejected the sign-in (wrong password, or a verification step was not finished).` : 'The sign-in page was closed or its link expired (links last 15 minutes).'} Nothing was connected: send a fresh link and the owner can try again.`
                 : sender.auth_method === 'cookie' ? 'Connected by cookie, so profile edits are locked. Have the owner sign in to unlock them.' : 'Use this if the account is stuck connecting or shows an error.'}</p>
               <p className={cn('text-sm', urgent ? 'text-red-800' : 'text-gray-600')}>Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
@@ -223,6 +332,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
                 <Button variant="secondary" onClick={() => reconnect('copy')} loading={busy === 'reconnect_copy'} disabled={!!busy}><Copy className="w-4 h-4" /> Copy sign-in link</Button>
                 {needsRelogin && sender.auth_method === 'cookie' && <Button variant="secondary" onClick={() => manage('reconnect_cookie')} loading={busy === 'reconnect_cookie'} disabled={!!busy}>Retry cookie reconnect</Button>}
               </div>
+              {refused && <RefusalNote refused={refused} workspaceId={sender.workspace_id} className="mt-3" />}
               {reloginLink && (
                 <div className="mt-3">
                   <div className="text-xs text-gray-600 mb-1">Sign-in link (works for 7 days)</div>

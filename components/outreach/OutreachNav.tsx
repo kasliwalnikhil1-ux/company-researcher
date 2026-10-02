@@ -4,17 +4,17 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, CreditCard, Settings, BarChart3, Sparkles, type LucideIcon } from 'lucide-react';
-import { supabase } from '@/utils/supabase/client';
+import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, CreditCard, Settings, BarChart3, Sparkles, Bot, type LucideIcon } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useDashboard } from '@/lib/outreach/queries';
+import { HUB_TABS, useNeedsYouCounts } from '@/lib/outreach/aiHub';
 import { useSidebarCollapsed, useSidebarFlat } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Modal, Input, Button } from './ui';
 
-type NavBadge = 'unread' | 'tasks_open' | 'ai_review';
-interface NavItem { href: string; label: string; icon: LucideIcon; exact?: boolean; prefix?: string; badge?: NavBadge; manager?: boolean; owner?: boolean; writer?: boolean }
+type NavBadge = 'unread' | 'tasks_open' | 'ai_needs_you';
+interface NavChild { href: string; label: string; badge?: NavBadge }
+interface NavItem { href: string; label: string; icon: LucideIcon; exact?: boolean; prefix?: string; badge?: NavBadge; manager?: boolean; owner?: boolean; writer?: boolean; children?: NavChild[] }
 
 export const OUTREACH_NAV: NavItem[] = [
   { href: '/outreach', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -23,7 +23,9 @@ export const OUTREACH_NAV: NavItem[] = [
   { href: '/outreach/leads', label: 'Leads', icon: Users },
   { href: '/outreach/sequences', label: 'Sequences', icon: GitBranch },
   { href: '/outreach/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks_open' },
-  { href: '/outreach/ai-review', label: 'AI Personalization', icon: Sparkles, badge: 'ai_review', writer: true },
+  // AI hub: one home for every AI feature. The badge counts what waits for this person (Needs you, "Mine").
+  { href: '/outreach/ai', label: 'AI', icon: Sparkles, badge: 'ai_needs_you', writer: true, children: HUB_TABS.map((t) => ({ href: t.href, label: t.label, badge: t.key === 'needs-you' ? 'ai_needs_you' as const : undefined })) },
+  { href: '/outreach/websites', label: 'Website assistant', icon: Bot, writer: true },
   { href: '/outreach/reports', label: 'Reports', icon: BarChart3 },
   { href: '/outreach/clients', label: 'Clients', icon: Building2, manager: true },
   { href: '/outreach/billing', label: 'Billing', icon: CreditCard, owner: true },
@@ -32,43 +34,29 @@ export const OUTREACH_NAV: NavItem[] = [
 
 const CLIENT_VIEWER_HIDDEN = ['/outreach/senders', '/outreach/sequences', '/outreach/tasks', '/outreach/clients'];
 
-export const aiReviewCountKey = (ws: string) => ['outreach', ws, 'ai-review-count'] as const;
-
-/**
- * AI lines that are written and wait for a person (`outreach_ai_values.status = 'generated'`).
- * Polled every 30 s; the shell also refreshes it on realtime changes. RLS limits the count to leads the member can see.
- */
-export function useAiReviewCount(ws: string | null | undefined, enabled = true) {
-  return useQuery({
-    queryKey: aiReviewCountKey(ws ?? ''), enabled: !!ws && enabled, refetchInterval: 30_000, retry: 0,
-    queryFn: async () => {
-      const { count, error } = await supabase.from('outreach_ai_values').select('id', { count: 'exact', head: true }).eq('workspace_id', ws!).eq('status', 'generated');
-      if (error) throw error;
-      return count ?? 0;
-    },
-  });
-}
-
 /** Outreach sub-nav items visible to the current role, with active state and badge counts. */
 export function useOutreachNav() {
   const pathname = usePathname();
   const { workspace, isManager, isOwner, role } = useWorkspace();
   const dash = useDashboard(workspace?.id);
   const isClientViewer = role === 'client_viewer';
-  const aiReview = useAiReviewCount(workspace?.id, !isClientViewer);
+  const needsYou = useNeedsYouCounts(workspace?.id, true, !isClientViewer);
   const counts: Record<NavBadge, number> = {
     unread: Number((dash.data as any)?.unread ?? 0),
     tasks_open: Number((dash.data as any)?.tasks_open ?? 0),
-    // the dashboard carries the same number; use it while the direct count is loading or unavailable
-    ai_review: Number(aiReview.data ?? (dash.data as any)?.ai_lines_awaiting ?? 0),
+    ai_needs_you: Number(needsYou.data?.total ?? 0),
   };
   return OUTREACH_NAV
     .filter((n) => (!n.manager || isManager) && (!n.owner || isOwner) &&!(isClientViewer && (n.writer || CLIENT_VIEWER_HIDDEN.includes(n.href))))
-    .map((n) => ({
-      ...n,
-      active: n.exact ? pathname === n.href : pathname.startsWith(n.prefix ?? n.href),
-      count: n.badge ? counts[n.badge] : 0,
-    }));
+    .map((n) => {
+      const base = n.prefix ?? n.href;
+      return {
+        ...n,
+        active: n.exact ? pathname === n.href : pathname === base || pathname.startsWith(`${base}/`),
+        count: n.badge ? counts[n.badge] : 0,
+        children: (n.children ?? []).map((c) => ({ ...c, active: pathname === c.href || pathname.startsWith(`${c.href}/`), count: c.badge ? counts[c.badge] : 0 })),
+      };
+    });
 }
 
 export function CountBadge({ count }: { count: number }) {
@@ -131,13 +119,29 @@ export function OutreachSidebarNav() {
         {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
         {!isClientViewer && <option value={NEW_WORKSPACE}>+ New workspace</option>}
       </select>
-      {items.map((n) => (
-        <Link key={n.href} href={n.href} aria-current={n.active ? 'page' : undefined} className={cn('flex items-center rounded-lg text-sm font-medium', flat ? 'gap-3 px-4 py-2.5' : 'gap-2 px-3 py-2', n.active ? 'bg-indigo-50 text-indigo-700' : flat ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-600 hover:bg-gray-50')}>
-          <n.icon className={flat ? 'w-5 h-5' : 'w-4 h-4'} />
-          <span className="flex-1">{n.label}</span>
-          <CountBadge count={n.count} />
-        </Link>
-      ))}
+      {items.map((n) => {
+        // An item with pages of its own (AI) opens them underneath while you are in it; the count then sits on its page.
+        const open = n.active && n.children.length > 0;
+        return (
+          <div key={n.href} className={flat ? 'space-y-1' : 'space-y-0.5'}>
+            <Link href={n.href} aria-current={n.active && !open ? 'page' : undefined} aria-expanded={n.children.length > 0 ? open : undefined} className={cn('flex items-center rounded-lg text-sm font-medium', flat ? 'gap-3 px-4 py-2.5' : 'gap-2 px-3 py-2', n.active ? 'bg-indigo-50 text-indigo-700' : flat ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-600 hover:bg-gray-50')}>
+              <n.icon className={flat ? 'w-5 h-5' : 'w-4 h-4'} />
+              <span className="flex-1">{n.label}</span>
+              {!open && <CountBadge count={n.count} />}
+            </Link>
+            {open && (
+              <div className={cn('border-l border-gray-200 space-y-0.5', flat ? 'ml-6 pl-3' : 'ml-5 pl-2')}>
+                {n.children.map((c) => (
+                  <Link key={c.href} href={c.href} aria-current={c.active ? 'page' : undefined} className={cn('flex items-center rounded-md px-3 py-1.5 text-sm', c.active ? 'text-indigo-700 font-medium bg-indigo-50/60' : 'text-gray-600 hover:bg-gray-50')}>
+                    <span className="flex-1">{c.label}</span>
+                    <CountBadge count={c.count} />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
       {/* Portal: the mobile sidebar is transformed, which would trap a fixed-position modal inside it. */}
       {createOpen && createPortal(<NewWorkspaceModal open onClose={() => setCreateOpen(false)} />, document.body)}
     </div>

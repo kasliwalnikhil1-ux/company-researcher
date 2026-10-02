@@ -15,6 +15,8 @@ import type { ActionType, Sender, SenderStatus } from '@/lib/outreach/types';
 export type SenderV2 = Sender & {
   alert_emails?: string[] | null;
   booking_link?: string | null;
+  /** 067: optional name for messages ({{ sender_label }}). */
+  label?: string | null;
   signature?: string | null;
   bcc_address?: string | null;
   monthly_cost?: number | string | null;

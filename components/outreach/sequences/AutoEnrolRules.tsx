@@ -7,6 +7,7 @@ import { Pencil, Plus, Trash2, Zap } from 'lucide-react';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { useLists, useStages, useTags } from '@/lib/outreach/queries';
 import { Badge, Button, EmptyState, ErrorBox, Input, Modal, Select, Spinner, Table, Td, Th, timeAgo, Toggle, useToast } from '@/components/outreach/ui';
+import { ListPicker } from '@/components/outreach/leads/ListPicker';
 import { ConfirmModal } from './Modals';
 import { sqk, useAutoEnrolLog, useAutoEnrolRules, useRuleMatchCount } from './hooks';
 import { fmtInt, plural, type AutoEnrolFilter, type AutoEnrolRule } from './publishTypes';
@@ -203,10 +204,7 @@ export default function AutoEnrolRules({ sequenceId, workspaceId, canManage, seq
         {form && (
           <div className="space-y-4">
             <Input label="Name" value={form.name} onChange={(e) => patch({ name: e.target.value })} placeholder="Founders from the weekly search" autoFocus />
-            <Select label="When a lead joins this list" value={form.listId} onChange={(e) => patch({ listId: e.target.value })}>
-              <option value="">Any list</option>
-              {(lists.data ?? []).map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-            </Select>
+            <ListPicker label="When a lead joins this list" emptyLabel="Any list" value={form.listId} onChange={(id) => patch({ listId: id })} />
             <div>
               <span className="block text-xs font-medium text-gray-600 mb-1">And matches these filters (all optional)</span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

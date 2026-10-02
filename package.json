@@ -6,8 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . && node scripts/check-note-leaks.mjs",
-    "lint:notes": "node scripts/check-note-leaks.mjs"
+    "lint": "eslint . && node scripts/check-note-leaks.mjs && node scripts/outreach-widget-size.mjs",
+    "lint:notes": "node scripts/check-note-leaks.mjs",
+    "lint:widget": "node scripts/outreach-widget-size.mjs"
   },
   "dependencies": {
     "@babel/runtime": "^7.27.1",
@@ -28,6 +29,7 @@
     "ai": "^5.0.115",
     "character-entities": "^2.0.2",
     "clsx": "^2.1.1",
+    "driver.js": "^1.8.0",
     "exa-js": "^1.3.2",
     "framer-motion": "^11.11.17",
     "html2canvas": "^1.4.1",

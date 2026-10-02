@@ -5,8 +5,8 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useSender } from '@/lib/outreach/queries';
 import { Avatar, BackLink, Badge, ErrorBox, HealthBar, PageLoader, StatusPill, useToast } from '@/components/outreach/ui';
-import { PROVIDER_LABELS } from '@/components/outreach/senders/helpers';
-import SenderOverview from '@/components/outreach/senders/SenderOverview';
+import { PROVIDER_LABELS, disconnectedReasonText, statusReasonText } from '@/components/outreach/senders/helpers';
+import SenderOverview, { DisconnectedPanel } from '@/components/outreach/senders/SenderOverview';
 import ScheduleEditor from '@/components/outreach/senders/ScheduleEditor';
 import BudgetsPanel from '@/components/outreach/senders/BudgetsPanel';
 import EventsTimeline from '@/components/outreach/senders/EventsTimeline';
@@ -86,7 +86,8 @@ function SenderDetail() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {s.status !== 'disabled' && <SenderDiagnosis senderId={s.id} senderName={s.display_name} />}
-          <StatusPill status={s.status} reason={s.status_reason} />
+          <StatusPill status={s.status} reason={s.status === 'disconnected' ? disconnectedReasonText(s.status_reason) : statusReasonText(s.status_reason)} />
+          {s.status === 'paused' && s.status_reason === 'over_plan_limit' && <Badge tone="amber">Paused by plan</Badge>}
           <QuietPeriodBadge sender={s} />
           <Badge tone="indigo">Level {s.warmup_level}</Badge>
           <HealthBar score={s.health_score} />
@@ -94,6 +95,8 @@ function SenderDetail() {
         </div>
       </div>
 
+      {/* Disconnected: why, what is kept, and Reconnect. Above the tabs so it is there on every one of them. */}
+      <DisconnectedPanel key={s.id} sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />
       <ProviderWarningBanner sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />
       <RunningDryCallout sender={s} canWrite={canWrite} />
 

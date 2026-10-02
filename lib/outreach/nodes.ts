@@ -1,7 +1,8 @@
 // Node catalogue for the sequence builder: metadata, defaults, exits, limits.
 // Mirrors outreach_node_types / outreach_node_action_type / outreach_is_executable_node in migrations/outreach/011_engine_v2.sql.
-import type { AbBranch, ActionType, AiRouteOption, ConditionOp, ConsentBasis, GraphNode, NodeType, Provider } from './types';
+import type { AbBranch, ActionType, AiField, AiRouteOption, ConditionOp, ConsentBasis, GraphNode, NodeType, Provider } from './types';
 import { AI_ROUTE_ELSE, CALL_OUTCOMES, CHANNEL_PROVIDERS } from './types';
+import { VARIABLE_ALIASES } from './render';
 
 export type NodeGroup = 'Outreach' | 'Social' | 'Instagram' | 'WhatsApp' | 'Logic' | 'CRM' | 'Integrations' | 'AI' | 'Flow';
 
@@ -250,7 +251,7 @@ export type ConditionValueKind = 'boolean' | 'number' | 'text' | 'select' | 'tag
 export interface ConditionFieldMeta {
   value: string;
   label: string;
-  group: 'Conversation' | 'Lead' | 'Profile data' | 'Sender';
+  group: 'Conversation' | 'Lead' | 'Profile data' | 'Sender' | 'AI fields';
   /** Kept for older callers: true when kind === 'boolean'. */
   boolean?: boolean;
   kind: ConditionValueKind;
@@ -309,14 +310,43 @@ export const CONDITION_FIELD_GROUPS: ConditionFieldMeta['group'][] = ['Conversat
 
 export const CONDITION_OPS = ['eq', 'neq', 'contains', 'not_contains', 'exists', 'not_exists', 'gt', 'lt', 'gte', 'lte'] as const;
 
-export function conditionFieldMeta(field: string): ConditionFieldMeta | undefined {
+/** An AI variable as the Condition editor and the builder checks need it (a row of outreach_ai_variables). */
+export interface AiConditionVariable { key: string; name: string; output?: string | null; fields?: AiField[] | null; builtin?: boolean | null }
+
+/**
+ * The "AI fields" group of the Condition editor, built from the workspace's AI variables (066): one entry per field of a
+ * Fields variable, typed (Choice shows its options, Yes/No shows yes / no, Number the number operators), and one
+ * "has a line" entry per one-line variable. A rule reads the APPROVED value only: without one it is empty, so every
+ * rule is false except "is empty".
+ */
+export function aiConditionFields(vars: AiConditionVariable[] | null | undefined): ConditionFieldMeta[] {
+  const out: ConditionFieldMeta[] = [];
+  for (const v of vars ?? []) {
+    if (v.builtin) continue;
+    if (v.output === 'fields') {
+      for (const f of Array.isArray(v.fields) ? v.fields : []) {
+        const base = { value: `ai.${v.key}.${f.key}`, label: `${v.name} · ${f.name}`, group: 'AI fields' as const, hint: f.description || undefined };
+        if (f.type === 'number') out.push({ ...base, kind: 'number', defaultOp: 'gte', ops: ['gte', 'lte', 'gt', 'lt', 'eq', 'exists', 'not_exists'] });
+        else if (f.type === 'yes_no') out.push({ ...base, ...BOOL });
+        else if (f.type === 'choice') out.push({ ...base, kind: 'select', defaultOp: 'eq', ops: ['eq', 'neq', 'exists', 'not_exists'], options: (f.options ?? []).map((o) => ({ value: o, label: o })) });
+        else out.push({ ...base, kind: 'text', defaultOp: 'contains', ops: ['contains', 'not_contains', 'eq', 'neq', 'exists', 'not_exists'] });
+      }
+    } else {
+      out.push({ value: `ai.${v.key}`, label: `${v.name} · has a line`, group: 'AI fields', kind: 'text', defaultOp: 'exists', ops: ['exists', 'not_exists'], hint: 'True when this lead has an approved line.' });
+    }
+  }
+  return out;
+}
+
+/** `extra` = the workspace's AI fields (aiConditionFields), which are not part of the static list. */
+export function conditionFieldMeta(field: string, extra?: ConditionFieldMeta[]): ConditionFieldMeta | undefined {
   if (field.startsWith('custom.')) return CONDITION_FIELDS.find((f) => f.value === 'custom.');
-  return CONDITION_FIELDS.find((f) => f.value === field);
+  return CONDITION_FIELDS.find((f) => f.value === field) ?? extra?.find((f) => f.value === field);
 }
 
 /** Operators offered for a field, most useful first. */
-export function conditionOpsFor(field: string): ConditionOp[] {
-  const meta = conditionFieldMeta(field);
+export function conditionOpsFor(field: string, extra?: ConditionFieldMeta[]): ConditionOp[] {
+  const meta = conditionFieldMeta(field, extra);
   if (meta?.ops) return meta.ops;
   if (meta?.kind === 'number') return NUMBER_OPS;
   return TEXT_OPS;
@@ -386,7 +416,7 @@ export const TEMPLATE_VARIABLE_GROUPS: TemplateVariableGroup[] = [
       { name: 'enrich.recent_post_date', label: 'Recent post date' },
     ],
   },
-  { id: 'ai', label: 'AI variables', note: 'Only approved lines are used. Anything not approved falls back.', variables: [] },   // filled from outreach_ai_variables
+  { id: 'ai', label: 'Personalized lines', note: 'Only approved lines are used. Anything not approved falls back.', variables: [] },   // filled from outreach_ai_variables
   {
     id: 'links', label: 'Links',
     variables: [
@@ -396,8 +426,10 @@ export const TEMPLATE_VARIABLE_GROUPS: TemplateVariableGroup[] = [
   },
 ];
 
-/** Flat list of the built-in variable names (custom.<key> and ai.<key> are per workspace). */
+/** Flat list of the built-in variable names (custom.<key>, ai.<key> and ai.<key>.<field> are per workspace). */
 export const TEMPLATE_VARIABLES: string[] = [
   ...TEMPLATE_VARIABLE_GROUPS.flatMap((g) => g.variables.map((v) => v.name)),
-  'custom.<key>', 'ai.<key>',
+  // the Insert Variables names (067): each is an alias of a path above, or of an account.* / now.* path
+  ...Object.keys(VARIABLE_ALIASES), 'tags', 'work_email_domain',
+  'custom.<key>', 'ai.<key>', 'ai.<key>.<field>',
 ];

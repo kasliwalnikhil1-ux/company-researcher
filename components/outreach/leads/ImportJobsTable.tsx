@@ -15,7 +15,7 @@ import { formatNumber, type ToastFn } from './helpers';
 const STATUS_TONE: Record<JobStatus, 'gray' | 'green' | 'red' | 'amber' | 'blue' | 'indigo'> = { queued: 'blue', running: 'indigo', paused: 'amber', done: 'green', failed: 'red', cancelled: 'gray' };
 
 type JobRow = ImportJob & { mode?: 'upsert' | 'update_only'; update_fields?: string[]; enrich?: boolean; schedule_id?: string | null };
-interface JobParams { storage_path?: string; api?: string; url?: string; post_url?: string; name?: string | null; companies?: unknown[]; only_replied?: boolean; repeat_run?: number; _state?: { not_found?: number | string[]; row_errors?: number; first_row_error?: string | null; company_name?: string | null; idx?: number } }
+interface JobParams { storage_path?: string; api?: string; url?: string; post_url?: string; name?: string | null; companies?: unknown[]; only_replied?: boolean; repeat_run?: number; _state?: { not_found?: number | string[]; row_errors?: number; first_row_error?: string | null; merged_rows?: number; skipped_rows?: number; company_name?: string | null; idx?: number } }
 
 function KindIcon({ kind }: { kind: string }) {
   const cls = 'w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5';
@@ -117,6 +117,8 @@ export function ImportJobsTable({ toast }: { toast: ToastFn }) {
                       {failed && !j.error && <div className="mt-1 text-xs text-red-700">Failed without an error message. Start the import again, and contact support if it fails twice.</div>}
                       {notFound > 0 && <div className="text-xs text-gray-500 mt-0.5">{j.mode === 'update_only' ? `${formatNumber(notFound)} rows matched no lead and were skipped.` : `${formatNumber(notFound)} compan${notFound === 1 ? 'y was' : 'ies were'} not found on LinkedIn${Array.isArray(st.not_found) ? `: ${st.not_found.slice(0, 5).join(', ')}${notFound > 5 ? '…' : ''}` : ''}.`}</div>}
                       {!!st.row_errors && <div className="text-xs text-amber-700 mt-0.5">{formatNumber(st.row_errors)} rows could not be read{st.first_row_error ? `. First error: ${st.first_row_error}` : ''}.</div>}
+                      {!!st.merged_rows && <div className="text-xs text-amber-700 mt-0.5 max-w-[360px]">{formatNumber(st.merged_rows)} rows had the same LinkedIn URL or email as an earlier row and were merged into that lead.</div>}
+                      {!!st.skipped_rows && <div className="text-xs text-gray-500 mt-0.5 max-w-[360px]">{formatNumber(st.skipped_rows)} rows had no LinkedIn URL and no email and were skipped.</div>}
                       {(j.kind as string) === 'company_people' && j.status === 'running' && st.company_name && <div className="text-xs text-gray-500 mt-0.5">Now on: {st.company_name}</div>}
                     </div>
                   </div>

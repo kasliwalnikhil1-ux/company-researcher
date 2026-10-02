@@ -1,6 +1,6 @@
 'use client';
 
-// Web chat (web-chat-PRD.md): types, query keys, hooks and helpers for Settings → Websites, the inbox (webchat threads,
+// Web chat (web-chat-PRD.md): types, query keys, hooks and helpers for AI Website Chatbots (/outreach/websites), the inbox (webchat threads,
 // visitor panel) and the agent presence ping. Every hook maps to one `outreach_webchat_*` RPC (migration 051).
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -12,32 +12,91 @@ import type { Provider } from './types';
 // Types (mirrors 049 / 050)
 // ---------------------------------------------------------------------------
 export type WebchatMode = 'bubble' | 'drawer' | 'sidebar' | 'modal' | 'inline' | 'embedded';
-export type AiMode = 'off' | 'first' | 'offline_only';
+/** Stored assistant mode. The app shows Off / Review / Auto (lib/outreach/aiHub.ts websiteHubMode): 'first' = Auto, always; 'offline_only' = Auto, outside business hours. */
+export type AiMode = 'off' | 'first' | 'offline_only' | 'review';
 
 export interface LauncherSettings { type: 'icon' | 'button'; size: 'sm' | 'md' | 'lg'; position: 'left' | 'right'; margin_bottom: number; margin_side: number; text: string }
 export interface PreChatField { key: string; label: string; type: 'text' | 'email' | 'phone' | 'number' | 'list' | 'checkbox' | 'date' | 'url' | 'textarea'; visible: boolean; required: boolean; placeholder?: string; options?: string[]; pattern?: string }
 export interface UrlRule { op: 'contains' | 'equals' | 'starts_with' | 'regex'; value: string; action: 'show' | 'hide' }
+/**
+ * A suggested question on the video bubble. With its own clip (migration 062) the clip plays in the expanded view when the
+ * question is clicked; with a page link, the page opens in a new tab. Stored as a plain text when it has neither.
+ */
+export interface VideoQuestion { text: string; video_url?: string | null; video_kind?: 'video' | 'image'; video_variants?: VideoClip[]; link_url?: string | null; link_text?: string | null }
+/** A language the video bubble's clips come in (migration 065). `flag` names a file in public/widget/v1/flags (<flag>.svg). */
+export interface VideoLanguage { code: string; label: string; flag: string }
+/** One clip in one language: the main clip (`launcher.video.variants`) or a question's answer clip (`video_variants`). */
+export interface VideoClip { lang: string; url: string; kind: 'video' | 'image' }
 /** launcher.video (migration 053): a GIF / video bubble instead of the launcher icon; a click expands it with suggested questions. */
 export interface VideoBubbleSettings {
   enabled: boolean; url: string | null; kind: 'video' | 'image'; shape: 'circle' | 'rounded' | 'square'; size: number; ratio: string; fit: 'cover' | 'contain';
   focus_x: number; focus_y: number; zoom: number; border_color: string; border_width: number; expanded_width: number; expanded_ratio: string; sound: boolean;
-  questions: string[]; questions_position: 'over' | 'below'; cta_text: string; question_bg: string; question_color: string; cta_bg: string | null; cta_color: string;
+  /** With languages, `variants` holds the main clip per language and `url` / `kind` mirror the default (first) language's clip. */
+  languages?: VideoLanguage[]; variants?: VideoClip[];
+  questions: Array<string | VideoQuestion>; questions_position: 'over' | 'below'; cta_text: string; question_bg: string; question_color: string; cta_bg: string | null; cta_color: string;
 }
+
+// ---- your own buttons, Ask AI buttons, product recommendations (web-chat-buttons-products-changes.md; migration 068)
+export type ButtonShell = Exclude<WebchatMode, 'embedded'>;
+/** An Ask AI button the widget places on the site: in the header, or next to every element a selector finds. */
+export interface AskButton {
+  id: string; kind: 'header' | 'element'; selector: string;
+  /** header: start | end of the element · element: before | after | inside (at the end). */
+  position: 'start' | 'end' | 'before' | 'after' | 'inside';
+  label: string; style: 'filled' | 'outline' | 'text' | 'match'; icon: boolean;
+  /** open the chat · ask `text` as the visitor · put `text` in the message box. A header button opens. */
+  click: 'open' | 'ask' | 'prefill'; text?: string | null;
+  context?: 'none' | 'page' | 'product';
+  /** The shell it opens in; null = the website's own. On a phone the chat is always full screen. */
+  mode?: ButtonShell | null;
+  url_rules: UrlRule[]; enabled: boolean;
+}
+export interface SelectionAsk { enabled: boolean; area: string; label: string }
+export interface ProductsSettings { enabled: boolean; catalogue_ids: string[]; max: number; show_prices: boolean; include_oos: boolean; add_to_cart: boolean; utm: boolean }
+export const PRODUCTS_DEFAULTS: ProductsSettings = { enabled: false, catalogue_ids: [], max: 3, show_prices: true, include_oos: false, add_to_cart: false, utm: true };
+export const SELECTION_ASK_DEFAULTS: SelectionAsk = { enabled: false, area: 'main, article', label: 'Ask AI' };
+export const MAX_ASK_BUTTONS = 10;
+export const HEADER_SELECTOR = 'header nav, header';
+export const BUTTON_SHELLS: Array<{ value: ButtonShell; label: string }> = [
+  { value: 'sidebar', label: 'Sidebar (docked, the page stays visible)' }, { value: 'bubble', label: 'Bubble (popup panel)' }, { value: 'drawer', label: 'Drawer (slides in)' },
+  { value: 'modal', label: 'Modal (centred)' }, { value: 'inline', label: 'Inline (bottom pill)' },
+];
+/** A new button with the defaults of its kind: a header button opens in the sidebar, an element button in the website's own shell. */
+export function newAskButton(kind: AskButton['kind'], taken: string[]): AskButton {
+  let id = '';
+  do { id = `${kind === 'header' ? 'hdr' : 'el'}-${Math.random().toString(36).slice(2, 8)}`; } while (taken.includes(id));
+  return kind === 'header'
+    ? { id, kind, selector: HEADER_SELECTOR, position: 'end', label: 'Ask AI', style: 'filled', icon: true, click: 'open', mode: 'sidebar', url_rules: [], enabled: true }
+    : { id, kind, selector: '', position: 'after', label: 'Ask AI', style: 'filled', icon: true, click: 'open', text: '', context: 'none', mode: null, url_rules: [], enabled: true };
+}
+/** Whether ⌘K / Ctrl+K toggles the chat: the stored switch, or (never touched) on for the modal shell only. */
+export const shortcutOn = (s: Pick<WebchatSettings, 'appearance' | 'shortcut'>) => s.shortcut?.enabled ?? s.appearance.mode === 'modal';
 
 export interface WebchatSettings {
   appearance: { brand_name: string; logo_url: string | null; bot_avatar_url: string | null; welcome_title: string; welcome_tagline: string; accent: string; widget_bg: string; chat_bg: string; font: string; theme: 'light' | 'dark' | 'auto'; mode: WebchatMode; z_index: number; custom_css: string; drawer_side: 'left' | 'right'; panel_width: number; mobile: Record<string, unknown> };
-  launcher: { desktop: LauncherSettings; mobile: LauncherSettings; show_unread_count: boolean; show_unread_previews: boolean; hide: boolean; online_dot: boolean; video?: VideoBubbleSettings };
+  launcher: { desktop: LauncherSettings; mobile: LauncherSettings; show_unread_count: boolean; show_unread_previews: boolean;
+    /** true = "My own buttons": no launcher, video bubble, popup or unread previews; the chat opens only from the site's buttons and links. */
+    hide: boolean;
+    /** With "My own buttons": may a proactive campaign open the chat (default no). */
+    campaigns_open?: boolean;
+    online_dot: boolean; video?: VideoBubbleSettings };
   popup: { enabled: boolean; text: string; image_url: string | null; delay_s: number; position: 'above' | 'left' };
   messages: { greeting_enabled: boolean; greeting: string; reply_time: 'minutes' | 'hours' | 'day' | 'none'; available_message: string; unavailable_message: string; email_capture_prompt: string; end_message: string; placeholder: string; privacy_url?: string | null; quick_replies: string[]; handoff_message: string; handoff_offline_message: string };
   pre_chat: { enabled: boolean; message: string; when: 'before_first' | 'offline_only'; fields: PreChatField[]; consent: { enabled: boolean; label: string; link: string | null; text_version: string } };
   features: { file_picker: boolean; emoji_picker: boolean; restart: boolean; end_conversation: boolean; allow_after_resolved: boolean; single_conversation: boolean; sounds: boolean; read_receipts: boolean; show_agent_names: boolean; transcript: boolean; email_capture: boolean; powered_by: boolean; show_offline_status: boolean; hide_outside_hours: boolean; markdown: boolean };
   csat: { enabled: boolean; scale: 'emoji' | 'thumbs'; ask_comment: boolean; by_email: boolean };
   continuity: { enabled: boolean; inactivity_min: number; digest_window_min: number; include_transcript_on_resolve: boolean };
-  ai: { mode: AiMode; knowledge_source_ids: string[]; persona: string; allowed_topics: string; handoff: { keywords: string[]; max_turns: number; low_confidence_streak: number; leads_in_sequence: boolean }; show_sources: boolean; hourly_cap_per_visitor: number };
+  ai: { mode: AiMode; knowledge_source_ids: string[]; persona: string; allowed_topics: string; handoff: { keywords: string[]; max_turns: number; low_confidence_streak: number; leads_in_sequence: boolean }; show_sources: boolean; hourly_cap_per_visitor: number; review_timeout_min?: number; products?: ProductsSettings };
   targeting: { url_rules: UrlRule[]; hide_mobile: boolean; hide_desktop: boolean; identified_only: boolean; countries_include: string[]; countries_exclude: string[] };
   security: { rate_limits: { visitor_10s: number; visitor_1h: number; ip_1m: number; ip_1h: number; inbox_1m: number }; turnstile_enabled: boolean; turnstile_site_key: string | null; consent_mode: boolean; allow_localhost: boolean; attachments: { max_mb: number; allow_zip: boolean }; profanity_filter: boolean };
   assignment: { auto: boolean; capacity: number; unassign_offline_min: number };
   locale: { default: string; use_browser: boolean; strings: Record<string, Record<string, string>> };
+  ask_buttons?: AskButton[];
+  selection_ask?: SelectionAsk;
+  /** Voice for the assistant (069): lib/outreach/voice.ts */
+  voice?: Partial<import('./voice').VoiceSettings>;
+  /** null = follow the shell (on for the modal shell only). */
+  shortcut?: { enabled: boolean | null };
 }
 
 export interface BusinessHours { tz?: string; weekly?: Record<string, Array<[string, string]>>; holidays?: string[] }
@@ -69,7 +128,18 @@ export interface WebchatVisitor {
 
 export interface CannedResponse { id: string; workspace_id: string; owner_id: string | null; short_code: string; content: string; created_at: string }
 export interface WebchatCampaign { id: string; inbox_id: string; title: string; message: string; sender_kind: 'bot' | 'agent'; sender_user_id: string | null; quick_replies: string[]; rules: { url_rules?: UrlRule[]; time_on_page_s?: number; visitor?: 'all' | 'new' | 'returning' | 'identified'; business_hours_only?: boolean }; frequency: 'once' | 'session' | 'every'; display: 'popup' | 'open'; enabled: boolean; shown: number; clicked: number; started: number }
-export interface WebchatReport { period: { from: string; to: string }; conversations: number; by_source: Record<string, number>; resolved: number; ai_resolved: number; handoffs: number; ai_turns: number; ai_feedback: { up: number; down: number }; first_response_median_s: number | null; first_response_p90_s: number | null; resolution_median_s: number | null; csat: { responses: number; avg: number | null }; csat_by_agent: Array<{ user_id: string; name: string; avg: number; n: number }>; visitor_to_lead: number; sequences_stopped: number; continuity: { sent: number; failed: number }; top_unanswered: Array<{ query: string; n: number }>; by_day: Array<{ day: string; n: number }> }
+export interface WebchatReport { voice?: import('./voice').VoiceReport; period: { from: string; to: string }; conversations: number; by_source: Record<string, number>; resolved: number; ai_resolved: number; handoffs: number; ai_turns: number; ai_feedback: { up: number; down: number }; first_response_median_s: number | null; first_response_p90_s: number | null; resolution_median_s: number | null; csat: { responses: number; avg: number | null }; csat_by_agent: Array<{ user_id: string; name: string; avg: number; n: number }>; visitor_to_lead: number; sequences_stopped: number; continuity: { sent: number; failed: number }; top_unanswered: Array<{ query: string; n: number }>; by_day: Array<{ day: string; n: number }>; products?: ProductsReport }
+export interface ProductsReportRow { id: string; n: number; title: string; url: string; image: string | null; removed: boolean }
+/** The report's Products block (migration 068). */
+export interface ProductsReport {
+  answers: number; answers_with_products: number; cards_shown: number; clicks: number; add_to_carts: number;
+  top_recommended: ProductsReportRow[]; top_clicked: ProductsReportRow[]; not_found: Array<{ query: string; chat_id: string | null; at: string }>;
+}
+/** How a conversation started (outreach_chats.source), in the report's words. */
+export const SOURCE_LABELS: Record<string, string> = {
+  launcher: 'Launcher', popup: 'Popup', campaign: 'Campaign', sdk: 'From code', standalone: 'Standalone page', email: 'Email',
+  button: 'Own button', ask: 'Ask button', input: 'Ask box', link: 'Link', header_button: 'Header Ask AI', element_button: 'Ask AI next to an element', selection: 'Ask AI on selected text', voice: 'Voice call',
+};
 export interface AiTurn { id: string; query: string; answer: string | null; confidence: string | null; handoff: string | null; feedback: number | null; feedback_text: string | null; sources: Array<{ url: string | null; title: string }>; latency_ms: number | null; created_at: string; chat_id: string | null }
 
 export const CHAT_STATUS_LABELS: Record<string, string> = { open: 'Open', pending: 'Pending', snoozed: 'Snoozed', resolved: 'Resolved' };
@@ -263,7 +333,62 @@ export const INSTALL_GUIDES: Array<{ key: string; label: string; body: (token: s
 export const VIDEO_BUBBLE_DEFAULTS: VideoBubbleSettings = {
   enabled: true, url: null, kind: 'video', shape: 'circle', size: 120, ratio: '1:1', fit: 'cover', focus_x: 50, focus_y: 50, zoom: 100, border_color: '#ffffff', border_width: 3,
   expanded_width: 420, expanded_ratio: 'auto', sound: true, questions: [], questions_position: 'over', cta_text: 'Chat with us', question_bg: '#111827', question_color: '#ffffff', cta_bg: null, cta_color: '#ffffff',
+  languages: [], variants: [],
 };
+/** The stored question list (texts and / or objects) as objects, for editing and for the preview. */
+export function videoQuestions(list: Array<string | VideoQuestion> | null | undefined): VideoQuestion[] {
+  return (Array.isArray(list) ? list : []).map((q) => (typeof q === 'string' ? { text: q } : { ...q, text: String(q?.text ?? '') }));
+}
+/**
+ * What gets saved: empty questions dropped, a question with no clip and no link as a plain text (the shape older widgets
+ * read). With languages, the answer clips are the per-language list and `video_url` mirrors the default language's clip.
+ */
+export function packVideoQuestions(list: VideoQuestion[], max = 6, languages: VideoLanguage[] = []): Array<string | VideoQuestion> {
+  return list.map((q) => {
+    const text = q.text.trim(), link_url = q.link_url?.trim() || null, link_text = q.link_text?.trim() || null;
+    const variants = orderVideoClips(q.video_variants, languages), first = variants[0];
+    const video_url = languages.length ? first?.url ?? null : q.video_url?.trim() || null, video_kind = languages.length ? first?.kind : q.video_kind;
+    if (!video_url && !link_url) return text;
+    return { text, ...(video_url ? { video_url, video_kind: video_kind ?? mediaKind(video_url) } : {}), ...(variants.length ? { video_variants: variants } : {}), ...(link_url ? { link_url, ...(link_text ? { link_text } : {}) } : {}) };
+  }).filter((q) => (typeof q === 'string' ? q : q.text)).slice(0, max);
+}
+
+// Languages of the video bubble (migration 065): the same clips in several languages, switched with a strip of flags.
+export const MAX_VIDEO_LANGUAGES = 8;
+/** The languages offered in the settings screen. Every `flag` has its file in public/widget/v1/flags. */
+export const VIDEO_LANGUAGES: VideoLanguage[] = [
+  { code: 'en-US', label: 'English (US)', flag: 'us' }, { code: 'en-GB', label: 'English (UK)', flag: 'gb' }, { code: 'en-AU', label: 'English (Australia)', flag: 'au' }, { code: 'en-IN', label: 'English (India)', flag: 'in' },
+  { code: 'en-CA', label: 'English (Canada)', flag: 'ca' }, { code: 'en-NZ', label: 'English (New Zealand)', flag: 'nz' }, { code: 'en-IE', label: 'English (Ireland)', flag: 'ie' }, { code: 'en-SG', label: 'English (Singapore)', flag: 'sg' },
+  { code: 'en-ZA', label: 'English (South Africa)', flag: 'za' }, { code: 'hi-IN', label: 'Hindi', flag: 'in' }, { code: 'bn-IN', label: 'Bengali (India)', flag: 'in' }, { code: 'bn-BD', label: 'Bengali (Bangladesh)', flag: 'bd' },
+  { code: 'ta-IN', label: 'Tamil', flag: 'in' }, { code: 'te-IN', label: 'Telugu', flag: 'in' }, { code: 'mr-IN', label: 'Marathi', flag: 'in' }, { code: 'gu-IN', label: 'Gujarati', flag: 'in' },
+  { code: 'kn-IN', label: 'Kannada', flag: 'in' }, { code: 'ml-IN', label: 'Malayalam', flag: 'in' }, { code: 'pa-IN', label: 'Punjabi', flag: 'in' }, { code: 'ur-PK', label: 'Urdu', flag: 'pk' },
+  { code: 'es-ES', label: 'Spanish (Spain)', flag: 'es' }, { code: 'es-MX', label: 'Spanish (Mexico)', flag: 'mx' }, { code: 'fr-FR', label: 'French', flag: 'fr' }, { code: 'fr-CA', label: 'French (Canada)', flag: 'ca' },
+  { code: 'de-DE', label: 'German', flag: 'de' }, { code: 'pt-PT', label: 'Portuguese (Portugal)', flag: 'pt' }, { code: 'pt-BR', label: 'Portuguese (Brazil)', flag: 'br' }, { code: 'it-IT', label: 'Italian', flag: 'it' },
+  { code: 'nl-NL', label: 'Dutch', flag: 'nl' }, { code: 'pl-PL', label: 'Polish', flag: 'pl' }, { code: 'sv-SE', label: 'Swedish', flag: 'se' }, { code: 'da-DK', label: 'Danish', flag: 'dk' },
+  { code: 'nb-NO', label: 'Norwegian', flag: 'no' }, { code: 'fi-FI', label: 'Finnish', flag: 'fi' }, { code: 'el-GR', label: 'Greek', flag: 'gr' }, { code: 'cs-CZ', label: 'Czech', flag: 'cz' },
+  { code: 'ro-RO', label: 'Romanian', flag: 'ro' }, { code: 'hu-HU', label: 'Hungarian', flag: 'hu' }, { code: 'uk-UA', label: 'Ukrainian', flag: 'ua' }, { code: 'ru-RU', label: 'Russian', flag: 'ru' },
+  { code: 'tr-TR', label: 'Turkish', flag: 'tr' }, { code: 'ar-SA', label: 'Arabic', flag: 'sa' }, { code: 'ar-AE', label: 'Arabic (UAE)', flag: 'ae' }, { code: 'he-IL', label: 'Hebrew', flag: 'il' },
+  { code: 'ja-JP', label: 'Japanese', flag: 'jp' }, { code: 'ko-KR', label: 'Korean', flag: 'kr' }, { code: 'zh-CN', label: 'Chinese (Simplified)', flag: 'cn' }, { code: 'zh-TW', label: 'Chinese (Traditional)', flag: 'tw' },
+  { code: 'id-ID', label: 'Indonesian', flag: 'id' }, { code: 'ms-MY', label: 'Malay', flag: 'my' }, { code: 'vi-VN', label: 'Vietnamese', flag: 'vn' }, { code: 'th-TH', label: 'Thai', flag: 'th' },
+  { code: 'fil-PH', label: 'Filipino', flag: 'ph' },
+];
+export function flagUrl(flag: string): string { return `${widgetOrigin()}/widget/v1/flags/${flag}.svg`; }
+/** A per-language clip list in the order of the languages, one clip per language, clips of removed languages dropped. */
+export function orderVideoClips(list: VideoClip[] | null | undefined, languages: VideoLanguage[]): VideoClip[] {
+  const all = Array.isArray(list) ? list : [];
+  return languages.flatMap((l) => { const c = all.find((x) => x && x.lang === l.code && !!mediaUrl(x.url)); return c ? [{ lang: l.code, url: c.url, kind: c.kind ?? mediaKind(c.url) }] : []; });
+}
+/** The clips one step can play, as the widget picks them (video.js clips()): one per language, else the single clip. */
+export function videoClips(url: string | null | undefined, kind: 'video' | 'image' | undefined, variants: VideoClip[] | null | undefined, languages: VideoLanguage[]): Array<{ lang: string | null; url: string; kind: 'video' | 'image' }> {
+  const list = orderVideoClips(variants, languages);
+  return list.length ? list : url && mediaUrl(url) ? [{ lang: null, url, kind: kind ?? mediaKind(url) }] : [];
+}
+/** The video bubble settings as they are saved (and as the preview draws them). */
+export function packVideoBubble(d: VideoBubbleSettings, maxQuestions = 6): VideoBubbleSettings {
+  const languages = (d.languages ?? []).slice(0, MAX_VIDEO_LANGUAGES).map((l) => ({ code: l.code, label: l.label.trim() || VIDEO_LANGUAGES.find((x) => x.code === l.code)?.label || l.code, flag: l.flag }));
+  const variants = orderVideoClips(d.variants, languages), main = variants[0];
+  return { ...d, languages, variants, url: languages.length ? main?.url ?? null : d.url, kind: languages.length ? main?.kind ?? d.kind : d.kind, questions: packVideoQuestions(videoQuestions(d.questions), maxQuestions, languages) };
+}
 export const WEBCHAT_MEDIA_BUCKET = 'outreach-webchat-media';
 export const WEBCHAT_MEDIA_MAX_MB = 20;
 /** What the bucket accepts, by extension (browsers report '' for some of these). */
@@ -287,9 +412,10 @@ export function useWebchatPresets() {
 }
 /**
  * Upload a launcher clip to the public media bucket under `<ws>/<inbox>/<ts>-<name>` and return its public address.
- * Older uploads of the inbox are removed, except `keep` (the clip the published settings still point at).
+ * Older uploads of the inbox are removed, except the ones in `keep`: every clip the published settings or the draft on
+ * screen still point at (the main clip and each question's clip).
  */
-export async function uploadWebchatMedia(ws: string, inboxId: string, file: File, keep?: string | null): Promise<{ url: string; kind: 'video' | 'image' }> {
+export async function uploadWebchatMedia(ws: string, inboxId: string, file: File, keep: Array<string | null | undefined> = []): Promise<{ url: string; kind: 'video' | 'image' }> {
   const ext = (file.name.split('.').pop() ?? '').toLowerCase(), t = MEDIA_TYPES[ext];
   if (!t) throw new Error('Use an MP4 or WebM video, or a GIF / WebP image.');
   if (file.size > WEBCHAT_MEDIA_MAX_MB * 1048576) throw new Error(`That file is ${(file.size / 1048576).toFixed(1)} MB. The limit is ${WEBCHAT_MEDIA_MAX_MB} MB.`);
@@ -301,11 +427,35 @@ export async function uploadWebchatMedia(ws: string, inboxId: string, file: File
   const url = bucket.getPublicUrl(`${dir}/${name}`).data.publicUrl;
   try {
     const { data } = await bucket.list(dir, { limit: 100 });
-    const stale = (data ?? []).map((o) => `${dir}/${o.name}`).filter((path) => !path.endsWith(`/${name}`) && !(keep && keep.endsWith(`/${path}`)));
+    const stale = (data ?? []).map((o) => `${dir}/${o.name}`).filter((path) => !path.endsWith(`/${name}`) && !keep.some((u) => u && u.endsWith(`/${path}`)));
     if (stale.length) await bucket.remove(stale);
   } catch { /* tidy-up only */ }
   return { url, kind: t.kind };
 }
+
+// ---------------------------------------------------------------------------
+// "Use your own button" (Installation tab): no JavaScript needed, the attributes go on any element
+// ---------------------------------------------------------------------------
+export const OWN_BUTTON_SNIPPETS: Array<{ key: string; label: string; lang: string; code: string }> = [
+  { key: 'open', label: 'Any element opens the chat', lang: 'html', code: '<button data-growthxai="open">Chat with us</button>' },
+  { key: 'ask', label: 'Ask a question', lang: 'html', code: '<a href="#" data-growthxai-ask="What\'s your return policy?">Returns question?</a>' },
+  { key: 'prefill', label: 'Put a text in the message box', lang: 'html', code: '<button data-growthxai-prefill="I\'d like a quote for ">Get a quote</button>' },
+  { key: 'badge', label: 'Unread badge on your button', lang: 'html', code: '<button data-growthxai="open">Help <span data-growthxai-unread></span></button>' },
+  { key: 'form', label: 'A search-style box', lang: 'html', code: '<form data-growthxai="ask-form"><input name="q" placeholder="Ask AI anything"><button>Ask</button></form>' },
+  { key: 'shopify', label: 'Shopify product page', lang: 'liquid', code: '{%- comment -%} Shopify product page {%- endcomment -%}\n<button data-growthxai-ask="Is this good for a wedding?"\n        data-growthxai-context="product:{{ product.handle }}">Ask about this piece</button>' },
+  { key: 'react', label: 'React / Next.js', lang: 'jsx', code: '<button onClick={() => window.growthxai?.ask(\'Do you ship to Dubai?\')}>Shipping?</button>' },
+  { key: 'link', label: 'A link (emails, ads, QR codes)', lang: 'text', code: 'https://your-site.com/any-page?gx=open\nhttps://your-site.com/any-page?gx_q=Do%20you%20do%20custom%20sizes%3F\n<a href="#ask-ai">Ask AI</a>' },
+];
+export const OWN_BUTTON_ATTRIBUTES: Array<[string, string]> = [
+  ['data-growthxai="open"', 'Opens the chat ("close" and "toggle" close / toggle it)'],
+  ['data-growthxai-ask="…"', 'Opens the chat and sends this question as the visitor'],
+  ['data-growthxai-prefill="…"', 'Opens the chat with this text in the message box, not sent'],
+  ['data-growthxai-mode="sidebar"', 'Opens in this shell (bubble, drawer, sidebar, modal, inline) until the page reloads'],
+  ['data-growthxai-context="…"', 'Background for the AI on that question, never shown. product:<handle | sku | url> names a catalogue product'],
+  ['data-growthxai-label="pricing-page"', 'Adds a label to the conversation'],
+  ['data-growthxai-unread', 'Its text is kept at the unread count; data-count="3"; hidden at 0'],
+  ['data-growthxai="call"', 'Starts a voice call with the assistant (when Voice is on for this website)'],
+];
 
 export const HMAC_SAMPLES: Array<{ label: string; code: (secret: string) => string }> = [
   { label: 'Node.js', code: (s) => `const crypto = require('crypto');\nconst hash = crypto.createHmac('sha256', '${s}').update(String(userId)).digest('hex');\n// in the page:\nwindow.growthxai.setUser(String(userId), { email, name, identifier_hash: hash });` },
@@ -315,10 +465,11 @@ export const HMAC_SAMPLES: Array<{ label: string; code: (secret: string) => stri
   { label: 'Go', code: (s) => `mac := hmac.New(sha256.New, []byte("${s}"))\nmac.Write([]byte(userID))\nhash := hex.EncodeToString(mac.Sum(nil))` },
 ];
 
-export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false, video = false) => [
+export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false, video = false, productImageHosts: string[] = [], voice = false) => [
   `script-src ${appOrigin}${turnstile ? ' https://challenges.cloudflare.com' : ''}`,
-  `connect-src ${apiHost} ${apiHost.replace(/^http/, 'ws')}`,
-  `img-src ${apiHost}${video ? ` ${appOrigin}` : ''} data:`,
+  `connect-src ${apiHost} ${apiHost.replace(/^http/, 'ws')}${voice ? ' https://api.elevenlabs.io wss://api.elevenlabs.io https://livekit.rtc.elevenlabs.io wss://livekit.rtc.elevenlabs.io' : ''}`,
+  ...(voice ? ['worker-src blob:  (voice: the audio processing runs in a worklet)', 'media-src blob:  (voice: the assistant\'s audio)', 'Permissions-Policy: microphone=(self)  (if your site sends one: voice needs the microphone)'] : []),
+  `img-src ${apiHost}${video ? ` ${appOrigin}` : ''}${productImageHosts.length ? ` ${productImageHosts.join(' ')}` : ''} data:${productImageHosts.length ? '  (product pictures on the cards come from the catalogue\'s image hosts)' : ''}`,
   ...(video ? [`media-src ${apiHost} ${appOrigin}  (the launcher clip; add your own host if the clip is on it)`] : []),
   turnstile ? `frame-src https://challenges.cloudflare.com  (Turnstile runs its check in an iframe)` : `frame-src: none needed (the widget uses Shadow DOM, not an iframe)`,
   `style-src: no change needed (styles are constructed stylesheets inside the Shadow root)`,

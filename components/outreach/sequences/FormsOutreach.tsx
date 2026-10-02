@@ -33,7 +33,7 @@ export function AiBriefField({ cfg, set, what }: { cfg: Record<string, any>; set
       {enabled && (
         <>
           <Textarea label="AI brief" value={cfg.ai?.brief ?? ''} onChange={(e) => set('ai', { ...(cfg.ai ?? {}), brief: e.target.value })} rows={3} placeholder="Who we are, what we offer, tone, what to avoid…" />
-          <Note>AI drafts are never sent automatically: each one becomes a Review AI Personalization task where a teammate can edit, approve or reject it before it goes out.</Note>
+          <Note>AI drafts are never sent automatically: each one waits in AI → Needs you as a step draft, where a teammate can edit, approve or skip it before it goes out.</Note>
         </>
       )}
     </div>
@@ -323,7 +323,7 @@ export function AiDraftApprovalForm({ cfg, set }: FormProps) {
         <option value="comment">Post comment</option>
       </Select>
       <Textarea label="Brief" value={cfg.brief ?? ''} onChange={(e) => set('brief', e.target.value)} rows={5} placeholder="Context, value proposition, tone, things to avoid… The sequence brief (top bar → settings) is also passed to the model." />
-      <Note>Creates a “Review AI Personalization” task with the generated text. Approving sends it through the matching action (within the normal daily limits); rejecting skips the step.</Note>
+      <Note>The AI writes the text and it waits in AI → Needs you as a step draft. Approving sends it through the matching action (within the normal daily limits); skipping it moves the lead on without this message.</Note>
     </div>
   );
 }

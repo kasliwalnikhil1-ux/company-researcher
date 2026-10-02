@@ -2,7 +2,7 @@
 // extension-based sign-in (UniLogin) instead of a password login; the sender is stored with auth_method = browser.
 // Channels (CHANNELS-BUILD-CONTRACT §4): INSTAGRAM and WHATSAPP connect through the same hosted page (WhatsApp shows a QR /
 // pairing code). A WhatsApp number must be attested as at least 6 months old with real use before it is created.
-import { admin, json, serve, requireUser, membership, requireRole, readJson, rateLimit, HttpError, FUNCTIONS_BASE, WEB_ORIGIN, audit } from "../_shared/outreach/supabase.ts";
+import { admin, json, serve, requireUser, membership, requireRole, readJson, rateLimit, HttpError, FUNCTIONS_BASE, WEB_ORIGIN, audit, rpc } from "../_shared/outreach/supabase.ts";
 import { unipile, unipileConfigured, hostedBrowserOptions } from "../_shared/outreach/unipile.ts";
 
 type Provider = "LINKEDIN" | "INSTAGRAM" | "WHATSAPP" | "GMAIL" | "OUTLOOK" | "IMAP";
@@ -31,11 +31,6 @@ serve("sender-connect", async (req) => {
   requireRole(m, "manager");
   if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
   const { data: ws } = await admin.from("outreach_workspaces").select("plan, settings, trial_ends_at").eq("id", body.workspace_id).single();
-  // Trial limits only apply when billing is actually configured; self-hosted / pre-billing installs are unlimited.
-  if (ws?.plan === "trial" && Deno.env.get("STRIPE_SECRET_KEY")) {
-    const { count } = await admin.from("outreach_senders").select("id", { count: "exact", head: true }).eq("workspace_id", body.workspace_id).is("deleted_at", null).neq("status", "disabled");
-    if ((count ?? 0) >= 3) throw new HttpError(402, "E_PLAN_LIMIT", "Trial workspaces can connect up to 3 senders. Add billing to connect more.");
-  }
   // WhatsApp: fresh numbers are blocked after two or three new chats; the operator attests the number's age before it is connected
   let ageMonths: number | null = null;
   if (provider === "WHATSAPP") {
@@ -88,6 +83,15 @@ serve("sender-connect", async (req) => {
     sender = data;
   }
   const senderId = String(sender.id);
+  // Accounts are bought up front (billing v2): the sign-in link holds one account for its 15-minute life, so two links opened at
+  // once cannot both take the last free one. E_ACCOUNT_LIMIT when none is free ("Add an account" in the app).
+  try { await rpc("slot_reserve", { p_ws: body.workspace_id, p_purpose: isMail ? "mailbox" : "hosted_auth", p_sender: senderId, p_minutes: 15, p_by: user.id }); }
+  catch (e) {
+    if (!reused) await admin.from("outreach_senders").delete().eq("id", senderId);
+    const m = /^(E_ACCOUNT_LIMIT|E_PLAN_SUSPENDED):\s*(.*)$/s.exec(String((e as Error)?.message ?? e).trim());
+    if (m) throw new HttpError(m[1] === "E_ACCOUNT_LIMIT" ? 402 : 403, m[1], m[2], m[1] === "E_ACCOUNT_LIMIT" ? { slots: await rpc("slots", { p_ws: body.workspace_id }).catch(() => null) } : undefined);
+    throw e;
+  }
   const providers = HOSTED[provider];
   const recruiter = !!body.recruiter && !!(ws?.settings?.recruiter_enabled);
   try {
@@ -108,6 +112,7 @@ serve("sender-connect", async (req) => {
     await admin.from("outreach_sender_events").insert({ sender_id: senderId, kind: "reconnect", data: { method: "connect_link", reused: !!reused, connect_method: browser ? "browser" : "credentials" } });
     return json({ link: link.url, sender_id: senderId, reused: !!reused });
   } catch (e) {
+    await rpc("slot_release_sender", { p_sender: senderId, p_reason: "failed" }).catch(() => null);
     if (!reused) await admin.from("outreach_senders").delete().eq("id", senderId);
     throw e;
   }

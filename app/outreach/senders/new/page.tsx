@@ -7,7 +7,8 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients } from '@/lib/outreach/queries';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { BackLink, Button, Card, ErrorBox, Input, PageHeader, SearchableSelect, Select, Toggle, useToast } from '@/components/outreach/ui';
-import { browserTimezone, copyText, timezoneChoices } from '@/components/outreach/senders/helpers';
+import { billingRefusalRemedy, browserTimezone, copyText, isBillingRefusal, timezoneChoices } from '@/components/outreach/senders/helpers';
+import { accountsMeter, useBilling, useInvalidateBilling } from '@/lib/outreach/billing';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn, normalizeEmail } from '@/lib/utils';
 import type { Provider } from '@/lib/outreach/types';
@@ -36,9 +37,11 @@ const LEGAL_LINKS = [
 ];
 
 export default function ConnectSenderPage() {
-  const { workspace, isManager, canWrite } = useWorkspace();
+  const { workspace, isManager, isOwner, canWrite } = useWorkspace();
   const ws = workspace?.id;
   const clients = useClients(ws);
+  const billing = useBilling(ws);
+  const invalidateBilling = useInvalidateBilling();
   const toast = useToast();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [provider, setProvider] = useState<Provider>('LINKEDIN');
@@ -60,6 +63,8 @@ export default function ConnectSenderPage() {
   const [allowDuplicate, setAllowDuplicate] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The plan refused the connect: no free account (E_ACCOUNT_LIMIT) or the plan is not active (E_PLAN_SUSPENDED).
+  const [refused, setRefused] = useState<{ code: string; message: string } | null>(null);
   const tzList = useMemo(() => timezoneChoices(), []);
   const recruiterEnabled = !!(workspace?.settings as Record<string, unknown> | undefined)?.recruiter_enabled;
   const ownerEmailClean = normalizeEmail(ownerEmail);
@@ -91,11 +96,12 @@ export default function ConnectSenderPage() {
       ...(force ? { allow_duplicate: true } : {}),
     });
     setResult(r);
+    invalidateBilling(ws);   // the link holds one account until it is used or expires
     return r;
   }
 
   async function launch(mode: 'redirect' | 'copy', force = allowDuplicate) {
-    setLaunching(mode); setError(null); setDuplicate(null);
+    setLaunching(mode); setError(null); setDuplicate(null); setRefused(null);
     try {
       const r = await ensureLink(force);
       if (mode === 'redirect') { window.location.href = r.link; return; }
@@ -106,6 +112,7 @@ export default function ConnectSenderPage() {
       const err = parseError(e);
       const d = (err.details as { details?: { existing_sender_id?: string; existing_display_name?: string | null; existing_status?: string } } | undefined)?.details;
       if (err.code === 'E_DUPLICATE_SENDER' && d?.existing_sender_id) setDuplicate({ id: d.existing_sender_id, name: d.existing_display_name ?? null, status: d.existing_status ?? '' });
+      else if (isBillingRefusal(err.code)) { setRefused({ code: err.code, message: err.message }); invalidateBilling(ws); }
       else setError(err.message);
     } finally { setLaunching(null); }
   }
@@ -119,10 +126,34 @@ export default function ConnectSenderPage() {
         : 'Connect your inbox to send and receive email from your sequences here.';
   const connectLabel = provider === 'LINKEDIN' ? 'Connect LinkedIn' : isInstagram ? 'Connect Instagram' : isWhatsApp ? 'Connect WhatsApp' : `Connect ${providerLabel}`;
 
+  // Accounts are bought up front. With none free there is nothing to fill in: say so and point at the way out. Once a link was
+  // made on this page it holds an account itself, so the form stays.
+  const slots = billing.data?.accounts;
+  const limit = accountsMeter(slots);
+  const remedy = billingRefusalRemedy(refused?.code ?? 'E_ACCOUNT_LIMIT', billing.data, isOwner);
+  const remedyNode = remedy.href ? <Link href={remedy.href}><Button>{remedy.label}</Button></Link> : <span className="text-sm text-gray-700">{remedy.label}</span>;
+  if (limit?.full && !result) {
+    return (
+      <div className="max-w-6xl">
+        <BackLink href="/outreach/senders">Back to senders</BackLink>
+        <PageHeader title="Connect an account" />
+        <Card title={slots?.trial ? `Your trial includes ${limit.billed} account${limit.billed === 1 ? '' : 's'}` : 'Every account on your plan is in use'}>
+          <div className="text-sm text-gray-700 space-y-1.5">
+            <p>{refused?.code === 'E_ACCOUNT_LIMIT' ? refused.message : slots?.trial ? 'Subscribe to connect more accounts.' : `${limit.text} ${limit.billed === 1 ? 'is' : 'are'} in use. Add an account to connect another.`}</p>
+            {!!slots?.reserved && <p>{slots.reserved === 1 ? 'One account is' : `${slots.reserved} accounts are`} held by a sign-in that has not finished. Finish it from the <Link href="/outreach/senders" className="text-indigo-600 hover:underline">senders list</Link>, or wait: an unfinished sign-in gives its account back when its link expires.</p>}
+            <p>Disconnecting or disabling a sender you no longer use also frees its account.</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-4">{remedyNode}</div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl">
       <BackLink href="/outreach/senders">Back to senders</BackLink>
       <PageHeader title={heading} subtitle={subtitle} />
+      {limit && slots && <div className="text-sm text-gray-600 -mt-3 mb-5"><span className="font-medium text-gray-900 tabular-nums">{slots.available ?? 0} of {limit.billed}</span> account{limit.billed === 1 ? '' : 's'} free on your plan.{result ? ' This sign-in link holds one until it is used or expires.' : ''}</div>}
 
       <ol className="flex items-center gap-2 mb-6 text-sm">
         {steps.map((label, i) => {
@@ -253,6 +284,12 @@ export default function ConnectSenderPage() {
             <p>Connecting someone else’s account? Use <strong>Copy sign-in link</strong> and send it to the account owner so they can sign in themselves. {isWhatsApp ? 'They need the phone with the number to hand.' : 'The proxy is pinned to the country of whoever opens the link.'}</p>
           </div>
           {error && <ErrorBox message={error} className="mb-4" />}
+          {refused && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              <div className="font-semibold">{refused.message}</div>
+              <div className="mt-3">{remedyNode}</div>
+            </div>
+          )}
           {duplicate && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <div className="font-semibold">{duplicate.name ?? 'This account'} is already connected with {ownerEmailClean}</div>
