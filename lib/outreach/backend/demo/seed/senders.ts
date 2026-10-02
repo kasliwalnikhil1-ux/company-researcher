@@ -65,6 +65,7 @@ export function seedSenders(s: DemoStore, now: number): void {
   const mayaEdu = [{ id: 'demo-edu-maya-1', school: 'Northgate Business School', degree: 'MBA', field: 'Marketing', start: '2016', end: '2018', description: null }];
   const mayaSkills = ['Go-to-market strategy', 'Demand generation', 'B2B sales', 'Team leadership'].map((name, i) => ({ name, endorsements: 40 - i * 7 }));
   recordSnapshot(s, maya, 'baseline', doc({
+    picture_url: maya.picture_url,
     headline: 'Head of Growth at Northwind Growth', summary: 'Growth lead at Northwind Growth. Outbound, partnerships and pipeline.', location: 'New York, United States',
     first_name: 'Maya', last_name: 'Chen', public_identifier: maya.public_identifier, connections_count: (maya.connections_count ?? 3400) - 90, follower_count: 3810,
     experience: mayaExp, education: mayaEdu, skills: mayaSkills, cover_url: null,
@@ -77,6 +78,7 @@ export function seedSenders(s: DemoStore, now: number): void {
   // Maya: a sharper headline (manual), 45 days ago
   apply(s, maya.id, { headline: 'Head of Growth at Northwind Growth | I help B2B software teams book more first meetings with outbound that sounds human' }, { at: now - 45 * D, by: mayaEmail, note: 'Say who we help, not just the title' });
   recordSnapshot(s, sam, 'baseline', doc({
+    picture_url: sam.picture_url,
     headline: 'Sales Director at Northwind Growth', summary: null, location: 'Chicago, Illinois', first_name: 'Sam', last_name: 'Okafor', public_identifier: sam.public_identifier,
     connections_count: (sam.connections_count ?? 5100) - 120, follower_count: 5480, experience: samExp,
     education: [{ id: 'demo-edu-sam-1', school: 'Hillcrest University', degree: 'BSc', field: 'Business Administration', start: '2012', end: '2016', description: null }],

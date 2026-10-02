@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "file": "presenter-1.mp4",
+    "label": "Presenter 1",
+    "kind": "video"
+  },
+  {
+    "file": "presenter-2.mp4",
+    "label": "Presenter 2",
+    "kind": "video"
+  },
+  {
+    "file": "presenter-3.mp4",
+    "label": "Presenter 3",
+    "kind": "video"
+  },
+  {
+    "file": "presenter-4.mp4",
+    "label": "Presenter 4",
+    "kind": "video"
+  }
+]

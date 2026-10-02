@@ -16,7 +16,7 @@
 | 4 | A local **simulator** moves campaigns forward: sends, accepts, replies, bounces. It works on fictional prospects and uses the app's own sequence and template logic |
 | 5 | Demo state lives in memory and in `sessionStorage`. **Reset demo** restores the starting data |
 | 6 | Four guards mean a demo action cannot reach production: the mode is fixed from the URL, the demo provider has no access to the Supabase client, lint rules block direct calls, and a runtime block refuses any request to production hosts |
-| 7 | A bar that is always visible: **"Demo: no messages are sent"** · Restart tour · Reset demo · **Start your outreach** |
+| 7 | A bar that is always visible: **"Demo"** · Restart tour · Reset demo · **Start your outreach** |
 | 8 | A short, skippable Driver.js walkthrough of the main workflow (`driver.js` is already in `package.json`) |
 | 9 | Staying in sync: typed contracts make the build fail when a feature is added without its demo side, plus a check script that opens every screen in demo mode |
 
@@ -70,7 +70,7 @@ It works signed out and signed in. A signed-in visitor still gets the demo, neve
 ### 2.2 Demo bar (always visible, above the app shell)
 
 ```
-● Demo: no messages are sent        ▶ Simulate activity: On ▾     ↻ Restart tour    Reset demo    [ Start your outreach → ]
+● Demo        ▶ Simulate activity: On ▾     ↻ Restart tour    Reset demo    [ Start your outreach → ]
 ```
 
 | Control | Behaviour |
@@ -411,7 +411,7 @@ Phase 1 is the largest mechanical change (about 170 files touched by codemod) bu
 - Every route in the manifest opens with data. No empty or broken screen.
 - The workflows in §2.4 and §7 work end to end and stay consistent across screens.
 - Zero requests to production data services during any demo session, proved by the check.
-- The label "Demo: no messages are sent" is visible on every screen.
+- The label "Demo" is visible on every screen.
 - The tour can be finished, skipped and restarted. After it, the whole product is explorable.
 - **Reset demo** restores the starting data.
 - **Start your outreach** lands in the normal `/outreach` sign-in flow.

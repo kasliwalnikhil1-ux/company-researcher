@@ -11,14 +11,15 @@ import 'driver.js/dist/driver.css';
 import { DEMO_TOUR_SEQUENCE_ID } from '@/lib/outreach/demoIds';
 import { kv } from '@/lib/outreach/storage';
 
-export interface TourStep { route: string; element: string; title: string; text: string }
+/** `canvas`: zoom the sequence canvas first: onto the top of the flow (`top`) or onto the topmost step of that type. */
+export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message' }
 
 export const TOUR_STEPS: TourStep[] = [
   { route: '/outreach', element: '[data-tour="dashboard-stats"]', title: 'A live workspace', text: "This is a live workspace with sample data. Here's the whole flow in a minute." },
-  { route: '/outreach/senders', element: '[data-tour="sender-card"]', title: 'Senders', text: 'Connect LinkedIn, email, WhatsApp or Instagram accounts. Each one has its own safe daily limits.' },
+  { route: '/outreach/senders', element: '[data-tour="sender-channels"]', title: 'Senders', text: 'Connect LinkedIn, email, WhatsApp or Instagram accounts. Each one has its own safe daily limits.' },
   { route: '/outreach/leads', element: '[data-tour="leads-table"]', title: 'Leads', text: 'Bring in prospects from a CSV, a LinkedIn search or by hand.' },
-  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-canvas"]', title: 'Sequences', text: 'Build the steps: visit, connect, message, follow up, branch on replies.' },
-  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-message-step"]', title: 'Personalisation', text: 'Personalise every message with variables and AI lines.' },
+  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-canvas"]', title: 'Sequences', text: 'Build the steps: visit, connect, message, follow up, branch on replies.', canvas: 'top' },
+  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-message-step"]', title: 'Personalisation', text: 'Personalise every message with variables and AI lines.', canvas: 'send_message' },
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Start it', text: 'Start it and leads move through on their own. In this demo the activity is simulated.' },
   { route: '/outreach/inbox', element: '[data-tour="inbox-conversation"]', title: 'One inbox', text: 'Replies from every channel land here. Answer them, or let AI draft.' },
   { route: '/outreach/reports?tab=funnel', element: '[data-tour="reports-funnel"]', title: 'Reports', text: 'See what works: accepted, replied, interested, meetings.' },
@@ -50,6 +51,21 @@ function waitFor(selector: string, ms: number): Promise<Element | null> {
       setTimeout(look, 100);
     };
     look();
+  });
+}
+
+/** Ask the canvas (Canvas.tsx) to zoom; resolves with the focused step's id once it has settled (null: no answer). */
+function focusCanvas(type: TourStep['canvas']): Promise<string | null> {
+  return new Promise((resolve) => {
+    let timer = 0;
+    const done = (e?: Event) => {
+      window.clearTimeout(timer);
+      window.removeEventListener('outreach:canvas-focused', done);
+      resolve((e as CustomEvent<{ id: string | null }> | undefined)?.detail?.id ?? null);
+    };
+    window.addEventListener('outreach:canvas-focused', done);
+    timer = window.setTimeout(done, 4000);
+    window.dispatchEvent(new CustomEvent('outreach:canvas-focus', { detail: { type: type === 'top' ? undefined : type } }));
   });
 }
 
@@ -87,8 +103,14 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     const step = TOUR_STEPS[i];
     writeTourState(`step:${i}`);
     if (o.currentPath() !== step.route.split('?')[0] || step.route.includes('?')) o.navigate(step.route);
-    const el = await waitFor(step.element, 4000);
+    let el = await waitFor(step.element, 4000);
     if (my !== token || !running) return;
+    // the canvas listens once its steps are on screen
+    if (step.canvas && await waitFor('.react-flow__node', 4000)) {
+      const id = await focusCanvas(step.canvas);
+      if (my !== token || !running) return;
+      if (id && step.canvas !== 'top') el = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"] ${step.element}`) ?? el;
+    }
     destroy();
     const last = i === TOUR_STEPS.length - 1;
     drv = driver({

@@ -9,7 +9,7 @@
  *   notYet       demo handlers marked notYet() (0 allowed after the build-out; --allow-not-yet=N while building)
  *
  * Browser (`npm run demo:check:e2e`, needs the app running; --base=http://localhost:3000):
- *   every manifest route opens under /product-tour with data, the label "Demo: no messages are sent", no error screen
+ *   every manifest route opens under /product-tour with data, the label "Demo", no error screen
  *   and no E_DEMO_QUERY / E_DEMO_MISSING; zero requests to Supabase data endpoints or /api during the whole run and
  *   zero runtime blocks; the scripted workflows; /outreach signed out still goes to sign-in.
  *   Playwright: `playwright-core` from node_modules, or PLAYWRIGHT_CORE=<path to playwright-core>; browser from
@@ -141,7 +141,7 @@ async function e2e() {
   page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 
-  const LABEL = 'Demo: no messages are sent';
+  const LABEL = 'Demo';
   const demo = (path) => `${base}${path.replace(/^\/outreach/, '/product-tour')}`;
   const gx = (fn, arg) => page.evaluate(fn, arg);
   const ready = async () => {
@@ -174,7 +174,7 @@ async function e2e() {
     await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
     await page.waitForTimeout(800);
     const state = await gx(() => ({
-      label: document.body.innerText.includes('Demo: no messages are sent'),
+      label: document.body.innerText.includes('Demo'),
       text: document.querySelector('main')?.innerText.trim().length ?? 0,
       boundary: /Application error|Unhandled Runtime Error|Something went wrong|This page could not be found/i.test(document.body.innerText),
       path: window.location.pathname,

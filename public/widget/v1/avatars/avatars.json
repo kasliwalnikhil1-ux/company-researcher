@@ -1,0 +1,42 @@
+[
+  {
+    "file": "character-1.webp",
+    "label": "Character 1",
+    "kind": "image"
+  },
+  {
+    "file": "character-2.webp",
+    "label": "Character 2",
+    "kind": "image"
+  },
+  {
+    "file": "character-3.webp",
+    "label": "Character 3",
+    "kind": "image"
+  },
+  {
+    "file": "character-4.webp",
+    "label": "Character 4",
+    "kind": "image"
+  },
+  {
+    "file": "photo-1.webp",
+    "label": "Photo 1",
+    "kind": "image"
+  },
+  {
+    "file": "photo-2.webp",
+    "label": "Photo 2",
+    "kind": "image"
+  },
+  {
+    "file": "photo-3.webp",
+    "label": "Photo 3",
+    "kind": "image"
+  },
+  {
+    "file": "photo-4.webp",
+    "label": "Photo 4",
+    "kind": "image"
+  }
+]

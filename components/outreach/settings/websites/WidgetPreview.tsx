@@ -7,7 +7,7 @@ import { useMemo, useState } from 'react';
 import { ArrowUp, ExternalLink, MessageSquare, Paperclip, Smile, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { IS_DEMO } from '@/lib/outreach/mode';
-import { VIDEO_BUBBLE_DEFAULTS, flagUrl, mediaUrl, videoClips, videoQuestions, type VideoBubbleSettings, type WebchatSettings } from '@/lib/outreach/webchat';
+import { VIDEO_BUBBLE_DEFAULTS, avatarUrl, flagUrl, mediaUrl, videoClips, videoQuestions, type VideoBubbleSettings, type WebchatSettings } from '@/lib/outreach/webchat';
 
 function contrast(hex: string): string {
   const h = hex.replace('#', ''); const full = h.length === 3 ? h.split('').map((c) => c + c).join('') : h;
@@ -156,7 +156,7 @@ export default function WidgetPreview({ settings, online = true, brandFallback, 
             </div>
             <div className="flex-1 min-h-0 p-4 space-y-3 text-[13px]" style={{ background: dark ? '#0b1220' : ap.chat_bg, color: dark ? '#f3f4f6' : '#111827' }}>
               <div><div className="text-[20px] font-bold leading-tight">{ap.welcome_title}</div><div className="opacity-70">{ap.welcome_tagline}</div></div>
-              {ms.greeting_enabled && <div className="max-w-[85%] rounded-2xl px-3 py-2" style={{ background: dark ? '#1f2937' : '#fff', border: '1px solid rgba(0,0,0,.06)' }}>{ms.greeting}</div>}
+              {ms.greeting_enabled && <div className="flex items-end gap-2">{avatarUrl(ap.bot_avatar_url) && <img src={avatarUrl(ap.bot_avatar_url)!} alt="" className="w-7 h-7 rounded-full object-cover flex-none" />}<div className="max-w-[85%] rounded-2xl px-3 py-2" style={{ background: dark ? '#1f2937' : '#fff', border: '1px solid rgba(0,0,0,.06)' }}>{ms.greeting}</div></div>}
               {/* the sent time shows under the last message only (the others reveal it on hover) */}
               <div className="flex flex-col items-end gap-0.5"><div className="max-w-[85%] rounded-2xl px-3 py-2" style={{ background: accent, color: on }}>Hi! I have a question about pricing.</div><div className="text-[10px] opacity-60 mr-1">12:03 {settings.features.read_receipts && '✓'}</div></div>
               {ms.quick_replies?.length > 0 && <div className="flex flex-wrap gap-1.5">{ms.quick_replies.slice(0, 4).map((q) => <span key={q} className="rounded-full px-3 py-1 text-[12px]" style={{ background: dark ? '#1f2937' : '#fff', border: '1px solid rgba(0,0,0,.1)' }}>{q}</span>)}</div>}

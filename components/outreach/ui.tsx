@@ -378,6 +378,8 @@ export function Td({ children, className, ...rest }: React.TdHTMLAttributes<HTML
 
 function safeImageUrl(src: string | null | undefined): string | null {
   if (!src) return null;
+  // same-origin files (the product tour's face photos in public/faces)
+  if (/^\/[^/\\]/.test(src)) return src;
   try { return new URL(src).protocol === 'https:' ? src : null; } catch { return null; }
 }
 

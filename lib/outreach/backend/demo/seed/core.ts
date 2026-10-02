@@ -10,6 +10,7 @@ import type { Graph, GraphNode, NodeType } from '../../../types';
 import { Engine } from '../sim/engine';
 import { idFrom, type DemoStore, type Row } from '../store';
 import { CLIENT, DEMO_USER_EMAIL, DEMO_WS_ID, LIST, MEMBER, SALT, SENDER, SEQ, STAGE, TAG, leadId } from './ids';
+import { SENDER_FACES } from './faces';
 import { COMPANIES, FIRST_NAMES, LAST_NAMES, LOCATIONS, POST_TOPICS, SCHOOLS, SKILLS, TITLES, slug } from './names';
 
 const D = 86_400_000;
@@ -58,7 +59,7 @@ function sender(id: string, o: Partial<Row>, now: number): Row {
   return {
     id, workspace_id: DEMO_WS_ID, client_id: null, owner_user_id: MEMBER.maya, owner_email: DEMO_USER_EMAIL, provider: 'LINKEDIN', unipile_account_id: `demo-acc-${id.slice(-4)}`,
     previous_unipile_account_id: null, disconnected_at: null, billing_paused_at: null, auth_method: 'credentials', display_name: 'Demo Sender', label: null,
-    public_identifier: null, provider_user_id: `demo-${id.slice(-6)}`, picture_url: null, is_premium: false, has_sales_nav: false, has_recruiter: false,
+    public_identifier: null, provider_user_id: `demo-${id.slice(-6)}`, picture_url: SENDER_FACES[String(o.display_name)] ?? null, is_premium: false, has_sales_nav: false, has_recruiter: false,
     connections_count: 1200, status: 'ok', status_reason: null, deleted_at: null, proxy_country: 'US', user_agent: null, timezone: 'America/New_York',
     schedule: WEEKDAYS, warmup_level: 4, warmup_locked_until: null, health_score: 92, health_breakdown: { acceptance: 95, pending: 90, rejects: 100, activity: 88 },
     manual_caps: {}, rejects_1h: 0, paused_until: null, invite_blocked_until: null, reconnect_attempts: 0, connected_at: iso(now - 120 * D), last_ok_at: iso(now - 10 * 60_000),

@@ -6,6 +6,7 @@
 import { DemoStore, SEED_VERSION, type DemoState } from '../store';
 import { seedAi, seedAiBeforeHistory } from './ai';
 import { seedHistory, seedLeads, seedReference, seedSenders, seedSequences, seedTaxonomy, seedWorkspace } from './core';
+import { seedFaces } from './faces';
 import { seedInbox } from './inbox';
 import { seedLeads as seedLeadExtras } from './leads';
 import { seedReports } from './reports';
@@ -37,5 +38,6 @@ export function buildSeed(): DemoState {
   seedInbox(s, now);
   seedSettings(s, now);
   seedReports(s, now);
+  seedFaces(s);
   return s.state;
 }

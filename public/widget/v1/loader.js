@@ -99,6 +99,7 @@
     if (settings.type === "expanded_bubble") la.desktop = Object.assign({}, la.desktop, { type: "button", text: settings.launcherTitle || la.desktop.text });
     if (settings.launcherTitle) la.desktop = Object.assign({}, la.desktop, { text: settings.launcherTitle });
     if (overrides.mountSelector) { ap.mode = "embedded"; ap.mount_selector = overrides.mountSelector; }
+    if (/^preset:[\w.-]+$/i.test(ap.bot_avatar_url || "")) ap.bot_avatar_url = src.replace(/loader\.js(\?.*)?$/, "avatars/") + ap.bot_avatar_url.slice(7);   // built-in avatars ship next to this file
     return Object.assign({}, s, { appearance: ap, launcher: la, messages: Object.assign({}, s.messages, overrides.quickPrompts ? { quick_replies: overrides.quickPrompts } : {},
       settings.welcomeTitle ? { welcome_title: settings.welcomeTitle } : {}, settings.welcomeDescription ? { welcome_tagline: settings.welcomeDescription } : {}) });
   }

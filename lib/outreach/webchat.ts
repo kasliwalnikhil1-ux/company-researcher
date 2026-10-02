@@ -405,14 +405,23 @@ export function mediaUrl(url: string | null | undefined): string | null {
   const m = /^preset:([\w.-]+)$/i.exec(url);
   return m ? `${widgetOrigin()}/widget/v1/presets/${m[1]}` : /^https:\/\//i.test(url) || (IS_DEMO && /^blob:/i.test(url)) ? url : null;
 }
+/** The address a bot avatar shows from: `preset:<file>` is a built-in avatar in public/widget/v1/avatars (the loader resolves it the same way). */
+export function avatarUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = /^preset:([\w.-]+)$/i.exec(url);
+  return m ? `${widgetOrigin()}/widget/v1/avatars/${m[1]}` : /^https?:\/\//i.test(url) ? url : null;
+}
 export interface WebchatPreset { file: string; label: string; kind: 'video' | 'image' }
-/** Built-in clips: public/widget/v1/presets/presets.json, written by scripts/outreach-webchat-presets.mjs. */
-export function useWebchatPresets() {
-  return useQuery({ queryKey: ['outreach', 'webchat', 'presets'], staleTime: 10 * 60_000, queryFn: async () => {
+function usePresetList(dir: 'presets' | 'avatars') {
+  return useQuery({ queryKey: ['outreach', 'webchat', dir], staleTime: 10 * 60_000, queryFn: async () => {
     // eslint-disable-next-line no-restricted-globals -- a static file on our own origin (allowed in the product tour too)
-    try { const r = await fetch('/widget/v1/presets/presets.json', { cache: 'no-cache' }); if (!r.ok) return []; const j = await r.json(); return (Array.isArray(j) ? j : []).filter((x) => x && typeof x.file === 'string' && /^[\w.-]+$/.test(x.file)) as WebchatPreset[]; } catch { return []; }
+    try { const r = await fetch(`/widget/v1/${dir}/${dir}.json`, { cache: 'no-cache' }); if (!r.ok) return []; const j = await r.json(); return (Array.isArray(j) ? j : []).filter((x) => x && typeof x.file === 'string' && /^[\w.-]+$/.test(x.file)) as WebchatPreset[]; } catch { return []; }
   } });
 }
+/** Built-in clips: public/widget/v1/presets/presets.json, written by scripts/outreach-webchat-presets.mjs. */
+export function useWebchatPresets() { return usePresetList('presets'); }
+/** Built-in bot avatars: public/widget/v1/avatars/avatars.json, written by scripts/outreach-webchat-presets.mjs --avatars. */
+export function useWebchatAvatars() { return usePresetList('avatars'); }
 /**
  * Upload a launcher clip to the public media bucket under `<ws>/<inbox>/<ts>-<name>` and return its public address.
  * Older uploads of the inbox are removed, except the ones in `keep`: every clip the published settings or the draft on
@@ -467,11 +476,11 @@ export const HMAC_SAMPLES: Array<{ label: string; code: (secret: string) => stri
   { label: 'Go', code: (s) => `mac := hmac.New(sha256.New, []byte("${s}"))\nmac.Write([]byte(userID))\nhash := hex.EncodeToString(mac.Sum(nil))` },
 ];
 
-export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false, video = false, productImageHosts: string[] = [], voice = false) => [
+export const CSP_NOTES = (apiHost: string, appOrigin: string, turnstile = false, video = false, productImageHosts: string[] = [], voice = false, presetAvatar = false) => [
   `script-src ${appOrigin}${turnstile ? ' https://challenges.cloudflare.com' : ''}`,
   `connect-src ${apiHost} ${apiHost.replace(/^http/, 'ws')}${voice ? ' https://api.elevenlabs.io wss://api.elevenlabs.io https://livekit.rtc.elevenlabs.io wss://livekit.rtc.elevenlabs.io' : ''}`,
   ...(voice ? ['worker-src blob:  (voice: the audio processing runs in a worklet)', 'media-src blob:  (voice: the assistant\'s audio)', 'Permissions-Policy: microphone=(self)  (if your site sends one: voice needs the microphone)'] : []),
-  `img-src ${apiHost}${video ? ` ${appOrigin}` : ''}${productImageHosts.length ? ` ${productImageHosts.join(' ')}` : ''} data:${productImageHosts.length ? '  (product pictures on the cards come from the catalogue\'s image hosts)' : ''}`,
+  `img-src ${apiHost}${video || presetAvatar ? ` ${appOrigin}` : ''}${productImageHosts.length ? ` ${productImageHosts.join(' ')}` : ''} data:${productImageHosts.length ? '  (product pictures on the cards come from the catalogue\'s image hosts)' : ''}`,
   ...(video ? [`media-src ${apiHost} ${appOrigin}  (the launcher clip; add your own host if the clip is on it)`] : []),
   turnstile ? `frame-src https://challenges.cloudflare.com  (Turnstile runs its check in an iframe)` : `frame-src: none needed (the widget uses Shadow DOM, not an iframe)`,
   `style-src: no change needed (styles are constructed stylesheets inside the Shadow root)`,

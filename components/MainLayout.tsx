@@ -861,7 +861,7 @@ export default function MainLayout({ children, subnav, demo = false }: { childre
         ${isMobile ? 'ml-0' : isCollapsed ? 'ml-16' : 'ml-64'}
         relative flex-1 flex flex-col overflow-hidden transition-all duration-300
         ${isMobile ? (demo ? 'pt-24 isolate' : 'pt-14 isolate') : demo ? 'pt-10' : ''}
-      `}>
+      `} style={demo ? { '--demo-bar': '2.5rem' } as React.CSSProperties : undefined}>
         {children}
       </main>
 

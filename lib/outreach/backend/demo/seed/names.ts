@@ -1,4 +1,4 @@
-/** Invented people and companies for the demo. No real person, brand, logo or photo. */
+/** Invented people and companies for the demo. No real person, brand or logo; photos are licensed stock portraits (seed/faces.ts). */
 
 export const FIRST_NAMES = [
   'Ava', 'Noah', 'Mia', 'Liam', 'Zoe', 'Ethan', 'Isla', 'Mateo', 'Nora', 'Kai', 'Leah', 'Omar', 'Ruby', 'Jonas', 'Elena', 'Arjun',
@@ -6,6 +6,16 @@ export const FIRST_NAMES = [
   'Lena', 'Yusuf', 'Grace', 'Nico', 'Priya', 'Owen', 'Freya', 'Kenji', 'Lucia', 'Sami', 'Elise', 'Marco', 'Anya', 'Caleb', 'Tara', 'Hugo',
   'Nadia', 'Rafael', 'Josie', 'Dev', 'Mila', 'Aaron', 'Selin', 'Victor', 'Leila', 'Oscar', 'Keira', 'Idris',
 ];
+
+/** Which first names get a woman's or a man's face (seed/faces.ts); names that could be either keep their initials. */
+export const FEMALE_FIRST_NAMES = new Set([
+  'Ava', 'Mia', 'Zoe', 'Isla', 'Nora', 'Leah', 'Ruby', 'Elena', 'Chloe', 'Hana', 'Maya', 'Sana', 'Ines', 'Clara', 'Ivy', 'Amara',
+  'Lena', 'Grace', 'Priya', 'Freya', 'Lucia', 'Elise', 'Anya', 'Tara', 'Nadia', 'Josie', 'Mila', 'Selin', 'Leila', 'Keira',
+]);
+export const MALE_FIRST_NAMES = new Set([
+  'Noah', 'Liam', 'Ethan', 'Mateo', 'Omar', 'Jonas', 'Arjun', 'Felix', 'Diego', 'Theo', 'Lucas', 'Rohan', 'Malik', 'Tomas', 'Ben',
+  'Yusuf', 'Nico', 'Owen', 'Kenji', 'Marco', 'Caleb', 'Hugo', 'Rafael', 'Dev', 'Aaron', 'Victor', 'Oscar', 'Idris',
+]);
 
 export const LAST_NAMES = [
   'Hartley', 'Okafor', 'Lindqvist', 'Moreau', 'Castillo', 'Brennan', 'Achterberg', 'Nakamura', 'Ferreira', 'Kowalski', 'Haddad', 'Ostrowski',

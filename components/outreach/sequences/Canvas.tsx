@@ -2,7 +2,7 @@
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState, type MouseEvent } from 'react';
 import {
-  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position, useReactFlow, MarkerType, applyNodeChanges, applyEdgeChanges, BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
+  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position, useReactFlow, useStoreApi, MarkerType, applyNodeChanges, applyEdgeChanges, BaseEdge, EdgeLabelRenderer, getSmoothStepPath,
   type Node, type Edge, type Connection, type NodeProps, type EdgeProps, type NodeChange, type EdgeChange, type NodeTypes, type EdgeTypes, type OnSelectionChangeParams, type IsValidConnection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -316,6 +316,34 @@ const CanvasInner = forwardRef<CanvasHandle, CanvasProps>(function CanvasInner(p
     focusNode: (id) => { select(id); rf.fitView({ nodes: [{ id }], duration: 300, maxZoom: 1.1, padding: 0.6 }); },
     fitView: () => { rf.fitView({ duration: 300, padding: 0.2 }); },
   }), [rf, select]);
+
+  // The product tour zooms the canvas: `outreach:canvas-focus` { type?: step type } → onto the top of the flow, or onto
+  // the topmost step of that type. Answers `outreach:canvas-focused` { id } once the zoom has settled.
+  const store = useStoreApi<OutreachRFNode, OutreachRFEdge>();
+  useEffect(() => {
+    let alive = true;
+    const onFocus = async (e: Event) => {
+      const type = (e as CustomEvent<{ type?: string }>).detail?.type;
+      // wait for measured nodes, then a beat so the initial fitView has run and doesn't override this one
+      const ready = () => { const ns = rf.getNodes(); return ns.length > 0 && ns.every((n) => n.measured?.width); };
+      for (let i = 0; i < 40 && !ready(); i++) await new Promise((r) => setTimeout(r, 75));
+      await new Promise((r) => setTimeout(r, 120));
+      if (!alive) return;
+      const ns = rf.getNodes();
+      const byTop = (a: OutreachRFNode, b: OutreachRFNode) => a.position.y - b.position.y || a.position.x - b.position.x;
+      const target = type ? ns.filter((n) => n.data.node.type === type).sort(byTop)[0] : ns.find((n) => n.id === graph.start) ?? [...ns].sort(byTop)[0];
+      if (!target) { window.dispatchEvent(new CustomEvent('outreach:canvas-focused', { detail: { id: null } })); return; }
+      const w = target.measured?.width ?? NODE_W, h = target.measured?.height ?? 0;
+      const zoom = type ? 1.15 : 1;
+      const cx = target.position.x + w / 2;
+      // top of the flow: the start step sits near the top edge; a single step: centred
+      const cy = type ? target.position.y + h / 2 : target.position.y + (store.getState().height / 2 - 40) / zoom;
+      await rf.setCenter(cx, cy, { zoom, duration: 400 });
+      if (alive) window.dispatchEvent(new CustomEvent('outreach:canvas-focused', { detail: { id: target.id } }));
+    };
+    window.addEventListener('outreach:canvas-focus', onFocus);
+    return () => { alive = false; window.removeEventListener('outreach:canvas-focus', onFocus); };
+  }, [rf, store, graph.start]);
 
   const onNodesChange = useEvent((changes: NodeChange<OutreachRFNode>[]) => {
     const removes = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);

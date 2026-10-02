@@ -59,7 +59,7 @@ every stored timestamp into the past, so "now" stays the real now and waits fall
 2. `npm run demo:contract`: adds any new RPC, function or table name to `backend/contract.names.ts`.
 3. `npx tsc --noEmit`: a new name without a demo handler is a type error in `backend/demo/rpc/index.ts` or `fn/index.ts`.
    Add the handler in the area file (`rpc/<area>.ts`), computed from the store, same shape as the SQL / function.
-4. Seed the rows the screen needs (`seed/<area>.ts`). Fictional only: invented names, `@example.com`, `+1 555 01xx`.
+4. Seed the rows the screen needs (`seed/<area>.ts`). Fictional only: invented names, `@example.com`, `+1 555 01xx`. Photos come only from `public/faces` (160px WebP, ~2.5 KB, face box filling the middle half; `w*` women / `m*` men; w01–w09 and m01–m07 are the marketing site's portraits): senders by name in `seed/faces.ts`, leads via `seedFaces`, which runs last.
 5. A new screen: add it to `backend/demo/routes.ts`.
 6. Something that would touch the outside world (send, connect, pay, export, webhook): show the normal success state and
    call `ctx.ui.simulated()`; for a hosted step use `await ctx.ui.dialog({ kind: 'connect' | 'checkout' | 'consent', … })`.

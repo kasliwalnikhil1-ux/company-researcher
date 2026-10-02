@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The bar above the product tour, on every screen: "Demo: no messages are sent", simulated activity, restart tour,
+ * The bar above the product tour, on every screen: "Demo", simulated activity, restart tour,
  * reset demo and the "Start your outreach" CTA. Fixed, 40 px, never dismissible.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -19,7 +19,7 @@ function Label() {
   return (
     <span className="flex items-center gap-2 font-medium whitespace-nowrap" data-demo-label>
       <span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75 animate-ping" /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" /></span>
-      Demo: no messages are sent
+      Demo
     </span>
   );
 }

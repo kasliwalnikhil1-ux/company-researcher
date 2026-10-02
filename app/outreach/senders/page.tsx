@@ -142,7 +142,7 @@ export default function SendersPage() {
       )}
 
       {channels.length > 1 || channel ? (
-        <div className="flex flex-wrap items-center gap-2 mb-3" role="group" aria-label="Channel">
+        <div className="flex flex-wrap items-center gap-2 mb-3" role="group" aria-label="Channel" data-tour="sender-channels">
           <button type="button" onClick={() => setChannel('')} aria-pressed={!channel}
             className={cn('px-3 py-1.5 rounded-full text-xs font-medium border', !channel ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
             All channels <span className="opacity-60 tabular-nums">{senders.data?.length ?? 0}</span>
@@ -184,14 +184,14 @@ export default function SendersPage() {
             <Th>Sender</Th><Th>Status</Th><Th>Health</Th><Th>Profile</Th><Th>Level</Th><Th>Proxy</Th><Th>Client</Th><Th>Schedule</Th><Th>Last sync</Th><Th className="text-right">Used today</Th>
           </tr></thead>
           <tbody>
-            {pageRows.map((s, rowIndex) => {
+            {pageRows.map((s) => {
               const today = todayById.get(s.id);
               const locked = isFuture(s.warmup_locked_until);
               const dryAlert = dry.data?.get(s.id);
               const isDry = !!s.running_dry_at || !!dryAlert;
               const hint = blockedHint(s);
               return (
-                <tr key={s.id} data-tour={rowIndex === 0 ? 'sender-card' : undefined} onClick={() => router.push(`/outreach/senders/${s.id}`)} className="cursor-pointer hover:bg-gray-50" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/outreach/senders/${s.id}`); }}>
+                <tr key={s.id} onClick={() => router.push(`/outreach/senders/${s.id}`)} className="cursor-pointer hover:bg-gray-50" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/outreach/senders/${s.id}`); }}>
                   <Td>
                     <div className="flex items-center gap-3 min-w-[200px]">
                       <div className="relative shrink-0">

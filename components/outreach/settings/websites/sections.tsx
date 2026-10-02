@@ -22,7 +22,7 @@ import ModeSwitch from '@/components/outreach/ai/hub/ModeSwitch';
 import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
 import { MODE_LINE, WEBSITE_WHEN_LABEL, hubHref, websiteHubMode, type HubMode, type WebsiteWhen } from '@/lib/outreach/aiHub';
 import {
-  CSP_NOTES, HMAC_SAMPLES, INSTALL_GUIDES, OWN_BUTTON_ATTRIBUTES, OWN_BUTTON_SNIPPETS, SOURCE_LABELS, SUPABASE_URL, fmtSeconds, snippetHtml, standaloneUrl, useCampaigns, useCannedResponses, useDeleteCampaign, useDeleteCanned,
+  CSP_NOTES, HMAC_SAMPLES, avatarUrl, useWebchatAvatars, INSTALL_GUIDES, OWN_BUTTON_ATTRIBUTES, OWN_BUTTON_SNIPPETS, SOURCE_LABELS, SUPABASE_URL, fmtSeconds, snippetHtml, standaloneUrl, useCampaigns, useCannedResponses, useDeleteCampaign, useDeleteCanned,
   useRegenerateHmac, useRestoreSettings, useSaveCampaign, useSaveCanned, useSetInboxMembers, useSettingsHistory, useUpdateInbox, useWebchatMailboxes, useWebchatReport,
   type BusinessHours, type InboxPatch, type PreChatField, type ProductsReport, type ProductsReportRow, type UrlRule, type WebchatCampaign, type WebchatInbox, type WebchatSettings,
 } from '@/lib/outreach/webchat';
@@ -116,6 +116,28 @@ function contrastRatio(a: string, b: string): number | null {
   const lum = (hex: string) => { const h = hex.replace('#', ''); const f = h.length === 3 ? h.split('').map((c) => c + c).join('') : h; if (!/^[0-9a-f]{6}$/i.test(f)) return null; const n = parseInt(f, 16); const [r, g, bl] = [n >> 16 & 255, n >> 8 & 255, n & 255].map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * bl; };
   const la = lum(a), lb = lum(b); if (la == null || lb == null) return null; const [x, y] = la > lb ? [la, lb] : [lb, la]; return (x + 0.05) / (y + 0.05);
 }
+/** Bot avatar: a built-in one (`preset:<file>`, public/widget/v1/avatars), none (the brand initial) or a link to any image. */
+function BotAvatarPicker({ value, brand, onChange, disabled }: { value: string | null; brand: string; onChange: (v: string | null) => void; disabled: boolean }) {
+  const avatars = useWebchatAvatars();
+  const preset = /^preset:/i.test(value ?? '') ? value!.slice(7) : null, custom = value && !preset ? value : '';
+  const tile = (on: boolean) => cn('w-11 h-11 rounded-full overflow-hidden flex-none ring-2 ring-offset-2 focus:outline-none focus-visible:ring-indigo-500 disabled:cursor-not-allowed', on ? 'ring-indigo-600' : 'ring-transparent hover:ring-gray-300');
+  return (
+    <div className="mt-3">
+      <Label hint="next to the assistant's messages and on voice calls">Bot avatar</Label>
+      <div className="flex flex-wrap items-center gap-2.5" role="radiogroup" aria-label="Bot avatar">
+        <button type="button" role="radio" aria-checked={!value} disabled={disabled} onClick={() => onChange(null)} className={cn(tile(!value), 'bg-gray-100 text-gray-600 text-sm font-bold flex items-center justify-center')} title="No avatar: the brand initial">{(brand.trim() || 'C').slice(0, 1).toUpperCase()}</button>
+        {(avatars.data ?? []).map((x) => (
+          <button key={x.file} type="button" role="radio" aria-checked={preset === x.file} aria-label={x.label} title={x.label} disabled={disabled} onClick={() => onChange(`preset:${x.file}`)} className={tile(preset === x.file)}>
+            <img src={avatarUrl(`preset:${x.file}`) ?? ''} alt="" className="w-full h-full object-cover" />
+          </button>
+        ))}
+        {custom && avatarUrl(custom) && <span className={tile(true)} title="Your image"><img src={avatarUrl(custom)!} alt="" className="w-full h-full object-cover" /></span>}
+      </div>
+      <input className={cn(field, 'mt-2')} value={custom} onChange={(e) => onChange(e.target.value.trim() || null)} disabled={disabled} placeholder="or paste a link to your own image (https://…, square, 64×64 or larger)" aria-label="Bot avatar link" />
+    </div>
+  );
+}
+
 export function AppearanceSection(p: SectionProps) {
   const { draft, set, dirty, reset } = useDraft(p.inbox.settings.appearance);
   const { save, saving } = useSaveSettings(p);
@@ -131,7 +153,6 @@ export function AppearanceSection(p: SectionProps) {
           <div><Label hint="≤ 50">Welcome heading</Label><input className={field} maxLength={50} value={draft.welcome_title} onChange={(e) => set({ welcome_title: e.target.value })} disabled={!p.canEdit} /></div>
           <div><Label hint="≤ 50">Welcome tagline</Label><input className={field} maxLength={50} value={draft.welcome_tagline} onChange={(e) => set({ welcome_tagline: e.target.value })} disabled={!p.canEdit} /></div>
           <div><Label hint="https; any proportions, shown whole">Logo URL</Label><input className={field} value={draft.logo_url ?? ''} onChange={(e) => set({ logo_url: e.target.value || null })} disabled={!p.canEdit} placeholder="https://…/logo.png" /></div>
-          <div><Label hint="50×50, https">Bot avatar URL</Label><input className={field} value={draft.bot_avatar_url ?? ''} onChange={(e) => set({ bot_avatar_url: e.target.value || null })} disabled={!p.canEdit} /></div>
           <div><Label>Accent colour</Label><div className="flex items-center gap-2"><input type="color" value={/^#[0-9a-f]{6}$/i.test(draft.accent) ? draft.accent : '#4f46e5'} onChange={(e) => set({ accent: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Accent colour" /><input className={field} value={draft.accent} onChange={(e) => set({ accent: e.target.value })} disabled={!p.canEdit} /></div>{!contrastOk && <p className="text-xs text-amber-700 mt-1">Contrast below 4.5:1 with both white and dark text — pick a darker or lighter accent (WCAG AA).</p>}</div>
           <div><Label>Widget background</Label><div className="flex items-center gap-2"><input type="color" value={draft.widget_bg} onChange={(e) => set({ widget_bg: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Widget background" /><input className={field} value={draft.widget_bg} onChange={(e) => set({ widget_bg: e.target.value })} disabled={!p.canEdit} /></div></div>
           <div><Label>Chat background</Label><div className="flex items-center gap-2"><input type="color" value={draft.chat_bg} onChange={(e) => set({ chat_bg: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Chat background" /><input className={field} value={draft.chat_bg} onChange={(e) => set({ chat_bg: e.target.value })} disabled={!p.canEdit} /></div></div>
@@ -141,6 +162,7 @@ export function AppearanceSection(p: SectionProps) {
           <div><Label hint="320–720">Panel width (px)</Label><input type="number" min={320} max={720} className={field} value={draft.panel_width} onChange={(e) => set({ panel_width: Number(e.target.value) || 384 })} disabled={!p.canEdit} /></div>
           <div><Label>z-index</Label><input type="number" className={field} value={draft.z_index} onChange={(e) => set({ z_index: Number(e.target.value) || 2147483000 })} disabled={!p.canEdit} /></div>
         </Grid>
+        <BotAvatarPicker value={draft.bot_avatar_url} brand={draft.brand_name || p.inbox.name} onChange={(v) => set({ bot_avatar_url: v })} disabled={!p.canEdit} />
         <div className="mt-3"><Label hint="advanced, scoped to the widget; @import and external url() are stripped">Custom CSS</Label><textarea className={cn(field, 'font-mono text-xs')} rows={5} value={draft.custom_css} onChange={(e) => set({ custom_css: e.target.value })} disabled={!p.canEdit} placeholder=".hd { border-radius: 0 }" /></div>
         <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { appearance: draft } })} />
       </Card>
@@ -627,7 +649,7 @@ export function InstallSection(p: SectionProps) {
       </Card>
       <Card title="Content-Security-Policy">
         <p className="text-xs text-gray-500 mb-2">If your site sets a CSP, allow:</p>
-        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled, !!(p.inbox.settings?.launcher?.video?.enabled !== false && p.inbox.settings?.launcher?.video?.url), productHosts, !!p.inbox.settings?.voice?.enabled).join('\n')}</pre>
+        <pre className="text-xs bg-gray-50 border border-gray-200 rounded-lg p-3 overflow-x-auto">{CSP_NOTES(apiHost, typeof window === 'undefined' ? '' : window.location.origin, !!p.inbox.settings?.security?.turnstile_enabled, !!(p.inbox.settings?.launcher?.video?.enabled !== false && p.inbox.settings?.launcher?.video?.url), productHosts, !!p.inbox.settings?.voice?.enabled, /^preset:/i.test(p.inbox.settings?.appearance?.bot_avatar_url ?? '')).join('\n')}</pre>
       </Card>
       <Card title="SDK">
         <p className="text-xs text-gray-500">Global <code>window.growthxai</code> (alias <code>window.kaptured</code>), ready event <code>growthxai:ready</code>.</p>

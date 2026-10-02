@@ -498,7 +498,7 @@ export default function Builder({ id }: { id: string }) {
 
   return (
     <BuilderContext.Provider value={ctx}>
-      <div className="flex flex-col -mx-4 md:-mx-6 -my-6 h-[calc(100dvh-3.5rem)] md:h-[100dvh] min-h-[560px] bg-gray-50">
+      <div className="flex flex-col -mx-4 md:-mx-6 -my-6 h-[calc(100dvh_-_3.5rem_-_var(--demo-bar,0px))] md:h-[calc(100dvh_-_var(--demo-bar,0px))] min-h-[560px] bg-gray-50">
         <TopBar
           sequence={sequence} draft={draft} dirty={dirty} saving={saving} version={sequence.head_version} readOnly={readOnly} canManage={canManage}
           publishMode={publishMode} modeKnown={modeKnown} canDiscard={dirty || !!autosave.savedAt} indicator={indicator}
