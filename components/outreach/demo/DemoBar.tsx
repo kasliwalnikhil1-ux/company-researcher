@@ -5,7 +5,7 @@
  * reset demo and the "Start your outreach" CTA. Fixed, 40 px, never dismissible.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, ChevronDown, FastForward, Pause, Play, RotateCcw, SkipForward, Zap } from 'lucide-react';
+import { ArrowRight, ChevronDown, FastForward, Pause, Play, RefreshCcw, RotateCcw, SkipForward, Zap } from 'lucide-react';
 import { Button, Modal } from '@/components/outreach/ui';
 import { useDemo } from './DemoProvider';
 
@@ -28,16 +28,16 @@ function Placeholder() {
   return <div className="fixed top-0 inset-x-0 z-[60] h-10 bg-gray-900 text-white text-sm flex items-center px-4"><Label /></div>;
 }
 
-function SimMenu() {
-  const { mode, setMode, skipDay, day } = useDemo();
+function SimMenu({ onReset }: { onReset: () => void }) {
+  const { mode, setMode, skipDay, day, tour } = useDemo();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const close = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', close); window.addEventListener('keydown', esc);
-    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', esc); };
+    window.addEventListener('pointerdown', close); window.addEventListener('keydown', esc);
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', esc); };
   }, [open]);
   const current = MODES.find((m) => m.key === mode) ?? MODES[0];
   return (
@@ -48,17 +48,29 @@ function SimMenu() {
         <ChevronDown className="w-3.5 h-3.5" />
       </button>
       {open && (
-        <div role="menu" className="absolute right-0 sm:left-0 sm:right-auto mt-1 w-56 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 py-1">
+        <div role="menu" className="fixed top-11 inset-x-3 sm:absolute sm:top-full sm:inset-x-auto sm:left-0 sm:mt-1 sm:w-56 bg-white text-gray-800 rounded-lg shadow-xl border border-gray-200 py-1">
+          <div className="sm:hidden px-3 pt-1.5 pb-1 text-xs font-medium text-gray-500">
+            Simulate activity{day > 0 && <span className="text-gray-400"> · day +{day}</span>}
+          </div>
           {MODES.map((m) => (
-            <button key={m.key} role="menuitemradio" aria-checked={mode === m.key} type="button" onClick={() => { setMode(m.key); setOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50 ${mode === m.key ? 'font-semibold text-indigo-700' : ''}`}>
+            <button key={m.key} role="menuitemradio" aria-checked={mode === m.key} type="button" onClick={() => { setMode(m.key); setOpen(false); }} className={`w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm hover:bg-gray-50 ${mode === m.key ? 'font-semibold text-indigo-700' : ''}`}>
               <m.icon className="w-4 h-4" /> {m.label}
-              <span className="ml-auto text-xs text-gray-400">{m.key === 'on' ? '2 h every 4 s' : m.key === 'fast' ? '8 h every 4 s' : 'stopped'}</span>
+              <span className="ml-auto text-xs text-gray-400 whitespace-nowrap">{m.key === 'on' ? '2 h every 4 s' : m.key === 'fast' ? '8 h every 4 s' : 'stopped'}</span>
             </button>
           ))}
           <div className="border-t border-gray-100 my-1" />
-          <button role="menuitem" type="button" onClick={() => { skipDay(); setOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-gray-50">
+          <button role="menuitem" type="button" onClick={() => { skipDay(); setOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm hover:bg-gray-50">
             <SkipForward className="w-4 h-4" /> Skip a day
           </button>
+          <div className="sm:hidden">
+            <div className="border-t border-gray-100 my-1" />
+            <button role="menuitem" type="button" onClick={() => { setOpen(false); tour.start(); }} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50">
+              <RotateCcw className="w-4 h-4" /> Restart tour
+            </button>
+            <button role="menuitem" type="button" onClick={() => { setOpen(false); onReset(); }} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50">
+              <RefreshCcw className="w-4 h-4" /> Reset demo
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -73,7 +85,7 @@ export default function DemoBar() {
       <div className="fixed top-0 inset-x-0 z-[60] h-10 bg-gray-900 text-white text-sm flex items-center gap-1 sm:gap-3 px-3 sm:px-4" role="region" aria-label="Product tour">
         <Label />
         <div className="hidden md:block w-px h-5 bg-white/20" />
-        <SimMenu />
+        <SimMenu onReset={() => setConfirm(true)} />
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <button type="button" onClick={() => tour.start()} className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 whitespace-nowrap" data-demo-restart-tour>
             <RotateCcw className="w-3.5 h-3.5" /> Restart tour

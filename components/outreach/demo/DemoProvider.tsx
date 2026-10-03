@@ -64,7 +64,6 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
   // the tour controller lives outside React: it reads the current router, path and CTA through refs
   const pathRef = useRef(pathname);
   const routerRef = useRef(router);
-  const ctaRef = useRef<() => void>(() => {});
   useEffect(() => { pathRef.current = pathname; routerRef.current = router; }, [pathname, router]);
 
   // The demo and the product never share a page: if the URL left /product-tour without a full load, reload so the
@@ -138,7 +137,6 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
 
   const signedIn = !!user;
   const cta = useCallback(() => leaveDemo(signedIn ? '/outreach' : '/outreach?from=product-tour'), [signedIn]);
-  useEffect(() => { ctaRef.current = cta; }, [cta]);
 
   // The refs are read only inside the controller's callbacks (navigation, clicks), never while rendering.
   // eslint-disable-next-line react-hooks/refs
@@ -146,7 +144,6 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
     const t: TourController = createTour({
       navigate: (p) => routerRef.current.push(p),
       currentPath: () => pathRef.current,
-      onCta: () => ctaRef.current(),
       onChange: () => setTourRunning(t.running),
     });
     return t;

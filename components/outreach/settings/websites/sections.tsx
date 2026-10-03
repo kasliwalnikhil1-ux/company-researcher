@@ -3,7 +3,7 @@
 // Settings → Websites → {inbox}: one component per §12 section of web-chat-PRD.md. Each section edits a draft copy of its
 // part of the settings and saves through outreach_webchat_inbox_update (nested merge, versioned, config_version bump).
 
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Copy, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -29,10 +29,16 @@ import {
 
 export interface SectionProps { inbox: WebchatInbox; ws: string; canEdit: boolean; toast: (m: string, kind?: 'error') => void }
 
-/** Draft + save helper shared by the sections. The page remounts a section on every config_version, so no reset effect. */
+/** A tab stacks several sections, each with its own Save: the page remounts a section on a new config_version only
+ *  when it has no unsaved edits or the save was its own, so saving one card never wipes another card's draft. */
+export const DraftScope = createContext<{ dirty: (d: boolean) => void; saved: () => void } | null>(null);
+
+/** Draft + save helper shared by the sections. The page remounts a section on a new config_version, so no reset effect. */
 export function useDraft<T>(initial: T) {
+  const scope = useContext(DraftScope);
   const [draft, setDraft] = useState<T>(initial);
   const [dirty, setDirty] = useState(false);
+  useEffect(() => { scope?.dirty(dirty); }, [scope, dirty]);
   const set = (patch: Partial<T> | ((d: T) => T)) => { setDraft((d) => (typeof patch === 'function' ? (patch as (d: T) => T)(d) : { ...d, ...patch })); setDirty(true); };
   return { draft, set, dirty, reset: () => { setDraft(initial); setDirty(false); } };
 }
@@ -50,9 +56,10 @@ export function SaveBar({ dirty, saving, onSave, onReset, canEdit }: { dirty: bo
 
 export function useSaveSettings(p: SectionProps) {
   const upd = useUpdateInbox(p.ws);
+  const scope = useContext(DraftScope);
   return {
     saving: upd.isPending,
-    save: async (patch: InboxPatch, ok = 'Saved') => { try { await upd.mutateAsync({ id: p.inbox.id, patch }); p.toast(ok); return true; } catch (e) { p.toast(parseError(e).message, 'error'); return false; } },
+    save: async (patch: InboxPatch, ok = 'Saved') => { try { await upd.mutateAsync({ id: p.inbox.id, patch }); scope?.saved(); p.toast(ok); return true; } catch (e) { p.toast(parseError(e).message, 'error'); return false; } },
   };
 }
 
@@ -337,7 +344,7 @@ export function AvailabilitySection(p: SectionProps) {
     <Card title="Availability">
       <Note tone={av.online ? 'green' : 'gray'} className="mb-3">Right now: {av.online ? 'online' : 'offline'} · {av.in_hours ? 'inside business hours' : `outside business hours${av.next_open_at ? `, back ${timeAgo(av.next_open_at).replace('ago', '')}` : ''}`} · {av.agents.length} collaborator{av.agents.length === 1 ? '' : 's'} online. Online for the widget = at least one collaborator online and inside hours.</Note>
       <div className="divide-y divide-gray-100">
-        <SettingRow title="Business hours" description="Outside hours the widget shows the unavailable message; the assistant can cover after hours (AI tab)." control={<Switch checked={draft.enabled} onChange={(v) => set((x) => ({ ...x, enabled: v, bh: { ...x.bh, weekly: v && !Object.keys(x.bh.weekly).length ? Object.fromEntries(DAYS.map((d) => [d, ['sat', 'sun'].includes(d) ? [] : [['09:00', '18:00']]])) : x.bh.weekly } }))} label="Business hours" disabled={!p.canEdit} />} />
+        <SettingRow title="Business hours" description="Outside hours the widget shows the unavailable message; the assistant can cover after hours (AI assistant tab)." control={<Switch checked={draft.enabled} onChange={(v) => set((x) => ({ ...x, enabled: v, bh: { ...x.bh, weekly: v && !Object.keys(x.bh.weekly).length ? Object.fromEntries(DAYS.map((d) => [d, ['sat', 'sun'].includes(d) ? [] : [['09:00', '18:00']]])) : x.bh.weekly } }))} label="Business hours" disabled={!p.canEdit} />} />
       </div>
       {draft.enabled && (
         <div className="space-y-3 mt-2">
@@ -481,7 +488,7 @@ export function AiSection(p: SectionProps & { between?: React.ReactNode }) {
       {p.between}
       {/* What the assistant wrote for this website: the Activity table, pre-filtered (it replaced "Recent answers"). */}
       <Card title="What the assistant wrote" actions={<Link href={hubHref.activity({ feature: 'website', where: p.inbox.id })} className="text-xs font-medium text-indigo-700 hover:underline">Open in Activity</Link>}>
-        <p className="text-xs text-gray-500 mb-3">Answers sent to visitors and suggestions written for your agents. Questions the assistant could not answer wait in <Link href={hubHref.needsYou({ type: 'question', where: p.inbox.id, mine: false })} className="text-indigo-700 hover:underline">AI → Needs you</Link>. Test the assistant on the Installation tab (demo page).</p>
+        <p className="text-xs text-gray-500 mb-3">Answers sent to visitors and suggestions written for your agents. Questions the assistant could not answer wait in <Link href={hubHref.needsYou({ type: 'question', where: p.inbox.id, mine: false })} className="text-indigo-700 hover:underline">AI → Needs you</Link>. Test the assistant on the Install &amp; security tab (demo page).</p>
         <ActivityTable ws={p.ws} fixed={{ feature: 'website', where: p.inbox.id }} pageSize={20} emptyText="The assistant has not written anything for this website in this period." />
       </Card>
     </div>
@@ -581,7 +588,7 @@ export function SecuritySection(p: SectionProps) {
         </div>
         <div className="divide-y divide-gray-100 mt-2">
           <SettingRow title="Allow .zip attachments" control={<Switch checked={draft.sec.attachments.allow_zip} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, attachments: { ...d.sec.attachments, allow_zip: v } } }))} label="Allow zip" disabled={!p.canEdit} />} />
-          <SettingRow title="Cloudflare Turnstile on the first message" description="Cloudflare's mostly invisible bot check runs before a conversation starts. Leave the site key blank to use the platform's widget; if your site sets a CSP, see Installation." control={<Switch checked={draft.sec.turnstile_enabled} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_enabled: v } }))} label="Turnstile" disabled={!p.canEdit} />} />
+          <SettingRow title="Cloudflare Turnstile on the first message" description="Cloudflare's mostly invisible bot check runs before a conversation starts. Leave the site key blank to use the platform's widget; if your site sets a CSP, see Content-Security-Policy above." control={<Switch checked={draft.sec.turnstile_enabled} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_enabled: v } }))} label="Turnstile" disabled={!p.canEdit} />} />
           {draft.sec.turnstile_enabled && <div className="py-2"><Label hint="optional">Turnstile site key</Label><input className={field} placeholder="Platform widget key" value={draft.sec.turnstile_site_key ?? ''} disabled={!p.canEdit} onChange={(e) => set((d) => ({ ...d, sec: { ...d.sec, turnstile_site_key: e.target.value || null } }))} /></div>}
           <SettingRow title="Wait for cookie consent" description="Nothing is stored until your site calls growthxai.consent(true)." control={<Switch checked={draft.sec.consent_mode} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, consent_mode: v } }))} label="Consent mode" disabled={!p.canEdit} />} />
           <SettingRow title="Allow localhost" description="For local development and the demo page." control={<Switch checked={draft.sec.allow_localhost} onChange={(v) => set((d) => ({ ...d, sec: { ...d.sec, allow_localhost: v } }))} label="Allow localhost" disabled={!p.canEdit} />} />
@@ -604,7 +611,7 @@ export function InstallSection(p: SectionProps) {
   const g = INSTALL_GUIDES.find((x) => x.key === guide) ?? INSTALL_GUIDES[0];
   const apiHost = SUPABASE_URL;
   const [copied, setCopied] = useState(false);
-  // "Show me the code" on the Launcher tab links here
+  // "Show me the code" under Launcher & popup links here
   useEffect(() => { if (window.location.hash === '#own-button') document.getElementById('own-button')?.scrollIntoView({ block: 'start' }); }, []);
   // product pictures on the cards come from the catalogue's own image hosts: a site with a CSP has to allow them
   const recommends = (p.inbox.settings.ai.products?.catalogue_ids?.length ?? 0) > 0;
@@ -621,7 +628,7 @@ export function InstallSection(p: SectionProps) {
       </Card>
       <div id="own-button" className="scroll-mt-4">
         <Card title="Use your own button">
-          <p className="text-xs text-gray-500 mb-3">Any element of your site can open the chat: add an attribute, no JavaScript needed. Buttons added later by your site (single-page apps, popups, carts) work too. To have nothing but your own buttons, choose <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=launcher`} className="text-indigo-700 hover:underline">My own buttons</Link> on the Launcher tab.</p>
+          <p className="text-xs text-gray-500 mb-3">Any element of your site can open the chat: add an attribute, no JavaScript needed. Buttons added later by your site (single-page apps, popups, carts) work too. To have nothing but your own buttons, choose <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=design#launcher`} className="text-indigo-700 hover:underline">My own buttons</Link> under Launcher &amp; popup on the Design tab.</p>
           <div className="space-y-2">
             {OWN_BUTTON_SNIPPETS.map((s) => (
               <div key={s.key}>

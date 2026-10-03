@@ -11,8 +11,11 @@ import 'driver.js/dist/driver.css';
 import { DEMO_TOUR_SEQUENCE_ID } from '@/lib/outreach/demoIds';
 import { kv } from '@/lib/outreach/storage';
 
-/** `canvas`: zoom the sequence canvas first: onto the top of the flow (`top`) or onto the topmost step of that type. */
-export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message' }
+/**
+ * `canvas`: zoom the sequence canvas first: onto the top of the flow (`top`) or onto the topmost step of that type.
+ * `side`: where the popover sits (default below the target).
+ */
+export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message'; side?: 'right' | 'bottom' }
 
 export const TOUR_STEPS: TourStep[] = [
   { route: '/outreach', element: '[data-tour="dashboard-stats"]', title: 'A live workspace', text: "This is a live workspace with sample data. Here's the whole flow in a minute." },
@@ -21,7 +24,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-canvas"]', title: 'Sequences', text: 'Build the steps: visit, connect, message, follow up, branch on replies.', canvas: 'top' },
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-message-step"]', title: 'Personalisation', text: 'Personalise every message with variables and AI lines.', canvas: 'send_message' },
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Start it', text: 'Start it and leads move through on their own. In this demo the activity is simulated.' },
-  { route: '/outreach/inbox', element: '[data-tour="inbox-conversation"]', title: 'One inbox', text: 'Replies from every channel land here. Answer them, or let AI draft.' },
+  { route: '/outreach/inbox', element: '[data-tour="inbox-list"]', title: 'One inbox', side: 'right', text: 'Replies from every channel land here. Answer them, or let AI draft.' },
   { route: '/outreach/reports?tab=funnel', element: '[data-tour="reports-funnel"]', title: 'Reports', text: 'See what works: accepted, replied, interested, meetings.' },
 ];
 
@@ -77,9 +80,9 @@ export interface TourController {
 
 /**
  * `navigate` gets an `/outreach…` path (the caller maps it into the tour), `currentPath` returns the current path in
- * the same `/outreach…` form. `onFinish` runs when the last step is completed; `onCta` is the "Start your outreach" button.
+ * the same `/outreach…` form. `onFinish` runs when the last step is completed.
  */
-export function createTour(o: { navigate: (path: string) => void; currentPath: () => string; onFinish?: () => void; onCta: () => void; onChange?: () => void }): TourController {
+export function createTour(o: { navigate: (path: string) => void; currentPath: () => string; onFinish?: () => void; onChange?: () => void }): TourController {
   let drv: Driver | null = null;
   let running = false;
   let swapping = false;
@@ -132,17 +135,8 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
           showButtons: i === 0 ? ['next', 'close'] : ['previous', 'next', 'close'],
           nextBtnText: last ? 'Keep exploring' : 'Next',
           prevBtnText: 'Back',
-          side: 'bottom',
+          side: step.side ?? 'bottom',
           align: 'start',
-          onPopoverRender: (popover) => {
-            if (!last) return;
-            const cta = document.createElement('button');
-            cta.type = 'button';
-            cta.textContent = 'Start your outreach';
-            cta.className = 'gxdemo-tour-cta';
-            cta.onclick = () => { end('done'); o.onCta(); };
-            popover.footerButtons.prepend(cta);
-          },
         },
       }],
     });

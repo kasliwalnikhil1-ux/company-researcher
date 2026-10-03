@@ -96,7 +96,7 @@ Eight steps across pages. The visitor can skip at any step, press Esc to skip, a
 | 5 | Sequence builder | A message step with a variable | "Personalise every message with variables and AI lines." |
 | 6 | Sequence page | The Start / Enroll button | "Start it and leads move through on their own. In this demo the activity is simulated." |
 | 7 | Inbox | A conversation with a reply | "Replies from every channel land here. Answer them, or let AI draft." |
-| 8 | Reports | The funnel | "See what works: accepted, replied, interested, meetings." Then **[ Start your outreach ]** · Keep exploring |
+| 8 | Reports | The funnel | "See what works: accepted, replied, interested, meetings." Then Back · **Keep exploring** (the demo bar keeps "Start your outreach") |
 
 - **Driver config:** one `driver()` instance with `allowClose: true`, `showProgress: true`, `overlayClickBehavior: 'close'`.
 - **Step definition:** each step is `{ route, element: '[data-tour="…"]', popover }`. A small controller navigates to `route`, waits up to 4 s for the element, then calls `drive(i)`. If the element never appears (for example on a narrow screen), the step shows as a centred popover.

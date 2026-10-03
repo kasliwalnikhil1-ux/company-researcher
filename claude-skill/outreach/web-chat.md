@@ -32,7 +32,7 @@ When the assistant is answering (`ai_handled: true`, no `handed_off_at`), do not
 
 ## Setting up a site (managers)
 
-1. Website assistant (in the sidebar) → Add website (name, domains). The snippet is on the Installation tab (plain HTML, GTM, WordPress, Shopify, Webflow, Wix, Framer, Next.js, Astro, React). "Seen on …" confirms the install.
+1. Website assistant (in the sidebar) → Add website (name, domains). The snippet is on the Install & security tab (plain HTML, GTM, WordPress, Shopify, Webflow, Wix, Framer, Next.js, Astro, React). "Seen on …" confirms the install.
 2. Collaborators on the General tab: only they see and take the site's conversations; auto-assignment is round-robin among those online with capacity.
 3. Reply mailbox (General) for email continuity. Business hours (Availability). Pre-chat form, CSAT, features as needed.
 4. Website assistant: pick knowledge sources (the shared library under AI → Knowledge, the same one Replies use), set the mode (Off · Review · Auto; also under AI → Setup → Website assistant), persona and handoff rules. Answers cost one AI action each from the workspace allowance; when it is used up the widget quietly becomes live chat.

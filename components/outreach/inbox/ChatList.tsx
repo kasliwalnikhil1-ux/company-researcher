@@ -280,7 +280,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
         <MentionsList ws={ws} selectedId={selectedId} onSelect={onSelectMention} unreadOnly={mentionsUnreadOnly} onUnreadOnly={setMentionsUnreadOnly} />
       ) : (
       /* `relative`: the virtual spacer below is positioned, so without a positioned scroll container its full height leaks into the page's scroll height (a window scrollbar and empty space under the inbox). */
-      <div ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="relative flex-1 min-h-0 overflow-y-auto" role="listbox" aria-label="Conversations">
+      <div ref={scrollRef} data-tour="inbox-list" onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)} className="relative flex-1 min-h-0 overflow-y-auto" role="listbox" aria-label="Conversations">
         {search.trim().length >= 2 && !!noteSearchQ.data?.length && (
           <div className="border-b border-amber-100 bg-amber-50/50">
             <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-amber-800">Private notes matching “{search.trim()}”</div>
@@ -314,7 +314,6 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                 return (
                   <button
                     key={c.id}
-                    data-tour={c.last_direction === 'in' ? 'inbox-conversation' : undefined}
                     type="button"
                     role="option"
                     aria-selected={active}
