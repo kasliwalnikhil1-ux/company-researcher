@@ -140,7 +140,7 @@ Eight steps across pages, written for a buyer: what each part gets them, in the 
     typeof window !== 'undefined' && /^\/product-tour(\/|$)/.test(window.location.pathname);
   ```
 
-  It is a constant for the life of the page. Crossing between `/product-tour` and `/outreach` is always a **full page load**: the CTA and "Exit demo" use `window.location.assign`. A route-change watcher reloads the page if the URL prefix and `IS_DEMO` ever disagree.
+  It is a constant for the life of the page. Crossing between `/product-tour` and `/outreach` is always a **full page load**: the CTA uses `window.location.assign`. A route-change watcher reloads the page if the URL prefix and `IS_DEMO` ever disagree.
 
 - **Links.** The app has 246 literal `/outreach…` references. They stay as they are. Three thin wrappers in `lib/outreach/nav.tsx` translate at the edge:
 
@@ -212,7 +212,7 @@ export interface OutreachBackend {
 |---|---|
 | `app/outreach/layout.tsx` | When `IS_DEMO`: skip `ProtectedRoute`, render `DemoBar` above `MainLayout`, wrap in `DemoProvider` (loads the store, starts the simulator, hosts the tour). When not demo: exactly today's tree. `ProtectedRoute` itself is not changed |
 | `OutreachWorkspaceProvider` | Unchanged code. Its `ensure_workspace` and workspace queries go through `db` and get the demo workspace |
-| `MainLayout` | Takes a `demo` flag: shows only the outreach navigation, a "Demo user" block, and a menu with **Exit demo** and **Start your outreach**. It skips its own Supabase and `/api/reset-account` calls |
+| `MainLayout` | Takes a `demo` flag: shows only the outreach navigation, a "Demo user" block, and a **Start your outreach** button (no Exit demo button). It skips its own Supabase and `/api/reset-account` calls |
 | `WebchatPresence` | Its presence ping goes through `db.rpc` → a local no-op |
 | Root providers (`AuthProvider`, `AccessProvider`, …) | Unchanged. They already run on public pages. Their session lookups are sign-in calls, not outreach data, and are allowed (§3.4) |
 

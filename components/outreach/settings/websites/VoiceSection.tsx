@@ -235,7 +235,7 @@ function VoiceForm(p: SectionProps & { state: VoiceState }) {
         </div>
         <div className="mt-3 divide-y divide-gray-100">
           <SettingRow title="Captions on by default" description="Visitors can switch them off; screen readers announce them." control={<Switch checked={ui.captions} onChange={(v) => setUi({ captions: v })} label="Captions" disabled={!p.canEdit} />} />
-          <SettingRow title="“Talk to us” on the home screen" control={<Switch checked={ui.show_on.home} onChange={(v) => setUi({ show_on: { ...ui.show_on, home: v } })} label="Home" disabled={!p.canEdit} />} />
+          <SettingRow title="“Voice” on the home screen" control={<Switch checked={ui.show_on.home} onChange={(v) => setUi({ show_on: { ...ui.show_on, home: v } })} label="Home" disabled={!p.canEdit} />} />
           <SettingRow title="Mic in the message box" description="While the box is empty the send button is the mic." control={<Switch checked={ui.show_on.composer} onChange={(v) => setUi({ show_on: { ...ui.show_on, composer: v } })} label="Composer mic" disabled={!p.canEdit} />} />
           <SettingRow title="Voice first" description="The launcher says your start button text and opens straight into a call." control={<Switch checked={ui.show_on.launcher} onChange={(v) => setUi({ show_on: { ...ui.show_on, launcher: v } })} label="Voice first" disabled={!p.canEdit} />} />
         </div>

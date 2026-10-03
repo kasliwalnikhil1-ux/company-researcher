@@ -20,7 +20,7 @@ export default function DemoWelcome() {
   const close = () => { setSeen(true); try { kv.setItem(KEY, 'seen'); } catch { /* storage blocked */ } };
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="gxdemo-welcome-title">
-      <div className="absolute inset-0 bg-gray-900/50" onClick={close} />
+      <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onClick={close} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <GrowthxLogo className="mb-5" />
         <h2 id="gxdemo-welcome-title" className="text-lg font-semibold text-gray-900">Your AI SDR</h2>

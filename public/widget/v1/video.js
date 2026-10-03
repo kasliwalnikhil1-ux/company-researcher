@@ -4,7 +4,9 @@
  * clip restarts (with sound when allowed) and suggested questions sit over or below it. A control bar runs along the
  * bottom of the expanded clip, like a video player: the progress line, then play / pause, replay, sound and the time on
  * the left, and on the right the language menu (when the clips come in more than one language), "Voice chat" (when the
- * website's voice assistant is on and the page allows the microphone) and "Chat with us", which opens the panel.
+ * website's voice assistant is on and the page allows the microphone) and "Text" (launcher.video.cta_text, when set),
+ * which opens the panel. On a phone (640px or narrower) the expanded view is a card across the bottom of the screen
+ * instead: the clip with its control bar, the questions one per row under it, then Voice and Text as two big buttons.
  * A question is a text or {text, text_variants, video_url, video_kind, video_variants, link_url, link_text}:
  *   - with its own clip: the clip plays in place of the main one; while it plays the other questions fade out so the
  *     clip can be seen (hovering the questions, pausing or the end of the clip brings them back), and its page link
@@ -38,6 +40,7 @@
   function num(v, lo, hi, d) { v = parseFloat(v); return isNaN(v) ? d : Math.max(lo, Math.min(hi, v)); }
   function ratio(r, d) { var m = /^(\d{1,2}):(\d{1,2})$/.exec(r || ""); return m && +m[1] && +m[2] ? m[1] + "/" + m[2] : d; }
   function clock(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2); }
+  var DEF_CTA = /^\s*(chat with us|text)?\s*$/i;   // the chat button's default words, old and new
   var CODE = /^[a-z]{2,3}(-[a-z0-9]{2,8}){0,2}$/i, FLAG = /^[a-z]{2}(-[a-z]{2,4})?$/;
   // the languages the clips come in, in menu order; the first one is the default
   function languages(list) {
@@ -97,16 +100,17 @@
         ".vb .badge{top:" + xo + "px;left:" + xo + "px;right:auto;z-index:2}.vb.open .badge{display:none}" +
         ".vbo{position:absolute;inset:0;display:none;flex-direction:column;justify-content:flex-end;pointer-events:none}.vb.open .vbo{display:flex}" +
         ".vbpl{position:absolute;top:50%;left:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:none;align-items:center;justify-content:center}.vbpl svg{width:28px;height:28px;margin-left:3px}.vb.open.paused .vbpl{display:flex}" +
-        // the bottom block: questions (when they sit over the clip) and the control bar, on a dark fade
+        // the bottom block: questions (when they sit over the clip) and the control bar, on a dark fade. The questions are
+        // a two-column grid, never a stack: 2 = one row of two, 4 = 2 x 2, 3 = two then one; a single one takes the row.
         ".vbb{display:flex;flex-direction:column;gap:8px;padding:30px 10px 6px;background:linear-gradient(transparent,rgba(0,0,0,.66));pointer-events:auto;transition:background .3s}.vbb.playing{background:linear-gradient(transparent,rgba(0,0,0,.42))}" +
-        ".vbq{display:flex;flex-wrap:wrap;gap:8px;pointer-events:auto}.vbq.below{display:none;width:" + ww + "}.vb.open .vbq.below{display:flex}" +
-        ".vbq button{flex:1 1 40%;min-width:0;display:flex;align-items:center;gap:8px;border:0;border-radius:999px;padding:9px 14px;font:inherit;font-weight:600;font-size:13px;line-height:1.25;cursor:pointer;text-align:start;background:" + (over ? rgba(qbg, .78) : qbg) + ";color:" + qc + ";box-shadow:0 2px 8px rgba(0,0,0,.18);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .15s,opacity .25s}.vbq button:hover{transform:translateY(-1px);background:" + qbg + "}.vbq button:focus-visible{outline:2px solid #fff;outline-offset:1px}" +
+        ".vbq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;pointer-events:auto}.vbq.one{grid-template-columns:minmax(0,1fr)}.vbq.below{display:none;width:" + ww + "}.vb.open .vbq.below{display:grid}" +
+        ".vbq button{min-width:0;display:flex;align-items:center;gap:6px;border:0;border-radius:999px;padding:5px 10px;font:inherit;font-weight:600;font-size:12px;line-height:1.25;cursor:pointer;text-align:start;background:" + (over ? rgba(qbg, .78) : qbg) + ";color:" + qc + ";box-shadow:0 2px 8px rgba(0,0,0,.18);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .15s,opacity .25s}.vbq button:hover{transform:translateY(-1px);background:" + qbg + "}.vbq button:focus-visible{outline:2px solid #fff;outline-offset:1px}" +
         // while a question's clip plays, the others fade almost out of sight so the clip can be seen; hovering the
         // questions, a pause or the end of the clip brings them back. The question that is playing stays dim.
         ".vbq button.sel,.vbq button.sel:hover{opacity:.55;transform:none;box-shadow:none}.vbq.playing button:not(.sel){opacity:.12}.vbq.playing:not(.hold):hover button:not(.sel),.vbq.playing:has(:focus-visible) button:not(.sel){opacity:1}" +
         ".vba{position:absolute;top:0;left:0;background:#111827}" +
-        ".vbl{flex:1 1 100%;min-width:0;display:none}.vbl.on{display:flex}.vbl a{display:inline-flex;align-items:center;gap:6px;max-width:100%;box-sizing:border-box;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.95);color:#111827;font-weight:600;font-size:12.5px;line-height:1.2;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.2)}.vbl a:hover{background:#fff}.vbl a:focus-visible{outline:2px solid " + accent + ";outline-offset:1px}.vbl svg{width:13px;height:13px;flex:0 0 auto}" +
-        ".vbq b{flex:0 0 auto;width:20px;height:20px;border-radius:50%;border:1px solid currentColor;opacity:.8;font-size:10px;display:flex;align-items:center;justify-content:center}.vbq span{overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.vbq .vbl span{display:block;white-space:nowrap;text-overflow:ellipsis}" +
+        ".vbl{grid-column:1/-1;min-width:0;display:none}.vbl.on{display:flex}.vbl a{display:inline-flex;align-items:center;gap:6px;max-width:100%;box-sizing:border-box;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.95);color:#111827;font-weight:600;font-size:12.5px;line-height:1.2;text-decoration:none;box-shadow:0 2px 8px rgba(0,0,0,.2)}.vbl a:hover{background:#fff}.vbl a:focus-visible{outline:2px solid " + accent + ";outline-offset:1px}.vbl svg{width:13px;height:13px;flex:0 0 auto}" +
+        ".vbq b{flex:0 0 auto;width:16px;height:16px;box-sizing:border-box;border-radius:50%;border:1px solid currentColor;opacity:.8;font-size:9px;display:flex;align-items:center;justify-content:center}.vbq span{overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.vbq .vbl span{display:block;white-space:nowrap;text-overflow:ellipsis}" +
         // the control bar
         ".vbc{display:flex;flex-direction:column;gap:2px;color:#fff}.vbp{height:12px;display:flex;align-items:center;cursor:pointer}.vbp span{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.35);overflow:hidden;transition:height .15s}.vbp:hover span{height:5px}.vbp i{display:block;height:100%;width:0;background:#fff}" +
         ".vbr{display:flex;align-items:center;gap:4px;min-width:0}.vbr .sp{flex:1;min-width:4px}.vbk{display:contents}.vbk button,.vbln{flex:0 0 auto;height:32px;min-width:32px;padding:0;border:0;border-radius:999px;background:transparent;color:#fff;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font:inherit}.vbk button:hover,.vbln:hover{background:rgba(255,255,255,.18)}.vbk button:focus-visible,.vbln:focus-visible,.vbct:focus-visible{outline:2px solid #fff;outline-offset:1px}.vbr svg{width:18px;height:18px}" +
@@ -114,12 +118,21 @@
         ".vbr .off,.vbr .muted .on{display:none}.vbr .muted .off{display:inline}.vbr .pa{display:none}.vb:not(.paused) [data-v=play] .pl{display:none}.vb:not(.paused) [data-v=play] .pa{display:inline}.vb.nov .vbk,.vb.nov .vbp{display:none}" +
         // language menu: the flag of the language playing, opening a list above it
         ".vbg{position:relative;flex:0 0 auto}.vbln{gap:4px;padding:0 6px 0 4px}.vbln img,.vbln>span:first-child{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#374151;font-size:9px;font-weight:700;overflow:hidden}.vbln svg{width:12px;height:12px;transition:transform .15s}.vbln[aria-expanded=true] svg{transform:rotate(180deg)}" +
-        ".vbm2{position:absolute;bottom:calc(100% + 8px);" + (side === "left" ? "left" : "right") + ":0;min-width:170px;max-height:220px;overflow:auto;margin:0;padding:6px;list-style:none;border-radius:12px;background:rgba(17,24,39,.96);box-shadow:0 10px 30px rgba(0,0,0,.35);display:none;z-index:3}.vbm2.on{display:block}" +
+        ".vbm2{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);width:max-content;min-width:150px;max-width:240px;max-height:220px;overflow:auto;margin:0;padding:6px;list-style:none;border-radius:12px;background:rgba(17,24,39,.96);box-shadow:0 10px 30px rgba(0,0,0,.35);display:none;z-index:3}.vbm2.on{display:block}" +
         ".vbm2 button{width:100%;display:flex;align-items:center;gap:9px;padding:7px 8px;border:0;border-radius:8px;background:transparent;color:#fff;font:inherit;font-size:13px;text-align:start;cursor:pointer}.vbm2 button:hover,.vbm2 button:focus-visible{background:rgba(255,255,255,.12);outline:none}.vbm2 img,.vbm2 button>span:first-child{width:20px;height:20px;flex:0 0 auto;border-radius:50%;background:#374151;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;overflow:hidden}.vbm2 em{flex:1;font-style:normal}.vbm2 svg{width:14px;height:14px;visibility:hidden}.vbm2 [aria-checked=true] svg{visibility:visible}" +
-        // Voice chat / Chat with us: two small pills at the right end of the bar
+        // Voice / Text: two small pills at the right end of the bar, both in the chat button's colours
         ".vbct{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border:0;border-radius:999px;font:inherit;font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}.vbct:hover{background:rgba(255,255,255,.28)}.vbct svg{width:14px;height:14px;flex:0 0 auto}.vbct span{min-width:0;overflow:hidden;text-overflow:ellipsis}.vbct.cta,.vbct.cta:hover{background:" + cbg + ";color:" + cc + "}.vbct.cta:hover{filter:brightness(1.08)}" +
-        // a narrow clip: the time goes first, then the words on the two pills (their icons stay)
-        "@container (max-width:480px){.vbtm{display:none}}@container (max-width:390px){.vbr [data-v=replay]{display:none}}@container (max-width:330px){.vbct span{display:none}.vbct{padding:0 9px}}";
+        // a narrow clip: the time goes first, then replay; the two pills tighten but keep their words ("Voice" / "Text" are short)
+        "@container (max-width:480px){.vbtm{display:none}}@container (max-width:390px){.vbr [data-v=replay]{display:none}}@container (max-width:330px){.vbct{padding:0 8px;gap:4px;font-size:11.5px}.vbr{gap:2px}}@container (max-width:250px){.vbct span{display:none}}" +
+        // Phones (.m, see build): the expanded view is a card across the bottom of the screen. The clip on top (the
+        // control bar over it), the questions one per row under it, then Voice and Text as two big buttons.
+        ".vbac{display:none;gap:8px}.vb.open .vbac{display:flex}.vbac .vbct{flex:1 1 0;justify-content:center;height:48px;padding:0 14px;border-radius:14px;font-size:15px;-webkit-backdrop-filter:none;backdrop-filter:none}.vbac .vbct svg{width:18px;height:18px}.vbac .vbct:focus-visible{outline:2px solid " + accent + ";outline-offset:2px}" +
+        ".vb.m.open{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));max-height:calc(100dvh - 20px);box-sizing:border-box;align-items:stretch;padding:8px;border-radius:22px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.3)}" +
+        ".vb.m.open .vbf{width:100%;flex:0 1 auto;max-height:56dvh;border-radius:16px}" +
+        ".vb.m.open .vbx{top:16px;right:16px;width:32px;height:32px;background:rgba(0,0,0,.55)}" +
+        ".vb.m .vbq.below{width:auto;flex:0 1 auto;min-height:0;overflow:auto;gap:6px}.vb.m .vbq button{padding:4px 9px;gap:5px;font-size:11px;background:" + qbg + ";box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}.vb.m .vbq b{width:14px;height:14px;font-size:8px}" +
+        ".vb.m .vbl a{background:#f3f4f6;box-shadow:none;padding:5px 10px;font-size:11.5px}" +
+        ".vb.m .vbk button,.vb.m .vbln{height:40px;min-width:40px}.vb.m .vbtm{display:block}.vb.m .vbr [data-v=replay]{display:inline-flex}";
     }
 
     // ---- expand / collapse -----------------------------------------------------------------------------------------
@@ -148,22 +161,28 @@
     function build(v, key) {
       var langs = languages(v.languages), code = want(langs), mains = clips(v.url, v.kind, v.variants, langs), mc = pick(mains, code);
       var isImg = mc.image, u = esc(url(mc.url)), now = langs.filter(function (l) { return l.code === code; })[0] || null;
-      var qs = (Array.isArray(v.questions) ? v.questions : []).map(function (x) { return question(x, langs, code); }).filter(Boolean).slice(0, 6), below = v.questions_position === "below", label = v.cta_text || L.i18n("chat");
+      // on a phone the questions always sit under the clip, and Voice / Text get their own row under them
+      var mob = L.isMobile(), qs = (Array.isArray(v.questions) ? v.questions : []).map(function (x) { return question(x, langs, code); }).filter(Boolean).slice(0, 6), below = mob || v.questions_position === "below";
+      // the button that opens the chat says "Text" (in the page's language) unless the website set its own words;
+      // "Chat with us" was the default before, so it counts as unset
+      var label = DEF_CTA.test(v.cta_text || "") ? L.i18n("text") || "Text" : String(v.cta_text).trim();
       var ctl = !isImg || qs.some(function (x) { return x.clips.some(function (c) { return !c.image; }); });   // play / progress / sound: whenever some clip here is a video
       var voice = L.voice ? L.voice() : null;
-      var q = '<div class="vbq ' + (below ? "below" : "over") + '"><div class="vbl"><a target="_blank" rel="noopener noreferrer">' + EXT + "<span></span></a></div>" +
+      var acts = (voice ? '<button type="button" class="vbct cta" data-v="voice">' + MIC + "<span>" + esc(voice.label || L.i18n("voice_chat") || "Voice") + "</span></button>" : "") +
+        '<button type="button" class="vbct cta" data-v="chat">' + L.ICON + "<span>" + esc(label) + "</span></button>";
+      var q = '<div class="vbq ' + (below ? "below" : "over") + (qs.length === 1 ? " one" : "") + '"><div class="vbl"><a target="_blank" rel="noopener noreferrer">' + EXT + "<span></span></a></div>" +
         qs.map(function (t, i) { return '<button type="button" data-q="' + i + '"' + (t.clips.length ? ' aria-pressed="false"' : "") + "><b>" + String.fromCharCode(65 + i) + "</b><span>" + esc(t.text) + "</span></button>"; }).join("") + "</div>";
       var bar = '<div class="vbc">' + (ctl ? '<div class="vbp" role="slider" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="-1"><span><i></i></span></div>' : "") +
         '<div class="vbr">' + (ctl ? '<span class="vbk"><button type="button" data-v="play" aria-label="Play / pause">' + PP + '</button><button type="button" data-v="replay" aria-label="Replay">' + REPLAY + '</button><button type="button" data-v="mute" aria-label="Sound">' + VOL + '</button><span class="vbtm" aria-hidden="true">0:00</span></span>' : "") +
         '<span class="sp"></span>' +
         (langs.length > 1 && now ? '<div class="vbg"><button type="button" class="vbln" aria-haspopup="true" aria-expanded="false" aria-label="' + esc((L.i18n("lang") || "Video language") + ": " + now.label) + '" title="' + esc(now.label) + '">' + flagImg(now) + CHEV + "</button>" +
           '<ul class="vbm2" role="menu">' + langs.map(function (l) { return '<li role="none"><button type="button" role="menuitemradio" data-l="' + esc(l.code) + '" aria-checked="' + (l.code === code) + '">' + flagImg(l) + "<em>" + esc(l.label) + "</em>" + TICK + "</button></li>"; }).join("") + "</ul></div>" : "") +
-        (voice ? '<button type="button" class="vbct" data-v="voice">' + MIC + "<span>" + esc(voice.label || L.i18n("voice_chat") || "Voice chat") + "</span></button>" : "") +
-        '<button type="button" class="vbct cta" data-v="chat">' + L.ICON + "<span>" + esc(label) + "</span></button></div></div>";
-      var el = doc.createElement("div"); el.className = "vb";
-      el.innerHTML = '<div class="vbf" role="button" tabindex="0" aria-expanded="false" aria-label="' + esc(label) + '">' +
+        (mob ? "" : acts) + "</div></div>";
+      var el = doc.createElement("div"); el.className = "vb" + (mob ? " m" : "");
+      el.innerHTML = '<div class="vbf" role="button" tabindex="0" aria-expanded="false" aria-label="' + esc(L.i18n("chat")) + '">' +
         (isImg ? '<img class="vbm" alt="" src="' + u + '">' : '<video class="vbm" src="' + u + '" muted loop playsinline preload="metadata"></video>') +
         '<div class="vbo">' + (ctl ? '<span class="vbpl">' + PLAY + "</span>" : "") + '<div class="vbb">' + (below ? "" : q) + bar + "</div></div></div>" + (below ? q : "") +
+        (mob ? '<div class="vbac">' + acts + "</div>" : "") +
         '<button class="vbx" type="button" aria-label="' + esc(L.i18n("close")) + '">' + L.CLOSE + "</button>";
       var o = { el: el, key: key, v: v, frame: el.querySelector(".vbf"), vid: isImg ? null : el.querySelector("video"), ans: null, av: null, sel: -1, lang: null }, media = el.querySelector(".vbm"), bar_ = el.querySelector(".vbp i");
       var qbox = el.querySelector(".vbq"), bb = el.querySelector(".vbb"), qb = Array.prototype.slice.call(el.querySelectorAll(".vbq button[data-q]")), lw = el.querySelector(".vbl"), la = lw.firstChild, tm = el.querySelector(".vbtm");
@@ -178,7 +197,16 @@
         if (!lm) return false;
         if (on === undefined) return lm.classList.contains("on");
         lm.classList.toggle("on", !!on); lb.setAttribute("aria-expanded", on ? "true" : "false");
-        if (on) { var c = lm.querySelector('[aria-checked="true"]') || lm.querySelector("button"); c && c.focus(); }
+        if (on) {
+          // straight above the flag, centred on it, but never past the clip's edges (the frame clips what overflows)
+          lm.style.left = lm.style.transform = "";
+          try {
+            var fr = o.frame.getBoundingClientRect(), gr = lb.getBoundingClientRect(), pr = lb.parentNode.getBoundingClientRect(), mw = lm.offsetWidth;
+            var x = Math.max(fr.left + 8, Math.min(fr.right - 8 - mw, gr.left + gr.width / 2 - mw / 2));
+            lm.style.transform = "none"; lm.style.left = Math.round(x - pr.left) + "px";
+          } catch (x) {}
+          var c = lm.querySelector('[aria-checked="true"]') || lm.querySelector("button"); c && c.focus();
+        }
         return !!on;
       };
       if (lb) {
@@ -308,7 +336,7 @@
     function render(v) {
       if (!v) { if (vb) { if (open) set(false); if (vb.vid) { try { vb.vid.pause(); } catch (x) {} } vb.el.classList.add("hidden"); } return false; }
       var vc = L.voice ? L.voice() : null;
-      var key = JSON.stringify(v) + "|" + L.locale() + "|" + (lang || "") + "|" + (vc ? vc.label || "1" : "");
+      var key = JSON.stringify(v) + "|" + L.locale() + "|" + (lang || "") + "|" + (vc ? vc.label || "1" : "") + "|" + (L.isMobile() ? "m" : "d");
       if (!vb || vb.key !== key) {
         var was = open;
         if (vb) { try { vb.clear(); if (vb.vid) vb.vid.pause(); } catch (x) {} vb.el.remove(); open = false; }
@@ -331,6 +359,11 @@
       if (doc.hidden) { try { vb.vid.pause(); } catch (x) {} }
       else if (vb.vid.paused && autoplay()) { var pr = vb.vid.play(); pr && pr.catch && pr.catch(function () {}); }
     });
+
+    // crossing the phone width (a rotation, a resized window) rebuilds the bubble for the other layout
+    var mq = win.matchMedia ? win.matchMedia("(max-width: 640px)") : null;
+    function relayout() { if (!vb || vb.el.classList.contains("hidden")) return; quiet = true; try { render(vb.v); } finally { quiet = false; } }
+    if (mq) { try { mq.addEventListener("change", relayout); } catch (x) { try { mq.addListener(relayout); } catch (y) {} } }
 
     // A language from the menu: every clip and question switches to it. The bubble is rebuilt for it (the main clip may
     // be a video in one language and a GIF in another), stays expanded, keeps the visitor's sound choice and the question that was up.

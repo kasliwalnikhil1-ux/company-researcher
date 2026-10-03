@@ -336,7 +336,7 @@ export const INSTALL_GUIDES: Array<{ key: string; label: string; body: (token: s
 // ---------------------------------------------------------------------------
 export const VIDEO_BUBBLE_DEFAULTS: VideoBubbleSettings = {
   enabled: true, url: null, kind: 'video', shape: 'circle', size: 120, ratio: '1:1', fit: 'cover', focus_x: 50, focus_y: 50, zoom: 100, border_color: '#ffffff', border_width: 3,
-  expanded_width: 420, expanded_ratio: 'auto', sound: true, questions: [], questions_position: 'over', cta_text: 'Chat with us', question_bg: '#111827', question_color: '#ffffff', cta_bg: null, cta_color: '#ffffff',
+  expanded_width: 420, expanded_ratio: 'auto', sound: true, questions: [], questions_position: 'over', cta_text: 'Text', question_bg: '#111827', question_color: '#ffffff', cta_bg: null, cta_color: '#ffffff',
   languages: [], variants: [],
 };
 /** The stored question list (texts and / or objects) as objects, for editing and for the preview. */

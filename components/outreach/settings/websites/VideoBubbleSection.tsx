@@ -223,6 +223,7 @@ export default function VideoBubbleSection(p: SectionProps) {
   const [busy, setBusy] = useState<string | null>(null);   // the slot an upload is running for: main:<lang>, q<n>, q<n>:<lang>
   const [link, setLink] = useState('');
   const [view, setView] = useState<'bubble' | 'expanded'>('bubble');
+  const [device, setDevice] = useState<'desktop' | 'phone'>('desktop'), phone = device === 'phone';
   const [framer, setFramer] = useState<Clip | null>(null);   // the clip being framed (Frame the clip)
   const off = !p.canEdit, accent = p.inbox.settings.appearance.accent;
   const langs = draft.languages ?? [];
@@ -430,7 +431,7 @@ export default function VideoBubbleSection(p: SectionProps) {
             ))}
           </ul>
           <div className="mt-4"><Grid>
-            <div><Label hint="≤ 40; opens the normal chat">Button text</Label><input className={field} maxLength={40} value={draft.cta_text} onChange={(e) => set({ cta_text: e.target.value })} disabled={off} placeholder="Chat with us" /></div>
+            <div><Label hint="≤ 40; opens the normal chat">Button text</Label><input className={field} maxLength={40} value={draft.cta_text} onChange={(e) => set({ cta_text: e.target.value })} disabled={off} placeholder="Text" /></div>
             <div />
             <Color label="Question background" value={draft.question_bg} fallback="#111827" onChange={(v) => set({ question_bg: v ?? '#111827' })} disabled={off} />
             <Color label="Question text" value={draft.question_color} fallback="#ffffff" onChange={(v) => set({ question_color: v ?? '#ffffff' })} disabled={off} />
@@ -444,11 +445,15 @@ export default function VideoBubbleSection(p: SectionProps) {
       <div className="xl:sticky xl:top-4 self-start rounded-xl border border-gray-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 text-xs">
           <span className="text-gray-500">Preview</span>
-          <div className="flex gap-1">{(['bubble', 'expanded'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2 py-0.5 rounded', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{v}</button>)}</div>
+          <div className="flex gap-3">
+            <div className="flex gap-1">{(['desktop', 'phone'] as const).map((d) => <button key={d} type="button" onClick={() => setDevice(d)} className={cn('px-2 py-0.5 rounded', device === d ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{d}</button>)}</div>
+            <div className="flex gap-1">{(['bubble', 'expanded'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2 py-0.5 rounded', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{v}</button>)}</div>
+          </div>
         </div>
-        <div className="relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]">
+        {/* phone: a 320 px screen, where the expanded view is the card across the bottom the widget uses on phones */}
+        <div className={cn('relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]', phone && 'w-[320px] mx-auto border-x border-gray-200')}>
           {hasClip && draft.enabled
-            ? <div className="absolute bottom-5 right-5"><VideoBubbleFrame v={packed} accent={HEX6.test(accent) ? accent : '#4f46e5'} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} maxWidth={318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
+            ? <div className={cn('absolute', phone && view === 'expanded' ? 'bottom-2.5 left-2.5' : phone ? 'bottom-4 right-4' : 'bottom-5 right-5')}><VideoBubbleFrame v={packed} accent={HEX6.test(accent) ? accent : '#4f46e5'} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} phone={phone} scale={phone ? 0.75 : 1} maxWidth={phone ? 300 : 318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
             : <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-gray-400">{hasClip ? 'The bubble is switched off. Visitors see the normal launcher.' : 'Add a clip to see the bubble here.'}</p>}
         </div>
       </div>

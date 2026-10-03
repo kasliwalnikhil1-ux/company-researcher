@@ -28,7 +28,7 @@ export interface VoiceSettings {
 export const VOICE_DEFAULTS: VoiceSettings = {
   enabled: false, voice_id: null, voice_name: null, speed: 1, stability: 0.5, language: null, languages: [], auto_language: true, hinglish: false,
   greeting: {}, instructions: '', max_minutes: 5, silence_end_s: 20, model: 'fast', tool_sound: 'typing', collect: ['name', 'phone', 'need'], record: true, retention_days: 30, consent_text: null,
-  ui: { start_text: 'Talk to us', start_hint: 'Speak with our AI assistant', orb_1: null, orb_2: '#c7a3ff', avatar: 'logo', labels: {}, captions: true, show_on: { home: true, composer: true, launcher: false } },
+  ui: { start_text: 'Voice', start_hint: 'Speak with our AI assistant', orb_1: null, orb_2: '#c7a3ff', avatar: 'logo', labels: {}, captions: true, show_on: { home: true, composer: true, launcher: false } },
 };
 /** The stored settings over the defaults (a website saved before a key existed has no value for it). */
 export function voiceOf(v: Partial<VoiceSettings> | null | undefined): VoiceSettings {

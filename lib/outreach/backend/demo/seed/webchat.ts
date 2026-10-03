@@ -43,7 +43,7 @@ export function seedWebchat(s: DemoStore, now: number): void {
       show_unread_count: true, show_unread_previews: true, hide: false, campaigns_open: false, online_dot: true,
       // no built-in clip ships with the widget (public/widget/v1/presets/presets.json is empty): the bubble is off
       video: { enabled: false, url: null, kind: 'video', shape: 'circle', size: 120, ratio: '1:1', fit: 'cover', focus_x: 50, focus_y: 50, zoom: 100, border_color: '#ffffff', border_width: 3,
-        expanded_width: 420, expanded_ratio: 'auto', sound: true, questions: ['How does pricing work?', 'Can I see a demo?'], questions_position: 'over', cta_text: 'Chat with us', question_bg: '#111827', question_color: '#ffffff', cta_bg: null, cta_color: '#ffffff', languages: [], variants: [] },
+        expanded_width: 420, expanded_ratio: 'auto', sound: true, questions: ['How does pricing work?', 'Can I see a demo?'], questions_position: 'over', cta_text: 'Text', question_bg: '#111827', question_color: '#ffffff', cta_bg: null, cta_color: '#ffffff', languages: [], variants: [] },
     },
     popup: { enabled: true, text: '👋 Want to see how teams book more meetings?', image_url: null, delay_s: 4, position: 'above' },
     messages: { greeting_enabled: true, greeting: 'Hi! I am the Northwind assistant. Ask me about pricing, how outreach works, or book a call with the team.', reply_time: 'minutes',
@@ -86,7 +86,7 @@ export function seedWebchat(s: DemoStore, now: number): void {
       greeting: { en: "Hi! I'm the Northwind assistant. What can I help you with today?", es: '¡Hola! Soy el asistente de Northwind. ¿En qué puedo ayudarte?' },
       instructions: 'Keep answers to two sentences. Offer to text links in the chat instead of reading them out.', max_minutes: 5, silence_end_s: 20, model: 'fast', tool_sound: 'typing',
       collect: ['name', 'phone', 'need'], record: true, retention_days: 30, consent_text: null,
-      ui: { start_text: 'Talk to us', start_hint: 'Speak with our AI assistant', orb_1: null, orb_2: '#c7a3ff', avatar: 'logo', labels: {}, captions: true, show_on: { home: true, composer: true, launcher: false } },
+      ui: { start_text: 'Voice', start_hint: 'Speak with our AI assistant', orb_1: null, orb_2: '#c7a3ff', avatar: 'logo', labels: {}, captions: true, show_on: { home: true, composer: true, launcher: false } },
     },
   };
   const businessHours = { tz: 'America/New_York', weekly: { mon: [['08:00', '20:00']], tue: [['08:00', '20:00']], wed: [['08:00', '20:00']], thu: [['08:00', '20:00']], fri: [['08:00', '18:00']], sat: [['10:00', '16:00']], sun: [] }, holidays: [] };

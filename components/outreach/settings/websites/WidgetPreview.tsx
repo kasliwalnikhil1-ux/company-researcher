@@ -26,11 +26,13 @@ function LangFlag({ l, className }: { l: VideoLanguage; className?: string }) {
 
 /**
  * The launcher clip as the widget draws it (public/widget/v1/video.js): the bubble, or the expanded view with the
- * questions and the control bar along the bottom (play / replay / sound / time, the language menu, Voice chat and the
- * chat button). In the expanded view a question that has its own clip can be clicked: its clip plays in place, the other
+ * questions and the control bar along the bottom (play / replay / sound / time, the language menu, Voice and the
+ * Text button). In the expanded view a question that has its own clip can be clicked: its clip plays in place, the other
  * questions fade out and come back on hover, as on the site. Clicking it again goes back to the main clip.
+ * `phone` draws the expanded view as the widget does on a phone: a card with the clip, the questions under it and
+ * Voice / Text as two big buttons.
  */
-export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, scale = 1, maxWidth = 320, onToggle }: { v: VideoBubbleSettings; accent: string; voice?: boolean; expanded?: boolean; scale?: number; maxWidth?: number; onToggle?: () => void }) {
+export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, phone = false, scale = 1, maxWidth = 320, onToggle }: { v: VideoBubbleSettings; accent: string; voice?: boolean; expanded?: boolean; phone?: boolean; scale?: number; maxWidth?: number; onToggle?: () => void }) {
   const [ar, setAr] = useState(16 / 9);
   const [picked, setPicked] = useState<number | null>(null);
   const [lang, setLang] = useState<string | null>(null);
@@ -44,15 +46,15 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, s
   const playing = (answer && pick(answer.clips)) || main, clip = mediaUrl(playing.url)!, clipKind = playing.kind;
   const ctl = mains.some((c) => c.kind !== 'image') || qs.some((q) => q.clips.some((c) => c.kind !== 'image'));
   const circle = v.shape !== 'rounded' && v.shape !== 'square', size = Math.round(clamp(v.size, 64, 240, 120) * scale), focus = `${clamp(v.focus_x, 0, 100, 50)}% ${clamp(v.focus_y, 0, 100, 50)}%`;
-  const width = expanded ? Math.min(clamp(v.expanded_width, 280, 720, 420), maxWidth) : size, narrow = width < 330;
+  const card = phone && expanded, width = card ? maxWidth - 16 : expanded ? Math.min(clamp(v.expanded_width, 280, 720, 420), maxWidth) : size, narrow = width < 330;
   const xo = expanded ? -10 : circle ? Math.round(size * 0.146) - 12 : -8;
-  const below = v.questions_position === 'below', qbg = hex(v.question_bg, '#111827'), qc = hex(v.question_color, '#ffffff');
+  const below = phone || v.questions_position === 'below', qbg = hex(v.question_bg, '#111827'), qc = hex(v.question_color, '#ffffff');
   const setRatio = (w: number, h: number) => { if (w && h) setAr(Math.max(0.5625, Math.min(1.7778, w / h))); };
   const media = { className: 'block w-full h-full', style: { objectFit: expanded ? 'cover' as const : v.fit, objectPosition: focus, transform: expanded ? undefined : `scale(${clamp(v.zoom, 100, 300, 100) / 100})`, transformOrigin: focus } };
   const questions = (
-    <div className="group/q flex flex-wrap gap-1.5" style={below ? { width } : undefined}>
+    <div className={cn('group/q grid gap-1.5', qs.length === 1 ? 'grid-cols-1' : 'grid-cols-2')} style={below ? { width } : undefined}>
       {answer?.link_url && (
-        <span className="basis-full min-w-0 flex">
+        <span className="col-span-full min-w-0 flex">
           <a href={answer.link_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1.5 max-w-full rounded-full bg-white/95 px-3 py-1.5 text-[11.5px] font-semibold text-gray-900 shadow">
             <ExternalLink className="w-3 h-3 flex-none" /><span className="truncate">{answer.link_text || 'Learn more'}</span>
           </a>
@@ -63,14 +65,16 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, s
         return (
           <span key={`${i}:${q.text}`} role={hasClip ? 'button' : undefined} title={hasClip ? (sel === i ? 'Back to the main clip' : 'Play this question\u2019s video') : undefined}
             onClick={hasClip ? (e) => { e.stopPropagation(); setPicked(sel === i ? null : i); } : undefined}
-            className={cn('flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold leading-tight shadow transition-opacity duration-300', hasClip && 'cursor-pointer', faded && 'opacity-[.12] group-hover/q:opacity-100')}
-            style={{ flex: '1 1 40%', minWidth: 0, background: qbg, color: qc, ...(sel === i ? { opacity: 0.55 } : {}) }}>
-            <b className="flex-none w-[18px] h-[18px] rounded-full border border-current opacity-80 text-[9px] flex items-center justify-center">{String.fromCharCode(65 + i)}</b><span className="line-clamp-2">{q.shown}</span>
+            className={cn('flex items-center gap-1.5 rounded-full font-semibold leading-tight shadow transition-opacity duration-300', card ? 'px-2 py-1 text-[10.5px]' : 'px-2.5 py-[5px] text-[11px]', hasClip && 'cursor-pointer', faded && 'opacity-[.12] group-hover/q:opacity-100')}
+            style={{ minWidth: 0, background: qbg, color: qc, ...(sel === i ? { opacity: 0.55 } : {}) }}>
+            <b className="flex-none w-[15px] h-[15px] rounded-full border border-current opacity-80 text-[8px] flex items-center justify-center">{String.fromCharCode(65 + i)}</b><span className="line-clamp-2">{q.shown}</span>
           </span>
         );
       })}
     </div>
   );
+  // Voice and Text share the chat button's colours; "Chat with us" was the old default and shows as Text
+  const pill = { background: hex(v.cta_bg, accent), color: hex(v.cta_color, '#ffffff') }, ctaText = /^\s*(chat with us|text)?\s*$/i.test(v.cta_text || '') ? 'Text' : v.cta_text;
   const bar = (
     <div className="flex flex-col gap-0.5 text-white">
       {ctl && <div className="h-3 flex items-center"><span className="flex-1 h-[3px] rounded bg-white/35 overflow-hidden"><i className="block h-full w-1/3 bg-white" /></span></div>}
@@ -88,7 +92,7 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, s
               <LangFlag l={now} className="w-5 h-5" /><ChevronUp className={cn('w-3 h-3 transition-transform', menu && 'rotate-180')} />
             </button>
             {menu && (
-              <span className="absolute bottom-full right-0 mb-2 min-w-[150px] rounded-xl bg-gray-900/95 p-1.5 shadow-xl z-10 flex flex-col">
+              <span className={cn('absolute bottom-full mb-2 min-w-[150px] rounded-xl bg-gray-900/95 p-1.5 shadow-xl z-10 flex flex-col', card ? 'right-0' : 'left-1/2 -translate-x-1/2')}>
                 {langs.map((l) => (
                   <button key={l.code} type="button" onClick={(e) => { e.stopPropagation(); setLang(l.code); setMenu(false); }} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-white/10">
                     <LangFlag l={l} className="w-5 h-5" /><span className="flex-1 truncate">{l.label}</span>{l.code === code && <Check className="w-3.5 h-3.5" />}
@@ -98,13 +102,13 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, s
             )}
           </span>
         )}
-        {voice && <span className="h-[30px] flex items-center gap-1 rounded-full bg-white/15 px-2.5 text-[11.5px] font-semibold whitespace-nowrap"><Mic className="w-3.5 h-3.5" />{!narrow && 'Voice chat'}</span>}
-        <span className="h-[30px] flex items-center gap-1 rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap" style={{ background: hex(v.cta_bg, accent), color: hex(v.cta_color, '#ffffff') }}><MessageSquare className="w-3.5 h-3.5" />{!narrow && (v.cta_text || 'Chat with us')}</span>
+        {!card && voice && <span className="h-[30px] flex items-center gap-1 rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap" style={pill}><Mic className="w-3.5 h-3.5" />Voice</span>}
+        {!card && <span className="h-[30px] flex items-center gap-1 rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap" style={pill}><MessageSquare className="w-3.5 h-3.5" />{ctaText}</span>}
       </div>
     </div>
   );
   return (
-    <div className="relative flex flex-col items-end gap-2">
+    <div className={cn('relative flex flex-col gap-2', card ? 'items-stretch p-2 rounded-[22px] bg-white shadow-xl' : 'items-end')} style={card ? { width: maxWidth } : undefined}>
       <div role={onToggle ? 'button' : undefined} onClick={onToggle} className={cn('relative overflow-hidden bg-gray-900 shadow-lg transition-all', onToggle && !expanded && 'cursor-pointer')}
         style={{ width, aspectRatio: expanded ? (v.expanded_ratio && v.expanded_ratio !== 'auto' ? ratioCss(v.expanded_ratio, '16 / 9') : String(ar)) : circle ? '1 / 1' : ratioCss(v.ratio, '1 / 1'), overflow: menu ? 'visible' : undefined,
           borderRadius: expanded ? 16 : circle ? '50%' : v.shape === 'square' ? 10 : Math.round(size * 0.22), border: expanded ? undefined : `${clamp(v.border_width, 0, 8, 3)}px solid ${hex(v.border_color, '#ffffff')}` }}>
@@ -119,7 +123,13 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, s
         )}
       </div>
       {expanded && below && questions}
-      <span className={cn('absolute rounded-full bg-gray-800 text-white flex items-center justify-center shadow', expanded ? 'w-7 h-7' : 'w-6 h-6')} style={{ top: xo, right: xo }}><X className="w-3 h-3" /></span>
+      {card && (
+        <div className="flex gap-2">
+          {voice && <span className="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-xl text-[13px] font-semibold" style={pill}><Mic className="w-4 h-4" />Voice</span>}
+          <span className="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-xl text-[13px] font-semibold" style={pill}><MessageSquare className="w-4 h-4" />{ctaText}</span>
+        </div>
+      )}
+      <span className={cn('absolute rounded-full text-white flex items-center justify-center shadow', card ? 'w-7 h-7 bg-black/55' : expanded ? 'w-7 h-7 bg-gray-800' : 'w-6 h-6 bg-gray-800')} style={card ? { top: 16, right: 16 } : { top: xo, right: xo }}><X className="w-3 h-3" /></span>
     </div>
   );
 }

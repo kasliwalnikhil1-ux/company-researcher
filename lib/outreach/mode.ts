@@ -44,7 +44,7 @@ export function toRealPath(path: string): string {
   return p === undefined ? path : REAL_PREFIX + path.slice(p.length);
 }
 
-/** Full page load out of the demo (the CTA and "Exit demo"). */
+/** Full page load out of the demo (the CTA). */
 export function leaveDemo(to = `${REAL_PREFIX}?from=product-tour`): void {
   window.location.assign(to);
 }

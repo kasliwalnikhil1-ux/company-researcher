@@ -10,7 +10,6 @@ import { useOnboarding } from '@/contexts/OnboardingContext';
 import { useRouter, usePathname } from '@/lib/outreach/nav';
 import Link from '@/lib/outreach/nav';
 import { DEMO_USER_EMAIL } from '@/lib/outreach/session';
-import { leaveDemo } from '@/lib/outreach/mode';
 import { demoCta } from './outreach/demo/cta';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
@@ -48,7 +47,7 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
 
 /**
  * `demo`: the product tour (`/product-tour`, lib/outreach/mode.ts). Only the outreach menu, a "Demo user" block with
- * Exit demo / Start your outreach instead of sign-out, room for the demo bar above, and none of this layout's own account
+ * the Start your outreach button instead of sign-out, room for the demo bar above, and none of this layout's own account
  * calls or route guards (they belong to a signed-in account, and the visitor may have none).
  */
 export default function MainLayout({ children, subnav, demo = false }: { children: React.ReactNode; subnav?: React.ReactNode; demo?: boolean }) {
@@ -825,14 +824,6 @@ export default function MainLayout({ children, subnav, demo = false }: { childre
                 title={demoCtaNow.label}
               >
                 {isCollapsed && !isMobile ? <span aria-hidden>→</span> : <span>{demoCtaNow.label}</span>}
-              </button>
-              <button
-                type="button"
-                onClick={() => leaveDemo('/')}
-                className={`mt-2 w-full flex items-center justify-center ${isCollapsed && !isMobile ? 'px-2' : 'px-4'} py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors`}
-                title="Exit demo"
-              >
-                {isCollapsed && !isMobile ? <span aria-hidden>×</span> : <span>Exit demo</span>}
               </button>
             </>
           ) : (<>

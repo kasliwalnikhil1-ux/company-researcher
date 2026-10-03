@@ -14,7 +14,7 @@ export default function DemoFinish({ onClose }: { onClose: () => void }) {
   };
   return (
     <div className="fixed inset-0 z-[65] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="gxdemo-finish-title">
-      <div className="absolute inset-0 bg-gray-900/50" onClick={onClose} />
+      <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
         <GrowthxLogo className="mb-5" />
         <h2 id="gxdemo-finish-title" className="text-lg font-semibold text-gray-900">Ready to build your first campaign?</h2>

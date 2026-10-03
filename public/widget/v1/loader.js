@@ -39,7 +39,7 @@
   var src = (script && script.src) || "";
   var API = (ds.api || settings.api || "").replace(/\/+$/, "");
   // content hashes (scripts/outreach-widget-version.mjs): cached for a year, a new file is a new address
-  var VER = {"chat.js":"46111a418c","video.js":"ad487ac4e7","ask.js":"8908fae517","voice.js":"2db185d15a"};   // widget-version
+  var VER = {"chat.js":"da1eef057a","video.js":"cd0ce84f15","ask.js":"8908fae517","voice.js":"91f0d285d4"};   // widget-version
   function asset(f) { var m = /loader\.js(\?[^#]*)?$/.exec(src), q = m && m[1] ? m[1] + "&" : "?"; return src.replace(/loader\.js(\?.*)?$/, f) + q + "v=" + (VER[f] || "0"); }
   var CHAT_URL = asset("chat.js"), VIDEO_URL = asset("video.js"), ASK_URL = asset("ask.js"), VOICE_URL = asset("voice.js");
   if (!API) { try { console.warn("[growthxai] data-api missing on the widget script tag"); } catch (e) {} return; }
@@ -209,7 +209,8 @@
     var vc = show && !state.open ? vconf(e) : null; if (vc && !vmod) loadVideo();
     var video = vmod ? vmod.render(vc) : !!vc;   // while video.js is on its way the icon stays hidden, so it does not flash
     btn.className = "btn " + (l.type === "button" && !isMobile() ? "pill" : "icon") + (show && !video ? "" : " hidden");
-    var vf = !state.open && voiceFirst(), vtext = vf ? String((voiceCfg().ui || {}).start_text || "").slice(0, 40) || i18n("talk") : "";
+    var vf = !state.open && voiceFirst(), vtext = vf ? String((voiceCfg().ui || {}).start_text || "").trim().slice(0, 40) : "";
+    if (vf && /^(talk to us|voice)?$/i.test(vtext)) vtext = i18n("talk");   // the default wording, old or new, shows translated
     var label = state.open ? (i18n("close")) : vf ? vtext : (l.text || i18n("chat"));
     btn.setAttribute("aria-label", label); btn.title = label; btn.setAttribute("aria-expanded", state.open ? "true" : "false");
     var inner = state.open ? CLOSE : vf ? MIC : (e.appearance.logo_url ? '<img src="' + esc(e.appearance.logo_url) + '" alt="">' : ICON);
@@ -294,7 +295,7 @@
     }, Math.max(0, (parseFloat(p.delay_s) || 3) * 1000));
   }
   function hidePopup() { clearTimeout(popupTimer); if (popupEl) { popupEl.remove(); popupEl = null; } }
-  var STR = { en: { talk: "Talk to us", chat: "Chat with us", close: "Close chat", dismiss: "Dismiss", more: "Learn more", lang: "Video language", voice_chat: "Voice chat" }, es: { talk: "Habla con nosotros", chat: "Chatea con nosotros", close: "Cerrar chat", dismiss: "Cerrar", more: "Más información", lang: "Idioma del vídeo" }, fr: { talk: "Parlez-nous", chat: "Discutez avec nous", close: "Fermer", dismiss: "Fermer", more: "En savoir plus", lang: "Langue de la vidéo" }, de: { talk: "Sprich mit uns", chat: "Chatte mit uns", close: "Chat schließen", dismiss: "Schließen", more: "Mehr erfahren", lang: "Videosprache" }, pt: { talk: "Fale conosco por voz", chat: "Fale conosco", close: "Fechar", dismiss: "Fechar", more: "Saiba mais", lang: "Idioma do vídeo" }, hi: { talk: "हमसे बात करें", chat: "हमसे चैट करें", close: "चैट बंद करें", dismiss: "हटाएँ", more: "और जानें", lang: "वीडियो की भाषा" }, ar: { talk: "تحدث إلينا", chat: "تحدث معنا", close: "إغلاق", dismiss: "إغلاق", more: "اعرف المزيد", lang: "لغة الفيديو" } };
+  var STR = { en: { talk: "Voice", chat: "Chat with us", close: "Close chat", dismiss: "Dismiss", more: "Learn more", lang: "Video language", voice_chat: "Voice", text: "Text" }, es: { talk: "Voz", chat: "Chatea con nosotros", close: "Cerrar chat", dismiss: "Cerrar", more: "Más información", lang: "Idioma del vídeo", voice_chat: "Voz", text: "Texto" }, fr: { talk: "Voix", chat: "Discutez avec nous", close: "Fermer", dismiss: "Fermer", more: "En savoir plus", lang: "Langue de la vidéo", voice_chat: "Voix", text: "Texte" }, de: { talk: "Sprache", chat: "Chatte mit uns", close: "Chat schließen", dismiss: "Schließen", more: "Mehr erfahren", lang: "Videosprache", voice_chat: "Sprache", text: "Text" }, pt: { talk: "Voz", chat: "Fale conosco", close: "Fechar", dismiss: "Fechar", more: "Saiba mais", lang: "Idioma do vídeo", voice_chat: "Voz", text: "Texto" }, hi: { talk: "आवाज़", chat: "हमसे चैट करें", close: "चैट बंद करें", dismiss: "हटाएँ", more: "और जानें", lang: "वीडियो की भाषा", voice_chat: "आवाज़", text: "टेक्स्ट" }, ar: { talk: "صوت", chat: "تحدث معنا", close: "إغلاق", dismiss: "إغلاق", more: "اعرف المزيد", lang: "لغة الفيديو", voice_chat: "صوت", text: "نص" } };
   function locale() {
     var l = settings.locale || overrides.locale; var e = cfg ? effective(cfg) : null;
     if (!l && e && e.locale && e.locale.use_browser !== false) l = (navigator.language || "en").slice(0, 2);
