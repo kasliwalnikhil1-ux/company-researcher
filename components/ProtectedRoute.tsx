@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { CalendarCheck, Compass, ExternalLink, LogOut, ShieldOff } from 'lucide-react';
 import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { useAccess } from '@/contexts/AccessContext';
 import { onboardingCalendlyUrl, trackMySignup } from '@/lib/platform/leads';
 import { DEMO_PREFIX } from '@/lib/outreach/mode';
+import { useWhitelabel } from '@/hooks/useWhitelabel';
 
 function Spinner() {
   return (
@@ -137,6 +139,7 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
  */
 function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | 'blocked'; email: string | null; name: string | null; onSignOut: () => void }) {
   const pending = status === 'pending';
+  const whitelabel = useWhitelabel();
 
   // record where this sign-up came from (best effort, once per mount)
   useEffect(() => { if (pending) trackMySignup(); }, [pending]);
@@ -161,6 +164,10 @@ function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | '
     <div className="min-h-screen bg-white lg:bg-gray-50 lg:px-4 lg:py-12">
       {/* a card on desktop (sized to Calendly's 800px booking card plus padding); on phones the page itself, edge to edge */}
       <div className="mx-auto w-full lg:max-w-[864px] bg-white lg:border lg:border-gray-200 lg:rounded-2xl lg:shadow-sm overflow-hidden">
+        <div className="flex items-center gap-2 px-6 sm:px-8 py-3 border-b border-gray-100 bg-gray-50/60">
+          <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={24} height={24} className="h-6 w-auto" />
+          <span className="text-sm font-semibold tracking-tight text-gray-900">{whitelabel.pageTitle}</span>
+        </div>
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-6 sm:p-8 pb-4 sm:pb-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in</p>
@@ -169,16 +176,20 @@ function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | '
               Thanks for signing up. Every new account is set up on a short call: we connect your first sending accounts, build your first
               sequence with you, setup your AI auto reply agent, and switch your workspace on.
             </p>
-            {email && <p className="mt-2 text-xs text-gray-400">Signed in as {email}</p>}
+            <p className="mt-2 flex items-center gap-1 text-xs text-gray-400">
+              {email && <span>Signed in as {email}</span>}
+              {email && <span aria-hidden>·</span>}
+              <button type="button" onClick={onSignOut} className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-700 hover:underline">
+                <LogOut className="w-3 h-3" /> Sign out
+              </button>
+            </p>
           </div>
-          <div className="shrink-0 flex items-center gap-2">
+          <div className="shrink-0 flex flex-col items-start sm:items-center gap-1">
             {/* a plain link: the tour runs on its own in-browser data, so entering it is a full page load */}
-            <a href={DEMO_PREFIX} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50" data-gate-product-tour>
+            <a href={DEMO_PREFIX} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700" data-gate-product-tour>
               <Compass className="w-4 h-4" /> Product tour
             </a>
-            <button type="button" onClick={onSignOut} title="Sign out" aria-label="Sign out" className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100">
-              <LogOut className="w-5 h-5" />
-            </button>
+            <span className="text-[11px] text-gray-400">See it now, instant demo</span>
           </div>
         </div>
 
