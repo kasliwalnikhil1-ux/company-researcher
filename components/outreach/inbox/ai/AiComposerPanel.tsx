@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bot, Clock, Hand, Loader2, MessageSquareOff, Send, Pencil, X, Square, RefreshCw, Sparkles, Languages, Undo2, ChevronDown, AlertTriangle, Eye } from 'lucide-react';
+import { Bot, Clock, Hand, Loader2, MessageSquareOff, Send, Pencil, X, Square, RefreshCw, Sparkles, Languages, Undo2, ChevronDown, AlertTriangle, Eye, Flag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -42,7 +42,7 @@ function Meta({ run, ai }: { run: RunSummary; ai: ComposerAi }) {
 }
 
 function DraftText({ text }: { text: string }) {
-  return <div className="text-sm text-gray-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-h-40 overflow-y-auto rounded-md bg-white/80 border border-gray-200 px-2.5 py-1.5">{text}</div>;
+  return <div className="text-sm text-gray-800 whitespace-pre-wrap break-words [overflow-wrap:anywhere] max-h-28 overflow-y-auto rounded-md bg-white/80 border border-gray-200 px-2.5 py-1.5">{text}</div>;
 }
 
 /** Cancel a scheduled AI reply: a reason is required (it feeds the prompt review), the note is optional. */
@@ -295,24 +295,17 @@ export function useDraftWithAi(ai: ComposerAi, chatId: string, onError: (msg: st
 }
 export type DraftWithAi = ReturnType<typeof useDraftWithAi>;
 
-/** Sits right above the textarea while it holds an AI draft: "✦ AI draft · Stage 2 · Relate · Pricing question · v7", warnings, stop line, chips. */
-export function AiDraftMeta({ ai, draft, chat, text, onError, canCompose }: { ai: ComposerAi; draft: DraftWithAi; chat: Pick<Chat, 'id' | 'last_message_at' | 'last_direction' | 'attendee_name'>; text: string; onError: (msg: string) => void; canCompose: boolean }) {
-  const { canWrite } = useWorkspace();
-  const cancel = useCancelRun();
-  const [instructionOpen, setInstructionOpen] = useState(false);
-  const [instruction, setInstruction] = useState('');
+type DraftChat = Pick<Chat, 'id' | 'last_message_at' | 'last_direction' | 'attendee_name'>;
+
+/** What the composer shows about the AI draft in the box; null while the box holds no AI draft. */
+function draftView(ai: ComposerAi, draft: DraftWithAi, chat: DraftChat, text: string) {
   const m = draft.meta;
   if (!m || !ai.tag) return null;
   const s = ai.state;
-  const stage = metaStage(m, s);
-  const canDismiss = canWrite && m.status === 'draft_ready';
-  const edited = text !== ai.tag.original;
-  const handedOff = !!s?.handed_off;
-  // a newer message from them arrived after this manual draft was written: never a silent replace
-  const newer = m.trigger === 'manual' && m.createdAt && chat.last_direction === 'in' && chat.last_message_at && new Date(chat.last_message_at).getTime() > new Date(m.createdAt).getTime();
   const promptNote = draft.prompt?.fallback === 'template' ? 'built-in template' : draft.prompt?.fallback === 'workspace_default' ? 'workspace default prompt' : s?.fallback === 'template' ? 'built-in template' : s?.fallback === 'workspace_default' ? 'workspace default prompt' : null;
-  const chips = canWrite && canCompose;
-  const chip = 'inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50';
+  // one line: "Stage 2 · Relate · Pricing question · v7 · “shorter”"
+  const details = [metaStage(m, s), m.scenarioTitle, m.version != null ? `v${m.version}` : null, m.guidance ? `“${m.guidance}”` : null, promptNote, m.ruleApplied && !m.scenarioTitle ? m.ruleApplied : null]
+    .filter(Boolean).join(' · ');
   // The engine already emits one warning per escalation reason; fold those into the single "handed to a person" line
   // (keeping the engine's more specific text, e.g. the unsupported claim) instead of listing the same reason twice.
   const escalating = m.decision === 'escalate' && m.escalationReasons.length > 0;
@@ -320,71 +313,94 @@ export function AiDraftMeta({ ai, draft, chat, text, onError, canCompose }: { ai
   const escalationWarnings = escalating
     ? [{ code: 'escalate', text: `${m.trigger === 'manual' ? 'The AI would have handed this to a person' : 'AI suggests handing this to a person'}: ${m.escalationReasons.map((r) => m.warnings.find((w) => w.code === r)?.text?.trim() || escalationText([r])).join('; ')}` }]
     : [];
-  const warnings = [...escalationWarnings, ...m.warnings.filter((w) => !reasonSet.has(w.code))];
+  return {
+    m,
+    details,
+    edited: text !== ai.tag.original,
+    handedOff: !!s?.handed_off,
+    // a newer message from them arrived after this manual draft was written: never a silent replace
+    newer: !!(m.trigger === 'manual' && m.createdAt && chat.last_direction === 'in' && chat.last_message_at && new Date(chat.last_message_at).getTime() > new Date(m.createdAt).getTime()),
+    warnings: [...escalationWarnings, ...m.warnings.filter((w) => !reasonSet.has(w.code))],
+  };
+}
 
+/**
+ * One line beside the Reply / Private note tabs while the box holds an AI draft: "✦ AI draft · Stage 2 · Relate · v7",
+ * the stop rule as a flag (wide composers), and Dismiss. Warnings sit inside the box (AiDraftNotes); redraft options
+ * are on the Draft with AI button's menu.
+ */
+export function AiDraftSummary({ ai, draft, chat, text, onError, compact, stopInline }: { ai: ComposerAi; draft: DraftWithAi; chat: DraftChat; text: string; onError: (msg: string) => void; compact?: boolean; stopInline?: boolean }) {
+  const { canWrite } = useWorkspace();
+  const cancel = useCancelRun();
+  const v = draftView(ai, draft, chat, text);
+  if (!v) return null;
+  const { m } = v;
+  const canDismiss = canWrite && m.status === 'draft_ready';
   return (
-    <div className="rounded-md border border-indigo-100 bg-indigo-50/40 px-2.5 py-1.5 space-y-1">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-        <span className="inline-flex items-center gap-1 font-medium text-indigo-700"><Sparkles className="w-3.5 h-3.5" />AI draft{edited ? ', edited' : ''}</span>
-        {stage && <span className="text-gray-600">· {stage}</span>}
-        {m.scenarioTitle && <span className="text-gray-600" title="The scenario card that handled this reply">· {m.scenarioTitle}</span>}
-        {m.version != null && <span className="text-gray-500">· v{m.version}</span>}
-        {m.guidance && <span className="text-gray-500 truncate max-w-[220px]" title={m.guidance}>· “{m.guidance}”</span>}
-        {promptNote && <span className="text-gray-500">· {promptNote}</span>}
-        {m.ruleApplied && !m.scenarioTitle && <span className="text-gray-500 truncate max-w-full" title="The part of the prompt the AI followed">· {m.ruleApplied}</span>}
-        {canDismiss && (
-          <button type="button" className="ml-auto text-gray-500 hover:text-gray-800 hover:underline disabled:opacity-50" disabled={cancel.isPending}
-            onClick={() => cancel.mutate({ chatId: chat.id, runId: m.runId, reason: 'dismissed' }, { onSuccess: () => ai.discardDraft(m.runId), onError: (e) => onError(parseError(e).message) })}>
-            {cancel.isPending ? 'Dismissing…' : 'Dismiss'}
-          </button>
-        )}
-      </div>
-      {handedOff && <div className="text-[11px] text-amber-800 inline-flex items-center gap-1"><Hand className="w-3 h-3" /> AI handed off: this draft is for you to send</div>}
-      {warnings.map((w, i) => <div key={i} className="text-[11px] text-amber-800 flex items-start gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" /><span>{warningText(w)}</span></div>)}
-      {m.wouldStop && <div className="text-[11px] text-amber-800">{stopText(m.stopRule)}</div>}
-      {newer && <div className="text-[11px] text-amber-800">New message from {chat.attendee_name ?? 'them'} since this draft was written. Regenerate?</div>}
-      {m.status === 'draft_ready' && !!m.sideEffects?.length && <SideEffects run={{ side_effects: m.sideEffects }} />}
-      {draft.variants.length > 0 && draft.variants[0].runId === m.runId && (
-        <div className="flex flex-wrap gap-1">
-          {draft.variants.map((v, i) => <button key={i} type="button" className={chip} title={v.text} onClick={() => ai.placeDraft(v.runId, v.text)}>Variant {i + 2}</button>)}
-        </div>
+    <div className="ml-auto flex items-center gap-1.5 min-w-0 text-[11px]" role="status">
+      <span className="inline-flex items-center gap-1 font-medium text-indigo-700 flex-shrink-0"><Sparkles className="w-3.5 h-3.5" />AI draft{v.edited ? ', edited' : ''}</span>
+      {v.details && <span className="truncate text-gray-500 min-w-0" title={v.details}>· {v.details}</span>}
+      {m.wouldStop && stopInline && (
+        <span className="inline-flex items-center gap-1 text-amber-800 min-w-0 max-w-[45%]" title={stopText(m.stopRule)}><Flag className="w-3 h-3 flex-shrink-0" /><span className="truncate">{stopText(m.stopRule)}</span></span>
       )}
-      {chips && (
-        <div className="flex flex-wrap items-center gap-1">
-          <button type="button" className={chip} disabled={draft.busy} onClick={() => draft.request({ regenerate: true })}><RefreshCw className={cn('w-3 h-3', draft.busy && 'animate-spin')} /> Regenerate</button>
-          <button type="button" className={chip} disabled={draft.busy} onClick={() => draft.request({ regenerate: true, guidance: 'shorter' })}>Shorter</button>
-          <button type="button" className={chip} disabled={draft.busy} onClick={() => draft.request({ regenerate: true, guidance: 'more formal' })}>More formal</button>
-          <button type="button" className={chip} disabled={draft.busy} onClick={() => setInstructionOpen(true)}>Instruction…</button>
-        </div>
+      {canDismiss && (
+        <button type="button" className="flex-shrink-0 ml-1 text-gray-500 hover:text-gray-800 hover:underline disabled:opacity-50" disabled={cancel.isPending} title="Dismiss the AI draft" aria-label="Dismiss the AI draft"
+          onClick={() => cancel.mutate({ chatId: chat.id, runId: m.runId, reason: 'dismissed' }, { onSuccess: () => ai.discardDraft(m.runId), onError: (e) => onError(parseError(e).message) })}>
+          {cancel.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : compact ? <X className="w-3.5 h-3.5" /> : 'Dismiss'}
+        </button>
       )}
-      <Modal open={instructionOpen} onClose={() => setInstructionOpen(false)} title="Redraft with an instruction" size="sm" footer={<>
-        <Button variant="secondary" onClick={() => setInstructionOpen(false)}>Cancel</Button>
-        <Button loading={draft.busy} disabled={!instruction.trim()} onClick={async () => { const g = instruction.trim(); setInstructionOpen(false); setInstruction(''); await draft.request({ regenerate: true, guidance: g }); }}>Redraft</Button>
-      </>}>
-        <Textarea label="Instruction (up to 300 characters)" value={instruction} onChange={(e) => setInstruction(e.target.value.slice(0, 300))} rows={3} autoFocus placeholder="e.g. ask about their budget, mention the Thursday slot" counter={{ max: 300, value: instruction.length }} className="min-h-[72px]" />
-      </Modal>
+    </div>
+  );
+}
+
+/** Inside the reply box, above the text: what to check before sending this AI draft (only when there is something). */
+export function AiDraftNotes({ ai, draft, chat, text, stopInline }: { ai: ComposerAi; draft: DraftWithAi; chat: DraftChat; text: string; stopInline?: boolean }) {
+  const v = draftView(ai, draft, chat, text);
+  if (!v) return null;
+  const { m } = v;
+  const stop = m.wouldStop && !stopInline;   // wide composers show it on the summary line instead
+  const effects = m.status === 'draft_ready' && !!m.sideEffects?.length;
+  if (!v.handedOff && !v.warnings.length && !stop && !v.newer && !effects) return null;
+  return (
+    <div className="px-3 pt-1.5 space-y-0.5">
+      {v.handedOff && <div className="text-[11px] text-amber-800 inline-flex items-center gap-1"><Hand className="w-3 h-3" /> AI handed off: this draft is for you to send</div>}
+      {v.warnings.map((w, i) => <div key={i} className="text-[11px] text-amber-800 flex items-start gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" /><span>{warningText(w)}</span></div>)}
+      {stop && <div className="text-[11px] text-amber-800 flex items-start gap-1"><Flag className="w-3 h-3 mt-0.5 flex-shrink-0" /><span>{stopText(m.stopRule)}</span></div>}
+      {v.newer && <div className="text-[11px] text-amber-800">New message from {chat.attendee_name ?? 'them'} since this draft was written. Regenerate?</div>}
+      {effects && <SideEffects run={{ side_effects: m.sideEffects }} />}
     </div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Composer buttons: Draft with AI · Improve my text · Translate ▾
+// Composer buttons: Draft with AI ▾ (redraft options) · Improve my text · Translate ▾
 // ---------------------------------------------------------------------------
 export interface AssistUndo { prev: string; label: 'Improve my text' | 'Translate'; warnings: RunWarning[]; language?: string | null }
 
-export function AiComposerActions({ ai, draft, chatId, text, setText, prospectLanguage, disabled, onError, undo, setUndo }: {
+export function AiComposerActions({ ai, draft, chatId, text, setText, prospectLanguage, disabled, onError, undo, setUndo, compact, wide }: {
   ai: ComposerAi; draft: DraftWithAi; chatId: string; text: string; setText: (t: string) => void; prospectLanguage: string | null; disabled?: boolean;
   onError: (msg: string) => void; undo: AssistUndo | null; setUndo: (u: AssistUndo | null) => void;
+  /** a narrow composer: icons only (the labels move into the titles) */
+  compact?: boolean;
+  /** a wide composer: Improve and Translate show their labels (otherwise icons) */
+  wide?: boolean;
 }) {
+  const { canWrite } = useWorkspace();
   const assist = useComposeAssist();
   const [placement, setPlacement] = useState<{ open: boolean; regenerate: boolean }>({ open: false, regenerate: false });
   const [translateOpen, setTranslateOpen] = useState(false);
+  const [redraftOpen, setRedraftOpen] = useState(false);
+  const [instructionOpen, setInstructionOpen] = useState(false);
+  const [instruction, setInstruction] = useState('');
   const [custom, setCustom] = useState('');
   const typed = text.trim();
   const holdsDraft = !!ai.tag && (typed === ai.tag.original.trim() || typed === '');
   const hasOwnText = !!typed && !holdsDraft;
   const mainLabel = ai.tag && typed ? 'Regenerate' : 'Draft with AI';
   const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
+  // redraft options (shorter, more formal, an instruction, the other variants) while the box holds an AI draft
+  const canRedraft = canWrite && !!draft.meta;
+  const variants = draft.meta && draft.variants.length > 0 && draft.variants[0].runId === draft.meta.runId ? draft.variants : [];
 
   /** Draft with AI (button or ⌘/Ctrl+J): typed text asks Replace / Insert below / Cancel first. */
   const start = useCallback(() => {
@@ -412,19 +428,51 @@ export function AiComposerActions({ ai, draft, chatId, text, setText, prospectLa
       onError: (e) => onError(parseError(e).message),
     });
   };
+  const redraft = (guidance?: string) => { setRedraftOpen(false); void draft.request({ regenerate: true, guidance }); };
   const langChips = Array.from(new Set([prospectLanguage, 'en'].filter((x): x is string => !!x && x !== 'und')));
+  const aiBtn = 'inline-flex items-center gap-1.5 text-xs font-medium py-1.5 border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
+  const menuItem = 'w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50';
 
   return (
     <>
-      <Button type="button" variant="secondary" size="sm" loading={draft.busy} disabled={disabled} onClick={start} title={`${mainLabel} (${isMac ? '⌘' : 'Ctrl'}+J)`}>
-        <Sparkles className="w-4 h-4" /> {mainLabel}
-      </Button>
-      <Button type="button" variant="ghost" size="sm" loading={assist.isPending && assist.variables?.kind === 'improve'} disabled={disabled || !typed || assist.isPending} onClick={() => runAssist('improve')} title="Rewrite what you typed in the prompt's style. Meaning kept; new facts are flagged, never added.">
-        <Pencil className="w-4 h-4" /> Improve my text
+      <div className="relative inline-flex">
+        <button type="button" disabled={disabled || draft.busy} onClick={start} title={`${mainLabel} (${isMac ? '⌘' : 'Ctrl'}+J)`} aria-label={mainLabel}
+          className={cn(aiBtn, compact ? 'px-2' : 'px-2.5', canRedraft ? 'rounded-l-lg' : 'rounded-lg')}>
+          {draft.busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}{!compact && mainLabel}
+        </button>
+        {canRedraft && (
+          <button type="button" disabled={disabled || draft.busy} onClick={() => setRedraftOpen((o) => !o)} title="Redraft: shorter, more formal, with an instruction" aria-label="Redraft options" aria-haspopup="menu" aria-expanded={redraftOpen}
+            className={cn(aiBtn, 'px-1 rounded-r-lg border-l-0')}>
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {redraftOpen && canRedraft && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setRedraftOpen(false)} />
+            <div className="absolute z-30 left-0 bottom-full mb-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg py-1" role="menu">
+              <div className="px-3 pt-1 pb-0.5 text-[11px] text-gray-500">Redraft</div>
+              <button type="button" role="menuitem" className={cn(menuItem, 'flex items-center gap-2')} onClick={() => redraft()}><RefreshCw className="w-3.5 h-3.5 text-gray-400" /> Regenerate</button>
+              <button type="button" role="menuitem" className={menuItem} onClick={() => redraft('shorter')}>Shorter</button>
+              <button type="button" role="menuitem" className={menuItem} onClick={() => redraft('more formal')}>More formal</button>
+              <button type="button" role="menuitem" className={menuItem} onClick={() => { setRedraftOpen(false); setInstructionOpen(true); }}>With an instruction…</button>
+              {variants.length > 0 && (
+                <>
+                  <div className="px-3 pt-1.5 pb-0.5 mt-1 border-t border-gray-100 text-[11px] text-gray-500">Other versions</div>
+                  {variants.map((v, i) => (
+                    <button key={i} type="button" role="menuitem" className={cn(menuItem, 'truncate')} title={v.text} onClick={() => { setRedraftOpen(false); ai.placeDraft(v.runId, v.text); }}>Variant {i + 2} <span className="text-gray-400">· {v.text}</span></button>
+                  ))}
+                </>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+      <Button type="button" variant="ghost" size="sm" className={wide ? undefined : 'px-2'} loading={assist.isPending && assist.variables?.kind === 'improve'} disabled={disabled || !typed || assist.isPending} onClick={() => runAssist('improve')} aria-label="Improve my text" title="Improve my text: rewrite what you typed in the prompt's style. Meaning kept; new facts are flagged, never added.">
+        <Pencil className="w-4 h-4" />{wide && 'Improve my text'}
       </Button>
       <div className="relative">
-        <Button type="button" variant="ghost" size="sm" loading={assist.isPending && assist.variables?.kind === 'translate_out'} disabled={disabled || !typed || assist.isPending} onClick={() => setTranslateOpen((o) => !o)} title="Translate what you typed. The original is kept for Undo." aria-haspopup="menu" aria-expanded={translateOpen}>
-          <Languages className="w-4 h-4" /> Translate <ChevronDown className="w-3 h-3 opacity-60" />
+        <Button type="button" variant="ghost" size="sm" className={cn('gap-1', !wide && 'px-1.5')} loading={assist.isPending && assist.variables?.kind === 'translate_out'} disabled={disabled || !typed || assist.isPending} onClick={() => setTranslateOpen((o) => !o)} title="Translate what you typed. The original is kept for Undo." aria-label="Translate" aria-haspopup="menu" aria-expanded={translateOpen}>
+          <Languages className="w-4 h-4" />{wide && ' Translate'}{!compact && <ChevronDown className="w-3 h-3 opacity-60" />}
         </Button>
         {translateOpen && (
           <>
@@ -447,7 +495,7 @@ export function AiComposerActions({ ai, draft, chatId, text, setText, prospectLa
         )}
       </div>
       {undo && (
-        <button type="button" onClick={() => { setText(undo.prev); setUndo(null); }} className="inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-gray-900 hover:underline" title={`Back to your text before ${undo.label}`}>
+        <button type="button" onClick={() => { setText(undo.prev); setUndo(null); }} className="inline-flex items-center gap-1 text-[11px] text-gray-600 hover:text-gray-900 hover:underline px-1" title={`Back to your text before ${undo.label}`}>
           <Undo2 className="w-3 h-3" /> Undo
         </button>
       )}
@@ -458,15 +506,21 @@ export function AiComposerActions({ ai, draft, chatId, text, setText, prospectLa
       </>}>
         <p className="text-sm text-gray-600">Replace what you typed with the AI draft, or add the draft below it?</p>
       </Modal>
+      <Modal open={instructionOpen} onClose={() => setInstructionOpen(false)} title="Redraft with an instruction" size="sm" footer={<>
+        <Button variant="secondary" onClick={() => setInstructionOpen(false)}>Cancel</Button>
+        <Button loading={draft.busy} disabled={!instruction.trim()} onClick={async () => { const g = instruction.trim(); setInstructionOpen(false); setInstruction(''); await draft.request({ regenerate: true, guidance: g }); }}>Redraft</Button>
+      </>}>
+        <Textarea label="Instruction (up to 300 characters)" value={instruction} onChange={(e) => setInstruction(e.target.value.slice(0, 300))} rows={3} autoFocus placeholder="e.g. ask about their budget, mention the Thursday slot" counter={{ max: 300, value: instruction.length }} className="min-h-[72px]" />
+      </Modal>
     </>
   );
 }
 
-/** Warnings from Improve / Translate, shown under the buttons until the box is emptied or sent. */
+/** Warnings from Improve / Translate, shown inside the box under the text until it is emptied or sent. */
 export function AssistWarnings({ undo }: { undo: AssistUndo | null }) {
   if (!undo) return null;
   return (
-    <div className="space-y-0.5">
+    <div className="px-3 pb-1 space-y-0.5">
       <div className="text-[11px] text-gray-500">{undo.label === 'Translate' ? `Translated to ${languageName(undo.language)}.` : 'Rewritten in the prompt’s style.'} Undo keeps your original.</div>
       {undo.warnings.map((w, i) => <div key={i} className="text-[11px] text-amber-800 flex items-start gap-1"><AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" /><span>{warningText(w)}</span></div>)}
     </div>

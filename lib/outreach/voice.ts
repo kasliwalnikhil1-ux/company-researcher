@@ -1,6 +1,6 @@
 'use client';
 
-// Voice for the website assistant (web-chat-voice-elevenlabs-PRD.md; migration 069): types, hooks and helpers for the
+// Voice for the website agent (web-chat-voice-elevenlabs-PRD.md; migration 069): types, hooks and helpers for the
 // Voice tab of a website, the voice picker, the test panel, the inbox's call card and the report. Settings are saved
 // with the website (settings.voice, outreach_webchat_inbox_update); everything that talks to the voice provider goes
 // through the `outreach-voice-admin` edge function, so nobody here ever sees the provider's ids or keys.

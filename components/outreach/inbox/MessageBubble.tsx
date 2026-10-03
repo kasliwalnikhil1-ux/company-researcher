@@ -466,7 +466,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   }, [picker]);
 
   if (m.event_type != null) return <EventPill m={m} />;
-  // a voice call with the website assistant (069): its card, where the call started
+  // a voice call with the website agent (069): its card, where the call started
   if (m.content_type === 'event' && isCallCard(m.content_attributes)) return <VoiceCallCard a={m.content_attributes} id={m.id} />;
   // LinkedIn: "accepted / declined your InMail" without text is a system line
   if (li && msgType && INMAIL_EVENTS[msgType] && !m.text?.trim() && !atts.length) {

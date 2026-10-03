@@ -684,7 +684,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
   // ================================================================ knowledge + Q&A (§9.2)
   tool(server, ctx, {
     name: "knowledge_sources_list", title: "Knowledge sources of the workspace", cls: "read", minRole: "member",
-    description: "Every knowledge source of the workspace (one library, shared by Replies and the Website assistant): id, kind (website crawl | document | pasted text), title, url, status (pending | crawling | ready | error), error, pages, chunks, crawled_at, refresh_days, used_by (prompts it is attached to). Sources are added in the app (AI → Knowledge); here you attach / detach them to a sequence's prompt. PDF / DOCX uploads are accepted but not extracted yet (status error unsupported_type).",
+    description: "Every knowledge source of the workspace (one library, shared by Replies and the Website agent): id, kind (website crawl | document | pasted text), title, url, status (pending | crawling | ready | error), error, pages, chunks, crawled_at, refresh_days, used_by (prompts it is attached to). Sources are added in the app (AI → Knowledge); here you attach / detach them to a sequence's prompt. PDF / DOCX uploads are accepted but not extracted yet (status error unsupported_type).",
     input: { ...wsParam },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id); requireRole(ws, "member");

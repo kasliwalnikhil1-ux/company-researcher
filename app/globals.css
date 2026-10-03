@@ -84,6 +84,16 @@ body {
   animation: fade-in 0.3s ease-out;
 }
 
+/* Product tour: the demo bar (DemoBar.tsx) is fixed at the top, 40 px, z-60. Full-screen layers — drawers,
+   modals, their backdrops — start under it instead of hiding their top edge (title, close button) behind it.
+   Layers that set their own top (the mobile menu backdrop's top-24) are left alone. */
+html[data-demo-bar] {
+  --demo-bar: 2.5rem;
+}
+html[data-demo-bar] .fixed.inset-0:not([class*="top-"]) {
+  top: var(--demo-bar);
+}
+
 :root {
   --background: var(--secondary-default);
   --accent: var(--brand-default);

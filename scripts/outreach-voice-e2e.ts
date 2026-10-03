@@ -1,4 +1,4 @@
-// End-to-end check of the website assistant's voice (web-chat-voice-elevenlabs-PRD.md §16) against a LOCAL Supabase
+// End-to-end check of the website agent's voice (web-chat-voice-elevenlabs-PRD.md §16) against a LOCAL Supabase
 // stack and a pretend voice provider (scripts/outreach-fake-elevenlabs.ts). It starts the real edge functions as child
 // processes behind a small proxy, drives them the way the widget, the app, the provider and the cron do, and asserts
 // what lands in the database and at the provider.

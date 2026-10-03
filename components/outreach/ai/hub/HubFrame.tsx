@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import type { Role } from '@/lib/outreach/types';
 import { roleAtLeast } from '@/components/outreach/settings/SettingsTabs';
 
-/** Needs you · Activity · Knowledge · Setup. The sidebar lists the same four under "AI"; these tabs are for a collapsed sidebar and for phones. */
+/** Needs you · Activity · Knowledge · Setup: the sections of the AI hub (the sidebar has one "AI" item). */
 export function HubTabs() {
   const pathname = usePathname();
   const { workspace } = useWorkspace();

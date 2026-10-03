@@ -103,7 +103,7 @@ USER_FUNCS=(
   outreach-api               # public REST API: the API key is checked in code (outreach_api_authenticate)
   outreach-profile           # Profile Studio: user actions (JWT) + the owner's public token pages (authority / approve / revert)
   outreach-billing           # billing v2: quote / change / checkout / cancel / resume / portal (owner JWT)
-  outreach-voice-admin       # website assistant voice: voices, draft / live agent sync, test calls, recording proxy (JWT)
+  outreach-voice-admin       # website agent voice: voices, draft / live agent sync, test calls, recording proxy (JWT)
   outreach-ai-reply          # AI replies: send now, simulator, regression, prompt save (JWT) + the owner's public consent pages (token)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")

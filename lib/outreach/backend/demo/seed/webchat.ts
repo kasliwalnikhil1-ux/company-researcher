@@ -122,7 +122,7 @@ export function seedWebchat(s: DemoStore, now: number): void {
     frequency: 'once', display: 'popup', enabled: true, shown: 214, clicked: 41, started: 17, created_at: iso(now - 40 * D), updated_at: iso(now - 12 * D),
   });
 
-  // anonymous visitors of the last 30 days (no conversation), and one blocked spammer
+  // anonymous visitors of the last 30 days (no conversation); no spam or bot visitors in the tour
   const countries: Array<[string, string, string]> = [['US', 'Austin', 'America/Chicago'], ['US', 'Brooklyn', 'America/New_York'], ['GB', 'Leeds', 'Europe/London'], ['CA', 'Toronto', 'America/Toronto'], ['DE', 'Hamburg', 'Europe/Berlin'], ['IN', 'Pune', 'Asia/Kolkata'], ['AU', 'Perth', 'Australia/Perth']];
   const pages = ['/', '/pricing', '/services/linkedin-outreach', '/blog/cold-email-benchmarks', '/case-studies', '/contact'];
   for (let i = 0; i < 36; i++) {
@@ -137,13 +137,6 @@ export function seedWebchat(s: DemoStore, now: number): void {
       blocked_at: null, merged_into: null, voice_consent_at: null, created_at: iso(first),
     });
   }
-  const spam = s.insert('outreach_webchat_visitors', {
-    workspace_id: DEMO_WS_ID, inbox_id: WEBCHAT.inbox, identifier: null, identity_verified: false, name: 'Cheap Backlinks Bot', email: 'offers@spam.example.com', email_verified: false, email_invalid: false,
-    phone: null, avatar_url: null, company: null, lead_id: null, custom_attributes: {}, consent: null, ip_hash: hex(s, 16), country: 'US', city: 'Unknown', timezone: 'UTC', browser: 'Other', os: 'Linux',
-    device: 'desktop', locale: 'en', referrer: null, landing_url: 'https://northwind.example.com/contact', utm: null, current_url: null, current_title: null, current_at: null, token_version: 2,
-    first_seen_at: iso(now - 9 * D), last_seen_at: iso(now - 9 * D), blocked_at: iso(now - 9 * D), merged_into: null, voice_consent_at: null, created_at: iso(now - 9 * D),
-  })[0];
-  s.insert('outreach_webchat_blocks', { inbox_id: WEBCHAT.inbox, kind: 'visitor', value: spam.id, note: 'Posted 40 links in 2 minutes', created_by: MEMBER.sam, created_at: iso(now - 9 * D) });
 
   // voice: both agents synced; the sample call (the inbox seed may show it as a card in one of its website chats)
   for (const which of ['live', 'test']) {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "capitalxai-smartlead",
-  "version": "2026.9.30",
+  "version": "2026.10.3",
   "description": "Run Smartlead cold email through guarded tools: morning digest, burn check, reply triage and copy iteration, with confirmation before anything sends or changes.",
   "author": {
     "name": "GrowthxAI",

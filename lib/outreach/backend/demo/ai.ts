@@ -72,7 +72,7 @@ export function draftReply(store: DemoStore, chat: Row, opts: { intent?: DraftIn
   }
 }
 
-/** Website assistant: the best seeded Q&A answer for a question (keyword overlap), or a polite fallback. */
+/** Website agent: the best seeded Q&A answer for a question (keyword overlap), or a polite fallback. */
 export function websiteAnswer(store: DemoStore, question: string, qa: Array<{ question: string; answer: string }>): { answer: string; matched: boolean } {
   const words = new Set(question.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3));
   let best: { score: number; answer: string } | null = null;

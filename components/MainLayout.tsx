@@ -358,7 +358,7 @@ export default function MainLayout({ children, subnav, demo = false }: { childre
           : `fixed ${demo ? 'top-10 h-[calc(100vh-2.5rem)]' : 'top-0 h-screen'} left-0 z-30 transition-[width] duration-300 ease-in-out ${isCollapsed ? 'w-16' : 'w-64'}`
         }
         bg-white border-r border-gray-200 flex flex-col
-        ${isMobile ? (demo ? 'h-[calc(100vh-6rem)]' : 'h-[calc(100vh-3.5rem)]') : ''}
+        ${isMobile ? (demo ? 'h-[calc(100dvh-6rem)]' : 'h-[calc(100dvh-3.5rem)]') : ''}
       `}>
         {/* Toggle Button - Desktop only */}
         {!isMobile && (

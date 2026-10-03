@@ -1,5 +1,5 @@
 /**
- * The website assistant's local "AI" (PRODUCT-TOUR PRD §4.5): answers from the seeded Q&A and knowledge chunks through
+ * The website agent's local "AI" (PRODUCT-TOUR PRD §4.5): answers from the seeded Q&A and knowledge chunks through
  * ai.ts websiteAnswer (keyword match), and product cards picked from the website's catalogues (outreach_products), in
  * the card shape of 068 outreach_product__card. No model is called.
  */

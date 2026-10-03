@@ -27,6 +27,12 @@ export const SENDER = {
   outlook: fixed('5e', 7),
   whatsapp: fixed('5e', 8),
   instagram: fixed('5e', 9),
+  // more LinkedIn accounts the team runs (5e…10 is the webchat sender below)
+  li_jess: fixed('5e', 11),
+  li_ravi: fixed('5e', 12),
+  li_hannah: fixed('5e', 13),
+  li_vikram: fixed('5e', 14),
+  li_marta: fixed('5e', 15),
 };
 
 export const SEQ = {

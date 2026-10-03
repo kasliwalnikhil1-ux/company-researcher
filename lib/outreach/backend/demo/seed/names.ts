@@ -7,14 +7,16 @@ export const FIRST_NAMES = [
   'Nadia', 'Rafael', 'Josie', 'Dev', 'Mila', 'Aaron', 'Selin', 'Victor', 'Leila', 'Oscar', 'Keira', 'Idris',
 ];
 
-/** Which first names get a woman's or a man's face (seed/faces.ts); names that could be either keep their initials. */
+/** Which first names get a woman's or a man's face (seed/faces.ts); a name in neither set gets one picked from its id. */
 export const FEMALE_FIRST_NAMES = new Set([
   'Ava', 'Mia', 'Zoe', 'Isla', 'Nora', 'Leah', 'Ruby', 'Elena', 'Chloe', 'Hana', 'Maya', 'Sana', 'Ines', 'Clara', 'Ivy', 'Amara',
   'Lena', 'Grace', 'Priya', 'Freya', 'Lucia', 'Elise', 'Anya', 'Tara', 'Nadia', 'Josie', 'Mila', 'Selin', 'Leila', 'Keira',
+  'Rosalind', 'Imogen', 'Wren',
 ]);
 export const MALE_FIRST_NAMES = new Set([
   'Noah', 'Liam', 'Ethan', 'Mateo', 'Omar', 'Jonas', 'Arjun', 'Felix', 'Diego', 'Theo', 'Lucas', 'Rohan', 'Malik', 'Tomas', 'Ben',
   'Yusuf', 'Nico', 'Owen', 'Kenji', 'Marco', 'Caleb', 'Hugo', 'Rafael', 'Dev', 'Aaron', 'Victor', 'Oscar', 'Idris',
+  'Kai', 'Sami', 'Teodor', 'Callum',
 ]);
 
 export const LAST_NAMES = [

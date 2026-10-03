@@ -303,7 +303,7 @@ export function Spinner({ className }: { className?: string }) {
 
 /** Whole-page loader: fills the visible height (minus the shell's padding and the mobile top bar) so the spinner sits in the middle of the screen instead of at the top. */
 export function PageLoader({ className }: { className?: string }) {
-  return <div className={cn('flex items-center justify-center min-h-[calc(100dvh-6.5rem)] md:min-h-[calc(100dvh-3rem)]', className)}><Loader2 className="w-7 h-7 text-indigo-500 animate-spin" /></div>;
+  return <div className={cn('flex items-center justify-center min-h-[calc(100dvh_-_6.5rem_-_var(--demo-bar,0px))] md:min-h-[calc(100dvh_-_3rem_-_var(--demo-bar,0px))]', className)}><Loader2 className="w-7 h-7 text-indigo-500 animate-spin" /></div>;
 }
 
 export function ErrorBox({ message, className }: { message: string; className?: string }) {
@@ -333,7 +333,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md' }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className={cn('relative bg-white rounded-xl shadow-xl w-full max-h-[90vh] flex flex-col', sizes[size])}>
+      <div className={cn('relative bg-white rounded-xl shadow-xl w-full max-h-[calc(90dvh_-_var(--demo-bar,0px))] flex flex-col', sizes[size])}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
           <h3 className="text-base font-semibold text-gray-900">{title}</h3>
           <button type="button" onClick={onClose} aria-label="Close" className="p-1 rounded-md hover:bg-gray-100 text-gray-500"><X className="w-4 h-4" /></button>

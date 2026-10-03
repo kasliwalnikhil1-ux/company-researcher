@@ -57,4 +57,6 @@ if (check) {
   writeFileSync(out, built);
   const { gzipSync } = await import('node:zlib');
   console.log(`${out}: ${(built.length / 1024).toFixed(1)} KB, ${(gzipSync(built, { level: 9 }).length / 1024).toFixed(1)} KB gzip`);
+  // the loader asks for voice.js?v=<hash>: stamp the new hash (a test build to another --out leaves it alone)
+  if (out === resolve(join(root, 'public', 'widget', 'v1', 'voice.js'))) await import('./outreach-widget-version.mjs');
 }

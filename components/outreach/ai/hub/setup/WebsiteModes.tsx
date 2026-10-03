@@ -1,6 +1,6 @@
 'use client';
 
-// AI → Setup → Website assistant: every website with its mode, When (Auto) and how long a suggestion waits (Review).
+// AI → Setup → Website agents: every website with its mode, When (Auto) and how long a suggestion waits (Review).
 import { useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
@@ -53,7 +53,7 @@ function WebsiteRow({ ws, w, canEdit, notify }: { ws: string; w: HubSetupWebsite
   });
 
   const setMode = (m: HubMode) => save({ mode: m },
-    m === 'off' ? `The Website assistant is off on ${w.name}.`
+    m === 'off' ? `The Website agent is off on ${w.name}.`
       : m === 'review' ? `${w.name} is on Review. The AI suggests an answer and a person sends it.`
       : `${w.name} is on Auto · ${WEBSITE_WHEN_LABEL[stored(w, 'auto').mode === 'offline_only' ? 'outside_hours' : 'always'].toLowerCase()}.`);
 
@@ -74,11 +74,11 @@ function WebsiteRow({ ws, w, canEdit, notify }: { ws: string; w: HubSetupWebsite
         </div>
       </Td>
       <Td>
-        <ModeSwitch compact value={cur.mode} onChange={setMode} lines={MODE_LINE.website} disabled={!canEdit} busy={set.isPending} label={`Website assistant mode for ${w.name}`} />
+        <ModeSwitch compact value={cur.mode} onChange={setMode} lines={MODE_LINE.website} disabled={!canEdit} busy={set.isPending} label={`Website agent mode for ${w.name}`} />
       </Td>
       <Td>
         {cur.mode === 'auto' ? (
-          <select aria-label={`When the Website assistant answers on ${w.name}`} title={WHEN_HINT} value={cur.when} disabled={locked} className={field}
+          <select aria-label={`When the Website agent answers on ${w.name}`} title={WHEN_HINT} value={cur.when} disabled={locked} className={field}
             onChange={(e) => { const at = e.target.value as WebsiteWhen; save({ mode: 'auto', when: at }, `${w.name} is on Auto · ${WEBSITE_WHEN_LABEL[at].toLowerCase()}.`); }}>
             {WHENS.map((k) => <option key={k} value={k}>{WEBSITE_WHEN_LABEL[k]}</option>)}
           </select>

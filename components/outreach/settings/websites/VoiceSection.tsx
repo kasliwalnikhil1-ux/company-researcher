@@ -1,6 +1,6 @@
 'use client';
 
-// AI Website Chatbots → {website} → Voice (web-chat-voice-elevenlabs-PRD.md §3, §4). Visitors can talk to the same
+// Website agents → {website} → Voice (web-chat-voice-elevenlabs-PRD.md §3, §4). Visitors can talk to the same
 // assistant they type to. Everything is set up here; nobody opens the voice provider.
 //
 //   draft    every change is kept as the Voice tab's draft and put on the TEST agent a few seconds later, so
@@ -87,11 +87,11 @@ function VoiceForm(p: SectionProps & { state: VoiceState }) {
         {req && !req.assistant_auto && (
           <Note tone="amber" className="mt-3">
             {req.assistant_mode === 'review'
-              ? <>Spoken answers can&rsquo;t wait for approval. Switch the assistant to Auto on the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="underline">AI assistant tab</Link> to use voice.</>
-              : <>Voice needs the website assistant on Auto. Turn it on in the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="underline">AI assistant tab</Link>.</>}
+              ? <>Spoken answers can&rsquo;t wait for approval. Switch the assistant to Auto on the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="underline">AI agent tab</Link> to use voice.</>
+              : <>Voice needs the website agent on Auto. Turn it on in the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="underline">AI agent tab</Link>.</>}
           </Note>
         )}
-        {req && req.assistant_auto && !req.knowledge && <Note tone="amber" className="mt-3">The assistant has no knowledge source and fewer than 5 Q&amp;A pairs yet, so it will often have to say it is not sure. Add some in the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="underline">AI assistant tab</Link>.</Note>}
+        {req && req.assistant_auto && !req.knowledge && <Note tone="amber" className="mt-3">The assistant has no knowledge source and fewer than 5 Q&amp;A pairs yet, so it will often have to say it is not sure. Add some in the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="underline">AI agent tab</Link>.</Note>}
         {req && !req.active && <Note tone="amber" className="mt-3">The widget is off for this website (General tab), so nobody can call.</Note>}
         {s && (
           <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border border-gray-200 px-4 py-3 text-sm">
@@ -169,9 +169,9 @@ function VoiceForm(p: SectionProps & { state: VoiceState }) {
       <Card title="How it answers">
         <div className="space-y-4">
           <div>
-            <Label hint="persona, topics, knowledge and handoff rules come from the AI assistant tab">Voice-only instructions</Label>
+            <Label hint="persona, topics, knowledge and handoff rules come from the AI agent tab">Voice-only instructions</Label>
             <textarea className={field} rows={3} maxLength={2000} value={draft.instructions} disabled={!p.canEdit} onChange={(e) => set({ instructions: e.target.value })} placeholder="Keep answers to 2 sentences. Offer to text links instead of reading them." />
-            <p className="mt-1 text-xs text-gray-500">Uses the assistant&rsquo;s persona and topics from the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="text-indigo-700 hover:underline">AI assistant tab</Link>. {draft.instructions.length}/2,000</p>
+            <p className="mt-1 text-xs text-gray-500">Uses the assistant&rsquo;s persona and topics from the <Link href={`${WEBSITES_PATH}/${p.inbox.id}?tab=ai`} className="text-indigo-700 hover:underline">AI agent tab</Link>. {draft.instructions.length}/2,000</p>
           </div>
           <Grid>
             <div>

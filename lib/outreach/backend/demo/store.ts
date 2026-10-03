@@ -10,7 +10,7 @@ export type Row = Record<string, any>;   // eslint-disable-line @typescript-esli
 export type Tables = Record<string, Row[]>;
 
 /** Bump when the seed changes shape: older saved states are discarded. */
-export const SEED_VERSION = 7;
+export const SEED_VERSION = 10;
 const STATE_KEY = `gxdemo:v${SEED_VERSION}:state`;
 
 export interface DemoState {

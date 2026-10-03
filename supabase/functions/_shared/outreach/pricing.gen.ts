@@ -260,7 +260,7 @@ export const PRICE_BOOK: PriceBook = {
     },
     {
       "key": "voice_minutes",
-      "label": "Voice minutes for the website assistant",
+      "label": "Voice minutes for the website agent",
       "launch": false,
       "scale": true,
       "enterprise": true,

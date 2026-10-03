@@ -1,6 +1,6 @@
 'use client';
 
-// Website assistant → {website} → Ask AI buttons (web-chat-buttons-products-changes.md §4). Buttons the widget places
+// Website agents → {website} → Ask AI buttons (web-chat-buttons-products-changes.md §4). Buttons the widget places
 // on the site with no code: one in the header, others next to page elements; Ask AI on selected text; the ⌘K shortcut.
 // Saved as settings.ask_buttons / selection_ask / shortcut through outreach_webchat_inbox_update (validated in 068).
 import { useState } from 'react';

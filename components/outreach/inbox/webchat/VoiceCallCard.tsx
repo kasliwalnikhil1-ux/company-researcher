@@ -1,6 +1,6 @@
 'use client';
 
-// A visitor's voice call with the website assistant, as a card in the thread at the point the call started
+// A visitor's voice call with the website agent, as a card in the thread at the point the call started
 // (web-chat-voice-elevenlabs-PRD.md §7.4). The card is the call's `event` message; the server keeps it current: live
 // while the call runs, then the length, how it ended, the summary and the recording once the provider confirmed it.
 // The recording is streamed through our proxy on demand and never stored by us.

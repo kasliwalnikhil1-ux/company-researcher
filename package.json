@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/outreach-widget-version.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint . && node scripts/check-note-leaks.mjs && node scripts/outreach-widget-size.mjs && node scripts/outreach-demo-check.mjs",
@@ -40,6 +41,7 @@
     "iso-3166-2": "^1.0.0",
     "jspdf": "^4.0.0",
     "lucide-react": "^0.460.0",
+    "mediabunny": "^1.61.0",
     "nanoid": "^5.1.5",
     "next": "^16.1.0",
     "openai": "^6.16.0",

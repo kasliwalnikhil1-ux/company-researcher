@@ -1,4 +1,4 @@
-// A pretend voice provider for local tests of the website assistant's voice (scripts/outreach-voice-e2e.ts).
+// A pretend voice provider for local tests of the website agent's voice (scripts/outreach-voice-e2e.ts).
 // It speaks the part of the ElevenLabs Agents API the code uses (the shapes read from their docs on 1 Oct 2026) and
 // keeps everything in memory. It is NOT a check of the real API: field names the docs do not state stay unverified
 // until a call is made with a real key (docs/outreach/WEBCHAT.md "Voice" lists them).

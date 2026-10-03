@@ -56,7 +56,7 @@ export default function AddCatalogueModal({ ws, onClose, onAdded, notify }: { ws
     <Modal open onClose={onClose} title="Add a product catalogue" size="md"
       footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!canSubmit}>Add</Button></>}>
       <div className="space-y-4">
-        <p className="text-sm text-gray-600">The Website assistant recommends products from a catalogue as cards: picture, name, price and a link, taken from your store as it is.</p>
+        <p className="text-sm text-gray-600">The Website agent recommends products from a catalogue as cards: picture, name, price and a link, taken from your store as it is.</p>
         <div role="tablist" aria-label="Where the products come from" className="flex flex-wrap gap-1 rounded-lg border border-gray-300 bg-gray-50 p-0.5">
           {PROVIDERS.map((x) => (
             <button key={x.key} type="button" role="tab" aria-selected={provider === x.key} disabled={busy} onClick={() => { setProvider(x.key); setError(null); }}

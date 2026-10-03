@@ -1,5 +1,5 @@
 /**
- * Voice for the website assistant in the demo (069): fictional voices, the minutes pool, the Voice tab's state, the
+ * Voice for the website agent in the demo (069): fictional voices, the minutes pool, the Voice tab's state, the
  * call list and the report block, and THE SAMPLE CALL: no microphone, no voice provider. The Voice tab's test panel
  * loads its voice SDK through `window.__growthxaiWebchatVoice` (lib/outreach/voice.ts loadVoiceModule); the demo puts a
  * stand-in there at boot that plays a scripted call (built from the website's own Q&A and products) with its

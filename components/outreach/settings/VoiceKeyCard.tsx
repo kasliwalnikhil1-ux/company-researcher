@@ -12,7 +12,7 @@ import { useAiSettings } from './hooks';
 import { maskHint } from './LlmKeyCard';
 
 /**
- * The workspace's own ElevenLabs account for the website assistant's voice (web-chat-voice-elevenlabs-PRD.md §12).
+ * The workspace's own ElevenLabs account for the website agent's voice (web-chat-voice-elevenlabs-PRD.md §12).
  * The key goes straight to `outreach-workspace-secrets`, which checks it can work with voices and agents, encrypts it
  * and stores it; only the last four characters come back. With it: no minute cap from us (the calls are billed to
  * that account), the account's own cloned voices in the voice picker, and the websites' voice agents move there at
@@ -52,7 +52,7 @@ export default function VoiceKeyCard() {
     <Card title={<span className="flex items-center gap-2"><Mic className="w-4 h-4" /> Voice account</span>}>
       {settings.isLoading ? <Spinner /> : (
         <div className="space-y-4">
-          <p className="text-xs text-gray-500">The website assistant&rsquo;s voice calls run on our ElevenLabs account, with the minutes your plan includes. With your own ElevenLabs key there is no cap from us: the calls are billed to your account, and your own cloned voices can be picked on a website&rsquo;s Voice tab.</p>
+          <p className="text-xs text-gray-500">The website agent&rsquo;s voice calls run on our ElevenLabs account, with the minutes your plan includes. With your own ElevenLabs key there is no cap from us: the calls are billed to your account, and your own cloned voices can be picked on a website&rsquo;s Voice tab.</p>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 px-4 py-3">
             {hint ? (
               <div><div className="flex items-center gap-2 text-sm font-medium text-gray-900"><KeyRound className="w-4 h-4 text-gray-400" /> Your own ElevenLabs account <Badge tone="green">in use</Badge></div><div className="text-xs text-gray-500 mt-0.5">key <span className="font-mono">{maskHint(hint)}</span></div></div>

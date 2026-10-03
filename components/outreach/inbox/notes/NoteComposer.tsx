@@ -180,7 +180,7 @@ export default function NoteComposer(p: NoteComposerProps) {
   const over = text.length >= NOTE_MAX_CHARS;
 
   return (
-    <div className={cn('rounded-lg border p-3 space-y-2', 'border-amber-200 bg-[var(--note-bg)]')} data-note-composer>
+    <div className={cn('rounded-lg border p-2.5 space-y-1.5', 'border-amber-200 bg-[var(--note-bg)]')} data-note-composer>
       <div className="relative">
         <textarea
           ref={textRef}
@@ -197,9 +197,9 @@ export default function NoteComposer(p: NoteComposerProps) {
           onPaste={(e) => { const pasted = Array.from(e.clipboardData?.files ?? []); if (pasted.length) { e.preventDefault(); addFiles(pasted); } }}
           placeholder={`Write a note for your team… type @ to mention someone (${mod}+Enter to add)`}
           aria-label="Private note"
-          rows={editing ? 4 : 3}
+          rows={editing ? 4 : 2}
           maxLength={NOTE_MAX_CHARS}
-          className="w-full text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white/70 resize-y min-h-[84px] max-h-72 placeholder:text-amber-900/40 focus:outline-none focus:ring-2 focus:ring-amber-400"
+          className="w-full text-base md:text-sm px-3 py-2 rounded-lg border border-amber-200 bg-white/70 resize-y min-h-[60px] max-h-[min(18rem,35vh)] placeholder:text-amber-900/40 focus:outline-none focus:ring-2 focus:ring-amber-400"
         />
         {picker && <MentionPicker members={readers} currentUserId={p.currentUserId} query={picker.query} onPick={pickMember} onClose={() => setPicker(null)} className="left-2 bottom-full mb-1" />}
       </div>

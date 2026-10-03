@@ -35,7 +35,7 @@ export const CATALOGUE_MAX_PRODUCTS = 10_000;
 export const CATALOGUE_PAGE = 50;
 export const MAX_CARDS = 6;
 
-/** A source the Website assistant can recommend from: a catalogue, or a website that also finds products. */
+/** A source the Website agent can recommend from: a catalogue, or a website that also finds products. */
 export const isProductSource = (s: { kind: string; detect_products?: boolean }) => s.kind === 'catalogue' || !!s.detect_products;
 export const catalogueHref = (id: string) => `/outreach/ai/knowledge/catalogue/${id}`;
 

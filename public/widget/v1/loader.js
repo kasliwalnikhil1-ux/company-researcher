@@ -38,7 +38,10 @@
   if (!token) return;
   var src = (script && script.src) || "";
   var API = (ds.api || settings.api || "").replace(/\/+$/, "");
-  var CHAT_URL = src.replace(/loader\.js(\?.*)?$/, "chat.js$1"), VIDEO_URL = src.replace(/loader\.js(\?.*)?$/, "video.js$1"), ASK_URL = src.replace(/loader\.js(\?.*)?$/, "ask.js$1"), VOICE_URL = src.replace(/loader\.js(\?.*)?$/, "voice.js$1");
+  // content hashes (scripts/outreach-widget-version.mjs): cached for a year, a new file is a new address
+  var VER = {"chat.js":"46111a418c","video.js":"ad487ac4e7","ask.js":"8908fae517","voice.js":"2db185d15a"};   // widget-version
+  function asset(f) { var m = /loader\.js(\?[^#]*)?$/.exec(src), q = m && m[1] ? m[1] + "&" : "?"; return src.replace(/loader\.js(\?.*)?$/, f) + q + "v=" + (VER[f] || "0"); }
+  var CHAT_URL = asset("chat.js"), VIDEO_URL = asset("video.js"), ASK_URL = asset("ask.js"), VOICE_URL = asset("voice.js");
   if (!API) { try { console.warn("[growthxai] data-api missing on the widget script tag"); } catch (e) {} return; }
   var LS = "gxwc:" + token + ":";
   var store = {
@@ -174,7 +177,8 @@
     var st = root.querySelector("style") || doc.createElement("style"); st.textContent = text; if (!st.parentNode) root.insertBefore(st, root.firstChild);
     return null;
   }
-  function applyStyles(text) { sheet = adopt(shadow, text, sheet); }
+  var sheetText = null;
+  function applyStyles(text) { if (text === sheetText) return; sheetText = text; sheet = adopt(shadow, text, sheet); }
   function mount() {
     if (host) return;
     host = doc.createElement("div"); host.id = "growthxai-webchat"; host.setAttribute("data-growthxai", "launcher");
@@ -212,7 +216,7 @@
     if (btn.className.indexOf("pill") >= 0 && !state.open) inner += "<span>" + esc(vf ? vtext : l.text || i18n("chat")) + "</span>";
     if (!state.open && state.unread > 0 && e.launcher.show_unread_count !== false) inner += '<span class="badge" aria-label="' + state.unread + ' unread">' + (state.unread > 9 ? "9+" : state.unread) + "</span>";
     if (!state.open && e.launcher.online_dot !== false && cfg.availability && cfg.availability.online) inner += '<span class="dot" aria-hidden="true"></span>';
-    btn.innerHTML = inner;
+    if (btn.__gx !== inner) { btn.innerHTML = inner; btn.__gx = inner; }
     if (state.open || !show) hidePopup();
   }
   function setOpen(o) {
@@ -222,7 +226,7 @@
   }
 
   // ---- GIF / video bubble (settings.launcher.video; see video.js) ----------------------------------------------------
-  var vmod = null, vstate = 0;   // vstate: 0 not requested, 1 requested, 2 unusable (script or media failed) -> normal launcher
+  var vmod = null, vstate = 0, vwait = 0;   // vstate: 0 not requested, 1 requested, 2 unusable (script or media failed) -> normal launcher
   function sess(k, v) { try { if (v === undefined) return sessionStorage.getItem(LS + k); sessionStorage.setItem(LS + k, v); } catch (x) {} return null; }
   function vclip(e) { var v = (e.launcher || {}).video; return v && v.enabled !== false && vstate !== 2 && /^(https:\/\/\S+|preset:[\w.-]+)$/i.test(v.url || "") ? v : null; }
   function vconf(e) { return sess("vbx") ? null : vclip(e); }
@@ -238,12 +242,18 @@
   function vexpand() { if (!vwant || !vmod) return; vwant = false; if (vmod.node()) setTimeout(function () { if (vmod.open && !state.open) vmod.open(); }, 0); }   // after the click that asked for it has finished bubbling
   function loadVideo() {
     if (vstate) return; vstate = 1;
+    // the clip waits for the page's own load (3 s at most): it never competes with the site's content
+    if (doc.readyState !== "complete" && !vwait) {
+      var go = function () { if (vstate !== 1 || vwait < 0) return; vwait = -1; vstate = 0; loadVideo(); };
+      vwait = 1; win.addEventListener("load", go); setTimeout(go, 3000); return;
+    }
     var s = doc.createElement("script"); s.src = VIDEO_URL; s.async = true;
     s.onload = function () {
       var f = win.__growthxaiWebchatVideo;
       if (f) vmod = f({ sdk: sdk, emit: emit, store: store, esc: esc, safeColor: safeColor, isMobile: isMobile, i18n: i18n, locale: locale, ICON: ICON, CLOSE: CLOSE, base: src.replace(/loader\.js(\?.*)?$/, ""),
-        prefetchChat: prefetchChat, hidePopup: hidePopup, host: function () { return host; }, wrap: function () { return shadow.querySelector(".wrap"); }, btn: function () { return btn; },
+        prefetchChat: prefetchChat, prefetchVoice: prefetchVoice, hidePopup: hidePopup, host: function () { return host; }, wrap: function () { return shadow.querySelector(".wrap"); }, btn: function () { return btn; },
         unread: function () { return effective(cfg).launcher.show_unread_count !== false ? state.unread : 0; },
+        voice: function () { var v = voiceCfg(); if (!v) return null; var p = doc.permissionsPolicy || doc.featurePolicy; try { if (p && p.allowsFeature && !p.allowsFeature("microphone")) return null; } catch (e) {} return { label: i18n("voice_chat") }; },
         fail: function () { vstate = 2; renderLauncher(); },
         dismiss: function () { sess("vbx", "1"); emit("video:dismissed", {}); renderLauncher(); btn.focus(); } });   // X on the bubble: gone for this browser session
       else vstate = 2;
@@ -284,7 +294,7 @@
     }, Math.max(0, (parseFloat(p.delay_s) || 3) * 1000));
   }
   function hidePopup() { clearTimeout(popupTimer); if (popupEl) { popupEl.remove(); popupEl = null; } }
-  var STR = { en: { talk: "Talk to us", chat: "Chat with us", close: "Close chat", dismiss: "Dismiss", more: "Learn more", lang: "Video language" }, es: { talk: "Habla con nosotros", chat: "Chatea con nosotros", close: "Cerrar chat", dismiss: "Cerrar", more: "Más información", lang: "Idioma del vídeo" }, fr: { talk: "Parlez-nous", chat: "Discutez avec nous", close: "Fermer", dismiss: "Fermer", more: "En savoir plus", lang: "Langue de la vidéo" }, de: { talk: "Sprich mit uns", chat: "Chatte mit uns", close: "Chat schließen", dismiss: "Schließen", more: "Mehr erfahren", lang: "Videosprache" }, pt: { talk: "Fale conosco por voz", chat: "Fale conosco", close: "Fechar", dismiss: "Fechar", more: "Saiba mais", lang: "Idioma do vídeo" }, hi: { talk: "हमसे बात करें", chat: "हमसे चैट करें", close: "चैट बंद करें", dismiss: "हटाएँ", more: "और जानें", lang: "वीडियो की भाषा" }, ar: { talk: "تحدث إلينا", chat: "تحدث معنا", close: "إغلاق", dismiss: "إغلاق", more: "اعرف المزيد", lang: "لغة الفيديو" } };
+  var STR = { en: { talk: "Talk to us", chat: "Chat with us", close: "Close chat", dismiss: "Dismiss", more: "Learn more", lang: "Video language", voice_chat: "Voice chat" }, es: { talk: "Habla con nosotros", chat: "Chatea con nosotros", close: "Cerrar chat", dismiss: "Cerrar", more: "Más información", lang: "Idioma del vídeo" }, fr: { talk: "Parlez-nous", chat: "Discutez avec nous", close: "Fermer", dismiss: "Fermer", more: "En savoir plus", lang: "Langue de la vidéo" }, de: { talk: "Sprich mit uns", chat: "Chatte mit uns", close: "Chat schließen", dismiss: "Schließen", more: "Mehr erfahren", lang: "Videosprache" }, pt: { talk: "Fale conosco por voz", chat: "Fale conosco", close: "Fechar", dismiss: "Fechar", more: "Saiba mais", lang: "Idioma do vídeo" }, hi: { talk: "हमसे बात करें", chat: "हमसे चैट करें", close: "चैट बंद करें", dismiss: "हटाएँ", more: "और जानें", lang: "वीडियो की भाषा" }, ar: { talk: "تحدث إلينا", chat: "تحدث معنا", close: "إغلاق", dismiss: "إغلاق", more: "اعرف المزيد", lang: "لغة الفيديو" } };
   function locale() {
     var l = settings.locale || overrides.locale; var e = cfg ? effective(cfg) : null;
     if (!l && e && e.locale && e.locale.use_browser !== false) l = (navigator.language || "en").slice(0, 2);
@@ -399,8 +409,12 @@
   function hideChip() { if (amod) amod.hideChip(); }
   // Single-page apps re-render: look again half a second after the page changed (elements added later, re-rendered targets).
   var mo = null, moT = 0;
+  // the site's own elements (the widget's own carry data-growthxai="launcher", "panel", "vp", "selection", "turnstile")
+  var SITE_EL = '[data-growthxai=open],[data-growthxai=close],[data-growthxai=toggle],[data-growthxai=call],[data-growthxai^=ask-],[data-growthxai-unread],[data-growthxai-ask],[data-growthxai-prefill]';
   function watch() {
     if (mo || !("MutationObserver" in win)) return;
+    // only pages with Ask AI buttons or data-growthxai elements: a busy page would otherwise be queried every 0.5 s
+    if (!askWanted() && !doc.querySelector(SITE_EL)) return;
     mo = new MutationObserver(function () { if (!moT) moT = setTimeout(function () { moT = 0; place(); syncPage(); }, 500); });
     mo.observe(doc.documentElement, { childList: true, subtree: true });
   }
@@ -439,12 +453,18 @@
 
   // ---- SPA route changes (PRD §4.2) -----------------------------------------------------------------------------
   function hookHistory() {
-    var fire = debounce(function () { emit("route", { url: location.href }); if (cfg) { renderLauncher(); place(); } call("onRouteChange", [location.href]); }, 50);
+    var fire = debounce(function () { emit("route", { url: location.href }); if (cfg) { renderLauncher(); place(); watch(); } call("onRouteChange", [location.href]); }, 50);
     ["pushState", "replaceState"].forEach(function (m) { var orig = history[m]; if (!orig) return; history[m] = function () { var r = orig.apply(this, arguments); fire(); return r; }; });
     win.addEventListener("popstate", fire); win.addEventListener("hashchange", fire);
   }
 
   // ---- boot -------------------------------------------------------------------------------------------------------
+  // chat.js before the first click only with work to do while closed: an open conversation ("live", kept by chat.js;
+  // missing = an older visitor, then "vt"), campaigns, or the embedded shell
+  function earlyChat() {
+    var e = effective(cfg), lv = store.get("live");
+    return e.appearance.mode === "embedded" || (cfg.campaigns || []).length > 0 || (lv === null ? !!store.get("vt") : !!lv);
+  }
   var booted = false;
   // The site may not use the widget (domain not allowed, widget off): what was painted from the cache goes, queued
   // clicks are dropped, and one console line says why.
@@ -470,8 +490,7 @@
       }
       if (pendingStart) { var ps = pendingStart; pendingStart = null; ps(); }
       emit("ready", { config_version: cfg.config_version });
-      // returning visitor: load the panel core early so unread counts + realtime work while closed
-      if (store.get("vt") || effective(cfg).appearance.mode === "embedded") { (win.requestIdleCallback || function (f) { setTimeout(f, 1200); })(function () { loadChat(); }); }
+      if (earlyChat()) { if (win.requestIdleCallback) win.requestIdleCallback(function () { loadChat(); }, { timeout: 4000 }); else setTimeout(function () { loadChat(); }, 1200); }
       if (settings.autoOpen) sdk.open();
     };
     fetchConfig().then(got);

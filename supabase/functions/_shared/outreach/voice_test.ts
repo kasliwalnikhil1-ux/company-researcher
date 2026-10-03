@@ -1,5 +1,5 @@
 // deno test --no-config --allow-env --allow-net --allow-read supabase/functions/_shared/outreach/voice_test.ts
-// The code side of the website assistant's voice: the agent we build, the prompt, the tools, the session token the
+// The code side of the website agent's voice: the agent we build, the prompt, the tools, the session token the
 // tools trust, the webhook signature, and a finished conversation as the database takes it. voice.ts builds a database
 // client at load, so the settings it reads get a stand-in.
 import { assert, assertEquals } from "jsr:@std/assert@1";

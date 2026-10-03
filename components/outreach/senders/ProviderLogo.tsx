@@ -49,8 +49,13 @@ export function ProviderLogo({ provider, className }: { provider: Provider; clas
   );
   if (provider === 'WEBCHAT') return (
     <svg viewBox="0 0 24 24" className={c} aria-label="Website chat" role="img">
-      <rect width="24" height="24" rx="6" fill="#4F46E5" />
-      <path fill="#fff" d="M12 5.5c-3.9 0-7 2.6-7 5.8 0 1.6.8 3.1 2.1 4.2L6.3 18.5l3.6-1.3c.7.2 1.4.3 2.1.3 3.9 0 7-2.6 7-5.8s-3.1-6.2-7-6.2z" />
+      {/* a round orange globe: a blue rounded square read as LinkedIn at list size */}
+      <circle cx="12" cy="12" r="12" fill="#F97316" />
+      <g fill="none" stroke="#fff" strokeWidth="1.7">
+        <circle cx="12" cy="12" r="6.6" />
+        <ellipse cx="12" cy="12" rx="2.9" ry="6.6" />
+        <path d="M5.4 12h13.2" />
+      </g>
     </svg>
   );
   return <Mail className={cn(c, 'text-gray-500')} aria-label="IMAP" />;

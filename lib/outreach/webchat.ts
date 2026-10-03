@@ -1,6 +1,6 @@
 'use client';
 
-// Web chat (web-chat-PRD.md): types, query keys, hooks and helpers for AI Website Chatbots (/outreach/websites), the inbox (webchat threads,
+// Web chat (web-chat-PRD.md): types, query keys, hooks and helpers for Website agents (/outreach/websites), the inbox (webchat threads,
 // visitor panel) and the agent presence ping. Every hook maps to one `outreach_webchat_*` RPC (migration 051).
 
 import { useCallback, useEffect, useRef } from 'react';
@@ -24,7 +24,9 @@ export interface UrlRule { op: 'contains' | 'equals' | 'starts_with' | 'regex'; 
  * A suggested question on the video bubble. With its own clip (migration 062) the clip plays in the expanded view when the
  * question is clicked; with a page link, the page opens in a new tab. Stored as a plain text when it has neither.
  */
-export interface VideoQuestion { text: string; video_url?: string | null; video_kind?: 'video' | 'image'; video_variants?: VideoClip[]; link_url?: string | null; link_text?: string | null }
+export interface VideoQuestion { text: string; text_variants?: VideoText[]; video_url?: string | null; video_kind?: 'video' | 'image'; video_variants?: VideoClip[]; link_url?: string | null; link_text?: string | null }
+/** A question's wording in one language (migration 072). `text` mirrors the default (first) language's wording. */
+export interface VideoText { lang: string; text: string }
 /** A language the video bubble's clips come in (migration 065). `flag` names a file in public/widget/v1/flags (<flag>.svg). */
 export interface VideoLanguage { code: string; label: string; flag: string }
 /** One clip in one language: the main clip (`launcher.video.variants`) or a question's answer clip (`video_variants`). */
@@ -347,11 +349,14 @@ export function videoQuestions(list: Array<string | VideoQuestion> | null | unde
  */
 export function packVideoQuestions(list: VideoQuestion[], max = 6, languages: VideoLanguage[] = []): Array<string | VideoQuestion> {
   return list.map((q) => {
-    const text = q.text.trim(), link_url = q.link_url?.trim() || null, link_text = q.link_text?.trim() || null;
+    const texts = orderVideoTexts(q, languages), text = (texts[0]?.lang === languages[0]?.code ? texts[0]?.text : null) ?? q.text.trim();
+    const link_url = q.link_url?.trim() || null, link_text = q.link_text?.trim() || null;
     const variants = orderVideoClips(q.video_variants, languages), first = variants[0];
     const video_url = languages.length ? first?.url ?? null : q.video_url?.trim() || null, video_kind = languages.length ? first?.kind : q.video_kind;
-    if (!video_url && !link_url) return text;
-    return { text, ...(video_url ? { video_url, video_kind: video_kind ?? mediaKind(video_url) } : {}), ...(variants.length ? { video_variants: variants } : {}), ...(link_url ? { link_url, ...(link_text ? { link_text } : {}) } : {}) };
+    // the wording per language is kept only when some language other than the default has its own
+    const text_variants = texts.some((t) => t.lang !== languages[0]?.code) ? texts : [];
+    if (!video_url && !link_url && !text_variants.length) return text;
+    return { text, ...(text_variants.length ? { text_variants } : {}), ...(video_url ? { video_url, video_kind: video_kind ?? mediaKind(video_url) } : {}), ...(variants.length ? { video_variants: variants } : {}), ...(link_url ? { link_url, ...(link_text ? { link_text } : {}) } : {}) };
   }).filter((q) => (typeof q === 'string' ? q : q.text)).slice(0, max);
 }
 
@@ -375,6 +380,15 @@ export const VIDEO_LANGUAGES: VideoLanguage[] = [
   { code: 'fil-PH', label: 'Filipino', flag: 'ph' },
 ];
 export function flagUrl(flag: string): string { return `${widgetOrigin()}/widget/v1/flags/${flag}.svg`; }
+/** A question's wording in one language: its own, else (for the default language) the plain text, else empty. */
+export function videoQuestionText(q: VideoQuestion, lang: string, languages: VideoLanguage[]): string {
+  const own = (q.text_variants ?? []).find((t) => t && t.lang === lang);
+  return own ? own.text : lang === languages[0]?.code ? q.text : '';
+}
+/** The wording per language in the order of the languages, empty ones and removed languages dropped. */
+export function orderVideoTexts(q: VideoQuestion, languages: VideoLanguage[]): VideoText[] {
+  return languages.flatMap((l) => { const t = videoQuestionText(q, l.code, languages).trim(); return t ? [{ lang: l.code, text: t.slice(0, 120) }] : []; });
+}
 /** A per-language clip list in the order of the languages, one clip per language, clips of removed languages dropped. */
 export function orderVideoClips(list: VideoClip[] | null | undefined, languages: VideoLanguage[]): VideoClip[] {
   const all = Array.isArray(list) ? list : [];
@@ -409,7 +423,7 @@ export function mediaUrl(url: string | null | undefined): string | null {
 export function avatarUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const m = /^preset:([\w.-]+)$/i.exec(url);
-  return m ? `${widgetOrigin()}/widget/v1/avatars/${m[1]}` : /^https?:\/\//i.test(url) ? url : null;
+  return m ? `${widgetOrigin()}/widget/v1/avatars/${m[1]}` : /^https?:\/\//i.test(url) || (IS_DEMO && /^blob:/i.test(url)) ? url : null;
 }
 export interface WebchatPreset { file: string; label: string; kind: 'video' | 'image' }
 function usePresetList(dir: 'presets' | 'avatars') {
@@ -422,15 +436,46 @@ function usePresetList(dir: 'presets' | 'avatars') {
 export function useWebchatPresets() { return usePresetList('presets'); }
 /** Built-in bot avatars: public/widget/v1/avatars/avatars.json, written by scripts/outreach-webchat-presets.mjs --avatars. */
 export function useWebchatAvatars() { return usePresetList('avatars'); }
+/** A video picked for upload may be this big: it is shrunk in the browser first, and the result must fit WEBCHAT_MEDIA_MAX_MB. */
+export const WEBCHAT_VIDEO_INPUT_MAX_MB = 300;
+const mb = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
+/**
+ * Shrink a video for the widget before it uploads (lib/videoCompression, mediabunny, loaded only here): the short
+ * side at most 720px, H.264 + AAC, metadata first so it starts playing before it has fully downloaded. The bubble is
+ * at most 240px and the expanded view 720px, so nothing visible is lost. Hands back the original when the browser
+ * cannot re-encode it or the saving is under 10%.
+ */
+async function optimiseWebchatVideo(file: File, onProgress?: (percent: number) => void): Promise<File> {
+  try {
+    const { canCompressVideo, compressVideoForWeb } = await import('@/lib/videoCompression');
+    if (!canCompressVideo()) return file;
+    return (await compressVideoForWeb(file, { maxShortSide: 720, maxBitrate: 1_500_000 }, onProgress)).file;
+  } catch (e) {
+    console.warn('Video not compressed, uploading the original:', e);
+    return file;
+  }
+}
+export type WebchatUploadStatus = { stage: 'compressing'; percent: number } | { stage: 'uploading' };
 /**
  * Upload a launcher clip to the public media bucket under `<ws>/<inbox>/<ts>-<name>` and return its public address.
- * Older uploads of the inbox are removed, except the ones in `keep`: every clip the published settings or the draft on
- * screen still point at (the main clip and each question's clip).
+ * A video is compressed first (optimiseWebchatVideo); `original` is its size before that. Older uploads of the inbox
+ * are removed, except the ones in `keep`: every clip the published settings or the draft on screen still point at (the
+ * main clip and each question's clip).
  */
-export async function uploadWebchatMedia(ws: string, inboxId: string, file: File, keep: Array<string | null | undefined> = []): Promise<{ url: string; kind: 'video' | 'image' }> {
-  const ext = (file.name.split('.').pop() ?? '').toLowerCase(), t = MEDIA_TYPES[ext];
+export async function uploadWebchatMedia(ws: string, inboxId: string, picked: File, keep: Array<string | null | undefined> = [], onStatus?: (s: WebchatUploadStatus) => void): Promise<{ url: string; kind: 'video' | 'image'; size: number; original: number }> {
+  let file = picked;
+  let t = MEDIA_TYPES[(file.name.split('.').pop() ?? '').toLowerCase()];
   if (!t) throw new Error('Use an MP4 or WebM video, or a GIF / WebP image.');
-  if (file.size > WEBCHAT_MEDIA_MAX_MB * 1048576) throw new Error(`That file is ${(file.size / 1048576).toFixed(1)} MB. The limit is ${WEBCHAT_MEDIA_MAX_MB} MB.`);
+  if (t.kind === 'video') {
+    if (file.size > WEBCHAT_VIDEO_INPUT_MAX_MB * 1048576) throw new Error(`That video is ${mb(file.size)}. The limit is ${WEBCHAT_VIDEO_INPUT_MAX_MB} MB.`);
+    onStatus?.({ stage: 'compressing', percent: 0 });
+    file = await optimiseWebchatVideo(file, (percent) => onStatus?.({ stage: 'compressing', percent }));
+    t = MEDIA_TYPES[(file.name.split('.').pop() ?? '').toLowerCase()] ?? t;
+  }
+  if (file.size > WEBCHAT_MEDIA_MAX_MB * 1048576) throw new Error(t.kind === 'video' && file !== picked
+    ? `Even compressed, that video is ${mb(file.size)}. The limit is ${WEBCHAT_MEDIA_MAX_MB} MB: trim it shorter and try again.`
+    : `That file is ${mb(file.size)}. The limit is ${WEBCHAT_MEDIA_MAX_MB} MB.`);
+  onStatus?.({ stage: 'uploading' });
   const bucket = db.storage.from(WEBCHAT_MEDIA_BUCKET), dir = `${ws}/${inboxId}`;
   const name = `${Date.now()}-${file.name.replace(/[^\w.-]+/g, '_').slice(-80)}`;
   const { error } = await bucket.upload(`${dir}/${name}`, file, { contentType: t.mime, cacheControl: '31536000', upsert: false });
@@ -438,10 +483,37 @@ export async function uploadWebchatMedia(ws: string, inboxId: string, file: File
   const url = bucket.getPublicUrl(`${dir}/${name}`).data.publicUrl;
   try {
     const { data } = await bucket.list(dir, { limit: 100 });
+    // files only: the logo/ and avatar/ folders (uploadWebchatImage) have their own tidy-up
+    const stale = (data ?? []).filter((o) => o.id && !o.name.includes('/')).map((o) => `${dir}/${o.name}`).filter((path) => !path.endsWith(`/${name}`) && !keep.some((u) => u && u.endsWith(`/${path}`)));
+    if (stale.length) await bucket.remove(stale);
+  } catch { /* tidy-up only */ }
+  return { url, kind: t.kind, size: file.size, original: picked.size };
+}
+/** The toast after an upload: the saving when the clip was compressed. */
+export function uploadedNote(r: { size: number; original: number }, what = 'Video'): string {
+  return r.size < r.original ? `${what} compressed from ${mb(r.original)} to ${mb(r.size)} and uploaded. Save to publish it.` : `${what} uploaded. Save to publish it.`;
+}
+/** What the logo / bot avatar pickers open: anything the browser can draw; the crop step re-encodes it. */
+export const WEBCHAT_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
+/**
+ * Upload a cropped header logo or bot avatar (WebP, or PNG where the browser cannot encode WebP) under
+ * `<ws>/<inbox>/<folder>/` and return its public address. Its own folder keeps it out of the clip tidy-up; older images
+ * of that folder go, except the ones in `keep`.
+ */
+export async function uploadWebchatImage(ws: string, inboxId: string, folder: 'logo' | 'avatar', file: File, keep: Array<string | null | undefined> = []): Promise<string> {
+  const what = folder === 'logo' ? 'logo' : 'avatar';
+  if (file.type !== 'image/webp' && file.type !== 'image/png') throw new Error(`The cropped ${what} must be a WebP or PNG image.`);
+  const bucket = db.storage.from(WEBCHAT_MEDIA_BUCKET), dir = `${ws}/${inboxId}/${folder}`;
+  const name = `${Date.now()}.${file.type === 'image/png' ? 'png' : 'webp'}`;
+  const { error } = await bucket.upload(`${dir}/${name}`, file, { contentType: file.type, cacheControl: '31536000', upsert: false });
+  if (error) throw new Error(`Could not upload the ${what}: ${error.message}`);
+  const url = bucket.getPublicUrl(`${dir}/${name}`).data.publicUrl;
+  try {
+    const { data } = await bucket.list(dir, { limit: 100 });
     const stale = (data ?? []).map((o) => `${dir}/${o.name}`).filter((path) => !path.endsWith(`/${name}`) && !keep.some((u) => u && u.endsWith(`/${path}`)));
     if (stale.length) await bucket.remove(stale);
   } catch { /* tidy-up only */ }
-  return { url, kind: t.kind };
+  return url;
 }
 
 // ---------------------------------------------------------------------------

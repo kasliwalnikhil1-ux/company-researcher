@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 
 const DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'widget', 'v1');
 // gzip budgets in bytes: what the file weighs today plus a little room. Raise one on purpose, in the same change that needs it.
-const BUDGET = { 'loader.js': 13_600, 'chat.js': 47_500, 'video.js': 10_500, 'ask.js': 5_000, 'voice.js': 185_000 };
+// loader 14,200 (3 Oct 2026): the file-hash stamps (incompressible) and the load-only-when-needed rules for chat.js and video.js.
+const BUDGET = { 'loader.js': 14_200, 'chat.js': 49_000, 'video.js': 11_600, 'ask.js': 5_000, 'voice.js': 185_000 };
 
 let failed = false;
 for (const [file, budget] of Object.entries(BUDGET)) {

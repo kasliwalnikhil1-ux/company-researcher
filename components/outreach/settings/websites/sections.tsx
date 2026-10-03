@@ -3,9 +3,9 @@
 // Settings → Websites → {inbox}: one component per §12 section of web-chat-PRD.md. Each section edits a draft copy of its
 // part of the settings and saves through outreach_webchat_inbox_update (nested merge, versioned, config_version bump).
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Copy, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Copy, Plus, RefreshCw, Trash2, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { db } from '@/lib/outreach/backend';
@@ -16,13 +16,14 @@ import { WEBSITES_PATH } from './WebsitesFrame';
 import { imageHosts, useProductSearch } from '@/lib/outreach/catalogue';
 import { ProductImage } from '@/components/outreach/products/ProductCards';
 import WidgetPreview from './WidgetPreview';
+import CropModal from '@/components/outreach/profile/CropModal';
 import { ENDED_BY, fmtCallLength, voiceLanguage, type VoiceReport } from '@/lib/outreach/voice';
 import Link from '@/lib/outreach/nav';
 import ModeSwitch from '@/components/outreach/ai/hub/ModeSwitch';
 import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
 import { MODE_LINE, WEBSITE_WHEN_LABEL, hubHref, websiteHubMode, type HubMode, type WebsiteWhen } from '@/lib/outreach/aiHub';
 import {
-  CSP_NOTES, HMAC_SAMPLES, avatarUrl, useWebchatAvatars, INSTALL_GUIDES, OWN_BUTTON_ATTRIBUTES, OWN_BUTTON_SNIPPETS, SOURCE_LABELS, SUPABASE_URL, fmtSeconds, snippetHtml, standaloneUrl, useCampaigns, useCannedResponses, useDeleteCampaign, useDeleteCanned,
+  CSP_NOTES, HMAC_SAMPLES, WEBCHAT_IMAGE_ACCEPT, avatarUrl, uploadWebchatImage, useWebchatAvatars, INSTALL_GUIDES, OWN_BUTTON_ATTRIBUTES, OWN_BUTTON_SNIPPETS, SOURCE_LABELS, SUPABASE_URL, fmtSeconds, snippetHtml, standaloneUrl, useCampaigns, useCannedResponses, useDeleteCampaign, useDeleteCanned,
   useRegenerateHmac, useRestoreSettings, useSaveCampaign, useSaveCanned, useSetInboxMembers, useSettingsHistory, useUpdateInbox, useWebchatMailboxes, useWebchatReport,
   type BusinessHours, type InboxPatch, type PreChatField, type ProductsReport, type ProductsReportRow, type UrlRule, type WebchatCampaign, type WebchatInbox, type WebchatSettings,
 } from '@/lib/outreach/webchat';
@@ -49,7 +50,7 @@ export function SaveBar({ dirty, saving, onSave, onReset, canEdit }: { dirty: bo
     <div className="flex items-center gap-2 pt-4 mt-4 border-t border-gray-100">
       <Button onClick={onSave} loading={saving} disabled={!dirty}>Save &amp; publish</Button>
       <Button variant="ghost" onClick={onReset} disabled={!dirty}>Discard</Button>
-      <span className="text-xs text-gray-500">Changes reach the widget within 5 minutes (or at once on the next page load).</span>
+      <span className="text-xs text-gray-500">Changes reach the widget within 5 minutes.</span>
     </div>
   );
 }
@@ -124,8 +125,18 @@ function contrastRatio(a: string, b: string): number | null {
   const la = lum(a), lb = lum(b); if (la == null || lb == null) return null; const [x, y] = la > lb ? [la, lb] : [lb, la]; return (x + 0.05) / (y + 0.05);
 }
 /** Bot avatar: a built-in one (`preset:<file>`, public/widget/v1/avatars), none (the brand initial) or a link to any image. */
-function BotAvatarPicker({ value, brand, onChange, disabled }: { value: string | null; brand: string; onChange: (v: string | null) => void; disabled: boolean }) {
+function BotAvatarPicker({ p, value, brand, onChange }: { p: SectionProps; value: string | null; brand: string; onChange: (v: string | null) => void }) {
+  const disabled = !p.canEdit;
   const avatars = useWebchatAvatars();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<File | null>(null);
+  const upload = async (cropped: File) => {
+    try {
+      // keep the published avatar and the one on screen: Discard must still find them
+      const url = await uploadWebchatImage(p.inbox.workspace_id, p.inbox.id, 'avatar', cropped, [p.inbox.settings.appearance.bot_avatar_url, value]);
+      onChange(url); setPending(null); p.toast('Avatar uploaded. Save to publish it.');
+    } catch (e) { p.toast(parseError(e).message, 'error'); }
+  };
   const preset = /^preset:/i.test(value ?? '') ? value!.slice(7) : null, custom = value && !preset ? value : '';
   const tile = (on: boolean) => cn('w-11 h-11 rounded-full overflow-hidden flex-none ring-2 ring-offset-2 focus:outline-none focus-visible:ring-indigo-500 disabled:cursor-not-allowed', on ? 'ring-indigo-600' : 'ring-transparent hover:ring-gray-300');
   return (
@@ -139,8 +150,42 @@ function BotAvatarPicker({ value, brand, onChange, disabled }: { value: string |
           </button>
         ))}
         {custom && avatarUrl(custom) && <span className={tile(true)} title="Your image"><img src={avatarUrl(custom)!} alt="" className="w-full h-full object-cover" /></span>}
+        <input ref={fileRef} type="file" accept={WEBCHAT_IMAGE_ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPending(f); }} />
+        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={disabled}><Upload className="w-3.5 h-3.5 mr-1" />{custom ? 'Upload a new one' : 'Upload your own'}</Button>
       </div>
       <input className={cn(field, 'mt-2')} value={custom} onChange={(e) => onChange(e.target.value.trim() || null)} disabled={disabled} placeholder="or paste a link to your own image (https://…, square, 64×64 or larger)" aria-label="Bot avatar link" />
+      <CropModal file={pending} kind="avatar" onCancel={() => setPending(null)} onConfirm={upload} />
+    </div>
+  );
+}
+
+/** Header logo: upload a picture and crop it to the circle the widget shows it in, or paste a link to one. */
+function LogoPicker({ p, value, brand, onChange }: { p: SectionProps; value: string | null; brand: string; onChange: (v: string | null) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<File | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const upload = async (cropped: File) => {
+    try {
+      // keep the published logo and the one on screen: Discard must still find them
+      const url = await uploadWebchatImage(p.inbox.workspace_id, p.inbox.id, 'logo', cropped, [p.inbox.settings.appearance.logo_url, value]);
+      onChange(url); setPending(null); setError(null); p.toast('Logo uploaded. Save to publish it.');
+    } catch (e) { p.toast(parseError(e).message, 'error'); }
+  };
+  return (
+    <div className="md:col-span-2">
+      <Label hint="shown in a circle in the chat header">Logo</Label>
+      <div className="flex items-center gap-3">
+        <div className="w-11 h-11 rounded-full flex-none overflow-hidden flex items-center justify-center bg-gray-100 text-gray-600 text-sm font-bold ring-1 ring-gray-200">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {value && !error ? <img src={value} alt="Logo preview" className="w-full h-full object-contain" onError={() => setError(value)} /> : (brand.trim() || 'C').slice(0, 1).toUpperCase()}
+        </div>
+        <input ref={fileRef} type="file" accept={WEBCHAT_IMAGE_ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPending(f); }} />
+        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!p.canEdit}><Upload className="w-3.5 h-3.5 mr-1" />{value ? 'Upload a new logo' : 'Upload a logo'}</Button>
+        {value && <Button size="sm" variant="ghost" onClick={() => { onChange(null); setError(null); }} disabled={!p.canEdit}><Trash2 className="w-3.5 h-3.5 mr-1" />Remove</Button>}
+      </div>
+      <input className={cn(field, 'mt-2')} value={value ?? ''} onChange={(e) => { onChange(e.target.value.trim() || null); setError(null); }} disabled={!p.canEdit} placeholder="or paste a link to your logo (https://…/logo.png)" aria-label="Logo link" />
+      {error && error === value && <p className="text-xs text-amber-700 mt-1">That link does not load as an image.</p>}
+      <CropModal file={pending} kind="logo" onCancel={() => setPending(null)} onConfirm={upload} />
     </div>
   );
 }
@@ -159,7 +204,7 @@ export function AppearanceSection(p: SectionProps) {
           <div><Label>Font</Label><select className={field} value={draft.font} onChange={(e) => set({ font: e.target.value })} disabled={!p.canEdit}>{FONTS.map((f) => <option key={f}>{f}</option>)}</select></div>
           <div><Label hint="≤ 50">Welcome heading</Label><input className={field} maxLength={50} value={draft.welcome_title} onChange={(e) => set({ welcome_title: e.target.value })} disabled={!p.canEdit} /></div>
           <div><Label hint="≤ 50">Welcome tagline</Label><input className={field} maxLength={50} value={draft.welcome_tagline} onChange={(e) => set({ welcome_tagline: e.target.value })} disabled={!p.canEdit} /></div>
-          <div><Label hint="https; any proportions, shown whole">Logo URL</Label><input className={field} value={draft.logo_url ?? ''} onChange={(e) => set({ logo_url: e.target.value || null })} disabled={!p.canEdit} placeholder="https://…/logo.png" /></div>
+          <LogoPicker p={p} value={draft.logo_url} brand={draft.brand_name || p.inbox.name} onChange={(v) => set({ logo_url: v })} />
           <div><Label>Accent colour</Label><div className="flex items-center gap-2"><input type="color" value={/^#[0-9a-f]{6}$/i.test(draft.accent) ? draft.accent : '#4f46e5'} onChange={(e) => set({ accent: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Accent colour" /><input className={field} value={draft.accent} onChange={(e) => set({ accent: e.target.value })} disabled={!p.canEdit} /></div>{!contrastOk && <p className="text-xs text-amber-700 mt-1">Contrast below 4.5:1 with both white and dark text — pick a darker or lighter accent (WCAG AA).</p>}</div>
           <div><Label>Widget background</Label><div className="flex items-center gap-2"><input type="color" value={draft.widget_bg} onChange={(e) => set({ widget_bg: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Widget background" /><input className={field} value={draft.widget_bg} onChange={(e) => set({ widget_bg: e.target.value })} disabled={!p.canEdit} /></div></div>
           <div><Label>Chat background</Label><div className="flex items-center gap-2"><input type="color" value={draft.chat_bg} onChange={(e) => set({ chat_bg: e.target.value })} disabled={!p.canEdit} className="w-9 h-9 p-0 border rounded" aria-label="Chat background" /><input className={field} value={draft.chat_bg} onChange={(e) => set({ chat_bg: e.target.value })} disabled={!p.canEdit} /></div></div>
@@ -169,7 +214,7 @@ export function AppearanceSection(p: SectionProps) {
           <div><Label hint="320–720">Panel width (px)</Label><input type="number" min={320} max={720} className={field} value={draft.panel_width} onChange={(e) => set({ panel_width: Number(e.target.value) || 384 })} disabled={!p.canEdit} /></div>
           <div><Label>z-index</Label><input type="number" className={field} value={draft.z_index} onChange={(e) => set({ z_index: Number(e.target.value) || 2147483000 })} disabled={!p.canEdit} /></div>
         </Grid>
-        <BotAvatarPicker value={draft.bot_avatar_url} brand={draft.brand_name || p.inbox.name} onChange={(v) => set({ bot_avatar_url: v })} disabled={!p.canEdit} />
+        <BotAvatarPicker p={p} value={draft.bot_avatar_url} brand={draft.brand_name || p.inbox.name} onChange={(v) => set({ bot_avatar_url: v })} />
         <div className="mt-3"><Label hint="advanced, scoped to the widget; @import and external url() are stripped">Custom CSS</Label><textarea className={cn(field, 'font-mono text-xs')} rows={5} value={draft.custom_css} onChange={(e) => set({ custom_css: e.target.value })} disabled={!p.canEdit} placeholder=".hd { border-radius: 0 }" /></div>
         <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { appearance: draft } })} />
       </Card>
@@ -344,7 +389,7 @@ export function AvailabilitySection(p: SectionProps) {
     <Card title="Availability">
       <Note tone={av.online ? 'green' : 'gray'} className="mb-3">Right now: {av.online ? 'online' : 'offline'} · {av.in_hours ? 'inside business hours' : `outside business hours${av.next_open_at ? `, back ${timeAgo(av.next_open_at).replace('ago', '')}` : ''}`} · {av.agents.length} collaborator{av.agents.length === 1 ? '' : 's'} online. Online for the widget = at least one collaborator online and inside hours.</Note>
       <div className="divide-y divide-gray-100">
-        <SettingRow title="Business hours" description="Outside hours the widget shows the unavailable message; the assistant can cover after hours (AI assistant tab)." control={<Switch checked={draft.enabled} onChange={(v) => set((x) => ({ ...x, enabled: v, bh: { ...x.bh, weekly: v && !Object.keys(x.bh.weekly).length ? Object.fromEntries(DAYS.map((d) => [d, ['sat', 'sun'].includes(d) ? [] : [['09:00', '18:00']]])) : x.bh.weekly } }))} label="Business hours" disabled={!p.canEdit} />} />
+        <SettingRow title="Business hours" description="Outside hours the widget shows the unavailable message; the assistant can cover after hours (AI agent tab)." control={<Switch checked={draft.enabled} onChange={(v) => set((x) => ({ ...x, enabled: v, bh: { ...x.bh, weekly: v && !Object.keys(x.bh.weekly).length ? Object.fromEntries(DAYS.map((d) => [d, ['sat', 'sun'].includes(d) ? [] : [['09:00', '18:00']]])) : x.bh.weekly } }))} label="Business hours" disabled={!p.canEdit} />} />
       </div>
       {draft.enabled && (
         <div className="space-y-3 mt-2">
@@ -380,7 +425,7 @@ const FEATURES: Array<[keyof WebchatSettings['features'], string, string?]> = [
   ['file_picker', 'File picker', 'Images, PDF, office documents, text and CSV up to 10 MB. Executables are always blocked.'], ['emoji_picker', 'Emoji picker'], ['restart', 'Restart conversation button'],
   ['end_conversation', 'End conversation button', 'The visitor can resolve the conversation and rate it.'], ['allow_after_resolved', 'Allow messages after resolved', 'On: a message reopens the conversation. Off: it starts a new one.'],
   ['single_conversation', 'Lock to a single conversation', 'No conversation list; the visitor always continues the same thread.'], ['sounds', 'Sounds', 'A soft chime when a reply arrives while the tab is hidden.'], ['read_receipts', 'Read receipts', '✓✓ once an agent has seen the message.'],
-  ['show_agent_names', 'Show agent names and avatars'], ['transcript', 'Transcript by email'], ['email_capture', 'Email capture when nobody is online'], ['markdown', 'Render markdown in agent and assistant messages'], ['powered_by', '"Powered by" strip', 'Its own band under the chat, in fixed colours. Pro and Agency plans can switch it off.'],
+  ['show_agent_names', 'Show agent names and avatars'], ['transcript', 'Transcript by email'], ['email_capture', 'Email capture when nobody is online'], ['markdown', 'Render markdown in agent and assistant messages'], ['powered_by', '"Powered by" strip', 'Its own band under the chat, in fixed colours.'],
 ];
 export function FeaturesSection(p: SectionProps) {
   const { draft, set, dirty, reset } = useDraft({ features: p.inbox.settings.features, csat: p.inbox.settings.csat, continuity: p.inbox.settings.continuity });
@@ -419,7 +464,7 @@ export function FeaturesSection(p: SectionProps) {
   );
 }
 
-// ---------------------------------------------------------------- Website assistant
+// ---------------------------------------------------------------- Website agent
 // Off · Review · Auto, the same switch as every AI feature (AI hub). Stored as before: Off = ai_enabled false,
 // Review = ai.mode 'review', Auto · Always = 'first', Auto · Outside business hours = 'offline_only'.
 export function AiSection(p: SectionProps & { between?: React.ReactNode }) {
@@ -433,9 +478,9 @@ export function AiSection(p: SectionProps & { between?: React.ReactNode }) {
   const setWhen = (w: WebsiteWhen) => set((x) => ({ ...x, ai: { ...x.ai, mode: w === 'outside_hours' ? 'offline_only' : 'first' } }));
   return (
     <div className="space-y-4">
-      <Card title="Website assistant">
+      <Card title="Website agent">
         <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-4 mb-4 border-b border-gray-100">
-          <ModeSwitch label="Website assistant mode" value={hub.mode} onChange={setMode} lines={MODE_LINE.website} disabled={!p.canEdit} />
+          <ModeSwitch label="Website agent mode" value={hub.mode} onChange={setMode} lines={MODE_LINE.website} disabled={!p.canEdit} />
           {hub.mode === 'auto' && (
             <div>
               <Label hint="also covers times when nobody on your team is online">When</Label>

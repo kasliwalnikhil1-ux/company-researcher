@@ -25,7 +25,7 @@ function WebsiteView() {
 
 export default function AiSetupWebsitePage() {
   return (
-    <HubFrame back={SETUP_BACK} subtitle="Setup: Website assistant. Every website with its mode.">
+    <HubFrame back={SETUP_BACK} subtitle="Setup: Website agents. Every website with its mode.">
       <WebsiteView />
     </HubFrame>
   );

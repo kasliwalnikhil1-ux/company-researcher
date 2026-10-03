@@ -1,6 +1,6 @@
 'use client';
 
-// Website assistant → {website} → Assistant → Products (web-chat-buttons-products-changes.md §7). The assistant
+// Website agents → {website} → AI agent → Products (web-chat-buttons-products-changes.md §7). The assistant
 // recommends 1 to 6 products of the picked catalogues as cards. Saved as settings.ai.products (validated in 068);
 // "Recommend products" needs a catalogue that has products in it.
 import Link from '@/lib/outreach/nav';

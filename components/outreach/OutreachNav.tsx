@@ -7,14 +7,13 @@ import { useState } from 'react';
 import { LayoutDashboard, Inbox, Users, Contact, GitBranch, CheckSquare, Building2, CreditCard, Settings, BarChart3, Sparkles, Bot, type LucideIcon } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useDashboard } from '@/lib/outreach/queries';
-import { HUB_TABS, useNeedsYouCounts } from '@/lib/outreach/aiHub';
+import { useNeedsYouCounts } from '@/lib/outreach/aiHub';
 import { useSidebarCollapsed, useSidebarFlat } from '@/contexts/SidebarContext';
 import { cn } from '@/lib/utils';
 import { Modal, Input, Button } from './ui';
 
 type NavBadge = 'unread' | 'tasks_open' | 'ai_needs_you';
-interface NavChild { href: string; label: string; badge?: NavBadge }
-interface NavItem { href: string; label: string; icon: LucideIcon; exact?: boolean; prefix?: string; badge?: NavBadge; manager?: boolean; owner?: boolean; writer?: boolean; children?: NavChild[] }
+interface NavItem { href: string; label: string; icon: LucideIcon; exact?: boolean; prefix?: string; badge?: NavBadge; manager?: boolean; owner?: boolean; writer?: boolean }
 
 export const OUTREACH_NAV: NavItem[] = [
   { href: '/outreach', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -23,9 +22,9 @@ export const OUTREACH_NAV: NavItem[] = [
   { href: '/outreach/leads', label: 'Leads', icon: Users },
   { href: '/outreach/sequences', label: 'Sequences', icon: GitBranch },
   { href: '/outreach/tasks', label: 'Tasks', icon: CheckSquare, badge: 'tasks_open' },
-  // AI hub: one home for every AI feature. The badge counts what waits for this person (Needs you, "Mine").
-  { href: '/outreach/ai', label: 'AI', icon: Sparkles, badge: 'ai_needs_you', writer: true, children: HUB_TABS.map((t) => ({ href: t.href, label: t.label, badge: t.key === 'needs-you' ? 'ai_needs_you' as const : undefined })) },
-  { href: '/outreach/websites', label: 'Website assistant', icon: Bot, writer: true },
+  // AI hub: one home for every AI feature (its sections are tabs on the page). The badge counts what waits for this person (Needs you, "Mine").
+  { href: '/outreach/ai', label: 'AI', icon: Sparkles, badge: 'ai_needs_you', writer: true },
+  { href: '/outreach/websites', label: 'Website agents', icon: Bot, writer: true },
   { href: '/outreach/reports', label: 'Reports', icon: BarChart3 },
   { href: '/outreach/clients', label: 'Clients', icon: Building2, manager: true },
   { href: '/outreach/billing', label: 'Billing', icon: CreditCard, owner: true },
@@ -54,7 +53,6 @@ export function useOutreachNav() {
         ...n,
         active: n.exact ? pathname === n.href : pathname === base || pathname.startsWith(`${base}/`),
         count: n.badge ? counts[n.badge] : 0,
-        children: (n.children ?? []).map((c) => ({ ...c, active: pathname === c.href || pathname.startsWith(`${c.href}/`), count: c.badge ? counts[c.badge] : 0 })),
       };
     });
 }
@@ -119,29 +117,13 @@ export function OutreachSidebarNav() {
         {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
         {!isClientViewer && <option value={NEW_WORKSPACE}>+ New workspace</option>}
       </select>
-      {items.map((n) => {
-        // An item with pages of its own (AI) opens them underneath while you are in it; the count then sits on its page.
-        const open = n.active && n.children.length > 0;
-        return (
-          <div key={n.href} className={flat ? 'space-y-1' : 'space-y-0.5'}>
-            <Link href={n.href} aria-current={n.active && !open ? 'page' : undefined} aria-expanded={n.children.length > 0 ? open : undefined} className={cn('flex items-center rounded-lg text-sm font-medium', flat ? 'gap-3 px-4 py-2.5' : 'gap-2 px-3 py-2', n.active ? 'bg-indigo-50 text-indigo-700' : flat ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-600 hover:bg-gray-50')}>
-              <n.icon className={flat ? 'w-5 h-5' : 'w-4 h-4'} />
-              <span className="flex-1">{n.label}</span>
-              {!open && <CountBadge count={n.count} />}
-            </Link>
-            {open && (
-              <div className={cn('border-l border-gray-200 space-y-0.5', flat ? 'ml-6 pl-3' : 'ml-5 pl-2')}>
-                {n.children.map((c) => (
-                  <Link key={c.href} href={c.href} aria-current={c.active ? 'page' : undefined} className={cn('flex items-center rounded-md px-3 py-1.5 text-sm', c.active ? 'text-indigo-700 font-medium bg-indigo-50/60' : 'text-gray-600 hover:bg-gray-50')}>
-                    <span className="flex-1">{c.label}</span>
-                    <CountBadge count={c.count} />
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
+      {items.map((n) => (
+        <Link key={n.href} href={n.href} aria-current={n.active ? 'page' : undefined} className={cn('flex items-center rounded-lg text-sm font-medium', flat ? 'gap-3 px-4 py-2.5' : 'gap-2 px-3 py-2', n.active ? 'bg-indigo-50 text-indigo-700' : flat ? 'text-gray-700 hover:bg-gray-50' : 'text-gray-600 hover:bg-gray-50')}>
+          <n.icon className={flat ? 'w-5 h-5' : 'w-4 h-4'} />
+          <span className="flex-1">{n.label}</span>
+          <CountBadge count={n.count} />
+        </Link>
+      ))}
       {/* Portal: the mobile sidebar is transformed, which would trap a fixed-position modal inside it. */}
       {createOpen && createPortal(<NewWorkspaceModal open onClose={() => setCreateOpen(false)} />, document.body)}
     </div>

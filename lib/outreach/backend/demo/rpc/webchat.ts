@@ -1,5 +1,5 @@
 /**
- * Demo handlers: Website assistant: inboxes (websites) and their settings, canned replies, campaigns, blocks, report, voice.
+ * Demo handlers: Website agent: inboxes (websites) and their settings, canned replies, campaigns, blocks, report, voice.
  * Owns: hub_voice_calls, hub_voice_state, webchat_block, webchat_campaign_delete, webchat_campaign_save, webchat_canned_delete, webchat_canned_save, webchat_conversation_update, webchat_default_settings, webchat_inbox_create, webchat_inbox_delete, webchat_inbox_get, webchat_inbox_regenerate_hmac, webchat_inbox_set_members, webchat_inbox_update, webchat_inboxes, webchat_mailboxes, webchat_report, webchat_settings_history, webchat_settings_restore, webchat_unblock
  *
  * Shapes follow the last migration defining each outreach_<name> (051, 053, 060, 063, 068, 069). The live widget

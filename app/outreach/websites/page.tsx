@@ -1,6 +1,6 @@
 'use client';
 
-// Website assistant (web-chat-PRD.md §12): one website inbox per site. List + create; everything else on /websites/[id].
+// Website agents (web-chat-PRD.md §12): one website inbox per site. List + create; everything else on /websites/[id].
 
 import { useState } from 'react';
 import Link, { modeHref } from '@/lib/outreach/nav';
@@ -13,6 +13,7 @@ import { Badge, Button, Card, EmptyState, ErrorBox, Input, Modal, Select, Spinne
 import { Note } from '@/components/outreach/settings/shared';
 import WebsitesFrame, { WEBSITES_PATH } from '@/components/outreach/settings/websites/WebsitesFrame';
 import { websiteHubMode, websiteModeText } from '@/lib/outreach/aiHub';
+import { usePlanFeature } from '@/lib/outreach/billing';
 
 export default function WebsitesPage() {
   const { workspace, isManager } = useWorkspace();
@@ -25,6 +26,9 @@ export default function WebsitesPage() {
   const [name, setName] = useState('');
   const [domains, setDomains] = useState('');
   const [client, setClient] = useState('');
+  // how many websites the plan allows (null = no limit, also while billing is not enforced)
+  const sites = usePlanFeature(ws, 'webchat_inboxes');
+  const atLimit = sites.limit != null && (q.data?.length ?? 0) >= sites.limit;
 
   const submit = async () => {
     try {
@@ -52,7 +56,7 @@ export default function WebsitesPage() {
                   <Card className="hover:border-indigo-300 transition-colors h-full">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap"><span className="font-medium text-gray-900 truncate">{i.name}</span>{!i.is_active && <Badge tone="gray">Off</Badge>}{websiteHubMode({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode }).mode !== 'off' && <Badge tone="indigo">Assistant: {websiteModeText({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode })}</Badge>}{i.availability.online ? <Badge tone="green">Online</Badge> : <Badge tone="gray">Offline</Badge>}</div>
+                        <div className="flex items-center gap-2 flex-wrap"><span className="font-medium text-gray-900 truncate">{i.name}</span>{!i.is_active && <Badge tone="gray">Off</Badge>}{websiteHubMode({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode }).mode !== 'off' && <Badge tone="indigo">AI agent: {websiteModeText({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode })}</Badge>}{i.availability.online ? <Badge tone="green">Online</Badge> : <Badge tone="gray">Offline</Badge>}</div>
                         <div className="text-xs text-gray-500 mt-0.5 truncate">{i.allowed_domains.join(', ') || 'No domains yet'}</div>
                       </div>
                       <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: i.settings.appearance.accent }} aria-hidden="true" />
@@ -67,7 +71,13 @@ export default function WebsitesPage() {
             })}
           </div>
         )}
-        <Note>Plans: Core 1 website, Pro 3, Agency unlimited (one per client workspace). AI answers draw from the workspace&apos;s AI allowance.</Note>
+        {!sites.loading && (
+          <Note>
+            {sites.limit == null ? 'Your plan has no limit on websites.' : `Your plan includes ${sites.limit} website${sites.limit === 1 ? '' : 's'}.`}
+            {atLimit && sites.minPlanLabel && <> <Link href={sites.upgradeHref} className="font-medium text-indigo-700 hover:underline">{sites.minPlanLabel} has more</Link>.</>}
+            {' '}AI answers draw from the workspace&apos;s AI allowance.
+          </Note>
+        )}
       </div>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Add a website" size="md" footer={<><Button variant="secondary" onClick={() => setOpen(false)}>Cancel</Button><Button onClick={submit} loading={create.isPending} disabled={!name.trim()}>Create</Button></>}>

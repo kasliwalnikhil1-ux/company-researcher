@@ -248,7 +248,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
         <h3 className="text-sm font-semibold text-gray-900">Lead</h3>
         <div className="flex items-center gap-1">
           {lead && <Link href={`/outreach/leads/${lead.id}`} className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-1">Open <ExternalLink className="w-3 h-3" /></Link>}
-          {onClose && <button type="button" onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 text-gray-500 xl:hidden" aria-label="Close lead panel"><X className="w-4 h-4" /></button>}
+          {onClose && <button type="button" onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 text-gray-500 min-[1440px]:hidden" aria-label="Close lead panel"><X className="w-4 h-4" /></button>}
         </div>
       </div>
 

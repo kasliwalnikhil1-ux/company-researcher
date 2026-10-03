@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One-time setup of the PLATFORM voice account for the website assistant's voice (web-chat-voice-elevenlabs-PRD.md
+// One-time setup of the PLATFORM voice account for the website agent's voice (web-chat-voice-elevenlabs-PRD.md
 // §7.2, §15): create our post-call webhook in the account and bind it for every agent, with retries on. The same idea
 // as outreach-unipile-setup for the connector's webhooks. Safe to run again: an existing webhook with our address is
 // reused (its secret cannot be read back; create a new one with --new when the secret is lost).
@@ -56,7 +56,7 @@ try {
 
   let id = !fresh && mine[0]?.webhook_id;
   if (!id) {
-    const made = await call('POST', '/v1/workspace/webhooks', { settings: { auth_type: 'hmac', name: 'GrowthxAI website assistant (post-call)', webhook_url: URL_ } });
+    const made = await call('POST', '/v1/workspace/webhooks', { settings: { auth_type: 'hmac', name: 'GrowthxAI website agent (post-call)', webhook_url: URL_ } });
     id = made.webhook_id;
     console.log(`\nCreated webhook ${id}.`);
     if (made.webhook_secret) {

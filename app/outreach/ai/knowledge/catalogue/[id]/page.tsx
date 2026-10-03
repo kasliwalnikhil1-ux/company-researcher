@@ -13,7 +13,7 @@ import { PageLoader } from '@/components/outreach/ui';
 export default function CataloguePage() {
   const params = useParams<{ id: string }>();
   return (
-    <HubFrame subtitle="Knowledge: the products the Website assistant can recommend from this catalogue.">
+    <HubFrame subtitle="Knowledge: the products the Website agent can recommend from this catalogue.">
       {params?.id ? <CatalogueView sourceId={params.id} /> : <PageLoader />}
     </HubFrame>
   );

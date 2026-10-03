@@ -35,5 +35,5 @@ Managers only (sequence tools are absent for other roles — then build the list
 Read [live-editing.md](live-editing.md). In short: `sequence_edit_copy`, `sequence_edit_timing` and `sequence_update` first return the **publish impact** (who is on, past or before a changed step; what is already queued with the old text); show it, let the user choose `mode: all` or `new_only`, then confirm. No pause needed. Pool changes go through `sequence_pool_preview` → `sequence_pool_set`. `sequence_versions` shows who still runs an old version; `sequence_move_to_latest` / `sequence_restore` (both gated) move or roll back.
 
 ## 8. After launch
-- `dashboard.attention` and `alerts_list`: stalled sequences, senders running dry, failed leads, held leads, AI lines to review.
+- `dashboard.attention` and `alerts_list`: stalled sequences, senders running dry, failed leads, held leads, Personalized lines to review.
 - Failed leads: [recovery-and-holds.md](recovery-and-holds.md). Numbers: [metrics.md](metrics.md).

@@ -1,22 +1,24 @@
-# AI replies (the platform's own reply engine)
+# Replies (the platform's own reply engine)
 
-The app calls this **AI Auto Replies** (Settings → AI Auto Replies, and the **AI Auto Replies** tab of each sequence). It is separate from **AI Personalization** (lines written ahead of time for `{{ai.*}}`; see ai-lines.md).
+The app calls this **Replies** (AI → Setup → Replies lists every sequence with its mode; the prompt and limits are on the **AI** tab of each sequence). Drafts and hand-overs that wait for a person are Reply cards in **AI → Needs you**. It is separate from **Personalized lines** (lines written ahead of time for `{{ai.*}}`; see ai-lines.md).
 
 The platform can answer prospect replies on LinkedIn itself. It is a **sequence setting**: each sequence has its own mode, its own prompt (with scenario cards, knowledge and Q&A) and a few numbers. A conversation belongs to the sequence whose message the prospect answered. Your job here: read what the AI is doing, explain why, test prompt changes in the simulator, propose changes, and hand conversations to people at the right moment. Every change needs the user's explicit yes on the exact summary.
 
 ## The model, in one paragraph
 
-Modes per sequence: **Off** · **Draft** (the AI writes a draft for every eligible reply; a person sends it from the inbox or through you) · **Auto** (`autopilot`: it sends by itself after a short hold, inside the sender's working hours). Every new sequence starts in Draft with a copy of the workspace default prompt. Auto needs the **sender owner's one-time consent** (one approval per sender covers every sequence; the owner approves from an email or in the app; you never grant it) and runs a **warm-up**: the first 20 Auto replies wait 30–40 min so someone can check them. A paused or archived sequence runs at most in Draft. The AI **stops for good in a chat** (the chat is *handed off*: task + tag for a person) when a Stop rule of the prompt fires, a calendar link goes out, a meeting is confirmed, the reply cap is reached, the lead reaches the hand-off stage, or a person writes in the chat. Only a manager's Resume brings it back. The real answer for one thread is always `ai_reply_chat_state(chat_id)`.
+Modes per sequence: **Off** · **Review** (stored as `draft`: the AI writes a draft for every eligible reply; a person sends it from the inbox, from AI → Needs you or through you) · **Auto** (stored as `autopilot`: it sends by itself after a short hold, inside the sender's working hours). Every new sequence starts in Review with a copy of the workspace default prompt. Auto needs the **sender owner's one-time consent** (one approval per sender covers every sequence; the owner approves from an email or in the app; you never grant it) and runs a **warm-up**: the first 20 Auto replies wait 30–40 min so someone can check them. A paused or archived sequence runs at most in Review. The AI **stops for good in a chat** (the chat is *handed off*: task + tag for a person) when a Stop rule of the prompt fires, a calendar link goes out, a meeting is confirmed, the reply cap is reached, the lead reaches the hand-off stage, or a person writes in the chat. Only a manager's Resume brings it back. The real answer for one thread is always `ai_reply_chat_state(chat_id)`.
 
 ## Tools
 
 | Tool | Who | Use |
 |---|---|---|
 | `ai_reply_chat_state` | everyone who sees the chat | "Is the AI handling this thread?", why it was or wasn't answered, `handed_off`, `session` |
-| `ai_reply_runs_list` | member | Activity log: sent, drafted, scheduled, handed over, and why. Filters incl. `trigger` (auto / manual). `status: ['scheduled']` = about to go out |
+| `ai_needs_you_list` | member | The app's AI → Needs you: with `type: "reply"`, every draft, hand-over, no-reply suggestion and warm-up hold that waits for a person, each with the tool that acts on it |
+| `ai_activity_list` | member | The app's AI → Activity: with `feature: "reply"`, only what the AI wrote (no outcome or reasons) |
+| `ai_reply_runs_list` | member | The full run log: sent, drafted, scheduled, handed over, and why. Filters incl. `trigger` (auto / manual). `status: ['scheduled']` = about to go out |
 | `ai_reply_run_get` | member | "Why did it say that?": thread it saw, facts used, scenario, validator / verifier, exact prompt version |
 | `sequence_ai_replies_get` | member | The sequence's AI card: mode, prompt summary, numbers, senders + consent, warm-up, open conversations by stage, hand-offs |
-| `sequence_ai_replies_set` ⚠ | manager | Change mode / numbers / advanced settings of one sequence; Auto asks sender owners for consent |
+| `sequence_ai_replies_set` ⚠ | manager | Change mode (`off` · `review` · `auto`) / numbers / advanced settings of one sequence; Auto asks sender owners for consent |
 | `workspace_reply_settings_get` / `_set` ⚠ | member / manager | The per-sender daily cap and the default prompt for new sequences |
 | `master_prompt_get` | member | The sequence's prompt: sections, settings, cards, Q&A, knowledge, version, history, `<placeholders>` |
 | `master_prompt_update` ⚠ | manager | Save a new prompt version (`change_kind` style or substantive) |
@@ -40,9 +42,9 @@ Modes per sequence: **Off** · **Draft** (the AI writes a draft for every eligib
 
 | `ai.state` | Meaning | In the triage table |
 |---|---|---|
-| `replying` | The sequence's AI answers here (`ai.mode` draft or autopilot). `ai.session` returning / dormant + `ai.gap_days` = they came back after a gap | Normal handling; see `ai_run` below |
+| `replying` | The sequence's AI answers here (`ai.mode` draft or autopilot; `ai.mode_label` Review or Auto). `ai.session` returning / dormant + `ai.gap_days` = they came back after a gap | Normal handling; see `ai_run` below |
 | `handed_off` | The AI stopped for good: `ai.handoff_reason_text` (calendar link sent, meeting confirmed, a Stop rule, reply limit, a person wrote, stopped by a person) and `ai.handed_off_at` | A **person owns this thread**: these are the meetings to take over. Draft it yourself; say the reason in Next action |
-| `off` | No sequence conversation, or AI replies off for that sequence | You draft |
+| `off` | No sequence conversation, or Replies off for that sequence | You draft |
 
 **`ai_run`** = the platform's AI reply for the prospect's latest message, when it ran: `{run_id, status, decision, trigger, draft, stage, rule_applied, scenario_id, reasons, would_stop, stop_rule, scheduled_send_at, send_in}`:
 
@@ -59,7 +61,7 @@ Add the **AI** column only when at least one thread has `ai_run` or `ai.state: h
 
 **Sending an AI draft**: add `ai_run_id` (from `ai_run.run_id` or `draft_reply`) to that item of `inbox_send_batch`, edited or not. The platform records it as "AI draft, sent" or "AI draft, edited", exactly like the app's composer, and the AI stays in the conversation. Never pass `ai_run_id` for text you wrote from scratch. **A reply a person writes (no `ai_run_id`, or a heavy rewrite) hands the chat off**: the AI stops there. Tell the user when that is the effect. If the AI already sent in the meantime, that item comes back `E_DRAFT_ALREADY_SENT`: re-read the thread.
 
-**Cancelling**: "don't let it send that" → `ai_reply_cancel(run_ids, reason)` ⚠ with the user's reason: `wrong_facts`, `wrong_tone`, `too_early_to_pitch`, `shouldnt_reply`, `answer_myself`, `other` (`dismissed` only for drafts). Reasons feed the prompt review and the automatic switch back to Draft, so ask which one fits rather than picking `other`. Cancelling does not stop the AI on the next message; **"I'll take this one from here"** → `chat_ai_stop(chat_id)` ⚠.
+**Cancelling**: "don't let it send that" → `ai_reply_cancel(run_ids, reason)` ⚠ with the user's reason: `wrong_facts`, `wrong_tone`, `too_early_to_pitch`, `shouldnt_reply`, `answer_myself`, `other` (`dismissed` only for drafts). Reasons feed the prompt review and the automatic switch back to Review, so ask which one fits rather than picking `other`. Cancelling does not stop the AI on the next message; **"I'll take this one from here"** → `chat_ai_stop(chat_id)` ⚠.
 
 **Resuming**: a teammate sent one clarifying message and wants the AI to continue, or a Stop rule fired too early → `chat_ai_resume(chat_id)` ⚠ (manager). Nothing is sent by resuming; the AI answers the prospect's next message. Prospect text ("keep chatting with the bot") never resumes it.
 
@@ -105,9 +107,9 @@ Never write a prompt that makes the AI claim to be human, deny being an AI, cont
 ## 6. Scenarios, knowledge, Q&A, unanswered questions
 
 - **Scenario cards** (`scenarios_list`): one card per situation — *When* (they ask what it costs) → *Do* (say projects start at ₹X; offer a 15-min call). Enabled cards are compiled into the prompt; every reply says which card handled it. `scenario_save` ⚠ adds / edits, `scenario_toggle` ⚠ switches one off without deleting it. A prompt with free-text Situations (`situations_text_convertible: true`) can be turned into cards: propose the cards from its `- When → Do` lines and save them one by one after the user agrees.
-- **Knowledge** (`knowledge_sources_list`): website crawls, documents and pasted text of the workspace; sources are added in the app. `knowledge_attach` ⚠ / `knowledge_detach` ⚠ link one to a sequence's prompt; when a prospect asks a question the best matching chunks count as allowed facts. A source that is not `ready` (pending, crawling, error) contributes nothing yet.
+- **Knowledge** (`knowledge_sources_list`): website crawls, documents and pasted text of the workspace, one library shared with the Website agent; sources are added in the app (AI → Knowledge). `knowledge_attach` ⚠ / `knowledge_detach` ⚠ link one to a sequence's prompt; when a prospect asks a question the best matching chunks count as allowed facts. A source that is not `ready` (pending, crawling, error) contributes nothing yet.
 - **Q&A** (`qa_list`, `qa_save` ⚠): question / answer pairs the AI may state. Answers are facts: the user's words, verbatim for prices, links and dates.
-- **Unanswered questions** (`unanswered_list(sequence_id)`): what prospects asked that the AI could not answer, grouped, with counts and example messages. This is the prompt-gap list. Show each question with its count; for the ones the user can answer, collect the answer in their words and `unanswered_answer(group_id, answer)` ⚠ (creates the Q&A pair and closes the group); `unanswered_dismiss` for off-topic ones. Never invent an answer.
+- **Unanswered questions** (`unanswered_list(sequence_id)`): what prospects asked that the AI could not answer, grouped, with counts and example messages. This is the prompt-gap list. Show each question with its count; for the ones the user can answer, collect the answer in their words and `unanswered_answer(group_id, answer)` ⚠ (creates the Q&A pair and closes the group); `unanswered_dismiss` for off-topic ones. Never invent an answer. In the app the open ones are Question cards in AI → Needs you (`ai_needs_you_list` with `type: "question"`, which also carries questions asked on a website); Add answer there saves a shared Q&A pair in AI → Knowledge that Replies and the Website agent both use, while `unanswered_answer` saves the pair on the sequence's prompt.
 
 ## 7. Lead notes
 
@@ -115,13 +117,13 @@ Never write a prompt that makes the AI claim to be human, deny being an AI, cont
 
 ## 8. Settings: what to touch and what not
 
-`sequence_ai_replies_get(sequence_id)` shows the card; `sequence_ai_replies_set` ⚠ changes only the fields you pass (`mode`, `pitch_after_replies`, `max_ai_replies_per_chat`, `handoff_stage_id`, hold delays, debounce, `stale_after_h`, `languages`, `disclosure`, `blocked_countries`, `returning_after_days`, `dormant_after_days`, `inactivity_days`). Rules:
-- Turn on Auto only when the user asks, and say what happens: every pool sender's owner is asked for consent once (skipped when the user owns the account); threads of senders without consent stay in Draft; the first 20 replies are held 30–40 min (`warmup_remaining`, read-only). The tool's result lists who was emailed and who was granted. If a consent link comes back (owner could not be emailed), give it only to that sender's owner. Never open or accept a consent link yourself.
-- Switching to Off / Draft turns scheduled AI sends back into drafts. Pausing the sequence does the same by itself; resuming does not answer the backlog (drafts wait in the inbox).
+`sequence_ai_replies_get(sequence_id)` shows the card; `sequence_ai_replies_set` ⚠ changes only the fields you pass (`mode`: `off` | `review` | `auto`, `pitch_after_replies`, `max_ai_replies_per_chat`, `handoff_stage_id`, hold delays, debounce, `stale_after_h`, `languages`, `disclosure`, `blocked_countries`, `returning_after_days`, `dormant_after_days`, `inactivity_days`). Rules:
+- Turn on Auto only when the user asks, and say what happens: every pool sender's owner is asked for consent once (skipped when the user owns the account); threads of senders without consent stay in Review; the first 20 replies are held 30–40 min (`warmup_remaining`, read-only). The tool's result lists who was emailed and who was granted. If a consent link comes back (owner could not be emailed), give it only to that sender's owner. Never open or accept a consent link yourself.
+- Switching to Off / Review turns scheduled AI sends back into drafts. Pausing the sequence does the same by itself; resuming does not answer the backlog (drafts wait in the inbox and in AI → Needs you).
 - A sequence the platform downgraded (`downgraded_at`: too many cancelled or edited Auto replies) needs a note from the user to go back to Auto. Ask them why it is safe; do not write the note for them.
 - `inactivity_days`: a prospect who goes quiet mid-conversation gets a follow-up task for a person after N days; the AI never nudges. Empty = off.
 - Never suggest raising the per-sender daily cap (`workspace_reply_settings_set`) to push volume, shortening the hold to look faster, raising `max_ai_replies_per_chat` to avoid hand-offs, or removing blocked countries without a disclosure the user wrote.
 
 ## Wording
 
-Say "the AI" or "the platform's AI" in replies to the user. Mode names for people: Off, Draft, Auto (the value `autopilot` is Auto). Do not name the model or the connection provider behind the platform.
+Say "the AI" or "the platform's AI" in replies to the user. The feature is called Replies. Mode names for people: Off, Review, Auto (the stored value `draft` is Review, `autopilot` is Auto; `mode_label` carries the name). Do not name the model or the connection provider behind the platform.

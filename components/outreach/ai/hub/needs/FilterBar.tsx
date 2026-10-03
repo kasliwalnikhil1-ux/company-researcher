@@ -72,14 +72,12 @@ export default function FilterBar({ filters, onFilters, counts, setup, whereName
 
   return (
     <div className="mb-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-        <h2 className="text-lg font-semibold text-gray-900">Needs you{counts && <span className="ml-1.5 font-normal text-gray-500 tabular-nums">({counts.total.toLocaleString()})</span>}</h2>
-        <div role="group" aria-label="Type" className="flex flex-wrap items-center gap-1.5">
-          {chip(null, 'All', counts?.total)}
-          {types.map((t) => chip(t, NEEDS_YOU_TYPE_LABEL[t], counts?.[t]))}
-        </div>
+      <h2 className="text-lg font-semibold text-gray-900">Needs you{counts && <span className="ml-1.5 font-normal text-gray-500 tabular-nums">({counts.total.toLocaleString()})</span>}</h2>
+      <div role="group" aria-label="Type" className="flex flex-wrap items-center gap-1.5">
+        {chip(null, 'All', counts?.total)}
+        {types.map((t) => chip(t, NEEDS_YOU_TYPE_LABEL[t], counts?.[t]))}
       </div>
-      <div className="flex flex-wrap items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Whose cards" className="inline-flex overflow-hidden rounded-lg border border-gray-300 divide-x divide-gray-300">
           {segment(true, 'Mine', 'Replies and website chats assigned to you, and everything that is assigned to nobody')}
           {segment(false, 'All', 'Everything you are allowed to act on')}

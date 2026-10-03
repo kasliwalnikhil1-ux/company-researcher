@@ -20,7 +20,10 @@ const MODE_TONE: Record<ReplyMode, string> = {
  * ("Stage 2 · Relate" or "Re-engage"), how many AI replies are left, and a menu with Stop AI in this chat / Resume AI.
  * A handed-off chat shows "AI handed off · <reason> · <date>". The mode itself is a sequence setting (no per-chat override).
  */
-export default function AiModeChip({ chatId, onError, onNotice }: { chatId: string; onError: (msg: string) => void; onNotice?: (msg: string) => void }) {
+/** `cramped`: the reason is cut shorter and the replies-left count moves into the menu; `narrow`: the chip shows the mode only. */
+export type ChipDensity = 'full' | 'cramped' | 'narrow';
+
+export default function AiModeChip({ chatId, onError, onNotice, density = 'full' }: { chatId: string; onError: (msg: string) => void; onNotice?: (msg: string) => void; density?: ChipDensity }) {
   const q = useChatAiState(chatId);
   const s = q.data;
   const { canWrite, isManager } = useWorkspace();
@@ -50,11 +53,11 @@ export default function AiModeChip({ chatId, onError, onNotice }: { chatId: stri
       <div className="relative">
         <button type="button" onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
           title={[`Replies: ${MODE_LABEL[st.mode]}`, why, stage, repliesLeftText(st)].filter(Boolean).join(' · ')}
-          className={cn('inline-flex items-center gap-1.5 text-xs pl-1.5 pr-1.5 py-1 rounded-full border max-w-[340px] min-w-0', st.handed_off ? 'bg-amber-50 border-amber-200 text-amber-900' : MODE_TONE[st.mode])}>
+          className={cn('inline-flex items-center gap-1.5 text-xs pl-1.5 pr-1.5 py-1 rounded-full border min-w-0', density === 'full' ? 'max-w-[340px]' : density === 'cramped' ? 'max-w-[220px]' : 'max-w-[160px]', st.handed_off ? 'bg-amber-50 border-amber-200 text-amber-900' : MODE_TONE[st.mode])}>
           {busy ? <span className="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin flex-shrink-0" /> : st.handed_off ? <Hand className="w-3.5 h-3.5 flex-shrink-0" /> : <Bot className="w-3.5 h-3.5 flex-shrink-0" />}
           {st.handed_off
             ? <span className="truncate font-medium">{handoff}</span>
-            : <><span className="font-medium flex-shrink-0">{MODE_LABEL[st.mode]}</span>{why && <span className="truncate opacity-80">· {why}</span>}</>}
+            : <><span className="font-medium flex-shrink-0">{MODE_LABEL[st.mode]}</span>{why && density !== 'narrow' && <span className="truncate opacity-80">· {why}</span>}</>}
           <ChevronDown className="w-3 h-3 flex-shrink-0 opacity-60" />
         </button>
         {open && (
@@ -95,11 +98,11 @@ export default function AiModeChip({ chatId, onError, onNotice }: { chatId: stri
           </>
         )}
       </div>
-      {stage && <span className="text-[11px] text-gray-500 px-1.5 py-0.5 rounded bg-white border border-gray-200 whitespace-nowrap" title="Where this conversation is in the prompt's flow">{stage}</span>}
-      {!st.handed_off && st.mode !== 'off' && <span className="text-[11px] text-gray-500 px-1.5 py-0.5 rounded bg-white border border-gray-200 whitespace-nowrap hidden sm:inline" title="AI replies used in this session against the sequence's limit">{repliesLeftText(st)}</span>}
+      {stage && density !== 'narrow' && <span className="text-[11px] text-gray-500 px-1.5 py-0.5 rounded bg-white border border-gray-200 whitespace-nowrap" title="Where this conversation is in the prompt's flow">{stage}</span>}
+      {!st.handed_off && st.mode !== 'off' && density === 'full' && <span className="text-[11px] text-gray-500 px-1.5 py-0.5 rounded bg-white border border-gray-200 whitespace-nowrap hidden sm:inline" title="AI replies used in this session against the sequence's limit">{repliesLeftText(st)}</span>}
       {paused && !st.handed_off && (
         <span className="inline-flex items-center gap-1 text-[11px] text-amber-800 px-1.5 py-0.5 rounded bg-amber-50 border border-amber-200 min-w-0">
-          <PauseCircle className="w-3 h-3 flex-shrink-0" /><span className="truncate max-w-[260px]" title={pausedText(paused)}>{pausedText(paused)}</span>
+          <PauseCircle className="w-3 h-3 flex-shrink-0" /><span className={cn('truncate', density === 'full' ? 'max-w-[260px]' : 'max-w-[120px]')} title={pausedText(paused)}>{pausedText(paused)}</span>
           {isManager && <button type="button" onClick={() => setResumeOpen(true)} className="ml-1 font-medium hover:underline">Resume</button>}
         </span>
       )}

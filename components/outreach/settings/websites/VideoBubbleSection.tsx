@@ -2,18 +2,19 @@
 
 // Settings → Websites → {inbox} → Video bubble: a GIF / video as the launcher instead of the chat icon
 // (settings.launcher.video, migration 053). A click on the bubble expands it with suggested questions and a
-// "Chat with us" button. A question can carry its own answer clip and a page link (migration 062). The clips can come
-// in several languages, switched by the visitor on a strip of flags (migration 065). The widget side is
-// public/widget/v1/video.js; with no clip set the normal launcher shows.
+// "Chat with us" button. A question either plays its own answer clip or opens a page (migration 062). The clips and
+// the questions' wording can come in several languages, switched by the visitor from a menu on the clip's control bar
+// (migrations 065 and 072). The widget side is public/widget/v1/video.js; with no clip set the normal launcher shows.
 
-import { useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, Trash2, Upload } from 'lucide-react';
+import { createContext, useContext, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, Crop, Plus, Trash2, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';
 import { Button, Card } from '@/components/outreach/ui';
 import { Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
-import { MAX_VIDEO_LANGUAGES, VIDEO_BUBBLE_DEFAULTS, VIDEO_LANGUAGES, WEBCHAT_MEDIA_ACCEPT, WEBCHAT_MEDIA_MAX_MB, flagUrl, mediaKind, mediaUrl, orderVideoClips, packVideoBubble, uploadWebchatMedia, useWebchatPresets, videoQuestions, type VideoBubbleSettings, type VideoClip, type VideoLanguage, type VideoQuestion } from '@/lib/outreach/webchat';
+import { MAX_VIDEO_LANGUAGES, VIDEO_BUBBLE_DEFAULTS, VIDEO_LANGUAGES, WEBCHAT_MEDIA_ACCEPT, WEBCHAT_MEDIA_MAX_MB, WEBCHAT_VIDEO_INPUT_MAX_MB, flagUrl, mediaKind, mediaUrl, orderVideoClips, packVideoBubble, uploadWebchatMedia, uploadedNote, useWebchatPresets, videoQuestionText, videoQuestions, type VideoBubbleSettings, type VideoClip, type VideoLanguage, type VideoQuestion, type WebchatUploadStatus } from '@/lib/outreach/webchat';
 import { VideoBubbleFrame } from './WidgetPreview';
+import ClipFramer from './ClipFramer';
 import { Grid, Label, SaveBar, field, useDraft, useSaveSettings, type SectionProps } from './sections';
 
 const HEX6 = /^#[0-9a-f]{6}$/i;
@@ -63,6 +64,14 @@ function Flag({ lang, className }: { lang: VideoLanguage; className?: string }) 
     : <span className={cn('rounded-full bg-gray-700 text-white text-[9px] font-bold flex items-center justify-center flex-none', className)}>{lang.code.slice(0, 2).toUpperCase()}</span>;
 }
 
+// The upload running now (one at a time): its stage, shown under the upload button that started it.
+const UploadStatus = createContext<WebchatUploadStatus | null>(null);
+function UploadStatusLine({ show }: { show: boolean }) {
+  const s = useContext(UploadStatus);
+  if (!show || !s) return null;
+  return <p className="mt-1 text-[11px] text-indigo-600 tabular-nums" role="status">{s.stage === 'compressing' ? `Compressing for fast loading… ${s.percent}%` : 'Uploading…'}</p>;
+}
+
 /** One clip slot: the clip that is there (thumb, name, Remove), or the two ways to add one (upload, paste a link). */
 function ClipSlot({ clip, what, canEdit, uploading, toast, onSet, onUpload }: {
   clip: Clip | null; what: string; canEdit: boolean; uploading: boolean; toast: SectionProps['toast']; onSet: (clip: Clip | null) => void; onUpload: (file: File | undefined) => void;
@@ -85,7 +94,11 @@ function ClipSlot({ clip, what, canEdit, uploading, toast, onSet, onUpload }: {
   return (
     <div className="space-y-2">
       <input ref={fileRef} type="file" accept={WEBCHAT_MEDIA_ACCEPT} hidden onChange={(e) => { onUpload(e.target.files?.[0]); e.target.value = ''; }} />
-      <Button size="sm" variant="secondary" loading={uploading} onClick={() => fileRef.current?.click()} aria-label={`Upload ${what}`}><Upload className="w-3.5 h-3.5 mr-1" />Upload a video</Button>
+      <div>
+        <Button size="sm" variant="secondary" loading={uploading} onClick={() => fileRef.current?.click()} aria-label={`Upload ${what}`}><Upload className="w-3.5 h-3.5 mr-1" />Upload a video</Button>
+        <UploadStatusLine show={uploading} />
+        {!uploading && <p className="mt-1 text-[11px] text-gray-500">MP4 or WebM up to {WEBCHAT_VIDEO_INPUT_MAX_MB} MB (compressed automatically for fast loading), GIF or WebP up to {WEBCHAT_MEDIA_MAX_MB} MB.</p>}
+      </div>
       <div className="flex items-center gap-2">
         <input className={cn(field, 'flex-1 min-w-0')} value={link} onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') applyLink(); }} placeholder="or paste a video link" aria-label={`Link to ${what}`} />
         <Button size="sm" variant="ghost" onClick={applyLink} disabled={!link.trim()}>Use link</Button>
@@ -117,37 +130,82 @@ function LangClips({ langs, clips, what, canEdit, busy, busyKey, toast, onSet, o
   );
 }
 
-/** One suggested question: its text, the clip that answers it (one per language when languages are set) and the page it links to. */
+type QMode = 'video' | 'link' | 'chat';
+const hasVideo = (q: VideoQuestion) => !!(q.video_url || q.video_variants?.some((x) => !!mediaUrl(x.url)));
+
+/**
+ * One suggested question: its wording (one per language when languages are set) and what a click does: play an answer
+ * video (one per language), open a page, or send the question to the chat. A question does one of these, never a video
+ * and a page link together.
+ */
 function QuestionRow({ i, count, q, langs, canEdit, busy, toast, onChange, onMove, onDelete, onUpload }: {
   i: number; count: number; q: VideoQuestion; langs: VideoLanguage[]; canEdit: boolean; busy: string | null; toast: SectionProps['toast'];
   onChange: (patch: Partial<VideoQuestion>) => void; onMove: (d: -1 | 1) => void; onDelete: () => void; onUpload: (lang: string | null, file: File | undefined) => void;
 }) {
-  const off = !canEdit, n = i + 1, badLink = !!q.link_url?.trim() && !HTTPS.test(q.link_url.trim());
+  const off = !canEdit, n = i + 1, letter = String.fromCharCode(65 + i), badLink = !!q.link_url?.trim() && !HTTPS.test(q.link_url.trim());
+  const [mode, setModeState] = useState<QMode>(() => (hasVideo(q) ? 'video' : q.link_url?.trim() ? 'link' : 'chat'));
+  const both = hasVideo(q) && !!q.link_url?.trim();   // saved before the two were exclusive
   const setVariant = (lang: string, clip: Clip | null) => onChange({ video_variants: [...(q.video_variants ?? []).filter((x) => x.lang !== lang), ...(clip ? [{ lang, ...clip }] : [])] });
+  // switching what the click does drops what the other choice had: a question is a video or a page, not both
+  const setMode = (m: QMode) => {
+    setModeState(m);
+    if (m !== 'video' && hasVideo(q)) onChange({ video_url: null, video_variants: [], ...(m === 'chat' ? { link_url: null, link_text: null } : {}) });
+    else if (m !== 'link' && q.link_url) onChange({ link_url: null, link_text: null });
+  };
+  // the wording in one language; the default language's is also the plain `text` older widgets read
+  const setText = (lang: string | null, text: string) => {
+    if (!lang || !langs.length) { onChange({ text }); return; }
+    const rest = (q.text_variants ?? []).filter((t) => t.lang !== lang);
+    onChange({ text_variants: [...rest, { lang, text }], ...(lang === langs[0].code ? { text } : {}) });
+  };
+  const multi = langs.length > 1;
   return (
     <li className="rounded-lg border border-gray-200 p-3">
       <div className="flex items-center gap-2">
-        <span className="flex-none w-6 h-6 rounded-full border border-gray-300 text-[11px] font-semibold text-gray-600 flex items-center justify-center">{String.fromCharCode(65 + i)}</span>
-        <input className={field} value={q.text} maxLength={120} onChange={(e) => onChange({ text: e.target.value })} disabled={off} placeholder="What does it cost?" aria-label={`Question ${n}`} />
+        <span className="flex-none w-6 h-6 rounded-full border border-gray-300 text-[11px] font-semibold text-gray-600 flex items-center justify-center">{letter}</span>
+        {multi && <Flag lang={langs[0]} className="w-5 h-5" />}
+        <input className={field} value={multi ? videoQuestionText(q, langs[0].code, langs) : q.text} maxLength={120} onChange={(e) => setText(multi ? langs[0].code : null, e.target.value)} disabled={off} placeholder="What does it cost?" aria-label={multi ? `Question ${n} in ${langs[0].label}` : `Question ${n}`} />
         {canEdit && <>
           <button type="button" onClick={() => onMove(-1)} disabled={i === 0} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-30" aria-label={`Move question ${n} up`}><ArrowUp className="w-4 h-4" /></button>
           <button type="button" onClick={() => onMove(1)} disabled={i === count - 1} className="p-1.5 rounded text-gray-500 hover:bg-gray-100 disabled:opacity-30" aria-label={`Move question ${n} down`}><ArrowDown className="w-4 h-4" /></button>
           <button type="button" onClick={onDelete} className="p-1.5 rounded text-red-600 hover:bg-red-50" aria-label={`Delete question ${n}`}><Trash2 className="w-4 h-4" /></button>
         </>}
       </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-2 sm:pl-8">
-        <div className="min-w-0">
-          <Label hint="plays when the question is clicked">Answer video</Label>
-          {langs.length > 0
+      {multi && (
+        <ul className="mt-2 space-y-1.5 sm:pl-8">
+          {langs.slice(1).map((l) => (
+            <li key={l.code} className="flex items-center gap-2">
+              <Flag lang={l} className="w-5 h-5" />
+              <input className={field} value={videoQuestionText(q, l.code, langs)} maxLength={120} onChange={(e) => setText(l.code, e.target.value)} disabled={off}
+                placeholder={`In ${l.label.trim() || l.code} (empty = shown in ${langs[0].label.trim() || langs[0].code})`} aria-label={`Question ${n} in ${l.label.trim() || l.code}`} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-3 sm:pl-8">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="text-xs font-medium text-gray-700">When clicked</span>
+          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 text-xs" role="radiogroup" aria-label={`What question ${n} does when clicked`}>
+            {([['video', 'Play a video'], ['link', 'Open a page'], ['chat', 'Send to chat']] as const).map(([m, label]) => (
+              <button key={m} type="button" role="radio" aria-checked={mode === m} disabled={off} onClick={() => mode !== m && setMode(m)}
+                className={cn('px-2.5 py-1 rounded-md', mode === m ? 'bg-indigo-600 text-white font-medium' : 'text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent')}>{label}</button>
+            ))}
+          </div>
+        </div>
+        {both && <Note tone="amber" className="mt-2">This question has a video and a page link. A question can do one of them: {canEdit ? <button type="button" className="underline" onClick={() => onChange({ link_url: null, link_text: null })}>remove the page link</button> : 'remove one'} or choose &ldquo;Open a page&rdquo; above.</Note>}
+        <div className="mt-2 max-w-md">
+          {mode === 'video' && (langs.length > 0
             ? <LangClips langs={langs} clips={q.video_variants ?? []} what={`the video of question ${n}`} canEdit={canEdit} busy={busy} busyKey={`q${i}`} toast={toast} onSet={setVariant} onUpload={onUpload} />
             : <ClipSlot clip={q.video_url ? { url: q.video_url, kind: q.video_kind ?? mediaKind(q.video_url) } : null} what={`the video of question ${n}`} canEdit={canEdit} uploading={busy === `q${i}`} toast={toast}
-                onSet={(clip) => onChange(clip ? { video_url: clip.url, video_kind: clip.kind } : { video_url: null })} onUpload={(file) => onUpload(null, file)} />}
-        </div>
-        <div className="min-w-0">
-          <Label hint="opens in a new tab">Page link</Label>
-          <input className={cn(field, badLink && 'border-red-400')} type="url" value={q.link_url ?? ''} maxLength={1000} onChange={(e) => onChange({ link_url: e.target.value })} disabled={off} placeholder="https://yoursite.com/pricing" aria-label={`Page link of question ${n}`} aria-invalid={badLink} />
-          {badLink && <p className="mt-1 text-xs text-red-600">Use a full https:// address.</p>}
-          <input className={cn(field, 'mt-2')} value={q.link_text ?? ''} maxLength={40} onChange={(e) => onChange({ link_text: e.target.value })} disabled={off || !q.link_url?.trim()} placeholder="Link text (Learn more)" aria-label={`Link text of question ${n}`} />
+                onSet={(clip) => onChange(clip ? { video_url: clip.url, video_kind: clip.kind } : { video_url: null })} onUpload={(file) => onUpload(null, file)} />)}
+          {mode === 'link' && (
+            <div>
+              <input className={cn(field, badLink && 'border-red-400')} type="url" value={q.link_url ?? ''} maxLength={1000} onChange={(e) => onChange({ link_url: e.target.value })} disabled={off} placeholder="https://yoursite.com/pricing" aria-label={`Page link of question ${n}`} aria-invalid={badLink} />
+              {badLink && <p className="mt-1 text-xs text-red-600">Use a full https:// address.</p>}
+              <p className="mt-1 text-[11px] text-gray-500">Opens in a new tab.</p>
+            </div>
+          )}
+          {mode === 'chat' && <p className="text-xs text-gray-500">The chat opens and the question is sent as the visitor&apos;s first message.</p>}
         </div>
       </div>
     </li>
@@ -161,9 +219,11 @@ export default function VideoBubbleSection(p: SectionProps) {
   const presets = useWebchatPresets();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [status, setStatus] = useState<WebchatUploadStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // the slot an upload is running for: main:<lang>, q<n>, q<n>:<lang>
   const [link, setLink] = useState('');
   const [view, setView] = useState<'bubble' | 'expanded'>('bubble');
+  const [framer, setFramer] = useState<Clip | null>(null);   // the clip being framed (Frame the clip)
   const off = !p.canEdit, accent = p.inbox.settings.appearance.accent;
   const langs = draft.languages ?? [];
   const q = videoQuestions(draft.questions);
@@ -177,17 +237,25 @@ export default function VideoBubbleSection(p: SectionProps) {
     if (!file) return;
     setUploading(true);
     try {
-      const r = await uploadWebchatMedia(p.inbox.workspace_id, p.inbox.id, file, clips());
+      const r = await uploadWebchatMedia(p.inbox.workspace_id, p.inbox.id, file, clips(), setStatus);
       set({ url: r.url, kind: r.kind, enabled: true });
-      p.toast('Clip uploaded. Save to publish it.');
+      setFramer(r);
+      p.toast(uploadedNote(r, 'Clip'));
     } catch (e) { p.toast(parseError(e).message, 'error'); }
-    finally { setUploading(false); if (fileRef.current) fileRef.current.value = ''; }
+    finally { setUploading(false); setStatus(null); if (fileRef.current) fileRef.current.value = ''; }
   };
   const applyLink = () => {
     const u = link.trim();
     if (!/^https:\/\/\S+$/i.test(u)) { p.toast('Paste an https link to an MP4, WebM, GIF or WebP file.', 'error'); return; }
-    set({ url: u, kind: mediaKind(u), enabled: true }); setLink('');
+    set({ url: u, kind: mediaKind(u), enabled: true }); setLink(''); setFramer({ url: u, kind: mediaKind(u) });
   };
+  // a built-in clip becomes the main clip (the default language's, with languages) and opens the framer, like a crop step
+  const pickPreset = (file: string, kind: Clip['kind']) => {
+    const clip = { url: `preset:${file}`, kind };
+    if (langs.length) setVariant(langs[0].code, clip); else set({ ...clip, enabled: true });
+    setFramer(clip);
+  };
+  const frameClip = mediaUrl(packed.url) ? { url: packed.url!, kind: packed.kind } : null;
   const setQ = (i: number, patch: Partial<VideoQuestion>) => set((d) => ({ ...d, questions: videoQuestions(d.questions).map((x, k) => (k === i ? { ...x, ...patch } : x)) }));
   const move = (i: number, d: -1 | 1) => { const j = i + d; if (j < 0 || j >= q.length) return; const n = [...q]; [n[i], n[j]] = [n[j], n[i]]; set({ questions: n }); };
   // the main clip in one language
@@ -197,16 +265,18 @@ export default function VideoBubbleSection(p: SectionProps) {
     if (!file) return;
     setBusy(key);
     try {
-      const r = await uploadWebchatMedia(p.inbox.workspace_id, p.inbox.id, file, clips());
+      const r = await uploadWebchatMedia(p.inbox.workspace_id, p.inbox.id, file, clips(), setStatus);
       apply(r);
-      p.toast('Video uploaded. Save to publish it.');
+      p.toast(uploadedNote(r));
     } catch (e) { p.toast(parseError(e).message, 'error'); }
-    finally { setBusy(null); }
+    finally { setBusy(null); setStatus(null); }
   };
   // Languages. With none, every step has one clip (url / video_url). With the first language added, the clips that are
   // there become that language's; with the last one removed, each step keeps one clip (that language's, else another).
   const setLangs = (next: VideoLanguage[]) => set((d) => {
-    const prev = d.languages ?? [], qs = videoQuestions(d.questions);
+    const prev = d.languages ?? [];
+    // the default language's wording may live only in `text`: pin it to that language before the order changes
+    const qs = videoQuestions(d.questions).map((x) => (prev.length && x.text.trim() && !(x.text_variants ?? []).some((t) => t.lang === prev[0].code) ? { ...x, text_variants: [...(x.text_variants ?? []), { lang: prev[0].code, text: x.text }] } : x));
     if (!prev.length && next.length) {
       const l = next[0].code;
       return { ...d, languages: next, variants: d.url ? [{ lang: l, url: d.url, kind: d.kind }] : [], questions: qs.map((x) => (x.video_url ? { ...x, video_variants: [{ lang: l, url: x.video_url, kind: x.video_kind ?? mediaKind(x.video_url) }] } : x)) };
@@ -215,20 +285,27 @@ export default function VideoBubbleSection(p: SectionProps) {
       // the clip of the last language left, else any clip the step still has
       const keep = (list?: VideoClip[]) => orderVideoClips(list, prev)[0] ?? (list ?? []).find((x) => !!mediaUrl(x.url));
       const m = keep(d.variants);
-      return { ...d, languages: [], variants: [], url: m?.url ?? null, kind: m?.kind ?? d.kind, questions: qs.map((x) => { const c = keep(x.video_variants); return { ...x, video_variants: [], video_url: c?.url ?? null, video_kind: c?.kind ?? x.video_kind }; }) };
+      return { ...d, languages: [], variants: [], url: m?.url ?? null, kind: m?.kind ?? d.kind, questions: qs.map((x) => {
+        const c = keep(x.video_variants), t = prev.map((l) => (x.text_variants ?? []).find((y) => y.lang === l.code && y.text.trim())).find(Boolean);
+        return { ...x, video_variants: [], text_variants: [], text: t?.text ?? x.text, video_url: c?.url ?? null, video_kind: c?.kind ?? x.video_kind };
+      }) };
     }
-    return { ...d, languages: next };
+    // the new default language's wording is also the plain text
+    return { ...d, languages: next, questions: qs.map((x) => { const t = next.length ? (x.text_variants ?? []).find((y) => y.lang === next[0].code) : null; return t ? { ...x, text: t.text } : x; }) };
   });
   const moveLang = (i: number, d: -1 | 1) => { const j = i + d; if (j < 0 || j >= langs.length) return; const n = [...langs]; [n[i], n[j]] = [n[j], n[i]]; setLangs(n); };
   const onSave = () => {
     const bad = q.findIndex((x) => x.text.trim() && !!x.link_url?.trim() && !HTTPS.test(x.link_url.trim()));
     if (bad >= 0) { p.toast(`Question ${String.fromCharCode(65 + bad)}: the page link must be a full https:// address.`, 'error'); return; }
+    const two = q.findIndex((x) => x.text.trim() && hasVideo(x) && !!x.link_url?.trim());
+    if (two >= 0) { p.toast(`Question ${String.fromCharCode(65 + two)} has a video and a page link. Keep one of them.`, 'error'); return; }
     const lost = q.findIndex((x) => !x.text.trim() && (x.video_url || x.video_variants?.length || x.link_url?.trim()));
     if (lost >= 0) { p.toast(`Question ${String.fromCharCode(65 + lost)} has a video or a link but no text. Add the question, or delete the row.`, 'error'); return; }
     return save({ settings: { launcher: { video: { ...packed, cta_text: draft.cta_text.trim() || VIDEO_BUBBLE_DEFAULTS.cta_text } } } });
   };
 
   return (
+    <UploadStatus.Provider value={status}>
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
       <div className="space-y-4 min-w-0">
         <Card title="Video bubble">
@@ -261,12 +338,12 @@ export default function VideoBubbleSection(p: SectionProps) {
                 ))}
               </ul>
             )}
-            <p className="text-xs text-gray-500">Add the same videos in more than one language (UK English, Australian English, Hindi…). Visitors get a strip of flags next to the expanded video and switch with one click; their choice is remembered. The strip shows only for a video that exists in more than one language. Before a visitor chooses, their browser&apos;s language decides; the first language here is the fallback.</p>
+            <p className="text-xs text-gray-500">Add the same videos in more than one language (UK English, Australian English, Hindi…). Visitors pick a language from the flag on the expanded video&apos;s control bar; their choice is remembered and switches the videos and the questions. Before a visitor chooses, their browser&apos;s language decides; the first language here is the fallback.</p>
           </div>
           <div className="mt-3 rounded-lg border border-gray-200 p-3">
             {langs.length > 0 ? (
               <LangClips langs={langs} clips={draft.variants ?? []} what="the main video" canEdit={p.canEdit} busy={busy} busyKey="main" toast={p.toast}
-                onSet={setVariant} onUpload={(lang, file) => uploadTo(`main:${lang}`, file, (c) => setVariant(lang, c))} />
+                onSet={setVariant} onUpload={(lang, file) => uploadTo(`main:${lang}`, file, (c) => { setVariant(lang, c); setFramer(c); })} />
             ) : <>
             {hasClip ? (
               <div className="flex items-center gap-3">
@@ -275,6 +352,7 @@ export default function VideoBubbleSection(p: SectionProps) {
                   <div className="font-medium text-gray-900 truncate">{preset ? `Built-in clip: ${presets.data?.find((x) => x.file === preset)?.label ?? preset}` : clipName(draft.url!)}</div>
                   <div className="text-xs text-gray-500">{draft.kind === 'image' ? 'GIF / image' : 'Video'}{draft.url !== (saved?.url ?? null) && ' · not saved yet'}</div>
                 </div>
+                {p.canEdit && <Button size="sm" variant="secondary" onClick={() => setFramer({ url: draft.url!, kind: draft.kind })}><Crop className="w-3.5 h-3.5 mr-1" />Adjust framing</Button>}
                 {p.canEdit && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => set({ url: null })}><Trash2 className="w-3.5 h-3.5 mr-1" />Remove</Button>}
               </div>
             ) : <p className="text-sm text-gray-500">No clip yet. The widget shows the normal launcher until you add one.</p>}
@@ -287,15 +365,16 @@ export default function VideoBubbleSection(p: SectionProps) {
                 <Button size="sm" variant="ghost" onClick={applyLink} disabled={!link.trim()}>Use link</Button>
               </div>
             )}
+            <UploadStatusLine show={uploading} />
             </>}
-            <p className="mt-2 text-xs text-gray-500">MP4 or WebM video, GIF or WebP, up to {WEBCHAT_MEDIA_MAX_MB} MB. It loads on every page, so keep it short and light: 5–15 seconds, under 5 MB. A question&apos;s answer video loads only when that question is clicked.</p>
+            <p className="mt-2 text-xs text-gray-500">MP4 or WebM video up to {WEBCHAT_VIDEO_INPUT_MAX_MB} MB, GIF or WebP up to {WEBCHAT_MEDIA_MAX_MB} MB. Videos are compressed in your browser before upload (720p, sized for the bubble and the expanded view), so they load fast. The clip loads on every page, so keep it short: 5–15 seconds. A question&apos;s answer video loads only when that question is clicked.</p>
           </div>
           {(presets.data?.length ?? 0) > 0 && (
             <div className="mt-3">
-              <Label hint="hover to play">Built-in clips</Label>
+              <Label hint="hover to play; picking one lets you frame it">Built-in clips</Label>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {presets.data!.map((x) => (
-                  <button key={x.file} type="button" disabled={off} onClick={() => (langs.length ? setVariant(langs[0].code, { url: `preset:${x.file}`, kind: x.kind }) : set({ url: `preset:${x.file}`, kind: x.kind, enabled: true }))} title={x.label}
+                  <button key={x.file} type="button" disabled={off} onClick={() => pickPreset(x.file, x.kind)} title={x.label}
                     className={cn('group relative rounded-lg overflow-hidden border-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500', preset === x.file ? 'border-indigo-600' : 'border-transparent hover:border-gray-300')}>
                     <Thumb url={`preset:${x.file}`} kind={x.kind} className="w-full aspect-square" />
                     <span className="absolute inset-x-0 bottom-0 bg-black/55 text-white text-[11px] px-1.5 py-0.5 truncate">{x.label}</span>
@@ -305,6 +384,7 @@ export default function VideoBubbleSection(p: SectionProps) {
             </div>
           )}
           {p.inbox.settings.launcher.hide && <Note tone="amber" className="mt-3">The launcher is hidden (Launcher &amp; popup tab), so the bubble is hidden too.</Note>}
+          {framer && <ClipFramer clip={framer} bubble={draft} onCancel={() => setFramer(null)} onConfirm={(f) => { set({ ...f, fit: 'cover' }); setFramer(null); }} />}
         </Card>
 
         <Card title="Bubble">
@@ -314,7 +394,7 @@ export default function VideoBubbleSection(p: SectionProps) {
             <Range label="Size" hint="width on desktop; phones get 75%" value={draft.size} min={64} max={240} step={4} unit="px" onChange={(v) => set({ size: v })} disabled={off} />
             <div><Label hint="the clip is never stretched">Fit</Label><select className={field} value={draft.fit} onChange={(e) => set({ fit: e.target.value as 'cover' | 'contain' })} disabled={off}><option value="cover">Fill the bubble (crop the edges)</option><option value="contain">Show the whole clip (bars at the sides)</option></select></div>
             <Range label="Zoom" value={draft.zoom} min={100} max={300} step={5} unit="%" onChange={(v) => set({ zoom: v })} disabled={off} />
-            <div />
+            <div className="flex items-end">{p.canEdit && frameClip && <Button size="sm" variant="secondary" onClick={() => setFramer(frameClip)}><Crop className="w-3.5 h-3.5 mr-1" />Frame on the clip</Button>}</div>
             <Range label="Focus, left to right" hint="which part stays in view" value={draft.focus_x} min={0} max={100} unit="%" onChange={(v) => set({ focus_x: v })} disabled={off} />
             <Range label="Focus, top to bottom" value={draft.focus_y} min={0} max={100} unit="%" onChange={(v) => set({ focus_y: v })} disabled={off} />
             <Color label="Border colour" value={draft.border_color} fallback="#ffffff" onChange={(v) => set({ border_color: v ?? '#ffffff' })} disabled={off} />
@@ -335,11 +415,11 @@ export default function VideoBubbleSection(p: SectionProps) {
         </Card>
 
         <Card title="Suggested questions" actions={p.canEdit && <Button size="sm" variant="secondary" disabled={q.length >= MAX_QUESTIONS} onClick={() => set({ questions: [...q, { text: '' }] })}><Plus className="w-3.5 h-3.5 mr-1" />Question</Button>}>
-          <p className="text-xs text-gray-500 mb-2">Shown in this order in the expanded view, up to {MAX_QUESTIONS}. All of them stay on screen the whole time.</p>
+          <p className="text-xs text-gray-500 mb-2">Shown in this order in the expanded view, up to {MAX_QUESTIONS}.{langs.length > 1 && ' Write each question in every language you added; visitors see it in the language they pick, and an empty one shows in the default language.'}</p>
           <ul className="text-xs text-gray-500 mb-3 list-disc pl-4 space-y-0.5">
-            <li><b className="font-medium text-gray-700">With an answer video:</b> a click plays that video in place of the main clip. The question&apos;s button dims while its video plays; the others stay bright and clickable.</li>
-            <li><b className="font-medium text-gray-700">With a page link:</b> a link button appears with the answer and opens the page in a new tab. With a link and no video, the click opens the page directly.</li>
-            <li><b className="font-medium text-gray-700">With neither:</b> the click opens the chat and sends the question as the visitor&apos;s first message.</li>
+            <li><b className="font-medium text-gray-700">Play a video:</b> the answer video plays in place of the main clip. While it plays, the other questions fade out so the video can be seen; they come back when it ends, is paused, or the visitor points at them.</li>
+            <li><b className="font-medium text-gray-700">Open a page:</b> the page opens in a new tab.</li>
+            <li><b className="font-medium text-gray-700">Send to chat:</b> the chat opens and sends the question as the visitor&apos;s first message.</li>
           </ul>
           {q.length === 0 && <p className="text-sm text-gray-500 py-2">No questions yet. The expanded view shows only the button below.</p>}
           <ul className="space-y-2">
@@ -368,10 +448,11 @@ export default function VideoBubbleSection(p: SectionProps) {
         </div>
         <div className="relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]">
           {hasClip && draft.enabled
-            ? <div className="absolute bottom-5 right-5"><VideoBubbleFrame v={packed} accent={HEX6.test(accent) ? accent : '#4f46e5'} expanded={view === 'expanded'} maxWidth={318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
+            ? <div className="absolute bottom-5 right-5"><VideoBubbleFrame v={packed} accent={HEX6.test(accent) ? accent : '#4f46e5'} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} maxWidth={318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
             : <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-gray-400">{hasClip ? 'The bubble is switched off. Visitors see the normal launcher.' : 'Add a clip to see the bubble here.'}</p>}
         </div>
       </div>
     </div>
+    </UploadStatus.Provider>
   );
 }

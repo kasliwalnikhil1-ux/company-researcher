@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 export const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many);
 
-/** Title and one line of a Setup sub-page (Replies, Website assistant, General). */
+/** Title and one line of a Setup sub-page (Replies, Website agents, General). */
 export function SetupHeading({ title, help }: { title: string; help?: React.ReactNode }) {
   return (
     <div className="min-w-0">

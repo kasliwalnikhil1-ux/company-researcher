@@ -78,6 +78,12 @@ export function seedSenders(s: DemoStore, now: number) {
     sender(SENDER.li_priya_warm, { display_name: 'Priya Lindqvist', owner_user_id: MEMBER.priya, owner_email: 'priya.lindqvist@example.com', public_identifier: 'demo-priya-lindqvist', warmup_level: 1, connections_count: 410, health_score: 81, connected_at: iso(now - 9 * D), created_at: iso(now - 9 * D), warmup_locked_until: iso(now + 4 * D) }, now),
     sender(SENDER.li_reconnect, { display_name: 'Leo Moreau', owner_user_id: MEMBER.leo, owner_email: 'leo.moreau@example.com', client_id: CLIENT.orchard, public_identifier: 'demo-leo-moreau', status: 'credentials', status_reason: 'LinkedIn asked to sign in again', health_score: 64, last_disconnect_at: iso(now - 7 * H), last_ok_at: iso(now - 8 * H), reconnect_attempts: 1 }, now),
     sender(SENDER.li_paused, { display_name: 'Nadia Haddad', owner_email: 'nadia.haddad@example.com', client_id: CLIENT.lumen, public_identifier: 'demo-nadia-haddad', status: 'paused', status_reason: 'Paused by Maya Chen', paused_until: null, health_score: 86, timezone: 'Europe/London' }, now),
+    // more of the team's LinkedIn accounts (the workspace runs mostly on LinkedIn)
+    sender(SENDER.li_jess, { display_name: 'Jess Alvarez', owner_email: 'jess.alvarez@example.com', public_identifier: 'demo-jess-alvarez', is_premium: true, has_sales_nav: true, monthly_cost: 129, connections_count: 4280, health_score: 93, label: 'Jess (Sales Navigator)', connected_at: iso(now - 95 * D), created_at: iso(now - 95 * D) }, now),
+    sender(SENDER.li_ravi, { display_name: 'Ravi Menon', owner_email: 'ravi.menon@example.com', public_identifier: 'demo-ravi-menon', connections_count: 2860, health_score: 90, timezone: 'America/Chicago', connected_at: iso(now - 80 * D), created_at: iso(now - 80 * D) }, now),
+    sender(SENDER.li_hannah, { display_name: 'Hannah Vogel', owner_email: 'hannah.vogel@example.com', public_identifier: 'demo-hannah-vogel', is_premium: true, connections_count: 3950, health_score: 95, connected_at: iso(now - 70 * D), created_at: iso(now - 70 * D) }, now),
+    sender(SENDER.li_vikram, { display_name: 'Vikram Nair', owner_email: 'vikram.nair@example.com', public_identifier: 'demo-vikram-nair', connections_count: 1980, health_score: 88, warmup_level: 3, connected_at: iso(now - 52 * D), created_at: iso(now - 52 * D) }, now),
+    sender(SENDER.li_marta, { display_name: 'Marta Silva', owner_email: 'marta.silva@example.com', public_identifier: 'demo-marta-silva', connections_count: 2470, health_score: 91, timezone: 'America/Los_Angeles', connected_at: iso(now - 64 * D), created_at: iso(now - 64 * D) }, now),
     sender(SENDER.gmail, { provider: 'GMAIL', monthly_cost: 6, auth_method: 'oauth', display_name: 'Maya Chen', owner_email: 'maya@northwind.example.com', public_identifier: null, connections_count: null, parent_sender_id: SENDER.li_maya, signature: '<p>Maya Chen<br/>Northwind Growth</p>', health_score: 97 }, now),
     sender(SENDER.outlook, { provider: 'OUTLOOK', monthly_cost: 6, auth_method: 'oauth', display_name: 'Sam Okafor', owner_user_id: MEMBER.sam, owner_email: 'sam@northwind.example.com', public_identifier: null, connections_count: null, parent_sender_id: SENDER.li_sam, health_score: 95 }, now),
     sender(SENDER.whatsapp, { provider: 'WHATSAPP', monthly_cost: 25, auth_method: 'credentials', display_name: 'Northwind (WhatsApp)', public_identifier: '+15550100', connections_count: null, warmup_level: 3, account_age_months: 26, account_age_attested_at: iso(now - 40 * D), account_age_attested_by: MEMBER.maya, health_score: 90 }, now),
@@ -91,6 +97,12 @@ export function seedSenders(s: DemoStore, now: number) {
     [SENDER.li_priya_warm, 'warmup', { from: 0, to: 1 }, 2],
     [SENDER.li_reconnect, 'status', { from: 'ok', to: 'credentials', reason: 'LinkedIn asked to sign in again' }, 0.3],
     [SENDER.li_paused, 'status', { from: 'ok', to: 'paused', by: 'Maya Chen' }, 6],
+    [SENDER.li_jess, 'status', { from: 'connecting', to: 'ok' }, 95],
+    [SENDER.li_ravi, 'status', { from: 'connecting', to: 'ok' }, 80],
+    [SENDER.li_hannah, 'status', { from: 'connecting', to: 'ok' }, 70],
+    [SENDER.li_marta, 'status', { from: 'connecting', to: 'ok' }, 64],
+    [SENDER.li_vikram, 'status', { from: 'connecting', to: 'ok' }, 52],
+    [SENDER.li_vikram, 'warmup', { from: 2, to: 3 }, 12],
     [SENDER.whatsapp, 'status', { from: 'connecting', to: 'ok' }, 60],
     [SENDER.instagram, 'status', { from: 'connecting', to: 'ok' }, 70],
   ];
@@ -246,8 +258,8 @@ export function sequenceGraphs(): Record<keyof typeof SEQ, Graph> {
 export function seedSequences(s: DemoStore, now: number) {
   const graphs = sequenceGraphs();
   const defs: Array<{ key: keyof typeof SEQ; name: string; status: string; client: string | null; pool: string[]; created: number; brief?: string; settings?: Row }> = [
-    { key: 'saas', name: 'SaaS founders · Q4 outreach', status: 'active', client: null, pool: [SENDER.li_maya, SENDER.li_sam], created: 58, brief: 'Founders and growth leads at 10–500 person SaaS companies in North America.' },
-    { key: 'agencies', name: 'Agency owners · LinkedIn + email', status: 'active', client: null, pool: [SENDER.li_sam, SENDER.li_priya_warm, SENDER.gmail, SENDER.outlook], created: 45, brief: 'Owners of 5–50 person marketing agencies.' },
+    { key: 'saas', name: 'SaaS founders · Q4 outreach', status: 'active', client: null, pool: [SENDER.li_maya, SENDER.li_sam, SENDER.li_jess, SENDER.li_ravi, SENDER.li_hannah], created: 58, brief: 'Founders and growth leads at 10–500 person SaaS companies in North America.' },
+    { key: 'agencies', name: 'Agency owners · LinkedIn + email', status: 'active', client: null, pool: [SENDER.li_sam, SENDER.li_priya_warm, SENDER.li_vikram, SENDER.li_marta, SENDER.gmail, SENDER.outlook], created: 45, brief: 'Owners of 5–50 person marketing agencies.' },
     { key: 'dental', name: 'Orchard Lane · practice owners', status: 'active', client: CLIENT.orchard, pool: [SENDER.li_maya], created: 40 },
     { key: 'revive', name: 'Re-engage past webinar guests', status: 'paused', client: CLIENT.lumen, pool: [SENDER.li_paused], created: 35 },
     { key: 'webinar', name: 'Q2 webinar follow-up', status: 'archived', client: CLIENT.lumen, pool: [SENDER.li_maya], created: 60 },

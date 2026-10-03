@@ -11,7 +11,7 @@ import { questionExamples, type CardProps } from './types';
 const ANSWER_MAX = 2000;   // outreach_hub_question_answer: 2 to 2000 characters
 
 /**
- * Question: something the AI could not answer, from Replies or the Website assistant, grouped. The question is the
+ * Question: something the AI could not answer, from Replies or the Website agent, grouped. The question is the
  * trigger; the answer a manager writes becomes a Q&A pair in Knowledge, so both features can answer it next time.
  */
 export default function QuestionCard({ row, hidden, api }: CardProps) {
@@ -33,7 +33,7 @@ export default function QuestionCard({ row, hidden, api }: CardProps) {
       ai={answering ? (
         <Textarea label="Your answer" value={answer} onChange={(e) => setAnswer(e.target.value)} rows={3} autoFocus className="min-h-[80px]"
           counter={{ max: ANSWER_MAX, value: (answer ?? '').length }}
-          hint={'Saved to Knowledge as a Q&A pair. Replies and the Website assistant can both use it.'} />
+          hint={'Saved to Knowledge as a Q&A pair. Replies and the Website agent can both use it.'} />
       ) : undefined}
       extra={examples.length > 0 ? (
         <ul className="space-y-0.5 text-xs text-gray-600">

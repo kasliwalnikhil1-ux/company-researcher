@@ -1,6 +1,6 @@
 /** Demo seed: suppressions, webhooks, API key, integrations, branding, notifications, audit log, alerts, billing. */
 import type { DemoStore, Row } from '../store';
-import { addInvoice, addMonths, slots, totalCents } from '../settings/billing';
+import { addInvoice, addMonths, occupies, slots, totalCents } from '../settings/billing';
 import { hex } from '../settings/common';
 import { CLIENT, DEMO_WS_ID, MEMBER, SENDER, SEQ, STAGE } from './ids';
 
@@ -28,14 +28,14 @@ export function seedSettings(s: DemoStore, now: number): void {
 }
 
 // ---------------------------------------------------------------------------
-// billing: Scale · 12 accounts · Monthly, active, 3 paid invoices, the history of how it got there
+// billing: Scale · 16 accounts · Monthly, active, 3 paid invoices, the history of how it got there
 // ---------------------------------------------------------------------------
 function seedBilling(s: DemoStore, w: Row, now: number) {
   const p0 = now - 12 * D;                       // the current period started 12 days ago
   const period = (k: number) => addMonths(p0, k); // k = -1: the period before, …
   s.update('outreach_workspaces', w.id, {
     plan: 'scale', stripe_customer_id: 'cus_demo', stripe_subscription_id: 'sub_demo', stripe_status: 'active', past_due_since: null, trial_ends_at: null,
-    billing_period: 'monthly', accounts_requested: 12, accounts_billed: 12, trial_account_limit: 1, current_period_start: iso(p0), current_period_end: iso(period(1)),
+    billing_period: 'monthly', accounts_requested: 16, accounts_billed: 16, trial_account_limit: 1, current_period_start: iso(p0), current_period_end: iso(period(1)),
     cancel_at_period_end: false, cancelled_at: null, data_delete_after: null, scheduled_change: null, pending_payment: null, stripe_schedule_id: null, price_version: 'v1',
     early_supporter_tier: null, early_supporter_discount: 0, custom_price_id: null, billing_comp: false, plan_before_suspension: null, disputed_at: null, suspended_at: null,
   }, { silent: true });
@@ -49,24 +49,25 @@ function seedBilling(s: DemoStore, w: Row, now: number) {
     quote: { charge_today_cents: totalCents('launch', 'monthly', 5), next_invoice_cents: totalCents('launch', 'monthly', 5) }, stripe_invoice_id: 'in_demo_checkout', applied_at: iso(checkoutAt + 60_000), created_at: iso(checkoutAt) });
   const upAt = period(-3) + 9 * D;
   const left = (period(-2) - upAt) / (period(-2) - period(-3));
-  change({ kind: 'change', from_state: st('launch', 5, 'monthly'), to_state: st('scale', 10, 'monthly'), immediate: { plan: 'scale', accounts: 10, period: 'monthly' },
-    quote: { charge_today_cents: Math.round((totalCents('scale', 'monthly', 10) - totalCents('launch', 'monthly', 5)) * left), next_invoice_cents: totalCents('scale', 'monthly', 10) },
+  change({ kind: 'change', from_state: st('launch', 5, 'monthly'), to_state: st('scale', 12, 'monthly'), immediate: { plan: 'scale', accounts: 12, period: 'monthly' },
+    quote: { charge_today_cents: Math.round((totalCents('scale', 'monthly', 12) - totalCents('launch', 'monthly', 5)) * left), next_invoice_cents: totalCents('scale', 'monthly', 12) },
     stripe_invoice_id: 'in_demo_upgrade', applied_at: iso(upAt + 30_000), created_at: iso(upAt) });
-  change({ kind: 'change', from_state: st('scale', 10, 'monthly'), to_state: st('scale', 12, 'monthly'), scheduled: { plan: 'scale', accounts: 12, period: 'monthly' },
-    quote: { charge_today_cents: 0, next_invoice_cents: totalCents('scale', 'monthly', 12) }, stripe_invoice_id: null, applied_at: iso(p0), created_at: iso(p0 - 3 * D) });
+  change({ kind: 'change', from_state: st('scale', 12, 'monthly'), to_state: st('scale', 16, 'monthly'), scheduled: { plan: 'scale', accounts: 16, period: 'monthly' },
+    quote: { charge_today_cents: 0, next_invoice_cents: totalCents('scale', 'monthly', 16) }, stripe_invoice_id: null, applied_at: iso(p0), created_at: iso(p0 - 3 * D) });
 
-  addInvoice(s, w, { at: period(-2), periodEnd: period(-1), plan: 'scale', accounts: 10, period: 'monthly', cents: totalCents('scale', 'monthly', 10), kind: 'renewal' });
-  addInvoice(s, w, { at: period(-1), periodEnd: p0, plan: 'scale', accounts: 10, period: 'monthly', cents: totalCents('scale', 'monthly', 10), kind: 'renewal' });
-  addInvoice(s, w, { at: p0, periodEnd: period(1), plan: 'scale', accounts: 12, period: 'monthly', cents: totalCents('scale', 'monthly', 12), kind: 'renewal' });
+  addInvoice(s, w, { at: period(-2), periodEnd: period(-1), plan: 'scale', accounts: 12, period: 'monthly', cents: totalCents('scale', 'monthly', 12), kind: 'renewal' });
+  addInvoice(s, w, { at: period(-1), periodEnd: p0, plan: 'scale', accounts: 12, period: 'monthly', cents: totalCents('scale', 'monthly', 12), kind: 'renewal' });
+  addInvoice(s, w, { at: p0, periodEnd: period(1), plan: 'scale', accounts: 16, period: 'monthly', cents: totalCents('scale', 'monthly', 16), kind: 'renewal' });
 
-  // accounts connected per day (information only): the warm-up sender joined 9 days ago
+  // accounts connected per day (information only), counted from each account's connection date
   const sl = slots(s, w);
+  const occupying = s.t('outreach_senders').filter((x) => x.workspace_id === w.id && occupies(x));
   for (let d = 59; d >= 0; d--) {
     const dayMs = now - d * D;
-    const accounts = d > 9 ? sl.used - 1 : sl.used;
+    const accounts = Math.min(sl.used, occupying.filter((x) => Date.parse(x.created_at) <= dayMs).length);
     const mailboxes = sl.mailboxes;
     s.insert('outreach_billing_usage', {
-      workspace_id: w.id, day: iso(dayMs).slice(0, 10), accounts, accounts_billed: dayMs >= p0 ? 12 : 10, active_senders: accounts - mailboxes, active_mailboxes: mailboxes,
+      workspace_id: w.id, day: iso(dayMs).slice(0, 10), accounts, accounts_billed: dayMs >= p0 ? 16 : 12, active_senders: accounts - mailboxes, active_mailboxes: mailboxes,
     }, { noId: true, silent: true });
   }
 
@@ -276,7 +277,7 @@ function seedAudit(s: DemoStore, now: number) {
     [50 * D, ['api_key.created', 'api_key', key?.id ?? null, { name: key?.name, role: 'manager', client_ids: [] }, MEMBER.sam, 'user']],
     [45 * D, ['integration.connected', 'integration', integ?.id ?? null, { provider: 'hubspot', account: 'HubSpot (demo)' }, MEMBER.maya, 'user']],
     [35 * D, ['webhook.created', 'webhook', s.t('outreach_outbound_webhooks')[1]?.id ?? null, { url: s.t('outreach_outbound_webhooks')[1]?.url, events: s.t('outreach_outbound_webhooks')[1]?.events }, MEMBER.sam, 'user']],
-    [12 * D, ['billing.changed', 'workspace', DEMO_WS_ID, { to: { plan: 'scale', accounts_billed: 12, billing_period: 'monthly' } }, MEMBER.maya, 'user']],
+    [12 * D, ['billing.changed', 'workspace', DEMO_WS_ID, { to: { plan: 'scale', accounts_billed: 16, billing_period: 'monthly' } }, MEMBER.maya, 'user']],
     [2 * D, ['member.invited', 'invitation', s.t('outreach_invitations')[0]?.id ?? null, { email: 'jordan.ashford@example.com', role: 'member', emailed: true }, MEMBER.maya, 'user']],
   ];
   const entries: Array<{ at: number; a: A }> = fixed.map(([ago, a], k) => ({ at: now - ago - k * 13 * 60_000, a }));

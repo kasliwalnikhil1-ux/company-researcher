@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useSearchParams } from '@/lib/outreach/nav';
 import { callFn } from '@/lib/outreach/api';
 import type { Intent, Member, Message } from '@/lib/outreach/types';
@@ -51,6 +51,38 @@ export function useDebounced<T>(value: T, ms = 300): T {
   return v;
 }
 
+/**
+ * Touch phones and tablets: while this is mounted the page does not zoom — no pinch, no double-tap, and iOS does not zoom
+ * into a focused field (and stay there). The page's viewport tag comes back on unmount. iOS ignores user-scalable=no for
+ * pinches, so the gesture itself is cancelled as well.
+ */
+export function useNoZoom(enabled = true) {
+  useEffect(() => {
+    if (!enabled || typeof window === 'undefined' || !window.matchMedia?.('(pointer: coarse)').matches) return;
+    let meta = document.head.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    const before = meta ? meta.getAttribute('content') : null;
+    const created = !meta;
+    if (!meta) { meta = document.createElement('meta'); meta.name = 'viewport'; document.head.appendChild(meta); }
+    meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+    const html = document.documentElement;
+    const touchBefore = html.style.touchAction;
+    html.style.touchAction = 'manipulation';   // no double-tap zoom
+    const cancel = (e: Event) => e.preventDefault();
+    const pinch = (e: TouchEvent) => { if (e.touches.length > 1) e.preventDefault(); };
+    const opts: AddEventListenerOptions = { passive: false };
+    document.addEventListener('gesturestart', cancel, opts);
+    document.addEventListener('gesturechange', cancel, opts);
+    document.addEventListener('touchmove', pinch, opts);
+    return () => {
+      document.removeEventListener('gesturestart', cancel);
+      document.removeEventListener('gesturechange', cancel);
+      document.removeEventListener('touchmove', pinch);
+      html.style.touchAction = touchBefore;
+      if (created) meta?.remove(); else if (before !== null) meta?.setAttribute('content', before);
+    };
+  }, [enabled]);
+}
+
 export function useMediaQuery(query: string): boolean {
   const [match, setMatch] = useState(false);
   useEffect(() => {
@@ -61,6 +93,24 @@ export function useMediaQuery(query: string): boolean {
     return () => mq.removeEventListener('change', on);
   }, [query]);
   return match;
+}
+
+/**
+ * True while the element is narrower than `px` (the thread column, which the list / panel resizers squeeze independently
+ * of the viewport). Measured before paint and kept current with a ResizeObserver; only a flip re-renders.
+ */
+export function useNarrowerThan(ref: RefObject<HTMLElement | null>, px: number): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const check = () => setNarrow(el.getBoundingClientRect().width < px);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, px]);
+  return narrow;
 }
 
 /** A ticking clock; re-renders every `intervalMs` while `enabled`. */

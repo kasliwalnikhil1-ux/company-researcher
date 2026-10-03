@@ -3,10 +3,10 @@
 //                           quiet, one digest per conversation, at most one per 15 min)
 //   {"mode":"maintenance"}  every 5 min: wake snoozed conversations, unassign agents who went offline (per-inbox setting),
 //                           purge stale uploads and old page views
-//   {"mode":"review"}       every minute (migration 064): Review mode of the website assistant. Writes the suggestions a
+//   {"mode":"review"}       every minute (migration 064): Review mode of the website agent. Writes the suggestions a
 //                           request did not finish, expires the ones nobody answered within the website's review timeout
 //                           and posts its offline message (docs/outreach/AI-HUB.md §6)
-//   {"mode":"voice"}        every minute (migration 070): voice calls of the website assistant. Fetches the calls whose
+//   {"mode":"voice"}        every minute (migration 070): voice calls of the website agent. Fetches the calls whose
 //                           post-call webhook never arrived, deletes what a removed website / an erased visitor left at
 //                           the voice provider, and (every 5th minute, or with "sweep": true) brings every voice agent in
 //                           line with its website's settings (docs/outreach/WEBCHAT.md "Voice")

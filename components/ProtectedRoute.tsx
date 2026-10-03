@@ -168,29 +168,45 @@ function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | '
           <Image src={whitelabel.logoPath} alt={whitelabel.pageTitle} width={24} height={24} className="h-6 w-auto" />
           <span className="text-sm font-semibold tracking-tight text-gray-900">{whitelabel.pageTitle}</span>
         </div>
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-6 sm:p-8 pb-4 sm:pb-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in</p>
-            <h1 className="mt-1 text-2xl font-semibold text-gray-900">Book your 20-minute onboarding call</h1>
-            <p className="mt-2 text-sm text-gray-600 max-w-2xl">
-              Thanks for signing up. Every new account is set up on a short call: we connect your first sending accounts, build your first
-              sequence with you, setup your AI auto reply agent, and switch your workspace on.
-            </p>
-            <p className="mt-2 flex items-center gap-1 text-xs text-gray-400">
-              {email && <span>Signed in as {email}</span>}
-              {email && <span aria-hidden>·</span>}
-              <button type="button" onClick={onSignOut} className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-700 hover:underline">
-                <LogOut className="w-3 h-3" /> Sign out
-              </button>
-            </p>
+        <div className="px-6 sm:px-8 pt-6 sm:pt-8">
+          <p className="text-xs font-semibold uppercase tracking-wider text-indigo-600">You&apos;re in</p>
+          <h1 className="mt-1 text-2xl font-semibold text-gray-900">Welcome to {whitelabel.pageTitle}</h1>
+          <p className="mt-2 flex flex-wrap items-center gap-1 text-xs text-gray-400">
+            {email && <span>Signed in as {email}</span>}
+            {email && <span aria-hidden>·</span>}
+            <button type="button" onClick={onSignOut} className="inline-flex items-center gap-1 text-gray-400 hover:text-gray-700 hover:underline">
+              <LogOut className="w-3 h-3" /> Sign out
+            </button>
+          </p>
+        </div>
+
+        {/* the tour: its own area, first, since it needs nothing from us */}
+        <div className="mx-6 sm:mx-8 mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 rounded-xl border border-indigo-100 bg-indigo-50/50 p-5">
+          <div className="flex items-start gap-3">
+            <div className="shrink-0 w-10 h-10 rounded-lg flex items-center justify-center bg-indigo-100 text-indigo-600"><Compass className="w-5 h-5" /></div>
+            <div>
+              <p className="text-sm font-semibold text-gray-900">Take the product tour</p>
+              <p className="mt-0.5 text-sm text-gray-600">See it now, instant demo. A full workspace with sample data, no setup.</p>
+            </div>
           </div>
-          <div className="shrink-0 flex flex-col items-start sm:items-center gap-1">
-            {/* a plain link: the tour runs on its own in-browser data, so entering it is a full page load */}
-            <a href={DEMO_PREFIX} className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700" data-gate-product-tour>
-              <Compass className="w-4 h-4" /> Product tour
-            </a>
-            <span className="text-[11px] text-gray-400">See it now, instant demo</span>
-          </div>
+          {/* a plain link: the tour runs on its own in-browser data, so entering it is a full page load */}
+          <a href={DEMO_PREFIX} className="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700" data-gate-product-tour>
+            <Compass className="w-4 h-4" /> Product tour
+          </a>
+        </div>
+
+        <div className="flex items-center gap-3 px-6 sm:px-8 mt-8" role="separator">
+          <span className="h-px flex-1 bg-gray-200" />
+          <span className="text-xs uppercase tracking-wider text-gray-500">Or book your onboarding call</span>
+          <span className="h-px flex-1 bg-gray-200" />
+        </div>
+
+        <div className="px-6 sm:px-8 pt-6 pb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Book your 20-minute onboarding call</h2>
+          <p className="mt-1 text-sm text-gray-600 max-w-2xl">
+            Thanks for signing up. Every new account is set up on a short call: we connect your first sending accounts, build your first
+            sequence with you, setup your AI auto reply agent, and switch your workspace on.
+          </p>
         </div>
 
         <CalendlyEmbed email={email} name={name} onBooked={(booking) => { trackMySignup({ booked: true, booking }); }} />

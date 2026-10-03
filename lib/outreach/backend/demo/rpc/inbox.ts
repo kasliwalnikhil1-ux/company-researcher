@@ -11,6 +11,7 @@ import {
 } from '../inbox/shared';
 import { agentSend, webchatChat } from '../inbox/webchat';
 import { tableHooks } from '../query';
+import { faceFor } from '../seed/faces';
 import type { DemoStore, Row } from '../store';
 import { aiRpc } from './ai';
 
@@ -127,7 +128,7 @@ function leadFromVisitor(ctx: Ctx, v: Row): Row {
   const lead = s.insert('outreach_leads', {
     ...blank, workspace_id: ctx.ws, client_id: i?.client_id ?? null, first_name: first, last_name: rest.join(' ') || null, full_name: name, company: v.company ?? null,
     email_work: email, phone: v.phone ?? null, custom: {}, stage_id: newStage?.id ?? null, do_not_contact: false, unsubscribed: false, is_open_profile: false,
-    source: 'webchat', enrich_status: 'none', email_status: email ? 'unverified' : null, headline: v.company ? `at ${v.company}` : null, created_at: now, updated_at: now,
+    picture_url: v.avatar_url ?? (v.name ? faceFor(first, name) : null), source: 'webchat', enrich_status: 'none', email_status: email ? 'unverified' : null, headline: v.company ? `at ${v.company}` : null, created_at: now, updated_at: now,
   })[0];
   if (email) s.insert('outreach_lead_identities', { workspace_id: ctx.ws, lead_id: lead.id, provider: 'GMAIL', identifier: email, provider_id: null, verified: false, source: 'webchat', is_valid: null, last_checked_at: null, created_at: now });
   return lead;

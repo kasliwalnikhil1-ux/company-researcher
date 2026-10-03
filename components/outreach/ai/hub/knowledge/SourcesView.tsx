@@ -2,7 +2,7 @@
 
 // Knowledge → Sources (AI hub §6): every website, document, pasted text and product catalogue of the workspace with the
 // places that use it, plus the two fixed rows: the shared Q&A and the questions the AI could not answer.
-// A product catalogue (migration 068) is what the Website assistant recommends products from; a website source can
+// A product catalogue (migration 068) is what the Website agent recommends products from; a website source can
 // also collect the products its pages describe ("Also find products").
 import { Fragment, useState } from 'react';
 import Link from '@/lib/outreach/nav';
@@ -154,7 +154,7 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
             <tr>
               <td colSpan={cols} className="border-b border-gray-100">
                 <EmptyState icon={<BookOpen className="w-6 h-6" />} title="No sources yet"
-                  description="A source is a website, a document or a text the AI may take facts from, or a product catalogue the Website assistant recommends from. Replies and the Website assistant answer from the sources attached to them."
+                  description="A source is a website, a document or a text the AI may take facts from, or a product catalogue the Website agent recommends from. Replies and the Website agent answer from the sources attached to them."
                   action={canEdit ? (
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       <Button variant="secondary" onClick={() => onAdd('website')}><Plus className="w-4 h-4" aria-hidden="true" />Website</Button>
@@ -178,7 +178,7 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
                       </div>
                       {s.kind === 'catalogue' && <div className="text-xs text-gray-500 truncate">{PROVIDER_LABEL[s.catalogue?.provider ?? 'feed']}{s.catalogue?.currency ? ` · ${s.catalogue.currency}` : ''}</div>}
                       {s.kind === 'website' && (canEdit || s.detect_products) && (
-                        <label className="mt-1 flex items-center gap-1.5 text-xs text-gray-600" title="Pages that describe a product (most shop platforms do) become products the Website assistant can recommend">
+                        <label className="mt-1 flex items-center gap-1.5 text-xs text-gray-600" title="Pages that describe a product (most shop platforms do) become products the Website agent can recommend">
                           <input type="checkbox" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={!!s.detect_products} disabled={!canEdit || update.isPending} onChange={(e) => findProducts(s, e.target.checked)} />
                           Also find products
                           {s.detect_products && Number(s.products ?? 0) > 0 && <Link href={catalogueHref(s.id)} className="text-indigo-700 hover:underline">({products(Number(s.products))})</Link>}

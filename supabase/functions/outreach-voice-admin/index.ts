@@ -1,4 +1,4 @@
-// outreach-voice-admin — what the app needs for the website assistant's voice (web-chat-voice-elevenlabs-PRD.md §3, §4,
+// outreach-voice-admin — what the app needs for the website agent's voice (web-chat-voice-elevenlabs-PRD.md §3, §4,
 // §7.4, §9). User JWT (validated here; deployed --no-verify-jwt so the browser's preflight works). Customers never open
 // the voice provider: everything they set up goes through these routes.
 //

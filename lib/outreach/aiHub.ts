@@ -4,7 +4,7 @@
 // This file is the shared layer of the hub: the feature names, the three modes, the two views (Needs you, Activity)
 // and one hook per outreach_hub_* RPC of migration 063.
 //
-//   Names   Replies · Personalized lines · Step drafts · Website assistant · Profile drafts
+//   Names   Replies · Personalized lines · Step drafts · Website agents · Profile drafts
 //   Modes   Off · Review · Auto, the same three words everywhere. Storage is unchanged underneath:
 //           Replies         off | draft (= Review) | autopilot (= Auto)            outreach_sequence_reply_settings.mode
 //           Lines           off | review                                           outreach_ai_variables.mode
@@ -52,7 +52,7 @@ export const hubHref = {
 export type AiFeature = 'reply' | 'line' | 'draft' | 'website' | 'profile';
 export const AI_FEATURES: AiFeature[] = ['reply', 'line', 'draft', 'website', 'profile'];
 /** The feature's name (cards, filters, settings). */
-export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'Replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website assistant', profile: 'Profile drafts' };
+export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'Replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website agents', profile: 'Profile drafts' };
 /** One output of the feature (the Feature column of Activity, the type on a card). */
 export const FEATURE_ONE: Record<AiFeature, string> = { reply: 'Reply', line: 'Line', draft: 'Step draft', website: 'Website', profile: 'Profile' };
 export const FEATURE_HELP: Record<AiFeature, string> = {
@@ -418,7 +418,7 @@ export function useQaDelete(ws: string | null | undefined) {
     onSuccess: () => { if (ws) qc.invalidateQueries({ queryKey: hk.all(ws) }); qc.invalidateQueries({ queryKey: ['outreach', 'sequence'] }); },
   });
 }
-/** "Add answer" on a Question card: a shared Q&A pair, so Replies and the Website assistant both answer it next time. */
+/** "Add answer" on a Question card: a shared Q&A pair, so Replies and the Website agent both answer it next time. */
 export function useQuestionAnswer(ws: string | null | undefined) {
   const invalidate = useInvalidateHub(ws);
   const qc = useQueryClient();
@@ -515,8 +515,8 @@ export function useWebchatSuggestion(chatId: string | null | undefined, enabled:
 /** File types the knowledge reader extracts. The same list for the library's upload and the one on a sequence's AI tab. */
 export const KNOWLEDGE_FILE_ACCEPT = '.txt,.md,.markdown,.html,.htm,text/plain,text/markdown,text/html';
 
-/** "Website assistant (kaptured.ai)" for a website, the sequence's name for a sequence: the Used by column. */
-export const knowledgeTargetText = (t: Pick<KnowledgeTarget, 'kind' | 'name'>) => (t.kind === 'website' ? `Website assistant (${t.name ?? 'a website'})` : t.name ?? 'A sequence');
+/** "Website agent (kaptured.ai)" for a website, the sequence's name for a sequence: the Used by column. */
+export const knowledgeTargetText = (t: Pick<KnowledgeTarget, 'kind' | 'name'>) => (t.kind === 'website' ? `Website agent (${t.name ?? 'a website'})` : t.name ?? 'A sequence');
 /** Where a place that uses knowledge is set up: the sequence's AI tab, the website's assistant tab. */
 export const knowledgeTargetHref = (t: Pick<KnowledgeTarget, 'kind' | 'id'>) => (t.kind === 'website' ? `/outreach/websites/${t.id}?tab=ai` : `/outreach/sequences/${t.id}?tab=ai`);
 

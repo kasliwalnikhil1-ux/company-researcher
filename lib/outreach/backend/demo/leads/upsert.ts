@@ -4,6 +4,7 @@
  * Used by the CSV and LinkedIn-source imports (and usable by any handler that creates leads).
  */
 import { demoError } from '../ctx';
+import { faceFor } from '../seed/faces';
 import type { DemoStore, Row } from '../store';
 import { identityNormalize, leadDefaults, linkedInProfileUrl, normEmail, normalizeHandle, normalizePhone } from './util';
 
@@ -82,7 +83,7 @@ export function upsertLead(store: DemoStore, ws: string, p: Row, source: string 
     const row = store.insert('outreach_leads', leadDefaults({
       client_id: nz(p.client_id), public_identifier: pid, provider_id: nz(p.provider_id), profile_url: nz(p.profile_url),
       first_name: nz(p.first_name), last_name: nz(p.last_name), full_name: nz(p.full_name), headline: nz(p.headline), company: nz(p.company), company_id: nz(p.company_id),
-      title: nz(p.title), location: nz(p.location), picture_url: nz(p.picture_url), phone: nz(p.phone), company_domain: cleanDomain(p.company_domain),
+      title: nz(p.title), location: nz(p.location), picture_url: nz(p.picture_url) ?? faceFor(nz(p.first_name) ?? String(p.full_name ?? '').split(' ')[0], String(pid ?? p.full_name ?? ew ?? '')), phone: nz(p.phone), company_domain: cleanDomain(p.company_domain),
       email_work: ew, email_personal: ep, is_open_profile: p.is_open_profile == null ? null : !!p.is_open_profile,
       custom: p.custom && typeof p.custom === 'object' ? { ...p.custom } : {}, list_id: nz(p.list_id), stage_id: nz(p.stage_id), source, import_job_id: importJob,
       last_profile_fetch_at: p.profile_fetched ? new Date().toISOString() : null,

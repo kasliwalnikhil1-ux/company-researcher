@@ -5,7 +5,7 @@
 //   - `finders` replaces the whole ordered list; an entry without `key` keeps the key already saved for that provider
 //   - `ensure: true` makes sure the secrets row exists (it carries the booking webhook secret) and changes nothing else
 //   - an LLM key is proven with one tiny call before it is saved (E_AI_KEY_INVALID carries the provider's own message)
-//   - `elevenlabs` is the workspace's own voice account for the website assistant (web-chat-voice-elevenlabs-PRD.md §12): the key
+//   - `elevenlabs` is the workspace's own voice account for the website agent (web-chat-voice-elevenlabs-PRD.md §12): the key
 //     is proven (it must list voices and agents), our post-call webhook is created in that account when the key may do
 //     that (otherwise finished calls are fetched by the worker), and the website's voice agents move to that account at
 //     the next sync. `elevenlabs: null` goes back to the platform's account.
@@ -177,7 +177,7 @@ serve("workspace-secrets", (req) => withMessage(async () => {
       // theirs). A key that may not create webhooks is fine: finished calls are then fetched by the worker.
       let webhook = "fetched by the worker";
       try {
-        const w = await el.webhooks.create(acct, "GrowthxAI website assistant", WEBHOOK_URL);
+        const w = await el.webhooks.create(acct, "GrowthxAI website agent", WEBHOOK_URL);
         if (w?.webhook_id && w.webhook_secret) { Object.assign(next, { elevenlabs_webhook_id: w.webhook_id, elevenlabs_webhook_secret_enc: await encrypt(w.webhook_secret) }); webhook = "webhook"; }
       } catch (e) { log({ fn: "workspace-secrets", warn: "voice webhook not created in the workspace's account", detail: elMessage(e) }); }
       changed.elevenlabs = { key_hint: hint(key), calls_confirmed_by: webhook };

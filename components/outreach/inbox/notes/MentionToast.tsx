@@ -29,7 +29,7 @@ function Item({ n, onDismiss }: { n: IncomingNotification; onDismiss: () => void
 export default function MentionToast({ items, onDismiss }: { items: IncomingNotification[]; onDismiss: (id: string) => void }) {
   if (!items.length) return null;
   return (
-    <div className="fixed top-4 right-4 z-[70] flex flex-col gap-2 pointer-events-none" aria-live="polite">
+    <div className="fixed top-[calc(1rem_+_var(--demo-bar,0px))] right-4 z-[70] flex flex-col gap-2 pointer-events-none" aria-live="polite">
       {items.map((n) => <Item key={n.id} n={n} onDismiss={() => onDismiss(n.id)} />)}
     </div>
   );

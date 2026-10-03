@@ -1,5 +1,5 @@
 /**
- * Website assistant (web chat) in the demo: the settings defaults and merge (outreach_webchat_default_settings() as
+ * Website agent (web chat) in the demo: the settings defaults and merge (outreach_webchat_default_settings() as
  * 053 + 063 + 068 + 069 leave it), the checks a save runs (053 settings_check, 068 buttons_check / products_fix, 069
  * voice_check), business hours, availability and the inbox JSON the UI reads (outreach_webchat__inbox_json).
  * Relative imports only; no network.

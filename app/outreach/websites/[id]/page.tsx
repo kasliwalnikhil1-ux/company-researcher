@@ -1,6 +1,6 @@
 'use client';
 
-// AI Website Chatbots → {inbox}: every §12 section of web-chat-PRD.md, grouped into eight horizontal tabs (?tab=). A tab
+// Website agents → {inbox}: every §12 section of web-chat-PRD.md, grouped into eight horizontal tabs (?tab=). A tab
 // stacks its sections as cards; each keeps its own Save. Old one-section tab keys land on their group, at that card.
 
 import { useEffect, useMemo, useState } from 'react';
@@ -28,7 +28,7 @@ const TABS: Array<{ key: string; label: string; sections: Section[] }> = [
   { key: 'general', label: 'General', sections: [{ key: 'general', C: GeneralSection }] },
   { key: 'design', label: 'Design', sections: [{ key: 'appearance', C: AppearanceSection }, { key: 'launcher', C: LauncherSection }, { key: 'video', C: VideoBubbleSection }, { key: 'ask', C: AskButtonsSection }] },
   { key: 'conversation', label: 'Conversation', sections: [{ key: 'messages', C: MessagesSection }, { key: 'prechat', C: PreChatSection }, { key: 'features', C: FeaturesSection }, { key: 'canned', C: CannedSection }] },
-  { key: 'ai', label: 'AI assistant', sections: [{ key: 'ai', C: AssistantSection }] },
+  { key: 'ai', label: 'AI agent', sections: [{ key: 'ai', C: AssistantSection }] },
   { key: 'voice', label: 'Voice', sections: [{ key: 'voice', C: VoiceSection }] },
   { key: 'targeting', label: 'Targeting & hours', sections: [{ key: 'targeting', C: TargetingSection }, { key: 'availability', C: AvailabilitySection }] },
   { key: 'install', label: 'Install & security', sections: [{ key: 'install', C: InstallSection }, { key: 'security', C: SecuritySection }] },
@@ -92,7 +92,7 @@ export default function WebsitePage() {
               <div className="min-w-0">
                 <h1 className="text-xl font-bold text-gray-900 truncate">{inbox.name}</h1>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
-                  <span>Website assistant</span>
+                  <span>Website agents</span>
                   {inbox.allowed_domains.length > 0 && <span>· {inbox.allowed_domains.slice(0, 2).join(', ')}{inbox.allowed_domains.length > 2 && ` +${inbox.allowed_domains.length - 2}`}</span>}
                   {client && <span>· {client.name}</span>}
                   <span>· v{inbox.config_version}</span>
@@ -103,7 +103,7 @@ export default function WebsitePage() {
               {inbox.is_active
                 ? <Badge tone={inbox.availability.online ? 'green' : 'gray'}>{inbox.availability.online ? 'Online' : 'Offline'}</Badge>
                 : <Badge tone="gray">Widget off</Badge>}
-              <Badge tone={inbox.ai_enabled ? 'indigo' : 'gray'}>{inbox.ai_enabled ? 'Assistant on' : 'Assistant off'}</Badge>
+              <Badge tone={inbox.ai_enabled ? 'indigo' : 'gray'}>{inbox.ai_enabled ? 'AI agent on' : 'AI agent off'}</Badge>
               {isOwner && <Button size="sm" variant="ghost" className="text-red-600" onClick={() => setConfirm(true)}><Trash2 className="w-3.5 h-3.5 mr-1" />Delete website</Button>}
             </div>
           </div>

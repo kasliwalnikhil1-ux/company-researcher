@@ -81,7 +81,7 @@
     { "key": "priority_processing", "label": "Priority processing", "launch": false, "scale": false, "enterprise": true },
     { "key": "ai_limits", "label": "AI limits", "launch": true, "scale": true, "enterprise": true, "limits": { "launch": 100, "scale": 100, "enterprise": 200 }, "limit_unit": "percent of the standard AI allowance" },
     { "key": "webchat_inboxes", "label": "Website chat inboxes", "launch": true, "scale": true, "enterprise": true, "limits": { "launch": 1, "scale": 3, "enterprise": null } },
-    { "key": "voice_minutes", "label": "Voice minutes for the website assistant", "launch": false, "scale": true, "enterprise": true, "limits": { "launch": 0, "scale": 100, "enterprise": 300 }, "limit_unit": "minutes a month" },
+    { "key": "voice_minutes", "label": "Voice minutes for the website agent", "launch": false, "scale": true, "enterprise": true, "limits": { "launch": 0, "scale": 100, "enterprise": 300 }, "limit_unit": "minutes a month" },
     { "key": "voice_max_minutes", "label": "Longest voice call", "launch": true, "scale": true, "enterprise": true, "limits": { "launch": 5, "scale": 10, "enterprise": 30 }, "limit_unit": "minutes" },
     { "key": "voice_concurrency", "label": "Voice calls at the same time", "launch": true, "scale": true, "enterprise": true, "limits": { "launch": 2, "scale": 5, "enterprise": 10 } },
     { "key": "voice_own_key", "label": "Your own ElevenLabs account for voice (no minute cap)", "launch": false, "scale": true, "enterprise": true }

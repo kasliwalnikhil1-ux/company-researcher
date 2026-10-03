@@ -183,7 +183,7 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
     return (
       <>
         <DemoBar.Placeholder />
-        <PageLoader className="min-h-screen" />
+        <PageLoader className="min-h-[calc(100dvh_-_3.5rem_-_var(--demo-bar,0px))] md:min-h-[calc(100dvh_-_var(--demo-bar,0px))]" />
       </>
     );
   }

@@ -3,6 +3,7 @@
  * Payments, CRM sign-ins and invitation emails are stand-ins (PRD §3.4): a fake checkout or consent step, then the
  * change lands in the local tables. Return URLs stay inside /product-tour.
  */
+import { faceFor } from '../seed/faces';
 import { FIRST_NAMES, LAST_NAMES, COMPANIES, TITLES, LOCATIONS, slug } from '../seed/names';
 import { DAY, demoError, type Ctx, type FnArea, type FnRequest } from '../ctx';
 import type { Row } from '../store';
@@ -135,7 +136,7 @@ function importLeads(ctx: Ctx, integ: Row, seg: { id: string; name: string; coun
     const company = COMPANIES[(n * 3 + 1) % COMPANIES.length], title = TITLES[(n * 5 + 2) % TITLES.length];
     const row: Row = Object.fromEntries(Object.keys(tpl).filter((key) => key !== 'id' && key !== 'created_at' && key !== 'updated_at').map((key) => [key, null]));
     Object.assign(row, {
-      workspace_id: integ.workspace_id, client_id: clientId, public_identifier: ident, provider_id: null, profile_url: null, first_name: first, last_name: last, full_name: `${first} ${last}`,
+      workspace_id: integ.workspace_id, client_id: clientId, public_identifier: ident, provider_id: null, profile_url: null, first_name: first, last_name: last, full_name: `${first} ${last}`, picture_url: faceFor(first, ident),
       headline: `${title} at ${company}`, company, title, location: LOCATIONS[n % LOCATIONS.length], email_work: `${slug(first)}.${slug(last)}.crm@example.com`.replace(/-/g, ''),
       custom: { crm_source: CRM[integ.provider]?.label ?? integ.provider, crm_segment: seg.name }, list_id: listId, stage_id: s.t('outreach_stages').find((x) => x.workspace_id === integ.workspace_id && x.kind === 'new')?.id ?? null,
       do_not_contact: false, unsubscribed: false, source: 'crm', import_job_id: null, enrich_status: 'none', email_status: 'unverified', is_open_profile: false,

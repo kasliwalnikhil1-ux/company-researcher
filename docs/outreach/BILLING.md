@@ -120,13 +120,12 @@ Also ask the connector's support (PRD §17 #5): does a signed-out account count 
 |---|---|---|
 | Not run against real Stripe | Field paths and proration behaviour rest on Stripe's docs for `2026-08-26.dahlia` and on the fake | Section 6 |
 | Migration 056–060 not dry-run on the live database | A new enum value cannot be used in the transaction that adds it, so the usual "migration + smoke test, rolled back" run needs `056` applied first. All 25 in-place patches were checked to match the live function bodies | Apply `056`, then dry-run the rest with `smoke_14` |
-| Website inbox limit has no upgrade note in the UI | The server refuses (`E_PLAN_LIMIT`); the page shows the raw message | `app/outreach/websites/page.tsx` (new, someone else's work in progress): `usePlanFeature(ws, 'webchat_inboxes')` |
+| Website inbox limit: the Add website refusal is still the server's message | The list page now says the plan's number (`usePlanFeature(ws, 'webchat_inboxes')`) and links the next plan at the limit (3 Oct 2026) | `app/outreach/websites/page.tsx` |
 | CRM "Sync now" stays clickable on a plan without CRM sync | The server skips the sync; the button does nothing useful | `components/outreach/settings/IntegrationPanel.tsx` |
 | Admin console has no field for a trial's account limit | The RPC accepts `trial_account_limit`; only the UI is missing | `components/admin/OutreachTab.tsx` |
 | `custom_price_id` and the early-supporter discount set by an admin do not change a live Stripe subscription | They apply at the next checkout or plan change | Change the subscription in Stripe as well |
 | Members can read the workspace row, billing columns included | The hosted invoice link of a pending payment is visible to every member | Column-level `select` grants on `outreach_workspaces` |
-| Two lines of old plan names in the website-chat screens ("Pro and Agency plans") | Copy only | `components/outreach/settings/websites/sections.tsx`, `app/outreach/websites/page.tsx` |
-| Website copy (PRD §11.5) and help-centre pages | Still say 14 days / 3 accounts | `outreach-app-website`, `outreach-app-docs` |
+| Website copy (PRD §11.5) | Still says 14 days / 3 accounts. The help-centre pages (`outreach-app-docs`) were rewritten for Launch / Scale / Enterprise on 3 Oct 2026 | `outreach-app-website` |
 
 ## 9. Decisions still open (PRD §16)
 

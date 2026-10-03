@@ -502,12 +502,19 @@ export class Engine {
     const lead = this.lead(ev.lead_id);
     const sender = this.sender(ev.sender_id);
     if (!chat || !lead || !sender) return null;
-    const intent: ReplyIntent = ev.follow_up ? 'interested' : this.pickIntent();
+    const mail = MAIL.has(sender.provider);
+    // LinkedIn has no out-of-office auto-replies: those prospects just answer later
+    let intent: ReplyIntent = ev.follow_up ? 'interested' : this.pickIntent();
+    if (!mail && intent === 'ooo') intent = 'not_now';
     const first = String(sender.display_name ?? '').split(' ')[0] || 'there';
-    const text = (ev.follow_up ? this.store.pick(FOLLOW_UP_REPLIES) : this.store.pick(REPLY_BANK[intent])).replace('{first}', first).replace('{company}', lead.company ?? 'our team');
+    // "thanks for connecting" only makes sense on LinkedIn
+    const bank = (ev.follow_up ? FOLLOW_UP_REPLIES : REPLY_BANK[intent]).filter((t) => !mail || !/connect/i.test(t));
+    let text = this.store.pick(bank).replace('{first}', first).replace('{company}', lead.company ?? 'our team');
+    // an email reply reads like an email: greeting and sign-off, except for auto-replies
+    if (mail && intent !== 'ooo') text = `${/^(hi|hello|thanks)\b/i.test(text) ? '' : `Hi ${first},\n\n`}${text}\n\n${lead.first_name ?? ''}`.trim();
     const msg = this.appendMessage(chat, { direction: 'in', text, at, replied_to_action_id: ev.action_id ?? null, intent: ev.follow_up ? null : intent, summary: ev.follow_up ? null : SUMMARIES[intent] });
     this.store.update('outreach_lead_sender_state', (r) => r.lead_id === lead.id && r.sender_id === sender.id, { replied: true, last_inbound_at: iso(at) });
-    const channel = MAIL.has(sender.provider) ? 'email' : String(sender.provider).toLowerCase();
+    const channel = mail ? 'email' : String(sender.provider).toLowerCase();
     const stageKind = intent === 'interested' ? 'interested' : 'replied';
     const target = this.store.t('outreach_stages').find((s) => s.kind === stageKind);
     const current = this.store.get('outreach_stages', lead.stage_id);

@@ -8,7 +8,8 @@
  */
 import { driver, type Driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
-import { DEMO_TOUR_AI_CHAT_ID, DEMO_TOUR_SEQUENCE_ID } from '@/lib/outreach/demoIds';
+import { DEMO_TOUR_AI_CHAT_ID, DEMO_TOUR_SEQUENCE_ID, DEMO_WS_ID } from '@/lib/outreach/demoIds';
+import { filtersKey } from '@/lib/outreach/persistedFilters';
 import { kv } from '@/lib/outreach/storage';
 
 /**
@@ -28,7 +29,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Press start, it runs every day', text: 'Leads move through the steps on their own, every working day. You only step in when someone wants to talk.' },
   { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-thread"]', title: 'AI talks to your prospects', side: 'left', text: 'When someone replies, AI answers their questions and sends your calendar link. Here it handled the whole conversation and the prospect booked a call.' },
   { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-list"]', title: 'Every reply in one place', side: 'right', text: 'LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want.' },
-  { route: '/outreach/reports?tab=funnel', element: '[data-tour="funnel-meeting"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
+  { route: '/outreach/reports?tab=funnel', element: '[data-tour="funnel-path"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
 ];
 
 export type TourState = { kind: 'idle' } | { kind: 'step'; index: number } | { kind: 'done' } | { kind: 'skipped' };
@@ -75,6 +76,26 @@ function focusCanvas(type: TourStep['canvas']): Promise<string | null> {
   });
 }
 
+/**
+ * Put the target on screen before Driver measures it. Driver's own smooth scroll moves the app's inner scroll area
+ * after it has placed the popover, which leaves the popover over the highlight. A popover above the target needs
+ * room above it, so that target goes to the bottom of the window.
+ */
+function bringIntoView(el: HTMLElement, side: TourStep['side']) {
+  const r = el.getBoundingClientRect();
+  const vh = window.innerHeight;
+  if (r.height > vh) return;
+  const ROOM = 240; // popover height + arrow + gap
+  if (side === 'top') {
+    if (r.top >= ROOM && r.bottom <= vh) return;
+    el.style.scrollMarginBottom = '16px';
+    el.scrollIntoView({ block: 'end', behavior: 'instant' });
+  } else {
+    if (r.top >= 0 && r.bottom <= vh) return;
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+  }
+}
+
 export interface TourController {
   start(): void;
   stop(): void;
@@ -108,6 +129,9 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     const my = ++token;
     const step = TOUR_STEPS[i];
     writeTourState(`step:${i}`);
+    // the inbox remembers the visitor's filters (Unread, Mine, a channel…), which would leave only a few conversations
+    // in the list: open it on All. The inbox reads them when it mounts, so this runs before navigating.
+    if (step.route.startsWith('/outreach/inbox')) { try { kv.removeItem(filtersKey('inbox', DEMO_WS_ID)); } catch { /* storage blocked */ } }
     if (o.currentPath() !== step.route.split('?')[0] || step.route.includes('?')) o.navigate(step.route);
     if (step.click) {
       const target = await waitFor(step.click, 4000);
@@ -122,6 +146,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
       if (my !== token || !running) return;
       if (id && step.canvas !== 'top') el = document.querySelector(`.react-flow__node[data-id="${CSS.escape(id)}"] ${step.element}`) ?? el;
     }
+    if (el && !step.top && !step.canvas) bringIntoView(el as HTMLElement, step.side);
     destroy();
     const last = i === TOUR_STEPS.length - 1;
     drv = driver({

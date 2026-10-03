@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { notePreview } from './notes/NoteBody';
 import { useChatNotes, useCreateNote, useDeleteNote, useMarkNoteRead, useUpdateNote, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
@@ -19,7 +19,8 @@ import ChatList from './ChatList';
 import Thread, { type ConvertKind } from './Thread';
 import LeadPanel from './LeadPanel';
 import VisitorPanel from './webchat/VisitorPanel';
-import { isTypingTarget, useDebounced, useMediaQuery } from './hooks';
+import ColumnResizer, { usePaneWidth } from './ColumnResizer';
+import { isTypingTarget, useDebounced, useMediaQuery, useNoZoom } from './hooks';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { useStageOptions } from './ai/useAiInbox';
 import { useChatAiState } from '@/lib/outreach/aiReplies';
@@ -30,6 +31,8 @@ export interface InboxRestrict { ids: string[]; label: string }
 type InboxFilters = ChatFilters & { sequence_id?: string | null };
 
 // Filters are remembered per workspace in this browser; the search is never stored (it is not a key of the defaults).
+const LIST_MIN = 260, LIST_MAX = 640, PANEL_MIN = 280, PANEL_MAX = 560, THREAD_MIN = 360;
+
 const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null, ai: null, stage: null };
 
 export default function InboxView({ chatId, initialFilters, restrict }: { chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null }) {
@@ -57,7 +60,18 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   const [panelOpen, setPanelOpen] = useState(false);
   const [convert, setConvert] = useState<ConvertKind | null>(null);
   const debouncedSearch = useDebounced(search.trim(), 300);
-  const isXl = useMediaQuery('(min-width: 1280px)');
+  // the lead panel docks only where the thread still keeps a comfortable width beside it; below that it slides over
+  const isXl = useMediaQuery('(min-width: 1440px)');
+  // phones: typing or tapping in the inbox never zooms the page
+  useNoZoom();
+  // Draggable column widths (remembered in this browser); the thread keeps at least THREAD_MIN px.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const [listW, setListW] = usePaneWidth('list', LIST_MIN, LIST_MAX);
+  const [panelW, setPanelW] = usePaneWidth('panel', PANEL_MIN, PANEL_MAX);
+  const spaceFor = (other: RefObject<HTMLElement | null>, cap: number) => () =>
+    Math.min(cap, (rootRef.current?.clientWidth ?? 0) - (other.current?.offsetWidth ?? 0) - THREAD_MIN);
 
 
   const effectiveFilters = useMemo<ChatFilters>(() => { const { sequence_id: _seq, ...rest } = filters; return { ...rest, search: debouncedSearch || undefined }; }, [filters, debouncedSearch]);
@@ -242,9 +256,13 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
 
   const showList = !chatId;
   return (
-    <div className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh-3.5rem)] md:h-[100dvh] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
+    <div ref={rootRef} className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh_-_3.5rem_-_var(--demo-bar,0px))] md:h-[calc(100dvh_-_var(--demo-bar,0px))] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
       {/* Left: chat list */}
-      <aside className={cn('w-full md:w-80 lg:w-96 flex-shrink-0 border-r border-gray-200 min-h-0', showList ? 'flex' : 'hidden md:flex', 'flex-col')}>
+      <aside
+        ref={listRef}
+        style={listW ? ({ '--inbox-list-w': `${listW}px` } as CSSProperties) : undefined}
+        className={cn('w-full flex-shrink-0 border-r border-gray-200 min-h-0', listW ? 'md:w-[var(--inbox-list-w)] md:max-w-[50%]' : 'md:w-72 lg:w-80 2xl:w-96', showList ? 'flex' : 'hidden md:flex', 'flex-col')}
+      >
         <ChatList
           rows={rows} loading={!filtersReady || chatsQ.isLoading || waitingForSeq} error={listError ? parseError(listError).message : null}
           sequences={sequencesQ.data} sequenceId={sequenceId} onSequence={(id) => patchFilters({ sequence_id: id })}
@@ -255,6 +273,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
           ws={ws} mentionsView={mentionsView} onMentionsView={(v) => { setMentionsView(v); router.replace(chatId ? `/outreach/inbox/${chatId}${v ? '?view=mentions' : ''}` : `/outreach/inbox${v ? '?view=mentions' : ''}`); }} onSelectMention={selectMention}
         />
       </aside>
+      <ColumnResizer className="hidden md:block" paneRef={listRef} edge="right" min={LIST_MIN} max={spaceFor(panelRef, LIST_MAX)} onResize={setListW} />
 
       {/* Middle: thread */}
       <main className={cn('flex-1 min-w-0 min-h-0', showList ? 'hidden md:flex' : 'flex', 'flex-col')}>
@@ -297,11 +316,14 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
       {chat && (
         <>
           {isXl && (
-            <aside className="flex w-80 flex-shrink-0 border-l border-gray-200 min-h-0 flex-col">
+            <>
+            <ColumnResizer paneRef={panelRef} edge="left" min={PANEL_MIN} max={spaceFor(listRef, PANEL_MAX)} onResize={setPanelW} />
+            <aside ref={panelRef} style={panelW ? { width: panelW, maxWidth: '40%' } : undefined} className="flex w-80 flex-shrink-0 border-l border-gray-200 min-h-0 flex-col">
               {chat.provider === 'WEBCHAT'
                 ? <VisitorPanel chat={chat} workspaceId={ws} canWrite={canWrite} isManager={isManager} members={membersQ.data} toast={toast.show} />
                 : <LeadPanel chat={chat} workspaceId={ws} canWrite={canWrite} members={membersQ.data} currentUserId={userId} requestedAction={convert} taskPrefill={taskPrefill} onActionHandled={onActionHandled} toast={toast.show} />}
             </aside>
+            </>
           )}
           {!isXl && panelOpen && (
             <div className="fixed inset-0 z-40 flex justify-end">

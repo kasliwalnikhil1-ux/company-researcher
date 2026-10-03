@@ -276,25 +276,38 @@ function seedRecentReplies(s: DemoStore, now: number, engine: Engine): Row[] {
     .filter((c) => { const l = s.get('outreach_leads', c.lead_id); return l && !l.do_not_contact && !l.unsubscribed; })
     .filter((c) => now - Date.parse(lastOf.get(c.id)!.sent_at) < 25 * D && now - Date.parse(lastOf.get(c.id)!.sent_at) > 8 * H)
     .sort((a, b) => String(b.last_message_at).localeCompare(String(a.last_message_at)));
+  // the top of the inbox is mostly LinkedIn (one thread per sender before any repeats), with an email every few rows
+  const bySender = (list: Row[]) => {
+    const queues = new Map<string, Row[]>();
+    for (const c of list) (queues.get(c.sender_id) ?? queues.set(c.sender_id, []).get(c.sender_id)!).push(c);
+    const out: Row[] = [];
+    for (let round = 0; out.length < list.length; round++) for (const q of queues.values()) if (q[round]) out.push(q[round]);
+    return out;
+  };
+  const li = bySender(candidates.filter((c) => c.provider === 'LINKEDIN'));
+  const mail = bySender(candidates.filter((c) => MAIL.has(c.provider)));
+  const pattern = 'LLLMLLLLMLLLMLL';
   const picked: Row[] = [];
-  const step = Math.max(1, Math.floor(candidates.length / 9));
-  for (let k = 0; k < candidates.length && picked.length < 9; k += step) picked.push(candidates[k]);
+  for (const ch of pattern) { const c = ch === 'L' ? li.shift() : mail.shift(); if (c) picked.push(c); }
   const team = [MEMBER.maya, MEMBER.sam, MEMBER.priya];
   picked.forEach((c, k) => {
     const last = lastOf.get(c.id)!;
     const lastMs = Date.parse(last.sent_at);
-    // replies land between the last message and now, mostly in the last few days
-    const at = Math.min(now - (30 + k * 37) * M, Math.max(lastMs + 2 * H, now - (1 + k * 0.6) * D));
+    // replies land in the last few hours, newest first in pattern order
+    const at = Math.max(lastMs + 2 * H, now - (12 + k * 38) * M);
     engine.deliverReply({ chat_id: c.id, lead_id: c.lead_id, sender_id: c.sender_id, action_id: last.action_id ?? null }, at);
-    if (k % 2 === 1 && at < now - 4 * H) {
+    if (k % 3 === 2 && at < now - 90 * M) {
       const lead = s.get('outreach_leads', c.lead_id);
       const first = String(lead?.first_name ?? 'there');
-      const who = team[k % team.length];
+      const snd = s.get('outreach_senders', c.sender_id);
+      const who = team[Math.floor(k / 3) % team.length];
+      // an email is signed by the mailbox's owner; on LinkedIn the account's name is already on the message
+      const signer = String(snd?.display_name ?? NAMES[who]).split(' ')[0];
       const text = MAIL.has(c.provider)
-        ? `Hi ${first},\n\nThanks for getting back to me. Happy to walk you through it, does Thursday at 2pm or Friday morning work?\n\nBest,\n${NAMES[who].split(' ')[0]}`
+        ? `Hi ${first},\n\nThanks for getting back to me. Happy to walk you through it, does Thursday at 2pm or Friday morning work?\n\nBest,\n${signer}`
         : `Thanks ${first}! Happy to walk you through it. Does Thursday at 2pm or Friday morning work for a quick call?`;
-      addMessage(s, c, { direction: 'out', text, at: at + 50 * M, origin: 'inbox_user', sent_by: who, read_at: c.provider === 'LINKEDIN' ? iso(at + 2 * H) : null });
-      if (k % 4 === 1 && at + 3 * H < now - 20 * M) engine.deliverReply({ chat_id: c.id, lead_id: c.lead_id, sender_id: c.sender_id, follow_up: true }, at + 3 * H);
+      addMessage(s, c, { direction: 'out', text, at: at + 50 * M, origin: 'inbox_user', sent_by: who, read_at: c.provider === 'LINKEDIN' && at + 70 * M < now ? iso(at + 70 * M) : null });
+      if (k % 2 === 1 && at + 80 * M < now - 5 * M) engine.deliverReply({ chat_id: c.id, lead_id: c.lead_id, sender_id: c.sender_id, follow_up: true }, at + 80 * M);
     }
   });
   return picked;
@@ -505,13 +518,15 @@ function seedNotes(s: DemoStore, now: number, wa: Row[], web: Row[], assigned: R
 // ------------------------------------------------------------------------------------------------
 export function seedInbox(s: DemoStore, now: number): void {
   const engine = engineFor(s);
-  const wa = seedWhatsApp(s, now, engine);
-  const ig = seedInstagram(s, now, engine);
+  // LinkedIn leads the inbox (fresh replies in the last few hours, an email every few rows); the WhatsApp, Instagram
+  // and website showcases are played a little earlier so they sit below that block
+  const wa = seedWhatsApp(s, now - 9 * H, engine);
+  const ig = seedInstagram(s, now - 11 * H, engine);
   const mail = seedEmailShowcase(s, now, engine);
   const li = seedLinkedInShowcase(s, now, engine);
   const booked = seedAiBookedShowcase(s, now, engine);
   const fresh = seedRecentReplies(s, now, engine);
-  const web = seedWebchatChats(s, now);
+  const web = seedWebchatChats(s, now - 8 * H);
   const keep = new Set([...wa, ...ig, ...mail, ...li, ...booked, ...fresh, ...web].map((c) => c.id));
   const assigned = seedTriage(s, now, keep);
   seedNotes(s, now, wa, web, assigned);

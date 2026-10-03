@@ -7,7 +7,7 @@ import { type Ctx, tool, z, wsParam, resolveWs, requireRole, urpc, gate, untrust
 type Row = Record<string, any>;
 
 /**
- * Website assistant mode in the app's words (lib/outreach/aiHub.ts websiteModeText): Off · Review · Auto · always |
+ * Website agent mode in the app's words (lib/outreach/aiHub.ts websiteModeText): Off · Review · Auto · always |
  * Auto · outside business hours. Stored as ai_enabled + settings.ai.mode (off | first | offline_only | review).
  */
 export function websiteModeLabel(i: Row): string {
@@ -29,7 +29,7 @@ function inboxSummary(i: Row): Row {
 export function registerWebchat(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "webchat_inboxes_list", title: "Website chat inboxes", cls: "read", minRole: "client_viewer", annotations: { readOnlyHint: true },
-    description: "List the website chat inboxes (one per site) with online state, collaborators, the Website assistant mode (ai = the stored value off | first | offline_only | review; ai_label says it as the app does: Off · Review · Auto), open / waiting counts and where the widget was seen installed. Settings details: webchat_inbox_get. Switch the assistant with website_assistant_set_mode.",
+    description: "List the website chat inboxes (one per site) with online state, collaborators, the Website agent mode (ai = the stored value off | first | offline_only | review; ai_label says it as the app does: Off · Review · Auto), open / waiting counts and where the widget was seen installed. Settings details: webchat_inbox_get. Switch the assistant with website_assistant_set_mode.",
     input: { ...wsParam },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
@@ -97,7 +97,7 @@ export function registerWebchat(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "webchat_settings_update", title: "Update website chat settings (confirmation required)", cls: "gated", minRole: "manager", annotations: { idempotentHint: true },
-    description: "Change settings of a website inbox. `settings` is merged section by section (appearance, launcher, popup, messages, pre_chat, features, csat, continuity, ai, targeting, security, assignment, locale, selection_ask, shortcut; `ask_buttons` is a list of at most 10 and is replaced whole; `ai.products` holds the product recommendation settings and can only be enabled once a picked catalogue has products); `voice` (the website assistant's voice) is read-only here and is changed in the app; top-level fields: name, allowed_domains, is_active, ai_enabled, enforce_identity, reply_mailbox_id, business_hours. Every save is a version and reaches the widget within 5 minutes. The Website assistant mode is ai_enabled + settings.ai.mode, which may be off | first (Auto, always) | offline_only (Auto, outside business hours) | review (the AI suggests, a person sends); website_assistant_set_mode is the simple way to switch it. Confirmation-gated; show the user exactly what changes.",
+    description: "Change settings of a website inbox. `settings` is merged section by section (appearance, launcher, popup, messages, pre_chat, features, csat, continuity, ai, targeting, security, assignment, locale, selection_ask, shortcut; `ask_buttons` is a list of at most 10 and is replaced whole; `ai.products` holds the product recommendation settings and can only be enabled once a picked catalogue has products); `voice` (the website agent's voice) is read-only here and is changed in the app; top-level fields: name, allowed_domains, is_active, ai_enabled, enforce_identity, reply_mailbox_id, business_hours. Every save is a version and reaches the widget within 5 minutes. The Website agent mode is ai_enabled + settings.ai.mode, which may be off | first (Auto, always) | offline_only (Auto, outside business hours) | review (the AI suggests, a person sends); website_assistant_set_mode is the simple way to switch it. Confirmation-gated; show the user exactly what changes.",
     input: { inbox_id: z.string(), patch: z.record(z.string(), z.unknown()).describe("e.g. {\"settings\":{\"messages\":{\"greeting\":\"Hi!\"}}} or {\"is_active\":false}"), confirmation_token: z.string().optional() },
   }, async (a) => {
     const i = await urpc<Row>(ctx, "webchat_inbox_get", { p_id: a.inbox_id });
@@ -105,7 +105,7 @@ export function registerWebchat(server: McpServer, ctx: Ctx): void {
     requireRole(ws, "manager");
     // voice is set up in the app (the Voice tab keeps a draft, tests it and publishes the agent): readable here, not writable
     if (a.patch.settings && typeof a.patch.settings === "object" && "voice" in (a.patch.settings as Record<string, unknown>)) {
-      return { error: "E_NOT_SUPPORTED", message: `Voice settings are changed in the app: AI Website Chatbots → ${i.name} → Voice. They can be read with webchat_inbox_get (settings.voice) and the calls with webchat_voice_calls_list.` };
+      return { error: "E_NOT_SUPPORTED", message: `Voice settings are changed in the app: Website agents → ${i.name} → Voice. They can be read with webchat_inbox_get (settings.voice) and the calls with webchat_voice_calls_list.` };
     }
     const keys = Object.keys(a.patch);
     const sections = a.patch.settings && typeof a.patch.settings === "object" ? Object.keys(a.patch.settings as Record<string, unknown>) : [];
@@ -129,10 +129,10 @@ export function registerWebchat(server: McpServer, ctx: Ctx): void {
     return { conversation: { id: r.id, status: r.status, assigned_to: r.assigned_to, priority: r.priority, labels: r.labels, snoozed_until: r.snoozed_until } };
   });
 
-  // ---- voice calls with the website assistant (migration 069)
+  // ---- voice calls with the website agent (migration 069)
   tool(server, ctx, {
-    name: "webchat_voice_calls_list", title: "Voice calls with the website assistant", cls: "read", minRole: "client_viewer", annotations: { readOnlyHint: true },
-    description: "Voice calls visitors had with the website assistant (they talk instead of type; the same conversation in the inbox holds the transcript as messages). Each call: when, how long, how it ended (visitor | agent_end_call | switch = the visitor went back to text chat | handoff = a person took over, with handoff_reason | takeover | silence | max_duration | error), the provider's summary and title, whether the question was resolved (successful: success | failure | unknown), the details the visitor gave by voice (collected: visitor_name, visitor_phone, need, budget), the language, has_audio, and chat_id for inbox_thread. `minutes` is this month's voice allowance (used / limit; limit null = the workspace's own voice account, no cap). Test calls from the Voice tab are marked test. Voice settings are read with webchat_inbox_get (settings.voice) and changed in the app only.",
+    name: "webchat_voice_calls_list", title: "Voice calls with the website agent", cls: "read", minRole: "client_viewer", annotations: { readOnlyHint: true },
+    description: "Voice calls visitors had with the website agent (they talk instead of type; the same conversation in the inbox holds the transcript as messages). Each call: when, how long, how it ended (visitor | agent_end_call | switch = the visitor went back to text chat | handoff = a person took over, with handoff_reason | takeover | silence | max_duration | error), the provider's summary and title, whether the question was resolved (successful: success | failure | unknown), the details the visitor gave by voice (collected: visitor_name, visitor_phone, need, budget), the language, has_audio, and chat_id for inbox_thread. `minutes` is this month's voice allowance (used / limit; limit null = the workspace's own voice account, no cap). Test calls from the Voice tab are marked test. Voice settings are read with webchat_inbox_get (settings.voice) and changed in the app only.",
     input: { ...wsParam, inbox_id: z.string().optional().describe("One website; omit for every website."), from: z.string().optional().describe("YYYY-MM-DD (default: 30 days ago)"), to: z.string().optional().describe("YYYY-MM-DD (default: today)"), limit: z.number().int().min(1).max(100).optional(), offset: z.number().int().min(0).optional() },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);

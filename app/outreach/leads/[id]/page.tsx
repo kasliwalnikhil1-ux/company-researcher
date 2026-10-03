@@ -39,7 +39,7 @@ export default function LeadDetailPage() {
 
   const back = <BackLink href="/outreach/leads">Back to leads</BackLink>;
 
-  if (lead.isLoading) return <div>{back}<PageLoader className="min-h-[calc(100dvh-9rem)] md:min-h-[calc(100dvh-5.5rem)]" /></div>;
+  if (lead.isLoading) return <div>{back}<PageLoader className="min-h-[calc(100dvh_-_9rem_-_var(--demo-bar,0px))] md:min-h-[calc(100dvh_-_5.5rem_-_var(--demo-bar,0px))]" /></div>;
   if (lead.error) {
     const err = parseError(lead.error);
     return <div>{back}{/PGRST116|not found|0 rows/i.test(err.message) || err.code === 'E_NOT_FOUND'

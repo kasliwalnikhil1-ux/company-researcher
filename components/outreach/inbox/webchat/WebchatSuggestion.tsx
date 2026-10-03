@@ -1,6 +1,6 @@
 'use client';
 
-// Website assistant, Review mode (docs/outreach/AI-HUB.md §6): the assistant's suggested answer for the visitor's last
+// Website agent, Review mode (docs/outreach/AI-HUB.md §6): the assistant's suggested answer for the visitor's last
 // message pre-fills the reply box. A person sends it, as it is or edited; the AI never does. The same suggestion is a
 // Website card in AI → Needs you. When the suggestion recommends products, their cards are sent with the reply; the
 // agent can remove any of them first (web-chat-buttons-products-changes.md §9).

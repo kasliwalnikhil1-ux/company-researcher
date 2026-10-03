@@ -22,7 +22,7 @@ function KnowledgeView() {
 
 export default function AiKnowledgePage() {
   return (
-    <HubFrame subtitle="Knowledge: the websites, documents and Q&A that Replies and the Website assistant answer from.">
+    <HubFrame subtitle="Knowledge: the websites, documents and Q&A that Replies and the Website agent answer from.">
       <Suspense fallback={<PageLoader />}>
         <KnowledgeView />
       </Suspense>

@@ -13,6 +13,7 @@ import { Badge, Button, ErrorBox, Spinner, timeAgo } from '@/components/outreach
 import { IntegrationsSubTabs } from '@/components/outreach/settings/SettingsTabs';
 import { Note, SettingsFrame } from '@/components/outreach/settings/shared';
 import IntegrationPanel from '@/components/outreach/settings/IntegrationPanel';
+import AiApps from '@/components/outreach/settings/AiApps';
 import { sk, useIntegrations } from '@/components/outreach/settings/hooks';
 import { CRM_PROVIDERS, crmLabel, oauthErrorText, plainCrmError } from '@/components/outreach/settings/crm';
 import type { CrmProvider, Integration } from '@/components/outreach/settings/types';
@@ -84,7 +85,10 @@ export default function IntegrationsSettingsPage() {
         </div>
       )}
 
-      <p className="text-sm text-gray-600 mb-4 max-w-3xl">Connect your CRM and leads flow in both directions. We push contacts, companies, messages, stages and deals. We pull lists to import and the customers you never want to contact. By default only leads who replied are pushed, so your CRM does not fill up with cold contacts.</p>
+      <AiApps />
+
+      <h2 className="text-base font-semibold text-gray-900">CRM</h2>
+      <p className="text-sm text-gray-600 mt-1 mb-4 max-w-3xl">Connect your CRM and leads flow in both directions. We push contacts, companies, messages, stages and deals. We pull lists to import and the customers you never want to contact. By default only leads who replied are pushed, so your CRM does not fill up with cold contacts.</p>
       <UpgradeNote feature="crm_sync" what="CRM sync" className="mb-4" />
 
       {integrations.isLoading ? <Spinner /> : integrations.isError ? <ErrorBox message={parseError(integrations.error).message} /> : (

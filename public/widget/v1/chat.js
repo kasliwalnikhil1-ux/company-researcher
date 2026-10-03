@@ -17,7 +17,7 @@
   // ---------------------------------------------------------------- i18n --------------------------------------------
   var STR = {
     en: { chat: "Chat with us", close: "Close", send: "Send", placeholder: "Ask a question…", start: "Start a conversation", cont: "Continue conversation", newconv: "New conversation", prev: "Previous conversations", online: "We're online", offline: "We're away at the moment", minutes: "Replies in a few minutes", hours: "Replies in a few hours", day: "Replies within a day", back_at: "We're away — back {when}", tomorrow: "tomorrow", soon: "We'll reply as soon as we can", ai: "AI", you: "You", talk: "Talk to a person", sources: "Sources", helpful: "Helpful", nothelpful: "Not helpful", thanks: "Thanks for your feedback", retry: "Retry", failed: "Not sent", sent: "Sent", read: "Read", typing: "{name} is typing…", closed: "This conversation is closed — start a new one", end: "End conversation", ended: "Conversation ended", rate: "How was this conversation?", comment: "Tell us more (optional)", submit: "Submit", rated: "Thanks for your rating", email_ph: "you@example.com", name_ph: "Your name", phone_ph: "+1 555 0100", required: "Required", invalid_email: "Enter a valid email", invalid_phone: "Enter a valid phone number", transcript: "Email me this conversation", transcript_sent: "Transcript sent", transcript_email: "Where should we send it?", sound_on: "Sound on", sound_off: "Sound off", popout: "Open in a new window", attach: "Attach a file", emoji: "Add an emoji", too_large: "File too large (max {mb} MB)", bad_type: "This file type is not allowed", limit: "Messages can be up to 5,000 characters", rate_limited: "You're sending too fast — try again in a moment", verify_failed: "We couldn't confirm you're not a robot. Please try again.", error: "Something went wrong. Please try again.", offline_q: "You're offline — we'll send this when you're back", today: "Today", yesterday: "Yesterday", powered: "Powered by", brand: "GrowthxAI", privacy: "By chatting with us, you agree to our {link}", privacy_link: "Privacy Policy", back: "Back", menu: "Menu", ai_note: "Answers by AI assistant. Ask for a person any time.", handoff: "Connecting you with a person…", copy: "Copy", copied: "Copied", download: "Download", consent_err: "Please accept to continue", campaign_reply: "Reply", closepanel: "Close chat", team: "Team", download_transcript: "Download transcript", just_now: "Just now", ai_agent: "AI Agent", video: "Watch video", cancel: "Cancel", view: "View", ask_about: "Ask", add_cart: "Add to cart", added: "Added ✓", view_cart: "View cart", oos: "Out of stock", tell_more: "Tell me more about {title}", prev_cards: "Previous products", next_cards: "More products",
-          talk: "Talk to us", talk_hint: "Speak with our AI assistant", call: "Start a voice call", voice_consent: "You'll be speaking with an AI assistant.", voice_rec: "The call may be recorded and transcribed to help us reply.", voice_norec: "The call is transcribed to help us reply.", start_call: "Start call", not_now: "Not now", voice_mic: "Microphone is blocked. Allow it in your browser's site settings, or keep typing.", voice_unavailable: "Voice isn't available right now. You can keep chatting here.", call_live: "Voice call in progress", call_ended: "Call ended", continue_voice: "Continue by voice", connecting: "Connecting…" },
+          msgs: "Messages", new_chat: "Start a new chat", see_all: "See all", talk: "Talk to us", talk_hint: "Speak with our AI assistant", call: "Start a voice call", voice_consent: "You'll be speaking with an AI assistant.", voice_rec: "The call may be recorded and transcribed to help us reply.", voice_norec: "The call is transcribed to help us reply.", start_call: "Start call", not_now: "Not now", voice_mic: "Microphone is blocked. Allow it in your browser's site settings, or keep typing.", voice_unavailable: "Voice isn't available right now. You can keep chatting here.", call_live: "Voice call in progress", call_ended: "Call ended", continue_voice: "Continue by voice", connecting: "Connecting…" },
     hi: { chat: "हमसे चैट करें", send: "भेजें", placeholder: "सवाल पूछें…", privacy: "हमसे चैट करके आप हमारी {link} से सहमत होते हैं", privacy_link: "गोपनीयता नीति", start: "बातचीत शुरू करें", cont: "बातचीत जारी रखें", newconv: "नई बातचीत", prev: "पिछली बातचीत", online: "हम ऑनलाइन हैं", offline: "हम अभी उपलब्ध नहीं हैं", minutes: "आमतौर पर कुछ मिनटों में जवाब", hours: "आमतौर पर कुछ घंटों में जवाब", day: "आमतौर पर एक दिन में जवाब", back_at: "हम बाहर हैं — {when} वापस", tomorrow: "कल", soon: "हम जल्द ही जवाब देंगे", you: "आप", talk: "किसी व्यक्ति से बात करें", sources: "स्रोत", helpful: "उपयोगी", nothelpful: "उपयोगी नहीं", thanks: "आपकी प्रतिक्रिया के लिए धन्यवाद", retry: "फिर कोशिश करें", failed: "नहीं भेजा गया", closed: "यह बातचीत बंद है — नई शुरू करें", end: "बातचीत समाप्त करें", rate: "यह बातचीत कैसी रही?", comment: "और बताएं (वैकल्पिक)", submit: "भेजें", rated: "रेटिंग के लिए धन्यवाद", required: "आवश्यक", invalid_email: "सही ईमेल दर्ज करें", transcript: "यह बातचीत ईमेल करें", error: "कुछ गलत हो गया। फिर कोशिश करें।", today: "आज", yesterday: "कल", handoff: "आपको एक व्यक्ति से जोड़ रहे हैं…", back: "वापस", download_transcript: "ट्रांसक्रिप्ट डाउनलोड करें", just_now: "अभी", ai_agent: "AI एजेंट", video: "वीडियो देखें", cancel: "रद्द करें", view: "देखें", ask_about: "पूछें", add_cart: "कार्ट में जोड़ें", added: "जोड़ा गया ✓", view_cart: "कार्ट देखें", oos: "स्टॉक में नहीं", tell_more: "{title} के बारे में और बताएं", talk: "हमसे बात करें", talk_hint: "हमारे AI असिस्टेंट से बात करें", call: "वॉइस कॉल शुरू करें", voice_consent: "आप एक AI असिस्टेंट से बात करेंगे।", voice_rec: "जवाब देने में मदद के लिए कॉल रिकॉर्ड और ट्रांसक्राइब की जा सकती है।", voice_norec: "जवाब देने में मदद के लिए कॉल ट्रांसक्राइब की जाती है।", start_call: "कॉल शुरू करें", not_now: "अभी नहीं", voice_mic: "माइक्रोफ़ोन ब्लॉक है। ब्राउज़र की साइट सेटिंग में अनुमति दें, या टाइप करते रहें।", voice_unavailable: "वॉइस अभी उपलब्ध नहीं है। आप यहाँ चैट जारी रख सकते हैं।", call_live: "वॉइस कॉल चल रही है", call_ended: "कॉल समाप्त", continue_voice: "आवाज़ से जारी रखें", connecting: "जोड़ रहे हैं…" },
     es: { chat: "Chatea con nosotros", send: "Enviar", placeholder: "Haz una pregunta…", privacy: "Al chatear con nosotros, aceptas nuestra {link}", privacy_link: "Política de privacidad", start: "Iniciar conversación", cont: "Continuar conversación", newconv: "Nueva conversación", prev: "Conversaciones anteriores", online: "Estamos en línea", offline: "No estamos disponibles ahora", minutes: "Suele responder en unos minutos", hours: "Suele responder en unas horas", day: "Suele responder en un día", back_at: "Volvemos {when}", tomorrow: "mañana", soon: "Responderemos lo antes posible", you: "Tú", talk: "Hablar con una persona", sources: "Fuentes", helpful: "Útil", nothelpful: "No útil", thanks: "Gracias por tu opinión", retry: "Reintentar", failed: "No enviado", closed: "Esta conversación está cerrada — inicia una nueva", end: "Terminar conversación", rate: "¿Cómo fue esta conversación?", comment: "Cuéntanos más (opcional)", submit: "Enviar", rated: "Gracias por tu valoración", required: "Obligatorio", invalid_email: "Introduce un email válido", transcript: "Enviarme esta conversación", error: "Algo salió mal. Inténtalo de nuevo.", today: "Hoy", yesterday: "Ayer", handoff: "Conectándote con una persona…", back: "Atrás", download_transcript: "Descargar transcripción", just_now: "Ahora mismo", ai_agent: "Agente de IA", video: "Ver el video", cancel: "Cancelar", view: "Ver", ask_about: "Preguntar", add_cart: "Añadir al carrito", added: "Añadido ✓", view_cart: "Ver carrito", oos: "Agotado", tell_more: "Cuéntame más sobre {title}", talk: "Habla con nosotros", talk_hint: "Habla con nuestro asistente de IA", call: "Iniciar una llamada de voz", voice_consent: "Vas a hablar con un asistente de IA.", voice_rec: "La llamada puede grabarse y transcribirse para ayudarnos a responder.", voice_norec: "La llamada se transcribe para ayudarnos a responder.", start_call: "Iniciar llamada", not_now: "Ahora no", voice_mic: "El micrófono está bloqueado. Permítelo en los ajustes del sitio de tu navegador, o sigue escribiendo.", voice_unavailable: "La voz no está disponible ahora. Puedes seguir por chat.", call_live: "Llamada de voz en curso", call_ended: "Llamada terminada", continue_voice: "Continuar por voz", connecting: "Conectando…" },
     fr: { chat: "Discutez avec nous", send: "Envoyer", placeholder: "Posez une question…", privacy: "En discutant avec nous, vous acceptez notre {link}", privacy_link: "Politique de confidentialité", start: "Démarrer une conversation", cont: "Continuer la conversation", newconv: "Nouvelle conversation", prev: "Conversations précédentes", online: "Nous sommes en ligne", offline: "Nous sommes absents", minutes: "Répond généralement en quelques minutes", hours: "Répond généralement en quelques heures", day: "Répond généralement en un jour", back_at: "De retour {when}", tomorrow: "demain", soon: "Nous répondrons dès que possible", you: "Vous", talk: "Parler à une personne", sources: "Sources", helpful: "Utile", nothelpful: "Pas utile", thanks: "Merci pour votre retour", retry: "Réessayer", failed: "Non envoyé", closed: "Cette conversation est fermée — commencez-en une nouvelle", end: "Terminer la conversation", rate: "Comment s'est passée cette conversation ?", comment: "Dites-nous en plus (facultatif)", submit: "Envoyer", rated: "Merci pour votre note", required: "Obligatoire", invalid_email: "Entrez un e-mail valide", transcript: "M'envoyer cette conversation", error: "Une erreur est survenue. Réessayez.", today: "Aujourd'hui", yesterday: "Hier", handoff: "Mise en relation avec une personne…", back: "Retour", download_transcript: "Télécharger la transcription", just_now: "À l'instant", ai_agent: "Agent IA", video: "Voir la vidéo", cancel: "Annuler", view: "Voir", ask_about: "Demander", add_cart: "Ajouter au panier", added: "Ajouté ✓", view_cart: "Voir le panier", oos: "En rupture", tell_more: "Dites-m'en plus sur {title}", talk: "Parlez-nous", talk_hint: "Parlez à notre assistant IA", call: "Démarrer un appel vocal", voice_consent: "Vous allez parler à un assistant IA.", voice_rec: "L'appel peut être enregistré et transcrit pour nous aider à répondre.", voice_norec: "L'appel est transcrit pour nous aider à répondre.", start_call: "Démarrer l'appel", not_now: "Pas maintenant", voice_mic: "Le micro est bloqué. Autorisez-le dans les réglages du site de votre navigateur, ou continuez à écrire.", voice_unavailable: "La voix n'est pas disponible pour le moment. Vous pouvez continuer par chat.", call_live: "Appel vocal en cours", call_ended: "Appel terminé", continue_voice: "Continuer à la voix", connecting: "Connexion…" },
@@ -120,7 +120,7 @@
       var utm = {}; try { new URL(location.href).searchParams.forEach(function (v, k) { if (/^utm_/i.test(k) || k === "ref") utm[k] = v.slice(0, 200); }); } catch (e) {}
       var body = { visitor_token: S.vt || store.get("vt") || null, locale: S.locale, timezone: (Intl.DateTimeFormat().resolvedOptions() || {}).timeZone, referrer: doc.referrer || null, landing_url: location.href, utm: Object.keys(utm).length ? utm : null, page: { url: location.href, title: doc.title } };
       visitorP = api("POST", "/visitor", body, { noAuth: true }).then(function (r) {
-        S.vt = r.visitor_token; store.set("vt", S.vt); S.visitor = r.visitor; S.convs = r.conversations || []; S.blocked = !!r.blocked; if (S.mounted) syncPrivacy();
+        S.vt = r.visitor_token; store.set("vt", S.vt); S.visitor = r.visitor; S.convs = r.conversations || []; noteLive(); S.blocked = !!r.blocked; if (S.mounted) syncPrivacy();
         if (S.visitor && S.visitor.identifier) L.identified(true);
         visitorP = null; return S.visitor;
       }, function (e) { visitorP = null; throw e; });
@@ -149,13 +149,20 @@
         ".mode-modal .panel{top:50%;left:50%;width:min(680px,calc(100vw - 32px));height:min(640px,calc(100dvh - 48px));border-radius:18px;transform:translate(-50%,-50%) scale(.96)}.mode-modal .panel.open{transform:translate(-50%,-50%)}" +
         ".backdrop{position:fixed;inset:0;background:rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s;z-index:" + (z - 1) + "}.mode-drawer .backdrop.open,.mode-modal .backdrop.open,.mode-inline .backdrop.open{opacity:1;pointer-events:auto}" +
         ".mode-embedded .panel{position:relative;width:100%;height:100%;min-height:480px;box-shadow:none;opacity:1;pointer-events:auto;transform:none;border-radius:0}" +
-        "@media(max-width:640px){.mode-bubble .panel,.mode-drawer .panel,.mode-inline .panel,.mode-sidebar .panel,.mode-modal .panel{inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0;transform:translateY(100%)}.mode-bubble .panel.open,.mode-drawer .panel.open,.mode-inline .panel.open,.mode-sidebar .panel.open,.mode-modal .panel.open{transform:none}}" +
+        "@media(max-width:640px){.mode-bubble .panel,.mode-drawer .panel,.mode-inline .panel,.mode-sidebar .panel,.mode-modal .panel{inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0;transform:translateY(100%)}.mode-bubble .panel.open,.mode-drawer .panel.open,.mode-inline .panel.open,.mode-sidebar .panel.open,.mode-modal .panel.open{transform:none}.panel .cp textarea,.panel .cp .ask input,.panel .form input,.panel .form select,.panel .form textarea{font-size:16px}}" +
+        ".panel{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}" +
         ".hd{background:var(--accent);color:var(--on-accent);padding:14px 16px;display:flex;align-items:center;gap:10px;flex:0 0 auto}.hd .logo{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto;font-weight:700}.hd .logo img{display:block;width:100%;height:100%;object-fit:contain}" +
         ".hd .ttl{font-weight:700;font-size:15px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hd .sub{font-size:12px;opacity:.9;display:flex;align-items:center;gap:6px;min-width:0}.hd .sub>span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.hd .sub .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(255,255,255,.35);flex:0 0 auto}.hd .sub .dot.off{background:#9ca3af}" +
         ".hd .grow{flex:1;min-width:0}.hd .ib{width:34px;height:34px;border:0;border-radius:10px;background:transparent;color:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:.9}.hd .ib:hover{background:rgba(255,255,255,.18);opacity:1}.hd .ib svg{width:20px;height:20px}" +
         ".menu{position:absolute;top:56px;" + (RTL[S.locale] ? "left" : "right") + ":10px;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:6px;min-width:220px;z-index:5}.menu button{display:flex;width:100%;text-align:start;gap:10px;align-items:center;padding:9px 10px;border:0;background:transparent;color:inherit;border-radius:8px;cursor:pointer;font:inherit}.menu button:hover,.menu button:focus-visible{background:var(--chat)}.menu svg{width:16px;height:16px;color:var(--ink2)}" +
         ".body{flex:1;min-height:0;overflow-y:auto;background:var(--chat);padding:14px 14px 6px;overscroll-behavior:contain;scroll-behavior:smooth}" +
-        ".home{padding:22px 18px}.home h2{margin:0 0 4px;font-size:22px;line-height:1.2}.home p{margin:0 0 16px;color:var(--ink2)}.home .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:10px}.home .card:hover{border-color:var(--accent)}.home .card b{display:block}.home .card small{color:var(--ink2)}.home .card svg{width:18px;height:18px;color:var(--accent);flex:0 0 auto;margin-inline-start:auto}" +
+        ".home{padding:22px 18px}.home h2{margin:0 0 4px;font-size:22px;line-height:1.2}.home p{margin:0 0 16px;color:var(--ink2)}" +
+        ".hl{display:flex;align-items:center;justify-content:space-between;margin:2px 0;font-size:12px;font-weight:600;color:var(--ink2)}.hl button{border:0;background:none;padding:2px 0;color:var(--accent);font:inherit;cursor:pointer}" +
+        ".rows{display:flex;flex-direction:column;margin:0 -18px 14px}.row{display:flex;align-items:center;gap:11px;width:100%;box-sizing:border-box;padding:10px 18px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;text-align:start;cursor:pointer}.row:hover{background:var(--card)}.row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}" +
+        ".row .av{width:38px;height:38px;border-radius:50%;flex:0 0 auto;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;overflow:hidden}.row .av img{width:100%;height:100%;object-fit:cover}" +
+        ".rm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.r1,.r2{display:flex;align-items:center;gap:8px;min-width:0}.r1 b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.r1 time{flex:0 0 auto;font-size:11.5px;color:var(--ink2)}" +
+        ".pv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--ink2)}.row.un .pv{color:var(--ink);font-weight:600}.ud{flex:0 0 auto;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:11px;font-style:normal;font-weight:700;display:flex;align-items:center;justify-content:center}" +
+        ".hacts{display:flex;gap:8px;flex-wrap:wrap}.act{flex:1 1 130px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}.act:hover{border-color:var(--accent)}.act.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}.act svg{width:16px;height:16px;flex:0 0 auto}.home .avl{margin:8px 0 0;font-size:12px;text-align:center}" +
         ".qp{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}.qp button{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:7px 12px;cursor:pointer;font:inherit;color:var(--ink);text-align:start}.qp button:hover{border-color:var(--accent);color:var(--accent)}" +
         ".day{display:flex;align-items:center;gap:10px;color:var(--ink2);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin:10px 0}.day::before,.day::after{content:'';flex:1;height:1px;background:var(--line)}" +
         ".msg{display:flex;gap:8px;margin:2px 0;align-items:flex-start}.msg.me{flex-direction:row-reverse}.msg .av{width:28px;height:28px;border-radius:50%;background:var(--card);border:1px solid var(--line);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex:0 0 auto;overflow:hidden;visibility:hidden}.msg.first{margin-top:10px}.msg.first .av{visibility:visible}.msg .av img{width:100%;height:100%;object-fit:cover}.msg.me .av{display:none}" +
@@ -198,7 +205,6 @@
         ".ft{flex:0 0 auto}" +
         ".note{font-size:11px;color:var(--ink2);text-align:center;padding:6px 10px 0}.toast{position:absolute;left:50%;transform:translateX(-50%);bottom:160px;background:#111827;color:#fff;padding:8px 14px;border-radius:18px;font-size:13px;z-index:6;animation:gxin .2s ease;max-width:calc(100% - 32px);width:max-content;text-align:center}@keyframes gxin{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translateX(-50%)}}" +
         ".light{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;z-index:" + (z + 1) + ";cursor:zoom-out}.light img{max-width:92vw;max-height:92vh;border-radius:8px}" +
-        ".convs .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px;cursor:pointer}.convs .card:hover{border-color:var(--accent)}.convs small{color:var(--ink2);display:block}.convs .st{font-size:10px;padding:1px 6px;border-radius:6px;background:var(--chat);color:var(--ink2);margin-inline-start:6px}" +
         ".drag{outline:2px dashed var(--accent);outline-offset:-6px}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}" +
         // voice: the consent sheet and "Connecting…", the call's line in the thread, "Continue by voice"; the call view's own rules come from voice.js
         ".vcs{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:36px 22px}.vcs p{margin:0;font-size:14px;line-height:1.5}.vcs a{color:var(--ink2);font-size:12px}.vcs .vci{width:56px;height:56px;border-radius:50%;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center}.vcs .vci svg{width:26px;height:26px}.vcs .pbtn,.vcs .sbtn{min-width:180px}.vcs .sbtn{border-color:transparent;color:var(--ink2);font-weight:500}" +
@@ -231,6 +237,7 @@
       down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></svg>',
       play: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M10 8.5v7l6-3.5z"/></svg>',
       check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+      msg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
       mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>'
     };
     function mount() {
@@ -262,6 +269,36 @@
       var side = S.eff.appearance.drawer_side === "left" ? "left" : "right";
       r.addEventListener("mousedown", function (e) { e.preventDefault(); var sx = e.clientX, sw = ui.panel.getBoundingClientRect().width; function mv(ev) { var w = Math.max(320, Math.min(720, sw + (side === "left" ? ev.clientX - sx : sx - ev.clientX))); root.style.setProperty("--sbw", w + "px"); pushBody(); } function up() { doc.removeEventListener("mousemove", mv); doc.removeEventListener("mouseup", up); store.set("sbw", parseInt(getComputedStyle(root).getPropertyValue("--sbw"), 10) || null); } doc.addEventListener("mousemove", mv); doc.addEventListener("mouseup", up); });
       if (mode !== "sidebar") r.style.display = "none";
+    }
+    // Phones: while the full-screen panel is open the page does not pinch-zoom, and a focused field does not zoom the
+    // page in (iOS zooms into fields under 16px and stays there). The page's own viewport tag comes back on close.
+    var vpSaved = null, taSaved = null;
+    // iOS Safari ignores user-scalable=no for pinches: the gesture itself is cancelled while the panel is open
+    function noGesture(e) { e.preventDefault(); }
+    function noPinch(e) { if (e.touches && e.touches.length > 1) e.preventDefault(); }
+    function lockZoom(on) {
+      try {
+        var m = doc.querySelector('meta[name="viewport"]');
+        if (on && isMobile() && S.mode !== "embedded") {
+          if (vpSaved === null) {
+            vpSaved = m ? (m.getAttribute("content") || "") : false;
+            taSaved = doc.documentElement.style.touchAction;
+            doc.documentElement.style.touchAction = "manipulation";   // no double-tap zoom anywhere while it is open
+            doc.addEventListener("gesturestart", noGesture, { passive: false });
+            doc.addEventListener("gesturechange", noGesture, { passive: false });
+            doc.addEventListener("touchmove", noPinch, { passive: false });
+          }
+          if (!m) { m = doc.createElement("meta"); m.setAttribute("name", "viewport"); m.setAttribute("data-growthxai", "vp"); doc.head.appendChild(m); }
+          m.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no");
+        } else if (!on && vpSaved !== null) {
+          if (vpSaved === false) { if (m && m.getAttribute("data-growthxai") === "vp") m.remove(); } else if (m) m.setAttribute("content", vpSaved);
+          vpSaved = null;
+          doc.documentElement.style.touchAction = taSaved || "";
+          doc.removeEventListener("gesturestart", noGesture);
+          doc.removeEventListener("gesturechange", noGesture);
+          doc.removeEventListener("touchmove", noPinch);
+        }
+      } catch (e) {}
     }
     function pushBody() {
       var side = S.eff.appearance.drawer_side === "left" ? "Left" : "Right", h = doc.documentElement;
@@ -326,29 +363,56 @@
     }
     // the back arrow: out of a call it means "switch to chat" (the call ends, the conversation stays on screen)
     function showHome() { if (V && V.active()) { V.leave("switch"); return; } S.view = S.view === "voice-consent" && S.conv ? "messages" : "home"; renderHeader(); renderView(); }
+    // "live": an open conversation, so the loader fetches chat.js early on later pages
+    function noteLive() { store.set("live", activeConv() ? 1 : 0); }
     function activeConv() { return S.convs.filter(function (c) { return c.status !== "resolved"; }).sort(function (a, b) { return new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at); })[0] || null; }
-    function renderHome() {
-      var ap = S.eff.appearance, ms = S.eff.messages || {}, feats = S.eff.features || {}, open = activeConv(), last = S.convs[0];
-      var h = '<div class="home"><h2>' + esc(t2("welcome_title") || ap.welcome_title || "") + "</h2><p>" + esc(t2("welcome_tagline") || ap.welcome_tagline || "") + "</p>";
-      if (open || (feats.single_conversation && last)) { var c = open || last; h += '<div class="card" data-open="' + esc(c.id) + '"><div><b>' + esc(T("cont")) + "</b><small>" + esc((c.last_message_preview || "").slice(0, 80)) + "</small></div>" + I.chev + "</div>"; }
-      if (!feats.single_conversation || !last) h += '<div class="card" data-new="1"><div><b>' + esc(T("start")) + "</b><small>" + esc(availabilityText()) + "</small></div>" + I.chev + "</div>";
-      if (voiceShow("home")) h += '<div class="card" data-call="1" role="button" tabindex="0"><div><b>' + esc(voiceText("start_text", "Talk to us", "talk")) + "</b><small>" + esc(voiceText("start_hint", "Speak with our AI assistant", "talk_hint")) + "</small></div>" + I.mic + "</div>";
-      var qp = (ms.quick_replies || []).slice(0, 6); if (qp.length) h += '<div class="qp" role="group">' + qp.map(function (q) { return '<button type="button" data-q="' + esc(q) + '">' + esc(q) + "</button>"; }).join("") + "</div>";
-      if (!feats.single_conversation && S.convs.length > 1) h += '<div class="card" data-list="1"><div><b>' + esc(T("prev")) + "</b><small>" + S.convs.length + "</small></div>" + I.chev + "</div>";
-      h += "</div>";
-      ui.body.innerHTML = h;
+    // Home and the conversation list: earlier conversations as compact chat rows (avatar, name, latest message, time),
+    // then "Start a new chat" and "Talk to us" as two small buttons under them.
+    function convWhen(d) {
+      var x = new Date(d), n = new Date(); if (isNaN(x)) return "";
+      if (x.toDateString() === n.toDateString()) return Date.now() - x < 60000 ? T("just_now") : fmtTime(x);
+      var y = new Date(n); y.setDate(n.getDate() - 1); if (x.toDateString() === y.toDateString()) return T("yesterday");
+      return n - x < 6 * 864e5 ? x.toLocaleDateString(undefined, { weekday: "short" }) : x.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    }
+    function convRow(c) {
+      var ap = S.eff.appearance, brand = t2("brand_name") || ap.brand_name || "Chat", who = (c.assignee && c.assignee.name) || brand;
+      var img = !(c.assignee && c.assignee.name) && (ap.bot_avatar_url || ap.logo_url);
+      var pv = c.last_message_preview || (c.status === "resolved" ? T("ended") : T("start"));
+      if (c.last_message_preview && c.last_direction === "in") pv = T("you") + ": " + pv;
+      return '<button type="button" class="row' + (c.unread ? " un" : "") + '" data-open="' + esc(c.id) + '"><span class="av" aria-hidden="true">' + (img ? '<img src="' + esc(safeUrl(img)) + '" alt="">' : esc(initials(who))) + "</span>" +
+        '<span class="rm"><span class="r1"><b>' + esc(who) + "</b><time>" + esc(convWhen(c.last_message_at || c.created_at)) + "</time></span>" +
+        '<span class="r2"><span class="pv">' + esc(pv.slice(0, 140)) + "</span>" + (c.unread ? '<i class="ud">' + (c.unread > 9 ? "9+" : c.unread) + "</i>" : "") + "</span></span></button>";
+    }
+    function byRecent(a, b) { return new Date(b.last_message_at || b.created_at) - new Date(a.last_message_at || a.created_at); }
+    function homeActions() {
+      var feats = S.eff.features || {}, h = "";
+      if (!feats.single_conversation || !S.convs.length) h += '<button type="button" class="act pri" data-new="1">' + I.msg + "<span>" + esc(T("new_chat")) + "</span></button>";
+      if (voiceShow("home")) h += '<button type="button" class="act" data-call="1">' + I.mic + "<span>" + esc(voiceText("start_text", "Talk to us", "talk")) + "</span></button>";
+      return h ? '<div class="hacts">' + h + "</div>" + (availabilityText() ? '<p class="avl">' + esc(availabilityText()) + "</p>" : "") : "";
+    }
+    function wireHome() {
       ui.body.querySelectorAll("[data-open]").forEach(function (n) { n.addEventListener("click", function () { openConv(n.getAttribute("data-open")); }); });
       ui.body.querySelectorAll("[data-new]").forEach(function (n) { n.addEventListener("click", function () { startNew(); }); });
-      ui.body.querySelectorAll("[data-call]").forEach(function (n) { var go = function () { startCall({ source: "voice" }); }; n.addEventListener("click", go); n.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }); n.addEventListener("mouseenter", function () { loadVoice().catch(function () {}); }); });
+      ui.body.querySelectorAll("[data-call]").forEach(function (n) { n.addEventListener("click", function () { startCall({ source: "voice" }); }); n.addEventListener("mouseenter", function () { loadVoice().catch(function () {}); }); });
       ui.body.querySelectorAll("[data-list]").forEach(function (n) { n.addEventListener("click", function () { S.view = "list"; renderHeader(); renderView(); }); });
       ui.body.querySelectorAll("[data-q]").forEach(function (n) { n.addEventListener("click", function () { startNew(n.getAttribute("data-q")); }); });
       ui.cp.innerHTML = "";
     }
-    function renderList() {
-      var h = '<div class="convs">' + S.convs.map(function (c) { return '<div class="card" data-open="' + esc(c.id) + '" role="button" tabindex="0"><b>' + esc((c.last_message_preview || T("start")).slice(0, 80)) + '</b><span class="st">' + esc(c.status) + "</span><small>" + esc(dayLabel(c.last_message_at || c.created_at, T)) + (c.unread ? " · " + c.unread + " new" : "") + "</small></div>"; }).join("") + "</div>";
+    function renderHome() {
+      var ap = S.eff.appearance, ms = S.eff.messages || {}, feats = S.eff.features || {}, list = S.convs.slice().sort(byRecent), max = feats.single_conversation ? 1 : 3;
+      var h = '<div class="home"><h2>' + esc(t2("welcome_title") || ap.welcome_title || "") + "</h2><p>" + esc(t2("welcome_tagline") || ap.welcome_tagline || "") + "</p>";
+      if (list.length) {
+        h += '<div class="hl"><span>' + esc(T("msgs")) + "</span>" + (list.length > max ? '<button type="button" data-list="1">' + esc(T("see_all")) + " (" + list.length + ")</button>" : "") + "</div>";
+        h += '<div class="rows">' + list.slice(0, max).map(convRow).join("") + "</div>";
+      }
+      var qp = (ms.quick_replies || []).slice(0, 6); if (qp.length) h += '<div class="qp" role="group">' + qp.map(function (q) { return '<button type="button" data-q="' + esc(q) + '">' + esc(q) + "</button>"; }).join("") + "</div>";
+      h += homeActions() + "</div>";
       ui.body.innerHTML = h;
-      ui.body.querySelectorAll("[data-open]").forEach(function (n) { var go = function () { openConv(n.getAttribute("data-open")); }; n.addEventListener("click", go); n.addEventListener("keydown", function (e) { if (e.key === "Enter") go(); }); });
-      ui.cp.innerHTML = "";
+      wireHome();
+    }
+    function renderList() {
+      ui.body.innerHTML = '<div class="home"><div class="rows">' + S.convs.slice().sort(byRecent).map(convRow).join("") + "</div>" + homeActions() + "</div>";
+      wireHome();
     }
     // Footer (every view): a "Powered by" strip and the privacy line. It renders in its own closed shadow root with literal
     // colours, so the inbox's accent / backgrounds and custom CSS cannot restyle it; only light / dark follows the panel.
@@ -385,13 +449,31 @@
       var pc = S.eff.pre_chat || {}; if (!pc.enabled) return false;
       if (S.visitor && S.visitor.identity_verified) return false;
       if (pc.when === "offline_only" && S.cfg.availability && S.cfg.availability.online) return false;
-      var fields = (pc.fields || []).filter(function (f) { return f.visible !== false && f.enabled !== false; });
-      var v = S.visitor || {};
-      return fields.some(function (f) { if (f.key === "name" && v.name) return false; if (f.key === "email" && v.email) return false; if (f.key === "phone" && v.phone) return false; return true; });
+      var missing = prechatMissing();
+      if (!missing.length) return false;
+      // asked once per visitor: after they sent the form (in this browser) or chatted before, only a required field
+      // that is still missing brings it back
+      if ((store.get("pc") || {}).at || S.convs.length) return missing.some(function (f) { return f.required; });
+      return true;
+    }
+    // the form's fields this visitor has not answered: their details on the server, else what this browser sent before
+    // (a visitor whose token was lost comes back as a new one; createConversation sends those details for them)
+    function prechatMissing() {
+      var pc = S.eff.pre_chat || {}, v = S.visitor || {}, saved = store.get("pc") || {}, ca = v.custom_attributes || {};
+      return (pc.fields || []).filter(function (f) {
+        if (f.visible === false || f.enabled === false) return false;
+        if (f.key === "name" || f.key === "email" || f.key === "phone") return !(v[f.key] || saved[f.key]);
+        return ca[f.key] == null || ca[f.key] === "";
+      });
+    }
+    function savedPrechat() {
+      var saved = store.get("pc") || {}, v = S.visitor || {}, out = null;
+      ["name", "email", "phone"].forEach(function (k) { if (saved[k] && !v[k]) { out = out || { custom: {} }; out[k] = saved[k]; } });
+      return out;
     }
     function renderPrechat() {
-      var pc = S.eff.pre_chat || {}, v = S.visitor || {};
-      var fields = (pc.fields || []).filter(function (f) { return f.visible !== false && f.enabled !== false && !((f.key === "name" && v.name) || (f.key === "email" && v.email) || (f.key === "phone" && v.phone)); });
+      var pc = S.eff.pre_chat || {};
+      var fields = prechatMissing();
       var h = '<div class="home"><p>' + esc(pc.message || "") + '</p><form class="form" novalidate>';
       fields.forEach(function (f, i) {
         var id = "f" + i, ph = esc(f.placeholder || (f.key === "email" ? T("email_ph") : f.key === "name" ? T("name_ph") : f.key === "phone" ? T("phone_ph") : ""));
@@ -423,6 +505,9 @@
         });
         if (pc.consent && pc.consent.enabled) { var cb = form.elements._consent; if (!cb.checked && pc.consent.required !== false) { ok = false; ui.body.querySelector('[data-err="_consent"]').textContent = T("consent_err"); } data.consent = { accepted: !!cb.checked, text_version: pc.consent.text_version }; }
         if (!ok) return;
+        var saved = store.get("pc") || {}, keep = { at: Date.now() };
+        ["name", "email", "phone"].forEach(function (k) { if (!data[k] && saved[k]) data[k] = saved[k]; if (data[k]) keep[k] = String(data[k]).slice(0, 120); });
+        store.set("pc", keep);
         var first = pendingFirst; pendingFirst = null;
         var call = S.afterPrechat === "call"; S.afterPrechat = null;
         if (call) S.view = "call";   // the conversation opens under the call view
@@ -449,10 +534,10 @@
         .catch(function (e) { if (e && e.code === "E_TURNSTILE" && !retried) return postConversation(form, source, true); throw e; });   // a token is single-use and expires: one fresh try
     }
     function createConversation(form, source) {
-      return postConversation(form, source).then(function (r) {
+      return postConversation(form || savedPrechat(), source).then(function (r) {
         S.campaignMsg = null; S.campaignId = null;
         if (r.visitor) S.visitor = r.visitor;
-        var c = r.conversation; S.convs = [c].concat(S.convs.filter(function (x) { return x.id !== c.id; }));
+        var c = r.conversation; S.convs = [c].concat(S.convs.filter(function (x) { return x.id !== c.id; })); noteLive();
         sdk.emit("conversation:started", { id: c.id }); L.store.set("chatted", 1);
         // labels and attributes set before there was a conversation (setLabel from a button's data-growthxai-label) go on this one
         var labels = S.pendingLabels, attrs = S.pendingConvAttrs; S.pendingLabels = null; S.pendingConvAttrs = null;
@@ -482,7 +567,9 @@
     function renderMessages(scroll) {
       // during a call the thread is not on screen: new cards and forms show in the call view, the rest waits for the switch
       if (S.view === "call") { if (V && V.active()) V.refresh(); return; }
-      if (S.view === "voice-consent") return;
+      // only the thread view draws the thread: a late fetch or a live message while the home / list / form is up must not
+      // paint the thread under a header with no back arrow and an empty composer
+      if (S.view !== "messages") return;
       var body = ui.body, ap = S.eff.appearance, feats = S.eff.features || {}, ms = S.eff.messages || {}, html = "", lastDay = null, prev = null, av = S.cfg.availability || {};
       var ai = S.conv && (av.ai_mode !== "off") && !(S.conv.handed_off_at);
       // one line under the newest bubble only (who · AI Agent · when); a bubble still being written takes it over
@@ -789,7 +876,7 @@
       }).then(function (r) {
         delete S.pending[m.echo_id]; S.msgs = S.msgs.filter(function (x) { return x !== m; });
         if (r.dropped) { r.message.pending = false; }
-        if (r.new_conversation && r.conversation) { S.convs = [r.conversation].concat(S.convs.filter(function (x) { return x.id !== r.conversation.id; })); openConv(r.conversation.id).then(function () { addMsg(r.message); renderMessages(true); }); return; }
+        if (r.new_conversation && r.conversation) { S.convs = [r.conversation].concat(S.convs.filter(function (x) { return x.id !== r.conversation.id; })); noteLive(); openConv(r.conversation.id).then(function () { addMsg(r.message); renderMessages(true); }); return; }
         if (r.conversation) { Object.assign(S.conv, r.conversation); syncConvList(); }
         if (!m.hidden) { addMsg(r.message); }
         renderMessages(true); broadcastTabs({ t: "sync", conv: S.conv.id });
@@ -903,7 +990,7 @@
     function markRead() { if (!S.conv) return; var unread = S.msgs.some(function (m) { return m.sender_type !== "visitor" && !m.read_by_visitor_at; }); S.msgs.forEach(function (m) { if (m.sender_type !== "visitor" && !m.read_by_visitor_at) m.read_by_visitor_at = new Date().toISOString(); }); if (S.conv.unread) { S.conv.unread = 0; syncConvList(); } setUnreadTotal(); if (unread) api("POST", "/conversations/" + S.conv.id + "/read").catch(function () {}); }
     function bumpUnread() { S.conv.unread = (S.conv.unread || 0) + 1; syncConvList(); setUnreadTotal(); }
     function setUnreadTotal() { var n = 0, prev = []; S.convs.forEach(function (c) { n += c.unread || 0; }); if (S.conv && S.conv.unread) { S.msgs.filter(function (m) { return m.sender_type !== "visitor" && !m.read_by_visitor_at && m.text; }).slice(-2).forEach(function (m) { prev.push({ from: m.sender_name || S.eff.appearance.brand_name, text: m.text }); }); } L.setUnread(n, prev); }
-    function syncConvList() { S.convs = S.convs.map(function (c) { return c.id === S.conv.id ? S.conv : c; }); }
+    function syncConvList() { S.convs = S.convs.map(function (c) { return c.id === S.conv.id ? S.conv : c; }); noteLive(); }
     function notify(m) { if ((S.eff.features || {}).sounds === false || S.muted || !doc.hidden && S.open) return; try { var ac = new (win.AudioContext || win.webkitAudioContext)(), o = ac.createOscillator(), g = ac.createGain(); o.type = "sine"; o.frequency.value = 880; g.gain.value = .08; o.connect(g); g.connect(ac.destination); o.start(); g.gain.exponentialRampToValueAtTime(.0001, ac.currentTime + .25); o.stop(ac.currentTime + .26); } catch (e) {} }
     function broadcastTabs(o) { try { bc && bc.postMessage(o); } catch (e) {} }
     try { bc = new BroadcastChannel("gxwc:" + TOKEN); bc.onmessage = function (ev) { var d = ev.data || {}; if (d.t === "sync" && S.conv && d.conv === S.conv.id) catchUp(); if (d.t === "reset") { S.vt = null; S.visitor = null; S.convs = []; S.conv = null; S.msgs = []; if (S.mounted) { S.view = "home"; renderHeader(); renderView(); } } }; } catch (e) {}
@@ -1119,7 +1206,7 @@
         if (o.context) S.nextContext = String(o.context).slice(0, 700);
         mount(); if (S.open && S.mode !== "embedded") { if (o.source && !S.conv) S.pendingSource = o.source; return; }
         S.open = true; S.pendingSource = o.source || "launcher"; focusBefore = doc.activeElement;
-        ui.panel.classList.add("open"); ui.backdrop.classList.add("open"); L.setOpen(true); pushBody();
+        ui.panel.classList.add("open"); ui.backdrop.classList.add("open"); L.setOpen(true); pushBody(); lockZoom(true);
         if (!S.visitor) ensureVisitor().then(function () { if (S.view === "home") renderHome(); if (S.blocked) {} var ac = activeConv(); if (ac && (S.eff.features || {}).single_conversation) openConv(ac.id); else if (ac && ac.unread) openConv(ac.id); }).catch(function () {});
         else if (S.conv) { catchUp(); markRead(); }
         setTimeout(function () { var f = ui.ta || ui.panel.querySelector("button,input,textarea"); f && f.focus(); }, 250);
@@ -1129,7 +1216,7 @@
       call: function (o) { startCall(o || {}); },
       close: function () { if (!S.mounted || !S.open || S.mode === "embedded") return;
         if (V && V.active()) { V.askEnd(function () { api_.close(); }); return; }   // closing the panel would hide a live call: ask first
-        S.open = false; S.nextContext = null; ui.panel.classList.remove("open"); ui.backdrop.classList.remove("open"); L.setOpen(false); pushBody(); var m = root.querySelector(".menu"); m && m.remove(); try { focusBefore && focusBefore.focus(); } catch (e) {} sdk.emit("closed", {}); },
+        S.open = false; S.nextContext = null; ui.panel.classList.remove("open"); ui.backdrop.classList.remove("open"); L.setOpen(false); pushBody(); lockZoom(false); var m = root.querySelector(".menu"); m && m.remove(); try { focusBefore && focusBefore.focus(); } catch (e) {} sdk.emit("closed", {}); },
       toggle: function (st) { if (st === "open" || (st == null && !S.open)) api_.open(); else api_.close(); },
       setMode: function (m) { if (["bubble", "drawer", "sidebar", "modal", "inline", "embedded"].indexOf(m) < 0) return; var wasOpen = S.open; S.forcedMode = m; if (S.mounted) { api_.close(); pushBody(); host.remove(); S.mounted = false; sheet = null; } mount(); if (wasOpen) api_.open(); },
       send: function (text, o) { return api_.ask(text, { prefill: !!(o && o.prefill), source: "sdk" }); },
@@ -1155,7 +1242,7 @@
           if (S.visitor && S.visitor.identifier && String(S.visitor.identifier) !== String(identifier) && user.identifier_hash) { return api("POST", "/visitor/reset").then(function () { S.vt = null; store.del("vt"); S.visitor = null; S.convs = []; S.conv = null; S.msgs = []; broadcastTabs({ t: "reset" }); return ensureVisitor(); }); }
         }).then(function () {
           return api("POST", "/visitor/identify", { identifier: identifier, identifier_hash: user.identifier_hash || user.identifierHash, name: user.name, email: user.email, phone: user.phone || user.phone_number, avatar_url: user.avatar_url || user.avatarUrl, company: user.company || user.company_name, custom_attributes: user.custom_attributes || user.customAttributes || {} });
-        }).then(function (r) { if (r.visitor_token) { S.vt = r.visitor_token; store.set("vt", S.vt); } S.visitor = r.visitor; S.convs = r.conversations || S.convs; if (S.mounted && S.view === "home") renderHome(); if (S.mounted) syncPrivacy(); setUnreadTotal(); sdk.emit("identified", { verified: r.verified }); return r; })
+        }).then(function (r) { if (r.visitor_token) { S.vt = r.visitor_token; store.set("vt", S.vt); } S.visitor = r.visitor; S.convs = r.conversations || S.convs; noteLive(); if (S.mounted && S.view === "home") renderHome(); if (S.mounted) syncPrivacy(); setUnreadTotal(); sdk.emit("identified", { verified: r.verified }); return r; })
           .catch(function (e) { sdk.emit("error", { code: e.code || "E_IDENTITY_INVALID", message: e.message }); throw e; });
       },
       setCustomAttributes: function (o) { return ensureVisitor().then(function () { return api("PATCH", "/visitor/attributes", { custom_attributes: o || {} }); }); },
@@ -1167,8 +1254,8 @@
       setLocale: function (l) { S.locale = STR[l] ? l : (STR[String(l).slice(0, 2)] ? String(l).slice(0, 2) : "en"); if (S.mounted) { applyStyles(); renderHeader(); renderView(); } },
       setColorScheme: function (s) { settings.darkMode = s; if (S.mounted) applyStyles(); },
       trackEvent: function (name, props) { return ensureVisitor().then(function () { return api("POST", "/events", { name: name, props: props || {}, conversation_id: S.conv ? S.conv.id : null }); }); },
-      reset: function () { var p = S.vt ? api("POST", "/visitor/reset").catch(function () {}) : Promise.resolve(); return p.then(function () { S.vt = null; store.del("vt"); store.del("q"); store.del("chatted"); store.del("sent"); S.visitor = null; S.convs = []; leaveRealtime(); S.conv = null; S.msgs = []; S.byId = {}; L.identified(false); L.setUnread(0, []); broadcastTabs({ t: "reset" }); if (S.mounted) { S.view = "home"; renderHeader(); renderView(); } }); },
-      destroy: function () { if (V && V.active()) V.leave("end"); api_.close(); leaveRealtime(); if (S.rt) S.rt.close(); S.campaignTimers.forEach(clearTimeout); if (host) host.remove(); S.mounted = false; var lh = doc.getElementById("growthxai-webchat"); lh && lh.remove(); },
+      reset: function () { var p = S.vt ? api("POST", "/visitor/reset").catch(function () {}) : Promise.resolve(); return p.then(function () { S.vt = null; store.del("vt"); store.del("q"); store.del("chatted"); store.del("sent"); store.del("pc"); store.del("live"); S.visitor = null; S.convs = []; leaveRealtime(); S.conv = null; S.msgs = []; S.byId = {}; L.identified(false); L.setUnread(0, []); broadcastTabs({ t: "reset" }); if (S.mounted) { S.view = "home"; renderHeader(); renderView(); } }); },
+      destroy: function () { if (V && V.active()) V.leave("end"); api_.close(); lockZoom(false); leaveRealtime(); if (S.rt) S.rt.close(); S.campaignTimers.forEach(clearTimeout); if (host) host.remove(); S.mounted = false; var lh = doc.getElementById("growthxai-webchat"); lh && lh.remove(); },
       popoutChatWindow: function () { var origin = (function () { try { return new URL(doc.currentScript ? doc.currentScript.src : (doc.querySelector("script[data-website-token]") || {}).src || location.href).origin; } catch (e) { return location.origin; } })(); win.open(origin + "/chat/" + TOKEN, "growthxai_chat_" + TOKEN, "width=420,height=640,noopener"); },
       consent: function (ok) { if (ok) ensureVisitor(); },
       onRouteChange: function (url) { if (S.vt) api("POST", "/page-view", { views: [{ url: url, title: doc.title, referrer: doc.referrer, at: new Date().toISOString() }] }, { keepalive: true }).catch(function () {}); evalCampaigns(); },

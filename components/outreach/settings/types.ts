@@ -37,7 +37,7 @@ export interface AiSettings {
   finders: Array<KeyHint<FinderProvider>>;
   verifier: KeyHint<VerifierProvider> | null;
   booking_webhook_secret: string | null;   // owner only
-  /** 069: the workspace's own voice account for the website assistant (last 4 characters), and whether the plan allows one */
+  /** 069: the workspace's own voice account for the website agent (last 4 characters), and whether the plan allows one */
   elevenlabs_key_hint?: string | null;
   voice_own_key_allowed?: boolean;
 }

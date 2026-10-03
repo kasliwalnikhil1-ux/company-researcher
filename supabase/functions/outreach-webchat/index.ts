@@ -10,7 +10,7 @@
 //   POST /visitor/reset                         POST /page-view          POST /events
 //   GET  /conversations                         POST /conversations      GET  /conversations/:id     GET  /conversations/:id/messages
 //   POST /conversations/:id/messages            POST /conversations/:id/typing|read|heartbeat|resolve|csat|transcript
-//   POST /conversations/:id/voice/start|turns|switch|end   (voice calls with the website assistant; docs/outreach/WEBCHAT.md "Voice")
+//   POST /conversations/:id/voice/start|turns|switch|end   (voice calls with the website agent; docs/outreach/WEBCHAT.md "Voice")
 //   GET  /conversations/:id/transcript          (every message, for the widget's "Download transcript")
 //   POST /uploads                               GET  /attachments/:conversation/:attachment
 //   POST /chat  (SSE: meta, token, products, done)   POST /feedback      POST /campaigns/:id/hit

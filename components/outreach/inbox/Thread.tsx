@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Wand2, CheckSquare, Tag as TagIcon, Layers, Repeat, NotebookPen, Eye, EyeOff } from 'lucide-react';
+import { ArrowLeft, Archive, ArchiveRestore, MailOpen, ChevronDown, PanelRight, ExternalLink, Check, CheckSquare, Tag as TagIcon, Layers, Repeat, NotebookPen, Eye, EyeOff, MoreHorizontal } from 'lucide-react';
 import NoteBubble from './notes/NoteBubble';
 import { isNoteModeShortcut, readComposerMode, readShowNotes, writeComposerMode, writeShowNotes, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import Link from '@/lib/outreach/nav';
@@ -14,11 +14,12 @@ import type { Chat, Intent, Lead, Member, Message, Sender } from '@/lib/outreach
 import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, StatusPill } from '@/components/outreach/ui';
 import MessageBubble from './MessageBubble';
 import Compose from './Compose';
-import { INTENTS, INTENT_LABELS, memberLabel, useNow, inEditWindowNow } from './hooks';
+import { INTENTS, INTENT_LABELS, useNow, inEditWindowNow, useNarrowerThan } from './hooks';
 import { useThreadAttribution } from '@/lib/outreach/intel';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk } from '@/lib/outreach/queries';
 import ForwardDialog from './ForwardDialog';
+import AssigneeSelect from './AssigneeSelect';
 import AiModeChip from './ai/AiModeChip';
 import WebchatThreadBar from './webchat/WebchatThreadBar';
 import EmailThread from './channels/EmailThread';
@@ -69,7 +70,7 @@ export interface ThreadProps {
   onNoteSeen: (noteId: string) => void;
 }
 
-function Menu({ button, children, align = 'right', disabled }: { button: (open: boolean) => React.ReactNode; children: (close: () => void) => React.ReactNode; align?: 'left' | 'right'; disabled?: boolean }) {
+function Menu({ button, children, align = 'right', disabled, className }: { button: (open: boolean) => React.ReactNode; children: (close: () => void) => React.ReactNode; align?: 'left' | 'right'; disabled?: boolean; className?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -77,12 +78,32 @@ function Menu({ button, children, align = 'right', disabled }: { button: (open: 
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className={cn('absolute z-30 mt-1 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg py-1', align === 'right' ? 'right-0' : 'left-0')} role="menu">{children(() => setOpen(false))}</div>
+          <div className={cn('absolute z-30 mt-1 min-w-[180px] bg-white border border-gray-200 rounded-lg shadow-lg py-1', align === 'right' ? 'right-0' : 'left-0', className)} role="menu">{children(() => setOpen(false))}</div>
         </>
       )}
     </div>
   );
 }
+
+/** The "more" menu's intent row: one line ("Intent · Unclassified ›") that opens the choices in place. */
+function IntentPicker({ intent, itemClass, onPick }: { intent: Intent | null; itemClass: string; onPick: (i: Intent) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" role="menuitem" aria-expanded={open} onClick={() => setOpen((o) => !o)} className={itemClass}>
+        <Layers className="w-4 h-4 text-gray-400 flex-shrink-0" /><span className="flex-1">Intent</span>
+        <span className="text-xs text-gray-500">{intent ? INTENT_LABELS[intent] : 'None'}</span><ChevronDown className={cn('w-3.5 h-3.5 text-gray-400 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && INTENTS.map((i) => (
+        <button key={i} type="button" role="menuitemradio" aria-checked={i === intent} onClick={() => onPick(i)} className={cn(itemClass, 'pl-9 text-[13px]', i === intent && 'text-indigo-700')}>
+          <span className="flex-1">{INTENT_LABELS[i]}</span>{i === intent && <Check className="w-3.5 h-3.5" />}
+        </button>
+      ))}
+    </>
+  );
+}
+
+const CONVERT_ITEMS = [['task', 'Task', CheckSquare], ['tag', 'Tag', TagIcon], ['stage', 'Stage change', Layers], ['reenrol', 'Re-enrol in sequence', Repeat]] as const;
 
 function dayLabel(iso: string): string {
   const d = new Date(iso);
@@ -99,6 +120,14 @@ export default function Thread(p: ThreadProps) {
   const lead = chat.outreach_leads;
   const sender = chat.outreach_senders;
   const name = chatTitle(chat);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // a squeezed thread column (laptop width, or the list / panel dragged wide): controls drop their labels so the
+  // header and composer stay one or two short rows and the messages keep the height
+  const narrow = useNarrowerThan(rootRef, 640);
+  // in between (a laptop with the lead panel open): labels go first, the controls stay
+  const cramped = useNarrowerThan(rootRef, 820);
+  // the composer's toolbar: every button keeps its label from 820 px, the AI and booking buttons theirs down to 520 px
+  const composerCompact = useNarrowerThan(rootRef, 520);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastCountRef = useRef(0);
 
@@ -252,7 +281,6 @@ export default function Thread(p: ThreadProps) {
     ? { name: sender?.display_name ?? 'You', avatar: sender?.picture_url ?? null }
     : { name: (multiParty ? m.sender_name : null) ?? name, avatar: multiParty ? null : contactAvatar };
 
-  const assignee = members?.find((m) => m.user_id === chat.assigned_to);
   const renderNote = (n: ChatNote) => (
     <NoteBubble
       note={n} chat={chat} workspaceId={p.workspaceId} members={members} currentUserId={p.currentUserId}
@@ -284,101 +312,117 @@ export default function Thread(p: ThreadProps) {
   const lastStoredId = useMemo(() => { const real = (messages ?? []).filter((m) => !m.id.startsWith('temp-')); return real.length ? real[real.length - 1].id : null; }, [messages]);
   const attributionQ = useThreadAttribution(chat.id, lastStoredId);
 
+  // one meta line under the name: who / subject first, then the channel and the handle (the provider logo is on the avatar)
+  const handleText = secondary ? (chat.provider === 'INSTAGRAM' && !secondary.startsWith('@') ? `@${secondary}` : secondary) : null;
+  const metaLine = [subtitle, channelLabel(chat.provider), handleText].filter(Boolean).join(' · ');
+  const webchat = chat.provider === 'WEBCHAT';
+
+  // Triage controls: one short row under the name — the AI, (web chat: status) / (others: intent), and the assignee.
+  // Everything else lives in the "more" menu so the messages keep the height.
+  const [webchatDetails, setWebchatDetails] = useState(false);   // web chat: the priority + labels editor row
+  const intentMenu = (
+    <Menu disabled={!p.canWrite} button={() => (
+      <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 disabled:cursor-default disabled:hover:bg-transparent" title={p.canWrite ? 'Override intent' : 'AI intent'} aria-label="Override intent" disabled={!p.canWrite}>
+        <IntentBadge intent={chat.intent} /><ChevronDown className="w-3 h-3 text-gray-400" />
+      </button>
+    )}>
+      {(close) => INTENTS.map((i) => (
+        <button key={i} type="button" role="menuitem" onClick={async () => { close(); await p.onSetIntent(i); }} className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between', i === chat.intent && 'bg-indigo-50 text-indigo-700')}>
+          {INTENT_LABELS[i]}<IntentBadge intent={i} />
+        </button>
+      ))}
+    </Menu>
+  );
+  const moreMenu = (
+    <Menu className="w-60 max-h-[70vh] overflow-y-auto" button={(open) => (
+      <button type="button" className={cn('relative p-1.5 rounded-md hover:bg-gray-100 text-gray-500', open && 'bg-gray-100')} title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded={open}>
+        <MoreHorizontal className="w-4 h-4" />
+        {!showNotes && noteCount > 0 && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-amber-500" aria-hidden />}
+      </button>
+    )}>
+      {(close) => {
+        const item = 'w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700 disabled:opacity-40 disabled:hover:bg-transparent';
+        const section = 'px-3 pt-2 pb-0.5 mt-1 border-t border-gray-100 text-[11px] text-gray-500';
+        const icon = 'w-4 h-4 text-gray-400 flex-shrink-0';
+        return (
+          <>
+            <button type="button" role="menuitem" onClick={() => { close(); setShowNotes(!showNotes); }} className={item}>
+              {showNotes ? <EyeOff className={icon} /> : <Eye className={icon} />}
+              <span className="flex-1">{showNotes ? 'Hide private notes' : 'Show private notes'}</span>
+              {noteCount > 0 && <span className="text-[11px] px-1.5 rounded-full bg-amber-100 text-amber-800 tabular-nums">{noteCount > 99 ? '99+' : noteCount}</span>}
+            </button>
+            <button type="button" role="menuitem" disabled={!p.canWrite} onClick={() => { close(); void p.onMarkUnread(); }} className={item}><MailOpen className={icon} /><span className="flex-1">Mark as unread</span><kbd className="text-[10px] text-gray-400">U</kbd></button>
+            <button type="button" role="menuitem" disabled={!p.canWrite} onClick={() => { close(); void p.onArchive(!chat.archived); }} className={item}>{chat.archived ? <ArchiveRestore className={icon} /> : <Archive className={icon} />}<span className="flex-1">{chat.archived ? 'Unarchive' : 'Archive'}</span><kbd className="text-[10px] text-gray-400">E</kbd></button>
+            {lead && !webchat && <button type="button" role="menuitem" onClick={() => { close(); p.onConvert('notes'); }} className={item} title="Key facts the AI picked up from this person's messages (budget, timeline, objections…)"><NotebookPen className={icon} />Lead notes</button>}
+            {webchat && <button type="button" role="menuitem" onClick={() => { close(); setWebchatDetails(true); }} className={item}><TagIcon className={icon} />Priority &amp; labels…</button>}
+            {webchat && p.canWrite && <IntentPicker intent={chat.intent} itemClass={item} onPick={async (i) => { close(); await p.onSetIntent(i); }} />}
+            {p.canWrite && (
+              <>
+                <div className={section}>Convert to</div>
+                {CONVERT_ITEMS.map(([k, label, Icon]) => <button key={k} type="button" role="menuitem" onClick={() => { close(); p.onConvert(k); }} className={item}><Icon className={icon} />{label}</button>)}
+              </>
+            )}
+            {sender && (
+              <div className="mt-1 border-t border-gray-100 px-3 py-2 flex items-center gap-2 text-xs text-gray-500 min-w-0">
+                <Avatar src={sender.picture_url} name={sender.display_name} size={5} />
+                <span className="truncate">Sending as <span className="font-medium text-gray-700">{sender.display_name ?? sender.public_identifier}</span></span>
+              </div>
+            )}
+          </>
+        );
+      }}
+    </Menu>
+  );
+
   return (
-    <div className="flex flex-col h-full min-h-0 bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
-        {/* Identity: who this conversation is with */}
-        <div className="px-4 md:px-5 pt-3.5 pb-3 flex items-start gap-3">
-          <button type="button" onClick={p.onBack} className="md:hidden -ml-1 mt-2 p-1.5 rounded-md hover:bg-gray-100 text-gray-600" aria-label="Back to conversations"><ArrowLeft className="w-4 h-4" /></button>
+    <div ref={rootRef} className="flex flex-col h-full min-h-0 bg-gray-50">
+      {/* Header: who it is + one short row of controls; the rest is in the "more" menu */}
+      <div className="flex-shrink-0 bg-white border-b border-gray-200 shadow-[0_1px_2px_rgba(0,0,0,0.03)]">
+        <div className="px-3 md:px-5 pt-2 pb-1.5 flex items-center gap-2.5 md:gap-3">
+          <button type="button" onClick={p.onBack} className="md:hidden -ml-1 p-1.5 rounded-md hover:bg-gray-100 text-gray-600" aria-label="Back to conversations"><ArrowLeft className="w-4 h-4" /></button>
           <div className="relative flex-shrink-0">
-            <Avatar src={chat.attendee_picture_url || lead?.picture_url} name={name} size={12} />
-            <span className="absolute -bottom-0.5 -right-0.5 rounded-[4px] bg-white p-px ring-1 ring-white" title={channelLabel(chat.provider)}><ProviderLogo provider={chat.provider} className="w-4 h-4 rounded-[3px]" /></span>
+            <Avatar src={chat.attendee_picture_url || lead?.picture_url} name={name} size={10} />
+            <span className="absolute -bottom-0.5 -right-0.5 rounded-[4px] bg-white p-px ring-1 ring-white" title={channelLabel(chat.provider)}><ProviderLogo provider={chat.provider} className="w-3.5 h-3.5 rounded-[3px]" /></span>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
-              <h2 className="text-lg font-semibold text-gray-900 truncate leading-tight" title={name}>{name}</h2>
+              <h2 className="text-base font-semibold text-gray-900 truncate leading-tight" title={name}>{name}</h2>
               {degree && <span className="flex-shrink-0 text-sm text-gray-500" title="Connection degree">· {degree}</span>}
               {facts?.is_premium && <span className="flex-shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-[3px] bg-gradient-to-br from-[#e7a33e] to-[#c37d16] text-white text-[9px] font-bold" title="LinkedIn Premium">in</span>}
-              {lead && <Link href={`/outreach/leads/${lead.id}`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-4 h-4" /></Link>}
+              {lead && <Link href={`/outreach/leads/${lead.id}`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-3.5 h-3.5" /></Link>}
               {chat.is_request && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: not accepted yet, so it may not have been seen">Message request</span>}
               {chat.archived && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Archived</span>}
+              {!showNotes && noteCount > 0 && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800" title="Private notes are hidden: show them from the … menu">Notes hidden</span>}
             </div>
-            {subtitle && <p className="text-sm text-gray-600 truncate mt-0.5" title={subtitle}>{subtitle}</p>}
-            <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5 min-w-0">
-              <span className="flex-shrink-0">{channelLabel(chat.provider)}</span>
-              {secondary && <><span aria-hidden>·</span><span className="truncate" title={secondary}>{chat.provider === 'INSTAGRAM' && !secondary.startsWith('@') ? `@${secondary}` : secondary}</span></>}
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5 min-w-0">
+              <span className="truncate" title={metaLine}>{metaLine}</span>
               {liChips.map((c) => <span key={c} className={cn('flex-shrink-0 text-[10px] font-semibold px-1.5 py-px rounded', c === 'InMail' ? 'bg-[#f3e9d2] text-[#915907]' : 'bg-[#0a66c2]/10 text-[#0a66c2]')}>{c}</span>)}
             </div>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
-            <button type="button" onClick={() => setShowNotes(!showNotes)} aria-pressed={showNotes} className={cn('p-2 rounded-md hover:bg-gray-100 disabled:opacity-40 relative', showNotes ? 'text-amber-700' : 'text-gray-500')} title={showNotes ? 'Hide private notes (read the pure conversation)' : 'Show private notes'} aria-label={showNotes ? 'Hide private notes' : 'Show private notes'}>
-              {showNotes ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-              {noteCount > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 px-1 rounded-full bg-amber-500 text-white text-[9px] leading-[14px] text-center tabular-nums">{noteCount > 99 ? '99+' : noteCount}</span>}
-            </button>
-            <button type="button" onClick={p.onMarkUnread} disabled={!p.canWrite} className="p-2 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title="Mark as unread (u)" aria-label="Mark as unread"><MailOpen className="w-4 h-4" /></button>
-            <button type="button" onClick={() => p.onArchive(!chat.archived)} disabled={!p.canWrite} className="p-2 rounded-md hover:bg-gray-100 text-gray-500 disabled:opacity-40" title={chat.archived ? 'Unarchive (e)' : 'Archive (e)'} aria-label={chat.archived ? 'Unarchive' : 'Archive'}>{chat.archived ? <ArchiveRestore className="w-4 h-4" /> : <Archive className="w-4 h-4" />}</button>
-            <button type="button" onClick={p.onTogglePanel} className="xl:hidden p-2 rounded-md hover:bg-gray-100 text-gray-500" title="Lead details" aria-label="Toggle lead panel"><PanelRight className="w-4 h-4" /></button>
+            {moreMenu}
+            <button type="button" onClick={p.onTogglePanel} className="min-[1440px]:hidden p-1.5 rounded-md hover:bg-gray-100 text-gray-500" title="Lead details" aria-label="Toggle lead panel"><PanelRight className="w-4 h-4" /></button>
           </div>
         </div>
 
-        {/* Toolbar: triage controls */}
-        <div className="px-4 md:px-5 py-2 border-t border-gray-100 bg-gray-50/60 flex items-center gap-2 flex-wrap">
-          {sender && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-gray-600 pl-1 pr-2 py-1 rounded-full bg-white border border-gray-200 min-w-0" title="Sender">
-              <Avatar src={sender.picture_url} name={sender.display_name} size={4} />
-              <span className="text-gray-400">via</span>
-              <span className="truncate max-w-[140px] font-medium text-gray-700">{sender.display_name ?? sender.public_identifier}</span>
-              {sender.status !== 'ok' && <StatusPill status={sender.status} reason={sender.status_reason} />}
-            </span>
-          )}
-          {chat.provider === 'WHATSAPP' && !isGroup && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
-          <AiModeChip chatId={chat.id} onError={p.onError} onNotice={p.onNotice} />
-          {lead && (
-            <button type="button" onClick={() => p.onConvert('notes')} className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50" title="Key facts the AI picked up from this person's messages (budget, timeline, objections…)">
-              <NotebookPen className="w-3.5 h-3.5 text-gray-400" /> Lead notes
-            </button>
-          )}
-          <span className="flex-1" />
-          <Menu disabled={!p.canWrite} button={() => (
-            <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 disabled:cursor-default disabled:hover:bg-transparent" title={p.canWrite ? 'Override intent' : 'AI intent'} aria-label="Override intent" disabled={!p.canWrite}>
-              <IntentBadge intent={chat.intent} /><ChevronDown className="w-3 h-3 text-gray-400" />
-            </button>
-          )}>
-            {(close) => INTENTS.map((i) => (
-              <button key={i} type="button" role="menuitem" onClick={async () => { close(); await p.onSetIntent(i); }} className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between', i === chat.intent && 'bg-indigo-50 text-indigo-700')}>
-                {INTENT_LABELS[i]}<IntentBadge intent={i} />
-              </button>
-            ))}
-          </Menu>
-          <select value={chat.assigned_to ?? ''} onChange={(e) => p.onAssign(e.target.value || null)} disabled={!p.canWrite} title="Assign conversation" aria-label="Assign conversation" className="text-xs rounded-md border border-gray-200 bg-white text-gray-700 px-1.5 py-1 max-w-[140px] focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">Unassigned</option>
-            {members?.map((m) => <option key={m.user_id} value={m.user_id}>{memberLabel(m)}</option>)}
-            {chat.assigned_to && !assignee && <option value={chat.assigned_to}>Former member</option>}
-          </select>
-          {p.canWrite && (
-            <Menu button={() => (
-              <button type="button" className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-gray-200 bg-white text-gray-700 hover:bg-gray-50" title="Convert this reply into an action">
-                <Wand2 className="w-3.5 h-3.5" /> Convert <ChevronDown className="w-3 h-3 text-gray-400" />
-              </button>
-            )}>
-              {(close) => (
-                <>
-                  {([['task', 'Task', CheckSquare], ['tag', 'Tag', TagIcon], ['stage', 'Stage change', Layers], ['reenrol', 'Re-enrol in sequence', Repeat]] as const).map(([k, label, Icon]) => (
-                    <button key={k} type="button" role="menuitem" onClick={() => { close(); p.onConvert(k); }} className="w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center gap-2 text-gray-700"><Icon className="w-4 h-4 text-gray-400" />{label}</button>
-                  ))}
-                </>
-              )}
-            </Menu>
-          )}
-        </div>
+        {webchat ? (
+          // Web chat: AI · status … assignee (web-chat-PRD.md §8); priority, labels and intent are in the "more" menu
+          <WebchatThreadBar chat={chat} messages={messages} members={members} workspaceId={p.workspaceId} canWrite={p.canWrite && !p.isClientViewer} onError={p.onError} onNotice={p.onNotice}
+            narrow={narrow} detailsOpen={webchatDetails} onDetailsOpen={setWebchatDetails} />
+        ) : (
+          <div className="px-3 md:px-5 pb-2 flex items-center gap-1.5 min-w-0">
+            <AiModeChip chatId={chat.id} onError={p.onError} onNotice={p.onNotice} density={narrow ? 'narrow' : 'cramped'} />
+            {chat.provider === 'WHATSAPP' && !isGroup && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
+            {sender && sender.status !== 'ok' && <StatusPill status={sender.status} reason={sender.status_reason} />}
+            <span className="flex-1" />
+            {intentMenu}
+            <AssigneeSelect value={chat.assigned_to} members={members} disabled={!p.canWrite} onChange={p.onAssign} />
+          </div>
+        )}
       </div>
 
-      {/* Web chat: status / assignment / labels / AI toggle bar (web-chat-PRD.md §8) */}
-      {chat.provider === 'WEBCHAT' && <WebchatThreadBar chat={chat} messages={messages} members={members} workspaceId={p.workspaceId} canWrite={p.canWrite && !p.isClientViewer} onError={p.onError} onNotice={p.onNotice} />}
-
       {/* Messages */}
-      <div ref={scrollRef} data-tour="inbox-thread" className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4',
+      <div ref={scrollRef} data-tour="inbox-thread" className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-3',
         wa ? 'space-y-1.5 bg-[#efeae2] bg-[radial-gradient(rgba(0,0,0,0.035)_1px,transparent_1px)] [background-size:14px_14px]'
           : look === 'instagram' ? 'bg-white' : look === 'linkedin' ? 'bg-white md:px-6' : look === 'email' ? 'bg-gray-100/70 md:px-6' : 'space-y-3')}>
         {p.messagesError && <ErrorBox message={p.messagesError} />}
@@ -430,7 +474,7 @@ export default function Thread(p: ThreadProps) {
       <Compose key={chat.id} chat={chat} sender={sender} workspaceId={p.workspaceId} disabledReason={disabledReason} onError={p.onError}
         replyTo={replyTo} replyToName={replyTo ? (replyTo.direction === 'out' ? 'You' : (replyTo.sender_name || name)) : undefined} onCancelReply={() => setReplyTo(null)}
         mailReply={mailReply?.chatId === chat.id ? mailReply : null}
-        mode={composerMode} onModeChange={setComposerMode} members={members} currentUserId={p.currentUserId} isClientViewer={p.isClientViewer} onAddNote={p.onAddNote} />
+        mode={composerMode} onModeChange={setComposerMode} members={members} currentUserId={p.currentUserId} isClientViewer={p.isClientViewer} onAddNote={p.onAddNote} compact={composerCompact} wide={!cramped} />
       <ForwardDialog chat={chat} message={forwarding} onClose={() => setForwarding(null)} onForward={forward} />
     </div>
   );

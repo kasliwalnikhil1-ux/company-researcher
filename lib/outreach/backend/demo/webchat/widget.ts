@@ -1,8 +1,8 @@
 /**
- * THE LIVE PREVIEW of the website assistant in the demo.
+ * THE LIVE PREVIEW of the website agent in the demo.
  *
  * In the real product the widget (public/widget/v1/loader.js + chat.js + ask.js) talks to the public edge function
- * `outreach-webchat` with fetch and a Realtime socket. In the demo the Website assistant's preview can run that same
+ * `outreach-webchat` with fetch and a Realtime socket. In the demo the Website agent's preview can run that same
  * widget inside an iframe holding a fictional sample page; the iframe's `fetch` is replaced (before the widget loads)
  * by `parent.__growthxaiDemoWidget.request(...)`, which is this module: every route the widget calls is answered here
  * from the demo store, in the edge function's shapes. Nothing leaves the browser:
@@ -229,7 +229,7 @@ function chatStream(ctx: Ctx, inbox: Row, v: Row, b: Row, realm: Realm): Respons
           k.close();
         } catch (e) {
           try { k.enqueue(frame('error', { message: 'assistant_unavailable' })); k.close(); } catch { /* closed */ }
-          console.error('[demo] website assistant', e);
+          console.error('[demo] website agent', e);
         }
       };
       setTimeout(tick, 380);

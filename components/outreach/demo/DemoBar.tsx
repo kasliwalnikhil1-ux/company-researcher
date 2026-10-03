@@ -23,7 +23,17 @@ function Label() {
   );
 }
 
+/** While a bar is on screen, full-screen overlays start below it (globals.css, html[data-demo-bar]). */
+function useBarOffset() {
+  useEffect(() => {
+    const html = document.documentElement;
+    html.setAttribute('data-demo-bar', '');
+    return () => html.removeAttribute('data-demo-bar');
+  }, []);
+}
+
 function Placeholder() {
+  useBarOffset();
   return <div className="fixed top-0 inset-x-0 z-[60] h-10 bg-gray-900 text-white text-sm flex items-center px-4"><Label /></div>;
 }
 
@@ -75,6 +85,7 @@ function SimMenu() {
 
 export default function DemoBar() {
   const { tour, cta, ctaLabel } = useDemo();
+  useBarOffset();
   return (
     <>
       <div className="fixed top-0 inset-x-0 z-[60] h-10 bg-gray-900 text-white text-sm flex items-center gap-1 sm:gap-3 px-3 sm:px-4" role="region" aria-label="Product tour">

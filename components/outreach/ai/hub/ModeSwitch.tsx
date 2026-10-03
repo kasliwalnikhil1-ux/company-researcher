@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 
 /**
  * The mode control of every AI feature: a three-way switch (Off · Review · Auto) with one line underneath that explains
- * the selected mode. It looks the same for Replies, Personalized lines and the Website assistant.
+ * the selected mode. It looks the same for Replies, Personalized lines and the Website agent.
  *
  *   lines      the explanation per mode (lib/outreach/aiHub.ts MODE_LINE)
  *   locked     modes that cannot be picked here, with the reason shown as the button's tooltip

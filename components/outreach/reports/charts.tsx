@@ -145,39 +145,64 @@ export function Sparkline({ data, dataKey, label, color = '#4f46e5', height = 44
   );
 }
 
-/** Horizontal funnel: one bar per stage, scaled to the enrolled cohort, with the median time between stages. */
+/**
+ * Horizontal funnel: one bar per stage, scaled to the enrolled cohort, with the median time between stages.
+ * The Invited → Meeting booked rows sit in one nested list (`data-tour="funnel-path"`) so the product tour can highlight them together.
+ */
 export function FunnelBars({ stages }: { stages: FunnelStage[] }) {
   const top = stages[0]?.count ?? 0;
+  const from = stages.findIndex((s) => s.stage === 'invited');
+  const to = stages.findIndex((s) => s.stage === 'meeting');
+  const grouped = from > 0 && to > from;
+
+  const gap = (i: number) => {
+    if (i === 0) return null;
+    const median = stages[i].median_hours_from_previous;
+    return (
+      <div className="grid grid-cols-[150px_1fr] gap-4 items-center h-7">
+        <span />
+        <span className="flex items-center gap-2 text-xs text-gray-500 pl-1">
+          <span className="w-px h-4 bg-gray-200" aria-hidden />
+          {median !== null ? <>Median {fmtHours(median)} after {FUNNEL_LABELS[stages[i - 1].stage].toLowerCase()}</> : <span className="text-gray-300">No timing yet</span>}
+        </span>
+      </div>
+    );
+  };
+  const row = (i: number) => {
+    const s = stages[i];
+    const width = top > 0 ? Math.max((s.count / top) * 100, s.count > 0 ? 0.75 : 0) : 0;
+    return (
+      <div className="grid grid-cols-[150px_1fr] gap-4 items-center" data-tour={`funnel-${s.stage}`}>
+        <div className="text-sm font-medium text-gray-900">{FUNNEL_LABELS[s.stage]}</div>
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="flex-1 h-6 rounded-r bg-gray-50 min-w-0">
+            <div className="h-6 rounded-r" style={{ width: `${width}%`, background: i === 0 ? ACCENT_SOFT : ACCENT, border: i === 0 ? `1px solid ${ACCENT}` : undefined }} />
+          </div>
+          <div className="w-[230px] flex-shrink-0 grid grid-cols-[70px_80px_80px] text-right items-baseline">
+            <span className="text-sm font-semibold text-gray-900 tabular-nums">{fmtInt(s.count)}</span>
+            <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_enrolled)}</span>
+            <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_previous)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <ol className="space-y-0">
       {stages.map((s, i) => {
-        const width = top > 0 ? Math.max((s.count / top) * 100, s.count > 0 ? 0.75 : 0) : 0;
-        return (
-          <li key={s.stage}>
-            {i > 0 && (
-              <div className="grid grid-cols-[150px_1fr] gap-4 items-center h-7">
-                <span />
-                <span className="flex items-center gap-2 text-xs text-gray-500 pl-1">
-                  <span className="w-px h-4 bg-gray-200" aria-hidden />
-                  {s.median_hours_from_previous !== null ? <>Median {fmtHours(s.median_hours_from_previous)} after {FUNNEL_LABELS[stages[i - 1].stage].toLowerCase()}</> : <span className="text-gray-300">No timing yet</span>}
-                </span>
-              </div>
-            )}
-            <div className="grid grid-cols-[150px_1fr] gap-4 items-center" data-tour={`funnel-${s.stage}`}>
-              <div className="text-sm font-medium text-gray-900">{FUNNEL_LABELS[s.stage]}</div>
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex-1 h-6 rounded-r bg-gray-50 min-w-0">
-                  <div className="h-6 rounded-r" style={{ width: `${width}%`, background: i === 0 ? ACCENT_SOFT : ACCENT, border: i === 0 ? `1px solid ${ACCENT}` : undefined }} />
-                </div>
-                <div className="w-[230px] flex-shrink-0 grid grid-cols-[70px_80px_80px] text-right items-baseline">
-                  <span className="text-sm font-semibold text-gray-900 tabular-nums">{fmtInt(s.count)}</span>
-                  <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_enrolled)}</span>
-                  <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_previous)}</span>
-                </div>
-              </div>
-            </div>
-          </li>
-        );
+        if (grouped && i > from && i <= to) return null;
+        if (grouped && i === from) {
+          return (
+            <li key="path">
+              {gap(i)}
+              <ol data-tour="funnel-path">
+                {stages.slice(from, to + 1).map((t, j) => <li key={t.stage}>{j > 0 && gap(from + j)}{row(from + j)}</li>)}
+              </ol>
+            </li>
+          );
+        }
+        return <li key={s.stage}>{gap(i)}{row(i)}</li>;
       })}
     </ol>
   );

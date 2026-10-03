@@ -8,7 +8,7 @@ const to = (sp: URLSearchParams, p: Record<string, string | string[] | undefined
   return `/outreach/websites/${encodeURIComponent(id)}${t ? `?tab=${encodeURIComponent(t)}` : ''}`;
 };
 
-// Websites moved out of Settings to its own sidebar item (AI Website Chatbots). Old links keep working, ?tab= included.
+// Websites moved out of Settings to its own sidebar item (Website agents). Old links keep working, ?tab= included.
 export default function WebsiteMovedPage() {
   return <ClientRedirect to={to} />;
 }

@@ -10,7 +10,7 @@ import NeedCard, { ClampText, Hint, Part, linkButton } from './NeedCard';
 import { websiteSources, type CardProps } from './types';
 
 /**
- * Website (Review mode): the Website assistant suggests an answer and the visitor waits for a person. Sending it here is
+ * Website (Review mode): the Website agent suggests an answer and the visitor waits for a person. Sending it here is
  * the agent's own message in that chat; the suggestion id marks the suggestion as used. A suggestion that recommends
  * products shows their cards: they are sent under the answer, minus the ones removed here.
  */

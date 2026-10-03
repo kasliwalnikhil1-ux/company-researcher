@@ -38,7 +38,7 @@ Not built here (unchanged from before): auto-approve for lines; Mintlify help pa
 | AI Auto Replies / AI replies | **Replies** | Reply | `reply` |
 | AI Personalization / AI variables | **Personalized lines** | Line | `line` |
 | AI draft + approval step | **Step drafts** | Step draft | `draft` |
-| AI Website Chatbots / AI assistant | **Website assistant** | Website | `website` |
+| AI Website Chatbots / AI assistant / Website assistant | **Website agents** (sidebar, feature); one website's is the **Website agent**, its tab **AI agent** (renamed 3 Oct) | Website | `website` |
 | Profile Studio "Draft with AI" | **Profile drafts** | Profile | `profile` |
 
 Modes are **Off · Review · Auto** everywhere. Replies keep the enum (`off | draft | autopilot`); the UI and the MCP say
