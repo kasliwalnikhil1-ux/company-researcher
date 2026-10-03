@@ -68,7 +68,47 @@ export function storedAttachment(a: any, unipileMessageId: string | null): Row {
   if (a.type === "contact_card" || a.attachment_type === "contact_card") {
     out.contact = { name: a.display_name ?? null, phones: (Array.isArray(a.phones) ? a.phones : []).map((p: any) => String(p?.number ?? p ?? "")).filter(Boolean).slice(0, 5) };
   }
+  // a LinkedIn post shared in the chat: keep the post's own address (a CDN file link expires, a post link does not)
+  if (out.type === "linkedin_post" && !out.link && typeof a.url === "string" && /^https:\/\/(www\.)?linkedin\.com\//i.test(a.url)) out.link = { url: a.url, author: null, text: null };
+  // LinkedIn video meeting invite: when it starts / ends, so the inbox can show a meeting card
+  if (out.type === "video_meeting") {
+    out.meeting = { starts_at: a.starts_at ?? null, expires_at: a.expires_at ?? null, time_range: a.time_range ?? null, url: typeof a.url === "string" && /^https:\/\//.test(a.url) && !a.url_expires_at ? a.url : null };
+  }
   return out;
+}
+
+/**
+ * What the thread shows besides the text, kept on `content_attributes` (049, every row has it): the connector's
+ * `message_type` when it is not a plain message (INMAIL, INVITATION, STORY_REPLY, STORY_MENTION …), an InMail's subject,
+ * view-once media. Empty for an ordinary message.
+ */
+export function messageMeta(m: any, keepSubject: boolean): Row {
+  const out: Row = {};
+  const type = String(m?.message_type ?? "").toUpperCase();
+  if (type && type !== "MESSAGE") out.msg_type = type;
+  if (keepSubject && typeof m?.subject === "string" && m.subject.trim()) out.subject = fixMojibake(m.subject.trim().slice(0, 300));
+  if (m?.is_view_once === true || m?.is_view_once === 1) out.view_once = true;
+  return out;
+}
+
+/** LinkedIn chat kind (InMail / sponsored / job offer) and which inbox it sits in (Sales Navigator, Recruiter, a page). */
+export function linkedinChatMeta(c: any): Row | null {
+  const content = typeof c?.content_type === "string" ? c.content_type : (typeof c?.chat_content_type === "string" ? c.chat_content_type : null);
+  const folders: string[] = (Array.isArray(c?.folder) ? c.folder : typeof c?.folder === "string" ? [c.folder] : []).map(String);
+  const inbox = folders.includes("INBOX_LINKEDIN_SALES_NAVIGATOR") ? "sales_navigator" : folders.includes("INBOX_LINKEDIN_RECRUITER") ? "recruiter" : folders.includes("INBOX_LINKEDIN_ORGANIZATION") ? "organization" : null;
+  if (!content && !inbox) return null;
+  return { content_type: content, inbox };
+}
+
+type MailPerson = { name: string | null; email: string };
+const mailPeople = (list: any): MailPerson[] => (Array.isArray(list) ? list : [])
+  .map((a: any) => ({ name: visibleName(a?.display_name) ?? null, email: String(a?.identifier ?? "").trim().toLowerCase() }))
+  .filter((a) => a.email).slice(0, 50);
+
+/** The people on an email (from / to / cc / bcc / reply-to) and its subject, as the thread's mail header shows them. */
+export function emailMeta(p: any): Row {
+  const from = mailPeople([p?.from_attendee])[0] ?? null;
+  return { from, to: mailPeople(p?.to_attendees), cc: mailPeople(p?.cc_attendees), bcc: mailPeople(p?.bcc_attendees), reply_to: mailPeople(p?.reply_to_attendees), subject: p?.subject ? String(p.subject).slice(0, 500) : null };
 }
 
 /**
@@ -799,6 +839,8 @@ export async function handleMessaging(payload: any): Promise<void> {
     };
     if (group) row.subject = payload.subject ?? null;
     if (multiParty) row.is_group = true;
+    const li = provider === "LINKEDIN" ? linkedinChatMeta(payload) : null;
+    if (li) row.custom_attributes = { linkedin: li };
     if (isRequest) row.is_request = true;
     let { data: c, error: cErr } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
     if (cErr && isRequest) { delete row.is_request; ({ data: c } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("*").single()); }
@@ -843,6 +885,9 @@ export async function handleMessaging(payload: any): Promise<void> {
     is_forwarded: payload.is_forwarded === true || payload.is_forwarded === 1,
     event_type: isEvent ? (Number.isFinite(Number(payload.event_type)) ? Number(payload.event_type) : 0) : null,
   };
+  // a group thread's `subject` is its name, not a message subject
+  const meta = messageMeta(payload, provider === "LINKEDIN" && !multiParty);
+  if (Object.keys(meta).length) insertRow.content_attributes = meta;
   const unsupported = unsupportedText && attachments.length === 0;
   if (unsupported) insertRow.unsupported = true;
   if (!isOut && payload.sender) {
@@ -992,7 +1037,7 @@ export async function handleMail(payload: any): Promise<void> {
     workspace_id: sender.workspace_id, chat_id: chat.id, unipile_message_id: payload.email_id, direction: isOut ? "out" : "in",
     text: payload.body_plain || (payload.body ? String(payload.body).replace(/<[^>]+>/g, " ").trim() : null), html: payload.body ?? null,
     attachments: (payload.attachments ?? []).map((a: any) => ({ id: a.id, name: a.name, size: a.size, type: a.mime ?? a.type, unipile_message_id: payload.email_id, email: true })),
-    sent_at: sentAt,
+    sent_at: sentAt, content_attributes: { email: emailMeta(payload) },
   }).select("id").single();
   if (leadId) {
     await admin.from("outreach_lead_sender_state").upsert({ lead_id: leadId, sender_id: sender.id }, { onConflict: "lead_id,sender_id", ignoreDuplicates: true });
@@ -1049,6 +1094,8 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
       // a re-sync never blanks what a webhook / name pass already filled in (an omitted column is only null on insert)
       for (const k of ["lead_id", "attendee_public_identifier", "attendee_name", "subject"]) if (row[k] == null) delete row[k];
       if (sender.provider === "INSTAGRAM" && isRequestFolder(c)) row.is_request = true;
+      const li = sender.provider === "LINKEDIN" ? linkedinChatMeta(c) : null;
+      if (li) row.custom_attributes = { linkedin: li };
       let { data: chat, error: cErr } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("id, lead_id").single();
       if (cErr && row.is_request) { delete row.is_request; ({ data: chat } = await admin.from("outreach_chats").upsert(row, { onConflict: "sender_id,unipile_chat_id" }).select("id, lead_id").single()); }
       if (!chat) continue;
@@ -1069,7 +1116,7 @@ export async function backfillChats(sender: Sender, maxPages = 3): Promise<numbe
             quoted: quotedOf(m.quoted ?? m.reply_to, [], (id) => !!ownId && id === ownId),
             is_forwarded: m.is_forwarded === 1 || m.is_forwarded === true,
             event_type: m.is_event === 1 || m.is_event === true ? (Number(m.event_type) || 0) : null,
-            reactions,
+            reactions, content_attributes: messageMeta(m, sender.provider === "LINKEDIN" && !(Array.isArray(c.attendees) && c.attendees.length > 2)),
             ...(isOut && (m.seen === 1 || m.seen === true) ? { read_at: sentAt } : {}),
             ...(isOut && (m.delivered === 1 || m.delivered === true) ? { delivered_at: sentAt } : {}),
             ...(m.edited === 1 || m.edited === true ? { edited_at: sentAt } : {}),

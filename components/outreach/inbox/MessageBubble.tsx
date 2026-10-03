@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from '@/lib/outreach/nav';
-import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus, Info, Languages } from 'lucide-react';
+import { Paperclip, Loader2, Pencil, Trash2, Sparkles, Eye, MousePointerClick, Clock, Download, GitBranch, CornerDownRight, User, Mic, CheckCheck, Check, ExternalLink, Smile, Reply, Copy, Forward, Ban, Phone, PhoneMissed, Video, Users, Contact, Plus, Info, Languages, UserPlus, Mail, Timer, Linkedin, Play } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Message, Provider } from '@/lib/outreach/types';
 import type { ThreadAttributionRow } from '@/lib/outreach/intel';
 import { parseError } from '@/lib/outreach/api';
 import { useComposeAssist } from '@/lib/outreach/aiReplies';
-import { Badge, Button, fmtDate } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, fmtDate } from '@/components/outreach/ui';
 import { editWindowRemainingMs, fmtRemaining, fmtBytes, sanitizeHtml, triggerDownload, useAttachmentUrl, type MessageAttachment } from './hooks';
 import { channelLabel, fixMojibake, isMailProvider } from '@/lib/outreach/channels';
 import AiOriginBadge, { hasOriginBadge, isAiOrigin } from './ai/AiOriginBadge';
@@ -16,6 +16,7 @@ import { languageName } from './ai/useAiInbox';
 import ProductCards, { cardsOf } from '@/components/outreach/products/ProductCards';
 import VoiceCallCard from './webchat/VoiceCallCard';
 import { isCallCard } from '@/lib/outreach/voice';
+import { clockTime, isEmojiOnly, msgSubjectOf, msgTypeOf, threadLook, type ThreadLook } from './channels/look';
 
 export function isVoiceNote(att: MessageAttachment): boolean {
   const mime = att.mimetype ?? att.type ?? '';
@@ -24,7 +25,7 @@ export function isVoiceNote(att: MessageAttachment): boolean {
 
 /** Image / video / sticker / GIF shown inline (WhatsApp and Instagram send these as `img` / `video`, sent files carry a mimetype). */
 function mediaKind(att: MessageAttachment): 'image' | 'video' | null {
-  if (att.unavailable || !att.id) return null;
+  if (att.unavailable || !att.id || att.type === 'video_meeting' || att.type === 'linkedin_post') return null;
   const t = String(att.type ?? '').toLowerCase();
   const mime = String(att.mimetype ?? '').toLowerCase();
   if (t === 'img' || t === 'image' || t.startsWith('image/') || mime.startsWith('image/')) return 'image';
@@ -58,10 +59,6 @@ function fmtDuration(s: number | null | undefined): string | null {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
-function clockTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-}
-
 /** What a quoted message without text shows ("📷 Photo"). */
 function attachmentLabel(type: string | null | undefined): string {
   const t = String(type ?? '').toLowerCase();
@@ -76,7 +73,7 @@ function attachmentLabel(type: string | null | undefined): string {
 // count at word edges, so snake_case names and 2*3*4 stay as typed.
 const RICH_RE = /(```[\s\S]+?```)|(https?:\/\/[^\s<]+[^\s<.,:;"')\]!?])|(?<![\w*])(\*\*[^*\n]+?\*\*)(?![\w*])|(?<![\w*])(\*[^*\s](?:[^*\n]*?[^*\s])?\*)(?![\w*])|(?<![\w_])(_[^_\s](?:[^_\n]*?[^_\s])?_)(?![\w_])|(?<![\w~])(~[^~\s](?:[^~\n]*?[^~\s])?~)(?![\w~])|(`[^`\n]+`)/g;
 
-function RichText({ text, format, dark }: { text: string; format: boolean; dark: boolean }): React.ReactNode {
+function RichText({ text, format, dark, linkClass }: { text: string; format: boolean; dark: boolean; linkClass?: string }): React.ReactNode {
   const out: React.ReactNode[] = [];
   let last = 0, k = 0;
   for (const mt of text.matchAll(RICH_RE)) {
@@ -85,13 +82,13 @@ function RichText({ text, format, dark }: { text: string; format: boolean; dark:
     if (!format && !url) continue;
     if (at > last) out.push(text.slice(last, at));
     const key = k++;
-    if (url) out.push(<a key={key} href={url} target="_blank" rel="noopener noreferrer" className={cn('underline break-all', dark ? 'text-white' : 'text-sky-700 hover:text-sky-800')}>{url}</a>);
+    if (url) out.push(<a key={key} href={url} target="_blank" rel="noopener noreferrer" className={cn('break-all', linkClass ?? cn('underline', dark ? 'text-white' : 'text-sky-700 hover:text-sky-800'))}>{url}</a>);
     else if (mono) out.push(<code key={key} className="font-mono text-[13px]">{mono.slice(3, -3)}</code>);
     else if (code) out.push(<code key={key} className={cn('font-mono text-[13px] rounded px-1', dark ? 'bg-white/15' : 'bg-black/[0.06]')}>{code.slice(1, -1)}</code>);
-    else if (bold2) out.push(<strong key={key}><RichText text={bold2.slice(2, -2)} format={format} dark={dark} /></strong>);
-    else if (bold) out.push(<strong key={key}><RichText text={bold.slice(1, -1)} format={format} dark={dark} /></strong>);
-    else if (italic) out.push(<em key={key}><RichText text={italic.slice(1, -1)} format={format} dark={dark} /></em>);
-    else if (strike) out.push(<s key={key}><RichText text={strike.slice(1, -1)} format={format} dark={dark} /></s>);
+    else if (bold2) out.push(<strong key={key}><RichText text={bold2.slice(2, -2)} format={format} dark={dark} linkClass={linkClass} /></strong>);
+    else if (bold) out.push(<strong key={key}><RichText text={bold.slice(1, -1)} format={format} dark={dark} linkClass={linkClass} /></strong>);
+    else if (italic) out.push(<em key={key}><RichText text={italic.slice(1, -1)} format={format} dark={dark} linkClass={linkClass} /></em>);
+    else if (strike) out.push(<s key={key}><RichText text={strike.slice(1, -1)} format={format} dark={dark} linkClass={linkClass} /></s>);
     else out.push(whole);
     last = at + whole.length;
   }
@@ -116,20 +113,24 @@ function VoiceNote({ messageId, att, dark }: { messageId: string; att: MessageAt
 }
 
 /** Photo / video / sticker / GIF, loaded on mount through the attachment proxy. A click opens the full file. */
-function Media({ messageId, att, kind }: { messageId: string; att: MessageAttachment; kind: 'image' | 'video' }) {
+export function Media({ messageId, att, kind, variant }: { messageId: string; att: MessageAttachment; kind: 'image' | 'video'; /** story: a portrait story tile; bare: media drawn without a bubble (Instagram) */ variant?: 'story' | 'bare' }) {
   const { url, loading, error, load } = useAttachmentUrl(messageId, att.id ?? '');
   useEffect(() => { if (att.id && !url && !loading && !error) void load(); }, [att.id, url, loading, error, load]);
   const name = att.name ?? (kind === 'image' ? 'Photo' : 'Video');
   if (error) return <div className="text-[11px] text-red-600 px-1">Could not load {kind === 'image' ? 'photo' : 'video'}: {error}</div>;
-  if (!url) return <div className={cn('flex items-center justify-center rounded-md bg-black/5 text-gray-400', att.sticker ? 'w-28 h-28' : 'w-60 h-40')}><Loader2 className="w-5 h-5 animate-spin" /></div>;
+  const story = variant === 'story';
+  const radius = story ? 'rounded-xl' : variant === 'bare' ? 'rounded-2xl' : 'rounded-md';
+  if (!url) return <div className={cn('flex items-center justify-center bg-black/5 text-gray-400', radius, story ? 'w-28 h-48' : att.sticker ? 'w-28 h-28' : 'w-60 h-40')}><Loader2 className="w-5 h-5 animate-spin" /></div>;
   if (kind === 'video') {
     return att.gif
-      ? <video src={url} autoPlay loop muted playsInline className="max-h-72 max-w-full rounded-md" aria-label="GIF" />
-      : <video src={url} controls preload="metadata" className="max-h-72 max-w-full rounded-md bg-black" aria-label={name} />;
+      ? <video src={url} autoPlay loop muted playsInline className={cn('max-h-72 max-w-full', radius)} aria-label="GIF" />
+      : story
+        ? <video src={url} muted playsInline preload="metadata" onClick={(e) => { const v = e.currentTarget; if (v.paused) void v.play(); else v.pause(); }} className={cn('w-28 h-48 object-cover bg-black cursor-pointer', radius)} aria-label={name} />
+        : <video src={url} controls preload="metadata" className={cn('max-h-72 max-w-full bg-black', radius)} aria-label={name} />;
   }
   return (
     <button type="button" onClick={() => window.open(url, '_blank', 'noopener')} className="block" title="Open full size">
-      <img src={url} alt={name} className={cn('rounded-md object-contain', att.sticker ? 'w-32 h-32' : 'max-h-72 max-w-full')} />
+      <img src={url} alt={name} className={cn(radius, story ? 'w-28 h-48 object-cover' : att.sticker ? 'w-32 h-32 object-contain' : 'max-h-72 max-w-full object-contain')} />
     </button>
   );
 }
@@ -147,8 +148,24 @@ function ContactCard({ contact }: { contact: NonNullable<MessageAttachment['cont
 }
 
 /** A shared Instagram post or reel: a link to it on Instagram (the file itself is only a preview image). */
-function SharedPost({ link, dark }: { link: NonNullable<MessageAttachment['link']>; dark: boolean }) {
+function SharedPost({ link, dark, messageId, att }: { link: NonNullable<MessageAttachment['link']>; dark: boolean; messageId: string; att: MessageAttachment }) {
   const isReel = /\/reel\//.test(link.url);
+  if (/linkedin\.com\//i.test(link.url)) return <LinkedInPostCard url={link.url} />;
+  const preview = mediaKind(att);
+  if (preview) {
+    // Instagram's own share card: who posted it, the picture, the caption
+    return (
+      <div className="w-[240px] rounded-2xl border border-gray-200 bg-white overflow-hidden text-gray-900 text-left">
+        <div className="flex items-center gap-2 px-3 py-2">
+          <span className="w-6 h-6 rounded-full bg-gradient-to-tr from-amber-400 via-pink-500 to-purple-600 p-[1.5px]"><span className="block w-full h-full rounded-full bg-white" /></span>
+          <span className="text-xs font-semibold truncate">{link.author ? link.author : (isReel ? 'Reel' : 'Post')}</span>
+        </div>
+        <div className="relative bg-gray-100 [&_img]:rounded-none [&_img]:w-full [&_img]:max-h-80 [&_img]:object-cover"><Media messageId={messageId} att={att} kind={preview} />{isReel && <Play className="absolute top-2 right-2 w-4 h-4 text-white drop-shadow" fill="currentColor" />}</div>
+        {link.text && <p className="px-3 pt-2 text-xs line-clamp-2"><span className="font-semibold">{link.author ?? ''}</span> {fixMojibake(link.text)}</p>}
+        <a href={link.url} target="_blank" rel="noopener noreferrer" className="block px-3 py-2 text-xs font-semibold text-[#0095f6] hover:text-[#00376b]">View {isReel ? 'reel' : 'post'}</a>
+      </div>
+    );
+  }
   return (
     <a href={link.url} target="_blank" rel="noopener noreferrer" className={cn('flex items-start gap-2 rounded-lg px-2.5 py-2 max-w-[280px] text-xs no-underline', dark ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-gray-50 border border-gray-200 text-gray-700 hover:bg-gray-100')}>
       <ExternalLink className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" aria-hidden />
@@ -161,8 +178,51 @@ function SharedPost({ link, dark }: { link: NonNullable<MessageAttachment['link'
   );
 }
 
+/** A LinkedIn post shared in the conversation. */
+function LinkedInPostCard({ url }: { url: string | null }) {
+  const body = (
+    <>
+      <span className="w-9 h-9 rounded-md bg-[#0a66c2] text-white flex items-center justify-center flex-shrink-0"><Linkedin className="w-5 h-5" /></span>
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-gray-900">LinkedIn post</span>
+        <span className="block text-xs text-gray-500">{url ? 'View the post on LinkedIn' : 'Open LinkedIn to see the post'}</span>
+      </span>
+    </>
+  );
+  const cls = 'flex items-center gap-2.5 rounded-lg border border-gray-200 bg-white px-3 py-2.5 w-[280px] max-w-full no-underline text-left';
+  return url ? <a href={url} target="_blank" rel="noopener noreferrer" className={cn(cls, 'hover:bg-gray-50')}>{body}</a> : <div className={cls}>{body}</div>;
+}
+
+/** A LinkedIn video meeting invite: when, and a join button while it is open. */
+function MeetingCard({ meeting }: { meeting: NonNullable<MessageAttachment['meeting']> }) {
+  const [openedAt] = useState(() => Date.now());
+  const start = meeting.starts_at ? new Date(meeting.starts_at) : null;
+  const end = meeting.expires_at ? new Date(meeting.expires_at) : null;
+  const t = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const when = start && !Number.isNaN(start.getTime())
+    ? `${start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} · ${t(start)}${end && !Number.isNaN(end.getTime()) ? ` – ${t(end)}` : ''}`
+    : meeting.time_range ?? 'Time not shared';
+  const over = end ? end.getTime() < openedAt : false;
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white w-[280px] max-w-full overflow-hidden text-left">
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <span className="w-9 h-9 rounded-md bg-[#0a66c2]/10 text-[#0a66c2] flex items-center justify-center flex-shrink-0"><Video className="w-5 h-5" /></span>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-gray-900">Video meeting</span>
+          <span className="block text-xs text-gray-500">{when}</span>
+        </span>
+      </div>
+      {meeting.url && !over
+        ? <a href={meeting.url} target="_blank" rel="noopener noreferrer" className="block text-center text-sm font-semibold text-[#0a66c2] border-t border-gray-200 py-1.5 hover:bg-[#0a66c2]/5">Join meeting</a>
+        : <div className="text-center text-xs text-gray-500 border-t border-gray-200 py-1.5">{over ? 'This meeting has ended' : 'Join from LinkedIn'}</div>}
+    </div>
+  );
+}
+
 function AttachmentChip({ messageId, att, dark }: { messageId: string; att: MessageAttachment; dark: boolean }) {
-  if (att.link?.url) return <SharedPost link={att.link} dark={dark} />;
+  if (att.meeting || att.type === 'video_meeting') return <MeetingCard meeting={att.meeting ?? {}} />;
+  if (att.type === 'linkedin_post' && !att.link?.url) return <LinkedInPostCard url={null} />;
+  if (att.link?.url) return <SharedPost link={att.link} dark={dark} messageId={messageId} att={att} />;
   if (att.contact) return <ContactCard contact={att.contact} />;
   if (!att.id || att.unavailable) {
     // stored before attachment ids were read, or no longer served by the provider: say so instead of failing
@@ -216,6 +276,15 @@ export interface MessageBubbleProps {
   onReact?: (m: Message, emoji: string) => Promise<void>;
   onForward?: (m: Message) => void;
   onJumpTo?: (messageId: string) => void;
+  /** How the thread is drawn (defaults to the channel's look). */
+  look?: ThreadLook;
+  /** First / last message of a run by the same side (Instagram corners and avatar, LinkedIn author header). */
+  groupStart?: boolean;
+  groupEnd?: boolean;
+  /** Who wrote it, for the LinkedIn row header and the Instagram avatar. */
+  author?: { name: string; avatar?: string | null };
+  /** The last message the contact has seen: LinkedIn shows their small picture under it, Instagram says "Seen". */
+  seen?: { name: string; avatar?: string | null; at: string | null } | null;
 }
 
 function stepHref(a: ThreadAttributionRow): string {
@@ -227,7 +296,7 @@ function stepName(a: ThreadAttributionRow): string {
   return a.step_label ? `${n}: ${a.step_label}` : n;
 }
 
-function Attribution({ a, mine }: { a: ThreadAttributionRow; mine: boolean }) {
+export function Attribution({ a, mine }: { a: ThreadAttributionRow; mine: boolean }) {
   const cls = 'flex items-center gap-1 mt-1 text-[11px] text-gray-500 max-w-full flex-wrap';
   if (a.kind === 'automated') {
     return (
@@ -291,7 +360,7 @@ function QuoteBlock({ m, quotedLocal, contactName, dark, onJumpTo }: { m: Messag
  * AI replies v2: the translation of a received message (compose_assist translate_in, cached on `messages.translation`).
  * Shown under the bubble; "Show original" collapses it (the original text always stays in the bubble).
  */
-function Translation({ m, local, dark }: { m: Message; local: { text: string; language: string | null } | null; dark: boolean }) {
+export function Translation({ m, local, dark }: { m: Message; local: { text: string; language: string | null } | null; dark: boolean }) {
   const t = local ?? (m.translation?.text ? { text: m.translation.text, language: m.translation.lang } : null);
   const [hidden, setHidden] = useState(false);
   if (!t) return null;
@@ -313,12 +382,31 @@ function Ticks({ m, pending }: { m: Message; pending: boolean }) {
   return <Check className="w-3.5 h-3.5" aria-label="Sent" />;
 }
 
-export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDelete, attribution, isGroup, quotedLocal, contactName, highlight, onReply, onReact, onForward, onJumpTo }: MessageBubbleProps) {
+/** Instagram story labels, from the side that sent the message. */
+function storyLabel(type: string | null, mine: boolean): string | null {
+  if (type === 'STORY_REPLY') return mine ? 'You replied to their story' : 'Replied to your story';
+  if (type === 'STORY_MENTION') return mine ? 'You mentioned them in your story' : 'Mentioned you in their story';
+  return null;
+}
+
+/** LinkedIn InMail answers that come without text: a system line, like LinkedIn shows them. */
+const INMAIL_EVENTS: Record<string, { mine: string; theirs: string }> = {
+  INMAIL_ACCEPT: { mine: 'You accepted the InMail', theirs: 'accepted your InMail' },
+  INMAIL_DECLINE: { mine: 'You declined the InMail', theirs: 'declined your InMail' },
+};
+
+export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDelete, attribution, isGroup, quotedLocal, contactName, highlight, onReply, onReact, onForward, onJumpTo, look: lookProp, groupStart = true, groupEnd = true, author, seen }: MessageBubbleProps) {
   const mine = m.direction === 'out';
   const deleted = !!m.deleted_at;
   const pending = m.id.startsWith('temp-');
-  const wa = provider === 'WHATSAPP';
-  const dark = mine && !wa;   // white text on the indigo bubble (every channel except WhatsApp)
+  const look = lookProp ?? threadLook(provider);
+  const wa = look === 'whatsapp';
+  const ig = look === 'instagram';
+  const li = look === 'linkedin';
+  const dark = mine && (look === 'chat' || ig);   // white text on the indigo (chat) or blue (Instagram) bubble
+  const msgType = msgTypeOf(m);
+  const subject = li ? msgSubjectOf(m) : null;
+  const story = ig ? storyLabel(msgType, mine) : null;
   const editWindow = EDIT_WINDOW_MS[provider];
   const deleteWindow = DELETE_WINDOW_MS[provider];
   const age = now - new Date(m.sent_at).getTime();
@@ -346,9 +434,16 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   // product cards are only ever drawn on what the assistant or an agent sent, never on a visitor's message
   const products = useMemo(() => (m.direction === 'out' ? cardsOf(m.content_attributes) : []), [m.direction, m.content_attributes]);
   const voiceNotes = useMemo(() => atts.filter((a) => isVoiceNote(a)), [atts]);
-  const media = useMemo(() => atts.filter((a) => !isVoiceNote(a) && mediaKind(a)), [atts]);
-  const otherAttachments = useMemo(() => atts.filter((a) => !isVoiceNote(a) && !mediaKind(a)), [atts]);
+  // shared posts carry a preview picture: they get their own card, not a bare photo
+  const media = useMemo(() => atts.filter((a) => !isVoiceNote(a) && mediaKind(a) && !a.link?.url), [atts]);
+  const otherAttachments = useMemo(() => atts.filter((a) => !isVoiceNote(a) && (!mediaKind(a) || !!a.link?.url)), [atts]);
   const onlySticker = media.length === 1 && !!media[0].sticker && !m.text && !m.quoted;
+  // Instagram draws a story (reply / mention) as a portrait tile above the bubble, and a lone photo without a bubble
+  const storyMedia = story ? media : [];
+  const bubbleMedia = story ? [] : media;
+  const onlyMedia = ig && bubbleMedia.length > 0 && !m.text && !m.quoted && !otherAttachments.length && !voiceNotes.length;
+  const bigEmoji = (wa || ig) && !deleted && !editing && !m.quoted && !atts.length && isEmojiOnly(m.text);
+  const bare = onlySticker || onlyMedia || bigEmoji || (!!story && !m.text && !otherAttachments.length && !voiceNotes.length);
   const reactionGroups = useMemo(() => {
     const reactions = Array.isArray(m.reactions) ? m.reactions.filter((r) => r && typeof r.emoji === 'string' && r.emoji) : [];
     const g = new Map<string, { emoji: string; names: string[]; mine: boolean }>();
@@ -373,6 +468,15 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
   if (m.event_type != null) return <EventPill m={m} />;
   // a voice call with the website assistant (069): its card, where the call started
   if (m.content_type === 'event' && isCallCard(m.content_attributes)) return <VoiceCallCard a={m.content_attributes} id={m.id} />;
+  // LinkedIn: "accepted / declined your InMail" without text is a system line
+  if (li && msgType && INMAIL_EVENTS[msgType] && !m.text?.trim() && !atts.length) {
+    const ev = INMAIL_EVENTS[msgType];
+    return (
+      <div className="flex justify-center py-1" id={`msg-${m.id}`}>
+        <span className="inline-flex items-center gap-1.5 text-xs text-gray-500" title={new Date(m.sent_at).toLocaleString()}><Mail className="w-3.5 h-3.5" /> {mine ? ev.mine : `${author?.name ?? contactName ?? 'They'} ${ev.theirs}`} · {clockTime(m.sent_at)}</span>
+      </div>
+    );
+  }
 
   const save = async () => {
     if (!draft.trim() || draft === m.text) { setEditing(false); return; }
@@ -400,11 +504,12 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
     });
   };
 
-  const showAuthor = isGroup && !mine && (m.sender_name || m.sender_identifier);
+  const showAuthor = isGroup && !mine && (m.sender_name || m.sender_identifier) && !li;
   const hideDeletedText = deleted && provider !== 'LINKEDIN';
   const actionBtn = 'p-1 rounded-full text-gray-500 hover:text-gray-800 hover:bg-white shadow-sm bg-white/80 border border-gray-200';
   const originBadge = mine && !pending && hasOriginBadge(m.origin);
   const hasActions = !editing && (reactable || replyable || forwardable || editable || deletable || translatable || (!!m.text && !deleted));
+  const fullTime = new Date(m.sent_at).toLocaleString();
 
   const toolbar = hasActions ? (
     <div className={cn('relative flex items-center gap-0.5 self-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity', picker && 'opacity-100')}>
@@ -412,7 +517,7 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
         <div className="relative" ref={pickerRef}>
           <button type="button" className={actionBtn} onClick={() => setPicker((v) => !v)} title="React" aria-label="React" disabled={busy === 'react'}>{busy === 'react' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Smile className="w-3.5 h-3.5" />}</button>
           {picker && (
-            <div className={cn('absolute z-20 bottom-full mb-1 flex items-center gap-0.5 rounded-full bg-white shadow-lg border border-gray-200 px-1.5 py-1', mine ? 'right-0' : 'left-0')} role="menu">
+            <div className={cn('absolute z-20 bottom-full mb-1 flex items-center gap-0.5 rounded-full bg-white shadow-lg border border-gray-200 px-1.5 py-1', mine && !li ? 'right-0' : li ? 'right-0' : 'left-0')} role="menu">
               {QUICK_REACTIONS.map((e) => <button key={e} type="button" role="menuitem" onClick={() => react(e)} className="text-lg leading-none px-1 py-0.5 rounded-full hover:bg-gray-100 hover:scale-125 transition-transform" aria-label={`React ${e}`}>{e}</button>)}
               <button type="button" role="menuitem" onClick={() => { const e = window.prompt('React with any emoji'); if (e?.trim()) void react(e.trim()); }} className="p-1 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Other emoji"><Plus className="w-4 h-4" /></button>
             </div>
@@ -428,88 +533,83 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
     </div>
   ) : null;
 
-  const bubbleCls = onlySticker
-    ? 'bg-transparent'
-    : wa
-      ? cn('rounded-lg px-2 pt-1.5 pb-1 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] text-gray-900', mine ? 'bg-[#d9fdd3] rounded-tr-none' : 'bg-white rounded-tl-none')
-      : cn('rounded-2xl px-3.5 py-2 shadow-sm', mine ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md');
-
-  return (
-    <div id={`msg-${m.id}`} className={cn('flex flex-col max-w-[85%] md:max-w-[70%]', mine ? 'ml-auto items-end' : 'mr-auto items-start')}>
-      <div className={cn('group flex items-end gap-1.5 max-w-full', mine && 'flex-row-reverse')}>
-        <div className={cn('relative max-w-full min-w-0 text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] transition-shadow', bubbleCls, deleted && 'opacity-80', pending && 'opacity-60', highlight && 'ring-2 ring-amber-400 ring-offset-2')}>
-          {showAuthor && (
-            <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
-              <span className={cn('text-xs font-semibold truncate', authorColor(m.sender_identifier ?? m.sender_name))}>{m.sender_name ?? m.sender_identifier}</span>
-              {m.sender_name && m.sender_identifier && <span className="text-[11px] text-gray-400 truncate">{m.sender_identifier}</span>}
-            </div>
-          )}
-          {m.is_forwarded && !deleted && <div className={cn('flex items-center gap-1 text-[11px] italic mb-0.5', dark ? 'text-white/75' : 'text-gray-500')}><Forward className="w-3 h-3" /> Forwarded</div>}
-          {m.is_invite_note && <div className="mb-1"><Badge tone={mine ? 'indigo' : 'blue'} className={dark ? 'bg-white/20 text-white' : ''}>Invitation note</Badge></div>}
-          {!hideDeletedText && <QuoteBlock m={m} quotedLocal={quotedLocal} contactName={contactName} dark={dark} onJumpTo={onJumpTo} />}
-          {!hideDeletedText && media.length > 0 && (
-            <div className={cn('flex flex-col gap-1', (m.text || voiceNotes.length || otherAttachments.length) ? 'mb-1' : '')}>
-              {media.map((a, i) => <Media key={a.id ?? `m${i}`} messageId={m.id} att={a} kind={mediaKind(a)!} />)}
-            </div>
-          )}
-          {hideDeletedText ? (
-            <span className="inline-flex items-center gap-1 italic text-gray-500" title={m.text ? `Deleted: ${fixMojibake(m.text)}` : undefined}><Ban className="w-3.5 h-3.5" /> {mine ? 'You deleted this message' : 'This message was deleted'}</span>
-          ) : isEmail && m.html && !m.text ? (
-            <div className="max-w-none [&_a]:underline [&_p]:my-1 [&_img]:max-w-full overflow-x-auto" dangerouslySetInnerHTML={{ __html: safeHtml }} />
-          ) : editing ? (
-            <div className="min-w-[240px]">
-              <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} rows={Math.min(10, Math.max(2, draft.split('\n').length))} className="w-full text-sm text-gray-900 rounded-md border border-gray-300 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400" aria-label="Edit message" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }} />
-              <div className="flex justify-end gap-1.5 mt-1">
-                <Button size="sm" variant="secondary" onClick={() => { setEditing(false); setDraft(m.text ?? ''); }}>Cancel</Button>
-                <Button size="sm" variant="secondary" loading={busy === 'edit'} onClick={save}>Save</Button>
-              </div>
-            </div>
-          ) : (
-            <span className={cn(deleted && 'line-through')}>{m.text ? <RichText text={fixMojibake(m.text) ?? ''} format={wa} dark={dark} /> : atts.length || products.length ? '' : m.unsupported
-              ? <span className={cn('inline-flex items-center gap-1.5 italic', dark ? 'text-white/80' : 'text-gray-500')}><Info className="w-3.5 h-3.5 shrink-0" /> This message can&apos;t be shown here. Open {channelLabel(provider)} to see it.</span>
-              : <em className="opacity-70">(empty message)</em>}</span>
-          )}
-          {/* web chat: the product cards the assistant recommended or an agent sent, as the visitor sees them */}
-          {!hideDeletedText && products.length > 0 && <ProductCards cards={products} className={m.text ? 'mt-2' : ''} />}
-          {!hideDeletedText && voiceNotes.length > 0 && (
-            <div className={cn('space-y-1.5', m.text ? 'mt-2' : '')}>
-              {voiceNotes.map((a, i) => <VoiceNote key={a.id ?? `v${i}`} messageId={m.id} att={a} dark={dark} />)}
-              {m.transcript
-                ? <div className={cn('text-xs italic border-l-2 pl-2', dark ? 'text-white/85 border-white/40' : 'text-gray-600 border-gray-300')}>{m.transcript}</div>
-                : transcriptPending ? <div className={cn('text-[11px] inline-flex items-center gap-1', dark ? 'text-white/70' : 'text-gray-400')}><Loader2 className="w-3 h-3 animate-spin" /> Transcribing…</div>
-                  : transcriptFailed ? <div className={cn('text-[11px]', dark ? 'text-white/70' : 'text-gray-400')}>Could not transcribe this voice note.</div> : null}
-            </div>
-          )}
-          {!hideDeletedText && otherAttachments.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mt-2">
-              {otherAttachments.map((a, i) => <AttachmentChip key={a.id ?? `a${i}`} messageId={m.id} att={a} dark={dark} />)}
-            </div>
-          )}
-          {!mine && !deleted && <Translation m={m} local={translation} dark={dark} />}
-          {translateError && <div className="text-[11px] text-red-600 mt-1">{translateError}</div>}
-          {wa && !editing && (
-            // WhatsApp keeps the time (and our ticks) inside the bubble, bottom right
-            <span className={cn('float-right ml-3 mt-1 -mb-0.5 inline-flex items-center gap-1 text-[11px] leading-4 select-none', onlySticker ? 'bg-black/40 text-white rounded px-1' : 'text-gray-500')} title={new Date(m.sent_at).toLocaleString()}>
-              {m.edited_at && !deleted && <span>Edited</span>}
-              {pending ? 'Sending…' : clockTime(m.sent_at)}
-              {mine && !deleted && <Ticks m={m} pending={pending} />}
-            </span>
-          )}
+  // ------------------------------------------------------------------ what the message says (shared by every look)
+  const linkTone = li ? 'text-[#0a66c2] hover:underline' : undefined;
+  const content = (
+    <>
+      {showAuthor && (
+        <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
+          <span className={cn('text-xs font-semibold truncate', authorColor(m.sender_identifier ?? m.sender_name))}>{m.sender_name ?? m.sender_identifier}</span>
+          {m.sender_name && m.sender_identifier && <span className="text-[11px] text-gray-400 truncate">{m.sender_identifier}</span>}
         </div>
-        {toolbar}
-      </div>
+      )}
+      {m.is_forwarded && !deleted && <div className={cn('flex items-center gap-1 text-[11px] italic mb-0.5', dark ? 'text-white/75' : 'text-gray-500')}><Forward className="w-3 h-3" /> Forwarded</div>}
+      {m.is_invite_note && (li
+        ? <div className="flex items-center gap-1 text-xs text-gray-500 mb-0.5"><UserPlus className="w-3.5 h-3.5" /> Sent with the connection request</div>
+        : <div className="mb-1"><Badge tone={mine ? 'indigo' : 'blue'} className={dark ? 'bg-white/20 text-white' : ''}>Invitation note</Badge></div>)}
+      {subject && !deleted && <div className="font-semibold text-gray-900 mb-1">{subject}</div>}
+      {m.content_attributes?.view_once && !deleted && <div className={cn('inline-flex items-center gap-1 text-xs mb-1', dark ? 'text-white/80' : 'text-gray-500')}><Timer className="w-3.5 h-3.5" /> View once{!media.length ? `: open ${channelLabel(provider)} to see it` : ''}</div>}
+      {!hideDeletedText && <QuoteBlock m={m} quotedLocal={quotedLocal} contactName={contactName} dark={dark} onJumpTo={onJumpTo} />}
+      {!hideDeletedText && bubbleMedia.length > 0 && (
+        <div className={cn('flex flex-col gap-1', (m.text || voiceNotes.length || otherAttachments.length) ? 'mb-1' : '')}>
+          {bubbleMedia.map((a, i) => <Media key={a.id ?? `m${i}`} messageId={m.id} att={a} kind={mediaKind(a)!} variant={onlyMedia ? 'bare' : undefined} />)}
+        </div>
+      )}
+      {hideDeletedText ? (
+        <span className="inline-flex items-center gap-1 italic text-gray-500" title={m.text ? `Deleted: ${fixMojibake(m.text)}` : undefined}><Ban className="w-3.5 h-3.5" /> {mine ? 'You deleted this message' : 'This message was deleted'}</span>
+      ) : isEmail && m.html && !m.text ? (
+        <div className="max-w-none [&_a]:underline [&_p]:my-1 [&_img]:max-w-full overflow-x-auto" dangerouslySetInnerHTML={{ __html: safeHtml }} />
+      ) : editing ? (
+        <div className="min-w-[240px]">
+          <textarea autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} rows={Math.min(10, Math.max(2, draft.split('\n').length))} className="w-full text-sm text-gray-900 rounded-md border border-gray-300 px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-400" aria-label="Edit message" onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false); }} />
+          <div className="flex justify-end gap-1.5 mt-1">
+            <Button size="sm" variant="secondary" onClick={() => { setEditing(false); setDraft(m.text ?? ''); }}>Cancel</Button>
+            <Button size="sm" variant="secondary" loading={busy === 'edit'} onClick={save}>Save</Button>
+          </div>
+        </div>
+      ) : bigEmoji ? (
+        <span className="text-4xl leading-tight">{m.text?.trim()}</span>
+      ) : (
+        <span className={cn(deleted && 'line-through')}>{m.text ? <RichText text={fixMojibake(m.text) ?? ''} format={wa} dark={dark} linkClass={linkTone} /> : atts.length || products.length ? '' : m.unsupported
+          ? <span className={cn('inline-flex items-center gap-1.5 italic', dark ? 'text-white/80' : 'text-gray-500')}><Info className="w-3.5 h-3.5 shrink-0" /> This message can&apos;t be shown here. Open {channelLabel(provider)} to see it.</span>
+          : story ? '' : <em className="opacity-70">(empty message)</em>}</span>
+      )}
+      {/* web chat: the product cards the assistant recommended or an agent sent, as the visitor sees them */}
+      {!hideDeletedText && products.length > 0 && <ProductCards cards={products} className={m.text ? 'mt-2' : ''} />}
+      {!hideDeletedText && voiceNotes.length > 0 && (
+        <div className={cn('space-y-1.5', m.text ? 'mt-2' : '')}>
+          {voiceNotes.map((a, i) => <VoiceNote key={a.id ?? `v${i}`} messageId={m.id} att={a} dark={dark} />)}
+          {m.transcript
+            ? <div className={cn('text-xs italic border-l-2 pl-2', dark ? 'text-white/85 border-white/40' : 'text-gray-600 border-gray-300')}>{m.transcript}</div>
+            : transcriptPending ? <div className={cn('text-[11px] inline-flex items-center gap-1', dark ? 'text-white/70' : 'text-gray-400')}><Loader2 className="w-3 h-3 animate-spin" /> Transcribing…</div>
+              : transcriptFailed ? <div className={cn('text-[11px]', dark ? 'text-white/70' : 'text-gray-400')}>Could not transcribe this voice note.</div> : null}
+        </div>
+      )}
+      {!hideDeletedText && otherAttachments.length > 0 && (
+        <div className={cn('flex flex-wrap gap-1.5', (m.text || bubbleMedia.length) && 'mt-2')}>
+          {otherAttachments.map((a, i) => <AttachmentChip key={a.id ?? `a${i}`} messageId={m.id} att={a} dark={dark} />)}
+        </div>
+      )}
+      {!mine && !deleted && <Translation m={m} local={translation} dark={dark} />}
+      {translateError && <div className="text-[11px] text-red-600 mt-1">{translateError}</div>}
+    </>
+  );
+
+  // ------------------------------------------------------------------ under the message (shared)
+  const reactions = reactionGroups.length > 0 && (
+    <div className={cn('flex flex-wrap gap-1 relative z-[1]', li ? 'mt-1' : '-mt-1.5', !li && (mine ? 'justify-end mr-2' : ig ? 'ml-11' : 'ml-2'))} aria-label="Reactions">
+      {reactionGroups.map((g) => (
+        <button key={g.emoji} type="button" disabled={!reactable || g.mine} onClick={() => react(g.emoji)} className={cn('inline-flex items-center gap-0.5 rounded-full border px-1.5 py-px text-xs disabled:cursor-default', ig ? 'bg-gray-100 border-white border-2 py-0' : 'bg-white shadow-sm', !ig && (g.mine ? (li ? 'border-[#0a66c2]/40 bg-[#0a66c2]/5' : 'border-emerald-300 bg-emerald-50') : 'border-gray-200 hover:bg-gray-50'))} title={g.names.join(', ')}>
+          {g.emoji}{g.names.length > 1 && <span className="text-[10px] text-gray-500">{g.names.length}</span>}
+        </button>
+      ))}
+    </div>
+  );
+  const extras = (
+    <>
       {/* a turn of a voice call: spoken, and "live transcript" until the provider's signed copy replaces it */}
       {m.content_attributes?.voice && m.content_type === 'text' && (
         <div className={cn('flex items-center gap-1 text-[10px] text-gray-400 mt-0.5', mine ? 'justify-end mr-1' : 'ml-1')}><Mic className="w-2.5 h-2.5" />{m.content_attributes.voice.live ? 'Spoken · live transcript' : 'Spoken'}</div>
-      )}
-      {reactionGroups.length > 0 && (
-        <div className={cn('flex flex-wrap gap-1 -mt-1.5 relative z-[1]', mine ? 'justify-end mr-2' : 'ml-2')} aria-label="Reactions">
-          {reactionGroups.map((g) => (
-            <button key={g.emoji} type="button" disabled={!reactable || g.mine} onClick={() => react(g.emoji)} className={cn('inline-flex items-center gap-0.5 rounded-full bg-white border shadow-sm px-1.5 py-px text-xs disabled:cursor-default', g.mine ? 'border-emerald-300 bg-emerald-50' : 'border-gray-200 hover:bg-gray-50')} title={g.names.join(', ')}>
-              {g.emoji}{g.names.length > 1 && <span className="text-[10px] text-gray-500">{g.names.length}</span>}
-            </button>
-          ))}
-        </div>
       )}
       {confirmDelete && (
         <div className="flex items-center gap-2 mt-1 text-[11px]">
@@ -525,15 +625,107 @@ export default function MessageBubble({ m, provider, now, canEdit, onEdit, onDel
         </div>
       )}
       {/* AI replies: the origin badge replaces the "Sent by" line (it names the teammate itself) */}
-      {attribution && !pending && !(originBadge && (isAiOrigin(m.origin) || attribution.kind === 'manual')) && <Attribution a={attribution} mine={mine} />}
+      {attribution && !pending && !(originBadge && (isAiOrigin(m.origin) || attribution.kind === 'manual')) && <Attribution a={attribution} mine={mine && !li} />}
       {originBadge && <AiOriginBadge origin={m.origin!} runId={m.ai_reply_run_id} sentByName={attribution?.sent_by_name} />}
-      {!wa && (
+    </>
+  );
+  const editClock = editable && <span className="inline-flex items-center gap-0.5 text-amber-600" title="Edit/delete window"><Clock className="w-3 h-3" />{fmtRemaining(editRemaining)}</span>;
+
+  // ------------------------------------------------------------------ LinkedIn: author rows, no bubbles
+  if (li) {
+    const inmail = msgType === 'INMAIL' || msgType === 'INMAIL_REPLY';
+    return (
+      <div id={`msg-${m.id}`} className={cn('group relative flex gap-3 rounded-lg px-2 -mx-2 hover:bg-gray-50/80 transition-colors', groupStart ? 'pt-2.5 pb-0.5' : 'py-0.5', highlight && 'ring-2 ring-amber-400 bg-amber-50/60')}>
+        <div className="w-10 flex-shrink-0">
+          {groupStart
+            ? <Avatar src={author?.avatar} name={author?.name ?? (mine ? 'You' : contactName)} size={10} />
+            : <span className="block text-right text-[10px] leading-5 text-gray-400 opacity-0 group-hover:opacity-100 tabular-nums" title={fullTime}>{clockTime(m.sent_at)}</span>}
+        </div>
+        <div className="min-w-0 flex-1">
+          {groupStart && (
+            <div className="flex items-baseline gap-1.5 flex-wrap min-w-0">
+              <span className="text-sm font-semibold text-gray-900 truncate">{author?.name ?? (mine ? 'You' : (m.sender_name ?? contactName ?? 'LinkedIn member'))}</span>
+              <span className="text-xs text-gray-500 tabular-nums" title={fullTime}>· {pending ? 'Sending…' : clockTime(m.sent_at)}</span>
+              {inmail && <span className="self-center text-[10px] font-semibold px-1.5 py-px rounded bg-[#f3e9d2] text-[#915907]">InMail</span>}
+              {msgType === 'INVITATION' && <span className="self-center text-[10px] font-semibold px-1.5 py-px rounded bg-[#0a66c2]/10 text-[#0a66c2]">Invitation</span>}
+            </div>
+          )}
+          <div className={cn('text-sm text-gray-900 leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]', deleted && 'opacity-70', pending && 'opacity-60')}>{content}</div>
+          {reactions}
+          {extras}
+          {(m.edited_at || editable || deleted) && (
+            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-gray-400">
+              {m.edited_at && !deleted && <span>Edited</span>}
+              {deleted && <span>Deleted</span>}
+              {editClock}
+            </div>
+          )}
+          {seen && (
+            <div className="flex justify-end items-center gap-1 mt-1" title={`Seen by ${seen.name}${seen.at ? ` · ${fmtDate(seen.at)}` : ''}`}>
+              <Avatar src={seen.avatar} name={seen.name} size={4} />
+            </div>
+          )}
+        </div>
+        {toolbar && <div className="absolute right-2 -top-2.5 z-10">{toolbar}</div>}
+      </div>
+    );
+  }
+
+  // ------------------------------------------------------------------ bubbles: WhatsApp, Instagram, plain chat
+  const bubbleCls = bare
+    ? 'bg-transparent'
+    : wa
+      ? cn('rounded-lg px-2 pt-1.5 pb-1 shadow-[0_1px_0.5px_rgba(0,0,0,0.13)] text-gray-900', mine ? 'bg-[#d9fdd3] rounded-tr-none' : 'bg-white rounded-tl-none')
+      : ig
+        ? cn('rounded-[22px] px-3.5 py-2 text-[15px] leading-snug', mine
+          ? cn('bg-[#3797f0] text-white', !groupStart && 'rounded-tr-md', !groupEnd && 'rounded-br-md')
+          : cn('bg-[#efefef] text-gray-900', !groupStart && 'rounded-tl-md', !groupEnd && 'rounded-bl-md'))
+        : cn('rounded-2xl px-3.5 py-2 shadow-sm', mine ? 'bg-indigo-600 text-white rounded-br-md' : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md');
+
+  return (
+    <div id={`msg-${m.id}`} className={cn('flex flex-col max-w-[85%]', ig ? 'md:max-w-[62%]' : 'md:max-w-[70%]', mine ? 'ml-auto items-end' : 'mr-auto items-start')}>
+      {story && <div className={cn('text-[11px] text-gray-500 mb-1', !mine && 'ml-9')}>{story}</div>}
+      {storyMedia.length > 0 && (
+        <div className={cn('flex gap-1 mb-1', mine ? 'pr-2 border-r-[3px]' : 'ml-9 pl-2 border-l-[3px]', 'border-gray-200')}>
+          {storyMedia.map((a, i) => <Media key={a.id ?? `s${i}`} messageId={m.id} att={a} kind={mediaKind(a)!} variant="story" />)}
+        </div>
+      )}
+      <div className={cn('group flex items-end gap-1.5 max-w-full', mine && 'flex-row-reverse')}>
+        {ig && !mine && <div className="w-7 flex-shrink-0 self-end">{groupEnd && <Avatar src={author?.avatar} name={author?.name ?? contactName} size={7} />}</div>}
+        <div
+          className={cn('relative max-w-full min-w-0 text-sm whitespace-pre-wrap break-words [overflow-wrap:anywhere] transition-shadow', bubbleCls, deleted && 'opacity-80', pending && 'opacity-60', highlight && 'ring-2 ring-amber-400 ring-offset-2')}
+          title={ig ? fullTime : undefined}
+          onDoubleClick={ig && reactable ? () => { void react('❤️'); } : undefined}
+        >
+          {content}
+          {wa && !editing && (
+            // WhatsApp keeps the time (and our ticks) inside the bubble, bottom right
+            <span className={cn('float-right ml-3 mt-1 -mb-0.5 inline-flex items-center gap-1 text-[11px] leading-4 select-none', bare ? 'bg-black/40 text-white rounded px-1' : 'text-gray-500')} title={fullTime}>
+              {m.edited_at && !deleted && <span>Edited</span>}
+              {pending ? 'Sending…' : clockTime(m.sent_at)}
+              {mine && !deleted && <Ticks m={m} pending={pending} />}
+            </span>
+          )}
+        </div>
+        {toolbar}
+      </div>
+      {reactions}
+      <div className={cn(ig && !mine && 'ml-9')}>{extras}</div>
+      {ig && (pending || (m.edited_at && !deleted) || editable || seen) && (
+        <div className={cn('flex items-center gap-2 mt-0.5 text-[11px] text-gray-500', mine ? 'mr-1' : 'ml-10')}>
+          {pending && <span>Sending…</span>}
+          {m.edited_at && !deleted && <span>Edited</span>}
+          {editClock}
+          {seen && <span title={seen.at ? `Seen ${fmtDate(seen.at)}` : undefined}>Seen</span>}
+        </div>
+      )}
+      {!wa && !ig && (
         <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400 flex-wrap">
-          <span title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : fmtDate(m.sent_at)}</span>
+          <span title={fullTime}>{pending ? 'Sending…' : fmtDate(m.sent_at)}</span>
           {m.edited_at && !deleted && <span>· edited</span>}
           {deleted && <span>· deleted</span>}
           {mine && m.read_at && !pending && <span className="inline-flex items-center gap-0.5 text-sky-600" title={`Seen ${fmtDate(m.read_at)}`}><CheckCheck className="w-3 h-3" /> Seen</span>}
-          {editable && <span className="inline-flex items-center gap-0.5 text-amber-600" title="Edit/delete window"><Clock className="w-3 h-3" />{fmtRemaining(editRemaining)}</span>}
+          {editClock}
           {isEmail && mine && (m.opens > 0 || m.clicks > 0) && (
             <>
               <span className="inline-flex items-center gap-0.5" title="Opens"><Eye className="w-3 h-3" />{m.opens}</span>

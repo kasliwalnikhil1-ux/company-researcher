@@ -21,6 +21,12 @@ import { qk } from '@/lib/outreach/queries';
 import ForwardDialog from './ForwardDialog';
 import AiModeChip from './ai/AiModeChip';
 import WebchatThreadBar from './webchat/WebchatThreadBar';
+import EmailThread from './channels/EmailThread';
+import { clockTime, linkedinChatMeta, msgTypeOf, threadLook } from './channels/look';
+import type { ProfileFacts } from '@/lib/outreach/intel';
+
+const DEGREE: Record<string, string> = { FIRST_DEGREE: '1st', SECOND_DEGREE: '2nd', THIRD_DEGREE: '3rd' };
+const LINKEDIN_INBOX: Record<string, string> = { sales_navigator: 'Sales Navigator', recruiter: 'Recruiter', organization: 'Company page' };
 
 /** `notes` opens the lead panel on its AI lead-notes tab (AI replies v2). */
 export type ConvertKind = 'task' | 'tag' | 'stage' | 'reenrol' | 'notes';
@@ -100,7 +106,8 @@ export default function Thread(p: ThreadProps) {
   // Tick only while some outbound LinkedIn / WhatsApp message is inside its edit window (60 / 15 minutes).
   const hasEditable = useMemo(() => (chat.provider === 'LINKEDIN' || chat.provider === 'WHATSAPP') && !!messages?.some((m) => m.direction === 'out' && !m.deleted_at && inEditWindowNow(m.sent_at)), [messages, chat.provider]);
   const qc = useQueryClient();
-  const wa = chat.provider === 'WHATSAPP';
+  const look = threadLook(chat.provider);
+  const wa = look === 'whatsapp';
   const isGroup = /@g\.us$/i.test(chat.attendee_provider_id ?? '');
   // reply / forward targets belong to one chat: switching chats drops them without an effect
   const [replyState, setReplyState] = useState<{ chatId: string; m: Message } | null>(null);
@@ -110,6 +117,8 @@ export default function Thread(p: ThreadProps) {
   const setReplyTo = useCallback((m: Message | null) => setReplyState(m ? { chatId: chat.id, m } : null), [chat.id]);
   const setForwarding = useCallback((m: Message | null) => setForwardState(m ? { chatId: chat.id, m } : null), [chat.id]);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  // email "Reply" / "Reply all": the composer opens on Reply with these Cc addresses (n changes on every click)
+  const [mailReply, setMailReply] = useState<{ chatId: string; cc: string[]; n: number } | null>(null);
   // quoted messages resolve against the loaded thread by the connector's message id
   const byUnipileId = useMemo(() => {
     const map = new Map<string, Message>();
@@ -220,7 +229,48 @@ export default function Thread(p: ThreadProps) {
   }, [messages, notes, showNotes]);
   const noteCount = (notes ?? []).filter((n) => !n.deleted_at).length;
 
+  // Instagram / LinkedIn: runs of messages from the same side are drawn together (corners, one avatar, one author header)
+  const runGap = look === 'linkedin' ? 10 * 60_000 : 60 * 60_000;
+  // system lines (calls, "accepted your InMail") never join a run, so the next message keeps its author header
+  const systemLine = (m: Message) => m.event_type != null || (!m.text?.trim() && !m.attachments?.length && /^INMAIL_(ACCEPT|DECLINE)$/.test(msgTypeOf(m) ?? ''));
+  const sameRun = (a: TimelineItem | undefined, b: TimelineItem | undefined) => !!a && !!b && a.kind === 'message' && b.kind === 'message'
+    && !systemLine(a.m) && !systemLine(b.m) && a.m.direction === b.m.direction && (a.m.sender_name ?? '') === (b.m.sender_name ?? '')
+    && Math.abs(Date.parse(b.at) - Date.parse(a.at)) < runGap;
+  // the newest message of ours the contact has seen (LinkedIn: their picture under it, Instagram: "Seen")
+  const seenId = useMemo(() => {
+    if (look !== 'linkedin' && look !== 'instagram') return null;
+    const list = messages ?? [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i];
+      if (m.direction === 'out' && !m.deleted_at && m.event_type == null && m.read_at) return m.id;
+    }
+    return null;
+  }, [messages, look]);
+  const contactAvatar = chat.attendee_picture_url || lead?.picture_url || null;
+  const multiParty = isGroup || !!chat.is_group;
+  const authorOf = (m: Message) => m.direction === 'out'
+    ? { name: sender?.display_name ?? 'You', avatar: sender?.picture_url ?? null }
+    : { name: (multiParty ? m.sender_name : null) ?? name, avatar: multiParty ? null : contactAvatar };
+
   const assignee = members?.find((m) => m.user_id === chat.assigned_to);
+  const renderNote = (n: ChatNote) => (
+    <NoteBubble
+      note={n} chat={chat} workspaceId={p.workspaceId} members={members} currentUserId={p.currentUserId}
+      isManager={p.isManager} isClientViewer={p.isClientViewer} canImprove={chat.provider === 'LINKEDIN' && !disabledReason}
+      highlight={flashNoteId === n.id} onUpdate={p.onUpdateNote} onDelete={p.onDeleteNote} onMakeTask={p.onMakeTaskFromNote}
+      onError={p.onError} onNotice={(msg) => p.onNotice?.(msg)}
+    />
+  );
+
+  // LinkedIn: connection degree, Premium / Open Profile, and the InMail / Sales Navigator kind of this conversation
+  const facts = chat.provider === 'LINKEDIN' ? ((lead as (Lead & { linkedin?: ProfileFacts | null }) | null)?.linkedin ?? null) : null;
+  const liChat = chat.provider === 'LINKEDIN' ? linkedinChatMeta(chat) : null;
+  const degree = facts?.network_distance ? DEGREE[facts.network_distance] ?? null : null;
+  const liChips = [
+    liChat?.content_type === 'inmail' ? 'InMail' : liChat?.content_type === 'sponsored' ? 'Sponsored' : liChat?.content_type === 'linkedin_offer' ? 'Job offer' : null,
+    liChat?.inbox ? LINKEDIN_INBOX[liChat.inbox] : null,
+    facts?.is_open_profile ? 'Open Profile' : null,
+  ].filter(Boolean) as string[];
 
   // Email threads lead with the subject; social threads with who the person is.
   const who = [lead?.headline, lead?.company].filter(Boolean).join(' · ');
@@ -248,6 +298,8 @@ export default function Thread(p: ThreadProps) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
               <h2 className="text-lg font-semibold text-gray-900 truncate leading-tight" title={name}>{name}</h2>
+              {degree && <span className="flex-shrink-0 text-sm text-gray-500" title="Connection degree">· {degree}</span>}
+              {facts?.is_premium && <span className="flex-shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-[3px] bg-gradient-to-br from-[#e7a33e] to-[#c37d16] text-white text-[9px] font-bold" title="LinkedIn Premium">in</span>}
               {lead && <Link href={`/outreach/leads/${lead.id}`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-4 h-4" /></Link>}
               {chat.is_request && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: not accepted yet, so it may not have been seen">Message request</span>}
               {chat.archived && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Archived</span>}
@@ -255,7 +307,8 @@ export default function Thread(p: ThreadProps) {
             {subtitle && <p className="text-sm text-gray-600 truncate mt-0.5" title={subtitle}>{subtitle}</p>}
             <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-0.5 min-w-0">
               <span className="flex-shrink-0">{channelLabel(chat.provider)}</span>
-              {secondary && <><span aria-hidden>·</span><span className="truncate" title={secondary}>{secondary}</span></>}
+              {secondary && <><span aria-hidden>·</span><span className="truncate" title={secondary}>{chat.provider === 'INSTAGRAM' && !secondary.startsWith('@') ? `@${secondary}` : secondary}</span></>}
+              {liChips.map((c) => <span key={c} className={cn('flex-shrink-0 text-[10px] font-semibold px-1.5 py-px rounded', c === 'InMail' ? 'bg-[#f3e9d2] text-[#915907]' : 'bg-[#0a66c2]/10 text-[#0a66c2]')}>{c}</span>)}
             </div>
           </div>
           <div className="flex items-center gap-0.5 flex-shrink-0">
@@ -325,36 +378,58 @@ export default function Thread(p: ThreadProps) {
       {chat.provider === 'WEBCHAT' && <WebchatThreadBar chat={chat} messages={messages} members={members} workspaceId={p.workspaceId} canWrite={p.canWrite && !p.isClientViewer} onError={p.onError} onNotice={p.onNotice} />}
 
       {/* Messages */}
-      <div ref={scrollRef} className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4', wa ? 'space-y-1.5 bg-[#efeae2] bg-[radial-gradient(rgba(0,0,0,0.035)_1px,transparent_1px)] [background-size:14px_14px]' : 'space-y-3')}>
+      <div ref={scrollRef} className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4',
+        wa ? 'space-y-1.5 bg-[#efeae2] bg-[radial-gradient(rgba(0,0,0,0.035)_1px,transparent_1px)] [background-size:14px_14px]'
+          : look === 'instagram' ? 'bg-white' : look === 'linkedin' ? 'bg-white md:px-6' : look === 'email' ? 'bg-gray-100/70 md:px-6' : 'space-y-3')}>
         {p.messagesError && <ErrorBox message={p.messagesError} />}
         {!p.messagesError && p.messagesLoading && !messages && <Spinner />}
         {messages && messages.length === 0 && <EmptyState title="No messages yet" description="Messages in this conversation will appear here." />}
-        {grouped.map((g) => (
-          <div key={g.day} className={wa ? 'space-y-1.5' : 'space-y-3'}>
+        {look === 'email' && messages && messages.length > 0 ? (
+          <EmailThread
+            chat={chat} sender={sender} now={now} attribution={attributionQ.data} canReply={!disabledReason} highlightId={highlightId}
+            onReply={(cc) => { setComposerMode('reply'); setMailReply({ chatId: chat.id, cc, n: Date.now() }); }}
+            items={grouped.flatMap((g) => g.items).map((it) => it.kind === 'note'
+              ? { kind: 'note' as const, key: `note-${it.n.id}`, node: renderNote(it.n) }
+              : { kind: 'message' as const, m: it.m })}
+          />
+        ) : grouped.map((g) => (
+          <div key={g.day} className={wa ? 'space-y-1.5' : look === 'instagram' || look === 'linkedin' ? '' : 'space-y-3'}>
             {wa
               ? <div className="flex justify-center py-1"><span className="text-[11px] text-gray-600 bg-white/90 rounded-md px-2.5 py-1 shadow-sm">{g.day}</span></div>
-              : <div className="flex items-center gap-3 text-[11px] text-gray-400 uppercase tracking-wide"><span className="flex-1 h-px bg-gray-200" />{g.day}<span className="flex-1 h-px bg-gray-200" /></div>}
-            {g.items.map((it) => it.kind === 'note' ? (
-              <NoteBubble
-                key={`note-${it.n.id}`} note={it.n} chat={chat} workspaceId={p.workspaceId} members={members} currentUserId={p.currentUserId}
-                isManager={p.isManager} isClientViewer={p.isClientViewer} canImprove={chat.provider === 'LINKEDIN' && !disabledReason}
-                highlight={flashNoteId === it.n.id} onUpdate={p.onUpdateNote} onDelete={p.onDeleteNote} onMakeTask={p.onMakeTaskFromNote}
-                onError={p.onError} onNotice={(m) => p.onNotice?.(m)}
-              />
-            ) : (
-              <MessageBubble
-                key={it.m.id} m={it.m} attribution={attributionQ.data?.[it.m.id]} provider={chat.provider} now={now} canEdit={canEditMessages} onEdit={p.onEditMessage} onDelete={p.onDeleteMessage}
-                isGroup={isGroup} contactName={isGroup ? undefined : name} highlight={highlightId === it.m.id}
-                quotedLocal={it.m.quoted?.unipile_message_id ? byUnipileId.get(it.m.quoted.unipile_message_id) ?? null : null}
-                onReply={setReplyTo} onReact={react} onForward={setForwarding} onJumpTo={jumpTo}
-              />
-            ))}
+              : look === 'instagram'
+                ? <div className="text-center text-[11px] font-medium text-gray-500 pt-4 pb-2">{g.day} {clockTime(g.items[0].at)}</div>
+                : <div className={cn('flex items-center gap-3 text-[11px] text-gray-400 uppercase tracking-wide', look === 'linkedin' && 'py-2 font-medium text-gray-500')}><span className="flex-1 h-px bg-gray-200" />{g.day}<span className="flex-1 h-px bg-gray-200" /></div>}
+            {g.items.map((it, k) => {
+              if (it.kind === 'note') return <div key={`note-${it.n.id}`} className={look === 'instagram' || look === 'linkedin' ? 'py-1.5' : undefined}>{renderNote(it.n)}</div>;
+              const prev = g.items[k - 1], next = g.items[k + 1];
+              const start = !sameRun(prev, it), end = !sameRun(it, next);
+              // Instagram: a time line after an hour of silence
+              const gapLine = look === 'instagram' && prev && Date.parse(it.at) - Date.parse(prev.at) >= 60 * 60_000;
+              const bubble = (
+                <MessageBubble
+                  m={it.m} attribution={attributionQ.data?.[it.m.id]} provider={chat.provider} now={now} canEdit={canEditMessages} onEdit={p.onEditMessage} onDelete={p.onDeleteMessage}
+                  isGroup={isGroup} contactName={isGroup ? undefined : name} highlight={highlightId === it.m.id}
+                  quotedLocal={it.m.quoted?.unipile_message_id ? byUnipileId.get(it.m.quoted.unipile_message_id) ?? null : null}
+                  onReply={setReplyTo} onReact={react} onForward={setForwarding} onJumpTo={jumpTo}
+                  look={look} groupStart={start || !!gapLine} groupEnd={end} author={authorOf(it.m)}
+                  seen={seenId === it.m.id ? { name, avatar: contactAvatar, at: it.m.read_at } : null}
+                />
+              );
+              if (look !== 'instagram') return <div key={it.m.id}>{bubble}</div>;
+              return (
+                <div key={it.m.id} className={cn(start && k > 0 ? 'pt-2.5' : 'pt-0.5')}>
+                  {gapLine && <div className="text-center text-[11px] font-medium text-gray-500 pt-2 pb-2.5">{clockTime(it.at)}</div>}
+                  {bubble}
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
 
       <Compose key={chat.id} chat={chat} sender={sender} workspaceId={p.workspaceId} disabledReason={disabledReason} onError={p.onError}
         replyTo={replyTo} replyToName={replyTo ? (replyTo.direction === 'out' ? 'You' : (replyTo.sender_name || name)) : undefined} onCancelReply={() => setReplyTo(null)}
+        mailReply={mailReply?.chatId === chat.id ? mailReply : null}
         mode={composerMode} onModeChange={setComposerMode} members={members} currentUserId={p.currentUserId} isClientViewer={p.isClientViewer} onAddNote={p.onAddNote} />
       <ForwardDialog chat={chat} message={forwarding} onClose={() => setForwarding(null)} onForward={forward} />
     </div>

@@ -514,7 +514,7 @@ export interface Message {
   html: string | null;
   // id is missing on attachments stored before the webhook's attachment_* fields were read (Instagram shares, Sept 2026).
   // link: a shared Instagram post or reel. unavailable: the provider no longer serves the file.
-  attachments: Array<{ id?: string | null; name?: string | null; type?: string | null; size?: number | null; unipile_message_id?: string; voice_note?: boolean; duration_s?: number | null; mimetype?: string | null; link?: { url: string; author?: string | null; text?: string | null } | null; unavailable?: boolean; storage?: boolean; sticker?: boolean; gif?: boolean; contact?: { name?: string | null; phones?: string[] } | null }>;
+  attachments: Array<{ id?: string | null; name?: string | null; type?: string | null; size?: number | null; unipile_message_id?: string; voice_note?: boolean; duration_s?: number | null; mimetype?: string | null; link?: { url: string; author?: string | null; text?: string | null } | null; unavailable?: boolean; storage?: boolean; sticker?: boolean; gif?: boolean; contact?: { name?: string | null; phones?: string[] } | null; /** LinkedIn video meeting invite */ meeting?: { starts_at?: string | null; expires_at?: string | null; time_range?: string | null; url?: string | null } | null }>;
   sent_at: string;
   is_invite_note: boolean;
   /** Channels (025): reactions received, read receipt, voice-note transcript. */

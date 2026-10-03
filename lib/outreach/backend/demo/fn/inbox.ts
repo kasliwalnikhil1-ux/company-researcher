@@ -19,6 +19,20 @@ const CHANNEL: Record<string, string> = { INSTAGRAM: 'Instagram', WHATSAPP: 'Wha
 const ACTIVE_RUNS = ['debouncing', 'drafting', 'draft_ready', 'scheduled'];
 const ATTACHMENTS = 'outreach-attachments';
 
+const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+/** = cleanAddresses in reply.ts: Cc / Bcc trimmed, lowercased, valid, unique, at most 20. */
+function cleanAddresses(list: unknown): string[] {
+  const out: string[] = [];
+  for (const v of Array.isArray(list) ? list : []) {
+    const e = String(v ?? '').trim().toLowerCase();
+    if (!e) continue;
+    if (!EMAIL_RE.test(e)) demoError('E_PAYLOAD_INVALID', `"${e.slice(0, 80)}" is not an email address`);
+    if (!out.includes(e)) out.push(e);
+  }
+  if (out.length > 20) demoError('E_PAYLOAD_INVALID', 'up to 20 Cc / Bcc addresses');
+  return out;
+}
+
 const escHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
 
 function replier(ctx: Ctx, chat: Row): void {
@@ -99,6 +113,7 @@ export const inboxFn = {
     if (runs.some((r) => r.status === 'sending')) demoError('E_AI_SENDING', 'The AI is sending its reply in this chat right now. Check the thread before sending yours.');
     if (b.ai_run_id && runs.some((r) => r.id === b.ai_run_id && r.status === 'sent' && r.sent_origin === 'ai_autopilot')) demoError('E_AI_ALREADY_SENT', 'The AI already sent its version of this reply. Check the thread before sending again.');
 
+    const mailCc = MAIL.has(sender.provider) ? cleanAddresses(b.cc) : [], mailBcc = MAIL.has(sender.provider) ? cleanAddresses(b.bcc) : [];
     let quoted: Row | null = null;
     if (b.quote_message_id && !MAIL.has(sender.provider)) {
       const q = s.get('outreach_messages', b.quote_message_id);
@@ -120,6 +135,16 @@ export const inboxFn = {
     const msg = engine.appendMessage(chat, { direction: 'out', text, html, at: now, origin: 'inbox_user', sent_by: ctx.userId, attachments: stored, action_id: action.id });
     s.update('outreach_actions', action.id, { response: { message_id: msg.unipile_message_id } });
     if (quoted) s.update('outreach_messages', msg.id, { quoted });
+    if (isMail) {
+      // the mail header reply.ts records for a sent reply
+      const to = String(chat.attendee_provider_id ?? '').toLowerCase();
+      const subject = b.subject ? String(b.subject) : (chat.subject ? (/^re:/i.test(chat.subject) ? chat.subject : `Re: ${chat.subject}`) : null);
+      s.update('outreach_messages', msg.id, { content_attributes: { email: {
+        from: (sender.public_identifier ?? sender.owner_email) ? { name: sender.display_name ?? null, email: String(sender.public_identifier ?? sender.owner_email).toLowerCase() } : null,
+        to: to ? [{ name: chat.attendee_name ?? null, email: to }] : [],
+        cc: mailCc.filter((e) => e !== to).map((email) => ({ name: null, email })), bcc: mailBcc.filter((e) => e !== to).map((email) => ({ name: null, email })), reply_to: [], subject,
+      } } });
+    }
     s.update('outreach_chats', chat.id, (c) => ({
       unread: false, unread_count: 0, archived: false,
       ...(sender.provider === 'INSTAGRAM' && c.is_request ? { is_request: false } : {}),

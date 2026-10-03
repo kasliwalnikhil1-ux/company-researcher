@@ -102,9 +102,14 @@ function seedInstagram(s: DemoStore, now: number, engine: Engine): Row[] {
     {
       i: 53,
       lines: (first) => [
+        // a reply to our story, a shared post and an emoji-only message: drawn the way Instagram draws them
+        { direction: 'in', text: 'Ha, this is exactly our team every Monday 😂', ago: 3 * D + 6 * H, read: true, content_attributes: { msg_type: 'STORY_REPLY' }, attachments: [{ id: 'ig-story-1', name: 'story.png', type: 'img', mimetype: 'image/png' }], preview: 'Replied to your story' },
         { direction: 'out', text: `Thanks for the follow, ${first}! Saw you are building out the sales team at your company. Happy to share what has worked for teams your size.`, ago: 3 * D + 2 * H, origin: 'inbox_user', sent_by: MEMBER.priya, read_at: iso(now - 3 * D) },
         { direction: 'in', text: 'Would love to see a demo 🙌', ago: 2 * D + 5 * H, read: true, intent: 'interested', summary: 'Asked for a demo.' },
         { direction: 'out', text: 'Here is a short walkthrough, and my calendar if you want to talk it through: https://example.com/book/northwind', ago: 2 * D + 4 * H, origin: 'inbox_user', sent_by: MEMBER.priya, read_at: iso(now - 2 * D - 3 * H) },
+        { direction: 'in', text: null, ago: 2 * D + 3 * H, read: true, preview: 'Shared a post', attachments: [{ id: 'ig-post-1', name: 'post.png', type: 'img', mimetype: 'image/png', link: { url: 'https://www.instagram.com/p/DEMO0outbound/', author: 'growth.weekly', text: '5 cold DM openers that actually get replies' } }] },
+        { direction: 'in', text: '🔥🔥', ago: 2 * D + 3 * H - M, read: true },
+        { direction: 'out', text: 'That one is from our weekly teardown 😄 Glad it helped!', ago: 2 * D + 2 * H, origin: 'inbox_user', sent_by: MEMBER.priya, read_at: iso(now - 2 * D - H), reactions: [{ emoji: '❤️', by: first, mine: false, at: iso(now - 2 * D - H) }] },
         { direction: 'in', text: 'Booked for Monday. See you then!', ago: 5 * H, reactions: [] },
       ],
     },
@@ -129,6 +134,78 @@ function seedInstagram(s: DemoStore, now: number, engine: Engine): Row[] {
     out.push(chat);
   }
   return out;
+}
+
+/** A lead with no conversation on this sender yet, so a showcase thread starts clean. */
+function freshLead(s: DemoStore, senderId: string, from: number): Row | undefined {
+  const busy = new Set(s.t('outreach_chats').filter((c) => c.sender_id === senderId).map((c) => c.lead_id));
+  for (let i = from; i < from + 200; i++) {
+    const l = s.get('outreach_leads', leadId(i));
+    if (l && !busy.has(l.id) && !l.do_not_contact && !l.unsubscribed && l.first_name && l.company) return l;
+  }
+  return undefined;
+}
+
+// ------------------------------------------------------------------------------------------------ email (a mail client's thread)
+/** A six-mail thread: a Cc'd colleague who answers too, quoted history, attachments, opens and clicks. */
+function seedEmailShowcase(s: DemoStore, now: number, engine: Engine): Row[] {
+  const sender = s.get('outreach_senders', SENDER.gmail);
+  const lead = sender ? freshLead(s, sender.id, 150) : undefined;
+  if (!sender || !lead) return [];
+  const first = String(lead.first_name);
+  const domain = `${String(lead.company).toLowerCase().replace(/[^a-z0-9]+/g, '')}.example.com`;
+  const leadEmail = String(lead.email_work ?? `${first.toLowerCase()}@${domain}`).toLowerCase();
+  if (!lead.email_work) s.update('outreach_leads', lead.id, { email_work: leadEmail }, { silent: true });
+  const me = { name: 'Maya Chen', email: String(sender.owner_email ?? 'maya@northwind.example.com') };
+  const them = { name: String(lead.full_name), email: leadEmail };
+  const daniel = { name: 'Daniel Brooks', email: `daniel.brooks@${domain}` };
+  const subject = `Outbound pilot for ${lead.company}`;
+  const head = (from: Row, to: Row[], cc: Row[] = [], subj = `Re: ${subject}`) => ({ email: { from, to, cc, bcc: [], reply_to: [], subject: subj } });
+  const when = (ms: number) => new Date(now - ms).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const sig = '<p>Maya Chen<br/>Northwind Growth</p>';
+  const first1 = `<p>Hi ${first},</p><p>I noticed ${lead.company} is growing the sales team this quarter. We run LinkedIn, email and WhatsApp follow-ups from one place, so new reps start with warm conversations instead of cold lists.</p><p>Would a two-week pilot with two of your reps be useful? Here is how other teams set it up: <a href="https://example.com/pilot">example.com/pilot</a></p>${sig}`;
+  const quote = (ms: number, who: Row, html: string) => `<div class="gmail_quote"><div class="gmail_attr">On ${when(ms)}, ${who.name} &lt;${who.email}&gt; wrote:</div><blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px solid #ccc;padding-left:1ex">${html}</blockquote></div>`;
+  const reply2 = `<p>Thanks for being so quick, ${first}.</p><p>Good to meet you, Daniel. The pilot is two weeks, two seats, and we do the setup. I will send the plan with what we measure in the first week.</p>${sig}`;
+  const daniel4 = `<p>Hi Maya,</p><p>Here are our numbers from last quarter and how the team is split today. The big gap is follow-up after events: most leads never get a second touch.</p><p>Best,<br/>Daniel</p>`;
+  const chat = engine.ensureChat(lead, sender, now - 10 * D, subject);
+  s.update('outreach_chats', chat.id, { attendee_provider_id: leadEmail, attendee_public_identifier: leadEmail, attendee_name: them.name, subject });
+  play(s, chat, now, [
+    { direction: 'out', text: null, html: first1, ago: 9 * D, origin: 'sequence', opens: 4, content_attributes: head(me, [them], [], subject), preview: `Hi ${first}, I noticed ${lead.company} is growing the sales team` },
+    { direction: 'in', text: `Hi Maya,\n\nThis is timely, we are hiring two SDRs. Adding Daniel, who runs sales ops.\n\nWhat would the pilot need from our side?\n\n${first}\n\nOn ${when(9 * D)}, Maya Chen <${me.email}> wrote:\n> Hi ${first},\n> I noticed ${lead.company} is growing the sales team this quarter.`, ago: 8 * D + 3 * H, read: true, intent: 'interested', summary: 'Hiring two SDRs; looped in sales ops; asked what the pilot needs.', content_attributes: head(them, [me], [daniel]) },
+    { direction: 'out', text: null, html: reply2 + quote(8 * D + 3 * H, them, `<p>This is timely, we are hiring two SDRs. Adding Daniel, who runs sales ops.</p>`), ago: 8 * D + H, origin: 'inbox_user', sent_by: MEMBER.maya, opens: 2, content_attributes: head(me, [them], [daniel]), preview: `Thanks for being so quick, ${first}.` },
+    { direction: 'in', text: null, html: daniel4 + `<blockquote type="cite">${reply2}</blockquote>`, ago: 6 * D + 2 * H, read: true, sender_name: daniel.name, content_attributes: head(daniel, [me], [them]), preview: 'Here are our numbers from last quarter', attachments: [{ id: 'mail-xlsx-1', name: 'Q3-outbound-numbers.xlsx', type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', mimetype: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', size: 48_120, email: true }, { id: 'mail-pdf-1', name: 'team-structure.pdf', type: 'application/pdf', mimetype: 'application/pdf', size: 212_400, email: true }, { id: 'mail-png-1', name: 'follow-up-gaps.png', type: 'image/png', mimetype: 'image/png', size: 64_900, email: true }] },
+    { direction: 'out', text: null, html: `<p>Thanks Daniel, this is really helpful. The event follow-up gap is exactly what the pilot fixes first.</p><p>Plan attached in the next mail once ${first} is happy with the dates.</p>${sig}`, ago: 5 * D + 4 * H, origin: 'inbox_user', sent_by: MEMBER.maya, opens: 3, content_attributes: head(me, [daniel], [them]), preview: 'Thanks Daniel, this is really helpful.' },
+    { direction: 'in', text: null, html: `<p>Looks good to both of us. Can you send the agreement? Our signed NDA is attached.</p><p>${first}</p>` + quote(5 * D + 4 * H, me, `<p>Thanks Daniel, this is really helpful.</p>`), ago: 2 * H, intent: 'interested', summary: 'Ready to sign; asked for the agreement and sent a signed NDA.', content_attributes: head(them, [me], [daniel]), preview: 'Looks good to both of us. Can you send the agreement?', attachments: [{ id: 'mail-pdf-2', name: 'Mutual-NDA-signed.pdf', type: 'application/pdf', mimetype: 'application/pdf', size: 98_300, email: true }] },
+  ]);
+  const firstMail = s.t('outreach_messages').find((m) => m.chat_id === chat.id && m.direction === 'out');
+  if (firstMail) s.update('outreach_messages', firstMail.id, { clicks: 1 }, { silent: true });
+  touchLead(s, engine, chat, 'email');
+  return [chat];
+}
+
+// ------------------------------------------------------------------------------------------------ LinkedIn (InMail, post share, video meeting)
+function seedLinkedInShowcase(s: DemoStore, now: number, engine: Engine): Row[] {
+  const sender = s.get('outreach_senders', SENDER.li_maya);
+  const lead = sender ? freshLead(s, sender.id, 170) : undefined;
+  if (!sender || !lead) return [];
+  const first = String(lead.first_name);
+  s.update('outreach_leads', lead.id, { linkedin: { ...(lead.linkedin ?? {}), network_distance: 'SECOND_DEGREE', is_premium: true, is_open_profile: true } }, { silent: true });
+  const chat = engine.ensureChat(lead, sender, now - 7 * D);
+  s.update('outreach_chats', chat.id, { custom_attributes: { linkedin: { content_type: 'inmail', inbox: 'sales_navigator' } } });
+  const meetAt = new Date(now + 2 * D);
+  meetAt.setHours(15, 0, 0, 0);
+  play(s, chat, now, [
+    { direction: 'out', text: `Hi ${first}, congrats on the new role! I help sales leaders at companies like ${lead.company} turn event leads into booked calls without adding headcount. Open to comparing notes?`, ago: 6 * D, origin: 'sequence', read_at: iso(now - 5 * D), content_attributes: { msg_type: 'INMAIL', subject: `Quick idea for ${lead.company}` } },
+    { direction: 'in', text: null, ago: 5 * D - 10 * M, read: true, content_attributes: { msg_type: 'INMAIL_ACCEPT' }, preview: 'Accepted your InMail' },
+    { direction: 'in', text: 'Thanks Maya! Timing is good, we are hiring two SDRs this quarter.', ago: 5 * D - 11 * M, read: true, intent: 'interested', summary: 'Hiring two SDRs; open to talk.' },
+    { direction: 'in', text: 'What does onboarding look like on your side?', ago: 5 * D - 12 * M, read: true },
+    { direction: 'out', text: 'Setup is done for you in the first week. Here is a post with what a recent team saw in month one:', ago: 4 * D + 20 * H, origin: 'inbox_user', sent_by: MEMBER.maya, read_at: iso(now - 4 * D), attachments: [{ id: 'li-post-1', name: 'LinkedIn post', type: 'linkedin_post', link: { url: 'https://www.linkedin.com/feed/update/urn:li:activity:7300000000000000001/', author: null, text: null } }] },
+    { direction: 'out', text: 'Would a 20-minute call next week work?', ago: 4 * D + 20 * H - M, origin: 'inbox_user', sent_by: MEMBER.maya, read_at: iso(now - 4 * D) },
+    { direction: 'in', text: 'Sure, I sent you an invite for Thursday.', ago: 3 * D, read: true, intent: 'interested', summary: 'Sent a video meeting invite for Thursday.', attachments: [{ id: 'li-meet-1', name: 'Video meeting', type: 'video_meeting', meeting: { starts_at: meetAt.toISOString(), expires_at: new Date(meetAt.getTime() + 30 * M).toISOString(), url: 'https://example.com/meet/northwind-demo' } }] },
+    { direction: 'out', text: 'Perfect, see you then 👍', ago: 3 * D - 30 * M, origin: 'inbox_user', sent_by: MEMBER.maya, read_at: iso(now - 2 * D), reactions: [{ emoji: '👍', by: first, mine: false, at: iso(now - 2 * D) }] },
+  ]);
+  touchLead(s, engine, chat, 'linkedin');
+  return [chat];
 }
 
 // ------------------------------------------------------------------------------------------------ fresher replies on history threads
@@ -377,9 +454,11 @@ export function seedInbox(s: DemoStore, now: number): void {
   const engine = engineFor(s);
   const wa = seedWhatsApp(s, now, engine);
   const ig = seedInstagram(s, now, engine);
+  const mail = seedEmailShowcase(s, now, engine);
+  const li = seedLinkedInShowcase(s, now, engine);
   const fresh = seedRecentReplies(s, now, engine);
   const web = seedWebchatChats(s, now);
-  const keep = new Set([...wa, ...ig, ...fresh, ...web].map((c) => c.id));
+  const keep = new Set([...wa, ...ig, ...mail, ...li, ...fresh, ...web].map((c) => c.id));
   const assigned = seedTriage(s, now, keep);
   seedNotes(s, now, wa, web, assigned);
   engine.resetIndexes();

@@ -21,6 +21,8 @@ import { useComposerSuggestion, WebchatSuggestionBar } from './webchat/WebchatSu
 import ProductPicker from './webchat/ProductPicker';
 import { sendProducts } from '@/lib/outreach/catalogue';
 import { hk } from '@/lib/outreach/aiHub';
+import AddressField, { isEmailAddress } from './channels/AddressField';
+import { senderEmail } from './channels/look';
 
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
@@ -36,6 +38,8 @@ export interface ComposeProps {
   replyTo?: Message | null;
   replyToName?: string;
   onCancelReply?: () => void;
+  /** Email "Reply" / "Reply all" from the thread: opens the reply with these Cc addresses (`n` changes on every click). */
+  mailReply?: { cc: string[]; n: number } | null;
   /** Private notes (private-notes-PRD §4): the second composer mode. Reply and note keep separate drafts. */
   mode: 'reply' | 'note';
   onModeChange: (mode: 'reply' | 'note') => void;
@@ -90,7 +94,7 @@ function bookingTitle(typed: string): string {
   return typed ? 'Sends your text with the booking link added below it' : `Sends: “${BOOKING_DEFAULT_TEXT}” followed by the booking link`;
 }
 
-export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent, replyTo, replyToName, onCancelReply, mode, onModeChange, members, currentUserId, isClientViewer, onAddNote }: ComposeProps) {
+export default function Compose({ chat, sender, workspaceId, disabledReason, onError, onSent, replyTo, replyToName, onCancelReply, mailReply, mode, onModeChange, members, currentUserId, isClientViewer, onAddNote }: ComposeProps) {
   const qc = useQueryClient();
   const isEmail = isMailProvider(chat.provider);
   // Instagram direct messages stop at 1000 characters, WhatsApp at 4096; LinkedIn and email are not limited here.
@@ -122,6 +126,20 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
   const fileRef = useRef<HTMLInputElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
   const wa = chat.provider === 'WHATSAPP';
+  const ig = chat.provider === 'INSTAGRAM';
+  // email: Cc / Bcc on the reply (the To is always the contact of the thread)
+  const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+  const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
+  const mailReplyN = mailReply?.n ?? null;
+  const [appliedReply, setAppliedReply] = useState<number | null>(null);
+  if (mailReply && mailReplyN !== appliedReply) {
+    setAppliedReply(mailReplyN);
+    setCc(mailReply.cc);
+    setShowCc(mailReply.cc.length > 0);
+  }
+  useEffect(() => { if (mailReplyN != null) requestAnimationFrame(() => textRef.current?.focus()); }, [mailReplyN]);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const emojiRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (replyTo) textRef.current?.focus(); }, [replyTo]);
@@ -159,6 +177,8 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
     // or to a short default line when the composer is empty. The link is therefore never typed into `text` here.
     const typed = text.trim();
     if (!booking && !typed && !files.length) return;
+    const badAddress = isEmail ? [...cc, ...bcc].find((e) => !isEmailAddress(e)) : undefined;
+    if (badAddress) { onError(`"${badAddress}" is not an email address. Fix or remove it before sending.`); return; }
     const body = booking ? [typed || BOOKING_DEFAULT_TEXT, '', bookingLink].join('\n') : typed;   // what the optimistic bubble shows
     // the AI already sent its own version of what is in the box: a second message needs an explicit yes
     if (ai.aiSent && !window.confirm('The AI already sent its version of this reply. Send yours as well?')) return;
@@ -173,6 +193,11 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       sent_at: new Date().toISOString(), is_invite_note: false, intent: null, intent_confidence: null, summary: null, classified_at: null,
       opens: 0, clicks: 0, edited_at: null, deleted_at: null, action_id: null, created_at: new Date().toISOString(),
       quoted: replyTo ? { unipile_message_id: replyTo.unipile_message_id, text: replyTo.text, sender_name: replyToName ?? null } : null,
+      content_attributes: isEmail ? { email: {
+        from: senderEmail(sender) ? { name: sender?.display_name ?? null, email: senderEmail(sender)! } : null,
+        to: chat.attendee_provider_id ? [{ name: chat.attendee_name ?? null, email: chat.attendee_provider_id }] : [],
+        cc: cc.map((email) => ({ name: null, email })), bcc: bcc.map((email) => ({ name: null, email })), reply_to: [], subject: subject.trim() || null,
+      } } : {},
     } as Message;
     const key = qk.messages(chat.id);
     qc.setQueryData<Message[]>(key, (old) => [...(old ?? []), optimistic]);
@@ -187,6 +212,8 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       const payload: Record<string, unknown> = { chat_id: chat.id, text: booking ? typed : body };
       if (paths.length) payload.attachments = paths;
       if (isEmail && subject.trim()) payload.subject = subject.trim();
+      if (isEmail && cc.length) payload.cc = cc;
+      if (isEmail && bcc.length) payload.bcc = bcc;
       if (booking) payload.booking = true;
       if (replyTo) payload.quote_message_id = replyTo.id;
       if (aiRunId) payload.ai_run_id = aiRunId;
@@ -205,6 +232,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
       if (chat.provider === 'WEBCHAT') { qc.invalidateQueries({ queryKey: hk.suggestion(chat.id) }); qc.invalidateQueries({ queryKey: hk.all(workspaceId) }); }
       setUndo(null);
       setFiles([]);
+      setCc([]); setBcc([]); setShowCc(false); setShowBcc(false);
       onCancelReply?.();
       qc.invalidateQueries({ queryKey: key });
       qc.invalidateQueries({ queryKey: ['outreach', workspaceId, 'chats'] });
@@ -281,7 +309,22 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
         </div>
       )}
       {isEmail && (
-        <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Email subject" className="w-full text-sm px-3 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+        // a mail client's header: To (the contact), optional Cc / Bcc, Subject
+        <div className="rounded-lg border border-gray-200 focus-within:border-indigo-300 bg-white">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-gray-100 text-sm min-w-0">
+            <span className="w-8 text-gray-500 flex-shrink-0">To</span>
+            <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 border border-gray-200 px-2 py-0.5 text-xs text-gray-800 min-w-0 truncate" title={chat.attendee_provider_id ?? undefined}>
+              {chat.attendee_name && chat.attendee_name !== chat.attendee_provider_id ? <><span className="font-medium truncate">{chat.attendee_name}</span><span className="text-gray-500 truncate">&lt;{chat.attendee_provider_id}&gt;</span></> : <span className="truncate">{chat.attendee_provider_id ?? 'No address'}</span>}
+            </span>
+            <span className="ml-auto flex items-center gap-2 text-xs flex-shrink-0">
+              {!showCc && <button type="button" onClick={() => setShowCc(true)} className="text-gray-500 hover:text-gray-900 hover:underline">Cc</button>}
+              {!showBcc && <button type="button" onClick={() => setShowBcc(true)} className="text-gray-500 hover:text-gray-900 hover:underline">Bcc</button>}
+            </span>
+          </div>
+          {showCc && <AddressField label="Cc" value={cc} onChange={setCc} autoFocus={!mailReply?.cc.length} onRemoveField={() => { setCc([]); setShowCc(false); }} />}
+          {showBcc && <AddressField label="Bcc" value={bcc} onChange={setBcc} autoFocus onRemoveField={() => { setBcc([]); setShowBcc(false); }} />}
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" aria-label="Email subject" className="w-full text-sm px-3 py-1.5 rounded-b-lg bg-transparent focus:outline-none" />
+        </div>
       )}
       {replyTo && (
         <div className="flex items-start gap-2 rounded-md bg-gray-50 border-l-4 border-emerald-500 px-2.5 py-1.5">
@@ -298,16 +341,18 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
         value={text}
         onChange={(e) => { setText(e.target.value); if (!e.target.value.trim()) { ai.dropTag(); setUndo(null); } }}
         onKeyDown={(e) => {
-          // WhatsApp: Enter sends, Shift+Enter adds a line (like the app). Everywhere: Ctrl/Cmd+Enter sends; Escape drops the reply.
+          // WhatsApp / Instagram: Enter sends, Shift+Enter adds a line (like the apps). Everywhere: Ctrl/Cmd+Enter sends; Escape drops the reply.
           if (e.key === 'Escape' && replyTo) { onCancelReply?.(); return; }
-          if (((e.metaKey || e.ctrlKey) && e.key === 'Enter') || (wa && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing)) { e.preventDefault(); send(false); }
+          if (((e.metaKey || e.ctrlKey) && e.key === 'Enter') || ((wa || ig) && e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing)) { e.preventDefault(); send(false); }
         }}
         onPaste={(e) => { const pasted = Array.from(e.clipboardData?.files ?? []); if (pasted.length) { e.preventDefault(); const dt = new DataTransfer(); pasted.forEach((f) => dt.items.add(f)); addFiles(dt.files); } }}
-        placeholder={wa ? `Type a message as ${sender?.display_name ?? 'sender'} (Enter to send, Shift+Enter for a new line)` : `Reply as ${sender?.display_name ?? 'sender'}… (${typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter to send)`}
+        placeholder={wa ? `Type a message as ${sender?.display_name ?? 'sender'} (Enter to send, Shift+Enter for a new line)`
+          : ig ? `Message… as ${sender?.display_name ?? 'sender'} (Enter to send)`
+            : `${isEmail ? 'Write your reply' : chat.provider === 'LINKEDIN' ? 'Write a message' : 'Reply'} as ${sender?.display_name ?? 'sender'}… (${typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter to send)`}
         aria-label="Reply"
         maxLength={maxLength}
-        rows={3}
-        className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 resize-y min-h-[72px] max-h-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        rows={isEmail ? 6 : 3}
+        className={cn('w-full text-sm px-3 py-2 border border-gray-200 resize-y max-h-64 focus:outline-none focus:ring-2', isEmail ? 'min-h-[132px] rounded-lg' : 'min-h-[72px]', ig ? 'rounded-[22px] px-4 focus:ring-[#3797f0]/50' : 'rounded-lg', !isEmail && !ig && 'focus:ring-indigo-500', isEmail && 'focus:ring-indigo-500')}
       />
       {files.length > 0 && (
         <div className="flex flex-wrap gap-1.5">

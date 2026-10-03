@@ -22,6 +22,9 @@ export interface ReplyInput {
   chat_id: string;
   text?: string;
   subject?: string;
+  /** Email only: extra recipients on the reply (addresses). */
+  cc?: string[];
+  bcc?: string[];
   attachments?: string[];
   booking?: boolean;
   /** Our id of the message this reply quotes (WhatsApp "reply"); sent as the connector's quote_id. */
@@ -32,6 +35,21 @@ export interface ReplyInput {
   suggestion_id?: string;
   /** Set for API keys: narrows the member's rights to the key's role and client scope. */
   scope?: { workspaceId: string; role: Role; clientIds: string[] };
+}
+
+const EMAIL_RE = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+/** Cc / Bcc addresses from the composer: trimmed, lowercased, valid, unique, at most 20. */
+export function cleanAddresses(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const v of list) {
+    const e = String(v ?? "").trim().toLowerCase();
+    if (!e) continue;
+    if (!EMAIL_RE.test(e)) throw new HttpError(400, "E_PAYLOAD_INVALID", `"${e.slice(0, 80)}" is not an email address`);
+    if (!out.includes(e)) out.push(e);
+  }
+  if (out.length > 20) throw new HttpError(400, "E_PAYLOAD_INVALID", "up to 20 Cc / Bcc addresses");
+  return out;
 }
 
 const escHtml = (v: string) => v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -54,6 +72,8 @@ export interface DeliverInput {
   actionId: string;
   sentBy: string | null;
   subject?: string;
+  cc?: string[];
+  bcc?: string[];
   attachments?: Blob[];
   stored?: Array<Record<string, unknown>>;
   quoted?: Record<string, unknown> | null;
@@ -69,6 +89,7 @@ export async function deliverChatMessage(o: DeliverInput): Promise<{ msg: Row | 
   try {
     let messageId: string | null = null;
     let html: string | null = null;
+    let attrs: Record<string, unknown> | null = null;
     if (CHAT_PROVIDERS.includes(sender.provider)) {
       const r = await unipile.chats.send(chat.unipile_chat_id, { account_id: sender.unipile_account_id, text, attachments: o.attachments ?? [], quote_id: (o.quoted?.unipile_message_id as string | undefined) ?? undefined });
       messageId = r.message_id ?? null;
@@ -83,11 +104,16 @@ export async function deliverChatMessage(o: DeliverInput): Promise<{ msg: Row | 
       // workspace settings.email_plain_text: the reply goes out as text/plain and is never tracked
       const plain = wsRow?.settings?.email_plain_text === true;
       const track = !plain && (sender.track_replies ?? wsRow?.settings?.track_replies ?? false) === true;
-      const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: chat.attendee_name ?? undefined }], subject: o.subject ?? (chat.subject ? (chat.subject.startsWith("Re:") ? chat.subject : `Re: ${chat.subject}`) : undefined), body: plain ? text : html, reply_to: last?.unipile_message_id ?? undefined, attachments: o.attachments ?? [], ...(plain ? { custom_headers: [{ ...PLAIN_TEXT_HEADER }] } : {}), ...(track ? { tracking_options: { opens: true, links: true, label: `reply:${o.actionId}` } } : {}) });
+      const subject = o.subject ?? (chat.subject ? (chat.subject.startsWith("Re:") ? chat.subject : `Re: ${chat.subject}`) : undefined);
+      const cc = (o.cc ?? []).filter((e) => e !== to), bcc = (o.bcc ?? []).filter((e) => e !== to && !cc.includes(e));
+      // the mail header the thread shows for this reply (inbound mail gets the same from the webhook)
+      const ownEmail = String(sender.public_identifier ?? sender.owner_email ?? "").toLowerCase();
+      attrs = { email: { from: ownEmail ? { name: sender.display_name ?? null, email: ownEmail } : null, to: [{ name: chat.attendee_name ?? null, email: to }], cc: cc.map((email) => ({ name: null, email })), bcc: bcc.map((email) => ({ name: null, email })), reply_to: [], subject: subject ?? null } };
+      const r = await unipile.mails.send({ account_id: sender.unipile_account_id, to: [{ identifier: to, display_name: chat.attendee_name ?? undefined }], ...(cc.length ? { cc: cc.map((identifier) => ({ identifier })) } : {}), ...(bcc.length ? { bcc: bcc.map((identifier) => ({ identifier })) } : {}), subject, body: plain ? text : html, reply_to: last?.unipile_message_id ?? undefined, attachments: o.attachments ?? [], ...(plain ? { custom_headers: [{ ...PLAIN_TEXT_HEADER }] } : {}), ...(track ? { tracking_options: { opens: true, links: true, label: `reply:${o.actionId}` } } : {}) });
       messageId = r.provider_id ?? r.tracking_id ?? null;
     }
     // upsert: the messaging webhook may have recorded this message first; our row then takes over its action / author
-    const { data: msg } = await admin.from("outreach_messages").upsert({ workspace_id: chat.workspace_id, chat_id: chat.id, unipile_message_id: messageId, direction: "out", text, html, sent_at: new Date().toISOString(), action_id: o.actionId, sent_by: o.sentBy, attachments: o.stored ?? [], quoted: o.quoted ?? null },
+    const { data: msg } = await admin.from("outreach_messages").upsert({ workspace_id: chat.workspace_id, chat_id: chat.id, unipile_message_id: messageId, direction: "out", text, html, sent_at: new Date().toISOString(), action_id: o.actionId, sent_by: o.sentBy, attachments: o.stored ?? [], quoted: o.quoted ?? null, ...(attrs ? { content_attributes: attrs } : {}) },
       { onConflict: "unipile_message_id", ignoreDuplicates: false }).select("*").single();
     await admin.from("outreach_chats").update({ unread: false, unread_count: 0, archived: false }).eq("id", chat.id);
     // Instagram: answering a message request accepts it; the thread is no longer a request
@@ -173,6 +199,10 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     if (text.length > limit) throw new HttpError(400, "E_PAYLOAD_INVALID", `${CHANNEL_LABEL[sender.provider]} messages can be up to ${limit} characters (this one is ${text.length})`);
   }
 
+  // Cc / Bcc only exist on email threads; validated before anything is reserved
+  const mail = !CHAT_PROVIDERS.includes(sender.provider);
+  const cc = mail ? cleanAddresses(input.cc) : [], bcc = mail ? cleanAddresses(input.bcc) : [];
+
   // Before the connector call: the AI stops in this chat (pending runs cancelled, the draft being sent held back from the
   // dispatcher), and an AI send already in flight or done wins instead of going out twice. Chats without AI runs pass straight.
   const pre = await rpc<Record<string, unknown>>("ai_reply_before_human_send", { p_chat: chat.id, p_run: input.ai_run_id ?? null })
@@ -211,7 +241,7 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     stored.push({ id: path, storage: true, name: name.replace(/^\d+-/, ""), type: blob.type || null, mimetype: blob.type || null, size: blob.size });
   }
   try {
-    const { msg, messageId } = await deliverChatMessage({ chat, sender, text, actionId: action.id, sentBy: input.userId, subject: input.subject, attachments, stored, quoted, bookingUrl });
+    const { msg, messageId } = await deliverChatMessage({ chat, sender, text, actionId: action.id, sentBy: input.userId, subject: input.subject, cc, bcc, attachments, stored, quoted, bookingUrl });
     await admin.from("outreach_actions").update({ status: "sent", executed_at: new Date().toISOString(), response: { message_id: messageId } }).eq("id", action.id);
     if (msg?.id) await afterHumanSend(chat, msg, input, text);
     return msg;
