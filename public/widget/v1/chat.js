@@ -954,9 +954,19 @@
     // already false when voice is off, the assistant is not on Auto, or the month's minutes are used up.
     var V = null, vLoad = null;
     function vcfg() { return S.eff.voice || {}; }
-    function voiceOk() { return !!(vcfg().enabled && L.voiceUrl && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && win.RTCPeerConnection && win.isSecureContext !== false); }
-    // where the website shows the way into a call ("home", "composer"); never while a teammate holds the conversation
-    function voiceShow(where) { var c = S.conv; return voiceOk() && !S.blocked && ((vcfg().ui || {}).show_on || {})[where] !== false && !(c && (c.handed_off_at || c.status === "resolved")) && !(V && V.active()); }
+    function voiceOk() { return !!(vcfg().enabled && L.voiceUrl && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && win.RTCPeerConnection && win.isSecureContext !== false && micAllowed()); }
+    // A page whose Permissions-Policy turns the microphone off (microphone=()) fails every call before the browser can
+    // ask: voice hides there, and the site owner gets one console line saying what to change.
+    var micPolicyWarned = false;
+    function micAllowed() {
+      var p = doc.permissionsPolicy || doc.featurePolicy, ok = true;
+      try { ok = !p || !p.allowsFeature || p.allowsFeature("microphone"); } catch (e) { ok = true; }
+      if (!ok && !micPolicyWarned && vcfg().enabled) { micPolicyWarned = true; try { console.warn("[GrowthxAI] Voice is off on this page: its Permissions-Policy blocks the microphone. Send microphone=(self) instead of microphone=()."); } catch (e) {} }
+      return ok;
+    }
+    // where the website shows the way into a call ("home", "composer"); never while a teammate holds the conversation.
+    // A conversation the assistant does not answer (ai_live false) has no mic; from home the call starts a new one.
+    function voiceShow(where) { var c = S.conv; return voiceOk() && !S.blocked && ((vcfg().ui || {}).show_on || {})[where] !== false && !(c && (c.handed_off_at || c.status === "resolved" || (where !== "home" && c.ai_live === false))) && !(V && V.active()); }
     // an untouched default follows the visitor's language
     function voiceText(k, dflt, key) { var v = (vcfg().ui || {})[k]; return t2("voice_" + k) || (v && v !== dflt ? v : T(key)); }
     function loadVoice() {
@@ -1015,10 +1025,11 @@
       var mic; try { mic = navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { mic = Promise.reject(e); }
       var release = function () { mic.then(function (st) { st.getTracks().forEach(function (t) { t.stop(); }); }, function () {}); };
       S.view = "call"; renderHeader(); renderView();
-      // the call belongs to a conversation: the one on screen, the visitor's open one, or a new one
+      // the call belongs to a conversation: the one on screen, the visitor's open one, or a new one. One the assistant
+      // does not answer (started while it was off: ai_live false) cannot take a call, so the call gets a new one.
       var conv = ensureVisitor().then(function () {
-        if (S.conv && S.conv.id && S.conv.status !== "resolved" && !composerDisabled()) return;
-        var ac = activeConv(); if (ac) return openConv(ac.id);
+        if (S.conv && S.conv.id && S.conv.status !== "resolved" && S.conv.ai_live !== false && !composerDisabled()) return;
+        var ac = activeConv(); if (ac && ac.ai_live !== false) return openConv(ac.id);
         if (needsPrechat()) { var e = new Error("prechat"); e.code = "PRECHAT"; throw e; }
         return createConversation(null, "voice");
       });
