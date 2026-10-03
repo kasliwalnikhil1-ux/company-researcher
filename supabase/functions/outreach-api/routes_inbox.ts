@@ -39,9 +39,11 @@ export function registerInbox(app: App): void {
   // It runs the SAME code as the inbox (_shared/outreach/reply.ts), as the key's member, narrowed to the key's role and client scope.
   app.post("/v1/threads/:id/reply", async (c) => {
     const chat = pathId(c);
-    const b = parse(z.object({ text: z.string().trim().min(1).max(8000), subject: z.string().max(300).optional(), booking: z.boolean().optional() }).strict(), body(c));
+    // cc / bcc: email threads only (addresses are checked again in sendReply: valid, unique, at most 20)
+    const addresses = z.array(z.string().trim().email().max(320)).max(20).optional();
+    const b = parse(z.object({ text: z.string().trim().min(1).max(8000), subject: z.string().max(300).optional(), cc: addresses, bcc: addresses, booking: z.boolean().optional() }).strict(), body(c));
     const ctx = ctxOf(c);
-    const message = await sendReply({ userId: ctx.key.user_id, chat_id: chat, text: b.text, subject: b.subject, booking: b.booking,
+    const message = await sendReply({ userId: ctx.key.user_id, chat_id: chat, text: b.text, subject: b.subject, cc: b.cc, bcc: b.bcc, booking: b.booking,
       scope: { workspaceId: ctx.key.workspace_id, role: ctx.key.role, clientIds: ctx.key.client_ids ?? [] } });
     return ok(c, { id: chat, message }, 201);
   });

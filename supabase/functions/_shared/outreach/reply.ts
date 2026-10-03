@@ -178,6 +178,9 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     if (input.scope.clientIds.length && chat.client_id && !input.scope.clientIds.includes(chat.client_id)) throw new HttpError(404, "E_NOT_FOUND");
   }
   const sender = (chat as any).outreach_senders;
+  // Cc / Bcc only exist on email threads: say so rather than dropping them (API callers would never know)
+  const mail = !!sender && !CHAT_PROVIDERS.includes(sender.provider) && sender.provider !== "WEBCHAT";
+  if (!mail && ((input.cc?.length ?? 0) > 0 || (input.bcc?.length ?? 0) > 0)) throw new HttpError(400, "E_PAYLOAD_INVALID", "cc and bcc can only be used on email threads");
   // web chat (web-chat-PRD.md): no connector; the message is a row + a Realtime broadcast, written by the same RPC the inbox uses
   if (sender?.provider === "WEBCHAT") {
     const stored = await storedAttachments(chat, input);
@@ -200,7 +203,6 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
   }
 
   // Cc / Bcc only exist on email threads; validated before anything is reserved
-  const mail = !CHAT_PROVIDERS.includes(sender.provider);
   const cc = mail ? cleanAddresses(input.cc) : [], bcc = mail ? cleanAddresses(input.bcc) : [];
 
   // Before the connector call: the AI stops in this chat (pending runs cancelled, the draft being sent held back from the

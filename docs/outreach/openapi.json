@@ -4792,8 +4792,8 @@
         "tags": [
           "Inbox"
         ],
-        "summary": "Send a reply (not available with API keys yet)",
-        "description": "Sends a reply on the thread's own channel through the same code as the inbox. Needs a key with the member role or higher; a client-scoped key can only reply on its clients' threads.\n\nRate class: spend.",
+        "summary": "Send a reply",
+        "description": "Sends a reply on the thread's own channel through the same code as the inbox. Needs a key with the member role or higher; a client-scoped key can only reply on its clients' threads. On email threads the reply goes to the thread's contact, with optional `cc` / `bcc` recipients; sending `cc` or `bcc` on a LinkedIn, Instagram, WhatsApp or web chat thread is refused with 400 E_PAYLOAD_INVALID.\n\nRate class: spend.",
         "parameters": [
           {
             "name": "id",
@@ -4822,6 +4822,24 @@
                   "subject": {
                     "type": "string",
                     "description": "Email threads only."
+                  },
+                  "cc": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "description": "Email threads only. Extra recipients who see each other (up to 20 addresses). Duplicates and the contact's own address are dropped."
+                  },
+                  "bcc": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "description": "Email threads only. Hidden recipients (up to 20 addresses)."
                   },
                   "booking": {
                     "type": "boolean",

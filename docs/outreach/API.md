@@ -225,7 +225,7 @@ A replay is a new delivery with the same payload plus `"replayed": true` and `"r
 
 ## Sending replies
 
-`POST /v1/threads/{id}/reply` sends a reply on the thread's own channel (LinkedIn message or email) through the same code as the inbox. Body: `text`, optional `subject` (email), optional `booking: true` to append the sender's booking link. The key needs the member role or higher, the member who created it must be allowed to reply, and a client-scoped key can only reply on its clients' threads. It counts against the 60 per hour budget-spending limit.
+`POST /v1/threads/{id}/reply` sends a reply on the thread's own channel (LinkedIn message or email) through the same code as the inbox. Body: `text`, optional `subject` (email), optional `cc` / `bcc` (email threads only: arrays of up to 20 addresses each; the contact of the thread is always the To, and Cc / Bcc on any other channel is refused with 400 `E_PAYLOAD_INVALID`), optional `booking: true` to append the sender's booking link. The key needs the member role or higher, the member who created it must be allowed to reply, and a client-scoped key can only reply on its clients' threads. It counts against the 60 per hour budget-spending limit.
 
 ## Ten common calls
 
