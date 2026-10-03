@@ -127,7 +127,7 @@ export default function RepliesTab({ ws, client, range, onNotice }: TabProps & {
       <Section title="Where replies come from" description="Click a number to open exactly those threads in the inbox."
         actions={<>
           <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5" role="group" aria-label="Group replies by">
-            {GROUPS.map((g) => <button key={g.key} type="button" aria-pressed={group === g.key} onClick={() => setGroup(g.key)} className={cn('px-2.5 py-1 text-xs rounded-md', group === g.key ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}>{g.label}</button>)}
+            {GROUPS.map((g) => <button key={g.key} type="button" aria-pressed={group === g.key} onClick={() => setGroup(g.key)} className={cn('px-2.5 py-1 text-xs rounded-md', group === g.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{g.label}</button>)}
           </div>
           <ExportButton onClick={exportCsv} disabled={!rows.length || needsSequence} />
         </>}>

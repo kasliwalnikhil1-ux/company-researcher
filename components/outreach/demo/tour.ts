@@ -1,5 +1,5 @@
 /**
- * The product-tour walkthrough (Driver.js): eight steps across pages. The controller navigates to a step's page, waits
+ * The product-tour walkthrough (Driver.js): eight steps across pages, then the finish card (DemoFinish). The controller navigates to a step's page, waits
  * up to 4 s for its `[data-tour="…"]` target and highlights it; a target that never appears (a narrow screen) gets a
  * centred popover instead. Skippable at every step (Close, Esc, a click on the overlay), with Back.
  *
@@ -8,24 +8,27 @@
  */
 import { driver, type Driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
-import { DEMO_TOUR_SEQUENCE_ID } from '@/lib/outreach/demoIds';
+import { DEMO_TOUR_AI_CHAT_ID, DEMO_TOUR_SEQUENCE_ID } from '@/lib/outreach/demoIds';
 import { kv } from '@/lib/outreach/storage';
 
 /**
  * `canvas`: zoom the sequence canvas first: onto the top of the flow (`top`) or onto the topmost step of that type.
  * `side`: where the popover sits (default below the target).
+ * `click`: clicked first (once it is on screen), e.g. to pick a tab the step talks about.
+ * `top`: keep the page at the top (a target taller than the window would otherwise be scrolled to its top edge).
  */
-export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message'; side?: 'right' | 'bottom' }
+export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message'; side?: 'top' | 'left' | 'right' | 'bottom'; click?: string; top?: boolean }
 
+/** Written for a buyer: what each part gets them, in the order the work happens (people → accounts → outreach → replies → meetings). */
 export const TOUR_STEPS: TourStep[] = [
-  { route: '/outreach', element: '[data-tour="dashboard-stats"]', title: 'A live workspace', text: "This is a live workspace with sample data. Here's the whole flow in a minute." },
-  { route: '/outreach/senders', element: '[data-tour="sender-channels"]', title: 'Senders', text: 'Connect LinkedIn, email, WhatsApp or Instagram accounts. Each one has its own safe daily limits.' },
-  { route: '/outreach/leads', element: '[data-tour="leads-table"]', title: 'Leads', text: 'Bring in prospects from a CSV, a LinkedIn search or by hand.' },
-  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-canvas"]', title: 'Sequences', text: 'Build the steps: visit, connect, message, follow up, branch on replies.', canvas: 'top' },
-  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-message-step"]', title: 'Personalisation', text: 'Personalise every message with variables and AI lines.', canvas: 'send_message' },
-  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Start it', text: 'Start it and leads move through on their own. In this demo the activity is simulated.' },
-  { route: '/outreach/inbox', element: '[data-tour="inbox-list"]', title: 'One inbox', side: 'right', text: 'Replies from every channel land here. Answer them, or let AI draft.' },
-  { route: '/outreach/reports?tab=funnel', element: '[data-tour="reports-funnel"]', title: 'Reports', text: 'See what works: accepted, replied, interested, meetings.' },
+  { route: '/outreach/leads/import', click: '#import-tab-search_url', element: '#import-tab-search_url', title: 'Find the right people', side: 'right', top: true, text: 'Pull prospects from a Sales Navigator search, people who liked or commented on a LinkedIn post, your target companies or a spreadsheet. Duplicates are removed for you.' },
+  { route: '/outreach/senders', element: '[data-tour="sender-channels"]', title: "Connect your team's accounts", text: "Add each person's LinkedIn, email, WhatsApp and Instagram. Outreach goes out from their own accounts, within safe daily limits." },
+  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-canvas"]', title: 'Reach them on every channel', text: 'Set the steps once: view their profile, connect, message, then follow up by email or WhatsApp. It stops on its own when someone replies.', canvas: 'top' },
+  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-message-step"]', title: 'Every message feels personal', text: 'AI writes a line for each person from their profile and company, so no two messages read the same.', canvas: 'send_message' },
+  { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Press start, it runs every day', text: 'Leads move through the steps on their own, every working day. You only step in when someone wants to talk.' },
+  { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-thread"]', title: 'AI talks to your prospects', side: 'left', text: 'When someone replies, AI answers their questions and sends your calendar link. Here it handled the whole conversation and the prospect booked a call.' },
+  { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-list"]', title: 'Every reply in one place', side: 'right', text: 'LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want.' },
+  { route: '/outreach/reports?tab=funnel', element: '[data-tour="funnel-meeting"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
 ];
 
 export type TourState = { kind: 'idle' } | { kind: 'step'; index: number } | { kind: 'done' } | { kind: 'skipped' };
@@ -106,6 +109,11 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     const step = TOUR_STEPS[i];
     writeTourState(`step:${i}`);
     if (o.currentPath() !== step.route.split('?')[0] || step.route.includes('?')) o.navigate(step.route);
+    if (step.click) {
+      const target = await waitFor(step.click, 4000);
+      if (my !== token || !running) return;
+      (target as HTMLElement | null)?.click();
+    }
     let el = await waitFor(step.element, 4000);
     if (my !== token || !running) return;
     // the canvas listens once its steps are on screen
@@ -120,7 +128,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
       allowClose: true,
       overlayClickBehavior: 'close',
       showProgress: true,
-      smoothScroll: true,
+      smoothScroll: !step.top,
       stagePadding: 6,
       popoverClass: 'gxdemo-tour',
       onDestroyStarted: () => { if (swapping) { drv?.destroy(); return; } end('skipped'); },
@@ -133,7 +141,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
           description: step.text,
           progressText: `${i + 1} of ${TOUR_STEPS.length}`,
           showButtons: i === 0 ? ['next', 'close'] : ['previous', 'next', 'close'],
-          nextBtnText: last ? 'Keep exploring' : 'Next',
+          nextBtnText: last ? 'Finish' : 'Next',
           prevBtnText: 'Back',
           side: step.side ?? 'bottom',
           align: 'start',
@@ -141,6 +149,12 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
       }],
     });
     drv.drive();
+    if (step.top && el) {
+      // Driver scrolled the tall target to its top edge: put the page (and any scrolling parent) back at the top
+      for (let p: HTMLElement | null = el.parentElement; p; p = p.parentElement) if (p.scrollTop) p.scrollTop = 0;
+      window.scrollTo(0, 0);
+      requestAnimationFrame(() => drv?.refresh());
+    }
   }
 
   return {

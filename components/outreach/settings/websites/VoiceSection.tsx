@@ -292,7 +292,7 @@ function VoicePicker({ ws, language, current, ownAccount, onClose, onPick, toast
     <Modal open onClose={onClose} title="Pick a voice" size="lg">
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
-          {tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cn('rounded-full px-3 py-1 text-sm', tab === k ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')}>{l}</button>)}
+          {tabs.map(([k, l]) => <button key={k} type="button" onClick={() => setTab(k)} className={cn('rounded-full px-3 py-1 text-sm', tab === k ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')}>{l}</button>)}
           <input className={cn(field, 'ml-auto w-48')} placeholder="Search voices" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search voices" />
         </div>
         <div className="flex flex-wrap gap-2">

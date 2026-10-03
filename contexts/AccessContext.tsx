@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { fetchMyAccess, type FeatureKey, type MyAccess } from '@/lib/platform/access';
+import { fetchMyAccess, rememberAccessStatus, type FeatureKey, type MyAccess } from '@/lib/platform/access';
 
 import { IS_DEMO } from '@/lib/outreach/mode';
 interface Ctx {
@@ -45,6 +45,10 @@ export function AccessProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   useEffect(() => { load(); }, [load]);
+
+  // The tour blocks every data request, so it reads the status the app last saw here (its CTA depends on it).
+  const loadedStatus = user && loaded?.userId === user.id ? loaded.access?.status : undefined;
+  useEffect(() => { if (user && loadedStatus) rememberAccessStatus(user.id, loadedStatus); }, [user, loadedStatus]);
 
   const value = useMemo<Ctx>(() => {
     const current = user && loaded?.userId === user.id ? loaded : null;

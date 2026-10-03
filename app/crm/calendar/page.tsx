@@ -122,7 +122,7 @@ export default function CalendarPage() {
               {eventsQ.isFetching && <Spinner className="w-3.5 h-3.5 ml-1" />}
             </div>
             <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5 text-xs">
-              {(['day', 'week', 'agenda'] as View[]).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2.5 py-1 rounded capitalize', view === v ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50')}>{v}</button>)}
+              {(['day', 'week', 'agenda'] as View[]).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2.5 py-1 rounded capitalize', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{v}</button>)}
             </div>
             <TimezonePicker compact value={timezone} onChange={setTimezone} teamTz={teamTz} />
             <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={calendars === 'all'} onChange={(e) => setCalendars(e.target.checked ? 'all' : 'primary')} /> all calendars (not just primary)</label>

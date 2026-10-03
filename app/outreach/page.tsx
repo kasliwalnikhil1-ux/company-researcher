@@ -100,7 +100,7 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
         <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1" role="group" aria-label="Show senders by state">
           {legend.map((g) => (
             <button key={g.key} type="button" onClick={() => setFilter(filter === g.key ? null : g.key)} aria-pressed={filter === g.key} disabled={counts[g.key] === 0}
-              className={cn('inline-flex items-center gap-1.5 text-xs rounded-full px-2 py-0.5 border transition-colors', filter === g.key ? 'border-gray-900 bg-gray-900 text-white' : 'border-transparent text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-default')}>
+              className={cn('inline-flex items-center gap-1.5 text-xs rounded-full px-2 py-0.5 border transition-colors', filter === g.key ? 'border-indigo-200 bg-indigo-50 text-indigo-700 font-medium' : 'border-transparent text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-default')}>
               <span className={cn('w-2 h-2 rounded-full', g.color)} />{g.label} <span className={cn('font-semibold tabular-nums', filter === g.key ? 'text-white' : 'text-gray-900')}>{fmtInt(counts[g.key])}</span>
             </button>
           ))}

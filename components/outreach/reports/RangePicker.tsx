@@ -58,13 +58,13 @@ export default function RangePicker({ value, onChange, timezone, workspaceId, on
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="inline-flex rounded-lg border border-gray-300 bg-white p-0.5" role="group" aria-label="Date range">
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="group" aria-label="Date range">
         {PRESETS.map((p) => (
           <button key={p.key} type="button" aria-pressed={!showCustom && active === p.key} onClick={() => { setCustom(false); onChange(presetRange(p.key, timezone)); }}
-            className={cn('px-2.5 py-1 text-sm rounded-md whitespace-nowrap transition-colors', !showCustom && active === p.key ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}>{p.label}</button>
+            className={cn('px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors', !showCustom && active === p.key ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{p.label}</button>
         ))}
         <button type="button" aria-pressed={showCustom} onClick={() => setCustom(true)}
-          className={cn('px-2.5 py-1 text-sm rounded-md whitespace-nowrap transition-colors inline-flex items-center gap-1', showCustom ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}><CalendarDays className="w-3.5 h-3.5" /> Custom</button>
+          className={cn('px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors inline-flex items-center gap-1', showCustom ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}><CalendarDays className="w-3.5 h-3.5" /> Custom</button>
       </div>
 
       {showCustom ? (

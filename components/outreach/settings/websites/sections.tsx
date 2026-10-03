@@ -575,7 +575,7 @@ export function SecuritySection(p: SectionProps) {
         {p.inbox.hmac_token ? (
           <div className="space-y-2 mt-2">
             <div className="flex items-end gap-2"><div className="flex-1"><CopyField label="HMAC secret" value={reveal ? p.inbox.hmac_token : '•'.repeat(24)} secret /></div><Button size="sm" variant="secondary" onClick={() => setReveal((r) => !r)}>{reveal ? 'Hide' : 'Reveal'}</Button>{p.canEdit && <Button size="sm" variant="danger" onClick={() => setConfirm(true)}><RefreshCw className="w-3.5 h-3.5 mr-1" />Regenerate</Button>}</div>
-            <div className="flex gap-1 flex-wrap">{HMAC_SAMPLES.map((s, i) => <button key={s.label} type="button" onClick={() => setLang(i)} className={cn('text-xs px-2 py-1 rounded', lang === i ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700')}>{s.label}</button>)}</div>
+            <div className="flex gap-1 flex-wrap">{HMAC_SAMPLES.map((s, i) => <button key={s.label} type="button" onClick={() => setLang(i)} className={cn('text-xs px-2 py-1 rounded', lang === i ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-gray-100 text-gray-700')}>{s.label}</button>)}</div>
             <pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto">{HMAC_SAMPLES[lang].code(reveal ? p.inbox.hmac_token : '<HMAC_SECRET>')}</pre>
           </div>
         ) : <Note>Only owners and managers can see the secret.</Note>}
@@ -620,7 +620,7 @@ export function InstallSection(p: SectionProps) {
   return (
     <div className="space-y-4">
       <Card title="Install">
-        <div className="flex gap-1 flex-wrap mb-3">{INSTALL_GUIDES.map((x) => <button key={x.key} type="button" onClick={() => setGuide(x.key)} className={cn('text-xs px-2.5 py-1 rounded-full', guide === x.key ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')}>{x.label}</button>)}</div>
+        <div className="flex gap-1 flex-wrap mb-3">{INSTALL_GUIDES.map((x) => <button key={x.key} type="button" onClick={() => setGuide(x.key)} className={cn('text-xs px-2.5 py-1 rounded-full', guide === x.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')}>{x.label}</button>)}</div>
         <div className="relative"><pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{g.body(p.inbox.website_token)}</pre><button type="button" className="absolute top-2 right-2 text-xs bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 inline-flex items-center gap-1" onClick={async () => { try { await navigator.clipboard.writeText(snippetHtml(p.inbox.website_token)); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ } }}>{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}{copied ? 'Copied' : 'Copy snippet'}</button></div>
         <div className="mt-3 text-sm">
           {seen.length ? <div className="text-emerald-700">Seen on {seen.slice(0, 3).map(([o, at]) => <span key={o} className="mr-2"><b>{o.replace(/^https?:\/\//, '')}</b> {timeAgo(at)}</span>)}</div> : <div className="text-amber-700">Not seen on any site yet. Reload a page with the snippet installed and this updates within a minute.</div>}

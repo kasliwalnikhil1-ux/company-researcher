@@ -325,6 +325,8 @@ async function e2e() {
   await page.waitForTimeout(500);
   const tourDone = await gx(() => window.sessionStorage.getItem('gxdemo:tour'));
   if (tourDone !== 'done') fail('workflow 7', `tour state after finishing is ${tourDone}`);
+  // the finish card covers the bar until it is closed
+  await page.locator('[data-demo-finish-explore]').click();
   await page.locator('[data-demo-restart-tour]').click();
   await page.locator('.driver-popover').waitFor({ timeout: 15_000 });
   await page.keyboard.press('Escape');
@@ -333,10 +335,9 @@ async function e2e() {
   if (tourSkipped !== 'skipped') fail('workflow 7', `tour state after skipping is ${tourSkipped}`);
   else ok('workflow 7', 'tour finished, skipped and restarted');
 
-  // 6. reset → starting numbers
-  await page.locator('[data-demo-reset]').click();
-  await page.locator('[data-demo-reset-confirm]').click();
-  await page.waitForLoadState('domcontentloaded');
+  // 6. reset → starting numbers (no button in the bar any more: the runtime's reset, then a reload, as DemoProvider does)
+  await gx(() => window.__gxdemo.runtime.reset());
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await ready();
   const afterReset = await gx(() => ({ seqs: window.__gxdemo.runtime.store.t('outreach_sequences').length, leads: window.__gxdemo.runtime.store.t('outreach_leads').length }));
   if (afterReset.seqs !== 6 || afterReset.leads !== 400) fail('workflow 6', `after reset: ${JSON.stringify(afterReset)}`);

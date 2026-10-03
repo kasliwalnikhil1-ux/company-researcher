@@ -1,12 +1,11 @@
 'use client';
 
 /**
- * The bar above the product tour, on every screen: "Demo", simulated activity, restart tour,
- * reset demo and the "Start your outreach" CTA. Fixed, 40 px, never dismissible.
+ * The bar above the product tour, on every screen: "Demo", simulated activity, restart tour
+ * and the "Start your outreach" CTA. Fixed, 40 px, never dismissible.
  */
 import { useEffect, useRef, useState } from 'react';
-import { ArrowRight, ChevronDown, FastForward, Pause, Play, RefreshCcw, RotateCcw, SkipForward, Zap } from 'lucide-react';
-import { Button, Modal } from '@/components/outreach/ui';
+import { ArrowRight, ChevronDown, FastForward, Pause, Play, RotateCcw, SkipForward, Zap } from 'lucide-react';
 import { useDemo } from './DemoProvider';
 
 const MODES = [
@@ -28,7 +27,7 @@ function Placeholder() {
   return <div className="fixed top-0 inset-x-0 z-[60] h-10 bg-gray-900 text-white text-sm flex items-center px-4"><Label /></div>;
 }
 
-function SimMenu({ onReset }: { onReset: () => void }) {
+function SimMenu() {
   const { mode, setMode, skipDay, day, tour } = useDemo();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -67,9 +66,6 @@ function SimMenu({ onReset }: { onReset: () => void }) {
             <button role="menuitem" type="button" onClick={() => { setOpen(false); tour.start(); }} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50">
               <RotateCcw className="w-4 h-4" /> Restart tour
             </button>
-            <button role="menuitem" type="button" onClick={() => { setOpen(false); onReset(); }} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50">
-              <RefreshCcw className="w-4 h-4" /> Reset demo
-            </button>
           </div>
         </div>
       )}
@@ -78,28 +74,22 @@ function SimMenu({ onReset }: { onReset: () => void }) {
 }
 
 export default function DemoBar() {
-  const { tour, reset, cta, ctaLabel } = useDemo();
-  const [confirm, setConfirm] = useState(false);
+  const { tour, cta, ctaLabel } = useDemo();
   return (
     <>
       <div className="fixed top-0 inset-x-0 z-[60] h-10 bg-gray-900 text-white text-sm flex items-center gap-1 sm:gap-3 px-3 sm:px-4" role="region" aria-label="Product tour">
         <Label />
         <div className="hidden md:block w-px h-5 bg-white/20" />
-        <SimMenu onReset={() => setConfirm(true)} />
+        <SimMenu />
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           <button type="button" onClick={() => tour.start()} className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 whitespace-nowrap" data-demo-restart-tour>
             <RotateCcw className="w-3.5 h-3.5" /> Restart tour
           </button>
-          <button type="button" onClick={() => setConfirm(true)} className="hidden sm:block px-2 py-1 rounded-md hover:bg-white/10 whitespace-nowrap" data-demo-reset>Reset demo</button>
           <button type="button" onClick={cta} className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-indigo-500 hover:bg-indigo-400 font-semibold whitespace-nowrap" data-demo-cta>
             <span className="hidden sm:inline">{ctaLabel}</span><span className="sm:hidden">Start</span> <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
-      <Modal open={confirm} onClose={() => setConfirm(false)} title="Reset the demo?" size="sm"
-        footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>Cancel</Button><Button onClick={() => { setConfirm(false); reset(); }} data-demo-reset-confirm>Reset demo</Button></>}>
-        <p className="text-sm text-gray-600">Everything you changed in this demo is cleared and the sample workspace starts over. Nothing real is affected.</p>
-      </Modal>
     </>
   );
 }

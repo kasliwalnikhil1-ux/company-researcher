@@ -11,6 +11,17 @@ export const LEAD_STATUSES: LeadStatus[] = ['new', 'contacted', 'booked', 'conve
 /** Where new sign-ups book their onboarding call (the account gate embeds it). */
 export const ONBOARDING_CALENDLY_URL = process.env.NEXT_PUBLIC_ONBOARDING_CALENDLY_URL || 'https://calendly.com/founders-growthxai/20min';
 
+/** The onboarding-call Calendly URL with the person's details prefilled and the GDPR banner off (the app already has its own notice). */
+export function onboardingCalendlyUrl(email: string | null, name: string | null, medium = 'signup_gate'): string {
+  const u = new URL(ONBOARDING_CALENDLY_URL);
+  u.searchParams.set('hide_gdpr_banner', '1');
+  u.searchParams.set('utm_source', 'app');
+  u.searchParams.set('utm_medium', medium);
+  if (email) u.searchParams.set('email', email);
+  if (name) u.searchParams.set('name', name);
+  return u.toString();
+}
+
 export const SOURCE_LABEL: Record<LeadSource, string> = {
   website_waitlist: 'Waitlist form',
   website_demo: 'Demo request',

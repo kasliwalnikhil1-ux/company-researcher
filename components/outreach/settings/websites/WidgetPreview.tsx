@@ -126,7 +126,7 @@ export default function WidgetPreview({ settings, online = true, brandFallback, 
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 text-xs">
         <span className="text-gray-500">Preview</span>
         <div className="flex gap-1">
-          {(['desktop', 'mobile'] as const).map((d) => <button key={d} type="button" onClick={() => setDevice(d)} className={cn('px-2 py-0.5 rounded', device === d ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}>{d}</button>)}
+          {(['desktop', 'mobile'] as const).map((d) => <button key={d} type="button" onClick={() => setDevice(d)} className={cn('px-2 py-0.5 rounded', device === d ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{d}</button>)}
           {!showLive && <button type="button" onClick={() => setOpen((o) => !o)} className="px-2 py-0.5 rounded text-gray-600 hover:bg-gray-100">{open ? 'closed state' : 'open state'}</button>}
           {IS_DEMO && inboxId && <button type="button" onClick={() => setLive((l) => !l)} className={cn('px-2 py-0.5 rounded', live ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-50')} title="Try the real widget with your saved settings">{live ? 'live' : 'try it live'}</button>}
         </div>

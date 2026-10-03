@@ -364,7 +364,7 @@ export default function VideoBubbleSection(p: SectionProps) {
       <div className="xl:sticky xl:top-4 self-start rounded-xl border border-gray-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 text-xs">
           <span className="text-gray-500">Preview</span>
-          <div className="flex gap-1">{(['bubble', 'expanded'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2 py-0.5 rounded', view === v ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100')}>{v}</button>)}</div>
+          <div className="flex gap-1">{(['bubble', 'expanded'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2 py-0.5 rounded', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{v}</button>)}</div>
         </div>
         <div className="relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]">
           {hasClip && draft.enabled

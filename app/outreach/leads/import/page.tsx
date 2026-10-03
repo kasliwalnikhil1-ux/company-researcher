@@ -52,7 +52,7 @@ export default function LeadsImportPage() {
         <Card><EmptyState icon={<ShieldAlert className="w-6 h-6" />} title={suspended ? 'Workspace is read-only' : 'You cannot import leads'} description={suspended ? 'Imports are disabled while the workspace is suspended.' : 'Ask a workspace owner or manager for the member role to import leads.'} /></Card>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[280px,1fr] gap-4">
-          <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0" role="tablist" aria-label="Import source" aria-orientation="vertical">
+          <div className="flex lg:flex-col gap-2 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0" role="tablist" aria-label="Import source" aria-orientation="vertical" data-tour="import-sources">
             {SOURCES.map((s) => (
               <button key={s.id} type="button" role="tab" id={`import-tab-${s.id}`} aria-controls="import-panel" aria-selected={source === s.id} onClick={() => setSource(s.id)}
                 className={cn('flex-1 lg:flex-none text-left rounded-xl border p-3 transition-colors min-w-[200px] focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500', source === s.id ? 'border-indigo-500 ring-1 ring-inset ring-indigo-500 bg-indigo-50' : 'border-gray-200 bg-white hover:bg-gray-50')}>

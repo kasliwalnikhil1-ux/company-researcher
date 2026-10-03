@@ -11,6 +11,7 @@ import { useRouter, usePathname } from '@/lib/outreach/nav';
 import Link from '@/lib/outreach/nav';
 import { DEMO_USER_EMAIL } from '@/lib/outreach/session';
 import { leaveDemo } from '@/lib/outreach/mode';
+import { demoCta } from './outreach/demo/cta';
 import Image from 'next/image';
 import { useState, useEffect, useMemo } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown, Search, FileText, Building2, BarChart3, Globe, Sparkles, Menu, X, UserCircle, CreditCard, HelpCircle, LifeBuoy, Handshake, Target, Database, Users, RotateCcw, Wrench, Banknote, ShieldCheck, MessageSquare, Contact, UserCog, Linkedin, Briefcase, SlidersHorizontal } from 'lucide-react';
@@ -53,6 +54,8 @@ const RESET_ACCOUNT_ALLOWED_USER_IDS = new Set([
 export default function MainLayout({ children, subnav, demo = false }: { children: React.ReactNode; subnav?: React.ReactNode; demo?: boolean }) {
   const { user, signOut } = useAuth();
   const access = useAccess();
+  // the tour's main button (outreach/demo/cta.ts): start / back to the workspace / book the onboarding call
+  const demoCtaNow = useMemo(() => demoCta(demo ? user : null), [demo, user]);
   const whitelabel = useWhitelabel();
   // GrowthxAI sells outreach: its sidebar is the Outreach menu. CRM and the fundraising items are CapitalxAI only.
   const isGrowthxai = demo || whitelabel.product === 'growthxai';
@@ -817,11 +820,11 @@ export default function MainLayout({ children, subnav, demo = false }: { childre
               )}
               <button
                 type="button"
-                onClick={() => leaveDemo(user ? '/outreach' : undefined)}
+                onClick={demoCtaNow.go}
                 className={`w-full flex items-center justify-center ${isCollapsed && !isMobile ? 'px-2' : 'px-4'} py-2.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors`}
-                title={user ? 'Back to my workspace' : 'Start your outreach'}
+                title={demoCtaNow.label}
               >
-                {isCollapsed && !isMobile ? <span aria-hidden>→</span> : <span>{user ? 'Back to my workspace' : 'Start your outreach'}</span>}
+                {isCollapsed && !isMobile ? <span aria-hidden>→</span> : <span>{demoCtaNow.label}</span>}
               </button>
               <button
                 type="button"

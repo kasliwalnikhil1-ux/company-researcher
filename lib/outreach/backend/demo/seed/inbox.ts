@@ -3,7 +3,10 @@
  * (read / unread, assignment, snooze, labels), private notes with @mentions, and the notifications they made.
  * Runs after the 60-day history and the webchat seed. Fictional people only; every time is relative to `now`.
  */
+import { DEMO_TOUR_AI_CHAT_ID } from '../../../demoIds';
 import { SAMPLE_AI_TAG } from '../ai';
+import { DEMO_MODEL } from '../aihub/jobs';
+import { AI_IDS } from '../aihub/knowledge';
 import { addMessage, catalogueProducts, insertNote, mentionToken, productCard, productItem, type MessageInput } from '../inbox/shared';
 import { engineFor, type Engine } from '../sim/engine';
 import type { DemoStore, Row } from '../store';
@@ -204,6 +207,56 @@ function seedLinkedInShowcase(s: DemoStore, now: number, engine: Engine): Row[] 
     { direction: 'in', text: 'Sure, I sent you an invite for Thursday.', ago: 3 * D, read: true, intent: 'interested', summary: 'Sent a video meeting invite for Thursday.', attachments: [{ id: 'li-meet-1', name: 'Video meeting', type: 'video_meeting', meeting: { starts_at: meetAt.toISOString(), expires_at: new Date(meetAt.getTime() + 30 * M).toISOString(), url: 'https://example.com/meet/northwind-demo' } }] },
     { direction: 'out', text: 'Perfect, see you then 👍', ago: 3 * D - 30 * M, origin: 'inbox_user', sent_by: MEMBER.maya, read_at: iso(now - 2 * D), reactions: [{ emoji: '👍', by: first, mine: false, at: iso(now - 2 * D) }] },
   ]);
+  touchLead(s, engine, chat, 'linkedin');
+  return [chat];
+}
+
+// ------------------------------------------------------------------------------------------------ LinkedIn: the AI books a call
+/**
+ * The walkthrough's "AI handles the replies" thread (fixed id): the prospect asks two questions, AI Auto Replies answers
+ * from the default prompt's facts and sends the calendar link, the prospect books, Maya confirms.
+ */
+function seedAiBookedShowcase(s: DemoStore, now: number, engine: Engine): Row[] {
+  const sender = s.get('outreach_senders', SENDER.li_maya);
+  // not another "Maya": the thread reads as two people
+  let lead = sender ? freshLead(s, sender.id, 260) : undefined;
+  for (let i = 261; sender && lead && lead.first_name === 'Maya' && i < 300; i++) lead = freshLead(s, sender.id, i);
+  if (!sender || !lead) return [];
+  const first = String(lead.first_name);
+  const company = String(lead.company);
+  const chat = engine.ensureChat(lead, sender, now - 4 * D, null, DEMO_TOUR_AI_CHAT_ID);
+  const [, ask1, ai1, ask2, ai2] = play(s, chat, now, [
+    { direction: 'out', text: `Hi ${first}, saw ${company} is growing the sales team. We help B2B teams book first meetings on LinkedIn and email without hiring more SDRs. Worth a quick chat?`, ago: 3 * D + 4 * H, origin: 'sequence', read_at: iso(now - 3 * D) },
+    { direction: 'in', text: 'Maybe. How is this different from an SDR agency?', ago: 2 * D + 6 * H, read: true, intent: 'question', summary: 'Asked how it differs from an SDR agency.' },
+    { direction: 'out', text: 'Good question. An agency writes from their own accounts. We run outreach from your team\'s LinkedIn and email, and every reply comes back to one inbox. Teams usually see 8–15% replies in the first month.', ago: 2 * D + 6 * H - 4 * M, origin: 'ai_autopilot', read_at: iso(now - 2 * D - 5 * H) },
+    { direction: 'in', text: 'Interesting. What would it cost for three people?', ago: 2 * D + 3 * H, read: true, intent: 'question', summary: 'Asked about pricing for three people.' },
+    { direction: 'out', text: `Plans start at $99 per sender a month, so about $297 for three, with a 14-day free trial. Happy to show you how it would work for ${company}. Pick a time here: https://example.com/book/northwind`, ago: 2 * D + 3 * H - 5 * M, origin: 'ai_autopilot', read_at: iso(now - 2 * D - 2 * H) },
+    { direction: 'in', text: 'Booked Thursday at 11. Looking forward to it.', ago: D + 2 * H, read: true, intent: 'interested', summary: 'Booked a call for Thursday at 11.' },
+    { direction: 'out', text: `Thanks ${first}, see you Thursday! I will bring a short plan for ${company}.`, ago: D + H, origin: 'inbox_user', sent_by: MEMBER.maya, read_at: iso(now - D) },
+  ]);
+  const mp = s.get('outreach_master_prompts', AI_IDS.mpLibrary);
+  const run = (inbound: Row, msg: Row, o: { stage: [string, string]; move: string; rule: string; facts: Array<[string, string]>; stop?: boolean }) => s.insert('outreach_ai_reply_runs', {
+    workspace_id: chat.workspace_id, client_id: chat.client_id ?? null, chat_id: chat.id, sender_id: chat.sender_id, lead_id: lead.id, sequence_id: null, provider: chat.provider,
+    inbound_message_ids: [inbound.id], followup_inbound_ids: [], debounce_until: inbound.sent_at, debounce_hard_until: inbound.sent_at, attempts: 1, send_attempts: 1, next_attempt_at: null,
+    mode: 'autopilot', policy_snapshot: { mode: 'autopilot', delay_min_s: 180, delay_max_s: 300 }, master_prompt_id: mp?.id ?? null, master_prompt_version: mp?.version ?? null,
+    floor_sha256: null, model: DEMO_MODEL, status: 'sent', decision: 'send', intent: inbound.intent, flags: [], language: 'en', stage_before: o.stage[0], stage_after: o.stage[1],
+    move: o.move, rule_applied: o.rule, side_effects: [], draft_confidence: 0.93, draft_text: msg.text, final_text: msg.text, facts_used: o.facts.map(([claim, source]) => ({ claim, source })),
+    validator: { ok: true }, verifier: { supported: true, unsupported_claims: [], follows_rule: true, answers_their_questions: true }, redrafts: 0, gate_failures: [], escalation_reasons: [],
+    context: { lead: { name: lead.full_name, title: lead.title, company } }, scheduled_send_at: msg.sent_at, sent_message_id: msg.id, action_id: null, sent_origin: 'ai_autopilot',
+    dispatched_by: null, cancelled_by: null, cancel_reason: null, cancel_note: null, edit_distance: 0, facts_changed: false,
+    reply_latency_s: Math.round((Date.parse(msg.sent_at) - Date.parse(inbound.sent_at)) / 1000), drew_bot_question: false, drew_hostile: false, error: null,
+    timings: { inbound_at: inbound.sent_at, drafted_at: inbound.sent_at, sent_at: msg.sent_at }, trigger_kind: 'auto', requested_by: null, requested_via: null, guidance: null, variants: null,
+    stop_after_send: !!o.stop, stop_rule: o.stop ? 'Calendar link sent' : null, scenario_id: null, gap_days: null, session_kind: 'normal', warnings: [],
+    created_at: inbound.sent_at, updated_at: msg.sent_at,
+  })[0];
+  const r1 = run(ask1, ai1, { stage: ['engage', 'relate'], move: 'answer', rule: 'Answer the question, then one line of proof', facts: [['Teams usually see 8–15% replies in the first month', 'master_prompt.facts']] });
+  const r2 = run(ask2, ai2, { stage: ['pitch', 'next_step'], move: 'schedule', rule: 'Pricing asked: give the starting price, then offer the calendar', facts: [['Plans from $99 per sender per month', 'master_prompt.facts'], ['14-day free trial', 'master_prompt.facts'], ['Calendar: https://example.com/book/northwind', 'master_prompt.facts']], stop: true });
+  s.update('outreach_messages', ai1.id, { ai_reply_run_id: r1.id }, { silent: true });
+  s.update('outreach_messages', ai2.id, { ai_reply_run_id: r2.id }, { silent: true });
+  s.update('outreach_chats', chat.id, {
+    ai_replies_count: 2, last_ai_move: 'schedule', conversation_stage: 'next_step', ai_run_id: r2.id, ai_run_status: 'sent', ai_run_decision: 'send', ai_session_started_at: ask1.sent_at, ai_session_kind: 'normal',
+    ai_handed_off_at: ai2.sent_at, ai_handoff_reason: 'calendar_sent', ai_handoff_rule: 'Calendar link sent', ai_handoff_run_id: r2.id, labels: ['meeting booked'], assigned_to: MEMBER.maya,
+  }, { silent: true });
   touchLead(s, engine, chat, 'linkedin');
   return [chat];
 }
@@ -456,9 +509,10 @@ export function seedInbox(s: DemoStore, now: number): void {
   const ig = seedInstagram(s, now, engine);
   const mail = seedEmailShowcase(s, now, engine);
   const li = seedLinkedInShowcase(s, now, engine);
+  const booked = seedAiBookedShowcase(s, now, engine);
   const fresh = seedRecentReplies(s, now, engine);
   const web = seedWebchatChats(s, now);
-  const keep = new Set([...wa, ...ig, ...mail, ...li, ...fresh, ...web].map((c) => c.id));
+  const keep = new Set([...wa, ...ig, ...mail, ...li, ...booked, ...fresh, ...web].map((c) => c.id));
   const assigned = seedTriage(s, now, keep);
   seedNotes(s, now, wa, web, assigned);
   engine.resetIndexes();

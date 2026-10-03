@@ -120,11 +120,13 @@ export default function TopBar(p: Props) {
         {sequence.throttled_reason && <Badge tone="amber" className="cursor-help"><span title={sequence.throttled_reason} className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> throttled</span></Badge>}
         <span className="text-xs text-gray-400 tabular-nums">v{version}</span>
         <DraftStatusText i={indicator} dirty={dirty} publishMode={publishMode} readOnly={readOnly} />
-        <div className="ml-auto flex items-center gap-1.5 flex-wrap" data-tour="sequence-start">
+        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
           {status !== 'draft' && <Button variant="ghost" size="sm" onClick={onWhy} title="Check what is holding this sequence back"><HelpCircle className="w-4 h-4" /><span className="hidden xl:inline">Why isn't this sending?</span></Button>}
           {!readOnly && (
             <Button variant="ghost" size="sm" disabled={!canDiscard || saving} onClick={onDiscard} title={publishMode ? 'Throw away every unpublished change' : 'Go back to the last saved version'}><Undo2 className="w-4 h-4" /><span className="hidden lg:inline">Discard draft</span></Button>
           )}
+          {/* the walkthrough highlights from Publish on: the controls that put the sequence live */}
+          <div className="flex items-center gap-1.5 flex-wrap" data-tour="sequence-start">
           {!readOnly && (publishMode
             ? <Button size="sm" variant={dirty ? 'primary' : 'secondary'} disabled={!dirty || !modeKnown} loading={saving} onClick={onPublish} title="Review who is affected, then publish (Ctrl/Cmd+S)" className="min-w-[5.75rem]"><UploadCloud className="w-4 h-4" /> Publish</Button>
             : <Button size="sm" variant={dirty ? 'primary' : 'secondary'} disabled={!dirty || !modeKnown} loading={saving} onClick={() => onSave()} title="Save (Ctrl/Cmd+S)" className="min-w-[5.75rem]"><Save className="w-4 h-4" /> Save</Button>)}
@@ -133,6 +135,7 @@ export default function TopBar(p: Props) {
           {canManage && status === 'paused' && <Button size="sm" onClick={() => onStatus('resume')} className="bg-green-600 hover:bg-green-700"><Play className="w-4 h-4" /> Resume</Button>}
           {canManage && live && <Button size="sm" variant="secondary" onClick={() => onStatus('archive')} title="Archive and take every lead out of the sequence"><Archive className="w-4 h-4" /><span className="hidden sm:inline">Archive</span></Button>}
           {canManage && status === 'archived' && <Button size="sm" variant="secondary" onClick={() => onStatus('draft')} title="Move back to draft"><RotateCcw className="w-4 h-4" /> Move to draft</Button>}
+          </div>
         </div>
       </div>
       <div className="flex items-center gap-2 px-3">

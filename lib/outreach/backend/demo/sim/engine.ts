@@ -98,14 +98,14 @@ export class Engine {
 
   // --- conversations ---------------------------------------------------------
   /** The lead's conversation with a sender (created on the first message). */
-  ensureChat(lead: Row, sender: Row, now: number, subject?: string | null): Row {
+  ensureChat(lead: Row, sender: Row, now: number, subject?: string | null, id?: string): Row {
     if (!this.chatIdx) { this.chatIdx = new Map(); for (const c of this.store.t('outreach_chats')) if (c.lead_id && !c.webchat_inbox_id) this.chatIdx.set(`${c.lead_id}|${c.sender_id}`, c); }
     const existing = this.chatIdx.get(`${lead.id}|${sender.id}`);
     if (existing && this.store.get('outreach_chats', existing.id) === existing) return existing;
     this.chatSeq += 1;
     this.store.setMeta('chatSeq', this.chatSeq);
     const chat = this.store.insert('outreach_chats', {
-      workspace_id: lead.workspace_id, client_id: lead.client_id ?? sender.client_id ?? null, sender_id: sender.id, lead_id: lead.id,
+      ...(id ? { id } : {}), workspace_id: lead.workspace_id, client_id: lead.client_id ?? sender.client_id ?? null, sender_id: sender.id, lead_id: lead.id,
       unipile_chat_id: `demo-chat-${this.chatSeq}`, provider: sender.provider, attendee_provider_id: lead.provider_id, attendee_public_identifier: lead.public_identifier,
       attendee_name: lead.full_name, attendee_picture_url: lead.picture_url, subject: subject ?? null, last_message_at: null, last_message_preview: null,
       last_direction: null, unread: false, unread_count: 0, assigned_to: null, intent: 'unclassified', archived: false, is_request: false, last_note_at: null,

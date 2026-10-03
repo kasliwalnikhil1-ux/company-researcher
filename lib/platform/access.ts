@@ -91,3 +91,21 @@ export async function rpc<T = unknown>(name: string, args: Record<string, unknow
 export async function fetchMyAccess(): Promise<MyAccess> {
   return rpc<MyAccess>('my_access');
 }
+
+/**
+ * The account status the app last loaded in this browser, per user. The product tour may not call the database, so
+ * it reads this to tell an account still waiting for its onboarding call from an active one. A hint only: the
+ * database enforces the real status.
+ */
+const STATUS_KEY = (userId: string) => `gx.access_status.${userId}`;
+
+export function rememberAccessStatus(userId: string, status: AccessStatus): void {
+  try { localStorage.setItem(STATUS_KEY(userId), status); } catch { /* private mode / storage off */ }
+}
+
+export function lastAccessStatus(userId: string): AccessStatus | null {
+  try {
+    const v = localStorage.getItem(STATUS_KEY(userId));
+    return v === 'pending' || v === 'active' || v === 'blocked' ? v : null;
+  } catch { return null; }
+}

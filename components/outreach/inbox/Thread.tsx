@@ -378,7 +378,7 @@ export default function Thread(p: ThreadProps) {
       {chat.provider === 'WEBCHAT' && <WebchatThreadBar chat={chat} messages={messages} members={members} workspaceId={p.workspaceId} canWrite={p.canWrite && !p.isClientViewer} onError={p.onError} onNotice={p.onNotice} />}
 
       {/* Messages */}
-      <div ref={scrollRef} className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4',
+      <div ref={scrollRef} data-tour="inbox-thread" className={cn('flex-1 min-h-0 overflow-y-auto px-3 md:px-5 py-4',
         wa ? 'space-y-1.5 bg-[#efeae2] bg-[radial-gradient(rgba(0,0,0,0.035)_1px,transparent_1px)] [background-size:14px_14px]'
           : look === 'instagram' ? 'bg-white' : look === 'linkedin' ? 'bg-white md:px-6' : look === 'email' ? 'bg-gray-100/70 md:px-6' : 'space-y-3')}>
         {p.messagesError && <ErrorBox message={p.messagesError} />}

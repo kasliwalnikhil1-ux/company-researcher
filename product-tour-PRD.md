@@ -16,7 +16,7 @@
 | 4 | A local **simulator** moves campaigns forward: sends, accepts, replies, bounces. It works on fictional prospects and uses the app's own sequence and template logic |
 | 5 | Demo state lives in memory and in `sessionStorage`. **Reset demo** restores the starting data |
 | 6 | Four guards mean a demo action cannot reach production: the mode is fixed from the URL, the demo provider has no access to the Supabase client, lint rules block direct calls, and a runtime block refuses any request to production hosts |
-| 7 | A bar that is always visible: **"Demo"** · Restart tour · Reset demo · **Start your outreach** |
+| 7 | A bar that is always visible: **"Demo"** · Restart tour · **Start your outreach** (Reset demo was taken out of the bar 2026-10-03; the runtime reset remains) |
 | 8 | A short, skippable Driver.js walkthrough of the main workflow (`driver.js` is already in `package.json`) |
 | 9 | Staying in sync: typed contracts make the build fail when a feature is added without its demo side, plus a check script that opens every screen in demo mode |
 
@@ -61,11 +61,12 @@
 
 `/product-tour` opens the Dashboard in demo mode with a welcome card:
 
-> **Explore GrowthxAI with sample data**
-> Everything here is fictional. No messages are sent and nothing is saved to an account.
-> **[ Take the 1-minute tour ]** · Explore on my own
+> **Your AI SDR**
+> Talks to prospects on your behalf and books meetings for you.
+> *You are looking at sample data. Nothing here is sent.*
+> **[ See how it works (1 min) ]** · Explore on my own
 
-It works signed out and signed in. A signed-in visitor still gets the demo, never their own data, and the CTA reads *"Back to my workspace"*.
+It works signed out and signed in. A signed-in visitor still gets the demo, never their own data, and the CTA reads *"Back to my workspace"*, except for an account still waiting for its onboarding call (it would only see the booking page): there it reads *"Try GrowthxAI"* and opens the onboarding Calendly in a new tab (`components/outreach/demo/cta.ts`).
 
 ### 2.2 Demo bar (always visible, above the app shell)
 
@@ -85,18 +86,26 @@ It works signed out and signed in. A signed-in visitor still gets the demo, neve
 
 ### 2.3 Walkthrough (Driver.js)
 
-Eight steps across pages. The visitor can skip at any step, press Esc to skip, and go back.
+Eight steps across pages, written for a buyer: what each part gets them, in the order the work happens (people, accounts, outreach, replies, meetings). The Dashboard is not a step: it is the busiest screen and says nothing about outcomes. The visitor can skip at any step, press Esc to skip, and go back.
 
-| # | Page | Highlights | Text |
-|---|---|---|---|
-| 1 | Dashboard | The stats row | "This is a live workspace with sample data. Here's the whole flow in a minute." |
-| 2 | Senders | A connected sender card | "Connect LinkedIn, email, WhatsApp or Instagram accounts. Each one has its own safe daily limits." |
-| 3 | Leads | The table + Import button | "Bring in prospects from a CSV, a LinkedIn search or by hand." |
-| 4 | Sequence builder (sample sequence) | The step canvas | "Build the steps: visit, connect, message, follow up, branch on replies." |
-| 5 | Sequence builder | A message step with a variable | "Personalise every message with variables and AI lines." |
-| 6 | Sequence page | The Start / Enroll button | "Start it and leads move through on their own. In this demo the activity is simulated." |
-| 7 | Inbox | A conversation with a reply | "Replies from every channel land here. Answer them, or let AI draft." |
-| 8 | Reports | The funnel | "See what works: accepted, replied, interested, meetings." Then Back · **Keep exploring** (the demo bar keeps "Start your outreach") |
+| # | Page | Highlights | Title | Text |
+|---|---|---|---|---|
+| 1 | Import leads (the tour selects Search URL) | The Search URL source | Find the right people | "Pull prospects from a Sales Navigator search, people who liked or commented on a LinkedIn post, your target companies or a spreadsheet. Duplicates are removed for you." |
+| 2 | Senders | The channel chips | Connect your team's accounts | "Add each person's LinkedIn, email, WhatsApp and Instagram. Outreach goes out from their own accounts, within safe daily limits, so your LinkedIn stays protected." |
+| 3 | Sequence builder (sample sequence) | The step canvas | Reach them on every channel | "Set the steps once: view their profile, connect, message, then follow up by email or WhatsApp. It stops on its own when someone replies." |
+| 4 | Sequence builder | The top message step | Every message feels personal | "AI writes a line for each person from their profile and company, so no two messages read the same." |
+| 5 | Sequence builder | Publish, Pause / Activate, Archive | Press start, it runs every day | "Leads move through the steps on their own, every working day. You only step in when someone wants to talk." |
+| 6 | Inbox, the AI-booked thread (`DEMO_TOUR_AI_CHAT_ID`) | The messages | AI talks to your prospects | "When someone replies, AI answers their questions and sends your calendar link. Here it handled the whole conversation and the prospect booked a call." |
+| 7 | Same thread | The conversation list | Every reply in one place | "LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want." |
+| 8 | Reports | The funnel's Meeting booked row (popover above it) | See the meetings it books | "Track who accepted, replied, showed interest and booked a meeting, for every campaign." Then Back · **Finish** |
+
+**Finish card** (after step 8 only, not after a skip):
+
+> **Ready to build your first campaign?**
+> Import your prospects and set up your outreach.
+> **[ Start ]** (the onboarding Calendly in a new tab) · Keep exploring
+
+**The AI-booked thread** (seed/inbox.ts `seedAiBookedShowcase`): a LinkedIn sequence opener, two prospect questions each answered by AI Auto Replies (`ai_autopilot`, with sent runs so "Why the AI wrote this" opens), the calendar link, the prospect's booking, then the AI hands off and Maya confirms.
 
 - **Driver config:** one `driver()` instance with `allowClose: true`, `showProgress: true`, `overlayClickBehavior: 'close'`.
 - **Step definition:** each step is `{ route, element: '[data-tour="…"]', popover }`. A small controller navigates to `route`, waits up to 4 s for the element, then calls `drive(i)`. If the element never appears (for example on a narrow screen), the step shows as a centred popover.

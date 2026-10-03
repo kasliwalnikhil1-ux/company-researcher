@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useRouter } from 'next/navigation';
-import { CalendarCheck, ExternalLink, ShieldOff } from 'lucide-react';
+import { CalendarCheck, Compass, ExternalLink, LogOut, ShieldOff } from 'lucide-react';
 import { useAuth, MFA_CHALLENGE_PATH } from '@/contexts/AuthContext';
 import { useAccess } from '@/contexts/AccessContext';
-import { ONBOARDING_CALENDLY_URL, trackMySignup } from '@/lib/platform/leads';
+import { onboardingCalendlyUrl, trackMySignup } from '@/lib/platform/leads';
+import { DEMO_PREFIX } from '@/lib/outreach/mode';
 
 function Spinner() {
   return (
@@ -15,23 +16,31 @@ function Spinner() {
   );
 }
 
-/** Calendly URL with the person's details prefilled and the GDPR banner off (the app already has its own notice). */
-function calendlyUrl(email: string | null, name: string | null): string {
-  const u = new URL(ONBOARDING_CALENDLY_URL);
-  u.searchParams.set('hide_gdpr_banner', '1');
-  u.searchParams.set('utm_source', 'app');
-  u.searchParams.set('utm_medium', 'signup_gate');
-  if (email) u.searchParams.set('email', email);
-  if (name) u.searchParams.set('name', name);
-  return u.toString();
-}
-
-/** What Calendly's widget script would build: the same page framed inline, tagged with the embedding host. */
-function calendlyEmbedUrl(url: string): string {
+/**
+ * What Calendly's widget script would build: the same page framed inline, tagged with the embedding host.
+ * Compact (phones) drops Calendly's event-details panel (host photo, title, duration) so the calendar is the first thing seen.
+ */
+function calendlyEmbedUrl(url: string, compact: boolean): string {
   const u = new URL(url);
   u.searchParams.set('embed_domain', typeof window === 'undefined' ? '' : window.location.host);
   u.searchParams.set('embed_type', 'Inline');
+  if (compact) u.searchParams.set('hide_event_type_details', '1');
   return u.toString();
+}
+
+/** Below the lg breakpoint, where the embed switches to its full-width phone layout. */
+const PHONE_QUERY = '(max-width: 1023px)';
+
+function useIsPhone(): boolean {
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia(PHONE_QUERY).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(PHONE_QUERY);
+    const on = () => setPhone(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return phone;
 }
 
 /** Is a postMessage from the framed Calendly page? */
@@ -46,7 +55,7 @@ function fromCalendly(origin: unknown): boolean {
  * and falls back to a plain link if the frame never reports in.
  */
 function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: string | null; onBooked: (booking: { event: string | null; invitee: string | null }) => void }) {
-  const url = calendlyUrl(email, name);
+  const url = onboardingCalendlyUrl(email, name);
   const [booked, setBooked] = useState(false);
   const [failed, setFailed] = useState(false);
   // the framed page's own height (it posts calendly.page_height as it renders and grows), so nothing scrolls inside the frame
@@ -56,7 +65,8 @@ function CalendlyEmbed({ email, name, onBooked }: { email: string | null; name: 
   useEffect(() => { onBookedRef.current = onBooked; }, [onBooked]);
 
   // the frame src carries the page host; the gate only renders in the browser, after sign-in resolves
-  const embedSrc = useMemo(() => (typeof window === 'undefined' ? null : calendlyEmbedUrl(url)), [url]);
+  const phone = useIsPhone();
+  const embedSrc = useMemo(() => (typeof window === 'undefined' ? null : calendlyEmbedUrl(url, phone)), [url, phone]);
 
   useEffect(() => {
     heard.current = false;
@@ -161,9 +171,15 @@ function AccountGate({ status, email, name, onSignOut }: { status: 'pending' | '
             </p>
             {email && <p className="mt-2 text-xs text-gray-400">Signed in as {email}</p>}
           </div>
-          <button type="button" onClick={onSignOut} className="shrink-0 px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800">
-            Sign out
-          </button>
+          <div className="shrink-0 flex items-center gap-2">
+            {/* a plain link: the tour runs on its own in-browser data, so entering it is a full page load */}
+            <a href={DEMO_PREFIX} className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50" data-gate-product-tour>
+              <Compass className="w-4 h-4" /> Product tour
+            </a>
+            <button type="button" onClick={onSignOut} title="Sign out" aria-label="Sign out" className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100">
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <CalendlyEmbed email={email} name={name} onBooked={(booking) => { trackMySignup({ booked: true, booking }); }} />

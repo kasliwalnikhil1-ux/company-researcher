@@ -163,7 +163,7 @@ export function FunnelBars({ stages }: { stages: FunnelStage[] }) {
                 </span>
               </div>
             )}
-            <div className="grid grid-cols-[150px_1fr] gap-4 items-center">
+            <div className="grid grid-cols-[150px_1fr] gap-4 items-center" data-tour={`funnel-${s.stage}`}>
               <div className="text-sm font-medium text-gray-900">{FUNNEL_LABELS[s.stage]}</div>
               <div className="flex items-center gap-3 min-w-0">
                 <div className="flex-1 h-6 rounded-r bg-gray-50 min-w-0">

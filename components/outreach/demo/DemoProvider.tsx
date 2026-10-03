@@ -12,14 +12,16 @@ import { usePathname as useBrowserPathname } from 'next/navigation';
 import type { DemoRuntime } from '@/lib/outreach/backend/demo';
 import { loadDemoBackend } from '@/lib/outreach/backend';
 import { setDemoUi, type DemoDialog } from '@/lib/outreach/demoUi';
-import { DEMO_PREFIX, isDemoPath, leaveDemo } from '@/lib/outreach/mode';
+import { DEMO_PREFIX, isDemoPath } from '@/lib/outreach/mode';
 import { usePathname, useRouter } from '@/lib/outreach/nav';
 import { useAuth } from '@/contexts/AuthContext';
 import { PageLoader } from '@/components/outreach/ui';
 import DemoBar from './DemoBar';
+import DemoFinish from './DemoFinish';
 import DemoWelcome from './DemoWelcome';
 import DemoDialogs from './DemoDialogs';
 import { createTour, type TourController } from './tour';
+import { demoCta } from './cta';
 import type { SimMode } from '@/lib/outreach/backend/demo/sim/clock';
 
 interface DemoCtx {
@@ -31,7 +33,7 @@ interface DemoCtx {
   tour: TourController;
   tourRunning: boolean;
   reset(): void;
-  /** "Start your outreach" (or "Back to my workspace" for a signed-in visitor): a full page load into /outreach. */
+  /** "Start your outreach", "Back to my workspace", or "Try GrowthxAI" for an account awaiting its onboarding call (./cta.ts). */
   cta(): void;
   ctaLabel: string;
 }
@@ -54,6 +56,7 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
   // what the bar shows of the simulator, refreshed on every tick or mode change
   const [simView, setSimView] = useState<{ mode: SimMode; day: number }>({ mode: 'on', day: 0 });
   const [tourRunning, setTourRunning] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [pending, setPending] = useState<Pending | null>(null);
   const qc = useQueryClient();
@@ -135,8 +138,7 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
     return () => { off(); if (timer) clearTimeout(timer); };
   }, [runtime, qc]);
 
-  const signedIn = !!user;
-  const cta = useCallback(() => leaveDemo(signedIn ? '/outreach' : '/outreach?from=product-tour'), [signedIn]);
+  const { label: ctaLabel, go: cta } = useMemo(() => demoCta(user), [user]);
 
   // The refs are read only inside the controller's callbacks (navigation, clicks), never while rendering.
   // eslint-disable-next-line react-hooks/refs
@@ -144,6 +146,7 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
     const t: TourController = createTour({
       navigate: (p) => routerRef.current.push(p),
       currentPath: () => pathRef.current,
+      onFinish: () => setFinished(true),
       onChange: () => setTourRunning(t.running),
     });
     return t;
@@ -170,8 +173,8 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
     tourRunning,
     reset,
     cta,
-    ctaLabel: signedIn ? 'Back to my workspace' : 'Start your outreach',
-  }, [runtime, reset, cta, signedIn, simView, tour, tourRunning]);
+    ctaLabel,
+  }, [runtime, reset, cta, ctaLabel, simView, tour, tourRunning]);
 
   if (failed) {
     return <div className="p-8 text-sm text-red-700">The demo could not start: {failed}</div>;
@@ -189,6 +192,7 @@ export default function DemoProvider({ children }: { children: React.ReactNode }
       <DemoBar />
       {children}
       <DemoWelcome />
+      {finished && <DemoFinish onClose={() => setFinished(false)} />}
       <DemoDialogs pending={pending} onDone={(ok) => { pending?.resolve(ok); setPending(null); }} />
       <div className="fixed bottom-4 left-4 z-[70] flex flex-col gap-2 pointer-events-none" aria-live="polite">
         {toasts.map((t) => (
