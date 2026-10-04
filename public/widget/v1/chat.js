@@ -176,6 +176,8 @@
         ".cur{display:inline-block;width:7px;height:14px;background:var(--accent);margin-inline-start:1px;animation:gxbl 1s steps(2) infinite;vertical-align:-2px}@keyframes gxbl{50%{opacity:0}}" +
         ".src{margin-top:8px;font-size:12px}.src summary{cursor:pointer;color:var(--ink2)}.src a{display:block;color:var(--accent);margin:3px 0;text-decoration:none}" +
         ".fb{margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}.fb button{background:none;border:1px solid var(--line);border-radius:8px;cursor:pointer;padding:3px 9px;font:inherit;font-size:12px;color:var(--ink)}.fb button:hover{border-color:var(--accent)}.fb .ok{font-size:12px;color:#16a34a}" +
+        // older AI answers: the thumbs float over the bubble's bottom edge on hover, so nothing shifts
+        ".aifb.old{position:absolute;right:10px;bottom:-14px;margin:0;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:2px;box-shadow:0 2px 8px rgba(0,0,0,.08);opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s}.aifb.old button{border:0;padding:2px 7px}.aifb.old .ok{padding:2px 7px}.msg:hover .aifb.old,.msg:focus-within .aifb.old{opacity:1;visibility:visible}" +
         ".acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.acts button,.acts a{background:var(--card);color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px;text-decoration:none}.acts button:disabled{opacity:.5;cursor:default}" +
         ".cards{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;padding:6px 0 4px}.cardi{min-width:200px;max-width:220px;flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}.cardi img{width:100%;height:120px;object-fit:cover;display:block}.cardi .ct{padding:8px 10px}.cardi b{display:block;font-size:13px}.cardi small{color:var(--ink2);display:block;margin:2px 0 6px}" +
         // product cards: the same row, a square picture, two lines of name, price, View / Ask (/ Add to cart); arrows on desktop when there is more than one
@@ -576,6 +578,9 @@
       var ai = S.conv && (av.ai_mode !== "off") && !(S.conv.handed_off_at);
       // one line under the newest bubble only (who · AI Agent · when); a bubble still being written takes it over
       var lastId = null; if (!S.aiStream && !S.agentTyping) for (var li = S.msgs.length - 1; li >= 0; li--) { var lm = S.msgs[li]; if (lm.content_type !== "event" && !lm.deleted) { lastId = lm.id; break; } }
+      // 👍/👎 sit under the newest AI answer only; older answers show them on hover
+      var lastAi = null; for (var ai2 = S.msgs.length - 1; ai2 >= 0; ai2--) { var am = S.msgs[ai2]; if (!am.deleted && am.sender_type === "bot" && (am.content_attributes || {}).ai) { lastAi = am.id; break; } }
+      S.lastAi = lastAi;
       if (!S.msgs.length && !ai) html += '<div class="note">' + esc(availabilityText()) + "</div>";
       if (ai && S.msgs.length) html += '<div class="note">' + esc(T("ai_note")) + "</div>";
       S.msgs.forEach(function (m) {
@@ -709,7 +714,7 @@
     function aiExtras(m) {
       var a = m.content_attributes || {}, h = "";
       if ((S.eff.ai || {}).show_sources !== false && a.sources && a.sources.length) h += '<details class="src"><summary>' + esc(T("sources")) + "</summary>" + a.sources.map(function (s) { return s.url ? '<a href="' + esc(safeUrl(s.url)) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title || s.url) + "</a>" : ""; }).join("") + "</details>";
-      h += '<div class="fb">' + (a.feedback ? '<span class="ok">✓ ' + esc(T("thanks")) + "</span>" : '<button type="button" data-fb="1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("helpful")) + '">👍</button><button type="button" data-fb="-1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("nothelpful")) + '">👎</button>') + "</div>";
+      h += '<div class="fb aifb' + (m.id === S.lastAi ? "" : " old") + '">' + (a.feedback ? '<span class="ok">✓ ' + esc(T("thanks")) + "</span>" : '<button type="button" data-fb="1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("helpful")) + '">👍</button><button type="button" data-fb="-1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("nothelpful")) + '">👎</button>') + "</div>";
       return h;
     }
     function wireBubbles() {

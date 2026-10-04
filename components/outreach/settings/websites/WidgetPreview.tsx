@@ -29,8 +29,8 @@ function LangFlag({ l, className }: { l: VideoLanguage; className?: string }) {
  * questions and the control bar along the bottom (play / replay / sound / time, the language menu, Voice and the
  * Text button). In the expanded view a question that has its own clip can be clicked: its clip plays in place, the other
  * questions fade out and come back on hover, as on the site. Clicking it again goes back to the main clip.
- * `phone` draws the expanded view as the widget does on a phone: a card with the clip, the questions under it and
- * Voice / Text as two big buttons.
+ * `phone` draws the expanded view as the widget does on a phone: the same player across the screen (`maxWidth`), with
+ * smaller question chips.
  */
 export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, phone = false, scale = 1, maxWidth = 320, onToggle }: { v: VideoBubbleSettings; accent: string; voice?: boolean; expanded?: boolean; phone?: boolean; scale?: number; maxWidth?: number; onToggle?: () => void }) {
   const [ar, setAr] = useState(16 / 9);
@@ -46,9 +46,9 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, p
   const playing = (answer && pick(answer.clips)) || main, clip = mediaUrl(playing.url)!, clipKind = playing.kind;
   const ctl = mains.some((c) => c.kind !== 'image') || qs.some((q) => q.clips.some((c) => c.kind !== 'image'));
   const circle = v.shape !== 'rounded' && v.shape !== 'square', size = Math.round(clamp(v.size, 64, 240, 120) * scale), focus = `${clamp(v.focus_x, 0, 100, 50)}% ${clamp(v.focus_y, 0, 100, 50)}%`;
-  const card = phone && expanded, width = card ? maxWidth - 16 : expanded ? Math.min(clamp(v.expanded_width, 280, 720, 420), maxWidth) : size, narrow = width < 330;
+  const card = phone && expanded, width = card ? maxWidth : expanded ? Math.min(clamp(v.expanded_width, 280, 720, 420), maxWidth) : size, narrow = width < 330;
   const xo = expanded ? -10 : circle ? Math.round(size * 0.146) - 12 : -8;
-  const below = phone || v.questions_position === 'below', qbg = hex(v.question_bg, '#111827'), qc = hex(v.question_color, '#ffffff');
+  const below = v.questions_position === 'below', qbg = hex(v.question_bg, '#111827'), qc = hex(v.question_color, '#ffffff');
   const setRatio = (w: number, h: number) => { if (w && h) setAr(Math.max(0.5625, Math.min(1.7778, w / h))); };
   const media = { className: 'block w-full h-full', style: { objectFit: expanded ? 'cover' as const : v.fit, objectPosition: focus, transform: expanded ? undefined : `scale(${clamp(v.zoom, 100, 300, 100) / 100})`, transformOrigin: focus } };
   const questions = (
@@ -73,7 +73,7 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, p
       })}
     </div>
   );
-  // Voice and Text share the chat button's colours; "Chat with us" was the old default and shows as Text
+  // Voice looks like the player's own controls, Text takes the chat button's colours; "Chat with us" was the old default and shows as Text
   const pill = { background: hex(v.cta_bg, accent), color: hex(v.cta_color, '#ffffff') }, ctaText = /^\s*(chat with us|text)?\s*$/i.test(v.cta_text || '') ? 'Text' : v.cta_text;
   const bar = (
     <div className="flex flex-col gap-0.5 text-white">
@@ -92,7 +92,7 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, p
               <LangFlag l={now} className="w-5 h-5" /><ChevronUp className={cn('w-3 h-3 transition-transform', menu && 'rotate-180')} />
             </button>
             {menu && (
-              <span className={cn('absolute bottom-full mb-2 min-w-[150px] rounded-xl bg-gray-900/95 p-1.5 shadow-xl z-10 flex flex-col', card ? 'right-0' : 'left-1/2 -translate-x-1/2')}>
+              <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 min-w-[150px] rounded-xl bg-gray-900/95 p-1.5 shadow-xl z-10 flex flex-col">
                 {langs.map((l) => (
                   <button key={l.code} type="button" onClick={(e) => { e.stopPropagation(); setLang(l.code); setMenu(false); }} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] hover:bg-white/10">
                     <LangFlag l={l} className="w-5 h-5" /><span className="flex-1 truncate">{l.label}</span>{l.code === code && <Check className="w-3.5 h-3.5" />}
@@ -102,13 +102,13 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, p
             )}
           </span>
         )}
-        {!card && voice && <span className="h-[30px] flex items-center gap-1 rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap" style={pill}><Mic className="w-3.5 h-3.5" />Voice</span>}
-        {!card && <span className="h-[30px] flex items-center gap-1 rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap" style={pill}><MessageSquare className="w-3.5 h-3.5" />{ctaText}</span>}
+        {voice && <span className="h-[30px] flex items-center gap-1 rounded-full bg-white/15 px-2.5 text-[11.5px] font-semibold text-white whitespace-nowrap"><Mic className="w-3.5 h-3.5" />Voice</span>}
+        <span className="h-[30px] flex items-center gap-1 rounded-full px-2.5 text-[11.5px] font-semibold whitespace-nowrap" style={pill}><MessageSquare className="w-3.5 h-3.5" />{ctaText}</span>
       </div>
     </div>
   );
   return (
-    <div className={cn('relative flex flex-col gap-2', card ? 'items-stretch p-2 rounded-[22px] bg-white shadow-xl' : 'items-end')} style={card ? { width: maxWidth } : undefined}>
+    <div className="relative flex flex-col items-end gap-2">
       <div role={onToggle ? 'button' : undefined} onClick={onToggle} className={cn('relative overflow-hidden bg-gray-900 shadow-lg transition-all', onToggle && !expanded && 'cursor-pointer')}
         style={{ width, aspectRatio: expanded ? (v.expanded_ratio && v.expanded_ratio !== 'auto' ? ratioCss(v.expanded_ratio, '16 / 9') : String(ar)) : circle ? '1 / 1' : ratioCss(v.ratio, '1 / 1'), overflow: menu ? 'visible' : undefined,
           borderRadius: expanded ? 16 : circle ? '50%' : v.shape === 'square' ? 10 : Math.round(size * 0.22), border: expanded ? undefined : `${clamp(v.border_width, 0, 8, 3)}px solid ${hex(v.border_color, '#ffffff')}` }}>
@@ -123,13 +123,7 @@ export function VideoBubbleFrame({ v, accent, voice = false, expanded = false, p
         )}
       </div>
       {expanded && below && questions}
-      {card && (
-        <div className="flex gap-2">
-          {voice && <span className="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-xl text-[13px] font-semibold" style={pill}><Mic className="w-4 h-4" />Voice</span>}
-          <span className="flex-1 h-10 flex items-center justify-center gap-1.5 rounded-xl text-[13px] font-semibold" style={pill}><MessageSquare className="w-4 h-4" />{ctaText}</span>
-        </div>
-      )}
-      <span className={cn('absolute rounded-full text-white flex items-center justify-center shadow', card ? 'w-7 h-7 bg-black/55' : expanded ? 'w-7 h-7 bg-gray-800' : 'w-6 h-6 bg-gray-800')} style={card ? { top: 16, right: 16 } : { top: xo, right: xo }}><X className="w-3 h-3" /></span>
+      <span className={cn('absolute rounded-full text-white flex items-center justify-center shadow', card ? 'w-7 h-7 bg-black/55' : expanded ? 'w-7 h-7 bg-gray-800' : 'w-6 h-6 bg-gray-800')} style={card ? { top: 8, right: 8 } : { top: xo, right: xo }}><X className="w-3 h-3" /></span>
     </div>
   );
 }

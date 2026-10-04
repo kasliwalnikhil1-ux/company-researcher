@@ -5,8 +5,8 @@
  * bottom of the expanded clip, like a video player: the progress line, then play / pause, replay, sound and the time on
  * the left, and on the right the language menu (when the clips come in more than one language), "Voice chat" (when the
  * website's voice assistant is on and the page allows the microphone) and "Text" (launcher.video.cta_text, when set),
- * which opens the panel. On a phone (640px or narrower) the expanded view is a card across the bottom of the screen
- * instead: the clip with its control bar, the questions one per row under it, then Voice and Text as two big buttons.
+ * which opens the panel. On a phone (640px or narrower) the expanded view is the same player, across the width of the
+ * screen, with smaller question chips.
  * A question is a text or {text, text_variants, video_url, video_kind, video_variants, link_url, link_text}:
  *   - with its own clip: the clip plays in place of the main one; while it plays the other questions fade out so the
  *     clip can be seen (hovering the questions, pausing or the end of the clip brings them back), and its page link
@@ -120,19 +120,17 @@
         ".vbg{position:relative;flex:0 0 auto}.vbln{gap:4px;padding:0 6px 0 4px}.vbln img,.vbln>span:first-child{width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#374151;font-size:9px;font-weight:700;overflow:hidden}.vbln svg{width:12px;height:12px;transition:transform .15s}.vbln[aria-expanded=true] svg{transform:rotate(180deg)}" +
         ".vbm2{position:absolute;bottom:calc(100% + 8px);left:50%;transform:translateX(-50%);width:max-content;min-width:150px;max-width:240px;max-height:220px;overflow:auto;margin:0;padding:6px;list-style:none;border-radius:12px;background:rgba(17,24,39,.96);box-shadow:0 10px 30px rgba(0,0,0,.35);display:none;z-index:3}.vbm2.on{display:block}" +
         ".vbm2 button{width:100%;display:flex;align-items:center;gap:9px;padding:7px 8px;border:0;border-radius:8px;background:transparent;color:#fff;font:inherit;font-size:13px;text-align:start;cursor:pointer}.vbm2 button:hover,.vbm2 button:focus-visible{background:rgba(255,255,255,.12);outline:none}.vbm2 img,.vbm2 button>span:first-child{width:20px;height:20px;flex:0 0 auto;border-radius:50%;background:#374151;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;overflow:hidden}.vbm2 em{flex:1;font-style:normal}.vbm2 svg{width:14px;height:14px;visibility:hidden}.vbm2 [aria-checked=true] svg{visibility:visible}" +
-        // Voice / Text: two small pills at the right end of the bar, both in the chat button's colours
+        // Voice / Text: two small pills at the right end of the bar; Voice in the player's own look (like play / sound), Text in the chat button's colours
         ".vbct{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border:0;border-radius:999px;font:inherit;font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}.vbct:hover{background:rgba(255,255,255,.28)}.vbct svg{width:14px;height:14px;flex:0 0 auto}.vbct span{min-width:0;overflow:hidden;text-overflow:ellipsis}.vbct.cta,.vbct.cta:hover{background:" + cbg + ";color:" + cc + "}.vbct.cta:hover{filter:brightness(1.08)}" +
         // a narrow clip: the time goes first, then replay; the two pills tighten but keep their words ("Voice" / "Text" are short)
         "@container (max-width:480px){.vbtm{display:none}}@container (max-width:390px){.vbr [data-v=replay]{display:none}}@container (max-width:330px){.vbct{padding:0 8px;gap:4px;font-size:11.5px}.vbr{gap:2px}}@container (max-width:250px){.vbct span{display:none}}" +
-        // Phones (.m, see build): the expanded view is a card across the bottom of the screen. The clip on top (the
-        // control bar over it), the questions one per row under it, then Voice and Text as two big buttons.
-        ".vbac{display:none;gap:8px}.vb.open .vbac{display:flex}.vbac .vbct{flex:1 1 0;justify-content:center;height:48px;padding:0 14px;border-radius:14px;font-size:15px;-webkit-backdrop-filter:none;backdrop-filter:none}.vbac .vbct svg{width:18px;height:18px}.vbac .vbct:focus-visible{outline:2px solid " + accent + ";outline-offset:2px}" +
-        ".vb.m.open{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));max-height:calc(100dvh - 20px);box-sizing:border-box;align-items:stretch;padding:8px;border-radius:22px;background:#fff;box-shadow:0 12px 40px rgba(0,0,0,.3)}" +
-        ".vb.m.open .vbf{width:100%;flex:0 1 auto;max-height:56dvh;border-radius:16px}" +
-        ".vb.m.open .vbx{top:16px;right:16px;width:32px;height:32px;background:rgba(0,0,0,.55)}" +
-        ".vb.m .vbq.below{width:auto;flex:0 1 auto;min-height:0;overflow:auto;gap:6px}.vb.m .vbq button{padding:4px 9px;gap:5px;font-size:11px;background:" + qbg + ";box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none}.vb.m .vbq b{width:14px;height:14px;font-size:8px}" +
-        ".vb.m .vbl a{background:#f3f4f6;box-shadow:none;padding:5px 10px;font-size:11.5px}" +
-        ".vb.m .vbk button,.vb.m .vbln{height:40px;min-width:40px}.vb.m .vbtm{display:block}.vb.m .vbr [data-v=replay]{display:inline-flex}";
+        // Phones (.m, see build): the same player as on a large screen, questions and Voice / Text inside it, but
+        // across the width of the screen (whatever expanded width the website set), with smaller chips.
+        ".vb.m.open{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));align-items:stretch}" +
+        ".vb.m.open .vbf{width:100%;max-height:calc(100dvh - 20px)}.vb.m .vbq.below{width:auto}" +
+        ".vb.m.open .vbx{top:8px;right:8px;background:rgba(0,0,0,.55)}" +
+        ".vb.m .vbq button{padding:4px 9px;gap:5px;font-size:11px}.vb.m .vbq b{width:14px;height:14px;font-size:8px}.vb.m .vbl a{padding:5px 10px;font-size:11.5px}" +
+        ".vb.m .vbk button,.vb.m .vbln{height:36px;min-width:36px}";
     }
 
     // ---- expand / collapse -----------------------------------------------------------------------------------------
@@ -161,14 +159,14 @@
     function build(v, key) {
       var langs = languages(v.languages), code = want(langs), mains = clips(v.url, v.kind, v.variants, langs), mc = pick(mains, code);
       var isImg = mc.image, u = esc(url(mc.url)), now = langs.filter(function (l) { return l.code === code; })[0] || null;
-      // on a phone the questions always sit under the clip, and Voice / Text get their own row under them
-      var mob = L.isMobile(), qs = (Array.isArray(v.questions) ? v.questions : []).map(function (x) { return question(x, langs, code); }).filter(Boolean).slice(0, 6), below = mob || v.questions_position === "below";
+      // on a phone the player spans the screen (class "m"); everything else is laid out as on a large screen
+      var mob = L.isMobile(), qs = (Array.isArray(v.questions) ? v.questions : []).map(function (x) { return question(x, langs, code); }).filter(Boolean).slice(0, 6), below = v.questions_position === "below";
       // the button that opens the chat says "Text" (in the page's language) unless the website set its own words;
       // "Chat with us" was the default before, so it counts as unset
       var label = DEF_CTA.test(v.cta_text || "") ? L.i18n("text") || "Text" : String(v.cta_text).trim();
       var ctl = !isImg || qs.some(function (x) { return x.clips.some(function (c) { return !c.image; }); });   // play / progress / sound: whenever some clip here is a video
       var voice = L.voice ? L.voice() : null;
-      var acts = (voice ? '<button type="button" class="vbct cta" data-v="voice">' + MIC + "<span>" + esc(voice.label || L.i18n("voice_chat") || "Voice") + "</span></button>" : "") +
+      var acts = (voice ? '<button type="button" class="vbct" data-v="voice">' + MIC + "<span>" + esc(voice.label || L.i18n("voice_chat") || "Voice") + "</span></button>" : "") +
         '<button type="button" class="vbct cta" data-v="chat">' + L.ICON + "<span>" + esc(label) + "</span></button>";
       var q = '<div class="vbq ' + (below ? "below" : "over") + (qs.length === 1 ? " one" : "") + '"><div class="vbl"><a target="_blank" rel="noopener noreferrer">' + EXT + "<span></span></a></div>" +
         qs.map(function (t, i) { return '<button type="button" data-q="' + i + '"' + (t.clips.length ? ' aria-pressed="false"' : "") + "><b>" + String.fromCharCode(65 + i) + "</b><span>" + esc(t.text) + "</span></button>"; }).join("") + "</div>";
@@ -177,12 +175,11 @@
         '<span class="sp"></span>' +
         (langs.length > 1 && now ? '<div class="vbg"><button type="button" class="vbln" aria-haspopup="true" aria-expanded="false" aria-label="' + esc((L.i18n("lang") || "Video language") + ": " + now.label) + '" title="' + esc(now.label) + '">' + flagImg(now) + CHEV + "</button>" +
           '<ul class="vbm2" role="menu">' + langs.map(function (l) { return '<li role="none"><button type="button" role="menuitemradio" data-l="' + esc(l.code) + '" aria-checked="' + (l.code === code) + '">' + flagImg(l) + "<em>" + esc(l.label) + "</em>" + TICK + "</button></li>"; }).join("") + "</ul></div>" : "") +
-        (mob ? "" : acts) + "</div></div>";
+        acts + "</div></div>";
       var el = doc.createElement("div"); el.className = "vb" + (mob ? " m" : "");
       el.innerHTML = '<div class="vbf" role="button" tabindex="0" aria-expanded="false" aria-label="' + esc(L.i18n("chat")) + '">' +
         (isImg ? '<img class="vbm" alt="" src="' + u + '">' : '<video class="vbm" src="' + u + '" muted loop playsinline preload="metadata"></video>') +
         '<div class="vbo">' + (ctl ? '<span class="vbpl">' + PLAY + "</span>" : "") + '<div class="vbb">' + (below ? "" : q) + bar + "</div></div></div>" + (below ? q : "") +
-        (mob ? '<div class="vbac">' + acts + "</div>" : "") +
         '<button class="vbx" type="button" aria-label="' + esc(L.i18n("close")) + '">' + L.CLOSE + "</button>";
       var o = { el: el, key: key, v: v, frame: el.querySelector(".vbf"), vid: isImg ? null : el.querySelector("video"), ans: null, av: null, sel: -1, lang: null }, media = el.querySelector(".vbm"), bar_ = el.querySelector(".vbp i");
       var qbox = el.querySelector(".vbq"), bb = el.querySelector(".vbb"), qb = Array.prototype.slice.call(el.querySelectorAll(".vbq button[data-q]")), lw = el.querySelector(".vbl"), la = lw.firstChild, tm = el.querySelector(".vbtm");

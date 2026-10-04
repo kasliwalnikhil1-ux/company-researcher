@@ -450,7 +450,7 @@ export default function VideoBubbleSection(p: SectionProps) {
             <div className="flex gap-1">{(['bubble', 'expanded'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2 py-0.5 rounded', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{v}</button>)}</div>
           </div>
         </div>
-        {/* phone: a 320 px screen, where the expanded view is the card across the bottom the widget uses on phones */}
+        {/* phone: a 320 px screen, where the expanded player spans the screen as the widget does on phones */}
         <div className={cn('relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]', phone && 'w-[320px] mx-auto border-x border-gray-200')}>
           {hasClip && draft.enabled
             ? <div className={cn('absolute', phone && view === 'expanded' ? 'bottom-2.5 left-2.5' : phone ? 'bottom-4 right-4' : 'bottom-5 right-5')}><VideoBubbleFrame v={packed} accent={HEX6.test(accent) ? accent : '#4f46e5'} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} phone={phone} scale={phone ? 0.75 : 1} maxWidth={phone ? 300 : 318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
