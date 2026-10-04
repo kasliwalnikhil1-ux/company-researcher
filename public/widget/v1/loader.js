@@ -39,7 +39,7 @@
   var src = (script && script.src) || "";
   var API = (ds.api || settings.api || "").replace(/\/+$/, "");
   // content hashes (scripts/outreach-widget-version.mjs): cached for a year, a new file is a new address
-  var VER = {"chat.js":"da1eef057a","video.js":"cd0ce84f15","ask.js":"8908fae517","voice.js":"91f0d285d4"};   // widget-version
+  var VER = {"chat.js":"10992165ce","video.js":"01af5ffce1","ask.js":"8908fae517","voice.js":"f9aa8e33ea"};   // widget-version
   function asset(f) { var m = /loader\.js(\?[^#]*)?$/.exec(src), q = m && m[1] ? m[1] + "&" : "?"; return src.replace(/loader\.js(\?.*)?$/, f) + q + "v=" + (VER[f] || "0"); }
   var CHAT_URL = asset("chat.js"), VIDEO_URL = asset("video.js"), ASK_URL = asset("ask.js"), VOICE_URL = asset("voice.js");
   if (!API) { try { console.warn("[growthxai] data-api missing on the widget script tag"); } catch (e) {} return; }

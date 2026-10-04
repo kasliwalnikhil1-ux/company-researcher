@@ -11,8 +11,6 @@
  * A call never blocks the chat: every failure ends with the visitor in the text thread of the same conversation.
  */
 import { Conversation } from "@elevenlabs/client";
-    // the End button's own word is short ("End"); a label the website wrote for it is used as it is
-    function endShort() { var own = (vui().labels || {}).end; return own && L("end") === own ? own : (STR[S.locale] && STR[S.locale].end_s) || STR.en.end_s; }
 
 (function () {
   "use strict";
@@ -86,6 +84,8 @@ import { Conversation } from "@elevenlabs/client";
     function vcfg() { return (S.eff && S.eff.voice) || {}; }
     function vui() { return vcfg().ui || {}; }
     function L(k) { var own = (vui().labels || {})[k === "sw" ? "switch" : k]; if (own && S.locale === ((S.eff.locale || {}).default || "en").slice(0, 2)) return own; return (STR[S.locale] && STR[S.locale][k]) || STR.en[k] || k; }
+    // the End button's own word is short ("End"); a label the website wrote for it is used as it is
+    function endShort() { var own = (vui().labels || {}).end; return own && L("end") === own ? own : (STR[S.locale] && STR[S.locale].end_s) || STR.en.end_s; }
     function color(c, f) { return d.safeColor(c, f); }
 
     function css() {
