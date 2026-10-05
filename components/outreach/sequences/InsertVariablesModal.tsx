@@ -6,7 +6,7 @@ import Link from '@/lib/outreach/nav';
 import { Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { hubHref } from '@/lib/outreach/aiHub';
-import { EXAMPLE_LEAD, matchesSearch, VARIABLE_CATALOG, VARIABLE_TABS, visibleRows, workspaceRows, type CatalogVariable, type PopupAiVariable, type VariableTab } from '@/lib/outreach/variables';
+import { matchesSearch, VARIABLE_CATALOG, VARIABLE_TABS, visibleRows, workspaceRows, type CatalogVariable, type PopupAiVariable, type VariableTab } from '@/lib/outreach/variables';
 
 const TAB_KEY = 'outreach.insert-variables.tab';
 const isTab = (v: unknown): v is VariableTab => VARIABLE_TABS.some((t) => t.id === v);
@@ -144,12 +144,12 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
           })}
         </div>
 
-        <div className={cn('grid shrink-0 gap-x-4 border-b border-gray-100 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500', cols)}>
-          <span>Variable Name</span>
-          {showExample && <span title={`What ${EXAMPLE_LEAD}, a made-up lead, would get`}>Example<span className="font-normal normal-case tracking-normal text-gray-400"> · {EXAMPLE_LEAD}</span></span>}
-        </div>
-
-        <div id={listId} role="listbox" aria-label={`${tabMeta.label} variables`} className="min-h-[160px] flex-1 overflow-y-auto px-2 py-1">
+        <div id={listId} role="listbox" aria-label={`${tabMeta.label} variables`} className="min-h-[160px] flex-1 overflow-y-auto px-2 pb-1">
+          {/* inside the scrolling list, so the scrollbar narrows it exactly like the rows and the columns line up */}
+          <div role="presentation" className={cn('sticky top-0 z-10 -mx-2 mb-1 grid gap-x-4 border-b border-gray-100 bg-white px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500', cols)}>
+            <span>Variable Name</span>
+            {showExample && <span>Example</span>}
+          </div>
           {totalMatches === 0 && searching ? (
             <p className="px-3 py-8 text-center text-sm text-gray-500">No variables match</p>
           ) : (

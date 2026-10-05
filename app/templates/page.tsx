@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import MainLayout from '@/components/MainLayout';
 import { useMessageTemplates, MessageTemplate, TemplateChannel, CHANNEL_LABELS, PreviewCompany } from '@/contexts/MessageTemplatesContext';
@@ -30,12 +31,70 @@ const PREVIEW_SAMPLE_CONTACT = { first_name: 'Alex', last_name: 'Morgan', full_n
 
 type TemplateTab = 'all' | TemplateChannel;
 
+// The sequence studio is large and browser-only (localStorage, layout measurement), so it loads
+// on demand.
+const SequenceStudio = dynamic(() => import('@/components/sequence-studio/SequenceStudio'), {
+  ssr: false,
+  loading: () => <div className="flex flex-1 items-center justify-center text-sm text-gray-500">Loading the sequence studio…</div>,
+});
+
+type TemplatesView = 'studio' | 'messages';
+const VIEW_STORAGE_KEY = 'templates.view';
+
 export default function TemplatesPage() {
+  const [view, setView] = useState<TemplatesView>('studio');
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(VIEW_STORAGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is only readable after mount
+      if (stored === 'messages' || stored === 'studio') setView(stored);
+    } catch {
+      // Ignore storage access errors (private mode, etc.)
+    }
+  }, []);
+  const choose = (v: TemplatesView) => {
+    setView(v);
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, v);
+    } catch {
+      // Ignore storage access errors
+    }
+  };
   return (
     <ProtectedRoute>
       <MainLayout>
-        <div className="flex-1 overflow-auto">
-          <TemplatesContent />
+        <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col md:h-[100dvh]">
+          <div className="flex flex-none items-end gap-2 border-b border-gray-200 bg-white px-4 pt-1">
+          <div className="flex items-end gap-1" role="tablist" aria-label="Templates">
+            {(
+              [
+                ['studio', 'Sequence studio'],
+                ['messages', 'Message templates'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={view === id}
+                onClick={() => choose(id)}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${view === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {/* The sequence studio renders its save state, undo and import/export here. */}
+          <div ref={setToolbarSlot} className="ml-auto flex items-center self-center" />
+          </div>
+          {view === 'studio' ? (
+            <SequenceStudio toolbarSlot={toolbarSlot} />
+          ) : (
+            <div className="flex-1 overflow-auto">
+              <TemplatesContent />
+            </div>
+          )}
         </div>
       </MainLayout>
     </ProtectedRoute>

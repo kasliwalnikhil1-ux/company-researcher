@@ -90,8 +90,9 @@
       var xo = circle ? Math.round(sz * .146) - 12 : -8, W = num(v.expanded_width, 280, 720, 420), ms = l.margin_side != null ? l.margin_side : 24, mb = l.margin_bottom != null ? l.margin_bottom : 24;
       var qbg = safeColor(v.question_bg, "#111827"), qc = safeColor(v.question_color, "#ffffff"), over = v.questions_position !== "below";
       var ww = "min(" + W + "px,calc(100vw - " + (ms * 2) + "px))", ear = v.expanded_ratio && v.expanded_ratio !== "auto" ? ratio(v.expanded_ratio, "16/9") : "var(--ar,16/9)";
-      // large screens: the expanded view grows past the website's width (x1.3 from 1280px, x1.5 from 1600px, at most
-      // 960px); the growth stops where the clip would be taller than the screen, so a tall clip is not cropped more than before
+      // large screens: the expanded view grows past the website's width (x1.35 from 1200px wide, x1.6 from 1500px, at most
+      // 960px). Width alone decides (laptop windows are often under 760px tall); the growth stops where the clip would be
+      // taller than the screen, so a tall clip is not cropped more than before
       function big(f) { return ".vb.open .vbf,.vbq.below{width:min(max(" + W + "px,min(" + Math.max(W, Math.min(960, Math.round(W * f))) + "px,calc((100dvh - " + (mb + 32) + "px) * " + ear + "))),calc(100vw - " + (ms * 2) + "px))}"; }
       return ".vb{pointer-events:auto;position:relative;display:flex;flex-direction:column;align-items:" + (side === "left" ? "flex-start" : "flex-end") + ";gap:8px;animation:gxin .25s ease both}.vb.re{animation:none}" +
         ".vbf{position:relative;box-sizing:border-box;width:" + sz + "px;aspect-ratio:" + (circle ? "1/1" : ratio(v.ratio, "1/1")) + ";border-radius:" + (circle ? "50%" : v.shape === "square" ? "10px" : Math.round(sz * .22) + "px") + ";overflow:hidden;cursor:pointer;background:#111827;border:" + bw + "px solid " + safeColor(v.border_color, "#ffffff") + ";box-shadow:0 8px 24px rgba(0,0,0,.22);transition:width .28s cubic-bezier(.3,1.2,.5,1),border-radius .28s,transform .18s;outline-offset:3px}" +
@@ -128,7 +129,7 @@
         ".vbct{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border:0;border-radius:999px;font:inherit;font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}.vbct:hover{background:rgba(255,255,255,.28)}.vbct svg{width:14px;height:14px;flex:0 0 auto}.vbct span{min-width:0;overflow:hidden;text-overflow:ellipsis}" +
         // a narrow clip: the time goes first, then replay; the two pills tighten but keep their words ("Voice" / "Text" are short)
         "@container (max-width:480px){.vbtm{display:none}}@container (max-width:390px){.vbr [data-v=replay]{display:none}}@container (max-width:330px){.vbct{padding:0 8px;gap:4px;font-size:11.5px}.vbr{gap:2px}}@container (max-width:250px){.vbct span{display:none}}" +
-        "@media (min-width:1280px) and (min-height:760px){" + big(1.3) + "}@media (min-width:1600px) and (min-height:900px){" + big(1.5) + "}" +
+        "@media (min-width:1200px){" + big(1.35) + "}@media (min-width:1500px){" + big(1.6) + "}" +
         // Phones (.m, see build): the same player as on a large screen, questions and Voice / Text inside it, but
         // across the width of the screen (whatever expanded width the website set), with smaller chips.
         ".vb.m.open{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));align-items:stretch}" +
