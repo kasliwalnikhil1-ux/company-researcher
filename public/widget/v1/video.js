@@ -89,21 +89,24 @@
       var circle = v.shape !== "rounded" && v.shape !== "square", bw = num(v.border_width, 0, 8, 3), fx = num(v.focus_x, 0, 100, 50) + "% " + num(v.focus_y, 0, 100, 50) + "%";
       var xo = circle ? Math.round(sz * .146) - 12 : -8, W = num(v.expanded_width, 280, 720, 420), ms = l.margin_side != null ? l.margin_side : 24, mb = l.margin_bottom != null ? l.margin_bottom : 24;
       var qbg = safeColor(v.question_bg, "#111827"), qc = safeColor(v.question_color, "#ffffff"), over = v.questions_position !== "below";
-      var ww = "min(" + W + "px,calc(100vw - " + (ms * 2) + "px))";
+      var ww = "min(" + W + "px,calc(100vw - " + (ms * 2) + "px))", ear = v.expanded_ratio && v.expanded_ratio !== "auto" ? ratio(v.expanded_ratio, "16/9") : "var(--ar,16/9)";
+      // large screens: the expanded view grows past the website's width (x1.3 from 1280px, x1.5 from 1600px, at most
+      // 960px); the growth stops where the clip would be taller than the screen, so a tall clip is not cropped more than before
+      function big(f) { return ".vb.open .vbf,.vbq.below{width:min(max(" + W + "px,min(" + Math.max(W, Math.min(960, Math.round(W * f))) + "px,calc((100dvh - " + (mb + 32) + "px) * " + ear + "))),calc(100vw - " + (ms * 2) + "px))}"; }
       return ".vb{pointer-events:auto;position:relative;display:flex;flex-direction:column;align-items:" + (side === "left" ? "flex-start" : "flex-end") + ";gap:8px;animation:gxin .25s ease both}.vb.re{animation:none}" +
         ".vbf{position:relative;box-sizing:border-box;width:" + sz + "px;aspect-ratio:" + (circle ? "1/1" : ratio(v.ratio, "1/1")) + ";border-radius:" + (circle ? "50%" : v.shape === "square" ? "10px" : Math.round(sz * .22) + "px") + ";overflow:hidden;cursor:pointer;background:#111827;border:" + bw + "px solid " + safeColor(v.border_color, "#ffffff") + ";box-shadow:0 8px 24px rgba(0,0,0,.22);transition:width .28s cubic-bezier(.3,1.2,.5,1),border-radius .28s,transform .18s;outline-offset:3px}" +
         ".vb:not(.open) .vbf:hover{transform:scale(1.04)}.vbf:focus-visible{outline:2px solid " + accent + "}" +
         // the clip is never stretched: it covers (or fits inside) the bubble, anchored on the focus point, optionally zoomed
         ".vbm{display:block;width:100%;height:100%;object-fit:" + (v.fit === "contain" ? "contain" : "cover") + ";object-position:" + fx + ";transform:scale(" + (num(v.zoom, 100, 300, 100) / 100) + ");transform-origin:" + fx + "}" +
-        ".vb.open .vbf{width:" + ww + ";container-type:inline-size;aspect-ratio:" + (v.expanded_ratio && v.expanded_ratio !== "auto" ? ratio(v.expanded_ratio, "16/9") : "var(--ar,16/9)") + ";max-height:calc(100dvh - " + (mb + 32) + "px);min-height:var(--mh,0px);border-radius:16px;border-width:0;cursor:default}.vb.open .vbm{transform:none;object-fit:cover}" +
+        ".vb.open .vbf{width:" + ww + ";container-type:inline-size;aspect-ratio:" + ear + ";max-height:calc(100dvh - " + (mb + 32) + "px);min-height:var(--mh,0px);border-radius:16px;border-width:0;cursor:default}.vb.open .vbm{transform:none;object-fit:cover}" +
         ".vbx{position:absolute;top:" + xo + "px;right:" + xo + "px;width:24px;height:24px;padding:0;border-radius:50%;border:0;background:#1f2937;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.3);z-index:2}.vbx:hover{background:#000}.vbx svg{width:11px;height:11px}.vb.open .vbx{top:-10px;right:-10px;width:30px;height:30px}.vb.open .vbx svg{width:13px;height:13px}" +
         ".vb .badge{top:" + xo + "px;left:" + xo + "px;right:auto;z-index:2}.vb.open .badge{display:none}" +
         ".vbo{position:absolute;inset:0;display:none;flex-direction:column;justify-content:flex-end;pointer-events:none}.vb.open .vbo{display:flex}" +
         ".vbpl{position:absolute;top:50%;left:50%;width:56px;height:56px;margin:-28px 0 0 -28px;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;display:none;align-items:center;justify-content:center}.vbpl svg{width:28px;height:28px;margin-left:3px}.vb.open.paused .vbpl{display:flex}" +
         // the bottom block: questions (when they sit over the clip) and the control bar, on a dark fade. The questions are
-        // a two-column grid, never a stack: 2 = one row of two, 4 = 2 x 2, 3 = two then one; a single one takes the row.
+        // a grid, never a stack: 2 = one row of two, 3 = one row of three, 4 = 2 x 2; a single one takes the row.
         ".vbb{display:flex;flex-direction:column;gap:8px;padding:30px 10px 6px;background:linear-gradient(transparent,rgba(0,0,0,.66));pointer-events:auto;transition:background .3s}.vbb.playing{background:linear-gradient(transparent,rgba(0,0,0,.42))}" +
-        ".vbq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;pointer-events:auto}.vbq.one{grid-template-columns:minmax(0,1fr)}.vbq.below{display:none;width:" + ww + "}.vb.open .vbq.below{display:grid}" +
+        ".vbq{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;pointer-events:auto}.vbq.one{grid-template-columns:minmax(0,1fr)}.vbq.three{grid-template-columns:repeat(3,minmax(0,1fr))}.vbq.below{display:none;width:" + ww + "}.vb.open .vbq.below{display:grid}" +
         ".vbq button{min-width:0;display:flex;align-items:center;gap:6px;border:0;border-radius:999px;padding:5px 10px;font:inherit;font-weight:600;font-size:12px;line-height:1.25;cursor:pointer;text-align:start;background:" + (over ? rgba(qbg, .78) : qbg) + ";color:" + qc + ";box-shadow:0 2px 8px rgba(0,0,0,.18);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);transition:transform .15s,opacity .25s}.vbq button:hover{transform:translateY(-1px);background:" + qbg + "}.vbq button:focus-visible{outline:2px solid #fff;outline-offset:1px}" +
         // while a question's clip plays, the others fade almost out of sight so the clip can be seen; hovering the
         // questions, a pause or the end of the clip brings them back. The question that is playing stays dim.
@@ -125,6 +128,7 @@
         ".vbct{flex:0 1 auto;min-width:0;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 11px;border:0;border-radius:999px;font:inherit;font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer;background:rgba(255,255,255,.16);color:#fff;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}.vbct:hover{background:rgba(255,255,255,.28)}.vbct svg{width:14px;height:14px;flex:0 0 auto}.vbct span{min-width:0;overflow:hidden;text-overflow:ellipsis}" +
         // a narrow clip: the time goes first, then replay; the two pills tighten but keep their words ("Voice" / "Text" are short)
         "@container (max-width:480px){.vbtm{display:none}}@container (max-width:390px){.vbr [data-v=replay]{display:none}}@container (max-width:330px){.vbct{padding:0 8px;gap:4px;font-size:11.5px}.vbr{gap:2px}}@container (max-width:250px){.vbct span{display:none}}" +
+        "@media (min-width:1280px) and (min-height:760px){" + big(1.3) + "}@media (min-width:1600px) and (min-height:900px){" + big(1.5) + "}" +
         // Phones (.m, see build): the same player as on a large screen, questions and Voice / Text inside it, but
         // across the width of the screen (whatever expanded width the website set), with smaller chips.
         ".vb.m.open{position:fixed;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));align-items:stretch}" +
@@ -169,7 +173,7 @@
       var voice = L.voice ? L.voice() : null;
       var acts = (voice ? '<button type="button" class="vbct" data-v="voice">' + MIC + "<span>" + esc(voice.label || L.i18n("voice_chat") || "Voice") + "</span></button>" : "") +
         '<button type="button" class="vbct cta" data-v="chat">' + L.ICON + "<span>" + esc(label) + "</span></button>";
-      var q = '<div class="vbq ' + (below ? "below" : "over") + (qs.length === 1 ? " one" : "") + '"><div class="vbl"><a target="_blank" rel="noopener noreferrer">' + EXT + "<span></span></a></div>" +
+      var q = '<div class="vbq ' + (below ? "below" : "over") + (qs.length === 1 ? " one" : qs.length === 3 ? " three" : "") + '"><div class="vbl"><a target="_blank" rel="noopener noreferrer">' + EXT + "<span></span></a></div>" +
         qs.map(function (t, i) { return '<button type="button" data-q="' + i + '"' + (t.clips.length ? ' aria-pressed="false"' : "") + "><b>" + String.fromCharCode(65 + i) + "</b><span>" + esc(t.text) + "</span></button>"; }).join("") + "</div>";
       var bar = '<div class="vbc">' + (ctl ? '<div class="vbp" role="slider" aria-label="Progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="-1"><span><i></i></span></div>' : "") +
         '<div class="vbr">' + (ctl ? '<span class="vbk"><button type="button" data-v="play" aria-label="Play / pause">' + PP + '</button><button type="button" data-v="replay" aria-label="Replay">' + REPLAY + '</button><button type="button" data-v="mute" aria-label="Sound">' + VOL + '</button><span class="vbtm" aria-hidden="true">0:00</span></span>' : "") +

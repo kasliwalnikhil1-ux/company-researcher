@@ -54,7 +54,7 @@ export function VideoBubbleFrame({ v, voice = false, expanded = false, phone = f
   const setRatio = (w: number, h: number) => { if (w && h) setAr(Math.max(0.5625, Math.min(1.7778, w / h))); };
   const media = { className: 'block w-full h-full', style: { objectFit: expanded ? 'cover' as const : v.fit, objectPosition: focus, transform: expanded ? undefined : `scale(${clamp(v.zoom, 100, 300, 100) / 100})`, transformOrigin: focus } };
   const questions = (
-    <div className={cn('group/q grid gap-1.5', qs.length === 1 ? 'grid-cols-1' : 'grid-cols-2')} style={below ? { width } : undefined}>
+    <div className={cn('group/q grid gap-1.5', qs.length === 1 ? 'grid-cols-1' : qs.length === 3 ? 'grid-cols-3' : 'grid-cols-2')} style={below ? { width } : undefined}>
       {answer?.link_url && (
         <span className="col-span-full min-w-0 flex">
           <a href={answer.link_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex items-center gap-1.5 max-w-full rounded-full bg-white/95 px-3 py-1.5 text-[11.5px] font-semibold text-gray-900 shadow">
