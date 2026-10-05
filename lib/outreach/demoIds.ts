@@ -7,3 +7,5 @@ export const DEMO_USER_NAME = 'Maya Chen';
 export const DEMO_TOUR_SEQUENCE_ID = '00000000-0000-4000-8000-5a0000000001';
 /** The LinkedIn conversation the AI handled up to a booked call (seed/inbox.ts seedAiBookedShowcase); the walkthrough opens it. */
 export const DEMO_TOUR_AI_CHAT_ID = '00000000-0000-4000-8000-c4a000000001';
+/** The demo website (seed/ids.ts WEBCHAT.inbox); the walkthrough opens its widget preview. */
+export const DEMO_TOUR_WEBSITE_ID = '00000000-0000-4000-8000-3b0000000001';

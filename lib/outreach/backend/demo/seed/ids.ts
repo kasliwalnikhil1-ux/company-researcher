@@ -2,6 +2,7 @@
  * Fixed ids of the demo workspace. Relative imports only (the demo check runs some demo modules in Node).
  * Generated rows (leads, chats …) use `idFrom(n, SALT.x)` so their ids are known without building the seed.
  */
+import { DEMO_TOUR_WEBSITE_ID } from '../../../demoIds';
 import { idFrom } from '../store';
 
 export { DEMO_WS_ID, DEMO_USER_ID, DEMO_USER_EMAIL, DEMO_USER_NAME } from '../../../demoIds';
@@ -45,7 +46,7 @@ export const SEQ = {
 };
 
 /** The demo website (web chat inbox) and the synthetic WEBCHAT sender its conversations belong to. */
-export const WEBCHAT = { inbox: fixed('3b', 1), sender: fixed('5e', 10) };
+export const WEBCHAT = { inbox: DEMO_TOUR_WEBSITE_ID, sender: fixed('5e', 10) };
 
 export const LIST = { founders: fixed('1a', 1), agencies: fixed('1a', 2), dental: fixed('1a', 3), events: fixed('1a', 4) };
 export const TAG = { hot: fixed('7a', 1), decision_maker: fixed('7a', 2), event_2026: fixed('7a', 3), partner: fixed('7a', 4), do_later: fixed('7a', 5) };

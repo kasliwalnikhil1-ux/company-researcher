@@ -86,7 +86,7 @@ It works signed out and signed in. A signed-in visitor still gets the demo, neve
 
 ### 2.3 Walkthrough (Driver.js)
 
-Eight steps across pages, written for a buyer: what each part gets them, in the order the work happens (people, accounts, outreach, replies, meetings). The Dashboard is not a step: it is the busiest screen and says nothing about outcomes. The visitor can skip at any step, press Esc to skip, and go back.
+Ten steps across pages, written for a buyer: what each part gets them, in the order the work happens (people, accounts, outreach, replies, website, meetings). The Dashboard is not a step: it is the busiest screen and says nothing about outcomes. The visitor can skip at any step, press Esc to skip, and go back.
 
 | # | Page | Highlights | Title | Text |
 |---|---|---|---|---|
@@ -97,9 +97,11 @@ Eight steps across pages, written for a buyer: what each part gets them, in the 
 | 5 | Sequence builder | Publish, Pause / Activate, Archive | Press start, it runs every day | "Leads move through the steps on their own, every working day. You only step in when someone wants to talk." |
 | 6 | Inbox, the AI-booked thread (`DEMO_TOUR_AI_CHAT_ID`) | The messages | AI talks to your prospects | "When someone replies, AI answers their questions and sends your calendar link. Here it handled the whole conversation and the prospect booked a call." |
 | 7 | Same thread | The conversation list | Every reply in one place | "LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want." |
-| 8 | Reports | The funnel's Meeting booked row (popover above it) | See the meetings it books | "Track who accepted, replied, showed interest and booked a meeting, for every campaign." Then Back · **Finish** |
+| 8 | Website agents → the demo website, Design tab (`DEMO_TOUR_WEBSITE_ID`; the tour picks the preview's chat view) | The widget preview | Your website answers visitors | "Add a chat to your website with one line of code, in your own colours and logo. AI answers visitors from your own pages and recommends the right products." |
+| 9 | Same page (the tour picks the preview's voice call view) | The widget preview, drawn as a voice call | Visitors can talk to it too | "One tap and a visitor speaks with an AI voice agent on your site, in their own language. Every call lands in your inbox with a summary and the recording." |
+| 10 | Reports | The funnel's Meeting booked row (popover above it) | See the meetings it books | "Track who accepted, replied, showed interest and booked a meeting, for every campaign." Then Back · **Finish** |
 
-**Finish card** (after step 8 only, not after a skip):
+**Finish card** (after step 10 only, not after a skip):
 
 > **Ready to build your first campaign?**
 > Import your prospects and set up your outreach.

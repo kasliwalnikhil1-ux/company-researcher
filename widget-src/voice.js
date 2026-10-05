@@ -97,6 +97,8 @@ import { Conversation } from "@elevenlabs/client";
         ".vc.x .vo{padding:2px 0 0;gap:4px}.vc.x .orb{width:48px;height:48px;font-size:16px}.vc.x .vt{display:none}.vx .pcard{width:136px;min-width:136px;max-width:136px}" +
         ".orb{--lv:0;position:relative;width:72px;height:72px;border-radius:50%;background:radial-gradient(circle at 32% 28%," + c2 + "," + c1 + " 62%);box-shadow:0 0 0 calc(4px + var(--lv)*12px) color-mix(in srgb," + c1 + " 18%,transparent),0 6px 18px rgba(0,0,0,.16);transform:scale(calc(1 + var(--lv)*.12));transition:transform .08s linear,box-shadow .08s linear;display:flex;align-items:center;justify-content:center;overflow:hidden;color:#fff;font-weight:700;font-size:22px}" +
         ".orb img{width:56%;height:56%;object-fit:contain;border-radius:50%;background:rgba(255,255,255,.9)}" +
+        // the logo is taken as transparent: no orb colour or disc behind it; the ring around it still shows the voice level
+        ".orb:has(img.lg){background:transparent;box-shadow:0 0 0 calc(4px + var(--lv)*12px) color-mix(in srgb," + c1 + " 18%,transparent)}.orb img.lg{width:100%;height:100%;background:transparent}" +
         ".vc.s-listening .orb,.vc.s-connecting .orb,.vc.s-thinking .orb{animation:gxorb 2.4s ease-in-out infinite}.vc.s-muted .orb{filter:grayscale(.8);opacity:.75}@keyframes gxorb{50%{transform:scale(1.05)}}" +
         ".vs{font-weight:600;font-size:14px}.vt{font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums}" +
         ".vcap{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;padding:0 10px;min-height:54px}.vcap p{margin:0;font-size:14px;line-height:1.4;color:var(--ink);overflow-wrap:anywhere}.vcap p b{color:var(--ink2);font-weight:600}.vcap p:not(:last-child){opacity:.6}.vcap[hidden]{display:none}" +
@@ -112,7 +114,7 @@ import { Conversation } from "@elevenlabs/client";
     function avatar() {
       var a = vui().avatar, ap = S.eff.appearance || {};
       var src = a === "bot" ? ap.bot_avatar_url : a === "none" ? null : ap.logo_url;
-      return src && /^https:\/\//i.test(src) ? '<img src="' + esc(src) + '" alt="">' : "";
+      return src && /^https:\/\//i.test(src) ? '<img' + (a !== "bot" ? ' class="lg"' : "") + ' src="' + esc(src) + '" alt="">' : "";
     }
     function build() {
       root = el("div", "vc s-connecting"); root.setAttribute("role", "group"); root.setAttribute("aria-label", L("call"));

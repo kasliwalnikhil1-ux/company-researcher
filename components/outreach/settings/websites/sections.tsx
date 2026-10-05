@@ -153,13 +153,12 @@ function BotAvatarPicker({ p, value, brand, onChange }: { p: SectionProps; value
         <input ref={fileRef} type="file" accept={WEBCHAT_IMAGE_ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPending(f); }} />
         <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={disabled}><Upload className="w-3.5 h-3.5 mr-1" />{custom ? 'Upload a new one' : 'Upload your own'}</Button>
       </div>
-      <input className={cn(field, 'mt-2')} value={custom} onChange={(e) => onChange(e.target.value.trim() || null)} disabled={disabled} placeholder="or paste a link to your own image (https://…, square, 64×64 or larger)" aria-label="Bot avatar link" />
       <CropModal file={pending} kind="avatar" onCancel={() => setPending(null)} onConfirm={upload} />
     </div>
   );
 }
 
-/** Header logo: upload a picture and crop it to the circle the widget shows it in, or paste a link to one. */
+/** Header logo: upload a picture and crop it to the circle the widget shows it in. Media is uploaded, never linked. */
 function LogoPicker({ p, value, brand, onChange }: { p: SectionProps; value: string | null; brand: string; onChange: (v: string | null) => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<File | null>(null);
@@ -175,7 +174,7 @@ function LogoPicker({ p, value, brand, onChange }: { p: SectionProps; value: str
     <div className="md:col-span-2">
       <Label hint="shown in a circle in the chat header">Logo</Label>
       <div className="flex items-center gap-3">
-        <div className="w-11 h-11 rounded-full flex-none overflow-hidden flex items-center justify-center bg-gray-100 text-gray-600 text-sm font-bold ring-1 ring-gray-200">
+        <div className={cn('w-11 h-11 rounded-full flex-none overflow-hidden flex items-center justify-center text-gray-600 text-sm font-bold ring-1 ring-gray-200', value && !error ? 'bg-transparent' : 'bg-gray-100')}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           {value && !error ? <img src={value} alt="Logo preview" className="w-full h-full object-contain" onError={() => setError(value)} /> : (brand.trim() || 'C').slice(0, 1).toUpperCase()}
         </div>
@@ -183,9 +182,33 @@ function LogoPicker({ p, value, brand, onChange }: { p: SectionProps; value: str
         <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!p.canEdit}><Upload className="w-3.5 h-3.5 mr-1" />{value ? 'Upload a new logo' : 'Upload a logo'}</Button>
         {value && <Button size="sm" variant="ghost" onClick={() => { onChange(null); setError(null); }} disabled={!p.canEdit}><Trash2 className="w-3.5 h-3.5 mr-1" />Remove</Button>}
       </div>
-      <input className={cn(field, 'mt-2')} value={value ?? ''} onChange={(e) => { onChange(e.target.value.trim() || null); setError(null); }} disabled={!p.canEdit} placeholder="or paste a link to your logo (https://…/logo.png)" aria-label="Logo link" />
-      {error && error === value && <p className="text-xs text-amber-700 mt-1">That link does not load as an image.</p>}
+      {error && error === value && <p className="text-xs text-amber-700 mt-1">This logo does not load. Upload it again.</p>}
       <CropModal file={pending} kind="logo" onCancel={() => setPending(null)} onConfirm={upload} />
+    </div>
+  );
+}
+
+/** The popup message's picture: uploaded and cropped to the circle it shows in. */
+function PopupImagePicker({ p, value, onChange }: { p: SectionProps; value: string | null; onChange: (v: string | null) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<File | null>(null);
+  const upload = async (cropped: File) => {
+    try {
+      const url = await uploadWebchatImage(p.inbox.workspace_id, p.inbox.id, 'popup', cropped, [p.inbox.settings.popup.image_url, value]);
+      onChange(url); setPending(null); p.toast('Image uploaded. Save to publish it.');
+    } catch (e) { p.toast(parseError(e).message, 'error'); }
+  };
+  return (
+    <div>
+      <Label hint="optional; shown in a circle next to the text">Popup image</Label>
+      <div className="flex items-center gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {value && <img src={value} alt="Popup image preview" className="w-9 h-9 rounded-full object-cover flex-none ring-1 ring-gray-200" />}
+        <input ref={fileRef} type="file" accept={WEBCHAT_IMAGE_ACCEPT} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setPending(f); }} />
+        <Button size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={!p.canEdit}><Upload className="w-3.5 h-3.5 mr-1" />{value ? 'Replace' : 'Upload'}</Button>
+        {value && <Button size="sm" variant="ghost" onClick={() => onChange(null)} disabled={!p.canEdit}><Trash2 className="w-3.5 h-3.5 mr-1" />Remove</Button>}
+      </div>
+      <CropModal file={pending} kind="popup" onCancel={() => setPending(null)} onConfirm={upload} />
     </div>
   );
 }
@@ -287,7 +310,7 @@ export function LauncherSection(p: SectionProps) {
         {draft.popup.enabled && (
           <Grid>
             <div className="md:col-span-2"><Label hint="≤ 60">Popup text</Label><input className={field} maxLength={60} value={draft.popup.text} onChange={(e) => set((d) => ({ ...d, popup: { ...d.popup, text: e.target.value } }))} disabled={!p.canEdit} /></div>
-            <div><Label hint="50×50">Image URL</Label><input className={field} value={draft.popup.image_url ?? ''} onChange={(e) => set((d) => ({ ...d, popup: { ...d.popup, image_url: e.target.value || null } }))} disabled={!p.canEdit} /></div>
+            <PopupImagePicker p={p} value={draft.popup.image_url} onChange={(v) => set((d) => ({ ...d, popup: { ...d.popup, image_url: v } }))} />
             <div><Label hint="2–5 recommended">Delay (s)</Label><input type="number" min={0} max={120} className={field} value={draft.popup.delay_s} onChange={(e) => set((d) => ({ ...d, popup: { ...d.popup, delay_s: Number(e.target.value) || 0 } }))} disabled={!p.canEdit} /></div>
           </Grid>
         )}

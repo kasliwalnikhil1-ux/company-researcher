@@ -1,5 +1,5 @@
 /**
- * The product-tour walkthrough (Driver.js): eight steps across pages, then the finish card (DemoFinish). The controller navigates to a step's page, waits
+ * The product-tour walkthrough (Driver.js): ten steps across pages, then the finish card (DemoFinish). The controller navigates to a step's page, waits
  * up to 4 s for its `[data-tour="…"]` target and highlights it; a target that never appears (a narrow screen) gets a
  * centred popover instead. Skippable at every step (Close, Esc, a click on the overlay), with Back.
  *
@@ -8,7 +8,7 @@
  */
 import { driver, type Driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
-import { DEMO_TOUR_AI_CHAT_ID, DEMO_TOUR_SEQUENCE_ID, DEMO_WS_ID } from '@/lib/outreach/demoIds';
+import { DEMO_TOUR_AI_CHAT_ID, DEMO_TOUR_SEQUENCE_ID, DEMO_TOUR_WEBSITE_ID, DEMO_WS_ID } from '@/lib/outreach/demoIds';
 import { filtersKey } from '@/lib/outreach/persistedFilters';
 import { kv } from '@/lib/outreach/storage';
 
@@ -20,7 +20,7 @@ import { kv } from '@/lib/outreach/storage';
  */
 export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message'; side?: 'top' | 'left' | 'right' | 'bottom'; click?: string; top?: boolean }
 
-/** Written for a buyer: what each part gets them, in the order the work happens (people → accounts → outreach → replies → meetings). */
+/** Written for a buyer: what each part gets them, in the order the work happens (people → accounts → outreach → replies → website → meetings). */
 export const TOUR_STEPS: TourStep[] = [
   { route: '/outreach/leads/import', click: '#import-tab-search_url', element: '#import-tab-search_url', title: 'Find the right people', side: 'right', top: true, text: 'Pull prospects from a Sales Navigator search, people who liked or commented on a LinkedIn post, your target companies or a spreadsheet. Duplicates are removed for you.' },
   { route: '/outreach/senders', element: '[data-tour="sender-channels"]', title: "Connect your team's accounts", text: "Add each person's LinkedIn, email, WhatsApp and Instagram. Outreach goes out from their own accounts, within safe daily limits." },
@@ -29,6 +29,8 @@ export const TOUR_STEPS: TourStep[] = [
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Press start, it runs every day', text: 'Leads move through the steps on their own, every working day. You only step in when someone wants to talk.' },
   { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-thread"]', title: 'AI talks to your prospects', side: 'left', text: 'When someone replies, AI answers their questions and sends your calendar link. Here it handled the whole conversation and the prospect booked a call.' },
   { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-list"]', title: 'Every reply in one place', side: 'right', text: 'LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want.' },
+  { route: `/outreach/websites/${DEMO_TOUR_WEBSITE_ID}?tab=design`, click: '[data-preview-view="chat"]', element: '[data-tour="widget-preview"]', title: 'Your website answers visitors', side: 'left', text: 'Add a chat to your website with one line of code, in your own colours and logo. AI answers visitors from your own pages and recommends the right products.' },
+  { route: `/outreach/websites/${DEMO_TOUR_WEBSITE_ID}?tab=design`, click: '[data-preview-view="voice"]', element: '[data-tour="widget-preview"]', title: 'Visitors can talk to it too', side: 'left', text: 'One tap and a visitor speaks with an AI voice agent on your site, in their own language. Every call lands in your inbox with a summary and the recording.' },
   { route: '/outreach/reports?tab=funnel', element: '[data-tour="funnel-path"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
 ];
 
@@ -47,6 +49,14 @@ export function readTourState(): TourState {
   return { kind: 'idle' };
 }
 function writeTourState(v: string) { try { kv.setItem(KEY, v); } catch { /* storage blocked */ } }
+
+function until(ok: () => boolean, ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    const look = () => (ok() || Date.now() - started > ms ? resolve() : setTimeout(look, 100));
+    look();
+  });
+}
 
 function waitFor(selector: string, ms: number): Promise<Element | null> {
   return new Promise((resolve) => {
@@ -132,7 +142,11 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     // the inbox remembers the visitor's filters (Unread, Mine, a channel…), which would leave only a few conversations
     // in the list: open it on All. The inbox reads them when it mounts, so this runs before navigating.
     if (step.route.startsWith('/outreach/inbox')) { try { kv.removeItem(filtersKey('inbox', DEMO_WS_ID)); } catch { /* storage blocked */ } }
-    if (o.currentPath() !== step.route.split('?')[0] || step.route.includes('?')) o.navigate(step.route);
+    const path = step.route.split('?')[0];
+    if (o.currentPath() !== path || step.route.includes('?')) o.navigate(step.route);
+    // the target can also be on the page being left (the inbox list, a thread): wait for the new page first
+    await until(() => o.currentPath() === path, 4000);
+    if (my !== token || !running) return;
     if (step.click) {
       const target = await waitFor(step.click, 4000);
       if (my !== token || !running) return;
@@ -166,6 +180,8 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
           description: step.text,
           progressText: `${i + 1} of ${TOUR_STEPS.length}`,
           showButtons: i === 0 ? ['next', 'close'] : ['previous', 'next', 'close'],
+          // each step is its own one-step Driver, which would grey out Back as having nowhere to go
+          disableButtons: [],
           nextBtnText: last ? 'Finish' : 'Next',
           prevBtnText: 'Back',
           side: step.side ?? 'bottom',

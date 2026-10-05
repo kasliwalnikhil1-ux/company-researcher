@@ -39,7 +39,7 @@
   var src = (script && script.src) || "";
   var API = (ds.api || settings.api || "").replace(/\/+$/, "");
   // content hashes (scripts/outreach-widget-version.mjs): cached for a year, a new file is a new address
-  var VER = {"chat.js":"10992165ce","video.js":"01af5ffce1","ask.js":"8908fae517","voice.js":"f9aa8e33ea"};   // widget-version
+  var VER = {"chat.js":"f796c6a869","video.js":"94c927a9db","ask.js":"8908fae517","voice.js":"1acd3163a6"};   // widget-version
   function asset(f) { var m = /loader\.js(\?[^#]*)?$/.exec(src), q = m && m[1] ? m[1] + "&" : "?"; return src.replace(/loader\.js(\?.*)?$/, f) + q + "v=" + (VER[f] || "0"); }
   var CHAT_URL = asset("chat.js"), VIDEO_URL = asset("video.js"), ASK_URL = asset("ask.js"), VOICE_URL = asset("voice.js");
   if (!API) { try { console.warn("[growthxai] data-api missing on the widget script tag"); } catch (e) {} return; }
@@ -157,8 +157,8 @@
       ".btn:hover{transform:scale(1.05)}.btn:focus-visible{outline:2px solid " + accent + "}" +
       ".btn.icon{width:" + size + "px;height:" + size + "px;padding:0;border-radius:50%}.btn.icon svg{width:" + Math.round(size * .46) + "px;height:" + Math.round(size * .46) + "px}" +
       ".btn.pill{height:" + Math.max(44, size - 8) + "px;padding:0 18px 0 14px;border-radius:999px;font-weight:600;font-size:15px}.btn.pill svg{width:20px;height:20px}" +
-      // a logo keeps its own proportions: it is fitted whole into the launcher, never cropped or squeezed
-      ".btn img{display:block;flex:0 0 auto;width:100%;height:100%;min-width:0;object-fit:contain;border-radius:50%}.btn.pill img{width:auto;height:28px;max-width:84px;border-radius:6px}" +
+      // a logo keeps its own proportions: it is fitted whole into the launcher, never cropped or squeezed, with nothing behind it
+      ".btn img{display:block;flex:0 0 auto;width:100%;height:100%;min-width:0;object-fit:contain;border-radius:50%}.btn.pill img{width:auto;height:28px;max-width:84px;border-radius:6px}.btn.icon.lg{background:none;box-shadow:none}" +
       ".badge{position:absolute;top:-4px;" + side + ":-4px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#ef4444;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #fff}" +
       ".dot{position:absolute;bottom:2px;" + (side === "left" ? "left" : "right") + ":2px;width:12px;height:12px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px #fff}" +
       ".pop{pointer-events:auto;max-width:280px;background:#fff;color:#111;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.16);padding:12px 36px 12px 14px;position:relative;font-size:14px;line-height:1.45;display:flex;gap:10px;align-items:flex-start;animation:gxin .25s ease both}" +
@@ -213,7 +213,7 @@
     if (vf && /^(talk to us|voice)?$/i.test(vtext)) vtext = i18n("talk");   // the default wording, old or new, shows translated
     var label = state.open ? (i18n("close")) : vf ? vtext : (l.text || i18n("chat"));
     btn.setAttribute("aria-label", label); btn.title = label; btn.setAttribute("aria-expanded", state.open ? "true" : "false");
-    var inner = state.open ? CLOSE : vf ? MIC : (e.appearance.logo_url ? '<img src="' + esc(e.appearance.logo_url) + '" alt="">' : ICON);
+    var inner = state.open ? CLOSE : vf ? MIC : (e.appearance.logo_url ? (btn.className += " lg", '<img src="' + esc(e.appearance.logo_url) + '" alt="">') : ICON);
     if (btn.className.indexOf("pill") >= 0 && !state.open) inner += "<span>" + esc(vf ? vtext : l.text || i18n("chat")) + "</span>";
     if (!state.open && state.unread > 0 && e.launcher.show_unread_count !== false) inner += '<span class="badge" aria-label="' + state.unread + ' unread">' + (state.unread > 9 ? "9+" : state.unread) + "</span>";
     if (!state.open && e.launcher.online_dot !== false && cfg.availability && cfg.availability.online) inner += '<span class="dot" aria-hidden="true"></span>';

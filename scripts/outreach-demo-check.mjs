@@ -317,9 +317,9 @@ async function e2e() {
   await page.goto(demo('/outreach'), { waitUntil: 'domcontentloaded' });
   await ready();
   await page.locator('[data-demo-restart-tour]').click();
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     // wait for this step's own popover (the previous one stays up until the next page and target are ready)
-    await page.locator('.driver-popover-progress-text', { hasText: `${i + 1} of 8` }).waitFor({ timeout: 20_000 });
+    await page.locator('.driver-popover-progress-text', { hasText: `${i + 1} of 10` }).waitFor({ timeout: 20_000 });
     await page.locator('.driver-popover-next-btn').click();
   }
   await page.waitForTimeout(500);

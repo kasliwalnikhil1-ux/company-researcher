@@ -72,17 +72,11 @@ function UploadStatusLine({ show }: { show: boolean }) {
   return <p className="mt-1 text-[11px] text-indigo-600 tabular-nums" role="status">{s.stage === 'compressing' ? `Compressing for fast loading… ${s.percent}%` : 'Uploading…'}</p>;
 }
 
-/** One clip slot: the clip that is there (thumb, name, Remove), or the two ways to add one (upload, paste a link). */
-function ClipSlot({ clip, what, canEdit, uploading, toast, onSet, onUpload }: {
-  clip: Clip | null; what: string; canEdit: boolean; uploading: boolean; toast: SectionProps['toast']; onSet: (clip: Clip | null) => void; onUpload: (file: File | undefined) => void;
+/** One clip slot: the clip that is there (thumb, name, Remove), or an upload button. Clips are uploaded, never linked. */
+function ClipSlot({ clip, what, canEdit, uploading, onSet, onUpload }: {
+  clip: Clip | null; what: string; canEdit: boolean; uploading: boolean; onSet: (clip: Clip | null) => void; onUpload: (file: File | undefined) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [link, setLink] = useState('');
-  const applyLink = () => {
-    const u = link.trim();
-    if (!HTTPS.test(u)) { toast('Paste an https link to an MP4, WebM, GIF or WebP file.', 'error'); return; }
-    onSet({ url: u, kind: mediaKind(u) }); setLink('');
-  };
   if (clip && mediaUrl(clip.url)) return (
     <div className="flex items-center gap-2">
       <Thumb url={clip.url} kind={clip.kind} className="w-11 h-11 rounded-md flex-none" />
@@ -92,24 +86,18 @@ function ClipSlot({ clip, what, canEdit, uploading, toast, onSet, onUpload }: {
   );
   if (!canEdit) return <p className="text-xs text-gray-500">No video.</p>;
   return (
-    <div className="space-y-2">
+    <div>
       <input ref={fileRef} type="file" accept={WEBCHAT_MEDIA_ACCEPT} hidden onChange={(e) => { onUpload(e.target.files?.[0]); e.target.value = ''; }} />
-      <div>
-        <Button size="sm" variant="secondary" loading={uploading} onClick={() => fileRef.current?.click()} aria-label={`Upload ${what}`}><Upload className="w-3.5 h-3.5 mr-1" />Upload a video</Button>
-        <UploadStatusLine show={uploading} />
-        {!uploading && <p className="mt-1 text-[11px] text-gray-500">MP4 or WebM up to {WEBCHAT_VIDEO_INPUT_MAX_MB} MB (compressed automatically for fast loading), GIF or WebP up to {WEBCHAT_MEDIA_MAX_MB} MB.</p>}
-      </div>
-      <div className="flex items-center gap-2">
-        <input className={cn(field, 'flex-1 min-w-0')} value={link} onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') applyLink(); }} placeholder="or paste a video link" aria-label={`Link to ${what}`} />
-        <Button size="sm" variant="ghost" onClick={applyLink} disabled={!link.trim()}>Use link</Button>
-      </div>
+      <Button size="sm" variant="secondary" loading={uploading} onClick={() => fileRef.current?.click()} aria-label={`Upload ${what}`}><Upload className="w-3.5 h-3.5 mr-1" />Upload a video</Button>
+      <UploadStatusLine show={uploading} />
+      {!uploading && <p className="mt-1 text-[11px] text-gray-500">MP4 or WebM up to {WEBCHAT_VIDEO_INPUT_MAX_MB} MB (compressed automatically for fast loading), GIF or WebP up to {WEBCHAT_MEDIA_MAX_MB} MB.</p>}
     </div>
   );
 }
 
 /** The same clip in each language: one slot per language, in the order of the strip. */
-function LangClips({ langs, clips, what, canEdit, busy, busyKey, toast, onSet, onUpload }: {
-  langs: VideoLanguage[]; clips: VideoClip[]; what: string; canEdit: boolean; busy: string | null; busyKey: string; toast: SectionProps['toast'];
+function LangClips({ langs, clips, what, canEdit, busy, busyKey, onSet, onUpload }: {
+  langs: VideoLanguage[]; clips: VideoClip[]; what: string; canEdit: boolean; busy: string | null; busyKey: string;
   onSet: (lang: string, clip: Clip | null) => void; onUpload: (lang: string, file: File | undefined) => void;
 }) {
   return (
@@ -121,7 +109,7 @@ function LangClips({ langs, clips, what, canEdit, busy, busyKey, toast, onSet, o
             <Flag lang={l} className="w-6 h-6 mt-0.5" />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-medium text-gray-700 mb-1">{name}{i === 0 && <span className="font-normal text-gray-400"> · default</span>}</div>
-              <ClipSlot clip={c} what={`${what} in ${name}`} canEdit={canEdit} uploading={busy === `${busyKey}:${l.code}`} toast={toast} onSet={(clip) => onSet(l.code, clip)} onUpload={(file) => onUpload(l.code, file)} />
+              <ClipSlot clip={c} what={`${what} in ${name}`} canEdit={canEdit} uploading={busy === `${busyKey}:${l.code}`} onSet={(clip) => onSet(l.code, clip)} onUpload={(file) => onUpload(l.code, file)} />
             </div>
           </li>
         );
@@ -138,8 +126,8 @@ const hasVideo = (q: VideoQuestion) => !!(q.video_url || q.video_variants?.some(
  * video (one per language), open a page, or send the question to the chat. A question does one of these, never a video
  * and a page link together.
  */
-function QuestionRow({ i, count, q, langs, canEdit, busy, toast, onChange, onMove, onDelete, onUpload }: {
-  i: number; count: number; q: VideoQuestion; langs: VideoLanguage[]; canEdit: boolean; busy: string | null; toast: SectionProps['toast'];
+function QuestionRow({ i, count, q, langs, canEdit, busy, onChange, onMove, onDelete, onUpload }: {
+  i: number; count: number; q: VideoQuestion; langs: VideoLanguage[]; canEdit: boolean; busy: string | null;
   onChange: (patch: Partial<VideoQuestion>) => void; onMove: (d: -1 | 1) => void; onDelete: () => void; onUpload: (lang: string | null, file: File | undefined) => void;
 }) {
   const off = !canEdit, n = i + 1, letter = String.fromCharCode(65 + i), badLink = !!q.link_url?.trim() && !HTTPS.test(q.link_url.trim());
@@ -195,8 +183,8 @@ function QuestionRow({ i, count, q, langs, canEdit, busy, toast, onChange, onMov
         {both && <Note tone="amber" className="mt-2">This question has a video and a page link. A question can do one of them: {canEdit ? <button type="button" className="underline" onClick={() => onChange({ link_url: null, link_text: null })}>remove the page link</button> : 'remove one'} or choose &ldquo;Open a page&rdquo; above.</Note>}
         <div className="mt-2 max-w-md">
           {mode === 'video' && (langs.length > 0
-            ? <LangClips langs={langs} clips={q.video_variants ?? []} what={`the video of question ${n}`} canEdit={canEdit} busy={busy} busyKey={`q${i}`} toast={toast} onSet={setVariant} onUpload={onUpload} />
-            : <ClipSlot clip={q.video_url ? { url: q.video_url, kind: q.video_kind ?? mediaKind(q.video_url) } : null} what={`the video of question ${n}`} canEdit={canEdit} uploading={busy === `q${i}`} toast={toast}
+            ? <LangClips langs={langs} clips={q.video_variants ?? []} what={`the video of question ${n}`} canEdit={canEdit} busy={busy} busyKey={`q${i}`} onSet={setVariant} onUpload={onUpload} />
+            : <ClipSlot clip={q.video_url ? { url: q.video_url, kind: q.video_kind ?? mediaKind(q.video_url) } : null} what={`the video of question ${n}`} canEdit={canEdit} uploading={busy === `q${i}`}
                 onSet={(clip) => onChange(clip ? { video_url: clip.url, video_kind: clip.kind } : { video_url: null })} onUpload={(file) => onUpload(null, file)} />)}
           {mode === 'link' && (
             <div>
@@ -221,11 +209,10 @@ export default function VideoBubbleSection(p: SectionProps) {
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<WebchatUploadStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // the slot an upload is running for: main:<lang>, q<n>, q<n>:<lang>
-  const [link, setLink] = useState('');
   const [view, setView] = useState<'bubble' | 'expanded'>('bubble');
   const [device, setDevice] = useState<'desktop' | 'phone'>('desktop'), phone = device === 'phone';
   const [framer, setFramer] = useState<Clip | null>(null);   // the clip being framed (Frame the clip)
-  const off = !p.canEdit, accent = p.inbox.settings.appearance.accent;
+  const off = !p.canEdit;
   const langs = draft.languages ?? [];
   const q = videoQuestions(draft.questions);
   const packed = packVideoBubble({ ...draft, questions: q }, MAX_QUESTIONS);   // what Save sends, and what the preview draws
@@ -244,11 +231,6 @@ export default function VideoBubbleSection(p: SectionProps) {
       p.toast(uploadedNote(r, 'Clip'));
     } catch (e) { p.toast(parseError(e).message, 'error'); }
     finally { setUploading(false); setStatus(null); if (fileRef.current) fileRef.current.value = ''; }
-  };
-  const applyLink = () => {
-    const u = link.trim();
-    if (!/^https:\/\/\S+$/i.test(u)) { p.toast('Paste an https link to an MP4, WebM, GIF or WebP file.', 'error'); return; }
-    set({ url: u, kind: mediaKind(u), enabled: true }); setLink(''); setFramer({ url: u, kind: mediaKind(u) });
   };
   // a built-in clip becomes the main clip (the default language's, with languages) and opens the framer, like a crop step
   const pickPreset = (file: string, kind: Clip['kind']) => {
@@ -343,7 +325,7 @@ export default function VideoBubbleSection(p: SectionProps) {
           </div>
           <div className="mt-3 rounded-lg border border-gray-200 p-3">
             {langs.length > 0 ? (
-              <LangClips langs={langs} clips={draft.variants ?? []} what="the main video" canEdit={p.canEdit} busy={busy} busyKey="main" toast={p.toast}
+              <LangClips langs={langs} clips={draft.variants ?? []} what="the main video" canEdit={p.canEdit} busy={busy} busyKey="main"
                 onSet={setVariant} onUpload={(lang, file) => uploadTo(`main:${lang}`, file, (c) => { setVariant(lang, c); setFramer(c); })} />
             ) : <>
             {hasClip ? (
@@ -361,9 +343,6 @@ export default function VideoBubbleSection(p: SectionProps) {
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <input ref={fileRef} type="file" accept={WEBCHAT_MEDIA_ACCEPT} hidden onChange={(e) => upload(e.target.files?.[0])} />
                 <Button size="sm" variant="secondary" loading={uploading} onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1" />{hasClip ? 'Upload another' : 'Upload a GIF or video'}</Button>
-                <span className="text-xs text-gray-400">or</span>
-                <input className={cn(field, 'flex-1 min-w-[180px]')} value={link} onChange={(e) => setLink(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') applyLink(); }} placeholder="https://…/clip.mp4" aria-label="Link to a clip" />
-                <Button size="sm" variant="ghost" onClick={applyLink} disabled={!link.trim()}>Use link</Button>
               </div>
             )}
             <UploadStatusLine show={uploading} />
@@ -425,7 +404,7 @@ export default function VideoBubbleSection(p: SectionProps) {
           {q.length === 0 && <p className="text-sm text-gray-500 py-2">No questions yet. The expanded view shows only the button below.</p>}
           <ul className="space-y-2">
             {q.map((x, i) => (
-              <QuestionRow key={i} i={i} count={q.length} q={x} langs={langs} canEdit={p.canEdit} busy={busy} toast={p.toast}
+              <QuestionRow key={i} i={i} count={q.length} q={x} langs={langs} canEdit={p.canEdit} busy={busy}
                 onChange={(patch) => setQ(i, patch)} onMove={(d) => move(i, d)} onDelete={() => set({ questions: q.filter((_, k) => k !== i) })}
                 onUpload={(lang, file) => (lang ? uploadTo(`q${i}:${lang}`, file, (c) => setQVariant(i, lang, c)) : uploadTo(`q${i}`, file, (c) => setQ(i, { video_url: c.url, video_kind: c.kind })))} />
             ))}
@@ -435,8 +414,6 @@ export default function VideoBubbleSection(p: SectionProps) {
             <div />
             <Color label="Question background" value={draft.question_bg} fallback="#111827" onChange={(v) => set({ question_bg: v ?? '#111827' })} disabled={off} />
             <Color label="Question text" value={draft.question_color} fallback="#ffffff" onChange={(v) => set({ question_color: v ?? '#ffffff' })} disabled={off} />
-            <Color label="Button background" hint="empty = accent colour" value={draft.cta_bg} fallback={HEX6.test(accent) ? accent : '#4f46e5'} onChange={(v) => set({ cta_bg: v })} disabled={off} />
-            <Color label="Button text" value={draft.cta_color} fallback="#ffffff" onChange={(v) => set({ cta_color: v ?? '#ffffff' })} disabled={off} />
           </Grid></div>
           <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={onSave} />
         </Card>
@@ -453,7 +430,7 @@ export default function VideoBubbleSection(p: SectionProps) {
         {/* phone: a 320 px screen, where the expanded player spans the screen as the widget does on phones */}
         <div className={cn('relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]', phone && 'w-[320px] mx-auto border-x border-gray-200')}>
           {hasClip && draft.enabled
-            ? <div className={cn('absolute', phone && view === 'expanded' ? 'bottom-2.5 left-2.5' : phone ? 'bottom-4 right-4' : 'bottom-5 right-5')}><VideoBubbleFrame v={packed} accent={HEX6.test(accent) ? accent : '#4f46e5'} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} phone={phone} scale={phone ? 0.75 : 1} maxWidth={phone ? 300 : 318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
+            ? <div className={cn('absolute', phone && view === 'expanded' ? 'bottom-2.5 left-2.5' : phone ? 'bottom-4 right-4' : 'bottom-5 right-5')}><VideoBubbleFrame v={packed} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} phone={phone} scale={phone ? 0.75 : 1} maxWidth={phone ? 300 : 318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
             : <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-gray-400">{hasClip ? 'The bubble is switched off. Visitors see the normal launcher.' : 'Add a clip to see the bubble here.'}</p>}
         </div>
       </div>

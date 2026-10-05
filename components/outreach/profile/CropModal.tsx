@@ -2,7 +2,7 @@
 
 // Crop step shown after choosing a photo or cover file, before anything is uploaded. Photo is a fixed square; cover is
 // LinkedIn's 4:1 banner. The cropped pixels are what gets uploaded, so what you frame here is what LinkedIn receives.
-// Logo / avatar are the web chat header logo and bot avatar: a square shown in a circle, saved as a small WebP.
+// Logo / avatar / popup are the web chat header logo, bot avatar and popup image: a square shown in a circle, saved as a small WebP.
 import { useEffect, useRef, useState } from 'react';
 import ReactCrop, { type Crop, type PixelCrop } from 'react-image-crop';
 import 'react-image-crop/dist/ReactCrop.css';
@@ -15,6 +15,7 @@ const COPY = {
   cover: { title: 'Crop cover image', hint: 'Drag the box to frame the banner. It stays 4:1.' },
   logo: { title: 'Crop logo', hint: 'The circle shows how the logo appears in the chat header. Drag and resize to frame it.' },
   avatar: { title: 'Crop bot avatar', hint: 'The circle shows how the avatar appears next to the assistant\'s messages and on voice calls. Drag and resize to frame it.' },
+  popup: { title: 'Crop popup image', hint: 'The circle shows how the image appears next to the popup message. Drag and resize to frame it.' },
 };
 
 export default function CropModal({ file, kind, onCancel, onConfirm }: {
@@ -37,7 +38,7 @@ export default function CropModal({ file, kind, onCancel, onConfirm }: {
   async function confirm() {
     if (!file || !imgRef.current || !done?.width || !done.height) return;
     setBusy(true);
-    try { await onConfirm(await cropToFile(imgRef.current, done, file, kind === 'logo' || kind === 'avatar' ? { type: 'image/webp', maxSide: 512 } : {})); }
+    try { await onConfirm(await cropToFile(imgRef.current, done, file, kind === 'logo' || kind === 'avatar' || kind === 'popup' ? { type: 'image/webp', maxSide: 512 } : {})); }
     finally { setBusy(false); }
   }
 

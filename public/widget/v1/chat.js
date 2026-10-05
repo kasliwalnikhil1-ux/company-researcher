@@ -151,7 +151,7 @@
         ".mode-embedded .panel{position:relative;width:100%;height:100%;min-height:480px;box-shadow:none;opacity:1;pointer-events:auto;transform:none;border-radius:0}" +
         "@media(max-width:640px){.mode-bubble .panel,.mode-drawer .panel,.mode-inline .panel,.mode-sidebar .panel,.mode-modal .panel{inset:0;width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0;transform:translateY(100%)}.mode-bubble .panel.open,.mode-drawer .panel.open,.mode-inline .panel.open,.mode-sidebar .panel.open,.mode-modal .panel.open{transform:none}.panel .cp textarea,.panel .cp .ask input,.panel .form input,.panel .form select,.panel .form textarea{font-size:16px}}" +
         ".panel{touch-action:manipulation;-webkit-text-size-adjust:100%;text-size-adjust:100%}" +
-        ".hd{background:var(--accent);color:var(--on-accent);padding:14px 16px;display:flex;align-items:center;gap:10px;flex:0 0 auto}.hd .logo{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto;font-weight:700}.hd .logo img{display:block;width:100%;height:100%;object-fit:contain}" +
+        ".hd{background:var(--accent);color:var(--on-accent);padding:14px 16px;display:flex;align-items:center;gap:10px;flex:0 0 auto}.hd .logo{width:40px;height:40px;border-radius:50%;background:rgba(255,255,255,.22);display:flex;align-items:center;justify-content:center;overflow:hidden;flex:0 0 auto;font-weight:700}.hd .logo img{display:block;width:100%;height:100%;object-fit:contain}.hd .logo.img{background:transparent}" +
         ".hd .ttl{font-weight:700;font-size:15px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hd .sub{font-size:12px;opacity:.9;display:flex;align-items:center;gap:6px;min-width:0}.hd .sub>span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.hd .sub .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(255,255,255,.35);flex:0 0 auto}.hd .sub .dot.off{background:#9ca3af}" +
         ".hd .grow{flex:1;min-width:0}.hd .ib{width:34px;height:34px;border:0;border-radius:10px;background:transparent;color:inherit;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:.9}.hd .ib:hover{background:rgba(255,255,255,.18);opacity:1}.hd .ib svg{width:20px;height:20px}" +
         ".menu{position:absolute;top:56px;" + (RTL[S.locale] ? "left" : "right") + ":10px;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.18);padding:6px;min-width:220px;z-index:5}.menu button{display:flex;width:100%;text-align:start;gap:10px;align-items:center;padding:9px 10px;border:0;background:transparent;color:inherit;border-radius:8px;cursor:pointer;font:inherit}.menu button:hover,.menu button:focus-visible{background:var(--chat)}.menu svg{width:16px;height:16px;color:var(--ink2)}" +
@@ -159,7 +159,7 @@
         ".home{padding:22px 18px}.home h2{margin:0 0 4px;font-size:22px;line-height:1.2}.home p{margin:0 0 16px;color:var(--ink2)}" +
         ".hl{display:flex;align-items:center;justify-content:space-between;margin:2px 0;font-size:12px;font-weight:600;color:var(--ink2)}.hl button{border:0;background:none;padding:2px 0;color:var(--accent);font:inherit;cursor:pointer}" +
         ".rows{display:flex;flex-direction:column;margin:0 -18px 14px}.row{display:flex;align-items:center;gap:11px;width:100%;box-sizing:border-box;padding:10px 18px;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;text-align:start;cursor:pointer}.row:hover{background:var(--card)}.row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}" +
-        ".row .av{width:38px;height:38px;border-radius:50%;flex:0 0 auto;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;overflow:hidden}.row .av img{width:100%;height:100%;object-fit:cover}" +
+        ".row .av{width:38px;height:38px;border-radius:50%;flex:0 0 auto;background:var(--card);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;overflow:hidden}.row .av img{width:100%;height:100%;object-fit:cover}.row .av.lg{background:transparent;border-color:transparent}.row .av.lg img{object-fit:contain}" +
         ".rm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.r1,.r2{display:flex;align-items:center;gap:8px;min-width:0}.r1 b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}.r1 time{flex:0 0 auto;font-size:11.5px;color:var(--ink2)}" +
         ".pv{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;color:var(--ink2)}.row.un .pv{color:var(--ink);font-weight:600}.ud{flex:0 0 auto;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:9px;background:var(--accent);color:var(--on-accent);font-size:11px;font-style:normal;font-weight:700;display:flex;align-items:center;justify-content:center}" +
         ".hacts{display:flex;gap:8px;flex-wrap:wrap}.act{flex:1 1 130px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:9px 14px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}.act:hover{border-color:var(--accent)}.act.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}.act svg{width:16px;height:16px;flex:0 0 auto}.home .avl{margin:8px 0 0;font-size:12px;text-align:center}" +
@@ -176,8 +176,8 @@
         ".cur{display:inline-block;width:7px;height:14px;background:var(--accent);margin-inline-start:1px;animation:gxbl 1s steps(2) infinite;vertical-align:-2px}@keyframes gxbl{50%{opacity:0}}" +
         ".src{margin-top:8px;font-size:12px}.src summary{cursor:pointer;color:var(--ink2)}.src a{display:block;color:var(--accent);margin:3px 0;text-decoration:none}" +
         ".fb{margin-top:8px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}.fb button{background:none;border:1px solid var(--line);border-radius:8px;cursor:pointer;padding:3px 9px;font:inherit;font-size:12px;color:var(--ink)}.fb button:hover{border-color:var(--accent)}.fb .ok{font-size:12px;color:#16a34a}" +
-        // older AI answers: the thumbs float over the bubble's bottom edge on hover, so nothing shifts
-        ".aifb.old{position:absolute;right:10px;bottom:-14px;margin:0;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:2px;box-shadow:0 2px 8px rgba(0,0,0,.08);opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s}.aifb.old button{border:0;padding:2px 7px}.aifb.old .ok{padding:2px 7px}.msg:hover .aifb.old,.msg:focus-within .aifb.old{opacity:1;visibility:visible}" +
+        // AI answers: the thumbs float over the bubble's bottom edge on hover, so nothing shifts
+        ".aifb{position:absolute;right:10px;bottom:-14px;margin:0;z-index:2;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:2px;box-shadow:0 2px 8px rgba(0,0,0,.08);opacity:0;visibility:hidden;transition:opacity .15s,visibility .15s}.aifb button{border:0;padding:2px 7px}.aifb .ok{padding:2px 7px}.msg:hover .aifb,.msg:focus-within .aifb{opacity:1;visibility:visible}" +
         ".acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.acts button,.acts a{background:var(--card);color:var(--accent);border:1px solid var(--accent);border-radius:999px;padding:6px 12px;cursor:pointer;font:inherit;font-size:13px;text-decoration:none}.acts button:disabled{opacity:.5;cursor:default}" +
         ".cards{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;padding:6px 0 4px}.cardi{min-width:200px;max-width:220px;flex:0 0 auto;scroll-snap-align:start;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}.cardi img{width:100%;height:120px;object-fit:cover;display:block}.cardi .ct{padding:8px 10px}.cardi b{display:block;font-size:13px}.cardi small{color:var(--ink2);display:block;margin:2px 0 6px}" +
         // product cards: the same row, a square picture, two lines of name, price, View / Ask (/ Add to cart); arrows on desktop when there is more than one
@@ -326,7 +326,7 @@
       var ap = S.eff.appearance, av = S.cfg.availability || {}, feats = S.eff.features || {};
       var showStatus = feats.show_offline_status !== false || av.online;
       ui.hd.innerHTML = (S.view !== "home" && S.view !== "embedded-home" ? '<button class="ib" data-a="back" aria-label="' + esc(T("back")) + '">' + I.back + "</button>" : "") +
-        '<div class="logo" aria-hidden="true">' + (ap.logo_url ? '<img src="' + esc(safeUrl(ap.logo_url)) + '" alt="">' : esc(initials(ap.brand_name))) + "</div>" +
+        '<div class="logo' + (ap.logo_url ? ' img' : '') + '" aria-hidden="true">' + (ap.logo_url ? '<img src="' + esc(safeUrl(ap.logo_url)) + '" alt="">' : esc(initials(ap.brand_name))) + "</div>" +
         '<div class="grow"><div class="ttl">' + esc(t2("brand_name") || ap.brand_name || "Chat") + '</div><div class="sub">' + (showStatus ? '<span class="dot' + (av.online ? "" : " off") + '"></span>' : "") + "<span>" + esc(availabilityText() || (av.online ? T("online") : "")) + "</span></div></div>" +
         '<button class="ib" data-a="menu" aria-label="' + esc(T("menu")) + '" aria-haspopup="menu">' + I.dots + "</button>" +
         (S.mode !== "embedded" ? '<button class="ib" data-a="close" aria-label="' + esc(T("closepanel")) + '">' + I.x + "</button>" : "");
@@ -383,7 +383,7 @@
       var img = !(c.assignee && c.assignee.name) && (ap.bot_avatar_url || ap.logo_url);
       var pv = c.last_message_preview || (c.status === "resolved" ? T("ended") : T("start"));
       if (c.last_message_preview && c.last_direction === "in") pv = T("you") + ": " + pv;
-      return '<button type="button" class="row' + (c.unread ? " un" : "") + '" data-open="' + esc(c.id) + '"><span class="av" aria-hidden="true">' + (img ? '<img src="' + esc(safeUrl(img)) + '" alt="">' : esc(initials(who))) + "</span>" +
+      return '<button type="button" class="row' + (c.unread ? " un" : "") + '" data-open="' + esc(c.id) + '"><span class="av' + (img && !ap.bot_avatar_url ? ' lg' : '') + '" aria-hidden="true">' + (img ? '<img src="' + esc(safeUrl(img)) + '" alt="">' : esc(initials(who))) + "</span>" +
         '<span class="rm"><span class="r1"><b>' + esc(who) + "</b><time>" + esc(convWhen(c.last_message_at || c.created_at)) + "</time></span>" +
         '<span class="r2"><span class="pv">' + esc(pv.slice(0, 140)) + "</span>" + (c.unread ? '<i class="ud">' + (c.unread > 9 ? "9+" : c.unread) + "</i>" : "") + "</span></span></button>";
     }
@@ -577,11 +577,7 @@
       var body = ui.body, ap = S.eff.appearance, feats = S.eff.features || {}, ms = S.eff.messages || {}, html = "", lastDay = null, prev = null, av = S.cfg.availability || {};
       var ai = S.conv && (av.ai_mode !== "off") && !(S.conv.handed_off_at);
       // one line under the newest bubble only (who · AI Agent · when); a bubble still being written takes it over
-      var lastId = null; if (!S.aiStream && !S.agentTyping) for (var li = S.msgs.length - 1; li >= 0; li--) { var lm = S.msgs[li]; if (lm.content_type !== "event" && !lm.deleted) { lastId = lm.id; break; } }
-      // 👍/👎 sit under the newest AI answer only; older answers show them on hover
-      var lastAi = null; for (var ai2 = S.msgs.length - 1; ai2 >= 0; ai2--) { var am = S.msgs[ai2]; if (!am.deleted && am.sender_type === "bot" && (am.content_attributes || {}).ai) { lastAi = am.id; break; } }
-      S.lastAi = lastAi;
-      if (!S.msgs.length && !ai) html += '<div class="note">' + esc(availabilityText()) + "</div>";
+      var lastId = null; if (!S.aiStream && !S.agentTyping) for (var li = S.msgs.length - 1; li >= 0; li--) { var lm = S.msgs[li]; if (lm.content_type !== "event" && !lm.deleted) { lastId = lm.id; break; } }      if (!S.msgs.length && !ai) html += '<div class="note">' + esc(availabilityText()) + "</div>";
       if (ai && S.msgs.length) html += '<div class="note">' + esc(T("ai_note")) + "</div>";
       S.msgs.forEach(function (m) {
         var day = dayLabel(m.sent_at, T); if (day !== lastDay) { html += '<div class="day">' + esc(day) + "</div>"; lastDay = day; prev = null; }
@@ -714,7 +710,7 @@
     function aiExtras(m) {
       var a = m.content_attributes || {}, h = "";
       if ((S.eff.ai || {}).show_sources !== false && a.sources && a.sources.length) h += '<details class="src"><summary>' + esc(T("sources")) + "</summary>" + a.sources.map(function (s) { return s.url ? '<a href="' + esc(safeUrl(s.url)) + '" target="_blank" rel="noopener noreferrer">' + esc(s.title || s.url) + "</a>" : ""; }).join("") + "</details>";
-      h += '<div class="fb aifb' + (m.id === S.lastAi ? "" : " old") + '">' + (a.feedback ? '<span class="ok">✓ ' + esc(T("thanks")) + "</span>" : '<button type="button" data-fb="1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("helpful")) + '">👍</button><button type="button" data-fb="-1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("nothelpful")) + '">👎</button>') + "</div>";
+      h += '<div class="fb aifb">' + (a.feedback ? '<span class="ok">✓ ' + esc(T("thanks")) + "</span>" : '<button type="button" data-fb="1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("helpful")) + '">👍</button><button type="button" data-fb="-1" data-turn="' + esc(a.turn_id || "") + '" aria-label="' + esc(T("nothelpful")) + '">👎</button>') + "</div>";
       return h;
     }
     function wireBubbles() {

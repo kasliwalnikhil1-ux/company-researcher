@@ -496,12 +496,12 @@ export function uploadedNote(r: { size: number; original: number }, what = 'Vide
 /** What the logo / bot avatar pickers open: anything the browser can draw; the crop step re-encodes it. */
 export const WEBCHAT_IMAGE_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif';
 /**
- * Upload a cropped header logo or bot avatar (WebP, or PNG where the browser cannot encode WebP) under
+ * Upload a cropped header logo, bot avatar or popup image (WebP, or PNG where the browser cannot encode WebP) under
  * `<ws>/<inbox>/<folder>/` and return its public address. Its own folder keeps it out of the clip tidy-up; older images
  * of that folder go, except the ones in `keep`.
  */
-export async function uploadWebchatImage(ws: string, inboxId: string, folder: 'logo' | 'avatar', file: File, keep: Array<string | null | undefined> = []): Promise<string> {
-  const what = folder === 'logo' ? 'logo' : 'avatar';
+export async function uploadWebchatImage(ws: string, inboxId: string, folder: 'logo' | 'avatar' | 'popup', file: File, keep: Array<string | null | undefined> = []): Promise<string> {
+  const what = folder === 'popup' ? 'image' : folder;
   if (file.type !== 'image/webp' && file.type !== 'image/png') throw new Error(`The cropped ${what} must be a WebP or PNG image.`);
   const bucket = db.storage.from(WEBCHAT_MEDIA_BUCKET), dir = `${ws}/${inboxId}/${folder}`;
   const name = `${Date.now()}.${file.type === 'image/png' ? 'png' : 'webp'}`;
