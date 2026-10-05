@@ -172,12 +172,17 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     f('popstate', onPop);
   };
 
+  // Driver hands focus back to whatever had it when a step opened: without this the button that started the tour (the
+  // bar's Restart tour) gets it back at the end and shows a focus ring.
+  const blur = () => (document.activeElement as HTMLElement | null)?.blur?.();
+
   const end = (state: 'done' | 'skipped') => {
     if (running) listen(false);
     running = false;
     token++;
     writeTourState(state);
     destroy();
+    blur();
     if (state === 'done') o.onFinish?.();
     o.onChange?.();
   };
@@ -250,7 +255,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
   }
 
   return {
-    start(at = 0) { if (!running) listen(true); running = true; o.onChange?.(); void show(at); },
+    start(at = 0) { blur(); if (!running) listen(true); running = true; o.onChange?.(); void show(at); },
     stop() { if (running) end('skipped'); },
     get running() { return running; },
   };

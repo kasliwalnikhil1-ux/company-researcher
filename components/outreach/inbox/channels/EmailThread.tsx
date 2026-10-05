@@ -162,7 +162,7 @@ function MailCard({ m, chat, sender, myEmail, contact, now, threadSubject, open,
         <span className="w-40 flex-shrink-0 truncate text-sm font-semibold text-gray-900">{fromLabel}{mine && <span className="font-normal text-gray-500"> (you)</span>}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-gray-500">{deleted ? 'This message was deleted' : snippet || (atts.length ? `${atts.length} attachment${atts.length === 1 ? '' : 's'}` : '(no text)')}</span>
         {atts.length > 0 && <Paperclip className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" aria-label="Has attachments" />}
-        <span className="flex-shrink-0 text-xs text-gray-500 tabular-nums" title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : mailShortDate(m.sent_at, now)}</span>
+        <span className="flex-shrink-0 text-xs text-gray-500 whitespace-nowrap" title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : mailShortDate(m.sent_at, now)}</span>
       </button>
     );
   }
@@ -173,13 +173,14 @@ function MailCard({ m, chat, sender, myEmail, contact, now, threadSubject, open,
         <button type="button" onClick={onToggle} className="flex-shrink-0 rounded-full" aria-label="Collapse message"><Avatar src={avatar} name={fromLabel} size={10} /></button>
         <div className="min-w-0 flex-1">
           <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1 cursor-pointer" onClick={onToggle}>
-              <span className="text-sm font-semibold text-gray-900">{h.from?.name || fromLabel}</span>
-              {h.from?.email && <span className="text-xs text-gray-500 ml-1.5 break-all">&lt;{h.from.email}&gt;</span>}
+            <div className="min-w-0 flex-1 flex items-baseline gap-1.5 cursor-pointer leading-6" onClick={onToggle} title={h.from?.email ? `${h.from?.name || fromLabel} <${h.from.email}>` : undefined}>
+              <span className="truncate flex-shrink-0 max-w-full text-sm font-semibold text-gray-900">{h.from?.name || fromLabel}</span>
+              {h.from?.email && <span className="min-w-0 truncate text-xs text-gray-500">&lt;{h.from.email}&gt;</span>}
             </div>
             <div className="flex items-center gap-0.5 flex-shrink-0 text-xs text-gray-500">
               {atts.length > 0 && <Paperclip className="w-3.5 h-3.5 mr-1 text-gray-400" aria-label="Has attachments" />}
-              <span className="tabular-nums hidden sm:inline" title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : mailDate(m.sent_at, now)}</span>
+              <span className="hidden lg:inline whitespace-nowrap" title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : mailDate(m.sent_at, now)}</span>
+              <span className="lg:hidden whitespace-nowrap" title={new Date(m.sent_at).toLocaleString()}>{pending ? 'Sending…' : mailShortDate(m.sent_at, now)}</span>
               {canReply && !pending && <button type="button" onClick={() => onReply([])} className="ml-1 p-1.5 rounded-full hover:bg-gray-100 text-gray-600" title="Reply" aria-label="Reply"><Reply className="w-4 h-4" /></button>}
               {(translatable || (canReply && cc.length > 0)) && !pending && (
                 <div className="relative">
@@ -200,7 +201,6 @@ function MailCard({ m, chat, sender, myEmail, contact, now, threadSubject, open,
           <button type="button" onClick={() => setDetails((v) => !v)} className="inline-flex items-center gap-0.5 text-xs text-gray-500 hover:text-gray-800 max-w-full" aria-expanded={details}>
             <span className="truncate">to {toSummary}</span><ChevronDown className={cn('w-3.5 h-3.5 flex-shrink-0 transition-transform', details && 'rotate-180')} />
           </button>
-          <span className="sm:hidden block text-[11px] text-gray-500">{mailShortDate(m.sent_at, now)}</span>
           {details && (
             <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs rounded-lg border border-gray-200 bg-white shadow-sm px-3 py-2.5 max-w-xl">
               <dt className="text-right text-gray-500">from:</dt><dd><PeopleList list={h.from ? [h.from] : []} myEmail={null} /></dd>
