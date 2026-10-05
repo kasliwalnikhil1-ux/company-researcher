@@ -110,23 +110,24 @@ export default function TopBar(p: Props) {
 
   return (
     <div className="bg-white border-b border-gray-200">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-        <button type="button" onClick={() => onNavigate('/outreach/sequences')} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500" title="Back to sequences" aria-label="Back to sequences"><ArrowLeft className="w-4 h-4" /></button>
+      {/* One row from lg up: the name and draft status truncate instead of pushing the buttons onto a second line. */}
+      <div className="flex flex-wrap lg:flex-nowrap items-center gap-2 px-3 py-2">
+        <button type="button" onClick={() => onNavigate('/outreach/sequences')} className="p-1.5 rounded-md hover:bg-gray-100 text-gray-500 flex-shrink-0" title="Back to sequences" aria-label="Back to sequences"><ArrowLeft className="w-4 h-4" /></button>
         <NameEditor value={draft.name} onChange={(name) => onChange({ name })} disabled={readOnly} />
-        <Badge tone={STATUS_TONE[status]} className="capitalize">{status}</Badge>
+        <Badge tone={STATUS_TONE[status]} className="capitalize flex-shrink-0">{status}</Badge>
         {sequence.stalled_at && status === 'active' && (
-          <button type="button" onClick={onWhy} title={sequence.stalled_reason ?? 'Nothing was sent in the last sending window'} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200"><AlertTriangle className="w-3 h-3" /> Stalled</button>
+          <button type="button" onClick={onWhy} title={sequence.stalled_reason ?? 'Nothing was sent in the last sending window'} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 flex-shrink-0"><AlertTriangle className="w-3 h-3" /> Stalled</button>
         )}
-        {sequence.throttled_reason && <Badge tone="amber" className="cursor-help"><span title={sequence.throttled_reason} className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> throttled</span></Badge>}
-        <span className="text-xs text-gray-400 tabular-nums">v{version}</span>
+        {sequence.throttled_reason && <Badge tone="amber" className="cursor-help flex-shrink-0"><span title={sequence.throttled_reason} className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> throttled</span></Badge>}
+        <span className="text-xs text-gray-400 tabular-nums flex-shrink-0">v{version}</span>
         <DraftStatusText i={indicator} dirty={dirty} publishMode={publishMode} readOnly={readOnly} />
-        <div className="ml-auto flex items-center gap-1.5 flex-wrap">
-          {status !== 'draft' && <Button variant="ghost" size="sm" onClick={onWhy} title="Check what is holding this sequence back"><HelpCircle className="w-4 h-4" /><span className="hidden xl:inline">Why isn't this sending?</span></Button>}
+        <div className="ml-auto flex items-center gap-1.5 flex-wrap lg:flex-nowrap lg:flex-shrink-0">
+          {status !== 'draft' && <Button variant="ghost" size="sm" onClick={onWhy} title="Why isn't this sending? Check what is holding this sequence back" aria-label="Why isn't this sending?"><HelpCircle className="w-4 h-4" /><span className="hidden 2xl:inline">Why isn't this sending?</span></Button>}
           {!readOnly && (
-            <Button variant="ghost" size="sm" disabled={!canDiscard || saving} onClick={onDiscard} title={publishMode ? 'Discard draft: throw away every unpublished change' : 'Discard draft: go back to the last saved version'} aria-label="Discard draft"><Undo2 className="w-4 h-4" /></Button>
+            <Button variant="ghost" size="sm" disabled={!canDiscard || saving} onClick={onDiscard} title={publishMode ? 'Discard changes: throw away every unpublished change' : 'Discard changes: go back to the last saved version'} aria-label="Discard changes"><Undo2 className="w-4 h-4" /></Button>
           )}
           {/* the walkthrough highlights from Publish on: the controls that put the sequence live */}
-          <div className="flex items-center gap-1.5 flex-wrap" data-tour="sequence-start">
+          <div className="flex items-center gap-1.5 flex-wrap lg:flex-nowrap" data-tour="sequence-start">
           {!readOnly && (publishMode
             ? <Button size="sm" variant={dirty ? 'primary' : 'secondary'} disabled={!dirty || !modeKnown} loading={saving} onClick={onPublish} title="Review who is affected, then publish (Ctrl/Cmd+S)" className="min-w-[5.75rem]"><UploadCloud className="w-4 h-4" /> Publish</Button>
             : <Button size="sm" variant={dirty ? 'primary' : 'secondary'} disabled={!dirty || !modeKnown} loading={saving} onClick={() => onSave()} title="Save (Ctrl/Cmd+S)" className="min-w-[5.75rem]"><Save className="w-4 h-4" /> Save</Button>)}

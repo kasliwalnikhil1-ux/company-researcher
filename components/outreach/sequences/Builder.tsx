@@ -585,7 +585,7 @@ export default function Builder({ id }: { id: string }) {
         />
 
         <ConfirmModal
-          open={confirm?.kind === 'discard'} title="Discard draft" confirmLabel="Discard draft" danger busy={confirm?.busy} onClose={() => setConfirm(null)} onConfirm={discardDraft}
+          open={confirm?.kind === 'discard'} title="Discard changes" confirmLabel="Discard changes" danger busy={confirm?.busy} onClose={() => setConfirm(null)} onConfirm={discardDraft}
           body={<><p>Every change since the last {publishMode ? 'publish' : 'save'} is thrown away{metaLabels.length ? `, including the ${metaLabels.join(', ')}` : ''}. This cannot be undone.</p>{publishMode && <p className="text-xs text-gray-500">Live leads are not affected. They never saw the draft.</p>}</>}
         />
         <ConfirmModal
