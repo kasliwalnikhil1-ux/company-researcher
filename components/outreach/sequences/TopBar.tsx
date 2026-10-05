@@ -123,7 +123,7 @@ export default function TopBar(p: Props) {
         <div className="ml-auto flex items-center gap-1.5 flex-wrap">
           {status !== 'draft' && <Button variant="ghost" size="sm" onClick={onWhy} title="Check what is holding this sequence back"><HelpCircle className="w-4 h-4" /><span className="hidden xl:inline">Why isn't this sending?</span></Button>}
           {!readOnly && (
-            <Button variant="ghost" size="sm" disabled={!canDiscard || saving} onClick={onDiscard} title={publishMode ? 'Throw away every unpublished change' : 'Go back to the last saved version'}><Undo2 className="w-4 h-4" /><span className="hidden lg:inline">Discard draft</span></Button>
+            <Button variant="ghost" size="sm" disabled={!canDiscard || saving} onClick={onDiscard} title={publishMode ? 'Discard draft: throw away every unpublished change' : 'Discard draft: go back to the last saved version'} aria-label="Discard draft"><Undo2 className="w-4 h-4" /></Button>
           )}
           {/* the walkthrough highlights from Publish on: the controls that put the sequence live */}
           <div className="flex items-center gap-1.5 flex-wrap" data-tour="sequence-start">
