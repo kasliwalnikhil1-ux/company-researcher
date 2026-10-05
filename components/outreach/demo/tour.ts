@@ -119,10 +119,10 @@ export function tourKey(e: KeyboardEvent): 'next' | 'back' | 'close' | null {
   if (e.key === 'Escape') return 'close';
   if (typing(e.target)) return null;
   if (e.key === 'Enter') {
-    // Driver focuses the popover's first button (Close), so Enter there means Next; a tabbed-to Back means Back.
-    // A focused button anywhere else (the welcome and finish cards) does its own thing.
+    // Enter is Next wherever focus is (the popover's Close, which Driver focuses, the highlighted tab, a page button
+    // clicked earlier), except a tabbed-to Back. The welcome and finish cards' own buttons do their own thing.
     const btn = (e.target as HTMLElement | null)?.closest?.('button');
-    if (btn && !btn.closest('.driver-popover')) return null;
+    if (btn?.closest('[aria-modal="true"]')) return null;
     return btn?.classList.contains('driver-popover-prev-btn') ? 'back' : 'next';
   }
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') return 'next';
