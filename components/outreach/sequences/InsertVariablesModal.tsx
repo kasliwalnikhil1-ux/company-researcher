@@ -119,12 +119,12 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" onKeyDown={onKeyDown}>
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="relative flex max-h-[70vh] w-[720px] max-w-full flex-col rounded-xl bg-white shadow-xl">
-        <div className="flex items-center justify-between px-5 pt-4 pb-3">
+        <div className="flex shrink-0 items-center justify-between px-5 pt-4 pb-3">
           <h3 id={titleId} className="text-base font-semibold text-gray-900">Insert Variables</h3>
           <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><X className="h-4 w-4" aria-hidden /></button>
         </div>
 
-        <div className="px-5">
+        <div className="shrink-0 px-5">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-gray-400" aria-hidden />
             <input ref={searchRef} value={q} onChange={(e) => { setQ(e.target.value); setActive(0); }} placeholder="Search variables" aria-label="Search variables"
@@ -133,7 +133,7 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
           </div>
         </div>
 
-        <div role="tablist" aria-label="Variable groups" className="mt-3 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-gray-200 px-5">
+        <div role="tablist" aria-label="Variable groups" className="mt-3 flex shrink-0 gap-1 overflow-x-auto overflow-y-hidden border-b border-gray-200 px-5">
           {VARIABLE_TABS.map((t) => {
             const n = byTab.get(t.id)?.length ?? 0;
             const on = t.id === tab;
@@ -147,7 +147,7 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
           })}
         </div>
 
-        <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-x-4 border-b border-gray-100 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+        <div className="grid shrink-0 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-x-4 border-b border-gray-100 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
           <span>Variable Name</span>
           <span title={leadName ? `What ${leadName} would get` : undefined}>Example{leadName && ctx ? <span className="font-normal normal-case tracking-normal text-gray-400"> · {leadName}</span> : null}</span>
         </div>
@@ -202,7 +202,7 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
           )}
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-gray-100 px-5 py-2.5 text-[11px] text-gray-500">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-gray-100 px-5 py-2.5 text-[11px] text-gray-500">
           <span className="min-w-0">{tabMeta.footer}</span>
           <span className="whitespace-nowrap text-gray-400">↑ ↓ to move · Enter to insert · Esc to close</span>
         </div>
