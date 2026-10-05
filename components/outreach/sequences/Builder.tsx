@@ -530,7 +530,7 @@ export default function Builder({ id }: { id: string }) {
         )}
         {tab === 'settings' && <SettingsTab sequenceId={sequence.id} draft={draft} clients={clientsQ.data ?? []} readOnly={readOnly} publishMode={publishMode} onChange={patchDraft} />}
         {tab === 'leads' && (
-          <TabPage title="Leads" subtitle="Who is in this sequence, where each lead has got to, and add more leads by hand." wide>
+          <TabPage title="Leads" subtitle="Who is enrolled in this sequence and where each lead has got to. Add leads by enrolling them into this sequence." wide>
             <EnrolPanel id={sequence.id} onOpenBuilder={() => setTab('steps')} />
           </TabPage>
         )}
