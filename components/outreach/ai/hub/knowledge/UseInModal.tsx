@@ -53,7 +53,7 @@ export default function UseInModal({ ws, source, live, targets: allTargets, load
         </p>
         {live?.status === 'error' && <Note tone="amber">This source could not be read, so the AI finds nothing in it yet.</Note>}
         {loading ? <Spinner className="py-6" /> : nothing ? (
-          <p className="text-sm text-gray-500">{isCatalogue ? 'There is no website to use it in yet. Add one under Website agents.' : 'There is no sequence or website to use it in yet.'}</p>
+          <p className="text-sm text-gray-500">{isCatalogue ? 'There is no website to use it in yet. Add one under Website Agents.' : 'There is no sequence or website to use it in yet.'}</p>
         ) : isCatalogue ? (
           <TargetChecklist targets={targets} websitesOnly isChecked={(k) => on.has(k)} isBusy={(k) => busy.has(k)} onToggle={toggle} />
         ) : (
@@ -62,7 +62,7 @@ export default function UseInModal({ ws, source, live, targets: allTargets, load
         {error && <ErrorBox message={error} />}
         {isCatalogue ? (
           <p className="text-xs text-gray-500">
-            {on.size === 0 ? 'Not used yet.' : `Used in ${on.size} ${plural(on.size, 'website')}.`} The assistant recommends from it once <b>Recommend products</b> is on for that website (Website agents → the website → AI agent → Products) and the catalogue has products.
+            {on.size === 0 ? 'Not used yet.' : `Used in ${on.size} ${plural(on.size, 'website')}.`} The assistant recommends from it once <b>Recommend products</b> is on for that website (Website Agents → the website → AI agent → Products) and the catalogue has products.
           </p>
         ) : (
           <p className="text-xs text-gray-500">

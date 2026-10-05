@@ -406,7 +406,7 @@ export default function Compose({ chat, sender, workspaceId, disabledReason, onE
                     <div className="absolute bottom-full mb-1 left-0 z-30 w-72 max-w-[calc(100vw-2rem)] max-h-64 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg py-1 text-xs" role="menu">
                       <div className="px-3 pt-1 pb-1 text-[11px] text-gray-500">Canned responses</div>
                       {canned.isLoading && <p className="px-3 py-1.5 text-gray-500">Loading…</p>}
-                      {!canned.isLoading && (canned.data ?? []).length === 0 && <p className="px-3 py-1.5 text-gray-500">None yet. Add them in Website agents → your website → Canned responses.</p>}
+                      {!canned.isLoading && (canned.data ?? []).length === 0 && <p className="px-3 py-1.5 text-gray-500">None yet. Add them in Website Agents → your website → Canned responses.</p>}
                       {(canned.data ?? []).map((c) => (
                         <button key={c.id} type="button" role="menuitem" className="block w-full text-left px-3 py-1.5 hover:bg-gray-50" onClick={() => insertCanned(c.content)}>
                           <span className="font-mono text-indigo-700">/{c.short_code}</span> <span className="text-gray-600 line-clamp-2">{c.content}</span>

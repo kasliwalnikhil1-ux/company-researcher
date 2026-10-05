@@ -8,7 +8,7 @@ import { ErrorBox, PageHeader, PageLoader } from '@/components/outreach/ui';
 import { roleAtLeast } from '@/components/outreach/settings/SettingsTabs';
 
 export const WEBSITES_PATH = '/outreach/websites';
-export const WEBSITES_TITLE = 'Website agents';
+export const WEBSITES_TITLE = 'Website Agents';
 
 /** `bare`: no page header, for a page that draws its own (one website's settings). */
 export default function WebsitesFrame({ children, subtitle, actions, bare }: { children: React.ReactNode; subtitle?: React.ReactNode; actions?: React.ReactNode; bare?: boolean }) {

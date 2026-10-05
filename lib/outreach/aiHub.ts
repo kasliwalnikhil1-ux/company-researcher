@@ -52,7 +52,7 @@ export const hubHref = {
 export type AiFeature = 'reply' | 'line' | 'draft' | 'website' | 'profile';
 export const AI_FEATURES: AiFeature[] = ['reply', 'line', 'draft', 'website', 'profile'];
 /** The feature's name (cards, filters, settings). */
-export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'Replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website agents', profile: 'Profile drafts' };
+export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'Replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website Agents', profile: 'Profile drafts' };
 /** One output of the feature (the Feature column of Activity, the type on a card). */
 export const FEATURE_ONE: Record<AiFeature, string> = { reply: 'Reply', line: 'Line', draft: 'Step draft', website: 'Website', profile: 'Profile' };
 export const FEATURE_HELP: Record<AiFeature, string> = {

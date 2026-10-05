@@ -92,7 +92,7 @@ export default function WebsitePage() {
               <div className="min-w-0">
                 <h1 className="text-xl font-bold text-gray-900 truncate">{inbox.name}</h1>
                 <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mt-0.5">
-                  <span>Website agents</span>
+                  <span>Website Agents</span>
                   {inbox.allowed_domains.length > 0 && <span>· {inbox.allowed_domains.slice(0, 2).join(', ')}{inbox.allowed_domains.length > 2 && ` +${inbox.allowed_domains.length - 2}`}</span>}
                   {client && <span>· {client.name}</span>}
                   <span>· v{inbox.config_version}</span>

@@ -4,6 +4,7 @@ import Link from '@/lib/outreach/nav';
 import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowRight, CheckCircle2, Circle, Contact, FileWarning, GitBranch, Hand, Inbox, MessageSquare, PauseCircle, Plus, Sparkles, Upload, CheckSquare, UserMinus, Wand2, XCircle } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
+import { IS_DEMO } from '@/lib/outreach/mode';
 import { useSequences } from '@/lib/outreach/queries';
 import { hubHref, useNeedsYouCounts } from '@/lib/outreach/aiHub';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
@@ -57,7 +58,8 @@ function flagReason(s: DashSender, g: HealthGroup): React.ReactNode {
 
 function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
   // Clicking a legend chip narrows the list to that group (click again to go back to "needs a look").
-  const [filter, setFilter] = useState<HealthGroup | null>(null);
+  // The product tour opens on Healthy: a visitor's first look at the product should not be a list of problems.
+  const [filter, setFilter] = useState<HealthGroup | null>(IS_DEMO ? 'healthy' : null);
   const { counts, grouped, flagged, capacity } = useMemo(() => {
     const counts: Record<HealthGroup, number> = { attention: 0, paused: 0, dry: 0, connecting: 0, healthy: 0 };
     const grouped: Array<{ s: DashSender; g: HealthGroup }> = [];
@@ -101,7 +103,7 @@ function SenderHealthSummary({ senders }: { senders: DashSender[] }) {
           {legend.map((g) => (
             <button key={g.key} type="button" onClick={() => setFilter(filter === g.key ? null : g.key)} aria-pressed={filter === g.key} disabled={counts[g.key] === 0}
               className={cn('inline-flex items-center gap-1.5 text-xs rounded-full px-2 py-0.5 border transition-colors', filter === g.key ? 'border-indigo-200 bg-indigo-50 text-indigo-700 font-medium' : 'border-transparent text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent disabled:cursor-default')}>
-              <span className={cn('w-2 h-2 rounded-full', g.color)} />{g.label} <span className={cn('font-semibold tabular-nums', filter === g.key ? 'text-white' : 'text-gray-900')}>{fmtInt(counts[g.key])}</span>
+              <span className={cn('w-2 h-2 rounded-full', g.color)} />{g.label} <span className={cn('font-semibold tabular-nums', filter === g.key ? 'text-indigo-700' : 'text-gray-900')}>{fmtInt(counts[g.key])}</span>
             </button>
           ))}
         </div>

@@ -106,8 +106,33 @@ function bringIntoView(el: HTMLElement, side: TourStep['side']) {
   }
 }
 
+/** A key typed into a field (a search box, the composer) is the visitor's, not the tour's. */
+function typing(t: EventTarget | null): boolean {
+  const el = t as HTMLElement | null;
+  if (!el || el.closest?.('.driver-popover')) return false;
+  return el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+}
+
+/** Next: → ↓ Enter. Back: ← ↑ Backspace (and the keyboard's Back key). Esc skips. Alt/Ctrl/Cmd combinations stay the browser's. */
+export function tourKey(e: KeyboardEvent): 'next' | 'back' | 'close' | null {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return null;
+  if (e.key === 'Escape') return 'close';
+  if (typing(e.target)) return null;
+  if (e.key === 'Enter') {
+    // Driver focuses the popover's first button (Close), so Enter there means Next; a tabbed-to Back means Back.
+    // A focused button anywhere else (the welcome and finish cards) does its own thing.
+    const btn = (e.target as HTMLElement | null)?.closest?.('button');
+    if (btn && !btn.closest('.driver-popover')) return null;
+    return btn?.classList.contains('driver-popover-prev-btn') ? 'back' : 'next';
+  }
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') return 'next';
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'Backspace' || e.key === 'BrowserBack') return 'back';
+  return null;
+}
+
 export interface TourController {
-  start(): void;
+  /** From the first step, or from step `at` (the finish card's Back). */
+  start(at?: number): void;
   stop(): void;
   readonly running: boolean;
 }
@@ -121,10 +146,34 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
   let running = false;
   let swapping = false;
   let token = 0;
+  let index = 0;
 
   const destroy = () => { if (drv) { swapping = true; drv.destroy(); swapping = false; drv = null; } };
 
+  const next = () => { if (index === TOUR_STEPS.length - 1) end('done'); else void show(index + 1); };
+  const back = () => { if (index > 0) void show(index - 1); };
+
+  // Driver's own keys are off (its ← has nowhere to go in a one-step Driver): these work while a step is still loading
+  // too, and a held key does not race through the steps.
+  const onKey = (e: KeyboardEvent) => {
+    const k = tourKey(e);
+    if (!k) return;
+    e.preventDefault(); // no page scroll, and Enter on the focused popover button does not click it as well
+    e.stopPropagation();
+    if (e.repeat) return;
+    if (k === 'close') end('skipped'); else if (k === 'next') next(); else back();
+  };
+  // The browser's Back button steps the tour back too: the tour pushed each step's page, so Back lands on the
+  // previous step's page (on the first step it leaves the tour).
+  const onPop = () => { if (index > 0) back(); else end('skipped'); };
+  const listen = (on: boolean) => {
+    const f = on ? window.addEventListener : window.removeEventListener;
+    f('keydown', onKey as EventListener, true);
+    f('popstate', onPop);
+  };
+
   const end = (state: 'done' | 'skipped') => {
+    if (running) listen(false);
     running = false;
     token++;
     writeTourState(state);
@@ -137,6 +186,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     if (i < 0) i = 0;
     if (i >= TOUR_STEPS.length) { end('done'); return; }
     const my = ++token;
+    index = i;
     const step = TOUR_STEPS[i];
     writeTourState(`step:${i}`);
     // the inbox remembers the visitor's filters (Unread, Mine, a channel…), which would leave only a few conversations
@@ -165,14 +215,15 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     const last = i === TOUR_STEPS.length - 1;
     drv = driver({
       allowClose: true,
+      allowKeyboardControl: false,
       overlayClickBehavior: 'close',
       showProgress: true,
       smoothScroll: !step.top,
       stagePadding: 6,
       popoverClass: 'gxdemo-tour',
       onDestroyStarted: () => { if (swapping) { drv?.destroy(); return; } end('skipped'); },
-      onNextClick: () => { if (last) end('done'); else void show(i + 1); },
-      onPrevClick: () => { void show(i - 1); },
+      onNextClick: next,
+      onPrevClick: back,
       steps: [{
         element: el ?? undefined,
         popover: {
@@ -199,7 +250,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
   }
 
   return {
-    start() { running = true; o.onChange?.(); void show(0); },
+    start(at = 0) { if (!running) listen(true); running = true; o.onChange?.(); void show(at); },
     stop() { if (running) end('skipped'); },
     get running() { return running; },
   };
