@@ -28,7 +28,7 @@ export interface CatalogVariable {
   /** For 'if' rows: the opening tag. The rest of `token` goes after the selection. */
   open?: string;
   insert: VariableInsert;
-  /** Shown in grey while there is no preview lead. */
+  /** The Example column: what EXAMPLE_LEAD (a made-up lead) would get. Not shown on the AI Variables tab. */
   sample: string;
   /** A description shown instead of a rendered example (conditionals). */
   describe?: string;
@@ -45,6 +45,9 @@ const row = (tab: VariableTab, name: string, sample: string, extra: Partial<Cata
 const ifRow = (tab: VariableTab, open: string, rest: string, describe: string, extra: Partial<CatalogVariable> = {}): CatalogVariable =>
   ({ tab, token: open + rest, open, insert: 'if', sample: '', describe, plainHidden: true, ...extra });
 
+/** The made-up lead every Example is written for (Contact, Account, Advanced); Rohan Mehta is the made-up sender. */
+export const EXAMPLE_LEAD = 'Priya Sharma';
+
 export const VARIABLE_CATALOG: CatalogVariable[] = [
   // ---------------------------------------------------------------- AI Variables: the three built-ins
   row('ai', 'ai_contact_first_name', 'Priya'),
@@ -56,7 +59,7 @@ export const VARIABLE_CATALOG: CatalogVariable[] = [
   row('contact', 'first_name', 'Priya'),
   row('contact', 'last_name', 'Sharma'),
   row('contact', 'position', 'Head of Growth'),
-  row('contact', 'headline', 'Growth @ Acme · ex-Swiggy'),
+  row('contact', 'headline', 'Growth @ Acme Technologies · ex-Globex'),
   row('contact', 'about', 'I build growth teams for B2B SaaS companies…'),
   row('contact', 'work_email', 'priya@acme.com'),
   row('contact', 'personal_email', 'priya.sharma@gmail.com'),
@@ -79,14 +82,14 @@ export const VARIABLE_CATALOG: CatalogVariable[] = [
   row('contact', 'followers_number', '1,240'),
   row('contact', 'skills', 'Growth, SEO, Paid social'),
   row('contact', 'tags', 'vip, q4-campaign'),
-  row('contact', 'current_company', 'Acme'),
+  row('contact', 'current_company', 'Acme Technologies'),
   row('contact', 'work_email_domain', 'acme.com'),
   row('contact', 'current_position', 'Head of Growth'),
   row('contact', 'current_company_start_date', 'Mar 2022'),
-  row('contact', 'current_company_duration', '2 yrs 3 mos'),
-  row('contact', 'previous_company', 'Swiggy'),
+  row('contact', 'current_company_duration', '4 yrs 7 mos'),
+  row('contact', 'previous_company', 'Globex'),
   row('contact', 'previous_position', 'Growth Manager'),
-  row('contact', 'experience_summary', 'Head of Growth at Acme (2022–present); Growth Manager at Swiggy (2019–2022)'),
+  row('contact', 'experience_summary', 'Head of Growth at Acme Technologies (2022–present); Growth Manager at Globex (2019–2022)'),
   row('contact', 'education_school', 'IIM Bangalore'),
   row('contact', 'education_degree', 'MBA'),
   row('contact', 'education_field', 'Marketing'),
@@ -95,8 +98,8 @@ export const VARIABLE_CATALOG: CatalogVariable[] = [
   row('contact', 'latest_post_date', 'Sep 20'),
   row('contact', 'last_3_posts', 'We just opened our Berlin office…'),
   // kept from the picker this popup replaces, so no option is lost
-  row('contact', 'enrich.years_in_role', '2', { section: 'More profile data' }),
-  row('contact', 'enrich.months_in_role', '27', { section: 'More profile data' }),
+  row('contact', 'enrich.years_in_role', '4', { section: 'More profile data' }),
+  row('contact', 'enrich.months_in_role', '55', { section: 'More profile data' }),
   row('contact', 'enrich.top_skill', 'Growth', { section: 'More profile data' }),
 
   // ---------------------------------------------------------------- Account (the lead's current company)
@@ -123,29 +126,29 @@ export const VARIABLE_CATALOG: CatalogVariable[] = [
   row('account', 'company_location_region', 'Karnataka'),
 
   // ---------------------------------------------------------------- Sender Profile
-  row('sender', 'sender_first_name', 'Naman'),
-  row('sender', 'sender_last_name', 'Jain'),
-  row('sender', 'sender_full_name', 'Naman Jain'),
-  row('sender', 'sender_email', 'naman@growthx.ai'),
-  row('sender', 'sender_label', 'Naman from GrowthX'),
-  row('sender', 'sender_booking_link', 'https://calendly.com/naman/intro'),
-  row('sender', 'sender_signature', 'Naman Jain · GrowthX', { emailOnly: true }),
+  row('sender', 'sender_first_name', 'Rohan'),
+  row('sender', 'sender_last_name', 'Mehta'),
+  row('sender', 'sender_full_name', 'Rohan Mehta'),
+  row('sender', 'sender_email', 'rohan@brightwave.io'),
+  row('sender', 'sender_label', 'Rohan from Brightwave'),
+  row('sender', 'sender_booking_link', 'https://cal.com/rohan-mehta/intro'),
+  row('sender', 'sender_signature', 'Rohan Mehta · Brightwave', { emailOnly: true }),
 
   // ---------------------------------------------------------------- Advanced
   row('advanced', 'now_day', '14'),
   row('advanced', 'now_month', 'October'),
   row('advanced', 'now_time_of_day', 'morning'),
-  row('advanced', 'now_weekday', 'Thursday'),
+  row('advanced', 'now_weekday', 'Wednesday'),
   row('advanced', 'now_year', '2026'),
-  ifRow('advanced', '{% if first_name %}', '{% else %}{% endif %}', 'Text shown only when first_name has a value'),
-  ifRow('advanced', '{% if first_name == "John" %}', '{% else %}{% endif %}', 'Text shown only when first_name is John'),
+  ifRow('advanced', '{% if first_name %}', '{% else %}{% endif %}', 'Hi Priya (only when first_name has a value)'),
+  ifRow('advanced', '{% if first_name == "John" %}', '{% else %}{% endif %}', 'Shown only when first_name is John (not for Priya)'),
   { tab: 'advanced', token: '{{ "Hey|Hello|Bonjour" | spintax }}', insert: 'spintax', sample: 'Hey / Hello / Bonjour (one per lead)', plainHidden: true },
   row('advanced', 'position | lowercase', 'head of growth'),
   row('advanced', 'position | uppercase', 'HEAD OF GROWTH'),
   row('advanced', 'position | capitalize_each_word', 'Head Of Growth'),
   row('advanced', 'position | plural', 'Heads of Growth'),
   row('advanced', 'position | capitalize_each_word | plural', 'Heads Of Growth'),
-  row('advanced', 'unsubscribe_link', 'https://example.com/unsubscribe', { emailOnly: true }),
+  row('advanced', 'unsubscribe_link', 'https://example.com/unsubscribe/priya', { emailOnly: true }),
 ];
 
 /** An AI variable as the popup needs it (a row of outreach_ai_variables). */
@@ -171,7 +174,7 @@ export function workspaceRows(aiVars: PopupAiVariable[] | null | undefined, cust
       out.push({ tab: 'ai', token: fb ? `{{ ai.${v.key} | ${fb} }}` : `{{ ai.${v.key} }}`, insert: 'token', sample: v.name, section: 'Your variables' });
     }
   }
-  for (const k of customKeys) out.push({ tab: 'contact', token: `{{ custom.${k} }}`, insert: 'token', sample: k, section: 'Custom fields' });
+  for (const k of customKeys) out.push({ tab: 'contact', token: `{{ custom.${k} }}`, insert: 'token', sample: `Priya's ${k.replace(/_/g, ' ')}`, section: 'Custom fields' });
   return out;
 }
 

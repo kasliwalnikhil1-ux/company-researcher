@@ -6,8 +6,7 @@ import Link from '@/lib/outreach/nav';
 import { Search, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { hubHref } from '@/lib/outreach/aiHub';
-import type { RenderContext } from '@/lib/outreach/render';
-import { exampleFor, matchesSearch, VARIABLE_CATALOG, VARIABLE_TABS, visibleRows, workspaceRows, type CatalogVariable, type PopupAiVariable, type VariableTab } from '@/lib/outreach/variables';
+import { EXAMPLE_LEAD, matchesSearch, VARIABLE_CATALOG, VARIABLE_TABS, visibleRows, workspaceRows, type CatalogVariable, type PopupAiVariable, type VariableTab } from '@/lib/outreach/variables';
 
 const TAB_KEY = 'outreach.insert-variables.tab';
 const isTab = (v: unknown): v is VariableTab => VARIABLE_TABS.some((t) => t.id === v);
@@ -26,19 +25,15 @@ interface Props {
   plain: boolean;
   aiVars: { data?: PopupAiVariable[] | null; isLoading: boolean; error: unknown };
   customKeys: string[];
-  /** The render context of the lead and sender the Preview panel uses. null while it loads or when there is no lead. */
-  ctx: RenderContext | null;
-  ctxLoading: boolean;
-  /** "Priya Sharma": whose values the Example column shows. */
-  leadName: string | null;
 }
 
 /**
  * The Insert Variables popup of a message box: a search over every variable, five tabs, and a Variable Name | Example
- * table. The example is the variable rendered for the preview lead by the same renderer that sends the message.
+ * table. The examples are written for one made-up lead (EXAMPLE_LEAD), the same in every tab; the AI Variables tab has
+ * no Example column.
  * Render it only while it is open. It is drawn on the page body, so the step drawer cannot clip it.
  */
-export default function InsertVariablesModal({ onClose, onInsert, channel, plain, aiVars, customKeys, ctx, ctxLoading, leadName }: Props) {
+export default function InsertVariablesModal({ onClose, onInsert, channel, plain, aiVars, customKeys }: Props) {
   const titleId = useId();
   const listId = useId();
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -114,6 +109,8 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
 
   const tabMeta = VARIABLE_TABS.find((t) => t.id === tab)!;
   const ownAiRows = rows.filter((v) => v.section?.startsWith('Your variables')).length;
+  const showExample = tab !== 'ai';
+  const cols = showExample ? 'grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]' : 'grid-cols-1';
 
   const body = (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4" onKeyDown={onKeyDown}>
@@ -147,9 +144,9 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
           })}
         </div>
 
-        <div className="grid shrink-0 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-x-4 border-b border-gray-100 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+        <div className={cn('grid shrink-0 gap-x-4 border-b border-gray-100 px-5 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500', cols)}>
           <span>Variable Name</span>
-          <span title={leadName ? `What ${leadName} would get` : undefined}>Example{leadName && ctx ? <span className="font-normal normal-case tracking-normal text-gray-400"> · {leadName}</span> : null}</span>
+          {showExample && <span title={`What ${EXAMPLE_LEAD}, a made-up lead, would get`}>Example<span className="font-normal normal-case tracking-normal text-gray-400"> · {EXAMPLE_LEAD}</span></span>}
         </div>
 
         <div id={listId} role="listbox" aria-label={`${tabMeta.label} variables`} className="min-h-[160px] flex-1 overflow-y-auto px-2 py-1">
@@ -159,18 +156,16 @@ export default function InsertVariablesModal({ onClose, onInsert, channel, plain
             <>
               {rows.map((v, i) => {
                 const heading = v.section && v.section !== rows[i - 1]?.section ? v.section : null;
-                const example = exampleFor(v, ctx);
                 const on = i === Math.min(active, rows.length - 1);
                 return (
                   <div key={`${v.token}-${i}`}>
                     {heading && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{heading}</div>}
                     <button id={optionId(i)} type="button" role="option" aria-selected={on} onClick={() => onInsert(v)} onMouseMove={() => { if (!on) setActive(i); }}
-                      className={cn('grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-center gap-x-4 rounded-md px-3 py-1.5 text-left text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500', on ? 'bg-indigo-50' : 'hover:bg-gray-50')}>
+                      className={cn('grid w-full items-center gap-x-4 rounded-md px-3 py-1.5 text-left text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500', cols, on ? 'bg-indigo-50' : 'hover:bg-gray-50')}>
                       <span className="truncate font-mono text-gray-900" title={v.token}>{v.token}</span>
-                      {v.describe ? <span className="truncate italic text-gray-500" title={v.describe}>{v.describe}</span>
-                        : example === null ? <span className="truncate text-gray-400" title={ctxLoading ? undefined : 'An example. Open Preview to pick a lead'}>{ctxLoading ? 'Loading…' : v.sample || '—'}</span>
-                        : example === '' ? <span className="text-gray-400" title="Empty for this lead">—</span>
-                        : <span className="truncate text-gray-700" title={example}>{example}</span>}
+                      {!showExample ? null
+                        : v.describe ? <span className="truncate italic text-gray-500" title={v.describe}>{v.describe}</span>
+                        : <span className="truncate text-gray-700" title={v.sample}>{v.sample}</span>}
                     </button>
                   </div>
                 );

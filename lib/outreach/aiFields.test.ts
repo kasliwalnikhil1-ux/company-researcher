@@ -110,6 +110,7 @@ chk('every plain name in the catalogue is an alias or a path the renderer knows'
   return name in VARIABLE_ALIASES || TEMPLATE_VARIABLES.includes(name) || /^(enrich|custom)\./.test(name) || ['full_name', 'first_name', 'last_name', 'headline', 'tags', 'work_email_domain', 'unsubscribe_link'].includes(name);
 }));
 chk('every alias is offered by the popup', Object.keys(VARIABLE_ALIASES).every((a) => VARIABLE_CATALOG.some((v) => new RegExp(`\\{\\{\\s*${a}\\s*[|}]`).test(v.token))), Object.keys(VARIABLE_ALIASES).filter((a) => !VARIABLE_CATALOG.some((v) => new RegExp(`\\{\\{\\s*${a}\\s*[|}]`).test(v.token))));
+chk('every row outside AI Variables has an example', rows.filter((v) => v.tab !== 'ai').every((v) => !!(v.describe || v.sample).trim()), rows.filter((v) => v.tab !== 'ai' && !(v.describe || v.sample).trim()).map((v) => v.token));
 chk('five tabs, each with rows', VARIABLE_TABS.length === 5 && VARIABLE_TABS.every((t) => rows.some((v) => v.tab === t.id)));
 chk('workspace rows: a field per row, Yes/No as a conditional, the fallback in a one-line token, built-ins not repeated',
   rows.some((v) => v.token === '{{ ai.research.pain }}') && rows.some((v) => v.token === '{{#if ai.research.hiring_sales}}{{/if}}' && v.insert === 'if')

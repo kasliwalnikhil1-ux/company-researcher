@@ -128,8 +128,7 @@ export default function TemplateField({ label, value, onChange, max, multiline =
   const lead: PreviewLead | null = target.lead ?? sampleLead;
   const senderOptions = poolSenders.length ? poolSenders : senders;
   const senderId = target.senderId && senderOptions.some((s) => s.id === target.senderId) ? target.senderId : senderOptions[0]?.id ?? null;
-  // the popup's Example column shows the same lead and sender as the Preview panel
-  const ctxQ = useRenderContext(lead?.id, senderId, previewOpen || varsOpen);
+  const ctxQ = useRenderContext(lead?.id, senderId, previewOpen);
   const found = useLeadSearch(workspaceId, debounced, previewOpen);
   const rendered = ctxQ.data ? renderTemplate(value, ctxQ.data) : '';
   const missing = ctxQ.data ? missingVariables(value, ctxQ.data) : [];
@@ -182,8 +181,7 @@ export default function TemplateField({ label, value, onChange, max, multiline =
       {hint && <span className="block text-xs text-gray-500 mt-1">{hint}</span>}
 
       {varsOpen && (
-        <InsertVariablesModal onClose={closeVariables} onInsert={insertVariable} channel={channel} plain={plain} aiVars={aiVars} customKeys={allCustomKeys}
-          ctx={ctxQ.data ?? null} ctxLoading={!!lead && ctxQ.isLoading} leadName={lead ? lead.full_name || lead.public_identifier || null : null} />
+        <InsertVariablesModal onClose={closeVariables} onInsert={insertVariable} channel={channel} plain={plain} aiVars={aiVars} customKeys={allCustomKeys} />
       )}
 
       {panel === 'cond' && <div className="fixed inset-0 z-20" onClick={() => setPanel(null)} aria-hidden />}
