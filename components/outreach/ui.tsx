@@ -366,8 +366,19 @@ export function PageHeader({ title, subtitle, actions }: { title: React.ReactNod
   );
 }
 
+/**
+ * Below md the table is at least 7.5rem per column (counted from its first row after render), so a wide table scrolls
+ * sideways inside its box instead of squeezing every cell to one word per line; a two-column one still fits a phone.
+ * The edge shadows show there is more to scroll to.
+ */
 export function Table({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn('overflow-x-auto border border-gray-200 rounded-xl bg-white', className)}><table className="min-w-full text-sm">{children}</table></div>;
+  const ref = useRef<HTMLTableElement>(null);
+  useLayoutEffect(() => {
+    const t = ref.current;
+    const cols = t?.rows[0] ? [...t.rows[0].cells].reduce((n, c) => n + c.colSpan, 0) : 0;
+    t?.style.setProperty('--table-min', `${cols * 7.5}rem`);
+  });
+  return <div className={cn('overflow-x-auto border border-gray-200 rounded-xl scroll-shadow-x', className)}><table ref={ref} className="min-w-full max-md:min-w-[max(100%,var(--table-min,0px))] text-sm">{children}</table></div>;
 }
 export function Th({ children, className, title }: { children?: React.ReactNode; className?: string; title?: string }) {
   return <th title={title} className={cn('text-left text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-2.5 bg-gray-50 border-b border-gray-200', title && 'cursor-help', className)}>{children}</th>;

@@ -39,9 +39,9 @@ export default function NotificationSettingsPage() {
                     <div><div className="text-sm font-medium text-gray-900">In-app</div><div className="text-xs text-gray-500">Bell, toast and the Mentions tab of the inbox. Always on.</div></div>
                     <Toggle checked disabled onChange={() => { /* always on */ }} />
                   </div>
-                  <div className="flex items-center justify-between gap-4">
-                    <div><div className="text-sm font-medium text-gray-900">Email</div><div className="text-xs text-gray-500">Only when the mention is still unread after the delay. Several notes on one conversation arrive as one email.</div></div>
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                    <div className="min-w-0 flex-[1_1_14rem]"><div className="text-sm font-medium text-gray-900">Email</div><div className="text-xs text-gray-500">Only when the mention is still unread after the delay. Several notes on one conversation arrive as one email.</div></div>
+                    <div className="flex items-center gap-2 ml-auto">
                       <Select value={String(p.email_delay_min)} disabled={!p.email || set.isPending} onChange={(e) => save(k.kind, { email_delay_min: Number(e.target.value) as 10 | 30 | 60 })} aria-label="Email delay" className="text-sm">
                         {DELAYS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
                       </Select>

@@ -101,7 +101,7 @@ function SenderDetail() {
       <RunningDryCallout sender={s} canWrite={canWrite} />
 
       <div className="border-b border-gray-200 mb-6">
-        <nav className="flex flex-wrap gap-1 -mb-px" role="tablist">
+        <nav className="flex gap-1 -mb-px overflow-x-auto [scrollbar-width:none]" role="tablist">
           {visibleTabs.map((t) => (
             <button key={t} role="tab" aria-selected={tab === t} onClick={() => selectTab(t)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800', t === 'Danger' && tab !== t && 'text-red-500 hover:text-red-700')}>{t}</button>
           ))}

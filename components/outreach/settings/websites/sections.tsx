@@ -642,7 +642,7 @@ export function SecuritySection(p: SectionProps) {
         <div className="divide-y divide-gray-100"><SettingRow title="Enforce identity validation" control={<Switch checked={draft.enforce} onChange={(v) => set({ enforce: v })} label="Enforce identity validation" disabled={!p.canEdit} />} /></div>
         {p.inbox.hmac_token ? (
           <div className="space-y-2 mt-2">
-            <div className="flex items-end gap-2"><div className="flex-1"><CopyField label="HMAC secret" value={reveal ? p.inbox.hmac_token : '•'.repeat(24)} secret /></div><Button size="sm" variant="secondary" onClick={() => setReveal((r) => !r)}>{reveal ? 'Hide' : 'Reveal'}</Button>{p.canEdit && <Button size="sm" variant="danger" onClick={() => setConfirm(true)}><RefreshCw className="w-3.5 h-3.5 mr-1" />Regenerate</Button>}</div>
+            <div className="flex flex-wrap items-end gap-2"><div className="flex-1 min-w-[12rem]"><CopyField label="HMAC secret" value={reveal ? p.inbox.hmac_token : '•'.repeat(24)} secret /></div><Button size="sm" variant="secondary" onClick={() => setReveal((r) => !r)}>{reveal ? 'Hide' : 'Reveal'}</Button>{p.canEdit && <Button size="sm" variant="danger" onClick={() => setConfirm(true)}><RefreshCw className="w-3.5 h-3.5 mr-1" />Regenerate</Button>}</div>
             <div className="flex gap-1 flex-wrap">{HMAC_SAMPLES.map((s, i) => <button key={s.label} type="button" onClick={() => setLang(i)} className={cn('text-xs px-2 py-1 rounded', lang === i ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-gray-100 text-gray-700')}>{s.label}</button>)}</div>
             <pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto">{HMAC_SAMPLES[lang].code(reveal ? p.inbox.hmac_token : '<HMAC_SECRET>')}</pre>
           </div>
@@ -689,7 +689,7 @@ export function InstallSection(p: SectionProps) {
     <div className="space-y-4">
       <Card title="Install">
         <div className="flex gap-1 flex-wrap mb-3">{INSTALL_GUIDES.map((x) => <button key={x.key} type="button" onClick={() => setGuide(x.key)} className={cn('text-xs px-2.5 py-1 rounded-full', guide === x.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')}>{x.label}</button>)}</div>
-        <div className="relative"><pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{g.body(p.inbox.website_token)}</pre><button type="button" className="absolute top-2 right-2 text-xs bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 inline-flex items-center gap-1" onClick={async () => { try { await navigator.clipboard.writeText(snippetHtml(p.inbox.website_token)); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ } }}>{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}{copied ? 'Copied' : 'Copy snippet'}</button></div>
+        <div className="relative"><pre className="text-xs bg-gray-900 text-gray-100 rounded-lg p-3 pt-10 sm:pt-3 sm:pr-32 overflow-x-auto whitespace-pre-wrap break-words">{g.body(p.inbox.website_token)}</pre><button type="button" className="absolute top-2 right-2 text-xs bg-white/10 hover:bg-white/20 text-white rounded px-2 py-1 inline-flex items-center gap-1" onClick={async () => { try { await navigator.clipboard.writeText(snippetHtml(p.inbox.website_token)); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* ignore */ } }}>{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}{copied ? 'Copied' : 'Copy snippet'}</button></div>
         <div className="mt-3 text-sm">
           {seen.length ? <div className="text-emerald-700">Seen on {seen.slice(0, 3).map(([o, at]) => <span key={o} className="mr-2"><b>{o.replace(/^https?:\/\//, '')}</b> {timeAgo(at)}</span>)}</div> : <div className="text-amber-700">Not seen on any site yet. Reload a page with the snippet installed and this updates within a minute.</div>}
         </div>
@@ -720,7 +720,7 @@ export function InstallSection(p: SectionProps) {
       <Card title="Standalone page">
         <p className="text-xs text-gray-500 mb-2">A hosted full-page chat for link-in-bio, email signatures and the &quot;continue the chat&quot; link in continuity emails.</p>
         <CopyField value={standaloneUrl(p.inbox.website_token)} />
-        <p className="text-xs text-gray-500 mt-2">Test locally with the demo page: <code>/widget/v1/demo.html?token={p.inbox.website_token}&amp;api={encodeURIComponent(`${apiHost}/functions/v1/outreach-webchat`)}</code> (allow localhost under Security first).</p>
+        <p className="text-xs text-gray-500 mt-2">Test locally with the demo page: <code className="break-all">/widget/v1/demo.html?token={p.inbox.website_token}&amp;api={encodeURIComponent(`${apiHost}/functions/v1/outreach-webchat`)}</code> (allow localhost under Security first).</p>
       </Card>
       <Card title="Content-Security-Policy">
         <p className="text-xs text-gray-500 mb-2">If your site sets a CSP, allow:</p>
@@ -760,7 +760,7 @@ export function CannedSection(p: SectionProps) {
       <p className="text-xs text-gray-500 mb-2">Type <code>/shortcut</code> in the reply box and it expands on send. Variables: <code>{'{{contact.name}}'}</code>, <code>{'{{contact.first_name}}'}</code>, <code>{'{{agent.name}}'}</code>. Shared responses are for the whole workspace; personal ones only for you.</p>
       {q.isLoading && <Spinner />}
       <ul className="divide-y divide-gray-100 text-sm">
-        {(q.data ?? []).map((c) => <li key={c.id} className="py-2 flex items-start gap-3"><span className="font-mono text-indigo-700 w-28 flex-shrink-0">/{c.short_code}</span><span className="flex-1 min-w-0 text-gray-700 whitespace-pre-wrap">{c.content}</span>{c.owner_id && <Badge tone="gray">personal</Badge>}<Button size="sm" variant="ghost" onClick={() => setEdit({ id: c.id, short_code: c.short_code, content: c.content, personal: !!c.owner_id })}>Edit</Button><button type="button" className="text-gray-400 hover:text-red-600" aria-label="Delete" onClick={() => del.mutate(c.id)}><Trash2 className="w-4 h-4" /></button></li>)}
+        {(q.data ?? []).map((c) => <li key={c.id} className="py-2 flex items-start gap-3"><span className="font-mono text-indigo-700 w-20 sm:w-28 flex-shrink-0 break-all">/{c.short_code}</span><span className="flex-1 min-w-0 text-gray-700 whitespace-pre-wrap break-words">{c.content}</span>{c.owner_id && <Badge tone="gray">personal</Badge>}<Button size="sm" variant="ghost" onClick={() => setEdit({ id: c.id, short_code: c.short_code, content: c.content, personal: !!c.owner_id })}>Edit</Button><button type="button" className="text-gray-400 hover:text-red-600" aria-label="Delete" onClick={() => del.mutate(c.id)}><Trash2 className="w-4 h-4" /></button></li>)}
         {q.data?.length === 0 && !edit && <li className="py-2 text-gray-500">None yet.</li>}
       </ul>
       {edit && (
@@ -828,14 +828,14 @@ function VoiceReportBlock({ r }: { r: VoiceReport }) {
       </div>
       <div className="text-xs text-gray-600">This month: {r.pool.used}{r.pool.limit != null ? ` of ${r.pool.limit}` : ''} minutes{r.pool.test_used ? ` (${r.pool.test_used} in tests)` : ''}{r.cost_usd != null ? ` · $${Number(r.cost_usd).toFixed(2)} billed to your own voice account in this period` : ''}.</div>
       {r.calls > 0 && (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
           <div><Label>How calls ended</Label><ul className="text-sm">{rows(r.ended_by, (k) => ENDED_BY[k] ?? k)}</ul></div>
           <div><Label hint={`${pct(r.switched, r.calls)} went on in chat`}>Handed to the team</Label><ul className="text-sm">{Object.keys(r.handoff_reasons).length ? rows(r.handoff_reasons, (k) => k.replace(/_/g, ' ')) : <li className="text-gray-500">None</li>}</ul></div>
           <div><Label>Languages</Label><ul className="text-sm">{rows(r.languages, (k) => voiceLanguage(k))}</ul></div>
         </div>
       )}
       {(r.top_questions.length > 0 || r.unanswered.length > 0) && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {r.top_questions.length > 0 && <div><Label>Asked by voice</Label><ul className="text-sm divide-y divide-gray-100">{r.top_questions.slice(0, 8).map((x) => <li key={x.query} className="py-1 flex justify-between gap-3"><span className="truncate">{x.query}</span><span className="text-gray-400">{x.n}</span></li>)}</ul></div>}
           {r.unanswered.length > 0 && <div><Label hint="add a Q&A or a source for these">Not answered by voice</Label><ul className="text-sm divide-y divide-gray-100">{r.unanswered.slice(0, 8).map((x) => <li key={x.query} className="py-1 flex justify-between gap-3"><span className="truncate">{x.query}</span><span className="text-gray-400">{x.n}</span></li>)}</ul></div>}
         </div>
@@ -870,7 +870,7 @@ function ProductsReportBlock({ r }: { r: ProductsReport }) {
         <S l="Clicks" v={r.clicks} h={`${pct(r.clicks, r.cards_shown)} click rate`} />
         <S l="Add-to-carts" v={r.add_to_carts} />
       </div>
-      <div className="grid gap-4 md:grid-cols-2"><ProductsReportList title="Top recommended" rows={r.top_recommended} /><ProductsReportList title="Top clicked" rows={r.top_clicked} /></div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2"><ProductsReportList title="Top recommended" rows={r.top_recommended} /><ProductsReportList title="Top clicked" rows={r.top_clicked} /></div>
       {r.not_found.length > 0 && (
         <div><Label hint="add the product, or a Q&A that says what you offer instead">Asked for, not found</Label>
           <ul className="text-sm divide-y divide-gray-100">{r.not_found.slice(0, 10).map((x, i) => (

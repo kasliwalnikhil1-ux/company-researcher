@@ -40,12 +40,15 @@ export function ruleCandidates(store: DemoStore, r: Row, limit: number): string[
 }
 
 /** One pass of a rule (outreach_run_auto_enroll for one rule): up to the room left under today's cap. */
-/** `day`: the day the daily cap counts against (the simulator passes its own simulated day). */
+/**
+ * `day`: the day the daily cap counts against (the simulator passes its own simulated day). The log row keeps it in
+ * `cap_day`; its `day` is the calendar date the UI shows.
+ */
 export function runRule(store: DemoStore, r: Row, userId: string | null, day?: string): { matched: number; enrolled: number } {
   const seq = store.get('outreach_sequences', r.sequence_id);
   if (!seq || seq.status !== 'active' || !r.active) return { matched: 0, enrolled: 0 };
   const today = day ?? new Date().toISOString().slice(0, 10);
-  const used = store.t('outreach_auto_enroll_log').filter((l) => l.rule_id === r.id && l.day === today).reduce((n, l) => n + (l.enrolled ?? 0), 0);
+  const used = store.t('outreach_auto_enroll_log').filter((l) => l.rule_id === r.id && (l.cap_day ?? l.day) === today).reduce((n, l) => n + (l.enrolled ?? 0), 0);
   const room = Number(r.daily_cap ?? 50) - used;
   store.update('outreach_auto_enroll_rules', r.id, { last_run_at: new Date().toISOString() });
   if (room <= 0) return { matched: 0, enrolled: 0 };
@@ -70,7 +73,7 @@ export function runRule(store: DemoStore, r: Row, userId: string | null, day?: s
     if (res.enrollment_ids[0]) { created.push(res.enrollment_ids[0]); store.update('outreach_enrollments', res.enrollment_ids[0], { created_by: userId, paused_from: null }); }
     else skipped.active++;
   }
-  store.insert('outreach_auto_enroll_log', { id: store.t('outreach_auto_enroll_log').reduce((m, l) => Math.max(m, Number(l.id) || 0), 0) + 1, rule_id: r.id, day: today, matched: ids.length, enrolled: created.length, skipped, at: new Date().toISOString() }, { noId: true });
+  store.insert('outreach_auto_enroll_log', { id: store.t('outreach_auto_enroll_log').reduce((m, l) => Math.max(m, Number(l.id) || 0), 0) + 1, rule_id: r.id, day: new Date(now).toISOString().slice(0, 10), cap_day: today, matched: ids.length, enrolled: created.length, skipped, at: new Date().toISOString() }, { noId: true });
   for (const id of created) stepNow(store, store.get('outreach_enrollments', id), now);
   return { matched: ids.length, enrolled: created.length };
 }

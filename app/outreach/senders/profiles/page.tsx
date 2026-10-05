@@ -32,7 +32,7 @@ function ProfilesInner() {
       <PageHeader title="Senders" subtitle="What prospects see when they click a sender: headlines, About sections and photos, kept in step with your offer and tested against acceptance" />
       <SendersSubnav />
       <div className="border-b border-gray-200 mb-6">
-        <nav className="flex flex-wrap gap-1 -mb-px" role="tablist">
+        <nav className="flex gap-1 -mb-px overflow-x-auto [scrollbar-width:none]" role="tablist">
           {TABS.map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => select(t)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800')}>{t}</button>)}
         </nav>
       </div>

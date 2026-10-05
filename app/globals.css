@@ -64,6 +64,17 @@ body {
 }
 
 @layer utilities {
+  /* Shadows at the edges of a sideways scroller while there is more to scroll to (covered by the white "local"
+     gradients when scrolled to that end). */
+  .scroll-shadow-x {
+    background:
+      linear-gradient(to right, #fff 30%, rgb(255 255 255 / 0)) left center / 2.5rem 100% no-repeat local,
+      linear-gradient(to left, #fff 30%, rgb(255 255 255 / 0)) right center / 2.5rem 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, rgb(0 0 0 / 0.14), transparent) left center / 0.75rem 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgb(0 0 0 / 0.14), transparent) right center / 0.75rem 100% no-repeat scroll,
+      #fff;
+  }
+
   .text-balance {
     text-wrap: balance;
   }

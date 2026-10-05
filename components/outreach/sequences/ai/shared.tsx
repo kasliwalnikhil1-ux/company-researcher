@@ -10,7 +10,7 @@ export function Section({ title, help, actions, children, className }: { title: 
   return (
     <section className={cn('bg-white border border-gray-200 rounded-xl p-4 space-y-3', className)}>
       <div className="flex flex-wrap items-start gap-2">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-[1_1_16rem]">
           <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
           {help && <p className="text-xs text-gray-500 mt-0.5">{help}</p>}
         </div>

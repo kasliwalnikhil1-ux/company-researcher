@@ -139,8 +139,9 @@ export default function TopBar(p: Props) {
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-2 px-3">
-        <div role="tablist" aria-label="Sequence section" className="flex gap-1 overflow-x-auto overflow-y-hidden min-w-0">
+      {/* phones: the tab strip takes the full width and the counts wrap under it */}
+      <div className="flex flex-wrap items-center gap-x-2 px-3">
+        <div role="tablist" aria-label="Sequence section" className="flex gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] min-w-0 max-w-full">
           {BUILDER_TABS.filter((t) => t !== 'leads' || showLeads).map((t) => (
             <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => onTab(t)} className={tabClass(tab === t)}>
               {TAB_LABEL[t]}

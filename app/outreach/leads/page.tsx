@@ -126,10 +126,10 @@ function LeadsPage() {
           {canWrite && <Button onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4" /> New lead</Button>}
         </> : undefined} />
 
-      <div role="tablist" aria-label="Leads section" className="flex flex-wrap gap-1 border-b border-gray-200 mb-4">
+      <div role="tablist" aria-label="Leads section" className="flex gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] shadow-[inset_0_-1px_0_theme(colors.gray.200)] mb-4">
         {(['leads', ...TAXONOMY_TABS] as Tab[]).map((t) => (
           <button key={t} role="tab" type="button" aria-selected={tab === t} onClick={() => setTab(t)}
-            className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors', tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>
+            className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors', tab === t ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>
             {t === 'leads' ? 'All leads' : TAXONOMY[t].label}
           </button>
         ))}

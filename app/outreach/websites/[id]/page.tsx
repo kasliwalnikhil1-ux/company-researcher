@@ -109,7 +109,7 @@ export default function WebsitePage() {
           </div>
 
           <div className="border-b border-gray-200 mb-6">
-            <nav className="flex flex-wrap gap-1 -mb-px" role="tablist" aria-label="Website settings">
+            <nav className="flex gap-1 -mb-px overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Website settings">
               {TABS.map((t) => (
                 <button key={t.key} type="button" role="tab" aria-selected={tab.key === t.key} onClick={() => selectTab(t.key)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab.key === t.key ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800')}>{t.label}</button>
               ))}

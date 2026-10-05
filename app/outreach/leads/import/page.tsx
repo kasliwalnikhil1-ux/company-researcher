@@ -45,7 +45,7 @@ function SourcePicker({ current, onOpen }: { current: SourceDef; onOpen: () => v
   return (
     <div className="lg:hidden">
       <p className="text-xs font-medium text-gray-500 mb-1.5">Import from</p>
-      <button type="button" onClick={onOpen} aria-haspopup="dialog"
+      <button type="button" onClick={onOpen} aria-haspopup="dialog" data-tour="import-source-picker"
         className="w-full flex items-start gap-3 text-left rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm active:bg-gray-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
         <span className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0"><current.icon className="w-5 h-5" /></span>
         <span className="flex-1 min-w-0">

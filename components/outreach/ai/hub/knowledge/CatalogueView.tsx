@@ -60,7 +60,7 @@ function Header({ s, ws, canEdit, hidden, notify }: { s: CatalogueSourceLike; ws
   return (
     <div className="mb-4 rounded-xl border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-[1_1_16rem]">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="truncate text-base font-semibold text-gray-900" title={s.title}>{s.title}</h2>
             <Badge tone="gray">{PROVIDER_LABEL[c?.provider ?? (isCat ? 'feed' : 'crawl')]}</Badge>

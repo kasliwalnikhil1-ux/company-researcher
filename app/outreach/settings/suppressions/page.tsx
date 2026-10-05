@@ -173,7 +173,7 @@ export default function BlacklistsSettingsPage() {
                     return (
                       <tr key={s.id}>
                         <Td><Badge tone={kindMeta(s.kind)?.tone ?? 'gray'}>{kindMeta(s.kind)?.label ?? s.kind}</Badge></Td>
-                        <Td className="font-mono text-xs text-gray-900 break-all">{s.value}</Td>
+                        <Td className="font-mono text-xs text-gray-900 break-all min-w-[12rem]">{s.value}</Td>
                         <Td className="whitespace-nowrap">{s.sequence_id ? <span title="Sequence"><span className="text-gray-400">Sequence · </span>{sequenceName.get(s.sequence_id) ?? 'deleted'}</span> : s.client_id ? <span title="Client"><span className="text-gray-400">Client · </span>{clientName.get(s.client_id) ?? 'hidden'}</span> : 'Workspace'}</Td>
                         <Td><Badge tone={src.tone}>{src.text}</Badge></Td>
                         <Td className="text-gray-600 max-w-[200px] truncate" title={s.reason ?? undefined}>{s.reason ?? <span className="text-gray-300">—</span>}</Td>

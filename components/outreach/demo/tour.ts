@@ -15,20 +15,23 @@ import { kv } from '@/lib/outreach/storage';
 /**
  * `canvas`: zoom the sequence canvas first: onto the top of the flow (`top`) or onto the topmost step of that type.
  * `side`: where the popover sits (default below the target).
- * `click`: clicked first (once it is on screen), e.g. to pick a tab the step talks about.
+ * `element`: may list alternatives (`a, b`): the first one on screen is highlighted (a phone shows other controls).
+ * `click`: clicked first, e.g. to pick a tab the step talks about. A hidden one (a desktop-only tab on a phone) is
+ *   clicked too, which still selects it.
  * `top`: keep the page at the top (a target taller than the window would otherwise be scrolled to its top edge).
+ * `phone`: replaces these fields below the md breakpoint (768 px), where a page shows one pane instead of two.
  */
-export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message'; side?: 'top' | 'left' | 'right' | 'bottom'; click?: string; top?: boolean }
+export interface TourStep { route: string; element: string; title: string; text: string; canvas?: 'top' | 'send_message'; side?: 'top' | 'left' | 'right' | 'bottom'; click?: string; top?: boolean; phone?: Partial<Pick<TourStep, 'route' | 'side'>> }
 
 /** Written for a buyer: what each part gets them, in the order the work happens (people → accounts → outreach → replies → website → meetings). */
 export const TOUR_STEPS: TourStep[] = [
-  { route: '/outreach/leads/import', click: '#import-tab-search_url', element: '#import-tab-search_url', title: 'Find the right people', side: 'right', top: true, text: 'Pull prospects from a Sales Navigator search, people who liked or commented on a LinkedIn post, your target companies or a spreadsheet. Duplicates are removed for you.' },
+  { route: '/outreach/leads/import', click: '#import-tab-search_url', element: '#import-tab-search_url, [data-tour="import-source-picker"]', title: 'Find the right people', side: 'right', top: true, text: 'Pull prospects from a Sales Navigator search, people who liked or commented on a LinkedIn post, your target companies or a spreadsheet. Duplicates are removed for you.' },
   { route: '/outreach/senders', element: '[data-tour="sender-channels"]', title: "Connect your team's accounts", text: "Add each person's LinkedIn, email, WhatsApp and Instagram. Outreach goes out from their own accounts, within safe daily limits." },
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-canvas"]', title: 'Reach them on every channel', text: 'Set the steps once: view their profile, connect, message, then follow up by email or WhatsApp. It stops on its own when someone replies.', canvas: 'top' },
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="builder-message-step"]', title: 'Every message feels personal', text: 'AI writes a line for each person from their profile and company, so no two messages read the same.', canvas: 'send_message' },
   { route: `/outreach/sequences/${DEMO_TOUR_SEQUENCE_ID}`, element: '[data-tour="sequence-start"]', title: 'Press start, it runs every day', text: 'Leads move through the steps on their own, every working day. You only step in when someone wants to talk.' },
   { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-thread"]', title: 'AI talks to your prospects', side: 'left', text: 'When someone replies, AI answers their questions and sends your calendar link. Here it handled the whole conversation and the prospect booked a call.' },
-  { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-list"]', title: 'Every reply in one place', side: 'right', text: 'LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want.' },
+  { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-list"]', title: 'Every reply in one place', side: 'right', phone: { route: '/outreach/inbox', side: 'bottom' }, text: 'LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want.' },
   { route: `/outreach/websites/${DEMO_TOUR_WEBSITE_ID}?tab=design`, click: '[data-preview-view="chat"]', element: '[data-tour="widget-preview"]', title: 'Your website answers visitors', side: 'left', text: 'Add a chat to your website with one line of code, in your own colours and logo. AI answers visitors from your own pages and recommends the right products.' },
   { route: `/outreach/websites/${DEMO_TOUR_WEBSITE_ID}?tab=design`, click: '[data-preview-view="voice"]', element: '[data-tour="widget-preview"]', title: 'Visitors can talk to it too', side: 'left', text: 'One tap and a visitor speaks with an AI voice agent on your site, in their own language. Every call lands in your inbox with a summary and the recording.' },
   { route: '/outreach/reports?tab=funnel', element: '[data-tour="funnel-path"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
@@ -58,12 +61,13 @@ function until(ok: () => boolean, ms: number): Promise<void> {
   });
 }
 
-function waitFor(selector: string, ms: number): Promise<Element | null> {
+/** The first match on screen (`visible`), or the first match at all. */
+function waitFor(selector: string, ms: number, visible = true): Promise<Element | null> {
   return new Promise((resolve) => {
     const started = Date.now();
     const look = () => {
-      const el = document.querySelector(selector);
-      if (el && (el as HTMLElement).getClientRects().length > 0) return resolve(el);
+      const el = [...document.querySelectorAll(selector)].find((e) => !visible || e.getClientRects().length > 0);
+      if (el) return resolve(el);
       if (Date.now() - started > ms) return resolve(null);
       setTimeout(look, 100);
     };
@@ -192,7 +196,8 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     if (i >= TOUR_STEPS.length) { end('done'); return; }
     const my = ++token;
     index = i;
-    const step = TOUR_STEPS[i];
+    const base = TOUR_STEPS[i];
+    const step = base.phone && window.matchMedia('(max-width: 767.98px)').matches ? { ...base, ...base.phone } : base;
     writeTourState(`step:${i}`);
     // the inbox remembers the visitor's filters (Unread, Mine, a channel…), which would leave only a few conversations
     // in the list: open it on All. The inbox reads them when it mounts, so this runs before navigating.
@@ -203,7 +208,7 @@ export function createTour(o: { navigate: (path: string) => void; currentPath: (
     await until(() => o.currentPath() === path, 4000);
     if (my !== token || !running) return;
     if (step.click) {
-      const target = await waitFor(step.click, 4000);
+      const target = await waitFor(step.click, 4000, false);
       if (my !== token || !running) return;
       (target as HTMLElement | null)?.click();
     }

@@ -55,7 +55,7 @@ export default function NewSequencePage() {
           </div>
         </form>
       </Card>
-      <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3 flex items-center justify-between gap-3">
+      <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 px-4 py-3 flex flex-col items-start sm:flex-row sm:items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-gray-900">Not sure where to start?</p>
           <p className="text-xs text-gray-500">Pick a ready-made flow: connect, follow up, rotate senders or nurture. You can change every step afterwards.</p>

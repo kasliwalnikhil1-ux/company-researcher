@@ -7,7 +7,7 @@ import { Button } from '@/components/outreach/ui';
 import { parseError } from '@/lib/outreach/api';
 import { PRESETS, fmtRange, isPresetKey, matchPreset, presetRange, useDeleteRange, useSaveRange, useSavedRanges, validRange, type DateRange, type SavedRange } from '@/lib/outreach/reports';
 
-const dateInput = 'px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500';
+const dateInput = 'min-w-0 flex-1 sm:flex-none px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500';
 
 function usePopover() {
   const [open, setOpen] = useState(false);
@@ -57,8 +57,8 @@ export default function RangePicker({ value, onChange, timezone, workspaceId, on
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="group" aria-label="Date range">
+    <div className="flex flex-wrap items-center gap-2 min-w-0 max-w-full">
+      <div className="inline-flex max-w-full overflow-x-auto [scrollbar-width:none] rounded-lg border border-gray-200 bg-white p-0.5" role="group" aria-label="Date range">
         {PRESETS.map((p) => (
           <button key={p.key} type="button" aria-pressed={!showCustom && active === p.key} onClick={() => { setCustom(false); onChange(presetRange(p.key, timezone)); }}
             className={cn('px-3 py-1.5 text-sm font-medium rounded-md whitespace-nowrap transition-colors', !showCustom && active === p.key ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{p.label}</button>
@@ -68,7 +68,7 @@ export default function RangePicker({ value, onChange, timezone, workspaceId, on
       </div>
 
       {showCustom ? (
-        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); if (!draftError) onChange(draft); }}>
+        <form className="flex flex-wrap items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); if (!draftError) onChange(draft); }}>
           <input type="date" aria-label="From" className={dateInput} value={draft.from} max={draft.to || undefined} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
           <span className="text-gray-400 text-sm">to</span>
           <input type="date" aria-label="To" className={dateInput} value={draft.to} min={draft.from || undefined} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
@@ -81,7 +81,7 @@ export default function RangePicker({ value, onChange, timezone, workspaceId, on
         <div className="relative" ref={pop.ref}>
           <Button size="sm" variant="ghost" onClick={() => pop.setOpen(!pop.open)} aria-expanded={pop.open} aria-haspopup="dialog"><Bookmark className="w-3.5 h-3.5" /> Saved ranges</Button>
           {pop.open && (
-            <div role="dialog" aria-label="Saved ranges" className="absolute z-40 mt-1 left-0 w-80 rounded-xl border border-gray-200 bg-white shadow-xl p-3">
+            <div role="dialog" aria-label="Saved ranges" className="absolute z-40 mt-1 left-0 w-[min(20rem,calc(100vw-3rem))] rounded-xl border border-gray-200 bg-white shadow-xl p-3">
               {saved.isLoading ? <div className="text-sm text-gray-400 py-2">Loading…</div> : saved.isError ? <div className="text-sm text-red-600 py-2">{(saved.error as Error).message}</div> : !saved.data?.length ? (
                 <p className="text-sm text-gray-500 py-1">No saved ranges yet. Save the range you are looking at to come back to it in one click.</p>
               ) : (

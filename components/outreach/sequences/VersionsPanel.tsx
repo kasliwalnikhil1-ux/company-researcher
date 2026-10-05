@@ -118,7 +118,7 @@ export default function VersionsPanel({ id, onRestored }: { id: string; onRestor
                 <tr key={v.version} className="hover:bg-gray-50">
                   <Td><span className="font-medium text-gray-900">v{v.version}</span>{isHead && <Badge tone="indigo" className="ml-2">live</Badge>}</Td>
                   <Td className="whitespace-nowrap">{fmtDate(v.created_at)}</Td>
-                  <Td className="text-gray-600">{who(v.created_by)}</Td>
+                  <Td className="text-gray-600 whitespace-nowrap">{who(v.created_by)}</Td>
                   <Td className="max-w-[16rem]">
                     {u?.note ? <span className="block text-gray-700 truncate" title={u.note}>{u.note}</span> : <span className="text-gray-400">—</span>}
                     {u?.publish_mode && <span className="block text-[11px] text-gray-500">{u.publish_mode === 'new_only' ? 'Published for new leads only' : 'Published for everyone not yet at the changed steps'}</span>}

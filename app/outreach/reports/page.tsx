@@ -89,16 +89,16 @@ function ReportsPage() {
               </select>
             </label>
           )}
-          <span className="inline-flex items-center gap-1.5 text-xs text-gray-500"><Globe className="w-3.5 h-3.5" /> Numbers are in {timezone} time.
-            {isManager && <Link href="/outreach/settings/workspace" className="underline underline-offset-2 hover:text-gray-900">Change timezone</Link>}
+          <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-500"><Globe className="w-3.5 h-3.5" /> Numbers are in {timezone} time.
+            {isManager && <Link href="/outreach/settings/workspace" className="underline underline-offset-2 hover:text-gray-900 whitespace-nowrap">Change timezone</Link>}
           </span>
         </div>
       </div>
 
-      <div role="tablist" aria-label="Report" className="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
+      <div role="tablist" aria-label="Report" className="flex gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none] shadow-[inset_0_-1px_0_theme(colors.gray.200)] mb-6">
         {tabs.map((t) => (
           <button key={t.key} role="tab" type="button" aria-selected={tab === t.key} onClick={() => setParams({ tab: t.key === 'overview' ? null : t.key })}
-            className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors', tab === t.key ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>{t.label}</button>
+            className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors', tab === t.key ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>{t.label}</button>
         ))}
       </div>
 

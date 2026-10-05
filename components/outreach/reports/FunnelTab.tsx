@@ -6,7 +6,7 @@ import { EmptyState, Select } from '@/components/outreach/ui';
 import { useLists, useSenders, useSequences, useTags } from '@/lib/outreach/queries';
 import { FUNNEL_LABELS, csvFileName, downloadCsv, fmtRange, useReportFunnel, type FunnelFilters, type FunnelStage } from '@/lib/outreach/reports';
 import { ChartSkeleton, ExportButton, MetricLabel, Refreshing, RetryError, Section } from './primitives';
-import { FunnelBars } from './charts';
+import { FUNNEL_GRID, FUNNEL_NUMS, FunnelBars } from './charts';
 import type { TabProps } from './OverviewTab';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
@@ -47,11 +47,9 @@ export default function FunnelTab({ ws, client, range }: TabProps) {
                 description={filtered ? 'Clear a filter or pick a longer range. The funnel only counts leads whose enrolment date falls inside the range.' : 'Pick a longer range. The funnel only counts leads whose enrolment date falls inside the range.'} />
             ) : (
               <>
-                <div className="grid grid-cols-[150px_1fr] gap-4 mb-2">
-                  <span />
-                  <div className="flex items-center gap-3"><span className="flex-1" />
-                    <div className="w-[230px] grid grid-cols-[70px_80px_80px] text-right text-[11px] font-semibold uppercase tracking-wide text-gray-500"><span>Leads</span><span>Of enrolled</span><span>Of previous</span></div>
-                  </div>
+                <div className={`${FUNNEL_GRID} mb-2`}>
+                  <span className="sm:col-span-2" />
+                  <div className={`${FUNNEL_NUMS} text-[11px] font-semibold uppercase tracking-wide text-gray-500 leading-tight`}><span>Leads</span><span>Of enrolled</span><span>Of previous</span></div>
                 </div>
                 <FunnelBars stages={q.data.stages} />
               </>

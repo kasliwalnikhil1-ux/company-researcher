@@ -38,7 +38,7 @@ function Placeholder() {
 }
 
 function SimMenu() {
-  const { mode, setMode, skipDay, day, tour } = useDemo();
+  const { mode, setMode, skipDay, day } = useDemo();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -71,12 +71,6 @@ function SimMenu() {
           <button role="menuitem" type="button" onClick={() => { skipDay(); setOpen(false); }} className="w-full flex items-center gap-2 px-3 py-2.5 sm:py-2 text-sm hover:bg-gray-50">
             <SkipForward className="w-4 h-4" /> Skip a day
           </button>
-          <div className="sm:hidden">
-            <div className="border-t border-gray-100 my-1" />
-            <button role="menuitem" type="button" onClick={() => { setOpen(false); tour.start(); }} className="w-full flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-gray-50">
-              <RotateCcw className="w-4 h-4" /> Restart tour
-            </button>
-          </div>
         </div>
       )}
     </div>
@@ -93,8 +87,9 @@ export default function DemoBar() {
         <div className="hidden md:block w-px h-5 bg-white/20" />
         <SimMenu />
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
-          <button type="button" onClick={() => tour.start()} className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white/10 whitespace-nowrap" data-demo-restart-tour>
-            <RotateCcw className="w-3.5 h-3.5" /> Restart tour
+          {/* phones: the icon only (the bar has no room for the words) */}
+          <button type="button" onClick={() => tour.start()} aria-label="Restart tour" title="Restart tour" className="flex items-center gap-1.5 p-2 sm:px-2 sm:py-1 rounded-md hover:bg-white/10 whitespace-nowrap" data-demo-restart-tour>
+            <RotateCcw className="w-4 h-4 sm:w-3.5 sm:h-3.5" /> <span className="hidden sm:inline">Restart tour</span>
           </button>
           <button type="button" onClick={cta} className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-indigo-500 hover:bg-indigo-400 font-semibold whitespace-nowrap" data-demo-cta>
             <span className="hidden sm:inline">{ctaLabel}</span><span className="sm:hidden">Start</span> <ArrowRight className="w-3.5 h-3.5" />

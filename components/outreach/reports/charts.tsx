@@ -149,6 +149,10 @@ export function Sparkline({ data, dataKey, label, color = '#4f46e5', height = 44
  * Horizontal funnel: one bar per stage, scaled to the enrolled cohort, with the median time between stages.
  * The Invited → Meeting booked rows sit in one nested list (`data-tour="funnel-path"`) so the product tour can highlight them together.
  */
+/** FunnelBars' columns, shared with the header row above it (FunnelTab). */
+export const FUNNEL_GRID = 'grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[150px_minmax(0,1fr)_230px] gap-x-4';
+export const FUNNEL_NUMS = 'w-[196px] sm:w-auto grid grid-cols-[52px_72px_72px] sm:grid-cols-[70px_80px_80px] text-right';
+
 export function FunnelBars({ stages }: { stages: FunnelStage[] }) {
   const top = stages[0]?.count ?? 0;
   const from = stages.findIndex((s) => s.stage === 'invited');
@@ -159,8 +163,8 @@ export function FunnelBars({ stages }: { stages: FunnelStage[] }) {
     if (i === 0) return null;
     const median = stages[i].median_hours_from_previous;
     return (
-      <div className="grid grid-cols-[150px_1fr] gap-4 items-center h-7">
-        <span />
+      <div className="grid sm:grid-cols-[150px_1fr] gap-4 items-center min-h-7 py-1 sm:py-0">
+        <span className="hidden sm:block" />
         <span className="flex items-center gap-2 text-xs text-gray-500 pl-1">
           <span className="w-px h-4 bg-gray-200" aria-hidden />
           {median !== null ? <>Median {fmtHours(median)} after {FUNNEL_LABELS[stages[i - 1].stage].toLowerCase()}</> : <span className="text-gray-300">No timing yet</span>}
@@ -172,17 +176,16 @@ export function FunnelBars({ stages }: { stages: FunnelStage[] }) {
     const s = stages[i];
     const width = top > 0 ? Math.max((s.count / top) * 100, s.count > 0 ? 0.75 : 0) : 0;
     return (
-      <div className="grid grid-cols-[150px_1fr] gap-4 items-center" data-tour={`funnel-${s.stage}`}>
-        <div className="text-sm font-medium text-gray-900">{FUNNEL_LABELS[s.stage]}</div>
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="flex-1 h-6 rounded-r bg-gray-50 min-w-0">
-            <div className="h-6 rounded-r" style={{ width: `${width}%`, background: i === 0 ? ACCENT_SOFT : ACCENT, border: i === 0 ? `1px solid ${ACCENT}` : undefined }} />
-          </div>
-          <div className="w-[230px] flex-shrink-0 grid grid-cols-[70px_80px_80px] text-right items-baseline">
-            <span className="text-sm font-semibold text-gray-900 tabular-nums">{fmtInt(s.count)}</span>
-            <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_enrolled)}</span>
-            <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_previous)}</span>
-          </div>
+      // Phones: label and numbers on one line, the bar full width under them. Wider: label · bar · numbers.
+      <div className={`${FUNNEL_GRID} gap-y-1.5 items-center`} data-tour={`funnel-${s.stage}`}>
+        <div className="text-sm font-medium text-gray-900 min-w-0 truncate">{FUNNEL_LABELS[s.stage]}</div>
+        <div className="order-3 sm:order-none col-span-2 sm:col-span-1 h-6 rounded-r bg-gray-50 min-w-0">
+          <div className="h-6 rounded-r" style={{ width: `${width}%`, background: i === 0 ? ACCENT_SOFT : ACCENT, border: i === 0 ? `1px solid ${ACCENT}` : undefined }} />
+        </div>
+        <div className={`${FUNNEL_NUMS} items-baseline`}>
+          <span className="text-sm font-semibold text-gray-900 tabular-nums">{fmtInt(s.count)}</span>
+          <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_enrolled)}</span>
+          <span className="text-xs text-gray-600 tabular-nums">{i === 0 ? '' : fmtRate(s.pct_of_previous)}</span>
         </div>
       </div>
     );

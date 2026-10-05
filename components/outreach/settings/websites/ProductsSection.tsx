@@ -82,7 +82,7 @@ export default function ProductsCard(p: SectionProps) {
         <SettingRow title="“Add to cart” button"
           description={cartStore ? `Adds the product to the cart of ${hostOf(cartStore.catalogue?.store ?? cartStore.catalogue?.url ?? cartStore.url)} without leaving the chat.` : 'Only for a Shopify catalogue whose store domain is one of this website’s allowed domains (General tab).'}
           control={<Switch checked={draft.add_to_cart && !!cartStore} onChange={(v) => set({ add_to_cart: v })} label="Add to cart button" disabled={!p.canEdit || !cartStore} />} />
-        <SettingRow title="Add tracking to product links" description={<>Adds <code>utm_source=growthxai&amp;utm_medium=chat&amp;utm_campaign={p.inbox.name}</code> to the View link.</>} control={<Switch checked={draft.utm} onChange={(v) => set({ utm: v })} label="Tracking on product links" disabled={!p.canEdit} />} />
+        <SettingRow title="Add tracking to product links" description={<>Adds <code className="break-all">utm_source=growthxai&amp;utm_medium=chat&amp;utm_campaign={p.inbox.name}</code> to the View link.</>} control={<Switch checked={draft.utm} onChange={(v) => set({ utm: v })} label="Tracking on product links" disabled={!p.canEdit} />} />
       </div>
       <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset}
         onSave={() => save({ settings: { ai: { products: { ...draft, enabled: draft.enabled && canEnable, add_to_cart: draft.add_to_cart && !!cartStore } } } })} />

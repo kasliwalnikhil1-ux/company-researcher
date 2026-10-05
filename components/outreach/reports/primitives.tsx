@@ -55,11 +55,11 @@ export function ChangeChip({ change, goodWhenUp = true, versus }: { change: Chan
   const Icon = change.direction === 'up' ? ArrowUpRight : change.direction === 'down' ? ArrowDownRight : Minus;
   const word = change.direction === 'up' ? 'Up' : change.direction === 'down' ? 'Down' : 'No change';
   return (
-    <span className="inline-flex items-center gap-1 text-xs text-gray-500">
-      <span className={cn('inline-flex items-center gap-0.5 font-medium tabular-nums', good === null ? 'text-gray-500' : good ? 'text-green-700' : 'text-red-700')}>
+    <span className="inline-flex flex-wrap items-center gap-x-1 text-xs text-gray-500">
+      <span className={cn('inline-flex items-center gap-0.5 font-medium tabular-nums whitespace-nowrap', good === null ? 'text-gray-500' : good ? 'text-green-700' : 'text-red-700')}>
         <Icon className="w-3.5 h-3.5" aria-hidden /><span className="sr-only">{word}</span>{change.text}
       </span>
-      {versus && <span className="text-gray-400">{versus}</span>}
+      {versus && <span className="text-gray-400 whitespace-nowrap">{versus}</span>}
     </span>
   );
 }

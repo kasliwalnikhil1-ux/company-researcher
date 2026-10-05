@@ -39,9 +39,9 @@ export default function KnowledgeSection({ sequenceId, ws, knowledge, faqs, canE
         {knowledge.map((k) => {
           const Icon = KIND_ICON[k.kind] ?? FileText;
           return (
-            <span key={k.id} className="inline-flex items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-full border border-gray-200 bg-gray-50 text-sm text-gray-800" title={k.status === 'error' ? k.error ?? 'Failed' : k.url ?? k.title}>
-              <Icon className="w-3.5 h-3.5 text-gray-500" aria-hidden="true" />
-              <span className="max-w-[16rem] truncate">{chipLabel(k)}</span>
+            <span key={k.id} className="inline-flex max-w-full items-center gap-1.5 pl-2.5 pr-1 py-1 rounded-full border border-gray-200 bg-gray-50 text-sm text-gray-800" title={k.status === 'error' ? k.error ?? 'Failed' : k.url ?? k.title}>
+              <Icon className="w-3.5 h-3.5 flex-shrink-0 text-gray-500" aria-hidden="true" />
+              <span className="min-w-0 max-w-[16rem] truncate">{chipLabel(k)}</span>
               <Badge tone={STATUS_TONE[k.status] ?? 'gray'}>{KNOWLEDGE_STATUS_LABEL[k.status] ?? k.status}</Badge>
               {canEdit && <button type="button" aria-label={`Detach ${k.title}`} disabled={detach.isPending} onClick={() => detach.mutate(k.id, { onError: fail })} className="p-0.5 rounded-full text-gray-400 hover:text-red-600 hover:bg-red-50"><X className="w-3.5 h-3.5" /></button>}
             </span>
