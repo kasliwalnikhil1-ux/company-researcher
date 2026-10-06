@@ -37,7 +37,7 @@ function ReadActions({ row, api, approve, onEdit }: Pick<LineCardProps, 'row' | 
       <Button size="sm" onClick={approve}><Check className="w-3.5 h-3.5" /> Approve</Button>
       <Button size="sm" variant="secondary" onClick={onEdit}><Pencil className="w-3.5 h-3.5" /> Edit</Button>
       <Button size="sm" variant="secondary" onClick={() => void api.act(row, () => reviewLines([row.id], 'regenerate'), 'The line is being written again. It comes back here when it is ready.')} title="Write a new line for this lead"><RefreshCw className="w-3.5 h-3.5" /> Regenerate</Button>
-      <Button size="sm" variant="ghost" onClick={() => api.defer(row, 'Line skipped', () => reviewLines([row.id], 'skip'))} title={lineFields(row) ? 'The fallback written in the message is used for this lead. A Condition step reads every field as empty.' : 'The fallback written in the message is used for this lead'}><SkipForward className="w-3.5 h-3.5" /> Skip</Button>
+      <Button size="sm" variant="ghost" onClick={() => api.defer(row, 'Personalization skipped', () => reviewLines([row.id], 'skip'))} title={lineFields(row) ? 'The fallback written in the message is used for this lead. A Condition step reads every field as empty.' : 'The fallback written in the message is used for this lead'}><SkipForward className="w-3.5 h-3.5" /> Skip</Button>
     </>
   );
 }
@@ -61,19 +61,19 @@ function TextLineCard({ row, hidden, api, checked, onCheck, edit: anyEdit, onEdi
   const maxChars = Number(metaValue(row, 'max_chars'));
   const name = row.who_name ?? 'this lead';
 
-  const approve = () => void api.act(row, () => reviewLines([row.id], 'approve'), (n) => (n > 0 ? 'Line approved.' : HANDLED));
+  const approve = () => void api.act(row, () => reviewLines([row.id], 'approve'), (n) => (n > 0 ? 'Personalization approved.' : HANDLED));
   const save = () => {
     const text = (edit ?? '').trim();
     if (!text) return;
     if (text === line) { onEdit(undefined); approve(); return; }
-    void api.act(row, () => reviewLines([row.id], 'edit', text), (n) => (n > 0 ? 'Line saved and approved.' : HANDLED)).then((ok) => { if (ok) onEdit(undefined); });
+    void api.act(row, () => reviewLines([row.id], 'edit', text), (n) => (n > 0 ? 'Personalization saved and approved.' : HANDLED)).then((ok) => { if (ok) onEdit(undefined); });
   };
 
   return (
     <NeedCard row={row} hidden={hidden}
       lead={api.canWrite ? <input type="checkbox" checked={checked} onChange={onCheck} aria-label={`Select the line for ${name}`} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /> : undefined}
       ai={editing ? (
-        <Textarea label={`Line for ${name}`} value={edit} onChange={(e) => onEdit(e.target.value)} rows={2} autoFocus className="min-h-[60px]"
+        <Textarea label={`Personalization for ${name}`} value={edit} onChange={(e) => onEdit(e.target.value)} rows={2} autoFocus className="min-h-[60px]"
           counter={Number.isFinite(maxChars) && maxChars > 0 ? { max: maxChars, value: (edit ?? '').length } : undefined}
           hint="Ctrl+Enter saves and approves. Esc discards the edit."
           onKeyDown={(e) => {
@@ -106,7 +106,7 @@ function FieldsLineCard({ row, hidden, api, checked, onCheck, edit: anyEdit, onE
   const facts = factLines(metaValue(row, 'facts'));
   const name = row.who_name ?? 'this lead';
 
-  const approve = () => void api.act(row, () => reviewLines([row.id], 'approve'), (n) => (n > 0 ? 'Line approved.' : HANDLED));
+  const approve = () => void api.act(row, () => reviewLines([row.id], 'approve'), (n) => (n > 0 ? 'Personalization approved.' : HANDLED));
   const discard = () => { setTried(false); onEdit(undefined); };
   const save = () => {
     if (!edit) return;

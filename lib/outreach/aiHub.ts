@@ -55,7 +55,7 @@ export const AI_FEATURES: AiFeature[] = ['reply', 'line', 'draft', 'website', 'p
 /** The feature's name (cards, filters, settings). */
 export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'AI replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website Agents', profile: 'Profile drafts' };
 /** One output of the feature (the Feature column of Activity, the type on a card). */
-export const FEATURE_ONE: Record<AiFeature, string> = { reply: 'AI reply', line: 'Line', draft: 'Step draft', website: 'Website', profile: 'Profile' };
+export const FEATURE_ONE: Record<AiFeature, string> = { reply: 'AI reply', line: 'Personalization', draft: 'Step draft', website: 'Website', profile: 'Profile' };
 export const FEATURE_HELP: Record<AiFeature, string> = {
   reply: 'Answers prospects who reply to a sequence.',
   line: 'One AI-written line per lead, used in a message as {{ai.key|fallback}}.',
@@ -108,7 +108,7 @@ export function websiteModeText(w: { ai_enabled: boolean; mode: string | null | 
 export type NeedsYouType = 'reply' | 'line' | 'draft' | 'website' | 'question' | 'profile';
 export const NEEDS_YOU_TYPES: NeedsYouType[] = ['reply', 'line', 'draft', 'website', 'question', 'profile'];
 export const NEEDS_YOU_TYPE_LABEL: Record<NeedsYouType, string> = { reply: 'AI replies', line: 'Personalizations', draft: 'Step drafts', website: 'Website', question: 'Questions', profile: 'Profile' };
-export const NEEDS_YOU_TYPE_ONE: Record<NeedsYouType, string> = { reply: 'AI reply', line: 'Line', draft: 'Step draft', website: 'Website', question: 'Question', profile: 'Profile' };
+export const NEEDS_YOU_TYPE_ONE: Record<NeedsYouType, string> = { reply: 'AI reply', line: 'Personalization', draft: 'Step draft', website: 'Website', question: 'Question', profile: 'Profile' };
 export const isNeedsYouType = (v: unknown): v is NeedsYouType => typeof v === 'string' && (NEEDS_YOU_TYPES as string[]).includes(v);
 export const isAiFeature = (v: unknown): v is AiFeature => typeof v === 'string' && (AI_FEATURES as string[]).includes(v);
 

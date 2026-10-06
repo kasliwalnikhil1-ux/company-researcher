@@ -24,7 +24,7 @@ type Row = Record<string, any>;
 const CARD_TYPES = ["reply", "line", "draft", "website", "question", "profile"] as const;
 const FEATURES = ["reply", "line", "draft", "website", "profile"] as const;
 /** One output of a feature, as the app's cards and the Activity table name it. */
-const ONE_LABEL: Record<string, string> = { reply: "Reply", line: "Line", draft: "Step draft", website: "Website", question: "Question", profile: "Profile" };
+const ONE_LABEL: Record<string, string> = { reply: "Reply", line: "Personalization", draft: "Step draft", website: "Website", question: "Question", profile: "Profile" };
 
 // Why a reply waits: the reply engine's own labels (lib/outreach/aiReplies.ts ESCALATION_LABEL / GATE_LABEL, the words the
 // inbox shows). The connector had no copy of them before this file.
