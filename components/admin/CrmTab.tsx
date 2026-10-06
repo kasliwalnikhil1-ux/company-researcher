@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
-import { Badge, Button, Table, Th, Td, ErrorBox, fmtDate } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, Table, Th, Td, ErrorBox, fmtDate } from '@/components/outreach/ui';
 import { adminApi } from '@/lib/platform/admin';
 import { AccountPicker, ConfirmModal, errMsg, fmtNum, useAdminToast } from './shared';
 
@@ -46,8 +46,13 @@ export default function CrmTab({ onOpenUser }: { onOpenUser: (id: string) => voi
           {rows.map((m) => (
             <tr key={m.user_id} className="hover:bg-gray-50">
               <Td>
-                <button type="button" className="font-medium text-gray-900 hover:underline" onClick={() => onOpenUser(m.user_id)}>{m.display_name}</button>
-                <div className="text-xs text-gray-400">{m.email ?? m.user_id}</div>
+                <div className="flex items-center gap-2.5">
+                  <Avatar name={m.display_name} size={8} />
+                  <div className="min-w-0">
+                    <button type="button" className="font-medium text-gray-900 hover:underline" onClick={() => onOpenUser(m.user_id)}>{m.display_name}</button>
+                    <div className="text-xs text-gray-400">{m.email ?? m.user_id}</div>
+                  </div>
+                </div>
               </Td>
               <Td><Badge tone={m.is_active ? 'green' : 'gray'}>{m.is_active ? 'Active' : 'Deactivated'}</Badge></Td>
               <Td className="text-right tabular-nums">{fmtNum(m.deals_owned)}</Td>

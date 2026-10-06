@@ -54,7 +54,7 @@ function ActivityView() {
 
 export default function AiActivityPage() {
   return (
-    <HubFrame subtitle="Activity: what the AI wrote, across Replies, Personalized lines, Step drafts, the Website agent and Profile drafts.">
+    <HubFrame>
       <Suspense fallback={<PageLoader />}>
         <ActivityView />
       </Suspense>

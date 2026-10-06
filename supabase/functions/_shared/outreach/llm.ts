@@ -41,6 +41,10 @@ export class LlmError extends Error {
 }
 export function isKeyInvalid(e: unknown): boolean { return (e as any)?.code === "E_AI_KEY_INVALID" || /^E_AI_KEY_INVALID\b/.test(String((e as any)?.message ?? "")); }
 
+// What people see when an AI call fails. Never the provider's name, status or raw message: those go to the logs only.
+export const AI_BUSY_MESSAGE = "AI is busy right now. Please try again later.";
+export const AI_KEY_MESSAGE = "Your AI key didn't work. Check it in AI → Setup.";
+
 // ---------------------------------------------------------------------------
 // Per-workspace config, cached for 60 s in module memory
 // ---------------------------------------------------------------------------
@@ -241,14 +245,21 @@ export async function llmCallDetailed(o: LlmCallOpts): Promise<LlmResult> {
     if (authFailure(e)) {
       if (cfg.own) {
         if (o.workspaceId) cache.delete(o.workspaceId);   // pick up a corrected key at once
-        log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, workspace_id: o.workspaceId, error: "workspace key rejected", status: e.status });
-        throw new LlmError("E_AI_KEY_INVALID", `${NAMES[cfg.provider]} rejected this workspace's API key: ${e.providerMessage}`, e.status, cfg.provider);
+        log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, workspace_id: o.workspaceId, error: "workspace key rejected", status: e.status, detail: e.providerMessage });
+        throw new LlmError("E_AI_KEY_INVALID", AI_KEY_MESSAGE, e.status, cfg.provider);
       }
-      throw new LlmError("E_AI_UNAVAILABLE", `the platform AI key was rejected (${e.status})`, e.status, cfg.provider);
+      log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, error: "platform key rejected", status: e.status, detail: e.providerMessage });
+      throw new LlmError("E_AI_UNAVAILABLE", AI_BUSY_MESSAGE, e.status, cfg.provider);
     }
-    throw e;
+    if (e instanceof LlmError) throw e;
+    // Quota, rate limits, outages, refusals, timeouts: log the provider's words, show a plain message.
+    log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, workspace_id: o.workspaceId, error: String((e as any)?.message ?? e).slice(0, 500), status: (e as any)?.status ?? null });
+    throw new LlmError("E_AI_BUSY", AI_BUSY_MESSAGE, (e as any)?.status ?? null, cfg.provider);
   }
-  if (!text) throw new Error(`Empty ${NAMES[cfg.provider]} response (finish_reason=${finish})`);
+  if (!text) {
+    log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, error: "empty response", finish_reason: finish });
+    throw new LlmError("E_AI_BUSY", AI_BUSY_MESSAGE, null, cfg.provider);
+  }
 
   const [ph, rh] = await Promise.all([sha256Hex(o.system + "\n" + o.user), sha256Hex(text)]);
   try {
@@ -276,9 +287,13 @@ export async function llmTestKey(input: { provider: LlmProvider; model?: string 
   } catch (e) {
     if (e instanceof HttpFail && e.status !== 429 && e.status < 500 || authFailure(e) || (e instanceof HttpFail && /insufficient_quota|exceeded your current quota/i.test(e.message))) {
       const f = e as HttpFail;
-      throw new LlmError("E_AI_KEY_INVALID", `${NAMES[cfg.provider]} did not accept this key${authFailure(e) ? "" : ` with model ${cfg.model}`}: ${f.providerMessage}`, f.status, cfg.provider);
+      log({ fn: "llm", purpose: "test_key", provider: cfg.provider, model: cfg.model, status: f.status, detail: f.providerMessage });
+      throw new LlmError("E_AI_KEY_INVALID", authFailure(e) ? "This key didn't work. Check it and try again." : "This key didn't work with that model. Check the key and model, then try again.", f.status, cfg.provider);
     }
-    if (e instanceof HttpFail || (e as any)?.name === "TimeoutError" || e instanceof TypeError) throw new LlmError("E_AI_UNAVAILABLE", `could not reach ${NAMES[cfg.provider]} to check the key. Try again in a minute. (${String((e as any)?.message ?? e).slice(0, 200)})`, (e as any)?.status ?? null, cfg.provider);
+    if (e instanceof HttpFail || (e as any)?.name === "TimeoutError" || e instanceof TypeError) {
+      log({ fn: "llm", purpose: "test_key", provider: cfg.provider, error: String((e as any)?.message ?? e).slice(0, 300) });
+      throw new LlmError("E_AI_UNAVAILABLE", "Couldn't check the key right now. Try again in a minute.", (e as any)?.status ?? null, cfg.provider);
+    }
     // "declined" / "no candidates" on a harmless prompt still proves the key was accepted.
   }
   return { provider: cfg.provider, model: cfg.model };

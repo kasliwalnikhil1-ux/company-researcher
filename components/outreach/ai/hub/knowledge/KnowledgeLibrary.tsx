@@ -40,10 +40,10 @@ export default function KnowledgeLibrary({ ws, view }: { ws: string; view: Knowl
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <nav aria-label="Knowledge views" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+        <nav aria-label="Knowledge views" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {VIEWS.map((v) => (
             <Link key={v.key} href={hubHref.knowledge(v.key)} aria-current={view === v.key ? 'page' : undefined}
-              className={cn('px-3 py-1 text-sm rounded-md', view === v.key ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900')}>{v.label}</Link>
+              className={cn('px-3 py-1 text-sm rounded-md', view === v.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{v.label}</Link>
           ))}
         </nav>
         {canEdit && (

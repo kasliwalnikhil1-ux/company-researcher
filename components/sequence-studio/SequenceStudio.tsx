@@ -255,18 +255,20 @@ export default function SequenceStudio({ toolbarSlot }: { toolbarSlot?: HTMLElem
 
         {ui.previewOnly ? null : ui.panels.centerOpen ? (
           <section className="relative flex min-w-0 flex-none flex-col border-r border-gray-200" style={{ width: ui.panels.center }} aria-label="Editor">
-            <div className="flex flex-none items-center gap-0.5 overflow-hidden border-b border-gray-200 px-2" role="tablist" aria-label="Editor tabs">
-              {TABS.map((t) => (
-                <TabButton key={t.id} active={ui.tab === t.id} onClick={() => setUi({ tab: t.id })} className="px-2">
-                  {t.label}
-                </TabButton>
-              ))}
-              <span className="ml-auto" />
-              {ICON_TABS.map(({ id, label, Icon }) => (
-                <TabButton key={id} active={ui.tab === id} onClick={() => setUi({ tab: id })} className="px-2" label={label}>
-                  <Icon className="h-4 w-4" />
-                </TabButton>
-              ))}
+            <div className="flex flex-none items-center gap-0.5 border-b border-gray-200 px-2">
+              <div className="-mb-px flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden [scrollbar-width:none]" role="tablist" aria-label="Editor tabs">
+                {TABS.map((t) => (
+                  <TabButton key={t.id} active={ui.tab === t.id} onClick={() => setUi({ tab: t.id })} className="px-2">
+                    {t.label}
+                  </TabButton>
+                ))}
+                <span className="ml-auto" />
+                {ICON_TABS.map(({ id, label, Icon }) => (
+                  <TabButton key={id} active={ui.tab === id} onClick={() => setUi({ tab: id })} className="px-2" label={label}>
+                    <Icon className="h-4 w-4" />
+                  </TabButton>
+                ))}
+              </div>
               <IconBtn label="Collapse editor" className="h-6 w-6 flex-none" onClick={() => setUi((u) => ({ panels: { ...u.panels, centerOpen: false } }))}>
                 <ChevronLeft className="h-3.5 w-3.5" />
               </IconBtn>

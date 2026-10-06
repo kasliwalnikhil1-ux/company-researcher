@@ -8,6 +8,7 @@ import {
   DEFAULT_LINKEDIN_HANDOVER_RULES,
   buildLinkedinGenerateReplyPrompt,
 } from '@/app/personalization/linkedinGenerateReplyDefault';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 
 /** Auth client (anon key + user token) for verifying user identity */
 function getAuthClient(accessToken: string) {
@@ -157,7 +158,7 @@ Respond according to system instructions.`;
   } catch (err) {
     console.error('[generate-reply] Error:', err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to generate reply' },
+      { error: err instanceof Error ? friendlyErrorText(err.message) : 'Failed to generate reply' },
       { status: 500 }
     );
   }

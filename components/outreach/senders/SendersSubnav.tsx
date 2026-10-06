@@ -14,11 +14,13 @@ const ITEMS = [
 export function SendersSubnav() {
   const pathname = usePathname();
   return (
-    <div className="flex flex-wrap gap-1 border-b border-gray-200 mb-4" role="tablist" aria-label="Senders sections">
-      {ITEMS.map((i) => {
-        const active = i.exact ? pathname === i.href : pathname.startsWith(i.href);
-        return <Link key={i.href} href={i.href} role="tab" aria-selected={active} className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 -mb-px transition-colors', active ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>{i.label}</Link>;
-      })}
+    <div className="border-b border-gray-200 mb-4">
+      <nav className="flex gap-1 -mb-px overflow-x-auto [scrollbar-width:none]" role="tablist" aria-label="Senders sections">
+        {ITEMS.map((i) => {
+          const active = i.exact ? pathname === i.href : pathname.startsWith(i.href);
+          return <Link key={i.href} href={i.href} role="tab" aria-selected={active} className={cn('px-3.5 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors', active ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800')}>{i.label}</Link>;
+        })}
+      </nav>
     </div>
   );
 }

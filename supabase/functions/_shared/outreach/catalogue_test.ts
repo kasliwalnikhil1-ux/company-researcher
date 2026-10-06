@@ -85,6 +85,42 @@ Deno.test("Shopify: a store that blocks /products.json gets the friendly error; 
   assertEquals(busy.requests.length, 3);   // two retries, then the worker tries again on its next run
 });
 
+Deno.test("Shopify: a store that answers 429 to the edge is read through the database, and the sync stays on that route", async () => {
+  const all = Array.from({ length: 300 }, (_, i) => shopifyProduct(i));
+  const f = fakeIo({ "/products.json": () => new Response("", { status: 429 }), "/meta.json": () => new Response("", { status: 429 }), "/cart.js": () => new Response("", { status: 429 }) });
+  const viaDb: string[] = [];
+  f.io.fetchViaDb = (url) => {
+    const u = new URL(url); viaDb.push(u.pathname + u.search);
+    if (u.hostname === "polki.myshopify.com") return Promise.resolve(new Response("", { status: 301, headers: { location: `https://polki.shop${u.pathname}${u.search}` } }));   // pg_net does not follow redirects
+    if (u.pathname === "/meta.json") return Promise.resolve(json({ currency: "INR" }));
+    const page = Number(u.searchParams.get("page"));
+    return Promise.resolve(json({ products: all.slice((page - 1) * 250, page * 250) }));
+  };
+  const r = await syncCatalogue({ provider: "shopify", url: "https://polki.myshopify.com" }, cursor(), f.io, 60_000);
+  assertEquals([r.done, r.complete, r.cursor.seen, r.cursor.via, r.store, r.currency], [true, true, 300, "db", "https://polki.shop", "INR"]);
+  assertEquals(f.requests, ["/products.json?limit=250&page=1"]);   // one edge try; every later request went straight through the database
+  assertEquals(viaDb, ["/products.json?limit=250&page=1", "/products.json?limit=250&page=1", "/meta.json", "/products.json?limit=250&page=2"]);
+  assertEquals(f.got[0].url, "https://polki.shop/products/necklace-0");
+
+  // on the database route a 429 is waited out like on the edge, from the page the sync had reached
+  const slow = fakeIo({});
+  let n = 0;
+  slow.io.fetchViaDb = (url) => { const page = Number(new URL(url).searchParams.get("page")); return Promise.resolve(++n === 1 ? new Response("", { status: 429, headers: { "retry-after": "3" } }) : json({ products: all.slice((page - 1) * 250, page * 250) })); };
+  const r2 = await syncCatalogue({ provider: "shopify", url: "https://polki.shop" }, { ...cursor(), page: 2, seen: 250, via: "db", store: "https://polki.shop", currency: "INR" }, slow.io, 60_000);
+  assertEquals([r2.done, r2.cursor.seen, slow.requests.length, slow.slept()], [true, 300, 0, 3000]);
+
+  // the database is turned away too: the usual retries, then the worker tries again on its next run
+  const both = fakeIo({ "/products.json": () => new Response("", { status: 429 }) });
+  both.io.fetchViaDb = () => Promise.resolve(new Response("", { status: 429 }));
+  const e = await assertRejects(() => syncCatalogue({ provider: "shopify", url: "https://busy.shop" }, cursor(), both.io, 60_000), CatalogueError);
+  assertEquals([e.final, both.requests.length], [false, 3]);
+
+  // an address the database would be sent to is checked like any other, redirects included
+  const evil = fakeIo({ "/products.json": () => new Response("", { status: 429 }) });
+  evil.io.fetchViaDb = () => Promise.resolve(new Response("", { status: 302, headers: { location: "http://169.254.169.254/latest/meta-data" } }));
+  await assertRejects(() => syncCatalogue({ provider: "shopify", url: "https://evil.shop" }, cursor(), evil.io, 60_000), CatalogueError);
+});
+
 Deno.test("Shopify: out of time → the cursor is saved and the next run continues from that page; a *.myshopify.com address becomes the main domain", async () => {
   const all = Array.from({ length: 600 }, (_, i) => shopifyProduct(i));
   const routes = {

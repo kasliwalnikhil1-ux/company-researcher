@@ -1,6 +1,6 @@
 'use client';
 
-// AI → Setup → Replies → Sequences: every sequence with its Replies mode, switchable inline.
+// AI → Setup → AI replies → Sequences: every sequence with its AI replies mode, switchable inline.
 // The switch does what the mode header of a sequence's AI tab does (components/outreach/sequences/ai/ModeHeader.tsx):
 // the same call, the plan gate on Auto, the note after an automatic switch-off and the consent requests that come back.
 import { useState } from 'react';
@@ -20,7 +20,6 @@ import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { STATUS_TONE } from '@/components/outreach/sequences/helpers';
 import { errText } from '@/components/outreach/sequences/ai/shared';
 import { Badge, Button, EmptyState, ErrorBox, Modal, Spinner, Table, Td, Textarea, Th, fmtDate } from '@/components/outreach/ui';
-import { CopyField } from '@/components/outreach/settings/shared';
 import { LinkButton, ModeLegend, NeedsYouLink, plural } from './parts';
 
 type Notify = (m: string, t?: 'success' | 'error') => void;
@@ -45,7 +44,6 @@ function SequenceRow({ ws, s, canEdit, autoLock, notify }: { ws: string; s: HubS
   const invalidate = useInvalidateHub(ws);
   const [noteOpen, setNoteOpen] = useState(false);
   const [note, setNote] = useState('');
-  const [links, setLinks] = useState<Array<{ name: string; link: string }>>([]);
   const mode = replyToHubMode(s.mode);
   const warmup = s.warmup_remaining ?? 0;
 
@@ -65,15 +63,11 @@ function SequenceRow({ ws, s, canEdit, autoLock, notify }: { ws: string; s: HubS
       invalidate();
 
       const applies = st?.applies_to ?? st?.open_conversations;
-      const req = r?.consent?.requested ?? [];
       // one toast: several in a row would replace each other
       notify([
-        next === 'off' ? `Replies are off for ${s.name}.` : `${s.name} is on ${HUB_MODE_LABEL[next]}.`,
+        next === 'off' ? `AI replies are off for ${s.name}.` : `${s.name} is on ${HUB_MODE_LABEL[next]}.`,
         applies != null ? `It applies to the next reply in ${applies} open ${plural(applies, 'conversation')}.` : '',
-        req.length ? `${req.map((x) => x.sender_name ?? 'A sender').join(', ')}: replies stay on Review until the account owner approves Auto (approval requested).` : '',
       ].filter(Boolean).join(' '));
-      const missing = req.filter((x) => x.link && !x.emailed).map((x) => ({ name: x.sender_name ?? 'Sender', link: x.link! }));
-      if (missing.length) setLinks(missing);
     } catch (e) { notify(errText(e), 'error'); }
   }
 
@@ -93,7 +87,7 @@ function SequenceRow({ ws, s, canEdit, autoLock, notify }: { ws: string; s: HubS
       <Td className="align-top"><Badge tone={STATUS_TONE[s.status] ?? 'gray'} className="capitalize">{s.status}</Badge></Td>
       <Td className="align-top">
         <ModeSwitch compact value={mode} onChange={pick} lines={MODE_LINE.reply} locked={autoLock ? { auto: autoLock } : undefined}
-          disabled={!canEdit} busy={set.isPending} label={`Replies mode for ${s.name}`} />
+          disabled={!canEdit} busy={set.isPending} label={`AI replies mode for ${s.name}`} />
         {mode === 'auto' && warmup > 0 && <RowNote icon={Clock} tone="indigo">Warm-up: the first replies wait 30 min so you can check them ({warmup} left).</RowNote>}
         {status && <RowNote icon={Info}>{status}</RowNote>}
         {s.downgraded_at && (s.downgrade_reason === 'plan'
@@ -105,12 +99,6 @@ function SequenceRow({ ws, s, canEdit, autoLock, notify }: { ws: string; s: HubS
           <div className="space-y-3">
             <p className="text-sm text-gray-700">Auto was switched off automatically for {s.name}{s.downgrade_reason ? ` (${s.downgrade_reason})` : ''}. Say in a line why it can go back on. The note is kept in the audit log.</p>
             <Textarea label="Note" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Fixed the pricing facts, checked 10 drafts" className="min-h-0" />
-          </div>
-        </Modal>
-        <Modal open={links.length > 0} onClose={() => setLinks([])} title="Send these approval links yourself" size="md" footer={<Button onClick={() => setLinks([])}>Done</Button>}>
-          <div className="space-y-3">
-            <p className="text-sm text-gray-700">These account owners have no email on file, so nothing was sent. Pass each link on. It works for 7 days.</p>
-            {links.map((l) => <CopyField key={l.link} label={l.name} value={l.link} />)}
           </div>
         </Modal>
       </Td>
@@ -132,7 +120,7 @@ export default function RepliesSequences({ ws, notify }: { ws: string; notify: N
     return (
       <div className="bg-white border border-gray-200 rounded-xl">
         <EmptyState icon={<GitBranch className="w-6 h-6" />} title="No sequences yet"
-          description="Replies are switched on per sequence. Create a sequence first, then pick its mode here or on its AI tab."
+          description="AI replies are switched on per sequence. Create a sequence first, then pick its mode here or on its AI tab."
           action={<LinkButton href="/outreach/sequences">Open sequences</LinkButton>} />
       </div>
     );

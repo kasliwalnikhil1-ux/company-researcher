@@ -153,7 +153,7 @@ export function GenerateLinesModal({ open, onClose, workspaceId, isManager, sele
           <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 mb-2" role="radiogroup" aria-label="Where the leads come from">
             {([['selection', `Current selection${selection.length ? ` (${selection.length.toLocaleString()})` : ''}`], ['list', 'A list'], ['tag', 'A tag']] as const).map(([id, label]) => (
               <button key={id} type="button" role="radio" aria-checked={source === id} disabled={id === 'selection' && selection.length === 0} onClick={() => setSource(id)}
-                className={cn('px-3 py-1.5 text-sm rounded-md disabled:opacity-40 disabled:cursor-not-allowed', source === id ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>
+                className={cn('px-3 py-1.5 text-sm rounded-md disabled:opacity-40 disabled:cursor-not-allowed', source === id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>
             ))}
           </div>
           {source === 'selection' && selection.length === 0 && <p className="text-xs text-gray-500">Select leads on the <Link href="/outreach/leads" className="text-indigo-600 hover:underline">leads page</Link> and choose “Generate lines” to pass them here.</p>}

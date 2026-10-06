@@ -45,7 +45,11 @@ export interface MentionRow {
   chat_id: string; note_id: string; created_at: string; read_at: string | null; unread_count: number; author: string; snippet: string;
   chat: { id: string; provider: Provider; attendee_name: string | null; picture_url: string | null; subject: string | null; lead_name: string | null; company: string | null; lead_picture_url: string | null; last_message_at: string | null; sender_name: string | null };
 }
-export interface NotificationRow { id: string; kind: string; chat_id: string | null; note_id: string | null; title: string; body: string | null; read_at: string | null; created_at: string; access: boolean }
+export interface NotificationRow {
+  id: string; kind: string; chat_id: string | null; note_id: string | null; message_id?: string | null; title: string; body: string | null;
+  /** reply alerts: messages merged into this row (076) */
+  count?: number; data?: Record<string, unknown> | null; read_at: string | null; created_at: string; updated_at?: string; access: boolean;
+}
 export interface NotesBadge { unread_mentions: number; unread_notifications: number }
 export interface NoteSearchHit { note_id: string; chat_id: string; created_at: string; author: string; snippet: string; chat: { id: string; provider: Provider; attendee_name: string | null; picture_url: string | null; lead_name: string | null; company: string | null } }
 export type NotificationKind = 'note_mention' | 'ai_handoff' | 'assigned';
@@ -303,31 +307,34 @@ export function useNoteFileUrl(noteId: string, path: string, auto = false) {
   return { url: q.data ?? null, loading: q.isFetching, error: q.error ? parseError(q.error).message : null, load };
 }
 
-// ---------------------------------------------------------------------------------------------------- notifications realtime (bell + toast)
-export interface IncomingNotification { id: string; kind: string; chat_id: string | null; note_id: string | null; title: string; body: string | null }
+// ---------------------------------------------------------------------------------------------------- notifications realtime (bell + alerts)
+export interface IncomingNotification {
+  id: string; kind: string; chat_id: string | null; note_id: string | null; message_id?: string | null; title: string; body: string | null;
+  workspace_id?: string; data?: Record<string, unknown> | null;
+}
 
 /**
- * Streams the signed-in user's notification rows (RLS: user_id = auth.uid()); each insert refreshes the bell and the
- * badge and is handed to `onNew` for a toast. Mounted once in the outreach Shell.
+ * Streams the signed-in user's notification rows (RLS: user_id = auth.uid()), inserts AND updates (reply alerts merge
+ * into one row per conversation and are read on every device at once). Each event refreshes the bell and is handed to
+ * `onEvent` — the alert engine (lib/outreach/alerts/engine.ts) decides about toast, sound and desktop notification.
+ * Mounted once in the outreach Shell; rows of every workspace arrive (alerts name the workspace).
  */
-export function useNotificationsRealtime(ws: string | null | undefined, userId: string | null | undefined, onNew: (n: IncomingNotification) => void) {
+export function useNotificationsRealtime<R extends { workspace_id?: string }>(ws: string | null | undefined, userId: string | null | undefined, onEvent: (row: R, event: 'INSERT' | 'UPDATE') => void) {
   const qc = useQueryClient();
-  const cb = useRef(onNew);
-  useEffect(() => { cb.current = onNew; }, [onNew]);
+  const cb = useRef(onEvent);
+  useEffect(() => { cb.current = onEvent; }, [onEvent]);
   useEffect(() => {
     if (!ws || !userId) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handle = (event: 'INSERT' | 'UPDATE') => (p: any) => {
+      const row = p?.new as R | undefined;
+      if (!row) return;
+      qc.invalidateQueries({ queryKey: ['outreach', ws, 'notes'] });
+      cb.current(row, event);
+    };
     const ch = db.channel(`outreach-notifications:${userId}`)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'outreach_notifications', filter: `user_id=eq.${userId}` }, (p: any) => {
-        const row = p?.new as (IncomingNotification & { workspace_id?: string }) | undefined;
-        if (!row) return;
-        qc.invalidateQueries({ queryKey: ['outreach', ws, 'notes'] });
-        if (row.workspace_id && row.workspace_id !== ws) return;   // another workspace's mention: the badge there will show it
-        cb.current(row);
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'outreach_notifications', filter: `user_id=eq.${userId}` }, () => {
-        qc.invalidateQueries({ queryKey: ['outreach', ws, 'notes'] });
-      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'outreach_notifications', filter: `user_id=eq.${userId}` }, handle('INSERT'))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'outreach_notifications', filter: `user_id=eq.${userId}` }, handle('UPDATE'))
       .subscribe();
     return () => { db.removeChannel(ch); };
   }, [ws, userId, qc]);
@@ -336,6 +343,13 @@ export function useNotificationsRealtime(ws: string | null | undefined, userId: 
 /** Link that opens a conversation on a note (scrolls to it and flashes it). */
 export function noteLink(chatId: string, noteId?: string | null): string {
   return noteId ? `/outreach/inbox/${chatId}?note=${noteId}` : `/outreach/inbox/${chatId}`;
+}
+
+/** Where a notification opens: a note (mentions, AI handoff notes), else the message (?m= flashes it), else the conversation. */
+export function notificationLink(n: { chat_id: string | null; note_id: string | null; message_id?: string | null }): string {
+  if (!n.chat_id) return '/outreach/inbox';
+  if (n.note_id) return noteLink(n.chat_id, n.note_id);
+  return n.message_id ? `/outreach/inbox/${n.chat_id}?m=${n.message_id}` : `/outreach/inbox/${n.chat_id}`;
 }
 
 /** The people picker's groups: Team first, then Client viewers (only when the note is shared with the client). */

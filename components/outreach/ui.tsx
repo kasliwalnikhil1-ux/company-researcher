@@ -4,6 +4,7 @@ import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } f
 import { createPortal } from 'react-dom';
 import Link from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 import { Loader2, X, AlertCircle, Inbox, ChevronDown, Check, Search, ArrowLeft } from 'lucide-react';
 import type { SenderStatus, EnrollmentStatus, Intent } from '@/lib/outreach/types';
 import { enrollmentStatusText } from '@/lib/outreach/reasons';
@@ -51,7 +52,30 @@ export function Input({ className, label, hint, error, ...rest }: React.InputHTM
   );
 }
 
-export function Textarea({ className, label, hint, counter, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; hint?: string; counter?: { max: number; value: number } }) {
+/**
+ * Grows a textarea with its text (its `rows` stay the smallest height). Measures again on width changes, which also
+ * covers a box that was mounted in a hidden tab and is shown later.
+ */
+export function useAutoGrowTextarea(ref: React.RefObject<HTMLTextAreaElement | null>, value: unknown, on = true) {
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !on) return;
+    const fit = () => {
+      if (!el.offsetParent) return;   // hidden: nothing to measure yet
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight + el.offsetHeight - el.clientHeight}px`;
+    };
+    fit();
+    let w = el.offsetWidth;
+    const ro = new ResizeObserver(() => { if (el.offsetWidth !== w) { w = el.offsetWidth; fit(); } });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, value, on]);
+}
+
+export function Textarea({ className, label, hint, counter, autoGrow, ...rest }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; hint?: string; counter?: { max: number; value: number }; autoGrow?: boolean }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useAutoGrowTextarea(ref, rest.value, !!autoGrow);
   const over = counter && counter.value > counter.max;
   return (
     <label className="block">
@@ -59,7 +83,7 @@ export function Textarea({ className, label, hint, counter, ...rest }: React.Tex
         {label && <span className="block text-xs font-medium text-gray-600">{label}</span>}
         {counter && <span className={cn('text-xs', over ? 'text-red-600 font-medium' : 'text-gray-400')}>{counter.value}/{counter.max}</span>}
       </div>
-      <textarea className={cn('w-full px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 min-h-[90px]', over && 'border-red-400', className)} {...rest} />
+      <textarea ref={ref} className={cn('w-full px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 min-h-[90px]', over && 'border-red-400', autoGrow && 'resize-none overflow-hidden', className)} {...rest} />
       {hint && <span className="block text-xs text-gray-500 mt-1">{hint}</span>}
     </label>
   );
@@ -76,8 +100,8 @@ export function Select({ className, label, children, ...rest }: React.SelectHTML
   );
 }
 
-/** `keywords` are matched by the search box but never rendered (aliases, old names, country). */
-export type SelectOption = { value: string; label?: string; hint?: string; keywords?: string };
+/** `keywords` are matched by the search box but never rendered (aliases, old names, country). `icon` sits before the label (e.g. a member's avatar). */
+export type SelectOption = { value: string; label?: string; hint?: string; keywords?: string; icon?: React.ReactNode };
 
 function normalizeSearch(s: string): string {
   return s.toLowerCase().replace(/[_/\-().,]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -88,7 +112,7 @@ function normalizeSearch(s: string): string {
  * searchable list. Type to filter, arrow keys to move, Enter to pick, Escape to close.
  * The list renders in a portal with fixed positioning so it is never clipped by a scrolling modal body.
  */
-export function SearchableSelect({ label, value, onChange, options, placeholder = 'Select…', searchPlaceholder = 'Type to search…', emptyOption, disabled, className, hint, error, 'aria-label': ariaLabel, id: idProp }: {
+export function SearchableSelect({ label, value, onChange, options, placeholder = 'Select…', searchPlaceholder = 'Type to search…', emptyOption, emptyIcon, size = 'md', triggerClassName, disabled, className, hint, error, 'aria-label': ariaLabel, id: idProp }: {
   label?: string;
   value: string;
   onChange: (value: string) => void;
@@ -97,6 +121,11 @@ export function SearchableSelect({ label, value, onChange, options, placeholder 
   searchPlaceholder?: string;
   /** Render a first option that sets the value to '' (e.g. "No client"). */
   emptyOption?: string;
+  emptyIcon?: React.ReactNode;
+  /** `sm`: a compact trigger for table cells and toolbars */
+  size?: 'sm' | 'md';
+  /** extra trigger classes (another kit's field look, e.g. the CRM's denser inputs) */
+  triggerClassName?: string;
   disabled?: boolean;
   className?: string;
   hint?: string;
@@ -117,14 +146,15 @@ export function SearchableSelect({ label, value, onChange, options, placeholder 
 
   const all = useMemo<SelectOption[]>(() => {
     const base = options.map((o) => (typeof o === 'string' ? { value: o, label: o } : o));
-    const list = emptyOption != null ? [{ value: '', label: emptyOption }, ...base] : base;
+    const list: SelectOption[] = emptyOption != null ? [{ value: '', label: emptyOption, icon: emptyIcon }, ...base] : base;
     // Keep an unknown current value selectable so it is never silently dropped.
     if (value && !list.some((o) => o.value === value)) list.unshift({ value, label: value });
     return list;
-  }, [options, emptyOption, value]);
+  }, [options, emptyOption, emptyIcon, value]);
 
   const selected = all.find((o) => o.value === value);
   const selectedLabel = selected ? (selected.label ?? selected.value) : '';
+  const sm = size === 'sm';
 
   const filtered = useMemo(() => {
     const q = normalizeSearch(query);
@@ -142,7 +172,9 @@ export function SearchableSelect({ label, value, onChange, options, placeholder 
     const r = el.getBoundingClientRect();
     const below = window.innerHeight - r.bottom;
     const up = below < 300 && r.top > below;
-    setPos({ top: up ? r.top - 4 : r.bottom + 4, left: r.left, width: r.width, up });
+    // the panel is at least 240px wide: keep it inside the viewport when the trigger sits near the right edge
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - Math.max(r.width, 240) - 8));
+    setPos({ top: up ? r.top - 4 : r.bottom + 4, left, width: r.width, up });
   }
 
   function openList() {
@@ -221,7 +253,7 @@ export function SearchableSelect({ label, value, onChange, options, placeholder 
             <li key={o.value || '__empty'} id={`${listId}-${i}`} data-index={i} role="option" aria-selected={isSel}
               onMouseEnter={() => setActive(i)} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o.value)}
               className={cn('flex items-center justify-between gap-3 px-3 py-1.5 cursor-pointer', i === active ? 'bg-indigo-50 text-indigo-900' : 'text-gray-900', isSel && 'font-medium')}>
-              <span className="truncate">{o.label ?? o.value}{o.hint && <span className="ml-2 text-xs text-gray-500 font-normal">{o.hint}</span>}</span>
+              <span className="flex items-center gap-2 min-w-0">{o.icon}<span className="truncate">{o.label ?? o.value}{o.hint && <span className="ml-2 text-xs text-gray-500 font-normal">{o.hint}</span>}</span></span>
               {isSel && <Check className="w-4 h-4 text-indigo-600 flex-shrink-0" />}
             </li>
           );
@@ -237,10 +269,11 @@ export function SearchableSelect({ label, value, onChange, options, placeholder 
       <button ref={triggerRef} id={id} type="button" disabled={disabled} aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={(e) => { if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openList(); } }}
-        className={cn('w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-left rounded-lg border bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed',
-          error ? 'border-red-300' : 'border-gray-300', selectedLabel ? 'text-gray-900' : 'text-gray-400')}>
-        <span className="truncate">{selectedLabel || placeholder}</span>
-        <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        className={cn('w-full flex items-center justify-between gap-2 text-left border bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed',
+          sm ? 'px-1.5 py-1 text-xs rounded-md' : 'px-3 py-2 text-sm rounded-lg',
+          error ? 'border-red-300' : sm ? 'border-gray-200' : 'border-gray-300', selectedLabel ? 'text-gray-900' : 'text-gray-400', triggerClassName)}>
+        <span className={cn('flex items-center min-w-0', sm ? 'gap-1.5' : 'gap-2')}>{selected?.icon}<span className="truncate">{selectedLabel || placeholder}</span></span>
+        <ChevronDown className={cn('text-gray-400 flex-shrink-0', sm ? 'w-3 h-3' : 'w-4 h-4')} />
       </button>
       {error ? <span className="block text-xs text-red-600 mt-1">{error}</span> : hint ? <span className="block text-xs text-gray-500 mt-1">{hint}</span> : null}
       {panel}
@@ -307,7 +340,7 @@ export function PageLoader({ className }: { className?: string }) {
 }
 
 export function ErrorBox({ message, className }: { message: string; className?: string }) {
-  return <div className={cn('flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-700 text-sm', className)}><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>{message}</span></div>;
+  return <div className={cn('flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-700 text-sm', className)}><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>{friendlyErrorText(message)}</span></div>;
 }
 
 export function EmptyState({ title, description, action, icon }: { title: string; description?: string; action?: React.ReactNode; icon?: React.ReactNode }) {
@@ -406,7 +439,7 @@ export function Avatar({ src, name, size = 8 }: { src?: string | null; name?: st
   return <div className={cn(cls, 'rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-semibold flex-shrink-0')}>{initials || '?'}</div>;
 }
 
-export function Stat({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
+export function Stat({ label, value, hint }: { label: React.ReactNode; value: React.ReactNode; hint?: string }) {
   return (
     <div className="bg-white border border-gray-200 rounded-xl px-4 py-3">
       <div className="text-xs text-gray-500">{label}</div>
@@ -439,7 +472,7 @@ export function timeAgo(v: string | null | undefined): string {
 export function useToast() {
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const show = React.useCallback((message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
+    setToast({ message: type === 'error' ? friendlyErrorText(message) : message, type });
     setTimeout(() => setToast(null), type === 'error' ? 5000 : 2500);
   }, []);
   const node = toast ? (

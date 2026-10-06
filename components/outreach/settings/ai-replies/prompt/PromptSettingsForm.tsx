@@ -1,21 +1,22 @@
 'use client';
 
+import { Check } from 'lucide-react';
 import { FLAG_LABEL } from '@/lib/outreach/aiReplies';
 import type { PromptSettings } from '@/lib/outreach/aiReplies';
 import { Select } from '@/components/outreach/ui';
 import { SettingRow, Switch } from '@/components/outreach/settings/shared';
+import { cn } from '@/lib/utils';
 import { SKIP_FLAGS } from './promptModel';
 
-function NumberField({ label, hint, value, min, max, disabled, onChange }: { label: string; hint?: string; value: number; min: number; max: number; disabled?: boolean; onChange: (v: number) => void }) {
+function NumberInput({ label, value, min, max, disabled, onChange }: { label: string; value: number; min: number; max: number; disabled?: boolean; onChange: (v: number) => void }) {
   const bad = !Number.isInteger(value) || value < min || value > max;
   return (
-    <label className="block">
-      <span className="block text-xs font-medium text-gray-600 mb-1">{label}</span>
-      <input type="number" inputMode="numeric" min={min} max={max} step={1} disabled={disabled}
+    <div className="flex flex-col items-end">
+      <input type="number" inputMode="numeric" min={min} max={max} step={1} disabled={disabled} aria-label={label} aria-invalid={bad}
         value={Number.isFinite(value) ? value : ''} onChange={(e) => onChange(e.target.value === '' ? NaN : Number(e.target.value))}
-        className={`w-28 px-3 py-2 text-sm rounded-lg border bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50 ${bad ? 'border-red-400' : 'border-gray-300'}`} />
-      <span className={`block text-xs mt-1 ${bad ? 'text-red-600' : 'text-gray-500'}`}>{bad ? `From ${min} to ${max}` : hint}</span>
-    </label>
+        className={cn('w-24 px-3 py-1.5 text-sm text-right tabular-nums rounded-lg border bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-50', bad ? 'border-red-400' : 'border-gray-300')} />
+      {bad && <span className="text-xs mt-1 text-red-600">From {min} to {max}</span>}
+    </div>
   );
 }
 
@@ -33,35 +34,43 @@ export default function PromptSettingsForm({ value, disabled, onChange }: {
     onChange({ skip_to_pitch_when: on ? [...value.skip_to_pitch_when.filter((x) => x !== f), f] : value.skip_to_pitch_when.filter((x) => x !== f) });
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap gap-6">
-        <NumberField label="Longest reply (characters)" hint="100 to 1000" value={value.max_length} min={100} max={1000} disabled={disabled}
-          onChange={(v) => onChange({ max_length: v })} />
-        <Select label='When they ask "Are you a bot?"' value={value.bot_question} disabled={disabled} className="w-72"
-          onChange={(e) => onChange({ bot_question: e.target.value as PromptSettings['bot_question'] })}>
-          <option value="escalate">Hand the chat to a person</option>
-          <option value="disclose">Say replies are AI-assisted and keep going</option>
-        </Select>
-      </div>
+    <div className="divide-y divide-gray-100">
+      <SettingRow title="Longest reply" description="In characters, from 100 to 1000."
+        control={<NumberInput label="Longest reply (characters)" value={value.max_length} min={100} max={1000} disabled={disabled} onChange={(v) => onChange({ max_length: v })} />} />
 
-      <fieldset>
-        <legend className="text-xs font-medium text-gray-600 mb-1.5">Skip ahead to the pitch when they</legend>
-        <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1.5">
-          {SKIP_FLAGS.map((f) => (
-            <label key={f} className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" className="rounded border-gray-300" disabled={disabled} checked={value.skip_to_pitch_when.includes(f)} onChange={(e) => toggleFlag(f, e.target.checked)} />
-              {FLAG_LABEL[f] ?? f}
-            </label>
-          ))}
+      <SettingRow title={'When they ask "Are you a bot?"'} description="What the AI does when a prospect asks if they are talking to a person."
+        control={(
+          <Select aria-label='When they ask "Are you a bot?"' value={value.bot_question} disabled={disabled} className="w-72 py-1.5"
+            onChange={(e) => onChange({ bot_question: e.target.value as PromptSettings['bot_question'] })}>
+            <option value="escalate">Hand the chat to a person</option>
+            <option value="disclose">Say replies are AI-assisted and keep going</option>
+          </Select>
+        )} />
+
+      <div className="py-3 space-y-2">
+        <div>
+          <div className="text-sm font-medium text-gray-900">Skip ahead to the pitch when they</div>
+          <div className="text-xs text-gray-500 mt-0.5">Any of these moves the AI straight to the pitch stage, even before the set number of replies.</div>
         </div>
-      </fieldset>
-
-      <div className="divide-y divide-gray-100 border-y border-gray-100">
-        <SettingRow title="Vary the approach in early stages" description="The AI does not repeat the same kind of reply twice in a row while getting to know them."
-          control={<Switch label="Vary the approach in early stages" checked={value.vary_moves_in_early_stages} disabled={disabled} onChange={(v) => onChange({ vary_moves_in_early_stages: v })} />} />
-        <SettingRow title="Reply in their language" description="If they switch to another language on the sequence's list, the AI switches too."
-          control={<Switch label="Reply in their language" checked={value.allow_language_switch} disabled={disabled} onChange={(v) => onChange({ allow_language_switch: v })} />} />
+        <div role="group" aria-label="Skip ahead to the pitch when they" className="flex flex-wrap gap-1.5">
+          {SKIP_FLAGS.map((f) => {
+            const on = value.skip_to_pitch_when.includes(f);
+            return (
+              <button key={f} type="button" aria-pressed={on} disabled={disabled} onClick={() => toggleFlag(f, !on)}
+                className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 text-sm rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-60',
+                  on ? 'border-indigo-200 bg-indigo-50 text-indigo-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
+                {on && <Check className="w-3.5 h-3.5" aria-hidden="true" />}
+                {FLAG_LABEL[f] ?? f}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      <SettingRow title="Vary the approach in early stages" description="The AI does not repeat the same kind of reply twice in a row while getting to know them."
+        control={<Switch label="Vary the approach in early stages" checked={value.vary_moves_in_early_stages} disabled={disabled} onChange={(v) => onChange({ vary_moves_in_early_stages: v })} />} />
+      <SettingRow title="Reply in their language" description="If they switch to another language on the sequence's list, the AI switches too."
+        control={<Switch label="Reply in their language" checked={value.allow_language_switch} disabled={disabled} onChange={(v) => onChange({ allow_language_switch: v })} />} />
     </div>
   );
 }

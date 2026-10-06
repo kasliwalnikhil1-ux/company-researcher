@@ -239,11 +239,11 @@ export function metaFromDraft(d: DraftNowDraft, scenarioTitle: string | null = n
 /** "Stage 2 · Relate" for the stage the draft lands in; "Re-engage" for a dormant session with no stage yet. */
 export function metaStage(m: DraftMeta, s: ChatAiState | null): string | null {
   const key = m.stageAfter ?? m.stageBefore ?? s?.stage?.key ?? null;
-  if (!key) return s?.stage ? (s.stage.position > 0 ? `Stage ${s.stage.position} · ${s.stage.label}` : s.stage.label) : null;
+  if (!key) return s?.stage?.label ?? null;
   if (key === 're_engage') return 'Re-engage';
-  const i = (s?.stages ?? []).findIndex((x) => x.key === key);
-  if (i >= 0) return `Stage ${i + 1} · ${s!.stages[i].label}`;
-  if (s?.stage?.key === key) return s.stage.position > 0 ? `Stage ${s.stage.position} · ${s.stage.label}` : s.stage.label;
+  const found = (s?.stages ?? []).find((x) => x.key === key);
+  if (found) return found.label;
+  if (s?.stage?.key === key) return s.stage.label;
   return humanizeKey(key);
 }
 
@@ -303,9 +303,10 @@ function draftView(ai: ComposerAi, draft: DraftWithAi, chat: DraftChat, text: st
   if (!m || !ai.tag) return null;
   const s = ai.state;
   const promptNote = draft.prompt?.fallback === 'template' ? 'built-in template' : draft.prompt?.fallback === 'workspace_default' ? 'workspace default prompt' : s?.fallback === 'template' ? 'built-in template' : s?.fallback === 'workspace_default' ? 'workspace default prompt' : null;
-  // one line: "Stage 2 · Relate · Pricing question · v7 · “shorter”"
-  const details = [metaStage(m, s), m.scenarioTitle, m.version != null ? `v${m.version}` : null, m.guidance ? `“${m.guidance}”` : null, promptNote, m.ruleApplied && !m.scenarioTitle ? m.ruleApplied : null]
+  // one line: "Relate · Pricing question · “shorter”"; the instructions version only shows in the hover text
+  const details = [metaStage(m, s), m.scenarioTitle, m.guidance ? `“${m.guidance}”` : null, promptNote, m.ruleApplied && !m.scenarioTitle ? m.ruleApplied : null]
     .filter(Boolean).join(' · ');
+  const detailsTip = [details, m.version != null ? `Sequence instructions, version ${m.version}` : null].filter(Boolean).join('\n');
   // The engine already emits one warning per escalation reason; fold those into the single "handed to a person" line
   // (keeping the engine's more specific text, e.g. the unsupported claim) instead of listing the same reason twice.
   const escalating = m.decision === 'escalate' && m.escalationReasons.length > 0;
@@ -316,6 +317,7 @@ function draftView(ai: ComposerAi, draft: DraftWithAi, chat: DraftChat, text: st
   return {
     m,
     details,
+    detailsTip,
     edited: text !== ai.tag.original,
     handedOff: !!s?.handed_off,
     // a newer message from them arrived after this manual draft was written: never a silent replace
@@ -325,7 +327,7 @@ function draftView(ai: ComposerAi, draft: DraftWithAi, chat: DraftChat, text: st
 }
 
 /**
- * One line beside the Reply / Private note tabs while the box holds an AI draft: "✦ AI draft · Stage 2 · Relate · v7",
+ * One line beside the Reply / Private note tabs while the box holds an AI draft: "✦ AI draft · Relate",
  * the stop rule as a flag (wide composers), and Dismiss. Warnings sit inside the box (AiDraftNotes); redraft options
  * are on the Draft with AI button's menu.
  */
@@ -339,7 +341,7 @@ export function AiDraftSummary({ ai, draft, chat, text, onError, compact, stopIn
   return (
     <div className="ml-auto flex items-center gap-1.5 min-w-0 text-[11px]" role="status">
       <span className="inline-flex items-center gap-1 font-medium text-indigo-700 flex-shrink-0"><Sparkles className="w-3.5 h-3.5" />AI draft{v.edited ? ', edited' : ''}</span>
-      {v.details && <span className="truncate text-gray-500 min-w-0" title={v.details}>· {v.details}</span>}
+      {v.details && <span className="truncate text-gray-500 min-w-0" title={v.detailsTip}>· {v.details}</span>}
       {m.wouldStop && stopInline && (
         <span className="inline-flex items-center gap-1 text-amber-800 min-w-0 max-w-[45%]" title={stopText(m.stopRule)}><Flag className="w-3 h-3 flex-shrink-0" /><span className="truncate">{stopText(m.stopRule)}</span></span>
       )}

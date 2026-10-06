@@ -7,7 +7,7 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
-import { applyAiChatFilter, type ChatFilters, type LeadFilters } from './queries';
+import { applyAiChatFilter, applyRepliesView, type ChatFilters, type LeadFilters } from './queries';
 import type { ActionType, AiField, AiFieldValue, AiVariableOutput, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
 
 // ---------------------------------------------------------------------------
@@ -255,11 +255,15 @@ export function useChatsByIds(ws: string | null | undefined, ids: string[] | nul
         if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
         if (f.provider) q = q.eq('provider', f.provider);
         q = applyAiChatFilter(q, f.ai);
+        q = applyRepliesView(q, f);
         if (f.stage) q = q.eq('conversation_stage', f.stage);
+        if (f.has_notes) q = q.not('last_note_at', 'is', null);
         const search = f.search ? cleanSearch(f.search) : '';
         if (search) q = q.or(`attendee_name.ilike.%${search}%,subject.ilike.%${search}%,last_message_preview.ilike.%${search}%`);
         all.push(...((await sel<ChatRowWithJoins[]>(q)) ?? []));
       }
+      // Needs reply: longest waiting first, as the paged list
+      if (f.chip === 'needs_reply') return all.sort((a, b) => new Date(a.last_inbound_at ?? 0).getTime() - new Date(b.last_inbound_at ?? 0).getTime());
       return all.sort((a, b) => new Date(b.last_message_at ?? 0).getTime() - new Date(a.last_message_at ?? 0).getTime());
     },
   });

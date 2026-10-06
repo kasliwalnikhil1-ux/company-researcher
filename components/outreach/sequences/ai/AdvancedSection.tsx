@@ -6,18 +6,18 @@ import { ChevronRight } from 'lucide-react';
 import type { Stage } from '@/lib/outreach/types';
 import { useSetSequenceAiReplies, type SequenceAiPatch, type SequenceAiSettings } from '@/lib/outreach/aiRepliesSequence';
 import { Button, Input, Select, Textarea } from '@/components/outreach/ui';
-import { Note } from '@/components/outreach/settings/shared';
+import BlockedCountriesField from './BlockedCountriesField';
 import { errText } from './shared';
 
 interface Form {
-  delay_min: string; delay_max: string; quiet: string; max: string; stale: string; languages: string; disclosure: string; countries: string;
+  delay_min: string; delay_max: string; quiet: string; max: string; stale: string; languages: string; disclosure: string; countries: string[];
   handoff_stage_id: string; returning: string; dormant: string; inactivity: string;
 }
 
 function fromSettings(s: SequenceAiSettings): Form {
   return {
     delay_min: String(Math.round(s.delay_min_s / 60)), delay_max: String(Math.round(s.delay_max_s / 60)), quiet: String(s.debounce_quiet_s), max: String(s.debounce_max_s),
-    stale: String(s.stale_after_h), languages: (s.languages ?? []).join(', '), disclosure: s.disclosure ?? '', countries: s.blocked_countries == null ? '' : s.blocked_countries.join(', '),
+    stale: String(s.stale_after_h), languages: (s.languages ?? []).join(', '), disclosure: s.disclosure ?? '', countries: s.blocked_countries ?? [],
     handoff_stage_id: s.handoff_stage_id ?? '', returning: String(s.returning_after_days), dormant: String(s.dormant_after_days), inactivity: s.inactivity_days == null ? '' : String(s.inactivity_days),
   };
 }
@@ -52,9 +52,8 @@ function toPatch(f: Form, s: SequenceAiSettings): { patch: SequenceAiPatch; erro
   const disc = f.disclosure.trim();
   if (disc.length > 200) errors.push('The disclosure line is up to 200 characters.');
   if (disc !== (s.disclosure ?? '')) patch.disclosure = disc || null;
-  const cs = list(f.countries, true);
-  if (cs.some((c) => !/^[A-Z]{2}$/.test(c))) errors.push('Blocked countries: two-letter codes like DE, FR.');
-  if (cs.join(',') !== (s.blocked_countries ?? []).join(',')) patch.blocked_countries = cs;
+  const sorted = (l: string[]) => [...l].sort().join(',');
+  if (sorted(f.countries) !== sorted(s.blocked_countries ?? [])) patch.blocked_countries = f.countries;
   if ((f.handoff_stage_id || null) !== (s.handoff_stage_id ?? null)) patch.handoff_stage_id = f.handoff_stage_id || null;
   const r = int(f.returning), d = int(f.dormant);
   if (!(r >= 1 && r <= 30)) errors.push('Returning after: 1 to 30 days.');
@@ -67,9 +66,14 @@ function toPatch(f: Form, s: SequenceAiSettings): { patch: SequenceAiPatch; erro
   return { patch, errors };
 }
 
-export default function AdvancedSection({ sequenceId, s, stages, canEdit, notify }: { sequenceId: string; s: SequenceAiSettings; stages: Stage[]; canEdit: boolean; notify: (m: string, t?: 'success' | 'error') => void }) {
+export default function AdvancedSection({ sequenceId, s, stages, canEdit, notify, alwaysOpen }: {
+  sequenceId: string; s: SequenceAiSettings; stages: Stage[]; canEdit: boolean; notify: (m: string, t?: 'success' | 'error') => void;
+  /** A plain card with a heading instead of the collapsed "Advanced" row (the Rules sub-tab). */
+  alwaysOpen?: boolean;
+}) {
   const set = useSetSequenceAiReplies(sequenceId);
-  const [open, setOpen] = useState(false);
+  const [expanded, setOpen] = useState(false);
+  const open = alwaysOpen || expanded;
   const [form, setForm] = useState<Form | null>(null);
   const f = form ?? fromSettings(s);
   const upd = (p: Partial<Form>) => setForm({ ...f, ...p });
@@ -84,11 +88,18 @@ export default function AdvancedSection({ sequenceId, s, stages, canEdit, notify
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl">
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="w-full flex items-center gap-2 px-4 py-3 text-left">
-        <ChevronRight className={`w-4 h-4 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
-        <span className="text-sm font-semibold text-gray-900">Advanced</span>
-        <span className="text-xs text-gray-500 hidden sm:inline">reply delay · languages · AI disclosure line · hand-off stage · returning / dormant · task if quiet</span>
-      </button>
+      {alwaysOpen ? (
+        <div className="px-4 pt-4 pb-3">
+          <h3 className="text-sm font-semibold text-gray-900">Timing, language and hand-off</h3>
+          <p className="text-xs text-gray-500 mt-0.5">When a reply goes out, which messages get one, and what happens when a person takes over.</p>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="w-full flex items-center gap-2 px-4 py-3 text-left">
+          <ChevronRight className={`w-4 h-4 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true" />
+          <span className="text-sm font-semibold text-gray-900">Advanced</span>
+          <span className="text-xs text-gray-500 hidden sm:inline">reply delay · languages · AI disclosure line · hand-off stage · returning / dormant · task if quiet</span>
+        </button>
+      )}
       {open && (
         <fieldset disabled={disabled} className="px-4 pb-4 space-y-5">
           <div className="grid sm:grid-cols-2 gap-4">
@@ -110,11 +121,8 @@ export default function AdvancedSection({ sequenceId, s, stages, canEdit, notify
             </div>
             <Input type="number" min={1} max={72} label="Skip messages older than (hours)" value={f.stale} onChange={(e) => upd({ stale: e.target.value })} hint="An old unanswered message gets no automatic reply." />
             <Input label="Languages" value={f.languages} onChange={(e) => upd({ languages: e.target.value })} placeholder="en, hi" hint="Codes separated by commas. A message in another language goes to a person." />
-            <Textarea label="AI disclosure line" rows={2} maxLength={200} value={f.disclosure} onChange={(e) => upd({ disclosure: e.target.value })} placeholder="e.g. (replies on this account are AI-assisted)" hint="Added to Auto replies for prospects in the blocked countries. Optional." className="min-h-0" />
-            <div className="space-y-1">
-              <Input label="Blocked countries" value={f.countries} onChange={(e) => upd({ countries: e.target.value })} placeholder="DE, FR" hint="Two-letter codes, comma separated. Auto does not reply to prospects there; drafts still come. Empty = none." />
-              {s.blocked_countries == null && !f.countries.trim() && <Note tone="amber" className="text-xs">Default: EU/EEA is blocked while no disclosure line is set. Type codes to choose your own list, or set a disclosure line.</Note>}
-            </div>
+            <Textarea label="AI disclosure line" rows={2} maxLength={200} value={f.disclosure} onChange={(e) => upd({ disclosure: e.target.value })} placeholder="e.g. (replies on this account are AI-assisted)" hint="Added to the end of every Auto reply. Optional." className="min-h-0" />
+            <BlockedCountriesField value={f.countries} onChange={(countries) => upd({ countries })} />
             <Select label="Move lead to stage on hand-off" value={f.handoff_stage_id} onChange={(e) => upd({ handoff_stage_id: e.target.value })}>
               <option value="">Do not move the lead</option>
               {stages.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}

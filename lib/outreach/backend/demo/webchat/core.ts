@@ -44,10 +44,10 @@ export const DEFAULT_SETTINGS: Row = {
   },
   popup: { enabled: false, text: "👋 Have a question? We're here to help.", image_url: null, delay_s: 3, position: 'above' },
   messages: {
-    greeting_enabled: true, greeting: 'Hi! How can we help you today?', reply_time: 'minutes', available_message: "We're online",
-    unavailable_message: "We're away right now. Leave a message and we'll get back to you.", email_capture_prompt: "We'll reply here and by email — what's your email?",
-    end_message: 'Thanks for chatting with us!', placeholder: 'Ask a question…', privacy_url: null, quick_replies: [], handoff_message: 'Connecting you with a person — one moment.',
-    handoff_offline_message: "Our team is offline right now. Leave your email and we'll reply as soon as we're back.",
+    greeting_enabled: true, greeting: 'Hi! How can we help?', reply_time: 'minutes', available_message: "We're online",
+    unavailable_message: "We're away. Leave a message.", email_capture_prompt: "What's your email so we can reply?",
+    end_message: 'Thanks for chatting!', placeholder: 'Ask a question…', privacy_url: null, quick_replies: [], handoff_message: 'Connecting you to a person…',
+    handoff_offline_message: "We're offline. Leave your email and we'll reply.",
   },
   pre_chat: {
     enabled: false, message: 'Tell us a bit about yourself so we can help.', when: 'before_first',

@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
-import { useCrm } from '@/contexts/CrmContext';
 import { useCoachingList } from '@/lib/crm/queries';
 import { RATING_LABELS, READINESS_LABELS, STAGE_LABELS, type CoachRollupRow, type CoachingListRow, type ReadinessStage } from '@/lib/crm/types';
-import { Badge, Card, CompanyLogo, EmptyState, ErrorBox, fmtDate, Input, PageHeader, Select, Spinner, Table, Td, Th, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { Badge, Card, CompanyLogo, EmptyState, ErrorBox, fmtDate, Input, PageHeader, Spinner, Table, Td, Th, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { MemberName, MemberSelect } from '@/components/crm/members';
 import { LensDots, ReadinessBadge, ScoreRing } from '@/components/crm/coaching';
 import { TranscriptModal } from '@/components/crm/transcript';
 import { GraduationCap, Search, Sparkles } from 'lucide-react';
@@ -40,7 +40,6 @@ function Sparkline({ values, className }: { values: number[]; className?: string
 }
 
 export default function CoachPage() {
-  const { activeMembers } = useCrm();
   const [owner, setOwner] = useState('');
   const [time, setTime] = useState<TimeFilter>({ range: '' });
   const [find, setFind] = useState('');
@@ -65,7 +64,7 @@ export default function CoachPage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[14rem]"><Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" /><Input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Company, contact, purpose…" className="pl-8" /></div>
-        <Select value={owner} onChange={(e) => setOwner(e.target.value)} className="w-44"><option value="">Every owner</option>{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
+        <MemberSelect aria-label="Owner" value={owner} onChange={setOwner} emptyLabel="Every owner" className="w-48" />
         <TimeRangeFilter label="Call date" value={time} onChange={setTime} />
         {q.isFetching && <Spinner className="w-4 h-4" />}
       </div>
@@ -94,7 +93,7 @@ export default function CoachPage() {
                       <tbody>
                         {calls.map((c: CoachingListRow) => (
                           <tr key={c.meeting_id} onClick={() => setOpen(c.meeting_id)} className="cursor-pointer hover:bg-indigo-50/40 align-top">
-                            <Td className="whitespace-nowrap text-gray-600">{fmtDate(c.scheduled_at, { time: true })}<div className="text-[11px] text-gray-400">{c.duration_seconds ? `${Math.round(c.duration_seconds / 60)} min · ` : ''}{c.owner ?? '—'}</div></Td>
+                            <Td className="whitespace-nowrap text-gray-600">{fmtDate(c.scheduled_at, { time: true })}<div className="text-[11px] text-gray-400"><span className="inline-flex items-center gap-1">{c.duration_seconds ? `${Math.round(c.duration_seconds / 60)} min · ` : ''}<MemberName userId={c.owner_id} name={c.owner} size="xs" /></span></div></Td>
                             <Td className="min-w-[12rem]">
                               <div className="flex items-start gap-2 min-w-0"><CompanyLogo name={c.company} size="xs" className="mt-0.5" /><div className="min-w-0"><Link href={`/crm/companies/${c.company_id}`} onClick={(e) => e.stopPropagation()} className="font-medium text-gray-900 hover:text-indigo-700">{c.company}</Link>{c.contact && <span className="text-gray-500"> · {c.contact}</span>}<div className="text-[11px] text-gray-500 line-clamp-2">{c.purpose ?? ''}</div></div></div>
                             </Td>
@@ -115,7 +114,7 @@ export default function CoachPage() {
                     {d.uncoached.map((u) => (
                       <li key={u.meeting_id} className="px-3 py-2 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span className="text-gray-500 tabular-nums">{fmtDate(u.scheduled_at, { time: true })}</span>
-                        <Link href={`/crm/companies/${u.company_id}`} className="font-medium text-gray-900 hover:text-indigo-700">{u.company}</Link>{u.contact && <span className="text-gray-500">· {u.contact}</span>}{u.owner && <span className="text-gray-400 text-xs">· {u.owner}</span>}
+                        <Link href={`/crm/companies/${u.company_id}`} className="font-medium text-gray-900 hover:text-indigo-700">{u.company}</Link>{u.contact && <span className="text-gray-500">· {u.contact}</span>}{u.owner && <span className="text-gray-400 text-xs inline-flex items-center gap-1">· <MemberName name={u.owner} size="xs" /></span>}
                         <span className="ml-auto text-[11px] text-gray-500 flex items-center gap-1"><Sparkles className="w-3 h-3 text-indigo-500" /> Ask your assistant: “coach the {u.company} call”</span>
                       </li>
                     ))}

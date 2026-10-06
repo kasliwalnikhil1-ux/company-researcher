@@ -4,21 +4,35 @@
 // places that use it, plus the two fixed rows: the shared Q&A and the questions the AI could not answer.
 // A product catalogue (migration 068) is what the Website agent recommends products from; a website source can
 // also collect the products its pages describe ("Also find products").
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import Link from '@/lib/outreach/nav';
-import { ArrowRight, BookOpen, FileText, Globe, HelpCircle, Loader2, MessageCircleQuestion, Plus, ShoppingBag, Type } from 'lucide-react';
+import { ArrowRight, BookOpen, Bot, FileText, GitBranch, Globe, HelpCircle, Loader2, Lock, MessageCircleQuestion, Plus, Search, ShoppingBag, Trash2, Type } from 'lucide-react';
 import { PROVIDER_LABEL, catalogueHref, useCatalogueUpdate } from '@/lib/outreach/catalogue';
 import { KNOWLEDGE_STATUS_LABEL, useKnowledgeSourceDelete } from '@/lib/outreach/aiRepliesSequence';
 import { hubHref, knowledgeTargetHref, knowledgeTargetText, useInvalidateKnowledge, type HubKnowledge, type HubKnowledgeSource } from '@/lib/outreach/aiHub';
 import { Badge, Button, EmptyState, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
 import { ConfirmModal } from '@/components/outreach/settings/shared';
 import { errText, plural } from '@/components/outreach/sequences/ai/shared';
+import { cn } from '@/lib/utils';
 import type { Notify } from './shared';
 
 const KIND_ICON = { website: Globe, document: FileText, text: Type, catalogue: ShoppingBag } as const;
 const KIND_LABEL: Record<HubKnowledgeSource['kind'], string> = { website: 'Website', document: 'Document', text: 'Text', catalogue: 'Product catalogue' };
 const products = (n: number) => `${n.toLocaleString()} ${plural(n, 'product')}`;
 const dash = <span className="text-gray-400">—</span>;
+
+/** Type filter: Products holds catalogues and the websites that also find products, so one site can be in both. */
+type SourceFilter = 'all' | 'website' | 'products' | 'document';
+const FILTERS: Array<{ key: SourceFilter; label: string; icon?: typeof Globe }> = [
+  { key: 'all', label: 'All' },
+  { key: 'website', label: 'Websites', icon: Globe },
+  { key: 'products', label: 'Products', icon: ShoppingBag },
+  { key: 'document', label: 'Documents', icon: FileText },
+];
+const inFilter = (s: HubKnowledgeSource, f: SourceFilter) =>
+  f === 'all' || (f === 'website' ? s.kind === 'website'
+    : f === 'products' ? s.kind === 'catalogue' || (s.kind === 'website' && !!s.detect_products)
+    : s.kind === 'document' || s.kind === 'text');
 
 /** "2d": how long ago a website was last read. */
 function shortAge(iso: string | null | undefined): string {
@@ -59,8 +73,20 @@ function CatalogueStatus({ s }: { s: HubKnowledgeSource }) {
   const tip = c?.synced_at ? `Last synced ${fmtDate(c.synced_at)}${s.refresh_days ? `. Synced again every ${s.refresh_days} ${plural(s.refresh_days, 'day')}` : ''}` : undefined;
   return (
     <div>
-      <span className={tip ? 'cursor-help' : undefined} title={tip}>{products(n)}{age ? ` · ${age}` : ''}</span>
-      {c?.warning && <div className="text-xs text-amber-700 mt-0.5 max-w-[18rem]">{c.warning}</div>}
+      <ReadyLine label={products(n)} sub={age ? `Synced ${age} ago` : undefined} tip={tip} />
+      {c?.warning && <div className="text-xs text-amber-700 mt-0.5 pl-3.5 max-w-[18rem]">{c.warning}</div>}
+    </div>
+  );
+}
+
+/** A ready source: green dot, what it holds, and how long ago it was last read underneath. */
+function ReadyLine({ label, sub, tip }: { label: string; sub?: string; tip?: string }) {
+  return (
+    <div className={tip ? 'cursor-help' : undefined} title={tip}>
+      <div className="flex items-center gap-1.5 text-gray-900">
+        <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" aria-hidden="true" />{label}
+      </div>
+      {sub && <div className="text-xs text-gray-500 mt-0.5 pl-3.5">{sub}</div>}
     </div>
   );
 }
@@ -77,10 +103,10 @@ function SourceStatus({ s }: { s: HubKnowledgeSource }) {
   }
   if (s.status === 'ready') {
     const pages = Number(s.pages ?? 0);
-    if (s.kind !== 'website' || pages <= 0) return <span>{KNOWLEDGE_STATUS_LABEL.ready}</span>;
+    if (s.kind !== 'website' || pages <= 0) return <ReadyLine label={KNOWLEDGE_STATUS_LABEL.ready} />;
     const age = shortAge(s.crawled_at);
     const tip = s.crawled_at ? `Last read ${fmtDate(s.crawled_at)}${s.refresh_days ? `. Read again every ${s.refresh_days} ${plural(s.refresh_days, 'day')}` : ''}` : undefined;
-    return <span className={tip ? 'cursor-help' : undefined} title={tip}>{pages.toLocaleString()} {plural(pages, 'page')}{age ? ` · ${age}` : ''}{s.detect_products ? ` · ${products(Number(s.products ?? 0))}` : ''}</span>;
+    return <ReadyLine label={`${pages.toLocaleString()} ${plural(pages, 'page')}${s.detect_products ? ` · ${products(Number(s.products ?? 0))}` : ''}`} sub={age ? `Read ${age} ago` : undefined} tip={tip} />;
   }
   return (
     <span className="inline-flex items-center gap-1.5 text-gray-600">
@@ -89,23 +115,41 @@ function SourceStatus({ s }: { s: HubKnowledgeSource }) {
   );
 }
 
+const CHIP = 'inline-flex items-center gap-1 max-w-[14rem] rounded-md border px-2 py-0.5 text-xs';
+/** Chips shown before "+N more". */
+const USED_SHOWN = 2;
+
+/** One chip per place: a Website agent or a sequence, each linking to where its AI is set up. */
 function UsedBy({ s }: { s: HubKnowledgeSource }) {
+  const [open, setOpen] = useState(false);
   const { used, hidden } = usage(s);
   if (used.length === 0 && hidden === 0) return <span className="text-gray-400">Not used yet</span>;
+  const shown = open ? used : used.slice(0, USED_SHOWN);
+  const more = used.length - shown.length;
   return (
-    <span className="text-gray-700">
-      {used.map((t, i) => (
-        <Fragment key={`${t.kind}:${t.id}`}>
-          {i > 0 && <span className="text-gray-400"> · </span>}
-          <Link href={knowledgeTargetHref(t)} className="hover:text-indigo-700 hover:underline">{knowledgeTargetText(t)}</Link>
-        </Fragment>
-      ))}
-      {hidden > 0 && (
-        <span className="text-gray-500 cursor-help" title="Archived sequences, saved prompts, or places you do not have access to">
-          {used.length > 0 && <span className="text-gray-400"> · </span>}{hidden} more not shown
+    <div className="flex flex-wrap items-center gap-1.5">
+      {shown.map((t) => {
+        const Icon = t.kind === 'website' ? Bot : GitBranch;
+        return (
+          <Link key={`${t.kind}:${t.id}`} href={knowledgeTargetHref(t)} title={knowledgeTargetText(t)}
+            className={cn(CHIP, 'border-gray-200 bg-white text-gray-700 hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700')}>
+            <Icon className="w-3 h-3 flex-shrink-0 text-gray-400" aria-hidden="true" />
+            <span className="truncate">{t.name ?? (t.kind === 'website' ? 'A website' : 'A sequence')}</span>
+          </Link>
+        );
+      })}
+      {more > 0 && (
+        <button type="button" onClick={() => setOpen(true)} className={cn(CHIP, 'border-transparent text-indigo-600 hover:bg-indigo-50')}>+{more + hidden} more</button>
+      )}
+      {more === 0 && hidden > 0 && (
+        <span className={cn(CHIP, 'border-dashed border-gray-300 text-gray-500 cursor-help')} title="Archived sequences, saved prompts, or places you do not have access to">
+          <Lock className="w-3 h-3 flex-shrink-0" aria-hidden="true" />{hidden} hidden
         </span>
       )}
-    </span>
+      {open && used.length > USED_SHOWN && (
+        <button type="button" onClick={() => setOpen(false)} className={cn(CHIP, 'border-transparent text-gray-500 hover:bg-gray-100')}>Show less</button>
+      )}
+    </div>
   );
 }
 
@@ -124,7 +168,14 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
   }
   const invalidate = useInvalidateKnowledge(ws);
   const [toRemove, setToRemove] = useState<HubKnowledgeSource | null>(null);
-  const sources = data.sources ?? [];
+  const [filter, setFilter] = useState<SourceFilter>('all');
+  const [q, setQ] = useState('');
+  const all = data.sources ?? [];
+  const needle = q.trim().toLowerCase();
+  const sources = all.filter((s) => inFilter(s, filter) && (!needle || `${s.title} ${s.url ?? ''}`.toLowerCase().includes(needle)));
+  const filtered = filter !== 'all' || !!needle;
+  // Documents only shows once there is one; Websites and Products always do
+  const chips = FILTERS.map((f) => ({ ...f, n: all.filter((s) => inFilter(s, f.key)).length })).filter((f) => f.key !== 'document' || f.n > 0 || filter === 'document');
   const qaTotal = Number(data.qa_total ?? 0);
   const questions = Number(data.questions_open ?? 0);
   const cols = canEdit ? 5 : 4;
@@ -139,6 +190,27 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
 
   return (
     <>
+      {all.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Source type">
+            {chips.map((f) => {
+              const Icon = f.icon;
+              return (
+                <button key={f.key} type="button" onClick={() => setFilter(f.key)} aria-pressed={filter === f.key}
+                  className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border', filter === f.key ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50')}>
+                  {Icon && <Icon className="w-3.5 h-3.5" aria-hidden="true" />}{f.label} <span className="opacity-60 tabular-nums">{f.n}</span>
+                </button>
+              );
+            })}
+          </div>
+          <label className="relative ml-auto w-full sm:w-64">
+            <span className="sr-only">Search sources</span>
+            <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" aria-hidden="true" />
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or URL…"
+              className="w-full text-sm rounded-lg border border-gray-300 bg-white pl-8 pr-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </label>
+        </div>
+      )}
       <Table>
         <thead>
           <tr>
@@ -150,11 +222,19 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
           </tr>
         </thead>
         <tbody>
-          {sources.length === 0 && (
+          {sources.length === 0 && filtered && all.length > 0 && (
+            <tr>
+              <td colSpan={cols} className="border-b border-gray-100 px-4 py-8 text-center text-sm text-gray-500">
+                No {filter === 'all' ? 'sources' : FILTERS.find((f) => f.key === filter)!.label.toLowerCase()} {needle ? <>match &ldquo;{q.trim()}&rdquo;</> : 'yet'}.{' '}
+                <button type="button" className="text-indigo-600 hover:underline" onClick={() => { setFilter('all'); setQ(''); }}>Show all sources</button>
+              </td>
+            </tr>
+          )}
+          {all.length === 0 && (
             <tr>
               <td colSpan={cols} className="border-b border-gray-100">
                 <EmptyState icon={<BookOpen className="w-6 h-6" />} title="No sources yet"
-                  description="A source is a website, a document or a text the AI may take facts from, or a product catalogue the Website agent recommends from. Replies and the Website agent answer from the sources attached to them."
+                  description="A source is a website, a document or a text the AI may take facts from, or a product catalogue the Website agent recommends from. AI replies and the Website agent answer from the sources attached to them."
                   action={canEdit ? (
                     <div className="flex flex-wrap items-center justify-center gap-2">
                       <Button variant="secondary" onClick={() => onAdd('website')}><Plus className="w-4 h-4" aria-hidden="true" />Website</Button>
@@ -197,16 +277,19 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
                 <Td className="align-top min-w-[14rem]"><UsedBy s={s} /></Td>
                 {canEdit && (
                   <Td className="align-top whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {s.kind === 'catalogue' && <Link href={catalogueHref(s.id)} className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50">Products</Link>}
+                    <div className="-my-1 flex items-center justify-end gap-1.5">
+                      {s.kind === 'catalogue' && <Link href={catalogueHref(s.id)} className="inline-flex items-center rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50">Products</Link>}
                       <Button size="sm" variant="secondary" aria-label={`Use in… (${s.title})`} onClick={() => onUseIn(s)}>Use in…</Button>
-                      <Button size="sm" variant="ghost" aria-label={`Remove ${s.title}`} className="hover:text-red-600 hover:bg-red-50" onClick={() => setToRemove(s)}>Remove</Button>
+                      <Button size="sm" variant="ghost" aria-label={`Remove ${s.title}`} title="Remove" className="px-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50" onClick={() => setToRemove(s)}>
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      </Button>
                     </div>
                   </Td>
                 )}
               </tr>
             );
           })}
+          {!filtered && <>
           <tr className="align-top">
             <Td>
               <button type="button" onClick={onOpenQa} className="inline-flex items-center gap-2 font-medium text-gray-900 hover:text-indigo-700 rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">
@@ -235,6 +318,7 @@ export default function SourcesView({ ws, data, canEdit, canAnswer, onAdd, onUse
             </Td>
             {canEdit && <Td className="border-b-0" />}
           </tr>
+          </>}
         </tbody>
       </Table>
       {!canEdit && <p className="text-xs text-gray-500 mt-2">Owners and managers add sources and choose where they are used.</p>}

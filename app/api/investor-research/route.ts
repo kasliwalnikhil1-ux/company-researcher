@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 
 const FASHION_DEEP_SEARCH_URL =
   process.env.NODE_ENV === 'development'
@@ -1404,6 +1405,6 @@ export async function POST(req: NextRequest) {
     } catch (missingErr) {
       console.error('[investor-research] Failed to add to missing_investors/not_an_investor in catch block:', missingErr);
     }
-    return NextResponse.json({ error: 'Investor research failed', details: fullMsg }, { status: 500 });
+    return NextResponse.json({ error: 'Investor research failed', details: friendlyErrorText(fullMsg) }, { status: 500 });
   }
 }

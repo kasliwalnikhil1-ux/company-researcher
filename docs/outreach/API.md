@@ -70,6 +70,8 @@ Every response carries `X-Request-Id`. Quote it when you ask for help.
 
 `limit` (1 to 200, default 50) and `offset` (default 0) on `GET /leads`, `/enrollments`, `/threads` and `/sequences/{id}/failed`. Read until `has_more` is `false`. To poll for changes, use `GET /leads?updated_since=2026-09-20T00:00:00Z` or `GET /threads?since=…` instead of walking every page.
 
+`GET /sent` pages with a cursor instead, so no row is skipped or repeated while new sends arrive: `limit` (1 to 100, default 50), then pass the response's `next_cursor` back as `cursor` until it is `null`.
+
 ## Errors
 
 ```json
@@ -227,6 +229,55 @@ A replay is a new delivery with the same payload plus `"replayed": true` and `"r
 
 `POST /v1/threads/{id}/reply` sends a reply on the thread's own channel (LinkedIn message or email) through the same code as the inbox. Body: `text`, optional `subject` (email), optional `cc` / `bcc` (email threads only: arrays of up to 20 addresses each; the contact of the thread is always the To, and Cc / Bcc on any other channel is refused with 400 `E_PAYLOAD_INVALID`), optional `booking: true` to append the sender's booking link. The key needs the member role or higher, the member who created it must be allowed to reply, and a client-scoped key can only reply on its clients' threads. It counts against the 60 per hour budget-spending limit.
 
+## Replies and Sent
+
+The inbox has two views, and the API reads both:
+
+- **Replies** are conversations where the other person has written. `GET /threads` returns every conversation; each one carries `first_inbound_at` (null when nobody on the other side has written yet, so the conversation is not in Replies), `last_inbound_at` (their last message from a person: out-of-office replies and bounces are left out), `last_auto_reply_at`, `waiting_on` (`us` when their message is the latest, `them` when ours is, `null` when they never wrote) and `ai_answering` (the AI is answering their latest message).
+- **Sent** is one row per thing a person on the other side receives from us: `GET /sent`.
+
+Messages keep `direction: "in" | "out"` everywhere.
+
+`GET /v1/sent` lists connection requests (with or without a note), LinkedIn messages and InMails, emails, WhatsApp and Instagram messages, replies a teammate sent, AI replies, and messages the account owner sent from LinkedIn or their phone. Website chat messages and private notes are never listed, and neither is anything sent before the account was connected.
+
+| Query | Meaning |
+|---|---|
+| `segment` | `sent` (default): what went out, newest first, the last 7 days unless `from` / `to` say otherwise. `scheduled`: sends with a planned time that have not gone out (sequence steps, AI replies waiting out their hold, a reply going out now), soonest first. `failed`: sends that did not go out and emails that bounced, newest first, the last 7 days |
+| `sender_ids` | Comma-separated sender ids (up to 100) |
+| `my_senders` | `true`: only senders owned by the member who created the key |
+| `client_id` | One client (a client-scoped key may only name its own clients) |
+| `channel` | `LINKEDIN`, `EMAIL`, `WHATSAPP` or `INSTAGRAM` |
+| `source` | `sequence`, `teammate`, `ai` or `outside_app` (the account owner, from LinkedIn or their phone) |
+| `sequence_id`, `lead_id` | Only sends of that sequence / to that lead |
+| `type` | `connection_request`, `message`, `inmail` or `email` |
+| `replied` | `sent` segment only. `true`: they answered it. `false`: no answer yet |
+| `from`, `to` | ISO 8601 timestamps. At most 90 days apart (422 `E_PAYLOAD_INVALID` otherwise) |
+| `search` | Recipient name, text or subject, at least 2 characters |
+| `limit`, `cursor` | See [Pagination](#pagination) |
+
+```json
+{
+  "data": [
+    {
+      "id": "…", "segment": "sent", "at": "2026-10-06T10:42:00Z", "status": "replied", "status_reason": null, "status_text": null,
+      "channel": "LINKEDIN", "type": "message", "source": "sequence", "from_ai_draft": false,
+      "subject": null, "preview": "Thanks for connecting, Priya. Quick question…", "replied_at": "2026-10-06T11:05:00Z",
+      "lead": { "id": "…", "name": "Priya Nair", "company": "Razorpay" },
+      "sender": { "id": "…", "name": "Naman", "provider": "LINKEDIN" },
+      "sequence": { "id": "…", "name": "Fintech CFOs" }, "step": { "number": 2, "variant": "b" },
+      "chat_id": "…", "message_id": "…", "action_id": "…", "enrollment_id": "…"
+    }
+  ],
+  "next_cursor": "eyJhdCI6…", "segment": "sent", "range": { "from": "2026-09-29T10:43:00Z", "to": "2026-10-06T10:43:00Z" }
+}
+```
+
+`status` is one value per row, the furthest reached. Sent: `replied`, `accepted` (connection request), `read`, `delivered`, `sent`. Scheduled: `scheduled`, `held` (past its planned time and blocked), `sending`. Failed: `failed`, `bounced`. Delivered and Read appear only where the channel reports them, never on email. A send counts as replied when the next message in that conversation is from the other person, which is the same rule as the step statistics; an out-of-office never counts. `status_reason` and `status_text` say why a row is held or failed, in the same words as `GET /sequences/{id}/why-not-sending`.
+
+To act on a row, use the routes that already exist: a failed sequence step with `recoverable: true` goes to `POST /enrollments/recover` (retry, skip or exit); a scheduled step's lead can be paused or removed with `POST /enrollments/{id}/pause` / `…/exit`. There is no way to send a sequence step early.
+
+A client viewer key gets 403 `E_FORBIDDEN` when the workspace turned off **Show Sent to clients**.
+
 ## Ten common calls
 
 ```bash
@@ -304,7 +355,7 @@ curl -X POST "$BASE/webhooks" -H "Authorization: Bearer $KEY" -H "Content-Type: 
   -d '{"url":"https://hooks.example.com/outreach","events":["message.classified","meeting.booked"]}'
 ```
 
-Also useful: stop contacting someone with `POST /leads/{id}/suppress`, blacklist a domain with `POST /suppressions` and `{"rows":[{"value":"competitor.com"}]}`, check a sender with `GET /senders/{id}/capacity`.
+Also useful: stop contacting someone with `POST /leads/{id}/suppress`, blacklist a domain with `POST /suppressions` and `{"rows":[{"value":"competitor.com"}]}`, check a sender with `GET /senders/{id}/capacity`, see what failed this week with `GET /sent?segment=failed`, and what goes out next with `GET /sent?segment=scheduled`.
 
 ## All routes
 
@@ -314,7 +365,7 @@ Also useful: stop contacting someone with `POST /leads/{id}/suppress`, blacklist
 | Leads | `GET /leads` · `POST /leads` · `GET /leads/{id}` · `PATCH /leads/{id}` · `POST /leads/{id}/tags` · `DELETE /leads/{id}/tags/{tag_id}` · `PUT /leads/{id}/stage` · `PUT /leads/{id}/list` · `POST /leads/{id}/suppress` · `DELETE /leads/{id}/suppress` · `GET /leads/{id}/timeline` · `POST /leads/enrich` · `POST /suppressions` |
 | Enrollments | `POST /enrollments/preview` · `POST /enrollments` · `GET /enrollments` · `POST /enrollments/{id}/pause` · `…/resume` · `…/exit` · `POST /enrollments/recover` |
 | Sequences | `GET /sequences` · `GET /sequences/{id}` · `GET /sequences/{id}/stats` · `POST /sequences/{id}/activate` · `POST /sequences/{id}/pause` · `GET /sequences/{id}/failed` · `GET /sequences/{id}/why-not-sending` |
-| Inbox | `GET /threads` · `GET /threads/{id}` · `POST /threads/{id}/reply` · `PUT /threads/{id}/intent` · `PUT /threads/{id}/assignee` |
+| Inbox | `GET /threads` · `GET /threads/{id}` · `POST /threads/{id}/reply` · `PUT /threads/{id}/intent` · `PUT /threads/{id}/assignee` · `GET /sent` |
 | Senders | `GET /senders` · `GET /senders/{id}` · `GET /senders/{id}/health` · `GET /senders/{id}/budgets` · `GET /senders/{id}/capacity` |
 | Reports | `GET /reports/overview` · `/funnel` · `/intents` · `/reply-threads` · `/cost` · `/sequences` · `/senders` · `/clients` · `/sequences/{id}` · `/senders/{id}` · `/clients/{id}` |
 | Webhooks | `GET /webhooks` · `POST /webhooks` · `DELETE /webhooks/{id}` · `GET /webhooks/deliveries` · `POST /webhooks/deliveries/{id}/replay` |
@@ -325,7 +376,7 @@ Building and publishing sequences, connecting senders and changing caps are not 
 ## For maintainers
 
 - Code: `supabase/functions/outreach-api/`. `index.ts` holds auth, rate limits, idempotency and error mapping. `dispatch.ts` holds `call(ctx, fn, args)`, the only way a route reaches the database. `routes_*.ts` hold one resource each.
-- Every route ends in `outreach_api_dispatch(key_id, fn, args)`. To add a route, the function must be on the whitelist in `migrations/outreach/015_platform.sql`.
+- Every route ends in `outreach_api_dispatch(key_id, fn, args)`. To add a route, the function must be on the whitelist in `migrations/outreach/015_platform.sql`. `GET /sent` needs `inbox_sent_list` on it.
 - Deploy with JWT verification off (`--no-verify-jwt`). An API key is not a JWT, and the function checks the key itself on every `/v1` route.
 - After changing routes, update `openapi.json` and run `deno run --allow-read supabase/functions/outreach-api/openapi_check.ts`. It fails when a route is missing from the spec or the other way round.
 - Reply hand-over: `outreach-send-reply` keeps its send logic inside its request handler and authenticates with `requireUser` (a member JWT). To switch on `POST /threads/{id}/reply`, move that logic into an exported function, for example `sendReply({ userId, role, clientIds, chatId, text, subject, attachments })` in `_shared/outreach/reply.ts`, call it from both functions, and have it check `can_reply` and client visibility against the role and scope passed in (the key's, not the member's).

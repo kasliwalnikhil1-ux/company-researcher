@@ -99,10 +99,10 @@ export function AddDocumentModal({ ws, onClose, onAdded, notify }: AddProps) {
     <Modal open onClose={onClose} title="Add a document" size="md"
       footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!canSubmit}>Add</Button></>}>
       <div className="space-y-4">
-        <div role="tablist" aria-label="How to add the document" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+        <div role="tablist" aria-label="How to add the document" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {DOC_TABS.map((t) => (
             <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} disabled={busy} onClick={() => { setTab(t.key); setError(null); }}
-              className={cn('px-3 py-1 text-sm rounded-md', tab === t.key ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900')}>{t.label}</button>
+              className={cn('px-3 py-1 text-sm rounded-md', tab === t.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{t.label}</button>
           ))}
         </div>
         {tab === 'file' && (

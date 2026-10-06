@@ -64,9 +64,10 @@ function reasonText(mode: string, code: string | null, label: string | null): st
   return `${m} — ${code && t[code] ? t[code] : `from ${label ?? 'the sequence'}`}`;
 }
 
+/** Mirrors migration 079: a sender in the pool replies on Auto, no owner approval. */
 export function consentValid(store: DemoStore, senderId: string): boolean {
-  const now = Date.now();
-  return store.t('outreach_ai_reply_consent').some((k) => k.sender_id === senderId && !k.revoked_at && Date.parse(k.expires_at) > now);
+  void store; void senderId;
+  return true;
 }
 
 /** The sequence a chat's replies belong to: the chat's own link, else the lead's latest enrollment with that sender. */
@@ -330,6 +331,18 @@ export function sendRun(store: DemoStore, runId: string, opts: { by?: string | n
   }
   engineFor(store).scheduleProspectAnswer(store.get('outreach_chats', chat.id)!);
   return msg;
+}
+
+/**
+ * Auto replies whose hold is over go out (what the real worker does when `scheduled_send_at` passes). The job queue
+ * runs on real time; this catches the holds the simulator's clock moved past. Returns how many were sent.
+ */
+export function sendDueHolds(store: DemoStore, now = Date.now()): number {
+  let n = 0;
+  for (const r of store.t('outreach_ai_reply_runs').filter((x) => x.status === 'scheduled' && x.scheduled_send_at && Date.parse(x.scheduled_send_at) <= now)) {
+    if (sendRun(store, r.id)) n++;
+  }
+  return n;
 }
 
 function markSent(store: DemoStore, r: Row, msg: Row, origin: string, by: string | null): void {

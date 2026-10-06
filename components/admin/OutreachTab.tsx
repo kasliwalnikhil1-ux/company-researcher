@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Search, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
-import { Badge, Button, Input, Modal, Select, Spinner, Table, Th, Td, ErrorBox, timeAgo } from '@/components/outreach/ui';
+import { Avatar, Badge, Button, Input, Modal, Select, Spinner, Table, Th, Td, ErrorBox, timeAgo } from '@/components/outreach/ui';
 import {
   adminApi, describeDetails, EARLY_SUPPORTER_DISCOUNTS, OUTREACH_BILLING_PERIODS, OUTREACH_PLANS, OUTREACH_ROLES,
   type AdminBillingChange, type AdminBillingSlots, type AdminBillingStateSnapshot, type AdminWorkspace, type AdminWorkspacePatch,
@@ -263,6 +263,7 @@ function MembersPanel({ w, onOpenUser, onChanged }: { w: AdminWorkspace; onOpenU
       <div className="grid gap-1.5">
         {w.members.map((m) => (
           <div key={m.user_id} className="flex flex-wrap items-center gap-2 text-sm bg-white border border-gray-200 rounded-lg px-3 py-1.5">
+            <Avatar name={m.email ?? m.user_id} size={6} />
             <button type="button" className="text-gray-900 hover:underline truncate max-w-[260px]" onClick={() => onOpenUser(m.user_id)}>{m.email ?? m.user_id}</button>
             <Select value={m.role} onChange={(e) => act(m.user_id, 'Role updated', () => adminApi.setWorkspaceMember(w.id, m.user_id, e.target.value as OutreachRole))} className="w-auto py-1 text-xs">{OUTREACH_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}</Select>
             {m.client_ids.length > 0 && <Badge tone="gray">{m.client_ids.length} client{m.client_ids.length === 1 ? '' : 's'}</Badge>}

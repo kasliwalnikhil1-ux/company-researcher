@@ -6,6 +6,7 @@ import { supabase } from '@/utils/supabase/client';
 import { rpc, parseError } from '@/lib/crm/api';
 import { ACCOUNT_COLORS, RESPONSE_LABEL, calendarApi, fmtDay, hm, nowMinutesIn, shiftDay, todayIn, useCalendarInvalidate, type CalendarAccount, type CalendarEvent, type FreeSlot, type Notify } from '@/lib/crm/calendar';
 import { Badge, Button, ErrorBox, Field, Input, Modal, Select, Spinner, Textarea } from '@/components/crm/ui';
+import { MemberAvatar, MemberName } from './members';
 import { TimezonePicker } from '@/components/crm/TimezonePicker';
 import { convertWallClock, tzOffsetLabel, tzShort } from '@/lib/crm/timezones';
 import { inviteDescription, inviteTitle, type InviteVars } from '@/lib/crm/invite';
@@ -37,7 +38,7 @@ export function AccountChips({ accounts, selected, onToggle, colorOf, onManage }
               <span className={cn('w-2 h-2 rounded-full', on ? c.dot : 'bg-gray-300')} />
               <span className="font-medium">{a.label || a.email}</span>
               {a.label && <span className="opacity-70 hidden sm:inline">{a.email}</span>}
-              {!a.mine && <span className="opacity-70">· {a.member_name}</span>}
+              {!a.mine && <span className="opacity-70 inline-flex items-center gap-1">· <MemberAvatar userId={a.member_id} name={a.member_name} size="xs" />{a.member_name}</span>}
               {a.mine && a.is_default && <Star className="w-3 h-3 fill-current opacity-70" aria-label="default" />}
               {a.auth_state !== 'ok' && <span className="text-red-600 font-medium">reconnect</span>}
               {!a.can_write && a.auth_state === 'ok' && <span className="text-amber-700">read-only</span>}
@@ -206,7 +207,7 @@ export function Agenda({ events, crmOnly, tz, colorOf, onEvent, onCrmOnly }: { e
                   <span className="font-medium text-gray-900 truncate">{e.title}</span>
                   {e.crm?.company && <Badge tone="indigo"><Building2 className="w-3 h-3" /> {e.crm.company}</Badge>}
                   {e.meet && <Video className="w-3.5 h-3.5 text-gray-400" aria-label="Google Meet" />}
-                  <span className="ml-auto text-xs text-gray-500 truncate">{e.mine ? e.account_email : e.member_name}{e.attendees.length > 1 ? ` · ${e.attendees.length} guests` : ''}</span>
+                  <span className="ml-auto text-xs text-gray-500 truncate inline-flex items-center gap-1">{e.mine ? e.account_email : <MemberName name={e.member_name} size="xs" />}{e.attendees.length > 1 ? ` · ${e.attendees.length} guests` : ''}</span>
                 </button></li>
               );
             })}
@@ -360,7 +361,7 @@ export function EventModal({ open, onClose, event, draft, accounts, tz, colorOf,
         <div className="min-w-0">
           <div className="text-base font-semibold text-gray-900">{e.title}</div>
           <div className="text-gray-700">{e.when}{e.recurring ? ' · repeats' : ''}</div>
-          <div className="text-xs text-gray-500">{e.mine ? e.account_email : `${e.member_name} · ${e.account_email}`}{e.calendar_name && e.calendar_id !== e.account_email ? ` · ${e.calendar_name}` : ''}{!e.organizer_self && e.organizer ? ` · organised by ${e.organizer}` : ''}</div>
+          <div className="text-xs text-gray-500">{e.mine ? e.account_email : <><MemberName name={e.member_name} size="xs" /> · {e.account_email}</>}{e.calendar_name && e.calendar_id !== e.account_email ? ` · ${e.calendar_name}` : ''}{!e.organizer_self && e.organizer ? ` · organised by ${e.organizer}` : ''}</div>
         </div>
       </div>
       <div className="flex flex-wrap gap-2">

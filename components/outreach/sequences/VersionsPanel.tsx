@@ -10,6 +10,7 @@ import { normalizeGraph } from '@/lib/outreach/graph';
 import { qk, useLists, useMembers, useSenders, useSequence, useSequenceVersions, useStages, useTags, useWebhooks, useSequences } from '@/lib/outreach/queries';
 import type { SequenceVersion } from '@/lib/outreach/types';
 import { Badge, Button, EmptyState, ErrorBox, fmtDate, Modal, PageLoader, Table, Td, Th, useToast } from '@/components/outreach/ui';
+import { MemberChip } from '@/components/outreach/members';
 import MiniCanvas from '@/components/outreach/sequences/MiniCanvas';
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
 import { diffGraphs, formatGraphError, nodeCount, nodeTitle, type Lookup } from '@/components/outreach/sequences/helpers';
@@ -50,12 +51,6 @@ export default function VersionsPanel({ id, onRestored }: { id: string; onRestor
   const [moved, setMoved] = useState<{ version: number; result: MoveToLatestResult } | null>(null);
   const canManage = isManager && !suspended;
   const usageMap = useMemo(() => Object.fromEntries((usage.data ?? []).map((u) => [u.version, u])), [usage.data]);
-
-  const who = (uid: string | null) => {
-    if (!uid) return 'system';
-    const m = members.data?.find((x) => x.user_id === uid);
-    return m?.display_name || m?.email || `${uid.slice(0, 8)}…`;
-  };
 
   // Restoring never touches live leads: the old graph is loaded into the draft, and the builder publishes (or saves) it.
   const doRestore = async () => {
@@ -118,7 +113,7 @@ export default function VersionsPanel({ id, onRestored }: { id: string; onRestor
                 <tr key={v.version} className="hover:bg-gray-50">
                   <Td><span className="font-medium text-gray-900">v{v.version}</span>{isHead && <Badge tone="indigo" className="ml-2">live</Badge>}</Td>
                   <Td className="whitespace-nowrap">{fmtDate(v.created_at)}</Td>
-                  <Td className="text-gray-600 whitespace-nowrap">{who(v.created_by)}</Td>
+                  <Td className="text-gray-600 whitespace-nowrap">{v.created_by ? <MemberChip userId={v.created_by} members={members.data} /> : 'system'}</Td>
                   <Td className="max-w-[16rem]">
                     {u?.note ? <span className="block text-gray-700 truncate" title={u.note}>{u.note}</span> : <span className="text-gray-400">—</span>}
                     {u?.publish_mode && <span className="block text-[11px] text-gray-500">{u.publish_mode === 'new_only' ? 'Published for new leads only' : 'Published for everyone not yet at the changed steps'}</span>}
@@ -142,9 +137,9 @@ export default function VersionsPanel({ id, onRestored }: { id: string; onRestor
 
       <Modal open={!!preview} onClose={() => setPreview(null)} title={preview ? `Version ${preview.version} · ${fmtDate(preview.created_at)}` : ''} size="xl"
         footer={<>
-          <div className="mr-auto inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
-            <button type="button" onClick={() => setMode('canvas')} className={`px-3 py-1.5 inline-flex items-center gap-1 ${mode === 'canvas' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700'}`}><LayoutGrid className="w-3.5 h-3.5" /> Canvas</button>
-            <button type="button" onClick={() => setMode('json')} className={`px-3 py-1.5 inline-flex items-center gap-1 ${mode === 'json' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700'}`}><Code2 className="w-3.5 h-3.5" /> Raw data</button>
+          <div className="mr-auto inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs">
+            <button type="button" onClick={() => setMode('canvas')} aria-pressed={mode === 'canvas'} className={`px-3 py-1 rounded-md inline-flex items-center gap-1 ${mode === 'canvas' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}><LayoutGrid className="w-3.5 h-3.5" /> Canvas</button>
+            <button type="button" onClick={() => setMode('json')} aria-pressed={mode === 'json'} className={`px-3 py-1 rounded-md inline-flex items-center gap-1 ${mode === 'json' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}><Code2 className="w-3.5 h-3.5" /> Raw data</button>
           </div>
           {canManage && preview && preview.version !== seq.data.head_version && <Button variant="secondary" onClick={() => { setRestore(preview); setPreview(null); }}><RotateCcw className="w-4 h-4" /> Restore this version</Button>}
           <Button onClick={() => setPreview(null)}>Close</Button>

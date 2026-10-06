@@ -144,12 +144,12 @@ export default function SendersPage() {
       {channels.length > 1 || channel ? (
         <div className="flex flex-wrap items-center gap-2 mb-3" role="group" aria-label="Channel" data-tour="sender-channels">
           <button type="button" onClick={() => setChannel('')} aria-pressed={!channel}
-            className={cn('px-3 py-1.5 rounded-full text-xs font-medium border', !channel ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
+            className={cn('px-3 py-1.5 rounded-full text-xs font-medium border', !channel ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
             All channels <span className="opacity-60 tabular-nums">{senders.data?.length ?? 0}</span>
           </button>
           {channels.map((p) => (
             <button key={p} type="button" onClick={() => setChannel(channel === p ? '' : p)} aria-pressed={channel === p}
-              className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border', channel === p ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50')}>
+              className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border', channel === p ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50')}>
               <ProviderLogo provider={p} className="w-3.5 h-3.5" /> {PROVIDER_LABELS[p]} <span className="opacity-60 tabular-nums">{channelCounts.get(p) ?? 0}</span>
             </button>
           ))}
@@ -181,7 +181,14 @@ export default function SendersPage() {
         <>
         <Table>
           <thead><tr>
-            <Th>Sender</Th><Th>Status</Th><Th>Health</Th><Th>Profile</Th><Th>Level</Th><Th>Proxy</Th><Th>Client</Th><Th>Schedule</Th><Th>Last sync</Th><Th className="text-right">Used today</Th>
+            <Th>Sender</Th><Th>Status</Th>
+            <Th title="How safe this account is to send from, 0 to 100. It's the lowest of six checks and is updated every hour. A lower score cuts today's limits, and below 50 sending pauses.">Health</Th>
+            <Th title="LinkedIn only: how complete and convincing the LinkedIn profile is. Click the score to open the Profile tab.">Profile</Th>
+            <Th title="Warm-up level. New accounts start at L0 with low daily limits, and each level allows more. A lock date means the account can't move up before then.">Level</Th>
+            <Th title="The country this account sends from. It's set when the account is connected and should match where the owner lives.">Proxy</Th>
+            <Th title="The client this sender works for, if any.">Client</Th>
+            <Th title="Working hours in the sender's own time zone. Actions are only sent during these hours.">Schedule</Th>
+            <Th>Last sync</Th><Th className="text-right">Used today</Th>
           </tr></thead>
           <tbody>
             {pageRows.map((s) => {

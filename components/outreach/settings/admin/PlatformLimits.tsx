@@ -55,7 +55,7 @@ export default function PlatformLimits() {
     <div className="flex flex-wrap gap-1.5 mb-3" role="tablist" aria-label="Channel">
       {CHANNEL_PROVIDERS.map((p) => (
         <button key={p} type="button" role="tab" aria-selected={channel === p} onClick={() => setChannel(p)}
-          className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border', channel === p ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50')}>
+          className={cn('inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border', channel === p ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50')}>
           <ProviderLogo provider={p} className="w-3.5 h-3.5" /> {PROVIDER_LABELS[p]}
         </button>
       ))}

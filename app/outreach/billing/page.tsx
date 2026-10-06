@@ -5,6 +5,7 @@ import Link from '@/lib/outreach/nav';
 import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CalendarClock, CheckCircle2, CreditCard, ExternalLink, Plus, XCircle } from 'lucide-react';
+import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
@@ -15,6 +16,8 @@ import {
 import { discountedCents, pricing, type BillingPeriod } from '@/lib/outreach/pricing';
 import { Badge, Button, Card, ErrorBox, fmtDate, Modal, PageHeader, PageLoader, Spinner, Table, Td, Textarea, Th, useToast } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
+
+const HISTORY_PAGE_SIZE = 12;
 
 type Tone = 'red' | 'amber' | 'blue' | 'green' | 'gray';
 const TONES: Record<Tone, string> = {
@@ -89,7 +92,9 @@ function BillingInner() {
       return (data ?? []) as Array<{ day: string; accounts: number; accounts_billed: number | null; active_senders: number; active_mailboxes: number }>;
     },
   });
-  const history = useQuery({ queryKey: ['outreach', ws ?? '', 'billing-changes'], enabled: !!ws && isOwner, queryFn: () => rpc<ChangeRow[]>('billing_changes', { p_ws: ws!, p_limit: 20 }) });
+  // The RPC returns at most 200 changes (years of history); they are paged here, a year of monthly renewals per page.
+  const history = useQuery({ queryKey: ['outreach', ws ?? '', 'billing-changes'], enabled: !!ws && isOwner, queryFn: () => rpc<ChangeRow[]>('billing_changes', { p_ws: ws!, p_limit: 200 }) });
+  const { pageRows: historyRows, ...historyPager } = usePagedRows(history.data ?? [], ws ?? '', HISTORY_PAGE_SIZE);
 
   async function run<T>(key: string, fn: () => Promise<T>, done?: (r: T) => void) {
     setBusy(key);
@@ -251,11 +256,12 @@ function BillingInner() {
       </div>
 
       <Card className="mt-6" title="Billing history">
-        {history.isLoading ? <Spinner /> : history.isError ? <ErrorBox message={parseError(history.error).message} /> : !history.data?.length ? <p className="text-sm text-gray-500">No plan changes yet.{b.has_customer ? ' Invoices are under “Payment method & invoices”.' : ''}</p> : (
+        {history.isLoading ? <Spinner /> : history.isError ? <ErrorBox message={parseError(history.error).message} /> : !historyPager.total ? <p className="text-sm text-gray-500">No plan changes yet.{b.has_customer ? ' Invoices are under “Payment method & invoices”.' : ''}</p> : (
+          <>
           <Table>
             <thead><tr><Th>When</Th><Th>Change</Th><Th className="text-right">Charged</Th><Th>Status</Th><Th>By</Th></tr></thead>
             <tbody>
-              {history.data.map((c) => (
+              {historyRows.map((c) => (
                 <tr key={c.id}>
                   <Td className="whitespace-nowrap text-gray-600">{fmtDate(c.applied_at ?? c.created_at)}</Td>
                   <Td className="text-gray-900">{changeText(c)}{c.status === 'failed' && c.error ? <div className="text-xs text-red-600 mt-0.5">{c.error}</div> : null}</Td>
@@ -266,6 +272,8 @@ function BillingInner() {
               ))}
             </tbody>
           </Table>
+          {historyPager.pageCount > 1 && <PaginationBar {...historyPager} />}
+          </>
         )}
       </Card>
 

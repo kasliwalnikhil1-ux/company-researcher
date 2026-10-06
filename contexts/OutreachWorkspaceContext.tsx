@@ -109,3 +109,8 @@ export function useWorkspace(): Ctx {
   if (!ctx) throw new Error('useWorkspace must be used within OutreachWorkspaceProvider');
   return ctx;
 }
+
+/** The current workspace id, or null outside the provider (shared widgets that also render on admin pages). */
+export function useWorkspaceIdOptional(): string | null {
+  return useContext(WorkspaceContext)?.workspace?.id ?? null;
+}

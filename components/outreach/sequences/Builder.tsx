@@ -36,7 +36,6 @@ import FailedLeadsDrawer from './FailedLeadsDrawer';
 import { WhyNotSendingDialog } from './WhyNotSendingDialog';
 import AutoEnrolRules from './AutoEnrolRules';
 import AiRepliesTab from './ai/AiRepliesTab';
-import { useSequenceAiSummary } from '@/lib/outreach/aiRepliesSequence';
 
 const EMPTY: never[] = [];
 const NO_AI_VARIABLES: AiVariable[] = [];
@@ -72,7 +71,6 @@ export default function Builder({ id }: { id: string }) {
   const inflightQ = useInflightCount(id);
   const failedQ = useFailedCount(id);
   const everQ = useEverEnrolled(id);
-  const aiSummaryQ = useSequenceAiSummary(id);
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -503,7 +501,6 @@ export default function Builder({ id }: { id: string }) {
           sequence={sequence} draft={draft} dirty={dirty} saving={saving} version={sequence.head_version} readOnly={readOnly} canManage={canManage}
           publishMode={publishMode} modeKnown={modeKnown} canDiscard={dirty || !!autosave.savedAt} indicator={indicator}
           inflight={inflightQ.data} failedCount={failedQ.data} tab={tab} onTab={setTab}
-          tabBadges={(aiSummaryQ.data?.unanswered_open ?? 0) >= 3 ? { ai: aiSummaryQ.data!.unanswered_open } : undefined}
           onChange={patchDraft} onSave={save} onPublish={openPublish} onDiscard={() => setConfirm({ kind: 'discard' })} onStatus={onStatus}
           onWhy={() => setWhyOpen(true)} onFailed={() => setFailedView({ nodeId: null, kind: 'failed' })}
           onNavigate={navigate}

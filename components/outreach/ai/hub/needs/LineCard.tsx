@@ -37,7 +37,7 @@ function ReadActions({ row, api, approve, onEdit }: Pick<LineCardProps, 'row' | 
       <Button size="sm" onClick={approve}><Check className="w-3.5 h-3.5" /> Approve</Button>
       <Button size="sm" variant="secondary" onClick={onEdit}><Pencil className="w-3.5 h-3.5" /> Edit</Button>
       <Button size="sm" variant="secondary" onClick={() => void api.act(row, () => reviewLines([row.id], 'regenerate'), 'The line is being written again. It comes back here when it is ready.')} title="Write a new line for this lead"><RefreshCw className="w-3.5 h-3.5" /> Regenerate</Button>
-      <Button size="sm" variant="ghost" onClick={() => api.defer(row, 'Line skipped', () => reviewLines([row.id], 'skip'))} title="The fallback is used for this lead"><SkipForward className="w-3.5 h-3.5" /> Skip</Button>
+      <Button size="sm" variant="ghost" onClick={() => api.defer(row, 'Line skipped', () => reviewLines([row.id], 'skip'))} title={lineFields(row) ? 'The fallback written in the message is used for this lead. A Condition step reads every field as empty.' : 'The fallback written in the message is used for this lead'}><SkipForward className="w-3.5 h-3.5" /> Skip</Button>
     </>
   );
 }
@@ -81,11 +81,11 @@ function TextLineCard({ row, hidden, api, checked, onCheck, edit: anyEdit, onEdi
             else if (e.key === 'Escape') { e.preventDefault(); onEdit(undefined); }
           }} />
       ) : (
-        <Part><ClampText text={line} /></Part>
+        <Part tone="ai" label="AI line"><ClampText text={line} /></Part>
       )}
       extra={<>
         <Facts facts={facts} />
-        <Hint>{fallback ? <>Skip uses the fallback: <span className="text-gray-700">{fallback}</span></> : 'Skip uses the fallback written in the message.'}</Hint>
+        {fallback && <Hint>If skipped: <span className="text-gray-700">{fallback}</span></Hint>}
       </>}
       actions={api.canWrite ? (
         editing ? (
@@ -126,12 +126,9 @@ function FieldsLineCard({ row, hidden, api, checked, onCheck, edit: anyEdit, onE
           <p className="text-xs text-gray-500 mt-1.5">Ctrl+Enter saves and approves. Esc discards the edit. Leave a field empty when the profile does not say.</p>
         </div>
       ) : (
-        <Part><FieldValueTable fields={fields} data={data} className="max-w-2xl" /></Part>
+        <Part tone="ai" label="AI fields"><FieldValueTable fields={fields} data={data} className="max-w-2xl" /></Part>
       )}
-      extra={<>
-        <Facts facts={facts} />
-        <Hint>Skip uses the fallback written in the message. A Condition step then reads every field as empty.</Hint>
-      </>}
+      extra={<Facts facts={facts} />}
       actions={api.canWrite ? (
         editing ? (
           <>

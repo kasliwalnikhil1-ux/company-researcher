@@ -3,8 +3,10 @@
 // Identities (PRD §8): one handle or number per channel for a lead. LinkedIn comes from the lead itself; Instagram
 // handles and WhatsApp numbers are added here (or arrive from imports, inbound messages and profile reads).
 import { useState } from 'react';
-import { AtSign, Check, Trash2 } from 'lucide-react';
+import { AtSign, Check, Copy, Trash2 } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
+import { cn } from '@/lib/utils';
+import { copyText } from '@/components/outreach/senders/helpers';
 import { channelLabel, useIdentityAdd, useIdentityRemove, useIdentityVerify, useLeadIdentities } from '@/lib/outreach/channels';
 import type { LeadIdentity, Provider } from '@/lib/outreach/types';
 import { Badge, Button, Card, ErrorBox, Input, Select, Spinner, fmtDate } from '@/components/outreach/ui';
@@ -32,6 +34,38 @@ export function identityHref(i: LeadIdentity): string | null {
   return null;
 }
 
+const isEmail = (v: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v);
+
+/** mailto: in the same tab (opens the computer's mail app; target=_blank leaves a blank tab) plus a copy icon. When
+ *  no mail app is set up the click does nothing, so if the page still has focus shortly after, copy the address. */
+export function EmailLink({ email, className }: { email: string; className?: string }) {
+  const [copied, setCopied] = useState<'ok' | 'fail' | 'fallback' | null>(null);
+  async function copy(kind: 'ok' | 'fallback') {
+    setCopied((await copyText(email)) ? kind : 'fail');
+    setTimeout(() => setCopied(null), kind === 'fallback' ? 3000 : 1500);
+  }
+  function openMail() {
+    let left = false;
+    const onBlur = () => { left = true; };
+    window.addEventListener('blur', onBlur, { once: true });
+    setTimeout(() => {
+      window.removeEventListener('blur', onBlur);
+      if (!left && document.hasFocus()) void copy('fallback');
+    }, 800);
+  }
+  return (
+    <span className="inline-flex items-center gap-1 min-w-0">
+      <a href={`mailto:${email}`} onClick={openMail} title="Write an email" className={cn('truncate hover:text-indigo-600', className)}>{email}</a>
+      <button type="button" aria-label="Copy email address" title={copied === 'fail' ? 'Copy failed. Select the address and copy it by hand.' : copied ? 'Copied' : 'Copy email address'}
+        onClick={() => copy('ok')}
+        className={cn('flex-shrink-0 text-gray-400 hover:text-gray-700', copied === 'fail' && 'text-red-600')}>
+        {copied === 'ok' || copied === 'fallback' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+      </button>
+      {copied === 'fallback' && <span className="flex-shrink-0 text-[11px] text-green-700" aria-live="polite">No email app found, address copied</span>}
+    </span>
+  );
+}
+
 /** Compact list for side panels: one line per identity. */
 export function IdentityList({ identities, className }: { identities: LeadIdentity[] | undefined; className?: string }) {
   if (!identities?.length) return <p className={`text-xs text-gray-500 ${className ?? ''}`}>No handles or numbers on file.</p>;
@@ -43,7 +77,7 @@ export function IdentityList({ identities, className }: { identities: LeadIdenti
         return (
           <li key={i.id ?? `${i.provider}:${i.identifier}`} className="flex items-center gap-1.5 text-xs min-w-0">
             <ProviderLogo provider={i.provider} className="w-3.5 h-3.5" />
-            {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-indigo-600 truncate">{i.identifier}</a> : <span className="text-gray-800 truncate">{i.identifier}</span>}
+            {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-gray-800 hover:text-indigo-600 truncate">{i.identifier}</a> : isEmail(i.identifier) ? <EmailLink email={i.identifier} className="text-gray-800" /> : <span className="text-gray-800 truncate">{i.identifier}</span>}
             {!i.verified && <span className="text-amber-700">unverified</span>}
             <WhatsAppCheck i={i} />
           </li>
@@ -100,7 +134,7 @@ export function LeadIdentitiesCard({ leadId, ws, canWrite, toast }: { leadId: st
                   <div className="flex items-center gap-2 flex-wrap">
                     <ProviderLogo provider={i.provider} className="w-4 h-4" />
                     <span className="text-xs text-gray-500">{channelLabel(i.provider)}</span>
-                    {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate">{i.identifier}</a> : <span className="text-sm font-medium text-gray-900 truncate">{i.identifier}</span>}
+                    {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="text-sm font-medium text-gray-900 hover:text-indigo-600 truncate">{i.identifier}</a> : isEmail(i.identifier) ? <EmailLink email={i.identifier} className="text-sm font-medium text-gray-900" /> : <span className="text-sm font-medium text-gray-900 truncate">{i.identifier}</span>}
                     {i.verified ? <Badge tone="green">Verified</Badge> : <Badge tone="amber">Unverified</Badge>}
                     <WhatsAppCheck i={i} />
                   </div>

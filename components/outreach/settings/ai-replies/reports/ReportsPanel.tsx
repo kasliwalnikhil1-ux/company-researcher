@@ -19,7 +19,7 @@ const n = (v: number | null | undefined) => (v == null ? '—' : v.toLocaleStrin
 
 /**
  * AI reply metrics for a date range plus hand-offs and the cancel-reason report by prompt rule.
- * `onOpenRun` opens one run; without it (AI → Setup → Replies, where the run drawer is gone) the report shows no run links.
+ * `onOpenRun` opens one run; without it (AI → Setup → AI replies, where the run drawer is gone) the report shows no run links.
  */
 export default function ReportsPanel({ ws, onOpenRun }: { ws: string; onOpenRun?: (id: string) => void }) {
   const [range, setRange] = useState(() => ({ from: isoDaysAgo(29), to: isoDaysAgo(0) }));

@@ -47,8 +47,10 @@ export default function KnowledgeSection({ sequenceId, ws, knowledge, faqs, canE
             </span>
           );
         })}
-        <button type="button" onClick={() => setFaqOpen(true)} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-indigo-200 bg-indigo-50 text-sm text-indigo-900 hover:bg-indigo-100">
-          <HelpCircle className="w-3.5 h-3.5" aria-hidden="true" />{faqs.length} Q&amp;A
+        <button type="button" onClick={() => setFaqOpen(true)} title="Questions prospects ask and the answer the AI may give" className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full border border-gray-200 bg-gray-50 text-sm text-gray-800 hover:border-indigo-200 hover:bg-indigo-50">
+          <HelpCircle className="w-3.5 h-3.5 flex-shrink-0 text-gray-500" aria-hidden="true" />
+          <span>Q&amp;A</span>
+          <Badge tone="gray">{faqs.length}</Badge>
         </button>
         {knowledge.length === 0 && <span className="text-xs text-gray-500">No sources attached. The AI only uses the facts written in the prompt.</span>}
       </div>
@@ -113,9 +115,9 @@ function AddKnowledgeModal({ sequenceId, ws, attached, onClose, notify }: { sequ
     <Modal open onClose={onClose} title="Add knowledge" size="md"
       footer={tab === 'existing' ? <Button variant="secondary" onClick={onClose}>Close</Button> : <><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!canSubmit}>Add</Button></>}>
       <div className="space-y-4">
-        <div role="tablist" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+        <div role="tablist" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {tabs.map((t) => (
-            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)} className={cn('px-3 py-1 text-sm rounded-md', tab === t.key ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900')}>{t.label}</button>
+            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)} className={cn('px-3 py-1 text-sm rounded-md', tab === t.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{t.label}</button>
           ))}
         </div>
         {tab === 'website' && (
@@ -139,7 +141,7 @@ function AddKnowledgeModal({ sequenceId, ws, attached, onClose, notify }: { sequ
         {tab === 'text' && (
           <div className="space-y-3">
             <Input label="Name" value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="Rate card" autoFocus />
-            <Textarea label="Text" rows={8} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the facts, prices, FAQs or product notes the AI may use." hint="At least a few sentences." />
+            <Textarea autoGrow label="Text" rows={8} value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste the facts, prices, FAQs or product notes the AI may use." hint="At least a few sentences." />
           </div>
         )}
         {tab === 'existing' && (
@@ -203,7 +205,7 @@ function FaqModal({ sequenceId, ws, faqs, canEdit, onClose, notify }: { sequence
         {editing && (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3 space-y-2">
             <Input label="Question" value={editing.question} maxLength={500} onChange={(e) => setEditing({ ...editing, question: e.target.value })} autoFocus />
-            <Textarea label="Answer" rows={3} maxLength={2000} value={editing.answer} onChange={(e) => setEditing({ ...editing, answer: e.target.value })} />
+            <Textarea autoGrow label="Answer" rows={3} maxLength={2000} value={editing.answer} onChange={(e) => setEditing({ ...editing, answer: e.target.value })} />
             {error && <ErrorBox message={error} />}
             <div className="flex gap-2"><Button size="sm" onClick={doSave} loading={save.isPending} disabled={!ok}>Save</Button><Button size="sm" variant="ghost" onClick={() => { setEditing(null); setError(null); }}>Cancel</Button></div>
           </div>

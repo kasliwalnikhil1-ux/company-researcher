@@ -82,6 +82,7 @@ CRON_FUNCS=(
   outreach-ai-reply-worker   # AI replies: draft (15 s), dispatch (1 min), maintenance (*/15), breakers (hourly), daily (graduation + digests)
   outreach-notes-worker      # private notes: mention emails (every minute), purge of deleted notes (daily)
   outreach-webchat-worker    # web chat: continuity email digests (every minute), maintenance (every 5 min), review (every minute), voice (every minute)
+  outreach-notify-push       # reply alerts F47: Web Push sender (every 10 s + nudged by each alert) AND user JWT (?action=public_key)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(

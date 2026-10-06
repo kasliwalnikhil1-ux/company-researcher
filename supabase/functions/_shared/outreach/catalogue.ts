@@ -18,14 +18,23 @@ export interface CatalogueProduct {
   price?: number | null; compare_at_price?: number | null; currency?: string | null; available?: boolean;
   image_url?: string | null; images?: string[]; variants?: CatalogueVariant[];
 }
-/** Where a sync is. `started_at` comes from the database (outreach_catalogue_begin). */
-export interface SyncCursor { started_at: string; page: number; seen: number; rejected: number; errors?: number; store?: string | null; currency?: string | null }
+/**
+ * Where a sync is. `started_at` comes from the database (outreach_catalogue_begin). `via: "db"` = the store turned the
+ * edge runtime away, so every request of this sync goes through the database (`fetchViaDb`). `note` = why it is retrying.
+ */
+export interface SyncCursor { started_at: string; page: number; seen: number; rejected: number; errors?: number; note?: string | null; via?: "db" | null; store?: string | null; currency?: string | null }
 export interface SyncIo {
   upsert(batch: CatalogueProduct[]): Promise<{ upserted: number; rejected: number }>;
   progress(cursor: SyncCursor): Promise<void>;
   /** The uploaded file of a CSV catalogue. */
   readFile?(path: string): Promise<string>;
   fetch?: typeof fetch;
+  /**
+   * The same GET from the database server (pg_net, migration 080). Stores such as Shopify answer 429 to the edge
+   * runtime's shared addresses and 200 to the database's, so a page the store turns away is asked for again this way.
+   * Shopify and WooCommerce product lists only: the database follows redirects itself, so it never reads a feed link.
+   */
+  fetchViaDb?(url: string, accept: string): Promise<Response>;
   sleep?(ms: number): Promise<void>;
   now?(): number;
 }
@@ -328,15 +337,57 @@ export function assertPublicUrl(u: string): URL {
   if (!/^https?:$/.test(x.protocol) || (local && Deno.env.get("OUTREACH_CATALOGUE_ALLOW_PRIVATE") !== "1")) throw new CatalogueError("That address cannot be read from here.");
   return x;
 }
-async function get(io: SyncIo, url: string, accept: string): Promise<Response> {
+/** Let go of an answer that will not be read. A body whose request already timed out rejects here; that is fine. */
+const drop = async (res: Response | null | undefined): Promise<void> => { try { await res?.body?.cancel(); } catch { /* already closed or aborted */ } };
+/** 429 = rate-limited, 403 = a bot wall: answers given to the edge runtime's address, which the database's may not get. */
+const turnedAway = (status: number): boolean => status === 429 || status === 403;
+/** One GET through the database (pg_net does not follow redirects, so they are followed here, each checked again). */
+async function viaDb(io: SyncIo, url: string, accept: string): Promise<Response> {
+  let at = url;
+  for (let hop = 0; hop < 5; hop++) {
+    assertPublicUrl(at);
+    let res: Response;
+    try { res = await io.fetchViaDb!(at, accept); }
+    catch (e) { throw new CatalogueError(`The source did not answer (${String((e as Error)?.message ?? e).slice(0, 120)}).`, false); }
+    const next = res.status >= 300 && res.status < 400 ? absolute(res.headers.get("location"), at) : null;
+    if (!next) { if (!res.url) Object.defineProperty(res, "url", { value: at }); return res; }
+    await drop(res);
+    at = next;
+  }
+  throw new CatalogueError("The source redirected too many times.");
+}
+/**
+ * A GET with two retries on 429 / 5xx. When the store turns the edge runtime away (or cannot be reached from it) the
+ * page is asked for through the database, and `cur.via` keeps the sync on that route.
+ */
+async function get(io: SyncIo, url: string, accept: string, cur?: SyncCursor, db = true): Promise<Response> {
   assertPublicUrl(url);
-  const f = io.fetch ?? fetch;
+  const f = io.fetch ?? fetch, dbOk = db && !!io.fetchViaDb;
+  const tryDb = async (): Promise<Response | null> => {
+    if (!dbOk) return null;
+    const alt = await viaDb(io, url, accept).catch(() => null);
+    if (alt && !turnedAway(alt.status) && alt.status < 500) { if (cur) cur.via = "db"; return alt; }
+    await drop(alt);
+    return null;
+  };
   for (let attempt = 0; ; attempt++) {
     let res: Response;
-    try { res = await f(url, { headers: { "user-agent": UA, accept }, redirect: "follow", signal: AbortSignal.timeout(20_000) }); }
-    catch (e) { throw new CatalogueError(`The source did not answer (${String((e as Error)?.message ?? e).slice(0, 120)}).`, false); }
+    if (cur?.via === "db" && dbOk) res = await viaDb(io, url, accept);
+    else {
+      try { res = await f(url, { headers: { "user-agent": UA, accept }, redirect: "follow", signal: AbortSignal.timeout(20_000) }); }
+      catch (e) {
+        const alt = await tryDb(); if (alt) return alt;
+        throw new CatalogueError(`The source did not answer (${String((e as Error)?.message ?? e).slice(0, 120)}).`, false);
+      }
+      if (attempt === 0 && turnedAway(res.status) && dbOk) {
+        const status = res.status, retryAfter = res.headers.get("retry-after");
+        await drop(res);   // before the database route runs: the edge request's 20 s timer would error a body left open
+        const alt = await tryDb(); if (alt) return alt;
+        res = new Response(null, { status, headers: retryAfter ? { "retry-after": retryAfter } : {} });
+      }
+    }
     if ((res.status === 429 || res.status >= 500) && attempt < 2) {
-      await res.body?.cancel();
+      await drop(res);
       await (io.sleep ?? sleep)(Math.min(10_000, Math.max(1000, Number(res.headers.get("retry-after")) * 1000 || 2000 * (attempt + 1))));
       continue;
     }
@@ -346,8 +397,10 @@ async function get(io: SyncIo, url: string, accept: string): Promise<Response> {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 async function textCapped(res: Response, max: number): Promise<string> {
   const len = Number(res.headers.get("content-length"));
-  if (len > max) { await res.body?.cancel(); throw new CatalogueError(`The file is larger than ${Math.round(max / 1048576)} MB.`); }
-  const t = await res.text();
+  if (len > max) { await drop(res); throw new CatalogueError(`The file is larger than ${Math.round(max / 1048576)} MB.`); }
+  let t: string;
+  try { t = await res.text(); }
+  catch (e) { throw new CatalogueError(`The source stopped answering (${String((e as Error)?.message ?? e).slice(0, 120)}).`, false); }   // a slow store: try again later
   if (t.length > max) throw new CatalogueError(`The file is larger than ${Math.round(max / 1048576)} MB.`);
   return t;
 }
@@ -370,8 +423,8 @@ export async function syncShopify(storeUrl: string, cur: SyncCursor, io: SyncIo,
   let store = cur.store || assertPublicUrl(storeUrl).origin;
   for (let first = true; ; first = false) {
     if (!first) { if (now() > deadline) { await io.progress(cur); return result(cur, false, false, cur.page - 1); } await wait(1000); }
-    const res = await get(io, `${store}/products.json?limit=250&page=${cur.page}`, "application/json");
-    if (!res.ok) { await res.body?.cancel(); throw new CatalogueError(res.status === 429 || res.status >= 500 ? `The store answered ${res.status}.` : SHOPIFY_BLOCKED, !(res.status === 429 || res.status >= 500)); }
+    const res = await get(io, `${store}/products.json?limit=250&page=${cur.page}`, "application/json", cur);
+    if (!res.ok) { await drop(res); throw new CatalogueError(res.status === 429 || res.status >= 500 ? `The store answered ${res.status}.` : SHOPIFY_BLOCKED, !(res.status === 429 || res.status >= 500)); }
     let body: Json;
     try { body = JSON.parse(await textCapped(res, MAX_FEED_BYTES)); } catch (e) { if (e instanceof CatalogueError) throw e; throw new CatalogueError(SHOPIFY_BLOCKED); }   // a password page, a theme 404
     if (!Array.isArray(body?.products)) throw new CatalogueError(SHOPIFY_BLOCKED);
@@ -379,7 +432,7 @@ export async function syncShopify(storeUrl: string, cur: SyncCursor, io: SyncIo,
       // the store's main domain (a *.myshopify.com address redirects to it): product links and Add to cart use it
       try { const o = new URL(res.url).origin; if (o && o !== "null") store = o; } catch { /* keep the given one */ }
       cur.store = store;
-      cur.currency = cur.currency ?? await shopifyCurrency(io, store);
+      cur.currency = cur.currency ?? await shopifyCurrency(io, store, cur);
     }
     const rows = (body.products as Json[]).map((p) => mapShopifyProduct(p, store)).filter((p): p is CatalogueProduct => !!p);
     await push(io, cur, rows);
@@ -389,11 +442,11 @@ export async function syncShopify(storeUrl: string, cur: SyncCursor, io: SyncIo,
     await io.progress(cur);
   }
 }
-async function shopifyCurrency(io: SyncIo, store: string): Promise<string | null> {
+async function shopifyCurrency(io: SyncIo, store: string, cur: SyncCursor): Promise<string | null> {
   for (const path of ["/meta.json", "/cart.js"]) {
     try {
-      const res = await get(io, store + path, "application/json");
-      if (!res.ok) { await res.body?.cancel(); continue; }
+      const res = await get(io, store + path, "application/json", cur);
+      if (!res.ok) { await drop(res); continue; }
       const c = String((await res.json())?.currency ?? "").toUpperCase();
       if (/^[A-Z]{3}$/.test(c)) return c;
     } catch { /* the next one */ }
@@ -411,10 +464,10 @@ export async function syncWoo(storeUrl: string, cur: SyncCursor, io: SyncIo, dea
     if (!first) { if (now() > deadline) { await io.progress(cur); return result(cur, false, false, cur.page - 1); } await wait(1000); }
     let res: Response | null = null;
     for (const b of cur.store ? [cur.store] : bases) {
-      res = await get(io, `${b}/wp-json/wc/store/v1/products?per_page=100&page=${cur.page}`, "application/json");
+      res = await get(io, `${b}/wp-json/wc/store/v1/products?per_page=100&page=${cur.page}`, "application/json", cur);
       if (res.ok) { cur.store = b; break; }
-      if (res.status === 429 || res.status >= 500) { await res.body?.cancel(); throw new CatalogueError(`The store answered ${res.status}.`, false); }
-      await res.body?.cancel();
+      if (res.status === 429 || res.status >= 500) { await drop(res); throw new CatalogueError(`The store answered ${res.status}.`, false); }
+      await drop(res);
     }
     if (!res?.ok) throw new CatalogueError("This store's product list could not be read (the WooCommerce Store API did not answer). Use its product feed or a CSV instead.");
     let body: Json;
@@ -448,8 +501,8 @@ async function syncRows(rows: CatalogueProduct[], cur: SyncCursor, io: SyncIo, d
   return result(cur, true, true, 1);
 }
 export async function syncFeed(feedUrl: string, cur: SyncCursor, io: SyncIo, deadline: number): Promise<SyncResult> {
-  const res = await get(io, feedUrl, "application/xml, text/xml, text/csv, text/tab-separated-values, text/plain, */*");
-  if (!res.ok) { await res.body?.cancel(); throw new CatalogueError(`The feed answered ${res.status}. Check the link.`, res.status !== 429 && res.status < 500); }
+  const res = await get(io, feedUrl, "application/xml, text/xml, text/csv, text/tab-separated-values, text/plain, */*", cur, false);   // the database reads store product lists only (migration 080)
+  if (!res.ok) { await drop(res); throw new CatalogueError(`The feed answered ${res.status}. Check the link.`, res.status !== 429 && res.status < 500); }
   const text = await textCapped(res, MAX_FEED_BYTES);
   return syncRows(productsFromFeed(text, res.url || feedUrl), cur, io, deadline);
 }

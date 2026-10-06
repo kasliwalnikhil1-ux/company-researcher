@@ -32,6 +32,10 @@ const nextConfig = {
       // built-in clips, bot avatars and flags: fixed names, rarely replaced
       { source: '/widget/v1/:dir(presets|avatars|flags)/:file*', headers: cache('public, max-age=604800, stale-while-revalidate=2592000') },
       { source: '/widget/v1/:dir(presets|avatars)/:name(.*\\.json)', headers: cache('public, max-age=300, stale-while-revalidate=86400') },
+      // reply alerts: the service worker is always revalidated (a stale one would keep old click / push handling);
+      // the four built-in sounds are fixed files
+      { source: '/outreach-sw.js', headers: cache('no-cache') },
+      { source: '/sounds/alerts/:file*', headers: cache('public, max-age=604800, stale-while-revalidate=2592000') },
     ];
   },
 };

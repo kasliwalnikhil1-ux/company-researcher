@@ -228,11 +228,11 @@ function ChangeInner() {
           </Card>
 
           <Card title="Billing period">
-            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden" role="radiogroup" aria-label="Billing period">
+            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="radiogroup" aria-label="Billing period">
               {pricing.book.periods.map((p) => (
                 <button key={p.id} type="button" role="radio" aria-checked={period === p.id} onClick={() => { setPeriod(p.id); setKeep(null); }}
-                  className={cn('px-4 py-2 text-sm font-medium border-r border-gray-300 last:border-r-0', period === p.id ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>
-                  {p.label}{p.discount > 0 ? <span className={cn('ml-1.5 text-xs', period === p.id ? 'text-indigo-100' : 'text-green-700')}>−{Math.round(p.discount * 100)}%</span> : null}
+                  className={cn('px-4 py-1.5 text-sm font-medium rounded-md', period === p.id ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
+                  {p.label}{p.discount > 0 ? <span className={cn('ml-1.5 text-xs', period === p.id ? 'text-indigo-500' : 'text-green-700')}>−{Math.round(p.discount * 100)}%</span> : null}
                 </button>
               ))}
             </div>

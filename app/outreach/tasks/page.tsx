@@ -14,6 +14,7 @@ import { useClients, useMembers, useTasksPage } from '@/lib/outreach/queries';
 import type { Lead, Sender, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, PageHeader, PageLoader, Spinner, Table, Td, Th, useToast } from '@/components/outreach/ui';
 import TaskDrawer, { TASK_KINDS, memberName, parseCallBody, taskKindLabel, taskKindTone } from '@/components/outreach/tasks/TaskDrawer';
+import { MemberChip, MemberPicker } from '@/components/outreach/members';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { LIST_PAGE_SIZE, PaginationBar } from '@/components/outreach/Pagination';
 import { NEEDS_YOU_RULE, hubHref } from '@/lib/outreach/aiHub';
@@ -105,7 +106,7 @@ function TasksPageInner() {
       <PageHeader title="Tasks" subtitle={<>Things you do yourself: manual steps, calls, follow-ups, leads held after a reply, conversations the AI handed over and sender reconnects. What the AI wrote and waits for your approval is in <Link href={hubHref.needsYou()} className="text-indigo-700 hover:underline">AI → Needs you</Link>.</>} actions={
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {(['open', 'completed'] as const).map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)} className={cn('px-3 py-1.5 text-sm rounded-md capitalize', tab === t ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{t}{t === 'open' && openCount != null && tasksQ.data ? ` (${openCount})` : ''}</button>
+            <button key={t} type="button" onClick={() => setTab(t)} aria-pressed={tab === t} className={cn('px-3 py-1.5 text-sm font-medium rounded-md capitalize', tab === t ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{t}{t === 'open' && openCount != null && tasksQ.data ? ` (${openCount})` : ''}</button>
           ))}
         </div>
       } />
@@ -116,8 +117,8 @@ function TasksPageInner() {
           {TASK_KINDS.map((k) => <option key={k} value={k}>{taskKindLabel(k)}</option>)}
         </select>
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
-          <button type="button" onClick={() => setMine(false)} className={cn('px-2.5 py-1 text-sm rounded-md', !mine ? 'bg-gray-100 text-gray-900' : 'text-gray-600')}>Anyone</button>
-          <button type="button" onClick={() => setMine(true)} className={cn('px-2.5 py-1 text-sm rounded-md', mine ? 'bg-gray-100 text-gray-900' : 'text-gray-600')}>Assigned to me</button>
+          <button type="button" aria-pressed={!mine} onClick={() => setMine(false)} className={cn('px-2.5 py-1 text-sm font-medium rounded-md', !mine ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>Anyone</button>
+          <button type="button" aria-pressed={mine} onClick={() => setMine(true)} className={cn('px-2.5 py-1 text-sm font-medium rounded-md', mine ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>Assigned to me</button>
         </div>
         {!!clientsQ.data?.length && (
           <select value={clientId} onChange={(e) => setClientId(e.target.value)} aria-label="Client" className="text-sm rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -129,10 +130,7 @@ function TasksPageInner() {
           <div className="ml-auto flex items-center gap-2 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-1.5 text-sm text-indigo-800">
             <Users className="w-4 h-4" />
             <span>{selected.size} selected</span>
-            <select value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)} aria-label="Assign selected tasks to" className="text-sm rounded-md border border-indigo-200 bg-white px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500">
-              <option value="">Unassigned</option>
-              {membersQ.data?.map((m) => <option key={m.user_id} value={m.user_id}>{memberName(membersQ.data, m.user_id)}{m.user_id === userId ? ' (me)' : ''}</option>)}
-            </select>
+            <MemberPicker size="sm" value={bulkAssignee} onChange={setBulkAssignee} members={membersQ.data} currentUserId={userId} aria-label="Assign selected tasks to" className="w-44" />
             <Button size="sm" loading={bulkBusy} onClick={bulkAssign}>Assign</Button>
             <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-indigo-600 hover:underline">Clear</button>
           </div>
@@ -182,16 +180,19 @@ function TasksPageInner() {
                       </Link>
                     ) : <span className="text-gray-400">—</span>}
                   </Td>
-                  <Td className="hidden md:table-cell text-gray-600">{t.outreach_senders?.display_name ?? <span className="text-gray-400">—</span>}</Td>
+                  <Td className="hidden md:table-cell text-gray-600">
+                    {t.outreach_senders?.display_name ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Avatar src={t.outreach_senders.picture_url} name={t.outreach_senders.display_name} size={6} />
+                        <span className="truncate max-w-[160px]">{t.outreach_senders.display_name}</span>
+                      </span>
+                    ) : <span className="text-gray-400">—</span>}
+                  </Td>
                   <Td className={cn('whitespace-nowrap', overdue && 'text-red-600 font-medium')}>{tab === 'open' ? (t.due_at ? fmtDate(t.due_at) : '—') : fmtDate(t.completed_at)}</Td>
                   <Td onClick={(e) => e.stopPropagation()}>
                     {tab === 'open' && canWrite ? (
-                      <select value={t.assigned_to ?? ''} onChange={(e) => assignOne(t.id, e.target.value || null)} aria-label="Assignee" className="text-xs rounded-md border border-gray-200 bg-white px-2 py-1 max-w-[150px] focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                        <option value="">Unassigned</option>
-                        {membersQ.data?.map((m) => <option key={m.user_id} value={m.user_id}>{memberName(membersQ.data, m.user_id)}</option>)}
-                        {t.assigned_to && !membersQ.data?.some((m) => m.user_id === t.assigned_to) && <option value={t.assigned_to}>Former member</option>}
-                      </select>
-                    ) : <span className="text-gray-600">{memberName(membersQ.data, t.assigned_to)}</span>}
+                      <MemberPicker size="sm" value={t.assigned_to} onChange={(id) => assignOne(t.id, id || null)} members={membersQ.data} currentUserId={userId} aria-label="Assignee" className="w-40" />
+                    ) : <MemberChip userId={t.assigned_to} members={membersQ.data} className="text-gray-600 max-w-[170px]" />}
                   </Td>
                 </tr>
               );

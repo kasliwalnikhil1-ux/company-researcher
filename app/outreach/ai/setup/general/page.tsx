@@ -13,7 +13,7 @@ import { PageLoader, useToast } from '@/components/outreach/ui';
 /**
  * /outreach/ai/setup/general: what every AI feature of the workspace shares (moved here from Settings → AI Personalization
  * and Settings → AI Auto Replies → Defaults): the AI provider and key, this month's usage, the per-sender daily cap for
- * Replies, the default and library prompts, and the email finder keys that lived on the same settings page.
+ * AI replies, the default and library prompts, and the email finder keys that lived on the same settings page.
  */
 function GeneralView() {
   const { workspace, isManager, canWrite } = useWorkspace();
@@ -23,7 +23,7 @@ function GeneralView() {
   return (
     <>
       <div className="space-y-6 max-w-4xl">
-        <SetupHeading title="General" help="What every AI feature of this workspace shares: the AI provider and key, this month's usage and the defaults for Replies." />
+        <SetupHeading title="General" help="What every AI feature of this workspace shares: the AI provider and key, this month's usage and the defaults for AI replies." />
         <LlmKeyCard />
         <VoiceKeyCard />
         <UsageCard ws={ws} />

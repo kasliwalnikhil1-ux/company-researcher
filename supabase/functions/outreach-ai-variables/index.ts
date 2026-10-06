@@ -4,6 +4,7 @@
 //   the three built-ins (migration 067), a tidied copy of a field the lead already has, checked in code and never reviewed.
 // User (JWT, manager): {action:"route_test"} = "test on 20 leads" (nothing stored), {action:"preview_variable"} = try a prompt on one lead (nothing stored).
 import { admin, json, serve, requireUser, requireCron, membership, requireRole, readJson, HttpError, rateLimit, rpc, log, errorResponse } from "../_shared/outreach/supabase.ts";
+import { AI_BUSY_MESSAGE } from "../_shared/outreach/llm.ts";
 import { generateAiVariable, generateAiFields, generateBuiltin, isBuiltinKey, routeLead, aiAvailable, isKeyInvalid, type AiRoute, type AiField } from "../_shared/outreach/ai.ts";
 
 type Row = Record<string, any>;
@@ -263,7 +264,7 @@ async function routeTest(userId: string, body: Row): Promise<Response> {
     }
   });
   if (keyError) throw keyError;                                   // E_AI_KEY_INVALID: the UI says so
-  if (!results.length && failed.length) throw new HttpError(502, "E_AI_UNAVAILABLE", `the AI did not answer: ${failed[0].error}`);
+  if (!results.length && failed.length) { log({ fn: "outreach-ai-variables", error: failed[0].error }); throw new HttpError(502, "E_AI_BUSY", AI_BUSY_MESSAGE); }
   const order = new Map(leads.map((l, i) => [l.id, i]));
   results.sort((a, b) => (order.get(a.lead_id) ?? 0) - (order.get(b.lead_id) ?? 0));
   return json({ split, results, failed, tested: results.length, not_tested: leads.length - results.length - failed.length, routes: routes.map((r) => ({ id: r.id, label: r.label ?? r.id })), stored: false });
@@ -330,7 +331,8 @@ async function previewVariable(userId: string, body: Row): Promise<Response> {
     return json({ lead_id: lead.id, name: lead.full_name ?? null, text: out.text, blank: out.text === null, facts: out.facts, fallback, used: out.text ?? fallback, model: out.model, enriched: !!(facts as any).enriched, stored: false });
   } catch (e) {
     if (isKeyInvalid(e)) throw e;
-    throw new HttpError(502, "E_AI_UNAVAILABLE", `the AI did not answer: ${errText(e)}`);
+    log({ fn: "outreach-ai-variables", error: errText(e) });
+    throw new HttpError(502, "E_AI_BUSY", AI_BUSY_MESSAGE);
   }
 }
 

@@ -200,9 +200,9 @@ export default function BlacklistsSettingsPage() {
             <div className="space-y-4">
               <fieldset>
                 <legend className="block text-xs font-medium text-gray-600 mb-1">Applies to</legend>
-                <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg bg-gray-100" role="radiogroup">
+                <div className="grid grid-cols-3 gap-1 p-0.5 rounded-lg border border-gray-200 bg-white" role="radiogroup">
                   {(['workspace', 'client', 'sequence'] as BlacklistScope[]).map((s) => (
-                    <button key={s} type="button" role="radio" aria-checked={scope === s} onClick={() => setScope(s)} className={cn('px-2 py-1.5 text-sm rounded-md font-medium capitalize', scope === s ? 'bg-white shadow-sm text-indigo-700' : 'text-gray-600 hover:text-gray-900')}>{s}</button>
+                    <button key={s} type="button" role="radio" aria-checked={scope === s} onClick={() => setScope(s)} className={cn('px-2 py-1.5 text-sm rounded-md font-medium capitalize', scope === s ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{s}</button>
                   ))}
                 </div>
                 <div className="text-xs text-gray-500 mt-1.5">{scope === 'workspace' ? 'Nobody in this workspace can contact a match.' : scope === 'client' ? 'Only this client\'s leads and sequences are affected. Other clients can still reach them.' : 'Only this one sequence skips a match.'}</div>
@@ -220,7 +220,7 @@ export default function BlacklistsSettingsPage() {
                 </Select>
               )}
 
-              <div className="inline-flex rounded-lg border border-gray-200 p-0.5" role="tablist" aria-label="How to add">
+              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="How to add">
                 {([['one', 'Add one'], ['csv', 'Upload CSV']] as const).map(([m, label]) => <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)} className={cn('px-3 py-1.5 text-sm font-medium rounded-md', mode === m ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>)}
               </div>
 

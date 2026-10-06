@@ -11,6 +11,7 @@ import { parseError, rpc } from '@/lib/outreach/api';
 import { db } from '@/lib/outreach/backend';
 import { useClients, useMembers } from '@/lib/outreach/queries';
 import { Badge, Button, Card, Spinner, fmtDate, timeAgo } from '@/components/outreach/ui';
+import { MemberAvatar } from '@/components/outreach/members';
 import { CopyButton, CopyField, ConfirmModal, Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
 import { WEBSITES_PATH } from './WebsitesFrame';
 import { imageHosts, useProductSearch } from '@/lib/outreach/catalogue';
@@ -106,6 +107,7 @@ export function GeneralSection(p: SectionProps) {
             return (
               <li key={m.user_id} className="py-2 flex items-center gap-3 text-sm">
                 <input type="checkbox" checked={t.on} disabled={!p.canEdit} onChange={(e) => setTeam({ ...team, [m.user_id]: { ...t, on: e.target.checked } })} aria-label={`Collaborator ${m.display_name || m.email}`} />
+                <MemberAvatar member={m} size={7} />
                 <span className="flex-1 min-w-0 truncate">{m.display_name || m.email} <span className="text-xs text-gray-400">{m.role}</span></span>
                 {online && <Badge tone="green">online</Badge>}
                 <label className="text-xs text-gray-600 flex items-center gap-1"><input type="checkbox" checked={t.auto} disabled={!p.canEdit || !t.on} onChange={(e) => setTeam({ ...team, [m.user_id]: { ...t, auto: e.target.checked } })} /> auto-assign</label>
@@ -241,7 +243,7 @@ export function AppearanceSection(p: SectionProps) {
         <div className="mt-3"><Label hint="advanced, scoped to the widget; @import and external url() are stripped">Custom CSS</Label><textarea className={cn(field, 'font-mono text-xs')} rows={5} value={draft.custom_css} onChange={(e) => set({ custom_css: e.target.value })} disabled={!p.canEdit} placeholder=".hd { border-radius: 0 }" /></div>
         <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { appearance: draft } })} />
       </Card>
-      <div className="xl:sticky xl:top-4 self-start"><WidgetPreview settings={preview} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} /></div>
+      <div className="xl:sticky xl:top-[calc(var(--demo-bar,0px)+1rem)] self-start"><WidgetPreview settings={preview} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} /></div>
     </div>
   );
 }
@@ -316,7 +318,7 @@ export function LauncherSection(p: SectionProps) {
         )}
         <SaveBar dirty={dirty} saving={saving} canEdit={p.canEdit} onReset={reset} onSave={() => save({ settings: { launcher: draft.launcher, popup: draft.popup } })} />
       </Card>
-      <div className="xl:sticky xl:top-4 self-start"><WidgetPreview settings={{ ...p.inbox.settings, launcher: draft.launcher, popup: draft.popup }} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} /></div>
+      <div className="xl:sticky xl:top-[calc(var(--demo-bar,0px)+1rem)] self-start"><WidgetPreview settings={{ ...p.inbox.settings, launcher: draft.launcher, popup: draft.popup }} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} /></div>
     </div>
   );
 }
@@ -557,7 +559,7 @@ export function AiSection(p: SectionProps & { between?: React.ReactNode }) {
       {/* What the assistant wrote for this website: the Activity table, pre-filtered (it replaced "Recent answers"). */}
       <Card title="What the assistant wrote" actions={<Link href={hubHref.activity({ feature: 'website', where: p.inbox.id })} className="text-xs font-medium text-indigo-700 hover:underline">Open in Activity</Link>}>
         <p className="text-xs text-gray-500 mb-3">Answers sent to visitors and suggestions written for your agents. Questions the assistant could not answer wait in <Link href={hubHref.needsYou({ type: 'question', where: p.inbox.id, mine: false })} className="text-indigo-700 hover:underline">AI → Needs you</Link>. Test the assistant on the Install &amp; security tab (demo page).</p>
-        <ActivityTable ws={p.ws} fixed={{ feature: 'website', where: p.inbox.id }} pageSize={20} emptyText="The assistant has not written anything for this website in this period." />
+        <ActivityTable ws={p.ws} fixed={{ feature: 'website', where: p.inbox.id }} pageSize={10} emptyText="The assistant has not written anything for this website in this period." />
       </Card>
     </div>
   );

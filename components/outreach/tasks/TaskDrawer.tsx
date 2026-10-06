@@ -12,6 +12,7 @@ import { buildContext, renderTemplate } from '@/lib/outreach/render';
 import { enrollmentStatusText } from '@/lib/outreach/reasons';
 import type { Graph, Member, Message, Task } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, ErrorBox, IntentBadge, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
+import { MemberChip, MemberPicker } from '@/components/outreach/members';
 import { cn } from '@/lib/utils';
 
 type KindTone = 'blue' | 'amber' | 'purple' | 'red' | 'green' | 'indigo' | 'gray';
@@ -185,7 +186,7 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
               <div className="text-xs text-gray-500 mt-0.5 flex flex-wrap gap-x-3">
                 <span className={overdue ? 'text-red-600 font-medium' : ''}>{task.due_at ? `Due ${fmtDate(task.due_at)}` : 'No due date'}</span>
                 <span>Created {fmtDate(task.created_at)}</span>
-                {completed && <span className="text-green-700">Completed {fmtDate(task.completed_at)} by {memberName(members, task.completed_by, 'system')}</span>}
+                {completed && <span className="text-green-700 inline-flex items-center gap-1">Completed {fmtDate(task.completed_at)} by {task.completed_by ? <MemberChip userId={task.completed_by} members={members} size={4} /> : 'system'}</span>}
               </div>
             )}
           </div>
@@ -224,13 +225,10 @@ export default function TaskDrawer({ taskId, onClose, members, workspaceId, canW
                       </div>
                     </div>
                   ) : <div className="text-xs text-gray-400">{task.sender_id ? 'Loading…' : 'No sender'}</div>}
-                  <label className="block mt-3">
+                  <div className="mt-3">
                     <span className="block text-[11px] text-gray-500 mb-1">Assigned to</span>
-                    <select value={task.assigned_to ?? ''} disabled={!canWrite || completed || busy === 'assign'} onChange={(e) => assign(e.target.value || null)} className="w-full text-xs px-2 py-1.5 rounded-md border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" aria-label="Assign task">
-                      <option value="">Unassigned</option>
-                      {members?.map((m) => <option key={m.user_id} value={m.user_id}>{memberName(members, m.user_id)}</option>)}
-                    </select>
-                  </label>
+                    <MemberPicker size="sm" value={task.assigned_to} disabled={!canWrite || completed || busy === 'assign'} onChange={(id) => assign(id || null)} members={members} aria-label="Assign task" />
+                  </div>
                 </div>
               </div>
 

@@ -77,8 +77,8 @@ export function ScenarioModal({ initial, loading, onClose, onSave }: { initial: 
       footer={<><Button variant="secondary" onClick={onClose} disabled={loading}>Cancel</Button><Button loading={loading} disabled={!ok} onClick={() => onSave({ ...d, title: d.title.trim(), when_text: d.when_text.trim(), do_text: d.do_text.trim() })}>Save</Button></>}>
       <div className="space-y-3">
         <Input label="Title" value={d.title} maxLength={80} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="Pricing question" autoFocus />
-        <Textarea label="When" hint="How to recognise the situation." rows={2} maxLength={500} value={d.when_text} onChange={(e) => setD({ ...d, when_text: e.target.value })} placeholder="They ask what it costs, rates, budget, or a quote" />
-        <Textarea label="Do" hint="What the AI says or does. Facts and numbers here count as allowed facts." rows={4} maxLength={1500} value={d.do_text} onChange={(e) => setD({ ...d, do_text: e.target.value })} placeholder="Say projects start at X; offer a 15-min call for an exact quote" />
+        <Textarea autoGrow label="When" hint="How to recognise the situation." rows={2} maxLength={500} value={d.when_text} onChange={(e) => setD({ ...d, when_text: e.target.value })} placeholder="They ask what it costs, rates, budget, or a quote" />
+        <Textarea autoGrow label="Do" hint="What the AI says or does. Facts and numbers here count as allowed facts." rows={4} maxLength={1500} value={d.do_text} onChange={(e) => setD({ ...d, do_text: e.target.value })} placeholder="Say projects start at X; offer a 15-min call for an exact quote" />
         <Toggle checked={d.enabled} onChange={(v) => setD({ ...d, enabled: v })} label="On" />
         {!ok && (d.title || d.when_text || d.do_text) && <ErrorBox message="Title up to 80, When up to 500 and Do up to 1500 characters, none empty." />}
       </div>

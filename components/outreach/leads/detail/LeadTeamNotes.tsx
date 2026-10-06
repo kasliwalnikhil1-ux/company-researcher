@@ -5,6 +5,7 @@
 import Link from '@/lib/outreach/nav';
 import { Lock, ExternalLink, Bot, Cog } from 'lucide-react';
 import { Card, EmptyState, ErrorBox, Spinner, fmtDate } from '@/components/outreach/ui';
+import { MemberAvatar } from '@/components/outreach/members';
 import { channelLabel } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { noteLink, useLeadTeamNotes } from '@/lib/outreach/notes';
@@ -25,7 +26,7 @@ export default function LeadTeamNotes({ leadId }: { leadId: string }) {
           {q.data.map((n) => (
             <li key={n.id} className="px-5 py-3">
               <div className="flex items-center gap-2 text-[11px] text-gray-500">
-                {n.author.type === 'ai' ? <Bot className="w-3 h-3" /> : n.author.type === 'system' ? <Cog className="w-3 h-3" /> : null}
+                {n.author.type === 'ai' ? <Bot className="w-3 h-3" /> : n.author.type === 'system' ? <Cog className="w-3 h-3" /> : <MemberAvatar userId={n.author.id} name={n.author.name} size={4} />}
                 <span className="font-medium text-gray-700">{n.author.name}</span>
                 <span>·</span>
                 <time dateTime={n.created_at}>{fmtDate(n.created_at)}</time>

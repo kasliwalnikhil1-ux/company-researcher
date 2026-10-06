@@ -1,13 +1,23 @@
-// Replies (AI → Setup → Replies / General, the sequence AI tab): small formatting helpers shared by the panels (no React).
+// AI replies (AI → Setup → AI replies / General, the sequence AI tab): small formatting helpers shared by the panels (no React).
 import { COUNTRIES } from '@/components/outreach/senders/helpers';
 import { ESCALATION_LABEL, GATE_LABEL, CANCEL_REASONS, type RunSummary } from '@/lib/outreach/aiReplies';
 
 /** EU member states + Iceland, Liechtenstein and Norway: the default autopilot block while no disclosure is set. */
 export const EU_EEA = ['AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO'];
 
-const EXTRA_COUNTRIES: Array<{ code: string; name: string }> = [{ code: 'CY', name: 'Cyprus' }, { code: 'MT', name: 'Malta' }, { code: 'LI', name: 'Liechtenstein' }];
-export const COUNTRY_LIST: Array<{ code: string; name: string }> = [...COUNTRIES, ...EXTRA_COUNTRIES.filter((e) => !COUNTRIES.some((c) => c.code === e.code))]
+/** Every ISO 3166-1 alpha-2 country (plus XK, Kosovo); each has a round flag at /flags/<code>.svg. */
+const ISO_CODES = 'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW'.split(' ');
+
+function intlName(code: string): string | undefined {
+  try { return new Intl.DisplayNames('en', { type: 'region' }).of(code); } catch { return undefined; }
+}
+
+export const COUNTRY_LIST: Array<{ code: string; name: string }> = ISO_CODES
+  .map((code) => ({ code, name: COUNTRIES.find((c) => c.code === code)?.name ?? intlName(code) ?? code }))
   .sort((a, b) => a.name.localeCompare(b.name));
+
+/** The round flag image for a two-letter country code. */
+export const flagSrc = (code: string) => `/flags/${code.toLowerCase()}.svg`;
 
 export function countryName(code: string): string {
   const c = COUNTRY_LIST.find((x) => x.code === code.toUpperCase());

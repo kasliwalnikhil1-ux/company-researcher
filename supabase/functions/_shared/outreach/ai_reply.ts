@@ -4,7 +4,7 @@
 // The database decides state (040–042: every transition is a compare-and-set in SQL); this file does the model calls
 // (ai_reply_engine.ts), the code checks (ai_reply_rules.ts) and the connector send (reply.ts deliverChatMessage).
 import { admin, log, rpc, HttpError, WEB_ORIGIN, membership, requireRole, clientVisible, type AuthedUser } from "./supabase.ts";
-import { llmCallDetailed } from "./llm.ts";
+import { llmCallDetailed, AI_BUSY_MESSAGE } from "./llm.ts";
 import { classifyMessage, aiAvailable, type Classification } from "./ai.ts";
 import { AI_LEAD_NOTES_SYSTEM, AI_COMPOSE_IMPROVE_SYSTEM, AI_COMPOSE_TRANSLATE_SYSTEM, AI_UNANSWERED_CANONICAL_SYSTEM } from "./prompts.ts";
 import { deliverChatMessage } from "./reply.ts";
@@ -231,7 +231,8 @@ export async function draftNow(user: AuthedUser, b: DraftNowBody): Promise<Row> 
     const msg = String((e as any)?.message ?? e).slice(0, 500);
     await rpc("ai_reply_finalize", { p_run: run!.id, p_to: "failed", p_patch: { error: msg, escalation_reasons: ["model_error"] } }).catch(() => null);
     if (e instanceof HttpError) throw e;
-    throw new HttpError(502, "E_AI_FAILED", `the AI could not draft a reply: ${msg}`);
+    log({ fn: "ai_reply", run_id: run!.id, error: msg });
+    throw new HttpError(502, "E_AI_BUSY", AI_BUSY_MESSAGE);
   }
 }
 
@@ -433,22 +434,35 @@ function catalogueIo(sourceId: string, startedAt: string): SyncIo {
       if (error || !blob) throw new CatalogueError(`The file could not be read (${error?.message ?? "no file"}).`);
       return (await blob.text()).slice(0, 40 * 1024 * 1024);
     },
+    fetchViaDb,
   };
+}
+/** A GET from the database server (migration 080, the `http` extension): store product lists only, 7 s at most. */
+async function fetchViaDb(url: string, accept: string): Promise<Response> {
+  const r = await rpc<Row>("catalogue_fetch", { p_url: url, p_accept: accept });
+  if (r?.status == null) throw new Error(String(r?.error ?? "no answer").slice(0, 200));
+  const headers: Record<string, string> = {};
+  for (const k of ["content_type", "location", "retry_after"]) if (r[k]) headers[k.replace("_", "-")] = String(r[k]);
+  return new Response(r.body ?? "", { status: Number(r.status), headers });
 }
 /** One catalogue, one worker run. "more" = it keeps its place and is claimed again on the next tick. */
 async function syncCatalogueSource(s: Row, deadline: number): Promise<"done" | "more" | "failed"> {
   const cat = (s.catalogue ?? {}) as Row;
   const cursor = await rpc<SyncCursor>("catalogue_begin", { p_source: s.id });
+  // the last place saved in this run: a retry carries on from there (pages read, the database route), not from the start
+  const io = catalogueIo(s.id, cursor.started_at), save = io.progress;
+  let latest: SyncCursor = cursor;
+  io.progress = async (c) => { latest = { ...c }; await save(c); };
   try {
-    const r = await syncCatalogue({ provider: String(cat.provider ?? ""), url: cat.url ?? s.url, storage_path: s.storage_path }, cursor, catalogueIo(s.id, cursor.started_at), deadline);
+    const r = await syncCatalogue({ provider: String(cat.provider ?? ""), url: cat.url ?? s.url, storage_path: s.storage_path }, cursor, io, deadline);
     if (!r.done) return "more";
     await rpc("catalogue_finish", { p_source: s.id, p_started: cursor.started_at, p_complete: r.complete, p_meta: { currency: r.currency, store: r.store, pages: r.pages, warning: r.warning } });
     return "done";
   } catch (e) {
     const msg = String((e as any)?.message ?? e).slice(0, 500);
-    const tries = Number(cursor.errors ?? 0) + 1;
+    const tries = Number(latest.errors ?? 0) + 1;   // a page read in this run sets errors back to 0
     // a store that is busy or briefly unreachable: keep the place and try again on the next ticks, five times at most
-    if (e instanceof CatalogueError && !e.final && tries < 5) { await rpc("catalogue_progress", { p_source: s.id, p_cursor: { ...cursor, errors: tries } }); log({ fn: "catalogue-sync", source: s.id, retry: tries, warn: msg }); return "more"; }
+    if (e instanceof CatalogueError && !e.final && tries < 5) { await rpc("catalogue_progress", { p_source: s.id, p_cursor: { ...latest, errors: tries, note: msg } }); log({ fn: "catalogue-sync", source: s.id, retry: tries, warn: msg }); return "more"; }
     await rpc("catalogue_finish", { p_source: s.id, p_started: cursor.started_at, p_complete: false, p_meta: {}, p_error: msg });
     log({ fn: "catalogue-sync", source: s.id, error: msg });
     return "failed";
@@ -717,14 +731,14 @@ async function notifyBreaker(it: Row): Promise<void> {
     subject = `Auto switched to Review for ${name}`;
     const reasons = (it.reasons ?? []).map((x: Row) => `<li>${esc(String(x.reason).replace(/_/g, " "))}${x.rule ? ` — rule "${esc(x.rule)}"` : ""}: ${esc(x.n)}</li>`).join("");
     body = it.kind === "downgrade_cancels"
-      ? `<p>${esc(it.bad)} of the last ${esc(it.n)} AI replies in <b>${esc(name)}</b> were cancelled or edited during the hold, above the ${Math.round(Number(it.threshold) * 100)}% limit. Replies there are drafts for a person again.</p>${reasons ? `<p>What people changed:</p><ul>${reasons}</ul>` : ""}<p>Fix the prompt rules named above, then turn Auto back on with a note.</p>`
-      : `<p>${esc(it.bot_questions)} of ${esc(it.sent)} AI replies in <b>${esc(name)}</b> drew an "are you a bot?" answer (limit 2%). Replies there are drafts for a person again.</p>`;
+      ? `<p>${esc(it.bad)} of the last ${esc(it.n)} AI replies in <b>${esc(name)}</b> were cancelled or edited during the hold, above the ${Math.round(Number(it.threshold) * 100)}% limit. AI replies there are drafts for a person again.</p>${reasons ? `<p>What people changed:</p><ul>${reasons}</ul>` : ""}<p>Fix the prompt rules named above, then turn Auto back on with a note.</p>`
+      : `<p>${esc(it.bot_questions)} of ${esc(it.sent)} AI replies in <b>${esc(name)}</b> drew an "are you a bot?" answer (limit 2%). AI replies there are drafts for a person again.</p>`;
     const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/sequences/${it.sequence_id}?tab=ai`, "Open the sequence", branding)}</p>`, branding, { audience: "team" });
     for (const e of to) await sendEmail(e, subject, html, undefined, { branding });
   } else if (it.kind === "too_early_to_pitch") {
-    subject = "Replies are pitching too early";
+    subject = "AI replies are pitching too early";
     body = `<p>${esc(it.n)} AI replies were cancelled this week as "too early to pitch". Consider raising <b>Pitch after</b> in the sequence's AI replies, or making the early stages ask more.</p>`;
-    const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/setup/replies?tab=reports`, "Open Replies", branding)}</p>`, branding, { audience: "team" });
+    const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/setup/replies?tab=reports`, "Open AI replies", branding)}</p>`, branding, { audience: "team" });
     for (const e of to) await sendEmail(e, subject, html, undefined, { branding });
   }
 }
@@ -738,10 +752,10 @@ async function sendManagerDigests(): Promise<number> {
     const branding = await workspaceBranding(w.workspace_id);
     const reasons = (w.reasons ?? []).map((x: Row) => `<li>${esc(String(x.reason ?? "other").replace(/_/g, " "))}: ${esc(x.n)}</li>`).join("");
     const downs = (w.downgrades ?? []).length ? `<p><b>${(w.downgrades ?? []).length}</b> sequence(s) were switched back to Review.</p>` : "";
-    const html = layout("Replies: last 24 hours",
+    const html = layout("AI replies: last 24 hours",
       `<p><b>${esc(w.sent_ai)}</b> sent on Auto · <b>${esc(w.sent_draft)}</b> AI drafts sent by your team · <b>${esc(w.handed_off ?? 0)}</b> handed off · <b>${esc(w.escalated)}</b> handed to a person · <b>${esc(w.cancelled)}</b> cancelled · <b>${esc(w.no_reply)}</b> needed no reply.</p>${reasons ? `<p>Why things were cancelled or handed over:</p><ul>${reasons}</ul>` : ""}${downs}
        <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/activity?feature=reply`, "Open Activity", branding)}</p>`, branding, { audience: "team" });
-    for (const e of to) if (await sendEmail(e, "Replies: daily summary", html, undefined, { branding })) n++;
+    for (const e of to) if (await sendEmail(e, "AI replies: daily summary", html, undefined, { branding })) n++;
   }
   return n;
 }
@@ -956,27 +970,12 @@ export async function masterPromptSave(user: AuthedUser, b: Row): Promise<Row> {
   return { prompt, warnings: (prompt as Row)?.warnings ?? [] };
 }
 
-/** Sequence settings; turning Auto on asks the pool's sender owners for consent (once per sender; skipped when the caller owns the account). */
+/** Sequence settings. Turning Auto on asks no one: a sender in the sequence's pool replies on Auto (migration 079). */
 export async function aiRepliesSet(user: AuthedUser, b: { sequence_id: string; patch: Row; note?: string | null }): Promise<Row> {
   if (!b.sequence_id) throw new HttpError(400, "E_PAYLOAD_INVALID", "sequence_id required");
   const { data: settings, error } = await user.client.rpc("outreach_sequence_ai_replies_set", { p_sequence: b.sequence_id, p_patch: b.patch ?? {}, p_note: b.note ?? null });
   if (error) throw rpcError(error.message);
-  const out: Row = { settings, consent: { granted: [] as string[], requested: [] as Row[] } };
-  if ((settings as Row)?.mode !== "autopilot") return out;
-  const { data: q } = await admin.from("outreach_sequences").select("workspace_id").eq("id", b.sequence_id).single();
-  for (const s of ((settings as Row).senders ?? []) as Row[]) {
-    if (s.consent === "granted") continue;
-    try {
-      const r = await consentRequest(user, { workspace_id: q!.workspace_id, sender_id: s.sender_id });
-      if (r.granted) out.consent.granted.push(s.sender_id);
-      else if (!r.skipped) out.consent.requested.push({ sender_id: s.sender_id, sender_name: s.sender_name, emailed: r.emailed, link: r.link });
-    } catch (e) { log({ fn: "ai-replies-set", warn: `consent ${s.sender_id}: ${String((e as any)?.message ?? e)}` }); }
-  }
-  if (out.consent.granted.length || out.consent.requested.length) {
-    const { data: fresh } = await user.client.rpc("outreach_sequence_ai_replies_get", { p_sequence: b.sequence_id });
-    if (fresh) out.settings = fresh;
-  }
-  return out;
+  return { settings };
 }
 
 /** Three example drafts from this sender's own recent threads, for the consent screen. Never sends, never writes runs. */

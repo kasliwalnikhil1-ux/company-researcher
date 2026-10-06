@@ -10,7 +10,7 @@
 //            tab): editing them there updates both.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from '@/lib/outreach/nav';
-import { AlertTriangle, CheckCircle2, Loader2, Mic, MicOff, Pause, Play, RefreshCw, Square, Wrench, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, Mic, Pause, Play, RefreshCw, Wrench, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { IS_DEMO } from '@/lib/outreach/mode';
 import { parseError } from '@/lib/outreach/api';
@@ -22,7 +22,9 @@ import {
 } from '@/lib/outreach/voice';
 import { Badge, Button, Card, ErrorBox, Modal, Spinner, timeAgo } from '@/components/outreach/ui';
 import { Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
+import type { WebchatSettings } from '@/lib/outreach/webchat';
 import { WEBSITES_PATH } from './WebsitesFrame';
+import WidgetPreview, { WidgetCallPanel, type CallLine, type CallStatus } from './WidgetPreview';
 import { Grid, Label, SaveBar, field, useDraft, useSaveSettings, type SectionProps } from './sections';
 
 const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -79,8 +81,12 @@ function VoiceForm(p: SectionProps & { state: VoiceState }) {
   const ui = draft.ui;
   const setUi = (patch: Partial<VoiceSettings['ui']>) => set((d) => ({ ...d, ui: { ...d.ui, ...patch } }));
 
+  // the preview draws the call even while voice is off, so the call view can be set up before turning it on
+  const preview: WebchatSettings = { ...p.inbox.settings, voice: { ...draft, enabled: true } };
+
   return (
-    <div className="space-y-4">
+    <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
+    <div className="space-y-4 min-w-0">
       <Card title={<span className="flex items-center gap-2"><Mic className="h-4 w-4" /> Voice</span>}
         actions={<div className="flex items-center gap-3"><Switch checked={draft.enabled} onChange={(v) => set({ enabled: v })} label="Voice on" disabled={!p.canEdit || (!req?.assistant_auto && !draft.enabled)} /></div>}>
         <p className="text-sm text-gray-600">Let visitors talk to your assistant. It uses the same knowledge, Q&amp;A and products as chat, and every call lands in the inbox as a conversation.</p>
@@ -258,7 +264,9 @@ function VoiceForm(p: SectionProps & { state: VoiceState }) {
       {!p.canEdit && <Note>Only owners and managers can change voice settings.</Note>}
 
       {picker && <VoicePicker ws={p.ws} language={mainLang} current={draft.voice_id} ownAccount={s?.account === 'own'} onClose={() => setPicker(false)} onPick={(v) => { set({ voice_id: v.voice_id, voice_name: v.name }); setPicker(false); }} toast={p.toast} />}
-      {testing && <TestPanel inbox={p.inbox.id} draft={draft} languages={langs} domains={p.inbox.allowed_domains} onClose={() => { setTesting(false); invalidate(); }} toast={p.toast} />}
+      {testing && <TestPanel inbox={p.inbox.id} draft={draft} settings={{ ...p.inbox.settings, voice: draft }} brandFallback={p.inbox.name} online={p.inbox.availability.online} languages={langs} domains={p.inbox.allowed_domains} onClose={() => { setTesting(false); invalidate(); }} toast={p.toast} />}
+    </div>
+      <div className="xl:sticky xl:top-[calc(var(--demo-bar,0px)+1rem)] self-start"><WidgetPreview settings={preview} online={p.inbox.availability.online} brandFallback={p.inbox.name} inboxId={p.inbox.id} view="voice" /></div>
     </div>
   );
 }
@@ -324,13 +332,12 @@ function VoicePicker({ ws, language, current, ownAccount, onClose, onPick, toast
 }
 
 // ---------------------------------------------------------------- test panel (§4)
-interface LogRow { at: number; kind: 'you' | 'ai' | 'tool' | 'event'; text: string; ms?: number }
-function TestPanel({ inbox, draft, languages, domains, onClose, toast }: { inbox: string; draft: VoiceSettings; languages: string[]; domains: string[]; onClose: () => void; toast: SectionProps['toast'] }) {
+interface LogRow { at: number; kind: 'you' | 'ai' | 'tool' | 'event'; text: string; ms?: number; typed?: boolean }
+function TestPanel({ inbox, draft, settings, brandFallback, online, languages, domains, onClose, toast }: { inbox: string; draft: VoiceSettings; settings: WebchatSettings; brandFallback: string; online: boolean; languages: string[]; domains: string[]; onClose: () => void; toast: SectionProps['toast'] }) {
   const [phase, setPhase] = useState<'idle' | 'starting' | 'live' | 'ended'>('idle');
   const [mode, setMode] = useState<'listening' | 'speaking'>('listening');
   const [muted, setMuted] = useState(false);
   const [log, setLog] = useState<LogRow[]>([]);
-  const [typed, setTyped] = useState('');
   const host = domains.find((d) => d && d !== 'localhost' && !d.startsWith('*.')) ?? 'your-site.com';
   const [page, setPage] = useState(`https://${host}/`);
   const [visitor, setVisitor] = useState('');
@@ -379,7 +386,7 @@ function TestPanel({ inbox, draft, languages, domains, onClose, toast }: { inbox
     if (call.current) { await endTestSession(inbox, call.current); call.current = null; }
     setPhase((p) => (p === 'idle' ? p : 'ended'));
   }
-  const send = () => { const t = typed.trim(); if (!t || !h.current) return; h.current.text(t); add({ kind: 'you', text: `${t} (typed)` }); lastAt.current = Date.now(); setTyped(''); };
+  const sendText = (t: string) => { if (!h.current) return; h.current.text(t); add({ kind: 'you', text: t, typed: true }); lastAt.current = Date.now(); };
   async function checksRun() {
     setChecking(true);
     try {
@@ -394,47 +401,47 @@ function TestPanel({ inbox, draft, languages, domains, onClose, toast }: { inbox
     } catch (e) { toast(parseError(e).message, 'error'); } finally { setChecking(false); }
   }
   const mm = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  const status: CallStatus = phase === 'idle' ? 'idle' : phase === 'ended' ? 'ended' : phase === 'starting' ? 'connecting' : muted ? 'muted' : mode;
+  // the captions are what the visitor sees; tool calls and timings stay in "Call details" below the widget
+  const lines: CallLine[] = log.filter((r) => r.kind === 'you' || r.kind === 'ai').map((r) => ({ you: r.kind === 'you', text: r.text }));
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/30" role="dialog" aria-modal="true" aria-label="Test voice">
       <div className="flex h-full w-full max-w-xl flex-col bg-white shadow-xl">
         <div className="flex items-center gap-2 border-b border-gray-200 px-4 py-3">
           <div className="font-semibold text-gray-900">Test voice <span className="font-normal text-gray-500">(draft settings)</span></div>
-          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => { void stop(); setLog([]); setPhase('idle'); setChecks(null); }} disabled={phase === 'starting'}>Reset</Button>
+          <Button size="sm" variant="ghost" className="ml-auto" onClick={() => { void stop(); setLog([]); setPhase('idle'); setChecks(null); setMuted(false); }} disabled={phase === 'starting'}>Reset</Button>
           <button type="button" onClick={() => { void stop(); onClose(); }} aria-label="Close" className="rounded p-1 text-gray-500 hover:bg-gray-100"><X className="h-5 w-5" /></button>
         </div>
-        <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
-          <span className={cn('flex h-9 w-9 items-center justify-center rounded-full', phase === 'live' ? (mode === 'speaking' ? 'animate-pulse bg-indigo-600 text-white' : 'bg-indigo-100 text-indigo-700') : 'bg-gray-100 text-gray-500')}><Mic className="h-4 w-4" /></span>
-          <span className="text-sm font-medium" role="status">{phase === 'starting' ? 'Connecting…' : phase === 'live' ? (muted ? 'Muted' : mode === 'speaking' ? 'Speaking…' : 'Listening…') : phase === 'ended' ? 'Call ended' : 'Not connected'}</span>
-          {phase === 'live' && <span className="text-xs tabular-nums text-gray-500">{mm}</span>}
-          <div className="ml-auto flex items-center gap-2">
-            {phase === 'live' && <Button size="sm" variant="secondary" onClick={() => { setMuted(!muted); h.current?.mute(!muted); }} aria-pressed={muted}>{muted ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}</Button>}
-            {phase === 'live' ? <Button size="sm" className="bg-red-600 hover:bg-red-700" onClick={() => void stop()}><Square className="mr-1 h-3.5 w-3.5" />End</Button>
-              : <Button size="sm" onClick={start} loading={phase === 'starting'}><Mic className="mr-1 h-3.5 w-3.5" />{phase === 'ended' ? 'Call again' : 'Start call'}</Button>}
-          </div>
-        </div>
-        {phase === 'idle' && (
-          <div className="grid gap-3 border-b border-gray-100 px-4 py-3 sm:grid-cols-3">
-            <div className="sm:col-span-3"><Label hint="for product context">Page the visitor is on</Label><input className={field} value={page} onChange={(e) => setPage(e.target.value)} /></div>
-            <div><Label>Visitor name</Label><input className={field} value={visitor} onChange={(e) => setVisitor(e.target.value)} placeholder="optional" /></div>
-            {languages.length > 1 && <div><Label>Speak in</Label><select className={field} value={lang} onChange={(e) => setLang(e.target.value)}>{languages.map((l) => <option key={l} value={l}>{voiceLanguage(l)}</option>)}</select></div>}
-          </div>
-        )}
-        <div className="flex-1 space-y-1.5 overflow-y-auto px-4 py-3 text-sm" aria-live="polite">
-          {log.length === 0 && <p className="text-gray-500">Start a call and talk as a visitor would. Every tool call shows here with what it found and how long it took. Test calls never appear in the inbox; they count toward this month&rsquo;s minutes, marked as tests.</p>}
-          {log.map((r, i) => (
-            <div key={i} className={cn('grid grid-cols-[52px_1fr_auto] gap-2', r.kind === 'tool' && 'text-xs text-gray-600', r.kind === 'event' && 'text-xs italic text-gray-500')}>
-              <span className="text-xs font-medium text-gray-500">{r.kind === 'you' ? 'You' : r.kind === 'ai' ? 'AI' : r.kind === 'tool' ? <Wrench className="h-3.5 w-3.5" /> : ''}</span>
-              <span className={cn(r.kind === 'ai' && 'text-gray-900')}>{r.text}</span>
-              <span className="text-[11px] tabular-nums text-gray-400">{r.ms != null ? `${(r.ms / 1000).toFixed(1)}s` : `${r.at.toFixed(0)}s`}</span>
+        <div className="flex-1 overflow-y-auto">
+          {phase === 'idle' && (
+            <div className="grid gap-3 border-b border-gray-100 px-4 py-3 sm:grid-cols-3">
+              <div className="sm:col-span-3"><Label hint="for product context">Page the visitor is on</Label><input className={field} value={page} onChange={(e) => setPage(e.target.value)} /></div>
+              <div><Label>Visitor name</Label><input className={field} value={visitor} onChange={(e) => setVisitor(e.target.value)} placeholder="optional" /></div>
+              {languages.length > 1 && <div><Label>Speak in</Label><select className={field} value={lang} onChange={(e) => setLang(e.target.value)}>{languages.map((l) => <option key={l} value={l}>{voiceLanguage(l)}</option>)}</select></div>}
             </div>
-          ))}
+          )}
+          {/* the call as visitors see it: the widget panel on a page */}
+          <div className="flex justify-center bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px] px-4 py-6">
+            <WidgetCallPanel settings={settings} brandFallback={brandFallback} online={online} className="h-[480px] w-full max-w-[340px]"
+              status={status} time={mm} lines={lines} muted={muted}
+              onStart={start} onMute={() => { setMuted(!muted); h.current?.mute(!muted); }} onEnd={() => void stop()}
+              onSwitch={() => { add({ kind: 'event', text: 'Switch to chat: on your site the call ends here and the conversation carries on in the chat.' }); void stop(); }}
+              onSend={phase === 'live' ? sendText : undefined} onTyping={() => h.current?.activity()} />
+          </div>
+          <div className="border-t border-gray-100 px-4 py-3">
+            <div className="mb-1.5 text-sm font-medium text-gray-900">Call details <span className="font-normal text-xs text-gray-500">only you see these</span></div>
+            <div className="space-y-1.5 text-sm" aria-live="polite">
+              {log.length === 0 && <p className="text-gray-500">Start a call and talk as a visitor would. Every tool call shows here with what it found and how long it took. Test calls never appear in the inbox; they count toward this month&rsquo;s minutes, marked as tests.</p>}
+              {log.map((r, i) => (
+                <div key={i} className={cn('grid grid-cols-[52px_1fr_auto] gap-2', r.kind === 'tool' && 'text-xs text-gray-600', r.kind === 'event' && 'text-xs italic text-gray-500')}>
+                  <span className="text-xs font-medium text-gray-500">{r.kind === 'you' ? 'You' : r.kind === 'ai' ? 'AI' : r.kind === 'tool' ? <Wrench className="h-3.5 w-3.5" /> : ''}</span>
+                  <span className={cn(r.kind === 'ai' && 'text-gray-900')}>{r.text}{r.typed && <span className="text-gray-400"> (typed)</span>}</span>
+                  <span className="text-[11px] tabular-nums text-gray-400">{r.ms != null ? `${(r.ms / 1000).toFixed(1)}s` : `${r.at.toFixed(0)}s`}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        {phase === 'live' && (
-          <form className="flex gap-2 border-t border-gray-100 px-4 py-3" onSubmit={(e) => { e.preventDefault(); send(); }}>
-            <input className={field} value={typed} onChange={(e) => { setTyped(e.target.value); h.current?.activity(); }} placeholder="Type a message…" aria-label="Type a message into the call" />
-            <Button type="submit" disabled={!typed.trim()}>Send</Button>
-          </form>
-        )}
         <div className="border-t border-gray-200 px-4 py-3">
           <div className="flex items-center gap-2"><span className="text-sm font-medium text-gray-900">Quick checks</span><span className="text-xs text-gray-500">simulated visitors, built from your Q&amp;A</span>
             <Button size="sm" variant="secondary" className="ml-auto" onClick={checksRun} loading={checking} disabled={phase === 'live'}>Run checks</Button></div>

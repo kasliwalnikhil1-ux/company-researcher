@@ -51,13 +51,13 @@ export default function ReplyCard({ row, hidden, api }: CardProps) {
 
   return (
     <NeedCard row={row} hidden={hidden}
-      trigger={row.trigger_text ? <Part label="They wrote:"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
+      trigger={row.trigger_text ? <Part tone="them" label="They wrote"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
       ai={editing ? (
         <Textarea label={`Your reply to ${name}`} value={edit} onChange={(e) => setEdit(e.target.value)} rows={4} autoFocus className="min-h-[96px]" />
       ) : draft ? (
-        <Part label="AI draft:"><ClampText text={draft} /></Part>
+        <Part tone="ai" label="AI draft"><ClampText text={draft} /></Part>
       ) : noReply ? undefined : (
-        <Part label="AI draft:"><span className="text-gray-500">No draft. The AI left this one to a person.</span></Part>
+        <Hint>No draft. The AI left this one to a person.</Hint>
       )}
       extra={(warnings.length > 0 || metaFlag(row, 'stop_after_send') || (api.canWrite && !api.canReply)) ? (
         <>

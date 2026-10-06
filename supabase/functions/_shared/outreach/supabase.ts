@@ -36,7 +36,7 @@ export function errorResponse(e: unknown): Response {
   if (e instanceof HttpError) return json({ error: e.message, code: e.code, details: e.details }, e.status);
   const msg = (e as any)?.message ?? String(e);
   const m = /^(E_[A-Z_]+)(?::\s*(.*))?$/s.exec(msg.trim());
-  if (m) return json({ error: m[2] || m[1], code: m[1] }, m[1] === "E_FORBIDDEN" || m[1] === "E_PLAN_SUSPENDED" ? 403 : m[1] === "E_NOT_FOUND" ? 404 : m[1] === "E_PLAN_REQUIRED" || m[1] === "E_ACCOUNT_LIMIT" ? 402 : 400);
+  if (m) return json({ error: m[2] || m[1], code: m[1] }, m[1] === "E_FORBIDDEN" || m[1] === "E_PLAN_SUSPENDED" ? 403 : m[1] === "E_NOT_FOUND" ? 404 : m[1] === "E_PLAN_REQUIRED" || m[1] === "E_ACCOUNT_LIMIT" ? 402 : m[1] === "E_AI_BUSY" ? 503 : 400);
   console.error("unhandled", e);
   return json({ error: msg, code: "E_INTERNAL" }, 500);
 }

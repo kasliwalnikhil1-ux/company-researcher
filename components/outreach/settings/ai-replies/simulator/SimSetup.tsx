@@ -29,11 +29,11 @@ export default function SimSetup({ testingLabel, source, sources, onSource, send
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm text-gray-700">Testing the <span className="font-medium">{testingLabel}</span> prompt with</span>
-        <div role="radiogroup" aria-label="Which prompt to test" className="inline-flex flex-wrap rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+        <div role="radiogroup" aria-label="Which prompt to test" className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-white p-0.5">
           {sources.map((s) => (
             <button key={s.key} type="button" role="radio" aria-checked={source === s.key} disabled={s.disabled || disabled} title={s.hint}
               onClick={() => onSource(s.key)}
-              className={cn('px-3 py-1 text-sm rounded-md disabled:opacity-40 disabled:cursor-not-allowed', source === s.key ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900')}>
+              className={cn('px-3 py-1 text-sm rounded-md disabled:opacity-40 disabled:cursor-not-allowed', source === s.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>
               {s.label}
             </button>
           ))}

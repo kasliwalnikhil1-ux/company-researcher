@@ -35,11 +35,11 @@ export default function WebsiteCard({ row, hidden, api }: CardProps) {
 
   return (
     <NeedCard row={row} hidden={hidden}
-      trigger={row.trigger_text ? <Part label="Asked:"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
+      trigger={row.trigger_text ? <Part tone="them" label="The visitor asked"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
       ai={editing ? (
         <Textarea label="Your answer to the visitor" value={edit} onChange={(e) => setEdit(e.target.value)} rows={4} autoFocus className="min-h-[96px]" />
       ) : (
-        <Part label="AI suggests:"><ClampText text={suggestion} /></Part>
+        <Part tone="ai" label="AI suggests"><ClampText text={suggestion} /></Part>
       )}
       extra={(sources.length > 0 || (products.data?.length ?? 0) > 0 || (api.canWrite && !api.canReply)) ? (
         <>

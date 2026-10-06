@@ -6,7 +6,11 @@ import { Check, RefreshCw, SkipForward, X } from 'lucide-react';
 import { reviewLines, whoText, type NeedsYouRow } from '@/lib/outreach/aiHub';
 import { Button, Modal } from '@/components/outreach/ui';
 import { ConfirmModal } from '@/components/outreach/settings/shared';
+import { cn } from '@/lib/utils';
 import type { CardApi } from './types';
+
+/** The buttons of the bar: white text on the dark pill. */
+const pill = 'inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium text-white whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400';
 
 const lines = (n: number) => `${n.toLocaleString()} line${n === 1 ? '' : 's'}`;
 
@@ -40,13 +44,13 @@ export default function BulkBar({ rows, dirty, api, onClear }: {
   };
 
   return (
-    <div role="region" aria-label="Selected lines" className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-white shadow-lg px-3 py-2 w-full max-w-2xl">
-      <span className="text-sm font-medium text-gray-900 tabular-nums" aria-live="polite">{rows.length.toLocaleString()} selected:</span>
-      <Button size="sm" disabled={approvable.length === 0} onClick={() => setApproveOpen(true)} title={approvable.length === 0 ? 'Every selected line has an unsaved edit' : undefined}><Check className="w-3.5 h-3.5" /> Approve</Button>
-      <Button size="sm" variant="secondary" onClick={() => api.defer(rows, `${lines(rows.length)} skipped`, () => reviewLines(ids, 'skip'))} title="The fallback is used for these leads"><SkipForward className="w-3.5 h-3.5" /> Skip</Button>
-      <Button size="sm" variant="secondary" onClick={() => setRegenerateOpen(true)}><RefreshCw className="w-3.5 h-3.5" /> Regenerate</Button>
-      <div className="flex-1" />
-      <button type="button" onClick={onClear} aria-label="Clear the selection" className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"><X className="w-4 h-4" /></button>
+    <div role="region" aria-label="Selected lines" className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-full bg-gray-900 py-1.5 pl-4 pr-1.5 text-white shadow-xl ring-1 ring-black/5">
+      <span className="mr-2 text-sm font-medium tabular-nums whitespace-nowrap" aria-live="polite">{rows.length.toLocaleString()} selected</span>
+      <span className="mr-1 h-5 w-px bg-white/20" aria-hidden="true" />
+      <button type="button" className={cn(pill, 'bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 disabled:hover:bg-indigo-500')} disabled={approvable.length === 0} onClick={() => setApproveOpen(true)} title={approvable.length === 0 ? 'Every selected line has an unsaved edit' : undefined}><Check className="w-3.5 h-3.5" /> Approve</button>
+      <button type="button" className={cn(pill, 'hover:bg-white/10')} onClick={() => api.defer(rows, `${lines(rows.length)} skipped`, () => reviewLines(ids, 'skip'))} title="The fallback is used for these leads"><SkipForward className="w-3.5 h-3.5" /> Skip</button>
+      <button type="button" className={cn(pill, 'hover:bg-white/10')} onClick={() => setRegenerateOpen(true)}><RefreshCw className="w-3.5 h-3.5" /> Regenerate</button>
+      <button type="button" onClick={onClear} aria-label="Clear the selection" title="Clear the selection" className="ml-0.5 rounded-full p-1.5 text-gray-400 hover:bg-white/10 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"><X className="w-4 h-4" /></button>
 
       {/* The bar is sticky (its own stacking context), so the dialogs go to the body to sit above the rest of the app. */}
       {approveOpen && createPortal(

@@ -4,8 +4,8 @@
 // settings draft. Desktop / mobile switch mirrors the launcher's per-device options; with voice on, "voice call" draws the
 // panel as a call (widget-src/voice.js) instead of the chat.
 
-import { useMemo, useState } from 'react';
-import { ArrowUp, Captions, Check, ChevronUp, ExternalLink, MessageSquare, Mic, Paperclip, Pause, RotateCcw, Smile, Square, Volume2, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, Captions, Check, ChevronUp, ExternalLink, MessageSquare, Mic, MicOff, Monitor, PanelBottomClose, PanelBottomOpen, Paperclip, Pause, Phone, RotateCcw, Smartphone, Smile, Square, Volume2, X, Zap, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { IS_DEMO } from '@/lib/outreach/mode';
 import { voiceOf } from '@/lib/outreach/voice';
@@ -34,7 +34,7 @@ function LangFlag({ l, className }: { l: VideoLanguage; className?: string }) {
  * `phone` draws the expanded view as the widget does on a phone: the same player across the screen (`maxWidth`), with
  * smaller question chips.
  */
-export function VideoBubbleFrame({ v, voice = false, expanded = false, phone = false, scale = 1, maxWidth = 320, onToggle }: { v: VideoBubbleSettings; voice?: boolean; expanded?: boolean; phone?: boolean; scale?: number; maxWidth?: number; onToggle?: () => void }) {
+export function VideoBubbleFrame({ v, voice = false, expanded = false, phone = false, scale = 1, maxWidth = 320, maxHeight, onToggle }: { v: VideoBubbleSettings; voice?: boolean; expanded?: boolean; phone?: boolean; scale?: number; maxWidth?: number; /** the expanded view (with questions below it) narrows to fit this height, as a tall clip would otherwise overflow the box it is drawn in */ maxHeight?: number; onToggle?: () => void }) {
   const [ar, setAr] = useState(16 / 9);
   const [picked, setPicked] = useState<number | null>(null);
   const [lang, setLang] = useState<string | null>(null);
@@ -48,9 +48,13 @@ export function VideoBubbleFrame({ v, voice = false, expanded = false, phone = f
   const playing = (answer && pick(answer.clips)) || main, clip = mediaUrl(playing.url)!, clipKind = playing.kind;
   const ctl = mains.some((c) => c.kind !== 'image') || qs.some((q) => q.clips.some((c) => c.kind !== 'image'));
   const circle = v.shape !== 'rounded' && v.shape !== 'square', size = Math.round(clamp(v.size, 64, 240, 120) * scale), focus = `${clamp(v.focus_x, 0, 100, 50)}% ${clamp(v.focus_y, 0, 100, 50)}%`;
-  const card = phone && expanded, width = card ? maxWidth : expanded ? Math.min(clamp(v.expanded_width, 280, 720, 420), maxWidth) : size, narrow = width < 330;
+  const below = v.questions_position === 'below';
+  const fixed = /^(\d{1,2}):(\d{1,2})$/.exec(v.expanded_ratio ?? ''), ratio = fixed && +fixed[1] && +fixed[2] ? +fixed[1] / +fixed[2] : ar;
+  const qRows = below && qs.length ? (qs.length === 3 ? 1 : Math.ceil(qs.length / 2)) : 0;
+  const fitW = expanded && maxHeight ? Math.floor((maxHeight - (qRows ? qRows * 34 + 8 : 0)) * ratio) : Infinity;
+  const card = phone && expanded, width = Math.min(fitW, card ? maxWidth : expanded ? Math.min(clamp(v.expanded_width, 280, 720, 420), maxWidth) : size), narrow = width < 330;
   const xo = expanded ? -10 : circle ? Math.round(size * 0.146) - 12 : -8;
-  const below = v.questions_position === 'below', qbg = hex(v.question_bg, '#111827'), qc = hex(v.question_color, '#ffffff');
+  const qbg = hex(v.question_bg, '#111827'), qc = hex(v.question_color, '#ffffff');
   const setRatio = (w: number, h: number) => { if (w && h) setAr(Math.max(0.5625, Math.min(1.7778, w / h))); };
   const media = { className: 'block w-full h-full', style: { objectFit: expanded ? 'cover' as const : v.fit, objectPosition: focus, transform: expanded ? undefined : `scale(${clamp(v.zoom, 100, 300, 100) / 100})`, transformOrigin: focus } };
   const questions = (
@@ -140,47 +144,131 @@ function DemoLiveWidget({ inboxId, mobile }: { inboxId: string; mobile: boolean 
   return <iframe title="Live widget preview" srcDoc={html} className={cn('block h-[600px] border-0 bg-white', mobile ? 'w-[320px] mx-auto' : 'w-full')} />;
 }
 
-/** The call screen as voice.js draws it (build() + css()), mid-call: the assistant speaking, captions on. */
-function CallView({ vo, settings, brand, accent, dark, line }: { vo: ReturnType<typeof voiceOf>; settings: WebchatSettings; brand: string; accent: string; dark: boolean; line: string }) {
-  const ap = settings.appearance, ui = vo.ui, lb = ui.labels;
-  const orb1 = hex(ui.orb_1, accent), orb2 = hex(ui.orb_2, '#c7a3ff');
-  const img = ui.avatar === 'bot' ? avatarUrl(ap.bot_avatar_url) : ui.avatar === 'none' ? null : ap.logo_url, logo = !!img && ui.avatar !== 'bot';
-  const ink = dark ? '#f3f4f6' : '#111827', ink2 = dark ? '#9ca3af' : '#6b7280', card = dark ? '#1f2937' : '#fff';
-  const pill = 'inline-flex items-center gap-[5px] rounded-full border px-2.5 py-[5px] text-[12px] font-medium whitespace-nowrap';
+/** The widget's colours for a settings draft (accent, theme, the line colour between parts). */
+function lookOf(settings: WebchatSettings) {
+  const ap = settings.appearance, accent = HEX.test(ap.accent) ? ap.accent : '#4f46e5', dark = ap.theme === 'dark';
+  return { accent, on: contrast(accent), dark, line: dark ? '#1f2937' : '#e5e7eb' };
+}
+
+/** The panel's header bar: logo, brand name, online line. */
+function PanelHeader({ settings, brand, online }: { settings: WebchatSettings; brand: string; online: boolean }) {
+  const ap = settings.appearance, ms = settings.messages, { accent, on } = lookOf(settings);
   return (
-    <div className="flex-1 min-h-0 flex flex-col gap-2 px-1 pt-1 pb-0.5" style={{ background: dark ? '#0b1220' : ap.chat_bg, color: ink }}>
-      <div className="flex flex-col items-center gap-1 pt-1.5 pb-0.5">
-        {/* the logo is taken as transparent: no orb colour or disc behind it, only the voice-level ring around it */}
-        <div className="my-2 w-[72px] h-[72px] rounded-full flex items-center justify-center overflow-hidden" style={logo ? { boxShadow: `0 0 0 8px color-mix(in srgb, ${orb1} 18%, transparent)` } : { background: `radial-gradient(circle at 32% 28%, ${orb2}, ${orb1} 62%)`, boxShadow: `0 0 0 8px color-mix(in srgb, ${orb1} 18%, transparent), 0 6px 18px rgba(0,0,0,.16)` }}>
-          {img && <img src={img} alt="" className={cn('object-contain rounded-full', logo ? 'w-full h-full' : 'w-[56%] h-[56%] bg-white/90')} />}
-        </div>
-        <div className="flex items-baseline gap-1.5"><span className="font-semibold text-[14px]">{lb.speaking || 'Speaking…'}</span><span className="text-[12px] tabular-nums" style={{ color: ink2 }}>0:42</span></div>
-      </div>
-      <div className="flex-1 min-h-0 overflow-hidden flex flex-col gap-1.5 px-2.5 text-[14px] leading-[1.4]">
-        {ui.captions && <>
-          <p className="opacity-60"><b className="font-semibold" style={{ color: ink2 }}>You:</b> Hi! I have a question about pricing.</p>
-          <p><b className="font-semibold" style={{ color: ink2 }}>{brand}:</b> Sure, happy to help. Which plan are you looking at?</p>
-        </>}
-      </div>
-      <div className="mx-1.5 flex items-center gap-1.5 rounded-[14px] border pl-3 pr-1 py-1" style={{ borderColor: line, background: card }}>
-        <span className="flex-1 min-w-0 truncate py-1.5 text-[13px]" style={{ color: ink2 }}>Type instead…</span>
-        <span className="w-[30px] h-[30px] flex-none rounded-full flex items-center justify-center" style={{ background: line, color: ink2 }}><ArrowUp className="w-4 h-4" /></span>
-      </div>
-      <div className="flex flex-wrap justify-center gap-1 px-0.5 pb-1">
-        <span className={pill} style={{ borderColor: line, color: ink2 }}><Mic className="w-3.5 h-3.5" />{lb.mute || 'Mute'}</span>
-        <span className={pill} style={{ borderColor: line, color: ink2 }}><Captions className="w-3.5 h-3.5" /></span>
-        <span className={pill} style={{ borderColor: line, color: ink2 }}><MessageSquare className="w-3.5 h-3.5" />{lb.switch || 'Switch to chat'}</span>
-        <span className={pill} style={{ borderColor: '#dc2626', background: '#dc2626', color: '#fff' }}><Square className="w-3.5 h-3.5" fill="currentColor" strokeWidth={0} />{lb.end || 'End'}</span>
-      </div>
+    <div className="flex items-center gap-2.5 px-4 py-3" style={{ background: accent, color: on }}>
+      <div className={cn('w-9 h-9 flex-none rounded-full flex items-center justify-center overflow-hidden font-bold text-sm', !ap.logo_url && 'bg-white/25')}>{ap.logo_url ? <img src={ap.logo_url} alt="" className="w-full h-full object-contain" /> : brand.slice(0, 1).toUpperCase()}</div>
+      <div className="min-w-0"><div className="font-bold text-[15px] leading-tight truncate">{brand}</div><div className="text-[12px] opacity-90 flex items-center gap-1.5"><span className={cn('w-2 h-2 rounded-full', online ? 'bg-emerald-400' : 'bg-gray-300')} />{online ? ({ minutes: 'Replies in a few minutes', hours: 'Replies in a few hours', day: 'Replies within a day', none: 'We are online' } as Record<string, string>)[ms.reply_time] : ms.unavailable_message}</div></div>
     </div>
   );
 }
 
-export default function WidgetPreview({ settings, online = true, brandFallback, inboxId }: { settings: WebchatSettings; online?: boolean; brandFallback?: string; inboxId?: string }) {
+/** The panel's footer: fixed colours, not the inbox's. */
+function PanelFooter({ settings }: { settings: WebchatSettings }) {
+  const { dark, line } = lookOf(settings);
+  return <>
+    {settings.features.powered_by && <div className="flex items-center justify-center gap-1 text-[10px] font-medium py-1.5 border-t" style={{ background: dark ? '#0b1220' : '#f3f4f6', borderColor: line, color: dark ? '#9ca3af' : '#6b7280' }}>Powered by <img src="/logo.png" alt="" className="w-3 h-3" /><b style={{ color: dark ? '#f3f4f6' : '#111827' }}>GrowthxAI</b></div>}
+    <div className="text-center text-[10px] px-3 pt-1 pb-1.5" style={{ background: dark ? '#111827' : '#ffffff', color: dark ? '#9ca3af' : '#6c6f74' }}>By chatting with us, you agree to our <u>Privacy Policy</u></div>
+  </>;
+}
+
+export type CallStatus = 'idle' | 'connecting' | 'listening' | 'thinking' | 'speaking' | 'muted' | 'ended';
+export interface CallLine { you: boolean; text: string }
+export interface CallControls {
+  status: CallStatus; time: string; lines: CallLine[];
+  muted?: boolean; onMute?: () => void; onSwitch?: () => void; onEnd?: () => void;
+  /** idle / ended: the start button (the widget's own start comes from its home screen; the test panel needs one here) */
+  onStart?: () => void;
+  onSend?: (text: string) => void; onTyping?: () => void;
+}
+
+/**
+ * The call screen as voice.js draws it (build() + css()). Static in the preview (mid-call, the assistant speaking);
+ * live in Voice → Test voice, where the controls work and the captions are the call's own.
+ */
+function CallScreen({ settings, brand, status, time, lines, muted = false, onMute, onSwitch, onEnd, onStart, onSend, onTyping }: { settings: WebchatSettings; brand: string } & CallControls) {
+  const ap = settings.appearance, ui = voiceOf(settings.voice).ui, lb = ui.labels, { accent, on, dark, line } = lookOf(settings);
+  const [cc, setCc] = useState(ui.captions);
+  const [typed, setTyped] = useState('');
+  const capRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { const el = capRef.current; if (el) el.scrollTop = el.scrollHeight; }, [lines, cc]);
+  const orb1 = hex(ui.orb_1, accent), orb2 = hex(ui.orb_2, '#c7a3ff');
+  const img = ui.avatar === 'bot' ? avatarUrl(ap.bot_avatar_url) : ui.avatar === 'none' ? null : ap.logo_url, logo = !!img && ui.avatar !== 'bot';
+  const ink = dark ? '#f3f4f6' : '#111827', ink2 = dark ? '#9ca3af' : '#6b7280', card = dark ? '#1f2937' : '#fff';
+  const pill = 'inline-flex items-center gap-[5px] rounded-full border px-2.5 py-[5px] text-[12px] font-medium whitespace-nowrap';
+  const inCall = status !== 'idle' && status !== 'ended', live = inCall && status !== 'connecting';
+  const label = status === 'idle' ? ui.start_hint || 'Speak with our AI assistant' : status === 'ended' ? 'Call ended'
+    : lb[status] || ({ connecting: 'Connecting…', listening: 'Listening…', thinking: 'Thinking…', speaking: 'Speaking…', muted: 'Muted' } as const)[status];
+  const ring = status === 'speaking' ? 14 : 8;
+  const send = () => { const t = typed.trim(); if (!t || !onSend) return; onSend(t); setTyped(''); };
+  return (
+    <div className="flex-1 min-h-0 flex flex-col gap-2 px-1 pt-1 pb-0.5" style={{ background: dark ? '#0b1220' : ap.chat_bg, color: ink }}>
+      <style>{'@keyframes gxorb{50%{transform:scale(1.05)}}'}</style>
+      <div className="flex flex-col items-center gap-1 pt-1.5 pb-0.5">
+        {/* the logo is taken as transparent: no orb colour or disc behind it, only the voice-level ring around it */}
+        <div className={cn('my-2 w-[72px] h-[72px] rounded-full flex items-center justify-center overflow-hidden transition-[box-shadow,transform] duration-300', status === 'muted' && 'grayscale opacity-75', status === 'ended' && 'opacity-60')}
+          style={{ ...(logo ? { boxShadow: `0 0 0 ${ring}px color-mix(in srgb, ${orb1} 18%, transparent)` } : { background: `radial-gradient(circle at 32% 28%, ${orb2}, ${orb1} 62%)`, boxShadow: `0 0 0 ${ring}px color-mix(in srgb, ${orb1} 18%, transparent), 0 6px 18px rgba(0,0,0,.16)` }),
+            animation: status === 'listening' || status === 'connecting' || status === 'thinking' ? 'gxorb 2.4s ease-in-out infinite' : undefined, transform: status === 'speaking' ? 'scale(1.08)' : undefined }}>
+          {img && <img src={img} alt="" className={cn('object-contain rounded-full', logo ? 'w-full h-full' : 'w-[56%] h-[56%] bg-white/90')} />}
+        </div>
+        <div className="flex items-baseline gap-1.5 px-3 text-center"><span className="font-semibold text-[14px]" role="status">{label}</span>{inCall && <span className="text-[12px] tabular-nums" style={{ color: ink2 }}>{time}</span>}</div>
+      </div>
+      <div ref={capRef} className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1.5 px-2.5 text-[14px] leading-[1.4]" aria-live="polite">
+        {cc && lines.slice(-8).map((l, i, all) => <p key={i} className={cn(i < all.length - 1 && 'opacity-60', 'break-words')}><b className="font-semibold" style={{ color: ink2 }}>{l.you ? 'You' : brand}:</b> {l.text}</p>)}
+      </div>
+      {inCall ? <>
+        <form className="mx-1.5 flex items-center gap-1.5 rounded-[14px] border pl-3 pr-1 py-1" style={{ borderColor: line, background: card }} onSubmit={(e) => { e.preventDefault(); send(); }}>
+          {onSend
+            ? <input className="flex-1 min-w-0 bg-transparent py-1.5 text-[13px] outline-none placeholder:text-[color:var(--ph)]" style={{ color: ink, ['--ph' as string]: ink2 }} placeholder="Type instead…" aria-label="Type instead" maxLength={1000} value={typed} disabled={!live} onChange={(e) => { setTyped(e.target.value); onTyping?.(); }} />
+            : <span className="flex-1 min-w-0 truncate py-1.5 text-[13px]" style={{ color: ink2 }}>Type instead…</span>}
+          <button type="submit" aria-label="Send" disabled={!onSend || !typed.trim()} className="w-[30px] h-[30px] flex-none rounded-full flex items-center justify-center" style={onSend && typed.trim() ? { background: accent, color: on } : { background: line, color: ink2 }}><ArrowUp className="w-4 h-4" /></button>
+        </form>
+        <div className="flex flex-wrap justify-center gap-1 px-0.5 pb-1">
+          <button type="button" className={pill} disabled={!live} onClick={onMute} aria-pressed={muted} style={muted ? { borderColor: line, background: line, color: ink } : { borderColor: line, color: ink2 }}>{muted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}{muted ? 'Unmute' : lb.mute || 'Mute'}</button>
+          <button type="button" className={cn(pill, !cc && 'opacity-55')} onClick={() => setCc(!cc)} aria-pressed={cc} aria-label={cc ? 'Hide captions' : 'Show captions'} style={{ borderColor: line, color: ink2 }}><Captions className="w-3.5 h-3.5" /></button>
+          <button type="button" className={pill} onClick={onSwitch} style={{ borderColor: line, color: ink2 }}><MessageSquare className="w-3.5 h-3.5" />{lb.switch || 'Switch to chat'}</button>
+          <button type="button" className={pill} onClick={onEnd} style={{ borderColor: '#dc2626', background: '#dc2626', color: '#fff' }}><Square className="w-3.5 h-3.5" fill="currentColor" strokeWidth={0} />{lb.end || 'End'}</button>
+        </div>
+      </> : onStart && (
+        <div className="flex justify-center px-2 pb-3 pt-1">
+          <button type="button" onClick={onStart} className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-[14px] font-semibold shadow" style={{ background: accent, color: on }}><Mic className="w-4 h-4" />{status === 'ended' ? 'Call again' : ui.start_text || 'Voice'}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The open widget panel in a call, drawn like the real one: Voice → Test voice runs its call in it. */
+export function WidgetCallPanel({ settings, brandFallback, online = true, className, ...call }: { settings: WebchatSettings; brandFallback?: string; online?: boolean; className?: string } & CallControls) {
+  const ap = settings.appearance, { dark } = lookOf(settings), brand = ap.brand_name || brandFallback || 'Chat';
+  return (
+    <div className={cn('flex flex-col overflow-hidden rounded-2xl shadow-2xl', className)} style={{ background: dark ? '#111827' : ap.widget_bg, fontFamily: `${ap.font && ap.font !== 'Inter' ? ap.font + ',' : ''}Inter, system-ui, sans-serif` }}>
+      <PanelHeader settings={settings} brand={brand} online={online} />
+      <CallScreen settings={settings} brand={brand} {...call} />
+      <PanelFooter settings={settings} />
+    </div>
+  );
+}
+
+/** An icon-only segmented toggle (Reports blue style); the label shows as the tooltip. */
+export function Seg({ items, value, onChange, attr }: { items: Array<{ k: string; icon: LucideIcon; label: string }>; value: string; onChange: (k: string) => void; attr?: string }) {
+  return (
+    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+      {items.map(({ k, icon: Icon, label }) => (
+        <button key={k} type="button" title={label} aria-label={label} aria-pressed={value === k} {...(attr ? { [attr]: k } : {})} onClick={() => onChange(k)}
+          className={cn('w-7 h-6 rounded-md flex items-center justify-center', value === k ? 'bg-indigo-50 text-indigo-700' : 'text-gray-500 hover:bg-gray-50')}>
+          <Icon className="w-3.5 h-3.5" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const SAMPLE_CALL: CallLine[] = [{ you: true, text: 'Hi! I have a question about pricing.' }, { you: false, text: 'Sure, happy to help. Which plan are you looking at?' }];
+
+export default function WidgetPreview({ settings, online = true, brandFallback, inboxId, view = 'chat' }: { settings: WebchatSettings; online?: boolean; brandFallback?: string; inboxId?: string; view?: 'chat' | 'voice' }) {
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [open, setOpen] = useState(true);
   const [live, setLive] = useState(false);
-  const [call, setCall] = useState(false);
+  const [call, setCall] = useState(view === 'voice');
   const showLive = IS_DEMO && !!inboxId && live;
   const vo = voiceOf(settings.voice), inCall = vo.enabled && call && open;
   const ap = settings.appearance, la = device === 'mobile' ? { ...settings.launcher.desktop, ...settings.launcher.mobile } : settings.launcher.desktop, ms = settings.messages;
@@ -195,16 +283,15 @@ export default function WidgetPreview({ settings, online = true, brandFallback, 
   const logoIcon = !!ap.logo_url && !open && !(la.type === 'button' && device === 'desktop');
   return (
     <div className="rounded-xl border border-gray-200 bg-white overflow-hidden" data-tour="widget-preview">
-      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-3 py-2 border-b border-gray-100 text-xs">
-        <div className="flex items-center gap-1">
-          <span className="text-gray-500 mr-1">Preview</span>
-          {vo.enabled && !showLive && (['chat', 'voice'] as const).map((k) => <button key={k} type="button" data-preview-view={k} onClick={() => { setCall(k === 'voice'); setOpen(true); }} className={cn('px-2 py-0.5 rounded', (k === 'voice') === inCall ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{k === 'voice' ? 'voice call' : 'chat'}</button>)}
-        </div>
-        <div className="flex gap-1 ml-auto">
-          {(['desktop', 'mobile'] as const).map((d) => <button key={d} type="button" onClick={() => setDevice(d)} className={cn('px-2 py-0.5 rounded', device === d ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{d}</button>)}
-          {!showLive && <button type="button" onClick={() => setOpen((o) => !o)} className="px-2 py-0.5 rounded text-gray-600 hover:bg-gray-100">{open ? 'closed state' : 'open state'}</button>}
-          {IS_DEMO && inboxId && <button type="button" onClick={() => setLive((l) => !l)} className={cn('px-2 py-0.5 rounded', live ? 'bg-indigo-600 text-white' : 'text-indigo-700 hover:bg-indigo-50')} title="Try the real widget with your saved settings">{live ? 'live' : 'try it live'}</button>}
-        </div>
+      {/* icons only, each with its tooltip: what is shown (chat / call), on which device, open or closed */}
+      <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-gray-100">
+        <span className="text-xs font-medium text-gray-500 mr-auto pl-0.5">Preview</span>
+        {vo.enabled && !showLive && (
+          <Seg items={[{ k: 'chat', icon: MessageSquare, label: 'Chat' }, { k: 'voice', icon: Phone, label: 'Voice call' }]} value={inCall ? 'voice' : 'chat'} onChange={(k) => { setCall(k === 'voice'); setOpen(true); }} attr="data-preview-view" />
+        )}
+        <Seg items={[{ k: 'desktop', icon: Monitor, label: 'Desktop' }, { k: 'mobile', icon: Smartphone, label: 'Mobile' }]} value={device} onChange={(k) => setDevice(k as 'desktop' | 'mobile')} />
+        {!showLive && <Seg items={[{ k: 'open', icon: PanelBottomOpen, label: 'Open' }, { k: 'closed', icon: PanelBottomClose, label: 'Closed (launcher only)' }]} value={open ? 'open' : 'closed'} onChange={(k) => setOpen(k === 'open')} />}
+        {IS_DEMO && inboxId && <Seg items={[{ k: 'live', icon: Zap, label: live ? 'Back to the preview' : 'Try the real widget with your saved settings' }]} value={live ? 'live' : ''} onChange={() => setLive((l) => !l)} />}
       </div>
       {showLive ? <DemoLiveWidget key={`${inboxId}:${device}`} inboxId={inboxId!} mobile={device === 'mobile'} /> : (
       <div className={cn('relative bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]', device === 'mobile' ? 'h-[600px] w-[320px] mx-auto' : 'h-[600px]')} style={{ fontFamily: `${ap.font && ap.font !== 'Inter' ? ap.font + ',' : ''}Inter, system-ui, sans-serif` }}>
@@ -225,11 +312,8 @@ export default function WidgetPreview({ settings, online = true, brandFallback, 
         {/* panel */}
         {open && (
           <div className={cn('absolute flex flex-col overflow-hidden shadow-2xl', device === 'mobile' ? 'inset-0' : 'h-[480px] rounded-2xl')} style={device === 'mobile' ? { background: dark ? '#111827' : ap.widget_bg } : { bottom: la.margin_bottom + size + 12, left: '50%', transform: 'translateX(-50%)', width: 'min(320px, calc(100% - 24px))', background: dark ? '#111827' : ap.widget_bg }}>
-            <div className="flex items-center gap-2.5 px-4 py-3" style={{ background: accent, color: on }}>
-              <div className={cn('w-9 h-9 flex-none rounded-full flex items-center justify-center overflow-hidden font-bold text-sm', !ap.logo_url && 'bg-white/25')}>{ap.logo_url ? <img src={ap.logo_url} alt="" className="w-full h-full object-contain" /> : brand.slice(0, 1).toUpperCase()}</div>
-              <div className="min-w-0"><div className="font-bold text-[15px] leading-tight truncate">{brand}</div><div className="text-[12px] opacity-90 flex items-center gap-1.5"><span className={cn('w-2 h-2 rounded-full', online ? 'bg-emerald-400' : 'bg-gray-300')} />{online ? ({ minutes: 'Replies in a few minutes', hours: 'Replies in a few hours', day: 'Replies within a day', none: 'We are online' } as Record<string, string>)[ms.reply_time] : ms.unavailable_message}</div></div>
-            </div>
-            {inCall ? <CallView vo={vo} settings={settings} brand={brand} accent={accent} dark={dark} line={line} /> : <>
+            <PanelHeader settings={settings} brand={brand} online={online} />
+            {inCall ? <CallScreen settings={settings} brand={brand} status="speaking" time="0:42" lines={SAMPLE_CALL} /> : <>
             <div className="flex-1 min-h-0 p-4 space-y-3 text-[13px]" style={{ background: dark ? '#0b1220' : ap.chat_bg, color: dark ? '#f3f4f6' : '#111827' }}>
               <div><div className="text-[20px] font-bold leading-tight">{ap.welcome_title}</div><div className="opacity-70">{ap.welcome_tagline}</div></div>
               {ms.greeting_enabled && <div className="flex items-end gap-2">{avatarUrl(ap.bot_avatar_url) && <img src={avatarUrl(ap.bot_avatar_url)!} alt="" className="w-7 h-7 rounded-full object-cover flex-none" />}<div className="max-w-[85%] rounded-2xl px-3 py-2" style={{ background: dark ? '#1f2937' : '#fff', border: '1px solid rgba(0,0,0,.06)' }}>{ms.greeting}</div></div>}
@@ -250,9 +334,7 @@ export default function WidgetPreview({ settings, online = true, brandFallback, 
               </div>
             </div>
             </>}
-            {/* footer: fixed colours, not the inbox's */}
-            {settings.features.powered_by && <div className="flex items-center justify-center gap-1 text-[10px] font-medium py-1.5 border-t" style={{ background: dark ? '#0b1220' : '#f3f4f6', borderColor: line, color: dark ? '#9ca3af' : '#6b7280' }}>Powered by <img src="/logo.png" alt="" className="w-3 h-3" /><b style={{ color: dark ? '#f3f4f6' : '#111827' }}>GrowthxAI</b></div>}
-            <div className="text-center text-[10px] px-3 pt-1 pb-1.5" style={{ background: dark ? '#111827' : '#ffffff', color: dark ? '#9ca3af' : '#6c6f74' }}>By chatting with us, you agree to our <u>Privacy Policy</u></div>
+            <PanelFooter settings={settings} />
           </div>
         )}
       </div>

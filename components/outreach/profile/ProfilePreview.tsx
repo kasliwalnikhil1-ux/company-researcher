@@ -39,8 +39,8 @@ export default function ProfilePreview({ doc, payload, name, pictureUrl, coverUr
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs font-medium text-gray-600">Preview · what a prospect sees</div>
         <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Preview width">
-          <button role="tab" aria-selected={!mobile} onClick={() => setMode('desktop')} className={cn('px-2 py-1 text-xs rounded-md inline-flex items-center gap-1', !mobile ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600')}><Monitor className="w-3.5 h-3.5" /> Desktop</button>
-          <button role="tab" aria-selected={mobile} onClick={() => setMode('mobile')} className={cn('px-2 py-1 text-xs rounded-md inline-flex items-center gap-1', mobile ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600')}><Smartphone className="w-3.5 h-3.5" /> Mobile</button>
+          <button role="tab" aria-selected={!mobile} onClick={() => setMode('desktop')} className={cn('px-2 py-1 text-xs rounded-md inline-flex items-center gap-1', !mobile ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}><Monitor className="w-3.5 h-3.5" /> Desktop</button>
+          <button role="tab" aria-selected={mobile} onClick={() => setMode('mobile')} className={cn('px-2 py-1 text-xs rounded-md inline-flex items-center gap-1', mobile ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}><Smartphone className="w-3.5 h-3.5" /> Mobile</button>
         </div>
       </div>
       <div className={cn('mx-auto rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm', mobile ? 'max-w-[360px]' : 'max-w-[680px]')}>

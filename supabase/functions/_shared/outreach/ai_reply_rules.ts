@@ -384,11 +384,9 @@ export function evaluateGates(g: GateInput): GateResult {
   if (tags.includes("vip") || tags.includes("manual_only") || tags.includes("manual-only")) { note("G13", false, "tagged vip / manual only"); escalate.push("vip"); }
   else if (g.handoffStagePosition != null && g.leadStagePosition != null && g.leadStagePosition >= g.handoffStagePosition) { note("G13", false, "at or past the hand-off stage"); escalate.push("stage"); }
   else note("G13", true);
-  // G14: the EU/EEA rule applies while no disclosure line is set; an unknown country counts as not allowed
-  if (!g.disclosure && g.blockedCountries.length) {
-    const blocked = !g.leadCountry || g.blockedCountries.includes(g.leadCountry);
-    if (blocked) { note("G14", false, g.leadCountry ? `lead in ${g.leadCountry}` : "lead country unknown"); maxMode = minMode(maxMode, "draft"); } else note("G14", true);
-  } else note("G14", true);
+  // G14: a lead whose country is known and on the sequence's blocked list gets a draft; everyone else gets Auto (the disclosure line plays no part)
+  if (g.leadCountry && g.blockedCountries.some((c) => c.toUpperCase() === g.leadCountry!.toUpperCase())) { note("G14", false, `lead in ${g.leadCountry}`); maxMode = minMode(maxMode, "draft"); }
+  else note("G14", true);
   return { skip: null, maxMode: minMode(g.mode, maxMode), escalate, failures, detail };
 }
 

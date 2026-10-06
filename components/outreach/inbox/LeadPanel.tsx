@@ -17,8 +17,9 @@ import { Avatar, Badge, Button, EnrollmentBadge, ErrorBox, Spinner, Toggle, fmtD
 import type { ChatDetail, ConvertKind } from './Thread';
 import { CreateTaskModal, ReenrolModal, ConfirmModal, type CreateTaskInput } from './LeadActions';
 import { memberLabel } from './hooks';
+import { MemberAvatar, UnassignedAvatar } from '@/components/outreach/members';
 import { activeConsentByChannel, chatTitle, useLeadConsent, useLeadIdentities, visibleName } from '@/lib/outreach/channels';
-import { IdentityList } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
+import { EmailLink, IdentityList } from '@/components/outreach/leads/detail/LeadIdentitiesCard';
 import { ConsentBadge, ConsentGrantModal, ConsentRevokeModal } from '@/components/outreach/leads/detail/LeadConsentCard';
 import type { LeadConsent } from '@/lib/outreach/types';
 import { cn } from '@/lib/utils';
@@ -287,7 +288,7 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                   {lead.headline && <div className="text-xs text-gray-600 mt-0.5 line-clamp-2">{lead.headline}</div>}
                   {(lead.company || lead.title) && <div className="text-xs text-gray-500 mt-1 inline-flex items-center gap-1"><Building2 className="w-3 h-3" />{[lead.title, lead.company].filter(Boolean).join(' @ ')}</div>}
                   {lead.location && <div className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1"><MapPin className="w-3 h-3" />{lead.location}</div>}
-                  {(lead.email_work || lead.email_personal) && <div className="text-xs text-gray-500 mt-0.5 truncate">{lead.email_work ?? lead.email_personal}</div>}
+                  {(lead.email_work || lead.email_personal) && <div className="text-xs text-gray-500 mt-0.5 flex min-w-0"><EmailLink email={(lead.email_work ?? lead.email_personal)!} /></div>}
                   {lead.phone && <a href={`tel:${lead.phone}`} className="text-xs text-gray-500 mt-0.5 inline-flex items-center gap-1 hover:text-indigo-600"><Phone className="w-3 h-3" />{lead.phone}</a>}
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
                     {lead.profile_url && <a href={lead.profile_url} target="_blank" rel="noopener noreferrer" className="text-xs text-[#0a66c2] hover:underline inline-flex items-center gap-1"><Linkedin className="w-3 h-3" /> LinkedIn</a>}
@@ -440,8 +441,9 @@ export default function LeadPanel({ chat, workspaceId, canWrite, members, curren
                         <CheckSquare className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
                         <span className="min-w-0 flex-1">
                           <span className="block text-gray-800 truncate">{t.title}</span>
-                          <span className={`block ${overdue ? 'text-red-600' : 'text-gray-400'}`}>{t.kind.replace(/_/g, ' ')}{t.due_at ? ` · due ${fmtDate(t.due_at)}` : ''}{t.assigned_to ? ` · ${memberLabel(members?.find((m) => m.user_id === t.assigned_to), 'member')}` : ''}</span>
+                          <span className={`block ${overdue ? 'text-red-600' : 'text-gray-400'}`}>{t.kind.replace(/_/g, ' ')}{t.due_at ? ` · due ${fmtDate(t.due_at)}` : ''}</span>
                         </span>
+                        {t.assigned_to && (() => { const m = members?.find((x) => x.user_id === t.assigned_to); return <span className="flex-shrink-0" title={`Assigned to ${memberLabel(m, 'a former member')}`}>{m ? <MemberAvatar member={m} size={5} /> : <UnassignedAvatar size={5} />}</span>; })()}
                       </Link>
                     </li>
                   );

@@ -2,6 +2,7 @@
 
 // The sequence's prompt: guided sections (or one raw text), stage table, settings, save / history / copy / reset.
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Copy, History, RotateCcw } from 'lucide-react';
 import { parseError } from '@/lib/outreach/api';
 import type { Sequence } from '@/lib/outreach/types';
@@ -9,11 +10,13 @@ import { scenariosFromText, useCopyPrompt, useLibraryPrompts, useSaveSequencePro
 import { Button, ErrorBox, Modal, Select, Textarea, timeAgo } from '@/components/outreach/ui';
 import { Note } from '@/components/outreach/settings/shared';
 import GuidedPromptEditor from '@/components/outreach/settings/ai-replies/prompt/GuidedPromptEditor';
+import PromptSettingsForm from '@/components/outreach/settings/ai-replies/prompt/PromptSettingsForm';
+import StageTable from '@/components/outreach/settings/ai-replies/prompt/StageTable';
 import VersionHistoryDrawer from '@/components/outreach/settings/ai-replies/prompt/VersionHistoryDrawer';
 import { changedParts, normalize, suggestKind, validate } from '@/components/outreach/settings/ai-replies/prompt/promptModel';
 import { Section, errText } from './shared';
 
-export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, notify, onDraftChange, onReload }: {
+export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, notify, onDraftChange, onReload, settingsHost }: {
   sequenceId: string;
   ws: string;
   s: SequenceAiSettings;
@@ -23,6 +26,8 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
   /** The unsaved edits (null when the editor matches the saved prompt), for "Test a conversation". */
   onDraftChange: (d: DraftPromptV2 | null) => void;
   onReload: () => void;
+  /** Where the prompt's Settings block goes (the Settings sub-tab). The edits stay part of this prompt's draft. */
+  settingsHost?: HTMLElement | null;
 }) {
   const p = s.prompt;
   const save = useSaveSequencePrompt(sequenceId);
@@ -55,6 +60,9 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
   }, [dirty]);
 
   const update = (next: DraftPromptV2) => setEdited(next);
+  const settingsDirty = parts.includes('Settings');
+  const stagesDirty = parts.includes('Stages');
+  const stageErrors = errors.filter((e) => e.startsWith('Stage') || e.startsWith('Keep between'));
   const discard = () => { setEdited(null); setShowErrors(false); };
 
   function openSave() {
@@ -79,8 +87,17 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
 
   const showSituations = current.editor_mode === 'guided' && p.situations_text_convertible && !!(current.sections?.situations ?? '').trim();
 
+  const saveActions = (show: boolean) => (
+    <>
+      {show && <span className="text-xs font-medium text-amber-700">Unsaved changes</span>}
+      {canEdit && dirty && <Button variant="ghost" size="sm" onClick={discard}>Discard</Button>}
+      {canEdit && <Button size="sm" onClick={openSave} disabled={!dirty} loading={save.isPending}>Save</Button>}
+    </>
+  );
+
   return (
-    <Section title="Prompt" help="Who the AI is, how a conversation goes, when it hands over and stops, the facts it may use and its style. Fully editable."
+    <>
+    <Section title="Instructions" help="Who the AI is, how a conversation goes, when it hands over and stops, the facts it may use and its style. Fully editable."
       actions={(
         <>
           <span className="text-xs text-gray-500 hidden sm:inline">
@@ -105,7 +122,7 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
           <ul className="list-disc pl-5 space-y-0.5">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
         </div>
       )}
-      <GuidedPromptEditor value={current} onChange={update} readOnly={readOnly} lockedKeys={lockedKeys} showSituations={showSituations}
+      <GuidedPromptEditor value={current} onChange={update} readOnly={readOnly} lockedKeys={lockedKeys} showSituations={showSituations} hideSettings={!!settingsHost} hideStages
         situationsSlot={canEdit && (
           <div className="flex items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => setConvertOpen(true)}>Convert to cards</Button>
@@ -113,7 +130,22 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
           </div>
         )} />
 
-      {saveOpen && (
+      {settingsHost && createPortal(
+        <Section title="How the AI replies" help="How long replies are, what the AI does when asked if it is a bot, and when it moves on. Saved with the instructions as a new version."
+          actions={saveActions(settingsDirty)}>
+          {showErrors && errors.length > 0 && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <div className="font-medium mb-1">Fix these before saving:</div>
+              <ul className="list-disc pl-5 space-y-0.5">{errors.map((e) => <li key={e}>{e}</li>)}</ul>
+            </div>
+          )}
+          <PromptSettingsForm value={current.settings} disabled={readOnly} onChange={(patch) => update({ ...current, settings: { ...current.settings, ...patch } })} />
+        </Section>,
+        settingsHost,
+      )}
+
+      {/* on document.body: Save is pressed from the Settings sub-tab too, while this panel is hidden */}
+      {saveOpen && typeof document !== 'undefined' && createPortal(
         <Modal open onClose={() => (save.isPending ? undefined : setSaveOpen(false))} title="Save prompt" size="md"
           footer={conflict ? (
             <><Button variant="secondary" onClick={() => setSaveOpen(false)}>Keep editing</Button><Button onClick={() => { setSaveOpen(false); setEdited(null); onReload(); }}>Load their version</Button></>
@@ -127,7 +159,7 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
               <>
                 <p className="text-sm text-gray-700">
                   {kind === 'style'
-                    ? 'Only the Style section changed, so this is a style-only version. Replies already scheduled go out as they are.'
+                    ? 'Only the Style section changed, so this is a style-only version. AI replies already scheduled go out as they are.'
                     : 'This is a substantive change: replies scheduled on the old version are drafted again, and the first 10 Auto replies wait 30 min so you can check them.'}
                 </p>
                 {parts.length > 0 && <p className="text-xs text-gray-500">Changed: {parts.join(', ')}.</p>}
@@ -136,7 +168,8 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
               </>
             )}
           </div>
-        </Modal>
+        </Modal>,
+        document.body,
       )}
 
       {p.id && (
@@ -150,6 +183,19 @@ export default function PromptCard({ sequenceId, ws, s, canEdit, sequences, noti
       </Modal>
       {convertOpen && <ConvertToCardsModal sequenceId={sequenceId} text={current.sections?.situations ?? ''} onClose={() => setConvertOpen(false)} onDone={(n) => { setConvertOpen(false); notify(`${n} scenario ${n === 1 ? 'card' : 'cards'} created.`); }} />}
     </Section>
+
+    {current.editor_mode === 'guided' && (
+      <Section title="Conversation stages" help="The AI moves through these in order. Click a stage to edit what it does there. Saved with the instructions."
+        actions={saveActions(stagesDirty)}>
+        {showErrors && stageErrors.length > 0 && (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+            <ul className="list-disc pl-5 space-y-0.5">{stageErrors.map((e) => <li key={e}>{e}</li>)}</ul>
+          </div>
+        )}
+        <StageTable stages={current.settings.stages} lockedKeys={lockedKeys} disabled={readOnly} onChange={(stages) => update({ ...current, settings: { ...current.settings, stages } })} />
+      </Section>
+    )}
+    </>
   );
 }
 
@@ -174,9 +220,9 @@ function CopyPromptModal({ sequenceId, ws, sequences, onClose, onDone }: { seque
       footer={<><Button variant="secondary" onClick={onClose} disabled={copy.isPending}>Cancel</Button><Button onClick={go} loading={copy.isPending} disabled={!ok}>Copy</Button></>}>
       <div className="space-y-3">
         <p className="text-sm text-gray-700">The prompt, its scenario cards, knowledge links and Q&amp;A are copied as an independent copy. This sequence&rsquo;s current prompt is replaced (the old version stays in History).</p>
-        <div role="radiogroup" aria-label="Copy from" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+        <div role="radiogroup" aria-label="Copy from" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
           {(['sequence', 'library'] as const).map((k) => (
-            <button key={k} type="button" role="radio" aria-checked={source === k} onClick={() => setSource(k)} className={`px-3 py-1 text-sm rounded-md ${source === k ? 'bg-white shadow-sm text-gray-900 font-medium' : 'text-gray-600 hover:text-gray-900'}`}>
+            <button key={k} type="button" role="radio" aria-checked={source === k} onClick={() => setSource(k)} className={`px-3 py-1 text-sm rounded-md ${source === k ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
               {k === 'sequence' ? 'Another sequence' : 'Library'}
             </button>
           ))}

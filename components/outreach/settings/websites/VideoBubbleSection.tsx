@@ -7,13 +7,13 @@
 // (migrations 065 and 072). The widget side is public/widget/v1/video.js; with no clip set the normal launcher shows.
 
 import { createContext, useContext, useRef, useState } from 'react';
-import { ArrowDown, ArrowUp, Crop, Plus, Trash2, Upload } from 'lucide-react';
+import { ArrowDown, ArrowUp, Circle, Crop, Maximize2, Monitor, Plus, Smartphone, Trash2, Upload } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';
 import { Button, Card } from '@/components/outreach/ui';
 import { Note, SettingRow, Switch } from '@/components/outreach/settings/shared';
 import { MAX_VIDEO_LANGUAGES, VIDEO_BUBBLE_DEFAULTS, VIDEO_LANGUAGES, WEBCHAT_MEDIA_ACCEPT, WEBCHAT_MEDIA_MAX_MB, WEBCHAT_VIDEO_INPUT_MAX_MB, flagUrl, mediaKind, mediaUrl, orderVideoClips, packVideoBubble, uploadWebchatMedia, uploadedNote, useWebchatPresets, videoQuestionText, videoQuestions, type VideoBubbleSettings, type VideoClip, type VideoLanguage, type VideoQuestion, type WebchatUploadStatus } from '@/lib/outreach/webchat';
-import { VideoBubbleFrame } from './WidgetPreview';
+import { Seg, VideoBubbleFrame } from './WidgetPreview';
 import ClipFramer from './ClipFramer';
 import { Grid, Label, SaveBar, field, useDraft, useSaveSettings, type SectionProps } from './sections';
 
@@ -173,10 +173,10 @@ function QuestionRow({ i, count, q, langs, canEdit, busy, onChange, onMove, onDe
       <div className="mt-3 sm:pl-8">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-xs font-medium text-gray-700">When clicked</span>
-          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 text-xs" role="radiogroup" aria-label={`What question ${n} does when clicked`}>
+          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs" role="radiogroup" aria-label={`What question ${n} does when clicked`}>
             {([['video', 'Play a video'], ['link', 'Open a page'], ['chat', 'Send to chat']] as const).map(([m, label]) => (
               <button key={m} type="button" role="radio" aria-checked={mode === m} disabled={off} onClick={() => mode !== m && setMode(m)}
-                className={cn('px-2.5 py-1 rounded-md', mode === m ? 'bg-indigo-600 text-white font-medium' : 'text-gray-600 hover:bg-gray-100 disabled:hover:bg-transparent')}>{label}</button>
+                className={cn('px-2.5 py-1 rounded-md', mode === m ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50 disabled:hover:bg-transparent')}>{label}</button>
             ))}
           </div>
         </div>
@@ -419,18 +419,16 @@ export default function VideoBubbleSection(p: SectionProps) {
         </Card>
       </div>
 
-      <div className="xl:sticky xl:top-4 self-start rounded-xl border border-gray-200 bg-white overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 text-xs">
-          <span className="text-gray-500">Preview</span>
-          <div className="flex gap-3">
-            <div className="flex gap-1">{(['desktop', 'phone'] as const).map((d) => <button key={d} type="button" onClick={() => setDevice(d)} className={cn('px-2 py-0.5 rounded', device === d ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{d}</button>)}</div>
-            <div className="flex gap-1">{(['bubble', 'expanded'] as const).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2 py-0.5 rounded', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-100')}>{v}</button>)}</div>
-          </div>
+      <div className="xl:sticky xl:top-[calc(var(--demo-bar,0px)+1rem)] self-start rounded-xl border border-gray-200 bg-white overflow-hidden">
+        <div className="flex items-center gap-1.5 px-2.5 py-2 border-b border-gray-100">
+          <span className="text-xs font-medium text-gray-500 mr-auto pl-0.5">Preview</span>
+          <Seg items={[{ k: 'desktop', icon: Monitor, label: 'Desktop' }, { k: 'phone', icon: Smartphone, label: 'Phone' }]} value={device} onChange={(k) => setDevice(k as 'desktop' | 'phone')} />
+          <Seg items={[{ k: 'bubble', icon: Circle, label: 'Bubble' }, { k: 'expanded', icon: Maximize2, label: 'Expanded' }]} value={view} onChange={(k) => setView(k as 'bubble' | 'expanded')} />
         </div>
         {/* phone: a 320 px screen, where the expanded player spans the screen as the widget does on phones */}
         <div className={cn('relative h-[520px] bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:16px_16px]', phone && 'w-[320px] mx-auto border-x border-gray-200')}>
           {hasClip && draft.enabled
-            ? <div className={cn('absolute', phone && view === 'expanded' ? 'bottom-2.5 left-2.5' : phone ? 'bottom-4 right-4' : 'bottom-5 right-5')}><VideoBubbleFrame v={packed} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} phone={phone} scale={phone ? 0.75 : 1} maxWidth={phone ? 300 : 318} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
+            ? <div className={cn('absolute', phone && view === 'expanded' ? 'bottom-2.5 left-2.5' : phone ? 'bottom-4 right-4' : 'bottom-5 right-5')}><VideoBubbleFrame v={packed} voice={!!p.inbox.settings.voice?.enabled} expanded={view === 'expanded'} phone={phone} scale={phone ? 0.75 : 1} maxWidth={phone ? 300 : 318} maxHeight={phone ? 500 : 484} onToggle={() => setView((v) => (v === 'bubble' ? 'expanded' : 'bubble'))} /></div>
             : <p className="absolute inset-0 flex items-center justify-center px-8 text-center text-sm text-gray-400">{hasClip ? 'The bubble is switched off. Visitors see the normal launcher.' : 'Add a clip to see the bubble here.'}</p>}
         </div>
       </div>

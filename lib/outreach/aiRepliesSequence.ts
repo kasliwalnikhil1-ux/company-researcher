@@ -86,7 +86,7 @@ export interface SequenceAiPatch {
 }
 
 export interface ConsentRequested { sender_id: string; sender_name: string | null; emailed: boolean; link?: string | null }
-export interface AiRepliesSetResult { settings: SequenceAiSettings & { applies_to?: number; demoted?: number }; consent: { granted: string[]; requested: ConsentRequested[] } }
+export interface AiRepliesSetResult { settings: SequenceAiSettings & { applies_to?: number; demoted?: number }; consent?: { granted: string[]; requested: ConsentRequested[] } }
 
 export interface UnansweredExample { run_id: string | null; chat_id: string | null; message_id: string | null; text: string; at: string }
 export interface UnansweredGroup {

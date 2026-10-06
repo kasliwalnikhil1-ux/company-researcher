@@ -6,6 +6,7 @@ import { useCrm } from '@/contexts/CrmContext';
 import { useStandup } from '@/lib/crm/queries';
 import { SCORE_KEYS, fmtMoney, type AttentionDeal, type TodayMeeting } from '@/lib/crm/types';
 import { addDaysISO, Badge, Button, Card, CompanyLogo, daysAgo, EmptyState, ErrorBox, fmtDate, fmtTime, logoDomain, PageLoader, StageBadge, todayISO } from '@/components/crm/ui';
+import { MemberAvatar, MemberName } from '@/components/crm/members';
 import { CommitmentForm, NextStepModal } from '@/components/crm/forms';
 import { CompanyAboutBlock, ContactAboutBlock, hasAbout, IndustryBadge } from '@/components/crm/about';
 import { ContactAvatar, ContactCard } from '@/components/crm/contact-card';
@@ -163,7 +164,7 @@ function AttentionPanel({ groups, onFix }: { groups: AttentionGroup[]; onFix: (d
               {g.rows.map((d) => (
                 <li key={d.deal_id} className={cn('pl-2.5 pr-3 py-2 flex items-center gap-2 text-sm border-l-[3px] hover:bg-gray-50', ATTENTION_TONE[g.tone].stripe)}>
                   <div className="flex-1 min-w-0">
-                    <div className="truncate"><span className="font-semibold text-gray-900">{d.company}</span> <span className="text-gray-500">· {d.owner ?? '—'}</span></div>
+                    <div className="truncate"><span className="font-semibold text-gray-900">{d.company}</span> <span className="text-gray-500">· <MemberName name={d.owner} size="xs" /></span></div>
                     <div className="text-xs text-gray-600 line-clamp-2">{g.render(d)}</div>
                   </div>
                   <StageBadge stage={d.stage} />
@@ -260,7 +261,7 @@ export default function StandupPage() {
                     <li key={d.deal_id} className="px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50">
                       {dueTab !== 'today' && <div className="w-16 shrink-0 text-xs tabular-nums text-gray-500">{d.next_step_date === s.date ? <span className="font-semibold text-indigo-700">{s.date === todayISO() ? 'Today' : fmtDate(s.date)}</span> : d.next_step_date ? new Date(`${d.next_step_date}T00:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '—'}</div>}
                       <div className="flex-1 min-w-0">
-                        <div className="truncate"><Link href={`/crm/companies/${d.company_id}`} className="font-semibold text-gray-900 hover:text-indigo-700">{d.company}</Link> <span className="text-gray-500">· {d.owner ?? '—'}</span></div>
+                        <div className="truncate"><Link href={`/crm/companies/${d.company_id}`} className="font-semibold text-gray-900 hover:text-indigo-700">{d.company}</Link> <span className="text-gray-500">· <MemberName name={d.owner} size="xs" /></span></div>
                         <div className="text-xs text-gray-600 line-clamp-2">{d.next_step ?? <span className="text-amber-700">date set, no step written</span>}</div>
                       </div>
                       <StageBadge stage={d.stage} />
@@ -287,7 +288,7 @@ export default function StandupPage() {
         <Card title="Today's commitments">
           <div className="flex flex-wrap gap-2 mb-2">
             {s.commitments_today.length === 0 && <span className="text-sm text-gray-400">Nothing committed yet.</span>}
-            {s.commitments_today.map((c) => <div key={c.owner_id} className="text-sm bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1"><span className="font-medium text-gray-900">{c.owner}:</span> {Object.entries(c.targets).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ')}{c.notes ? <span className="text-gray-500"> — {c.notes}</span> : null}</div>)}
+            {s.commitments_today.map((c) => <div key={c.owner_id} className="text-sm bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1"><span className="font-medium text-gray-900 inline-flex items-center gap-1.5 align-middle"><MemberAvatar userId={c.owner_id} name={c.owner} size="sm" />{c.owner}:</span> {Object.entries(c.targets).map(([k, v]) => `${v} ${k.replace(/_/g, ' ')}`).join(', ')}{c.notes ? <span className="text-gray-500"> — {c.notes}</span> : null}</div>)}
           </div>
           <CommitmentForm date={s.date} />
         </Card>
@@ -296,7 +297,7 @@ export default function StandupPage() {
             <ul className="space-y-1 text-sm">
               {s.yesterday_commitments.map((r) => (
                 <li key={r.owner_id} className="flex flex-wrap items-center gap-x-2">
-                  <span className="font-medium text-gray-900 w-28 truncate">{r.owner}</span>
+                  <MemberName userId={r.owner_id} name={r.owner} size="sm" className="font-medium text-gray-900 w-32" />
                   <Badge tone={r.all_met ? 'green' : 'red'}>{r.all_met ? 'met all' : `missed ${r.metrics_missed}/${r.metrics_committed}`}</Badge>
                   {Object.entries(r.committed).map(([k, v]) => { const a = r.actual?.[k]; const miss = a != null && a < v; return <span key={k} className={cn('tabular-nums', miss ? 'text-red-700 font-medium' : 'text-gray-700')}>{k.replace(/_/g, ' ')} {a ?? '?'}/{v}</span>; })}
                 </li>

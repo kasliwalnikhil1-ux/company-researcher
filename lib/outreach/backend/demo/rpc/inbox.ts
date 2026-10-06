@@ -1,10 +1,10 @@
 /**
- * Demo handlers: Inbox: intents, AI stop/resume, private notes, mentions, notifications, website-chat agent actions and visitors.
- * Owns: chat_ai_resume, chat_ai_stop, hub_webchat_send_products, mentions_list, mentions_mark_all_read, note_create, note_delete, note_mark_read, note_revisions, note_update, notes_badge, notes_for_lead, notes_list, notes_search, notification_prefs_get, notification_prefs_set, notifications_list, notifications_mark_read, set_intent, thread_attribution, webchat_agent_ai, webchat_agent_read, webchat_agent_send, webchat_agent_typing, webchat_ai_turns_list, webchat_canned_list, webchat_presence, webchat_visitor, webchat_visitor_export, webchat_visitor_link_lead, webchat_visitor_update
+ * Demo handlers: Inbox: Replies / Sent (075), intents, AI stop/resume, private notes, mentions, notifications, website-chat agent actions and visitors.
+ * Owns: chat_ai_resume, chat_ai_stop, hub_webchat_send_products, inbox_counts, inbox_sent_list, mentions_list, mentions_mark_all_read, note_create, note_delete, note_mark_read, note_revisions, note_update, notes_badge, notes_for_lead, notes_list, notes_search, notification_prefs_get, notification_prefs_set, notifications_list, notifications_mark_read, set_intent, thread_attribution, webchat_agent_ai, webchat_agent_read, webchat_agent_send, webchat_agent_typing, webchat_ai_turns_list, webchat_canned_list, webchat_presence, webchat_visitor, webchat_visitor_export, webchat_visitor_link_lead, webchat_visitor_update
  */
-import { NODE_CATALOG } from '../../../nodes';
-import type { NodeType } from '../../../types';
 import { demoError, inWs, type Ctx, type RpcArea, type RpcHandler } from '../ctx';
+import { registerInboxViews } from '../inbox/direction';
+import { inboxCounts, inboxSentList, stepNumbers } from '../inbox/sent';
 import {
   MENTIONS, NOTES, NOTIFICATIONS, PREFS, REVISIONS, authorLabel, canReadNote, catalogueProducts, insertNote, memberOf, noteJson, notePlain, notifyMentions,
   parseMentions, productCard, productItem, userLabel,
@@ -54,25 +54,6 @@ function chatAiState(ctx: Ctx, chatId: string): unknown {
 }
 
 // ------------------------------------------------------------------------------------------------ thread attribution
-function stepNumbers(graph: Row | null | undefined): Record<string, number> {
-  const out: Record<string, number> = {};
-  if (!graph?.nodes) return out;
-  const queue: string[] = [graph.start];
-  const seen = new Set<string>();
-  let i = 0;
-  while (queue.length) {
-    const cur = queue.shift()!;
-    if (!cur || seen.has(cur)) continue;
-    seen.add(cur);
-    const n = graph.nodes[cur];
-    if (!n) continue;
-    const meta = NODE_CATALOG[n.type as NodeType];
-    if ((meta && meta.actionType) || ['manual_task', 'call_task', 'ai_draft_approval'].includes(n.type)) out[cur] = ++i;
-    if (n.next) queue.push(n.next);
-    if (n.branches && typeof n.branches === 'object') for (const v of Object.values(n.branches)) if (typeof v === 'string') queue.push(v);
-  }
-  return out;
-}
 const initcap = (s: string) => s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 
 // ------------------------------------------------------------------------------------------------ web chat visitor
@@ -181,6 +162,10 @@ export const inboxRpc = {
     if (!picked.length) demoError('E_NOT_FOUND', 'products');
     return agentSend(ctx, c, { text, contentType: 'cards', attrs: { items: picked.map((p) => productItem(p.row)), products: picked.map((p) => productCard(p.row, p.provider)) } });
   },
+
+  // ---------------------------------------------------------------------------------------------- Replies / Sent (075)
+  inbox_sent_list: (a, ctx) => inboxSentList(a, ctx),
+  inbox_counts: (a, ctx) => inboxCounts(a, ctx),
 
   // ---------------------------------------------------------------------------------------------- mentions / notifications
   mentions_list: (a, ctx) => {
@@ -573,4 +558,6 @@ export function registerInbox(): void {
       }
     },
   };
+  // Replies / Sent columns (first_inbound_at, waiting_on, replied_at …), recomputed after the wake-up above
+  registerInboxViews();
 }

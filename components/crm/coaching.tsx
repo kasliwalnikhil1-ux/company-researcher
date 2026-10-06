@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react';
 import { RATING_LABELS, READINESS_LABELS, type CoachEvidence, type CoachRating, type CoachReadiness, type CoachCounts, type Coaching, type CoachLens } from '@/lib/crm/types';
 import { Badge, Button, EmptyState, type Tone } from './ui';
+import { MemberName } from './members';
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, Dumbbell, HelpCircle, ListChecks, Play, Sparkles, ThumbsUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -269,7 +270,7 @@ export function CoachingReport({ c, onSeek }: { c: Coaching; onSeek?: (s: number
             {Object.keys(c.context_used ?? {}).length > 0 && <div className="text-[11px] text-gray-500 mt-2">Coached from: {Object.entries(c.context_used).filter(([, v]) => v).map(([k]) => k.replace('_', ' ')).join(', ') || 'transcript'}</div>}
           </Fold>
         )}
-        <div className="text-[11px] text-gray-400">Version {c.version} · {c.saved_by ? `by ${c.saved_by} · ` : ''}{new Date(c.updated_at).toLocaleString()}{c.model ? ` · ${c.model}` : ''}</div>
+        <div className="text-[11px] text-gray-400">Version {c.version} · {c.saved_by ? <>by <MemberName name={c.saved_by} size="xs" /> · </> : ''}{new Date(c.updated_at).toLocaleString()}{c.model ? ` · ${c.model}` : ''}</div>
       </div>
     </div>
   );

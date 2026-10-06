@@ -1,6 +1,7 @@
 'use client';
 
 import { supabase } from '@/utils/supabase/client';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 
 export class CrmError extends Error {
   code: string;
@@ -17,8 +18,8 @@ export function parseError(err: unknown): CrmError {
   if (err instanceof CrmError) return err;
   const raw = (err as any)?.message ?? (err as any)?.error ?? String(err);
   const m = /^(E_[A-Z_]+)(?::\s*([\s\S]*))?$/.exec(String(raw).trim());
-  if (m) return new CrmError(m[2] || humanize(m[1]), m[1], (err as any)?.details);
-  return new CrmError(String(raw), 'E_UNKNOWN', err);
+  if (m) return new CrmError(friendlyErrorText(m[2] || humanize(m[1])), m[1], (err as any)?.details);
+  return new CrmError(friendlyErrorText(String(raw)), 'E_UNKNOWN', err);
 }
 
 export function humanize(code: string): string {

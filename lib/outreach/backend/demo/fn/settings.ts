@@ -330,6 +330,8 @@ function workspaceSecrets(req: FnRequest, ctx: Ctx): unknown {
 
 // ---------------------------------------------------------------------------
 export const settingsFn = {
+  // reply alerts: the tour never subscribes a browser to Web Push
+  'notify-push': () => demoError('E_DEMO', 'Desktop notifications are switched off in the product tour.'),
   billing,
   'invite-member': inviteMember,
   'crm-oauth': crmOauth,

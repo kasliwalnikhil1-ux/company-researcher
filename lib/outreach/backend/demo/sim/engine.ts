@@ -9,7 +9,7 @@
  */
 import { nodeExits } from '../../../nodes';
 import type { DemoStore, Row } from '../store';
-import { inSchedule, Ledger, simWallClock } from './caps';
+import { inSchedule, Ledger, localParts, simWallClock } from './caps';
 import { renderFor } from './render';
 import { FOLLOW_UP_REPLIES, INTENT_WEIGHTS, REPLY_BANK, SUMMARIES, type ReplyIntent } from './replies';
 
@@ -29,6 +29,10 @@ const ACTION_OF: Record<string, string> = {
   follow_profile: 'follow', follow: 'follow', unfollow: 'unfollow', like_recent_posts: 'like', comment_post: 'comment', find_email: 'find_email',
   check_identifier: 'identifier_check', call_api: 'call_api',
 };
+
+/** Steps that send something a person receives: the planner gives these a time ahead (Sent · Scheduled lists them). */
+const SEND_STEP: Record<string, string> = { send_invite: 'invite', send_message: 'message', send_inmail: 'inmail', send_voice_note: 'message', send_email: 'email' };
+const SLOT_STEP = 15 * 60_000;
 
 type Hook = (store: DemoStore, info: { chat: Row; message: Row; lead: Row | undefined; enrollment: Row | undefined; intent: ReplyIntent }) => void;
 /** Other areas react to the simulation (AI drafts on a reply, notifications …) by adding a hook here. */
@@ -104,9 +108,11 @@ export class Engine {
     if (existing && this.store.get('outreach_chats', existing.id) === existing) return existing;
     this.chatSeq += 1;
     this.store.setMeta('chatSeq', this.chatSeq);
+    // an email thread is with the lead's address (the bounce rules of 075 match on it), LinkedIn with the profile
+    const mailTo = MAIL.has(sender.provider) ? String(lead.email_work ?? lead.email_personal ?? '').toLowerCase() || null : null;
     const chat = this.store.insert('outreach_chats', {
       ...(id ? { id } : {}), workspace_id: lead.workspace_id, client_id: lead.client_id ?? sender.client_id ?? null, sender_id: sender.id, lead_id: lead.id,
-      unipile_chat_id: `demo-chat-${this.chatSeq}`, provider: sender.provider, attendee_provider_id: lead.provider_id, attendee_public_identifier: lead.public_identifier,
+      unipile_chat_id: `demo-chat-${this.chatSeq}`, provider: sender.provider, attendee_provider_id: mailTo ?? lead.provider_id, attendee_public_identifier: mailTo ?? lead.public_identifier,
       attendee_name: lead.full_name, attendee_picture_url: lead.picture_url, subject: subject ?? null, last_message_at: null, last_message_preview: null,
       last_direction: null, unread: false, unread_count: 0, assigned_to: null, intent: 'unclassified', archived: false, is_request: false, last_note_at: null,
       status: 'open', labels: [], custom_attributes: {}, autopilot_state: 'active', conversation_stage: null, conversation_exchanges: 0, ai_replies_count: 0,
@@ -172,19 +178,121 @@ export class Engine {
     return true;
   }
 
-  /** Leaves (or keeps) a queued action at the step, so the lead's "Queued" list and "Why not sending" have something to show. */
+  /**
+   * Leaves (or keeps) a queued action at the step, so the lead's "Queued" list, "Why not sending" and Sent · Scheduled
+   * have something to show. Like the planner, the row gets the next slot the sender can use (working hours, today's
+   * allowance); a slot that passed while the step was still blocked is planned again. A sender that cannot send at all
+   * (disconnected, paused) keeps the row where it is: Scheduled shows it as Held.
+   */
   private queue(e: Row, sender: Row | undefined, node: Row, type: string, now: number) {
     if (!sender) return;
-    if (!this.queued(e, node.id)) this.act(e, sender, node, type, now + H, { status: 'queued' });
+    const q = this.queued(e, node.id);
+    if (!q) {
+      if (this.available(sender, now)) this.plan(e, sender, node, type, now, now);
+      else this.act(e, sender, node, type, now + H, { status: 'queued' });
+    } else if (this.available(sender, now) && Date.parse(q.scheduled_for) < now - 2 * 60_000) {
+      const slot = this.nextSlot(sender, now, type, `${e.id}:${node.id}`);
+      Object.assign(q, { scheduled_for: iso(slot.at), decision: slot.deferred ? 'budget_deferred' : null, sender_id: sender.id });
+      this.store.touch();
+    }
     if (e.status !== 'active') this.store.update('outreach_enrollments', e.id, { status: 'active', wait_until: null });
+  }
+
+  /** The planner's slot from `from`: inside the sender's working hours (the demo's wall clock) with allowance left that day, spread by `key`. */
+  nextSlot(sender: Row, from: number, type: string, key: string): { at: number; deferred: boolean } {
+    let deferred = false;
+    let t = Math.ceil(from / 60_000) * 60_000;
+    for (let i = 0; i < 8 * 96; i++, t += SLOT_STEP) {
+      if (!inSchedule(sender, simWallClock(this.store, t))) continue;
+      if (this.ledger.room(sender, t, type) <= 0) { deferred = true; continue; }
+      // sends of one sender do not all go at the top of the window
+      const at = t + Math.floor(this.hash(key) * 100) * 60_000;
+      return { at: inSchedule(sender, simWallClock(this.store, at)) ? at : t, deferred };
+    }
+    return { at: from + H, deferred };
+  }
+
+  /** A queued action at `node` with its planned slot (and the text the step will send, filled in at send time). */
+  private plan(e: Row, sender: Row, node: Row, type: string, from: number, now: number): Row {
+    const slot = this.nextSlot(sender, from, type, `${e.id}:${node.id}`);
+    const row = this.store.insert('outreach_actions', {
+      workspace_id: e.workspace_id, enrollment_id: e.id, import_job_id: null, lead_id: e.lead_id, node_id: node.id, variant_id: null,
+      scheduled_for: iso(slot.at), attempt: 1, decision: slot.deferred ? 'budget_deferred' : null, created_at: iso(now), status: 'queued', executed_at: null,
+      reserved_at: null, payload: {}, response: null, error_code: null, action_type: type, sender_id: sender.id,
+    })[0];
+    this.queuedIdx?.set(`${e.id}|${node.id}`, row);
+    return row;
+  }
+
+  /** End of the next working day after today in the sender's timezone (the planner looks that far ahead). */
+  private horizon(sender: Row, now: number): number {
+    const tz = sender.timezone ?? 'UTC';
+    const wall = simWallClock(this.store, now);
+    const endToday = now + (24 * 60 - localParts(wall, tz).minutes) * 60_000;
+    const sched = sender.schedule as Record<string, unknown[]> | undefined;
+    for (let k = 0; k < 7; k++) {
+      const dayStart = endToday + k * D;
+      const wd = localParts(simWallClock(this.store, dayStart + 60_000), tz).wd;
+      if (!sched || (sched[wd] ?? []).length) return dayStart + D;
+    }
+    return endToday + D;
+  }
+
+  /**
+   * The planner's look-ahead: a lead whose wait ends before the end of the next working day gets its next send planned
+   * now (a delay → the step after it; waiting for a reply → the follow-up when nobody answers). A reply before then
+   * cancels it (stop on reply), so it leaves Scheduled again.
+   */
+  planAhead(now: number) {
+    const active = new Set(this.store.t('outreach_sequences').filter((s) => s.status === 'active').map((s) => s.id));
+    for (const e of this.store.t('outreach_enrollments')) {
+      if (e.status !== 'waiting_delay' || !e.wait_until || !active.has(e.sequence_id)) continue;
+      const graph = this.graphOf(e);
+      const cur: Row | undefined = graph?.nodes?.[e.current_node_id ?? ''];
+      if (!cur) continue;
+      const nextId: string | null = cur.type === 'delay' ? (cur.next ?? cur.branches?.next ?? null) : cur.type === 'wait_for_reply' ? (cur.branches?.no_reply ?? null) : null;
+      const node: Row | undefined = nextId ? graph!.nodes[nextId] : undefined;
+      const type = node && node.mode !== 'manual' ? SEND_STEP[node.type] : undefined;
+      if (!node || !type || this.queued(e, node.id)) continue;
+      const seq = this.sequence(e.sequence_id)!;
+      const lead = this.lead(e.lead_id);
+      if (!lead || lead.do_not_contact) continue;
+      let actor: Row | undefined;
+      if (type === 'email') {
+        if (!lead.email_work && !lead.email_personal) continue;
+        actor = (node.config?.mailbox_sender_id && this.sender(node.config.mailbox_sender_id)) || this.channelSender(e, seq, 'MAIL');
+      } else {
+        const channel: string = node.config?.channel ?? 'LINKEDIN';
+        actor = channel === 'LINKEDIN' ? this.sender(e.sender_id) : this.channelSender(e, seq, channel) ?? this.sender(e.sender_id);
+        if (channel === 'LINKEDIN' && type === 'message' && this.state(lead.id, actor?.id ?? e.sender_id).relation !== 'first') continue;
+        if (type === 'invite' && this.state(lead.id, actor?.id ?? e.sender_id).relation === 'first') continue;
+      }
+      if (!actor || !this.available(actor, now)) continue;
+      const due = Date.parse(e.wait_until);
+      if (due > this.horizon(actor, now)) continue;
+      this.plan(e, actor, node, type, Math.max(due, now), now);
+    }
+  }
+
+  /** Queued rows the enrollment no longer needs (it moved to another step or ended). */
+  private dropPlanned(e: Row, keep: string | null) {
+    const nodes = this.graphOf(e)?.nodes;
+    if (!nodes) return;
+    for (const nid of Object.keys(nodes)) {
+      if (nid === keep) continue;
+      const q = this.queued(e, nid);
+      if (q) { q.status = 'cancelled'; q.decision = q.decision ?? 'not_on_path'; this.queuedIdx?.delete(`${e.id}|${nid}`); }
+    }
   }
 
   // --- moving ----------------------------------------------------------------
   private enter(e: Row, nodeId: string | null | undefined, now: number) {
     if (!nodeId) { this.complete(e, now, null); return; }
+    this.dropPlanned(e, nodeId);
     this.store.update('outreach_enrollments', e.id, { current_node_id: nodeId, node_entered_at: iso(now), wait_until: null, status: 'active', wait_reason: null });
   }
   complete(e: Row, now: number, reason: string | null) {
+    this.dropPlanned(e, null);
     this.store.update('outreach_enrollments', e.id, { status: 'completed', completed_at: iso(now), wait_until: null, exit_reason: reason });
   }
   exit(e: Row, status: string, reason: string, now: number) {
@@ -378,7 +486,10 @@ export class Engine {
       }
 
       // --- steps that are an action of a sender ---
-      const channel: string = node.config?.channel ?? (['follow', 'unfollow', 'like_recent_posts', 'comment_post', 'wait_follow_back'].includes(type) ? 'INSTAGRAM' : type === 'check_identifier' ? 'WHATSAPP' : 'LINKEDIN');
+      // a step the planner gave a time waits for it (that is the time Sent · Scheduled shows)
+      const planned = this.queued(e, node.id);
+      if (planned && Date.parse(planned.scheduled_for) > now + 60_000 && this.available(this.sender(planned.sender_id), now)) return;
+      const channel: string =node.config?.channel ?? (['follow', 'unfollow', 'like_recent_posts', 'comment_post', 'wait_follow_back'].includes(type) ? 'INSTAGRAM' : type === 'check_identifier' ? 'WHATSAPP' : 'LINKEDIN');
       if (type === 'send_email') {
         const mailbox = (node.config?.mailbox_sender_id && this.sender(node.config.mailbox_sender_id)) || this.channelSender(e, seq, 'MAIL');
         if (!lead.email_work && !lead.email_personal) { if (mailbox) this.act(e, mailbox, node, 'email', now, { status: 'skipped', error_code: 'E_NO_EMAIL' }); go(nodeExits(node as never).includes('no_email') ? 'no_email' : 'next'); continue; }
@@ -547,6 +658,7 @@ export class Engine {
       .filter((e) => active.has(e.sequence_id) && RUNNABLE.has(e.status) && (!e.wait_until || Date.parse(e.wait_until) <= now || e.status === 'waiting_connection'))
       .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100) || String(a.created_at).localeCompare(String(b.created_at)));
     for (const e of due) this.step(e, now);
+    this.planAhead(now);
   }
 
   /**

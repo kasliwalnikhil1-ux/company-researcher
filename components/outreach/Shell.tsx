@@ -8,7 +8,10 @@ import { useOutreachRealtime } from '@/lib/outreach/queries';
 import { applyAccent, isHexColor, isHttpsUrl, productName, useBranding, type Branding } from '@/lib/outreach/branding';
 import { useSessionUser } from '@/lib/outreach/session';
 import { useNotificationsRealtime, type IncomingNotification } from '@/lib/outreach/notes';
-import MentionToast from './inbox/notes/MentionToast';
+import { useAlertSettings } from '@/lib/outreach/alerts';
+import { useAlertEngine, useTabBadge, type AlertRow } from '@/lib/outreach/alerts/engine';
+import { useInboxCounts } from '@/lib/outreach/inboxSent';
+import AlertToast from './alerts/AlertToast';
 import { changeHref, longDate, useBilling } from '@/lib/outreach/billing';
 
 function BrandMark({ branding, fallback }: { branding: Branding; fallback: string }) {
@@ -55,16 +58,25 @@ function HelpMenu({ branding }: { branding: Branding }) {
 }
 
 export default function OutreachShell({ children }: { children: React.ReactNode }) {
-  const { workspace, suspended, isClientViewer, isOwner } = useWorkspace();
+  const { workspace, workspaces, switchWorkspace, suspended, isClientViewer, isOwner } = useWorkspace();
   // plan state for the banners (billing v2): trial ending, trial ended, subscription ended, client access not on the plan
   const billing = useBilling(workspace?.id).data;
   const plan = billing?.plan ?? workspace?.plan;
   const trialDays = billing?.enforced && plan === 'trial' ? billing.trial?.days_left ?? null : null;
   const { user } = useSessionUser();
   useOutreachRealtime(workspace?.id);
-  // Private notes: the signed-in user's notification stream (bell badge + toast for a fresh @mention)
+  // The signed-in user's notification stream: the bell, and reply alerts (toast, sound, desktop notification; the
+  // engine applies reply-notifications-PRD.md §3.3 in the one alerting tab)
   const [toasts, setToasts] = useState<IncomingNotification[]>([]);
-  useNotificationsRealtime(workspace?.id, user?.id, (n) => setToasts((t) => [...t.filter((x) => x.id !== n.id), n].slice(-3)));
+  const alertSettings = useAlertSettings(workspace?.id).data;
+  const onAlert = useAlertEngine({
+    ws: workspace?.id, userId: user?.id, settings: alertSettings, workspaces, switchWorkspace,
+    toast: (row) => setToasts((t) => [...t.filter((x) => x.id !== row.id && (!row.chat_id || x.chat_id !== row.chat_id)), row].slice(-3)),
+    untoast: (chatId) => setToasts((t) => t.filter((x) => x.chat_id !== chatId)),
+  });
+  useNotificationsRealtime<AlertRow>(workspace?.id, user?.id, onAlert);
+  // "(3) Inbox · …", the dot on the tab icon and the installed app's badge: unread conversations (= the Replies badge)
+  useTabBadge(useInboxCounts(workspace?.id, {}).data?.replies_unread);
 
   // White-label: clients see the agency's name, logo, colour and help links. The team keeps the normal look.
   const brandingQuery = useBranding(isClientViewer ? workspace?.id : null);
@@ -116,7 +128,7 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
           <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>Payment is past due. The workspace becomes read-only 7 days after the failed payment. <Link href="/outreach/billing" className="underline font-medium">Update billing</Link></span>
         </div>
       )}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 min-w-0 overflow-x-clip">
         <div className="px-4 md:px-6 py-6 max-w-[1600px] mx-auto w-full">
           {billing?.access_blocked === 'client_viewer_plan' ? (
             <div className="max-w-xl mx-auto mt-16 text-center">
@@ -126,7 +138,7 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
           ) : children}
         </div>
       </div>
-      <MentionToast items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
+      <AlertToast items={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
     </div>
   );
 }

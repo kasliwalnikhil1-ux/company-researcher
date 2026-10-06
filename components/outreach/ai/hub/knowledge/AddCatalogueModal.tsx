@@ -57,10 +57,10 @@ export default function AddCatalogueModal({ ws, onClose, onAdded, notify }: { ws
       footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!canSubmit}>Add</Button></>}>
       <div className="space-y-4">
         <p className="text-sm text-gray-600">The Website agent recommends products from a catalogue as cards: picture, name, price and a link, taken from your store as it is.</p>
-        <div role="tablist" aria-label="Where the products come from" className="flex flex-wrap gap-1 rounded-lg border border-gray-300 bg-gray-50 p-0.5">
+        <div role="tablist" aria-label="Where the products come from" className="flex flex-wrap gap-1 rounded-lg border border-gray-200 bg-white p-0.5">
           {PROVIDERS.map((x) => (
             <button key={x.key} type="button" role="tab" aria-selected={provider === x.key} disabled={busy} onClick={() => { setProvider(x.key); setError(null); }}
-              className={cn('flex-1 whitespace-nowrap rounded-md px-3 py-1 text-sm', provider === x.key ? 'bg-white font-medium text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900')}>{x.label}</button>
+              className={cn('flex-1 whitespace-nowrap rounded-md px-3 py-1 text-sm', provider === x.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{x.label}</button>
           ))}
         </div>
 

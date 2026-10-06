@@ -8,7 +8,7 @@ import { IS_DEMO } from '@/lib/outreach/mode';
 import { useSequences } from '@/lib/outreach/queries';
 import { hubHref, useNeedsYouCounts } from '@/lib/outreach/aiHub';
 import { fmtInt, fmtRate, useAlertsRealtime, useDashboardV2, type AttentionItem, type DashboardV2 } from '@/lib/outreach/reports';
-import { MetricLabel } from '@/components/outreach/reports/primitives';
+import { InfoTip, MetricLabel } from '@/components/outreach/reports/primitives';
 import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, PageHeader, PageLoader, Stat, StatusPill } from '@/components/outreach/ui';
 import { healthTextClass, isAbandonedSignIn, PROVIDER_LABELS, statusReasonText } from '@/components/outreach/senders/helpers';
@@ -265,10 +265,10 @@ export default function OutreachDashboardPage() {
       {emptyWorkspace ? null : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6" data-tour="dashboard-stats">
-            <Stat label="Sent today" value={fmtInt(d.sent_today)} hint="All senders, today in the workspace timezone" />
-            <Stat label="Queued (next 24h)" value={fmtInt(d.queued_today)} />
-            <Stat label="Live enrollments" value={fmtInt(d.enrollments_live)} />
-            <Stat label="Leads" value={d.leads_total.toLocaleString()} />
+            <Stat label={<InfoTip text="Outbound actions your senders completed today: invites, messages, InMails, emails, profile views, likes, comments, endorsements, follows and withdrawn invites. Each one counts as one.">Sent today</InfoTip>} value={fmtInt(d.sent_today)} hint="All senders, today in the workspace timezone" />
+            <Stat label={<InfoTip text="Actions scheduled to run in the next 24 hours that have not run yet. If this is 0, nothing will go out until leads are enrolled in an active sequence.">Queued (next 24h)</InfoTip>} value={fmtInt(d.queued_today)} />
+            <Stat label={<InfoTip text="Leads currently moving through a sequence, including those waiting for a connection to be accepted, a delay to pass or a manual task. Leads that finished, replied or exited are not counted.">Live enrollments</InfoTip>} value={fmtInt(d.enrollments_live)} />
+            <Stat label={<InfoTip text="Every lead in the workspace that you can see, whether or not it is enrolled in a sequence.">Leads</InfoTip>} value={d.leads_total.toLocaleString()} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

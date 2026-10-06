@@ -4,6 +4,7 @@
  * so "now" stays the real now: past events recede, waits fall due, and the engine runs whatever became due.
  * The simulator stops when the tab is hidden, when activity is Paused, or when no sequence is running.
  */
+import { sendDueHolds } from '../aihub/replies';
 import type { DemoStore, Row } from '../store';
 import { engineFor } from './engine';
 import { runRule } from '../sequences/rules';
@@ -76,6 +77,8 @@ export class Simulator {
       engine.ledger.rebuild();
       this.dailyJobs();
       engine.run(Date.now());
+      // Auto replies whose hold the clock moved past go out (they leave Sent · Scheduled)
+      sendDueHolds(this.store);
     }
     // the step numbers are computed (sim/derived.ts): tell open sequence pages to refetch them
     for (const s of this.store.t('outreach_sequences')) this.store.emit({ table: 'outreach_node_stats', eventType: 'UPDATE', new: { sequence_id: s.id }, old: null });

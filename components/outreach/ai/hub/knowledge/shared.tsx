@@ -64,7 +64,7 @@ export function TargetChecklist({ targets, isChecked, isBusy, disabled, websites
   }
   return (
     <div className="grid gap-4 sm:grid-cols-2">
-      <Group title="Sequences (Replies)" empty="No sequences yet." kind="sequence" isChecked={isChecked} isBusy={isBusy} disabled={disabled} onToggle={onToggle}
+      <Group title="Sequences (AI replies)" empty="No sequences yet." kind="sequence" isChecked={isChecked} isBusy={isBusy} disabled={disabled} onToggle={onToggle}
         items={(targets.sequences ?? []).map((s) => ({ id: s.id, name: s.name, note: SEQUENCE_STATUS_NOTE[s.status] }))} />
       <Group title="Websites (Website agent)" empty="No websites yet." kind="website" isChecked={isChecked} isBusy={isBusy} disabled={disabled} onToggle={onToggle}
         items={(targets.websites ?? []).map((w) => ({ id: w.id, name: w.name }))} />

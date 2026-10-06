@@ -30,15 +30,15 @@ function OutputPicker({ value, onChange, locked, disabled }: { value: AiVariable
   return (
     <div>
       <span id="variable-output-title" className="block text-xs font-medium text-gray-600 mb-1">Output</span>
-      <div role="radiogroup" aria-labelledby="variable-output-title" aria-describedby="variable-output-hint" className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+      <div role="radiogroup" aria-labelledby="variable-output-title" aria-describedby="variable-output-hint" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
         {OUTPUTS.map((o) => {
           const on = value === o.id;
           return (
             <button key={o.id} type="button" role="radio" aria-checked={on} disabled={(locked || disabled) && !on} aria-disabled={locked || disabled || undefined} title={locked && !on ? 'To switch, create a new variable' : o.line}
               onClick={() => { if (!on && !locked && !disabled) onChange(o.id); }}
               className={cn('px-3.5 py-1 text-sm rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500',
-                on ? (locked || disabled ? 'bg-white text-gray-800 shadow-sm font-medium cursor-default' : 'bg-indigo-600 text-white shadow-sm font-medium') : 'text-gray-600 hover:text-gray-900',
-                !on && (locked || disabled) && 'opacity-50 cursor-not-allowed hover:text-gray-600')}>
+                on ? (locked || disabled ? 'bg-gray-100 text-gray-800 font-medium cursor-default' : 'bg-indigo-50 text-indigo-700 font-medium') : 'text-gray-600 hover:bg-gray-50',
+                !on && (locked || disabled) && 'opacity-50 cursor-not-allowed hover:bg-transparent')}>
               {o.label}
             </button>
           );

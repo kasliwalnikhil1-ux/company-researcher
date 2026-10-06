@@ -7,6 +7,7 @@ import { useCrmInvalidate } from '@/lib/crm/queries';
 import { calendarApi, useCalendarAccounts } from '@/lib/crm/calendar';
 import { COMMIT_KEYS, stageRank, STAGE_LABELS, STAGES, type Contact, type DealStage, type Company } from '@/lib/crm/types';
 import { Button, Input, Select, Textarea, Modal, Field, ErrorBox, addDaysISO, todayISO } from './ui';
+import { MemberSelect } from './members';
 import { CompanyAboutFields, ContactAboutFields, companyAboutDraft, companyAboutPatch, contactAboutDraft, contactAboutPatch } from './about';
 
 export const TZ_OPTIONS = ['Asia/Kolkata', 'Asia/Dubai', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'Asia/Singapore', 'Australia/Sydney'];
@@ -99,7 +100,7 @@ export function StageSelect({ deal, size = 'sm' }: { deal: { id: string; company
 
 // ---------------------------------------------------------------- activity
 export function ActivityModal({ companyId, contacts, dealId, open, onClose }: { companyId: string; contacts: Pick<Contact, 'id' | 'name' | 'role'>[]; dealId?: string | null; open: boolean; onClose: () => void }) {
-  const { lookups, activeMembers, me } = useCrm();
+  const { lookups, me } = useCrm();
   const { write, busy, error } = useWrite();
   const types = lookups('activity_type'); const channels = lookups('source_channel');
   const [f, setF] = useState({ contact_id: '', activity_type: '', direction: 'outbound', outcome: '', occurred_at: localNow(), source_channel: '', body: '', owner: '' });
@@ -117,7 +118,7 @@ export function ActivityModal({ companyId, contacts, dealId, open, onClose }: { 
         <Select label="Outcome" value={f.outcome} onChange={(e) => setF({ ...f, outcome: e.target.value })}>{OUTCOMES.map((o) => <option key={o} value={o}>{o || '—'}</option>)}</Select>
         <Input label="When" type="datetime-local" value={f.occurred_at} onChange={(e) => setF({ ...f, occurred_at: e.target.value })} />
         <Select label="Channel" value={f.source_channel} onChange={(e) => setF({ ...f, source_channel: e.target.value })}><option value="">— deal's channel —</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}</Select>
-        <Select label="By" value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}>{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
+        <MemberSelect label="By" value={f.owner} onChange={(owner) => setF({ ...f, owner })} />
         <div className="col-span-2"><Textarea label="Notes" value={f.body} onChange={(e) => setF({ ...f, body: e.target.value })} placeholder="What was said / sent" /></div>
         {error && <div className="col-span-2"><ErrorBox message={error} /></div>}
       </div>
@@ -236,7 +237,7 @@ export function ContactModal({ companyId, contact, open, onClose }: { companyId:
 
 // ---------------------------------------------------------------- deal
 export function DealModal({ companyId, open, onClose }: { companyId: string; open: boolean; onClose: () => void }) {
-  const { lookups, activeMembers, me, currencies, data } = useCrm();
+  const { lookups, me, currencies, data } = useCrm();
   const { write, busy, error } = useWrite();
   const chans = lookups('source_channel');
   const defCur = (data?.settings?.default_currency as string | undefined) ?? 'USD';
@@ -250,7 +251,7 @@ export function DealModal({ companyId, open, onClose }: { companyId: string; ope
     <Modal open={open} onClose={onClose} title="New deal" footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button loading={busy} onClick={save}>Create</Button></>}>
       <div className="grid grid-cols-2 gap-3">
         <Input label="Title (optional)" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder="Q4 UGC batch" />
-        <Select label="Owner" value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}>{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
+        <MemberSelect label="Owner" value={f.owner} onChange={(owner) => setF({ ...f, owner })} />
         <div className="grid grid-cols-[1fr_auto] gap-2 items-end">
           <Input label="Monthly value" type="number" value={f.value_monthly} onChange={(e) => setF({ ...f, value_monthly: e.target.value })} />
           <Select label="Currency" value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value })}>{currencies.map((c) => <option key={c} value={c}>{c}</option>)}</Select>
@@ -268,7 +269,7 @@ export function DealModal({ companyId, open, onClose }: { companyId: string; ope
 
 // ---------------------------------------------------------------- commitments
 export function CommitmentForm({ date, onSaved }: { date?: string; onSaved?: () => void }) {
-  const { activeMembers, me } = useCrm();
+  const { me } = useCrm();
   const { write, busy, error } = useWrite();
   const [owner, setOwner] = useState(me?.user_id ?? '');
   const [vals, setVals] = useState<Record<string, string>>({});
@@ -282,7 +283,7 @@ export function CommitmentForm({ date, onSaved }: { date?: string; onSaved?: () 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2 items-end">
-        <Select label="Who" value={owner} onChange={(e) => setOwner(e.target.value)} className="min-w-[140px]">{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
+        <MemberSelect label="Who" value={owner} onChange={setOwner} className="min-w-[170px]" />
         {COMMIT_KEYS.map((k) => (
           <label key={k} className="block w-[84px]"><span className="block text-[10px] font-medium text-gray-500 mb-1 truncate" title={k}>{k.replace(/_/g, ' ')}</span><input type="number" min={0} className="w-full px-2 py-1.5 text-sm rounded-md border border-gray-300" value={vals[k] ?? ''} onChange={(e) => setVals({ ...vals, [k]: e.target.value })} /></label>
         ))}

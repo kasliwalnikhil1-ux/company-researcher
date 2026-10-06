@@ -46,9 +46,9 @@ export default function EnrollmentsTable({ sequence, canWrite }: { sequence: Seq
   return (
     <Card title={view === 'failed' ? 'Failed and skipped leads' : `Enrolled leads${q.data ? ` (${rows.length}${rows.length === 200 ? '+' : ''})` : ''}`} actions={
       <>
-        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs" role="tablist" aria-label="Which leads to show">
-          <button type="button" role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={cn('px-3 py-1', view === 'list' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>Enrollments</button>
-          <button type="button" role="tab" aria-selected={view === 'failed'} onClick={() => setView('failed')} className={cn('px-3 py-1 tabular-nums', view === 'failed' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>Failed{failedCount.data ? ` (${failedCount.data.toLocaleString()})` : ''}</button>
+        <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs" role="tablist" aria-label="Which leads to show">
+          <button type="button" role="tab" aria-selected={view === 'list'} onClick={() => setView('list')} className={cn('px-3 py-1 rounded-md', view === 'list' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>Enrollments</button>
+          <button type="button" role="tab" aria-selected={view === 'failed'} onClick={() => setView('failed')} className={cn('px-3 py-1 rounded-md tabular-nums', view === 'failed' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>Failed{failedCount.data ? ` (${failedCount.data.toLocaleString()})` : ''}</button>
         </div>
         {view === 'list' && (
           <Select value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)} aria-label="Filter enrollments" className="!py-1 !text-xs w-auto">

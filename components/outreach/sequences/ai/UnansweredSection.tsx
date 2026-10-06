@@ -82,7 +82,7 @@ export default function UnansweredSection({ sequenceId, canEdit, notify }: { seq
         footer={<><Button variant="secondary" onClick={() => setAnswering(null)} disabled={answer.isPending}>Cancel</Button><Button onClick={doAnswer} loading={answer.isPending} disabled={text.trim().length < 2}>Save answer</Button></>}>
         <div className="space-y-3">
           <p className="text-sm text-gray-900 font-medium">{answering?.canonical}</p>
-          <Textarea label="Answer" rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder="What the AI should say when this comes up. Numbers and links here count as allowed facts." autoFocus />
+          <Textarea autoGrow label="Answer" rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} placeholder="What the AI should say when this comes up. Numbers and links here count as allowed facts." autoFocus />
           {error && <ErrorBox message={error} />}
         </div>
       </Modal>
@@ -90,7 +90,7 @@ export default function UnansweredSection({ sequenceId, canEdit, notify }: { seq
         footer={<><Button variant="secondary" onClick={() => setDismissing(null)} disabled={dismiss.isPending}>Cancel</Button><Button onClick={doDismiss} loading={dismiss.isPending}>Dismiss</Button></>}>
         <div className="space-y-3">
           <p className="text-sm text-gray-700">&ldquo;{dismissing?.canonical}&rdquo; is hidden. It comes back if it keeps being asked.</p>
-          <Textarea label="Reason (optional)" rows={2} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. A person should always answer this" className="min-h-0" />
+          <Textarea autoGrow label="Reason (optional)" rows={2} maxLength={300} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. A person should always answer this" className="min-h-0" />
           {error && <ErrorBox message={error} />}
         </div>
       </Modal>

@@ -47,10 +47,10 @@ export function seedWebchat(s: DemoStore, now: number): void {
     },
     popup: { enabled: true, text: '👋 Want to see how teams book more meetings?', image_url: null, delay_s: 4, position: 'above' },
     messages: { greeting_enabled: true, greeting: 'Hi! I am the Northwind assistant. Ask me about pricing, how outreach works, or book a call with the team.', reply_time: 'minutes',
-      available_message: "We're online", unavailable_message: "We're away right now. Leave a message and we'll get back to you within a business day.",
-      email_capture_prompt: "We'll reply here and by email — what's your email?", end_message: 'Thanks for chatting with Northwind!', placeholder: 'Ask a question…',
+      available_message: "We're online", unavailable_message: "We're away. Leave a message.",
+      email_capture_prompt: "What's your email so we can reply?", end_message: 'Thanks for chatting with Northwind!', placeholder: 'Ask a question…',
       privacy_url: 'https://northwind.example.com/privacy', quick_replies: ['Pricing', 'Book a demo', 'How does it work?', 'Talk to a person'],
-      handoff_message: 'Connecting you with someone from the team — one moment.', handoff_offline_message: "Our team is offline right now. Leave your email and we'll reply as soon as we're back." },
+      handoff_message: 'Connecting you to the team…', handoff_offline_message: "We're offline. Leave your email and we'll reply." },
     pre_chat: { enabled: false, message: 'Tell us a bit about yourself so we can help.', when: 'offline_only',
       fields: [
         { key: 'name', label: 'Name', type: 'text', visible: true, required: false, placeholder: '' },

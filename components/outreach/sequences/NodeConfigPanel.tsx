@@ -110,9 +110,9 @@ export default function NodeConfigPanel({ node, issues, readOnly, onChange, onDe
         {executable && (
           <div>
             <div className="text-xs font-medium text-gray-600 mb-1">How this step runs</div>
-            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
+            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs">
               {(['auto', 'manual'] as const).map((m) => (
-                <button key={m} type="button" onClick={() => onChange({ ...node, mode: m === 'auto' ? undefined : m })} className={cn('px-3 py-1.5 capitalize', (node.mode ?? 'auto') === m ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>{m}</button>
+                <button key={m} type="button" onClick={() => onChange({ ...node, mode: m === 'auto' ? undefined : m })} aria-pressed={(node.mode ?? 'auto') === m} className={cn('px-3 py-1 rounded-md capitalize', (node.mode ?? 'auto') === m ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{m}</button>
               ))}
             </div>
             <p className="text-xs text-gray-500 mt-1">{node.mode === 'manual' ? 'Creates a task; the action runs when a teammate completes it.' : 'Runs on its own, within the sender’s working hours and daily limits.'}</p>

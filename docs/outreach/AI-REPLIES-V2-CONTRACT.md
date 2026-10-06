@@ -45,7 +45,7 @@ outreach_sequence_reply_settings
   master_prompt_id → outreach_master_prompts (the sequence's own prompt), pitch_after_replies 0–5 (2),
   max_ai_replies_per_chat 1–10 (6), warmup_remaining ≥0 (20), handoff_stage_id → outreach_stages (set null),
   delay_min_s ≥60 (240), delay_max_s ≤3600 > min (1200), debounce_quiet_s 30–600 (120), debounce_max_s 60–1800 (600),
-  stale_after_h (12), languages text[] ('{en}'), disclosure, blocked_countries text[] ('{}' = none; null = EU/EEA default),
+  stale_after_h (12), languages text[] ('{en}'), disclosure, blocked_countries text[] (null or '{}' = none; no EU/EEA default since migration 078),
   returning_after_days 1–30 (3), dormant_after_days 7–365 (30) > returning, inactivity_days null|1–60 (7),
   downgraded_at, downgrade_reason, breaker_reset_at, updated_by, updated_at
 outreach_workspace_reply_settings

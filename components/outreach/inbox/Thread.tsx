@@ -62,6 +62,8 @@ export interface ThreadProps {
   isClientViewer: boolean;
   /** `?note=<id>` deep link: scroll to this note and flash it */
   highlightNoteId: string | null;
+  /** `?m=<message id>` deep link (a Sent row): scroll to this message and flash it */
+  highlightMessageId?: string | null;
   onAddNote: (body: string, visibility: NoteVisibility, attachments: NoteAttachment[]) => Promise<void>;
   onUpdateNote: (noteId: string, patch: { body?: string; visibility?: NoteVisibility }) => Promise<void>;
   onDeleteNote: (noteId: string) => Promise<void>;
@@ -69,6 +71,8 @@ export interface ThreadProps {
   /** a note that mentions the signed-in user scrolled into view: marks the mention read */
   onNoteSeen: (noteId: string) => void;
 }
+
+const INTENT_HELP = 'What the AI thinks their latest reply means. Reports and the inbox filters count it.';
 
 function Menu({ button, children, align = 'right', disabled, className }: { button: (open: boolean) => React.ReactNode; children: (close: () => void) => React.ReactNode; align?: 'left' | 'right'; disabled?: boolean; className?: string }) {
   const [open, setOpen] = useState(false);
@@ -203,7 +207,20 @@ export default function Thread(p: ThreadProps) {
     }, 60);
     return () => window.clearTimeout(t);
   }, [p.highlightNoteId, notes, showNotes, setShowNotes]);
-  useEffect(() => { jumpedRef.current = null; }, [chat.id]);
+  // ?m=<id> (opened from a Sent row): once the message is loaded, scroll to it and flash it
+  const msgJumpRef = useRef<string | null>(null);
+  useEffect(() => { jumpedRef.current = null; msgJumpRef.current = null; }, [chat.id]);
+  useEffect(() => {
+    const id = p.highlightMessageId;
+    if (!id || !messages || msgJumpRef.current === id || !messages.some((m) => m.id === id)) return;
+    msgJumpRef.current = id;
+    const t = window.setTimeout(() => {
+      document.getElementById(`msg-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      setHighlightId(id);
+      window.setTimeout(() => setHighlightId((h) => (h === id ? null : h)), 2200);
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [p.highlightMessageId, messages]);
   // a note that mentions me, unread, visible for a second → mark the mention read (PRD §6.1)
   const unreadMentionIds = useMemo(() => (notes ?? []).filter((n) => !n.deleted_at && n.mentions.some((m) => m.user_id === p.currentUserId && !m.read_at)).map((n) => n.id), [notes, p.currentUserId]);
   useEffect(() => {
@@ -226,8 +243,8 @@ export default function Thread(p: ThreadProps) {
     const total = messages.length + (showNotes ? (notes?.length ?? 0) : 0);
     const grew = total !== lastCountRef.current;
     lastCountRef.current = total;
-    if (grew && !p.highlightNoteId) el.scrollTop = el.scrollHeight;
-  }, [messages, notes, showNotes, p.highlightNoteId]);
+    if (grew && !p.highlightNoteId && !p.highlightMessageId) el.scrollTop = el.scrollHeight;
+  }, [messages, notes, showNotes, p.highlightNoteId, p.highlightMessageId]);
   useEffect(() => { lastCountRef.current = 0; }, [chat.id]);
 
   const senderOk = sender?.status === 'ok';
@@ -321,16 +338,26 @@ export default function Thread(p: ThreadProps) {
   // Everything else lives in the "more" menu so the messages keep the height.
   const [webchatDetails, setWebchatDetails] = useState(false);   // web chat: the priority + labels editor row
   const intentMenu = (
-    <Menu disabled={!p.canWrite} button={() => (
-      <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 disabled:cursor-default disabled:hover:bg-transparent" title={p.canWrite ? 'Override intent' : 'AI intent'} aria-label="Override intent" disabled={!p.canWrite}>
+    <Menu disabled={!p.canWrite} className="w-64" button={() => (
+      <button type="button" className="inline-flex items-center gap-1 rounded-md hover:bg-gray-100 px-1 py-0.5 text-xs text-gray-500 disabled:cursor-default disabled:hover:bg-transparent" aria-label="Reply intent"
+        title={`Reply intent: ${chat.intent ? INTENT_LABELS[chat.intent] : 'none yet'}\n${INTENT_HELP}${p.canWrite ? ' Click to correct it.' : ''}`} disabled={!p.canWrite}>
+        <TagIcon className="w-3.5 h-3.5 text-gray-400" aria-hidden />{!narrow && <span>Intent</span>}
         <IntentBadge intent={chat.intent} /><ChevronDown className="w-3 h-3 text-gray-400" />
       </button>
     )}>
-      {(close) => INTENTS.map((i) => (
-        <button key={i} type="button" role="menuitem" onClick={async () => { close(); await p.onSetIntent(i); }} className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between', i === chat.intent && 'bg-indigo-50 text-indigo-700')}>
-          {INTENT_LABELS[i]}<IntentBadge intent={i} />
-        </button>
-      ))}
+      {(close) => (
+        <>
+          <div className="px-3 py-2 border-b border-gray-100">
+            <div className="text-xs font-semibold text-gray-900">Reply intent</div>
+            <div className="text-[11px] text-gray-500 leading-snug">{INTENT_HELP} Pick another to correct it.</div>
+          </div>
+          {INTENTS.map((i) => (
+            <button key={i} type="button" role="menuitem" onClick={async () => { close(); await p.onSetIntent(i); }} className={cn('w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 flex items-center justify-between', i === chat.intent && 'bg-indigo-50 text-indigo-700')}>
+              {INTENT_LABELS[i]}<IntentBadge intent={i} />
+            </button>
+          ))}
+        </>
+      )}
     </Menu>
   );
   const moreMenu = (
@@ -392,6 +419,7 @@ export default function Thread(p: ThreadProps) {
               {lead && <Link href={`/outreach/leads/${lead.id}`} className="flex-shrink-0 text-gray-400 hover:text-indigo-600" title="Open lead"><ExternalLink className="w-3.5 h-3.5" /></Link>}
               {chat.is_request && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: not accepted yet, so it may not have been seen">Message request</span>}
               {chat.archived && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600">Archived</span>}
+              {!webchat && !chat.first_inbound_at && messages && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600" title="Nobody on the other side has written in this conversation yet. It is listed under Sent, not Replies.">No reply yet</span>}
               {!showNotes && noteCount > 0 && <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-800" title="Private notes are hidden: show them from the … menu">Notes hidden</span>}
             </div>
             <div className="flex items-center gap-1.5 text-xs text-gray-500 mt-0.5 min-w-0">

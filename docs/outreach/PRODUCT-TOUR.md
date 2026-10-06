@@ -41,7 +41,33 @@ connected accounts, and nothing reaches a production service. Spec: `product-tou
 | `routes.ts` | The route manifest |
 
 Time: while activity is On, every 4 s is 2 simulated hours (Fast: 8 h); "Skip a day" is 24 h. Time moves by shifting
-every stored timestamp into the past, so "now" stays the real now and waits fall due on their own.
+every stored timestamp into the past, so "now" stays the real now and waits fall due on their own. Working hours are
+judged on `simWallClock` (real now + the offset), never on the real clock.
+
+### Replies / Sent (migration 075)
+
+- **Derived columns** (`inbox/direction.ts`): `outreach_chats.first_inbound_at / last_inbound_at / first_outbound_at /
+  last_outbound_at / last_auto_reply_at / waiting_on / ai_answering` and `outreach_messages.replied_at / is_auto_reply /
+  is_bounce / bounced_at` are recomputed from the messages before any read of either table (a `beforeRead` hook chained
+  after the snooze wake-up, cached on `store.rev`), with 075's rules: `outreach__msg_kind`, the email bounce /
+  auto-reply subject rules and the `ooo` intent (`_kind_intent` remembers the intent the flags were set for, so a
+  correction away from `ooo` clears it), the window + step-credit rule for `replied_at`, `outreach__chat_ai_answering`.
+  They are written onto the rows in place (no change event) and are read-only through `db.from()`.
+- **RPCs** (`inbox/sent.ts`, wired in `rpc/inbox.ts`): `inbox_sent_list` (the six sources of `outreach_sent_items`,
+  keyset `{at, id}` paging, filters, the 90-day cap, `E_FORBIDDEN` for client viewers when
+  `settings.inbox_show_sent_to_clients = false`) and `inbox_counts`. Before answering they do what the real workers
+  would have done by now: AI holds that are over go out, snoozed chats wake up.
+- **Scheduled comes from the engine's planner** (`sim/engine.ts`): a blocked send step gets the sender's next slot
+  (working hours, today's allowance, a stable spread), `planAhead` plans the send after a delay / a reply window that
+  ends before the end of the next working day, and a step with a planned slot waits for it, so "Scheduled · 14:20"
+  goes out at 14:20. A reply (stop on reply), a branch or the end of the enrollment cancels what it no longer needs,
+  so those rows leave Scheduled. The clock sends AI holds whose time it moved past (`sendDueHolds`).
+- **Seed** (`seed/sent.ts`, after the inbox seed): leads that just accepted (first message planned), agency leads whose
+  reply window ends (email planned), Leo's disconnected account holding three invitations, one paused lead, two AI
+  replies in their hold (one warm-up), four recoverable failed steps (rate limit, timeout, LinkedIn error, an
+  invitation sent too recently), a bounced email with its mailer-daemon notice, two email out-of-office replies (one
+  followed by a real answer) and two replies sent from outside the app (`origin: external_device`). LinkedIn never gets
+  an out-of-office in the tour.
 
 ## Guards: the demo can never reach production
 

@@ -1,11 +1,51 @@
-// outreach-api/routes_inbox.ts — threads, one thread with messages and attribution, intent, assignee, reply.
+// outreach-api/routes_inbox.ts — threads, one thread with messages and attribution, intent, assignee, reply; the Sent list
+// (docs/outreach/INBOX-REPLIES-SENT.md: one row per send, segments sent | scheduled | failed). Messages keep direction in | out.
 
 import { sendReply } from "../_shared/outreach/reply.ts";
-import { type App, call, ctxOf, body, parse, pathId, ok, page, filters, id, bool, paging, z, HttpError } from "./dispatch.ts";
+import { type App, call, ctxOf, body, parse, pathId, ok, page, filters, scopedClient, id, bool, z, paging, HttpError } from "./dispatch.ts";
 
 const INTENTS = ["interested", "question", "not_now", "not_interested", "ooo", "wrong_person", "unclear", "unclassified"] as const;
 
+/** The Sent cursor: the RPC's next_cursor {at, id}, carried as one opaque base64url string. */
+const encodeCursor = (c: unknown): string | null => {
+  const o = c as { at?: string; id?: string } | null;
+  return o?.at && o?.id ? btoa(JSON.stringify({ at: o.at, id: o.id })).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") : null;
+};
+function decodeCursor(s: string | undefined): { at: string; id: string } | undefined {
+  if (!s) return undefined;
+  try {
+    const o = JSON.parse(atob(s.replace(/-/g, "+").replace(/_/g, "/")));
+    if (o && typeof o.at === "string" && typeof o.id === "string") return { at: o.at, id: o.id };
+  } catch { /* fall through */ }
+  throw new HttpError(422, "E_PAYLOAD_INVALID", "cursor: pass the next_cursor of the previous page unchanged.");
+}
+
 export function registerInbox(app: App): void {
+  // Sent: what went out, what is scheduled, what failed. Same rows as the app's Sent view (outreach_inbox_sent_list).
+  app.get("/v1/sent", async (c) => {
+    const ctx = ctxOf(c);
+    const q = parse(z.object({
+      segment: z.enum(["sent", "scheduled", "failed"]).default("sent"),
+      sender_ids: z.string().optional().transform((v, k) => {
+        if (!v) return undefined;
+        const ids = v.split(",").map((x) => x.trim()).filter(Boolean);
+        if (ids.length > 100 || ids.some((x) => !id.safeParse(x).success)) { k.addIssue({ code: "custom", message: "comma-separated sender ids (at most 100)" }); return z.NEVER; }
+        return ids.length ? ids : undefined;
+      }),
+      my_senders: bool.optional(), client_id: id.optional(), channel: z.enum(["LINKEDIN", "EMAIL", "WHATSAPP", "INSTAGRAM"]).optional(),
+      source: z.enum(["sequence", "teammate", "ai", "outside_app"]).optional(), sequence_id: id.optional(),
+      type: z.enum(["connection_request", "message", "inmail", "email"]).optional(), replied: bool.optional(),
+      from: z.iso.datetime({ offset: true }).optional(), to: z.iso.datetime({ offset: true }).optional(),
+      search: z.string().trim().max(200).optional(), lead_id: id.optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(50), cursor: z.string().max(500).optional(),
+    }), c.req.query());
+    const { segment, limit, cursor, ...f } = q;
+    scopedClient(ctx, f.client_id);
+    const r = await call<{ segment?: string; items?: unknown[]; next_cursor?: unknown; range?: unknown }>(ctx, "inbox_sent_list",
+      { p_ws: ctx.key.workspace_id, p_segment: segment, p_filters: filters(f), p_cursor: decodeCursor(cursor), p_limit: limit });
+    return ok(c, r?.items ?? [], 200, { next_cursor: encodeCursor(r?.next_cursor), segment: r?.segment ?? segment, range: r?.range ?? null });
+  });
+
   app.get("/v1/threads", async (c) => {
     const ctx = ctxOf(c);
     const q = parse(z.object({

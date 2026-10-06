@@ -13,6 +13,8 @@ export type CatalogueProvider = 'shopify' | 'woocommerce' | 'feed' | 'csv' | 'cr
 export interface CatalogueState {
   provider: CatalogueProvider; url?: string | null; store?: string | null; currency?: string | null; currency_locked?: boolean;
   products?: number; synced_at?: string | null; complete?: boolean; warning?: string | null; last_error?: string | null; last_error_at?: string | null; syncing?: boolean;
+  /** A running sync that is being tried again (the store was busy or did not answer): which try, and why. */
+  retry?: { tries: number; note?: string | null } | null;
 }
 /** The part of a knowledge source the catalogue screens read. */
 export interface CatalogueSourceLike {

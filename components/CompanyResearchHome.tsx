@@ -4208,7 +4208,7 @@ export default function CompanyResearcher() {
 
       {/* Input mode tabs: Via Link / Via Table / Via CSV */}
       <div className="mb-6 border-b border-gray-200 opacity-0 animate-fade-up [animation-delay:400ms] flex items-center justify-between gap-4">
-        <nav className="-mb-px flex space-x-8">
+        <nav className="-mb-px flex min-w-0 space-x-8 overflow-x-auto [scrollbar-width:none]">
           <button
             type="button"
             onClick={() => handleSwitchInputMode('link')}

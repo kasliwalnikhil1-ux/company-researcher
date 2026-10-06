@@ -54,7 +54,7 @@ export default function ConsentSenderCard({ sender, canEdit, busy, onRequest, on
             {sender.sequences_on_auto.length === 0 ? 'None' : sender.sequences_on_auto.map((q, i) => (
               <span key={q.id}>{i > 0 && ', '}<Link href={`/outreach/sequences/${q.id}?tab=ai`} className="text-indigo-700 hover:underline">{q.name}</Link></span>
             ))}
-            {needs && sender.sequences_on_auto.length > 0 && <div className="text-xs text-amber-700">Replies in these sequences are drafts until the owner approves.</div>}
+            {needs && sender.sequences_on_auto.length > 0 && <div className="text-xs text-amber-700">AI replies in these sequences are drafts until the owner approves.</div>}
           </dd>
         </div>
         <div><dt className="text-xs text-gray-500">Sent by Auto, last 7 days</dt><dd className="text-gray-800 tabular-nums">{sender.ai_sent_7d}</dd></div>

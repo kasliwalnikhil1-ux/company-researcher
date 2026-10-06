@@ -84,7 +84,7 @@ export function SalesNavImport({ toast, onCreated }: { toast: ToastFn; onCreated
       </p>
       <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="Sales Navigator source">
         {([['sn_saved_search', 'Saved search'], ['sn_lead_list', 'Lead list']] as const).map(([id, label]) => (
-          <button key={id} type="button" role="tab" aria-selected={mode === id} onClick={() => setMode(id)} className={cn('px-3 py-1.5 text-sm rounded-md', mode === id ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>
+          <button key={id} type="button" role="tab" aria-selected={mode === id} onClick={() => setMode(id)} className={cn('px-3 py-1.5 text-sm rounded-md', mode === id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>
         ))}
       </div>
       <SenderPicker senders={ready} allSenders={senders.data ?? []} value={senderId} onChange={setSenderId} hint="Saved searches and lead lists belong to one LinkedIn account. Pick the account that owns them." />

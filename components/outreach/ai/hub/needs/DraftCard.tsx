@@ -42,12 +42,12 @@ export default function DraftCard({ row, hidden, api }: CardProps) {
   return (
     <NeedCard row={row} hidden={hidden} busy={drafting || regenerating}
       reason={regenerating ? 'The AI is writing this draft again' : undefined}
-      trigger={row.trigger_text ? <Part label="Brief:"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
+      trigger={row.trigger_text ? <Part tone="them" label="Brief"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
       ai={api.canWrite ? (
         <Textarea label={`Draft${kind ? ` (${kind.replace(/_/g, ' ')})` : ''} for ${name}`} value={text} onChange={(e) => setEdit(e.target.value)} rows={4} className="min-h-[96px]"
           counter={{ max: limit, value: text.length }} placeholder={row.state === 'review' ? undefined : 'Write the message yourself, or wait for the draft'} />
       ) : text.trim() ? (
-        <Part label="Draft:"><ClampText text={text} /></Part>
+        <Part tone="ai" label="AI draft"><ClampText text={text} /></Part>
       ) : undefined}
       actions={api.canWrite ? (
         <>

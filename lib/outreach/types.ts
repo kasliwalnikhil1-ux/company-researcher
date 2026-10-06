@@ -502,6 +502,18 @@ export interface Chat {
   ai_session_kind?: 'normal' | 'returning' | 'dormant' | null;
   ai_session_count?: number;
   ai_quiet_task_at?: string | null;
+  /**
+   * Replies / Sent (075), maintained by the database: first_inbound_at null = nobody on the other side has written (the
+   * conversation is in Sent only); last_inbound_at = their last PERSON message (auto-replies and bounces excluded);
+   * waiting_on 'us' (their message is the latest) | 'them' (ours is) | null; ai_answering = the AI is answering their latest message.
+   */
+  first_inbound_at?: string | null;
+  last_inbound_at?: string | null;
+  first_outbound_at?: string | null;
+  last_outbound_at?: string | null;
+  last_auto_reply_at?: string | null;
+  waiting_on?: 'us' | 'them' | null;
+  ai_answering?: boolean;
 }
 
 export interface Message {
@@ -526,6 +538,11 @@ export interface Message {
   sender_identifier?: string | null;
   is_forwarded?: boolean;
   delivered_at?: string | null;
+  /** Replies / Sent (075): on our message, when their next message arrived; auto-reply / bounce flags on theirs; bounced_at on our email. */
+  replied_at?: string | null;
+  is_auto_reply?: boolean;
+  is_bounce?: boolean;
+  bounced_at?: string | null;
   /** System event code (calls, group changes); null for a normal message. */
   event_type?: number | null;
   /** 031: a message type the connector cannot read (poll, live location …): the inbox says to open the app. */

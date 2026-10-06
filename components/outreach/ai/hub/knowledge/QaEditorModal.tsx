@@ -70,7 +70,7 @@ export default function QaEditorModal({ ws, pair, targets, targetsLoading, onClo
           <legend className="text-xs font-medium text-gray-600 mb-1">Available to</legend>
           <label className="flex items-start gap-2 text-sm text-gray-900 cursor-pointer">
             <input type="radio" name="qa-scope" className="mt-0.5 border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={scope === 'all'} onChange={() => { setScope('all'); setTouched(true); }} />
-            <span>All<span className="block text-xs text-gray-500">Replies in every sequence and the Website agent on every website.</span></span>
+            <span>All<span className="block text-xs text-gray-500">AI replies in every sequence and the Website agent on every website.</span></span>
           </label>
           <label className="flex items-start gap-2 text-sm text-gray-900 cursor-pointer">
             <input type="radio" name="qa-scope" className="mt-0.5 border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={scope === 'only'} onChange={() => { setScope('only'); setTouched(true); }} />

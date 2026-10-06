@@ -4,9 +4,9 @@
 // This file is the shared layer of the hub: the feature names, the three modes, the two views (Needs you, Activity)
 // and one hook per outreach_hub_* RPC of migration 063.
 //
-//   Names   Replies · Personalized lines · Step drafts · Website agents · Profile drafts
+//   Names   AI replies · Personalized lines · Step drafts · Website agents · Profile drafts
 //   Modes   Off · Review · Auto, the same three words everywhere. Storage is unchanged underneath:
-//           Replies         off | draft (= Review) | autopilot (= Auto)            outreach_sequence_reply_settings.mode
+//           AI replies      off | draft (= Review) | autopilot (= Auto)            outreach_sequence_reply_settings.mode
 //           Lines           off | review                                           outreach_ai_variables.mode
 //           Website         ai_enabled false (= Off) | ai.mode 'review' | 'first' (= Auto · Always) | 'offline_only' (= Auto · Outside hours)
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -20,11 +20,12 @@ import type { CatalogueState, ProductCard } from './catalogue';
 // Routes
 // ---------------------------------------------------------------------------------------------------------------
 export const AI_HUB_PATH = '/outreach/ai';
+/** `blurb` is the one line shown under the tab bar while that tab is open (as on Settings). */
 export const HUB_TABS = [
-  { key: 'needs-you', label: 'Needs you', href: `${AI_HUB_PATH}/needs-you` },
-  { key: 'activity', label: 'Activity', href: `${AI_HUB_PATH}/activity` },
-  { key: 'knowledge', label: 'Knowledge', href: `${AI_HUB_PATH}/knowledge` },
-  { key: 'setup', label: 'Setup', href: `${AI_HUB_PATH}/setup` },
+  { key: 'needs-you', label: 'Needs you', href: `${AI_HUB_PATH}/needs-you`, blurb: 'What the AI wrote that a person has to approve before it goes out.' },
+  { key: 'activity', label: 'Activity', href: `${AI_HUB_PATH}/activity`, blurb: 'Everything the AI wrote, including what went out on its own.' },
+  { key: 'knowledge', label: 'Knowledge', href: `${AI_HUB_PATH}/knowledge`, blurb: 'The websites, documents, Q&A and product catalogues the AI answers from.' },
+  { key: 'setup', label: 'Setup', href: `${AI_HUB_PATH}/setup`, blurb: 'Switch each AI feature Off, to Review or to Auto, and see what it wrote this week.' },
 ] as const;
 export type HubTab = typeof HUB_TABS[number]['key'];
 
@@ -39,7 +40,7 @@ export const hubHref = {
   activity: (f: { feature?: AiFeature | null; where?: string | null } = {}) => `${AI_HUB_PATH}/activity${qs({ feature: f.feature, where: f.where })}`,
   knowledge: (view?: 'sources' | 'qa' | null) => `${AI_HUB_PATH}/knowledge${qs({ view: view === 'sources' ? null : view })}`,
   setup: () => `${AI_HUB_PATH}/setup`,
-  setupReplies: (tab?: 'sequences' | 'consent' | 'reports' | null) => `${AI_HUB_PATH}/setup/replies${qs({ tab: tab === 'sequences' ? null : tab })}`,
+  setupReplies: (tab?: 'sequences' | 'reports' | null) => `${AI_HUB_PATH}/setup/replies${qs({ tab: tab === 'sequences' ? null : tab })}`,
   setupLines: (view?: 'variables' | 'lines' | null) => `${AI_HUB_PATH}/setup/lines${qs({ view: view === 'variables' ? null : view })}`,
   setupLine: (variableId: string) => `${AI_HUB_PATH}/setup/lines/${variableId}`,
   setupWebsite: () => `${AI_HUB_PATH}/setup/website`,
@@ -52,9 +53,9 @@ export const hubHref = {
 export type AiFeature = 'reply' | 'line' | 'draft' | 'website' | 'profile';
 export const AI_FEATURES: AiFeature[] = ['reply', 'line', 'draft', 'website', 'profile'];
 /** The feature's name (cards, filters, settings). */
-export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'Replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website Agents', profile: 'Profile drafts' };
+export const FEATURE_LABEL: Record<AiFeature, string> = { reply: 'AI replies', line: 'Personalized lines', draft: 'Step drafts', website: 'Website Agents', profile: 'Profile drafts' };
 /** One output of the feature (the Feature column of Activity, the type on a card). */
-export const FEATURE_ONE: Record<AiFeature, string> = { reply: 'Reply', line: 'Line', draft: 'Step draft', website: 'Website', profile: 'Profile' };
+export const FEATURE_ONE: Record<AiFeature, string> = { reply: 'AI reply', line: 'Line', draft: 'Step draft', website: 'Website', profile: 'Profile' };
 export const FEATURE_HELP: Record<AiFeature, string> = {
   reply: 'Answers prospects who reply to a sequence.',
   line: 'One AI-written line per lead, used in a message as {{ai.key|fallback}}.',
@@ -106,8 +107,8 @@ export function websiteModeText(w: { ai_enabled: boolean; mode: string | null | 
 // ---------------------------------------------------------------------------------------------------------------
 export type NeedsYouType = 'reply' | 'line' | 'draft' | 'website' | 'question' | 'profile';
 export const NEEDS_YOU_TYPES: NeedsYouType[] = ['reply', 'line', 'draft', 'website', 'question', 'profile'];
-export const NEEDS_YOU_TYPE_LABEL: Record<NeedsYouType, string> = { reply: 'Replies', line: 'Lines', draft: 'Step drafts', website: 'Website', question: 'Questions', profile: 'Profile' };
-export const NEEDS_YOU_TYPE_ONE: Record<NeedsYouType, string> = { reply: 'Reply', line: 'Line', draft: 'Step draft', website: 'Website', question: 'Question', profile: 'Profile' };
+export const NEEDS_YOU_TYPE_LABEL: Record<NeedsYouType, string> = { reply: 'AI replies', line: 'Personalizations', draft: 'Step drafts', website: 'Website', question: 'Questions', profile: 'Profile' };
+export const NEEDS_YOU_TYPE_ONE: Record<NeedsYouType, string> = { reply: 'AI reply', line: 'Line', draft: 'Step draft', website: 'Website', question: 'Question', profile: 'Profile' };
 export const isNeedsYouType = (v: unknown): v is NeedsYouType => typeof v === 'string' && (NEEDS_YOU_TYPES as string[]).includes(v);
 export const isAiFeature = (v: unknown): v is AiFeature => typeof v === 'string' && (AI_FEATURES as string[]).includes(v);
 
@@ -169,8 +170,8 @@ export function needsYouReason(row: Pick<NeedsYouRow, 'type' | 'state' | 'reason
 }
 export function originsText(origins: unknown): string {
   const o = Array.isArray(origins) ? origins.map(String) : [];
-  const names = [o.includes('reply') ? 'Replies' : null, o.includes('website') ? 'Website' : null].filter(Boolean);
-  return names.length ? names.join(' + ') : 'Replies';
+  const names = [o.includes('reply') ? 'AI replies' : null, o.includes('website') ? 'Website' : null].filter(Boolean);
+  return names.length ? names.join(' + ') : 'AI replies';
 }
 /** "Priya Nair (Razorpay)", "Visitor (Mumbai)". */
 export const whoText = (r: { who_name: string | null; who_detail: string | null }) => (r.who_name ? `${r.who_name}${r.who_detail ? ` (${r.who_detail})` : ''}` : '');
@@ -267,6 +268,45 @@ export function useNeedsYou(ws: string | null | undefined, f: NeedsYouFilters, u
       return (data ?? []) as NeedsYouRow[];
     },
     getNextPageParam: (last, pages) => (last.length === NEEDS_YOU_PAGE ? pages.length : undefined),
+  });
+}
+
+/**
+ * The photos of the "who" on a page of cards (the view carries none): the lead's picture, else the chat's attendee
+ * picture, and the sender's picture on a Profile card. Keyed by `cardKey`; a card without a photo is left out.
+ */
+export function useNeedsYouPictures(ws: string | null | undefined, rows: NeedsYouRow[]) {
+  const ids = (pick: (r: NeedsYouRow) => string | null) => [...new Set(rows.map(pick).filter((v): v is string => !!v))].sort();
+  const leadIds = ids((r) => (r.who_kind === 'lead' ? r.who_id : null));
+  const senderIds = ids((r) => (r.who_kind === 'sender' ? r.who_id : null));
+  const chatIds = ids((r) => (r.who_kind === 'lead' ? r.chat_id : null));
+  return useQuery({
+    queryKey: [...hk.all(ws ?? ''), 'pictures', leadIds, senderIds, chatIds] as const,
+    enabled: !!ws && leadIds.length + senderIds.length + chatIds.length > 0,
+    staleTime: 5 * 60_000, placeholderData: keepPreviousData,
+    queryFn: async () => {
+      const fetchAll = async (table: 'outreach_leads' | 'outreach_senders' | 'outreach_chats', col: string, list: string[]) => {
+        const out = new Map<string, string>();
+        for (let i = 0; i < list.length; i += 150) {
+          const { data, error } = await db.from(table).select(`id, ${col}`).in('id', list.slice(i, i + 150));
+          if (error) throw parseError(error);
+          for (const r of (data ?? []) as unknown as Array<Record<string, string | null>>) if (r.id && r[col]) out.set(r.id, r[col]!);
+        }
+        return out;
+      };
+      const [leads, senders, chats] = await Promise.all([
+        fetchAll('outreach_leads', 'picture_url', leadIds),
+        fetchAll('outreach_senders', 'picture_url', senderIds),
+        fetchAll('outreach_chats', 'attendee_picture_url', chatIds),
+      ]);
+      const out: Record<string, string> = {};
+      for (const r of rows) {
+        const src = r.who_kind === 'lead' ? (r.who_id && leads.get(r.who_id)) || (r.chat_id && chats.get(r.chat_id))
+          : r.who_kind === 'sender' && r.who_id ? senders.get(r.who_id) : null;
+        if (src) out[`${r.type}:${r.id}`] = src;
+      }
+      return out;
+    },
   });
 }
 
@@ -418,7 +458,7 @@ export function useQaDelete(ws: string | null | undefined) {
     onSuccess: () => { if (ws) qc.invalidateQueries({ queryKey: hk.all(ws) }); qc.invalidateQueries({ queryKey: ['outreach', 'sequence'] }); },
   });
 }
-/** "Add answer" on a Question card: a shared Q&A pair, so Replies and the Website agent both answer it next time. */
+/** "Add answer" on a Question card: a shared Q&A pair, so AI replies and the Website agent both answer it next time. */
 export function useQuestionAnswer(ws: string | null | undefined) {
   const invalidate = useInvalidateHub(ws);
   const qc = useQueryClient();

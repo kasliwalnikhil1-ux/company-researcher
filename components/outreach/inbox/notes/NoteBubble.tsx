@@ -9,7 +9,8 @@ import { createPortal } from 'react-dom';
 import { Lock, MoreHorizontal, Pencil, Trash2, CheckSquare, Link2, Eye, EyeOff, History, Paperclip, Download, Bot, Cog, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Chat, Member } from '@/lib/outreach/types';
-import { Avatar, Modal, fmtDate } from '@/components/outreach/ui';
+import { Modal, fmtDate } from '@/components/outreach/ui';
+import { MemberAvatar } from '@/components/outreach/members';
 import { fmtBytes } from '../hooks';
 import { decodeMentions, noteLink, useNoteFileUrl, useNoteRevisions, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import NoteBody from './NoteBody';
@@ -153,7 +154,7 @@ export default function NoteBubble(p: NoteBubbleProps) {
         {system ? (
           <span className="inline-flex items-center gap-1 text-[11px] text-gray-600">{note.author.type === 'ai' ? <Bot className="w-3 h-3" /> : <Cog className="w-3 h-3" />}{note.author.name}</span>
         ) : (
-          <span className="inline-flex items-center gap-1 text-[11px] text-gray-700 min-w-0"><Avatar name={note.author.name} size={4} /><span className={cn('truncate', note.author.former && 'italic text-gray-500')}>{note.author.name}</span></span>
+          <span className="inline-flex items-center gap-1 text-[11px] text-gray-700 min-w-0"><MemberAvatar userId={note.author.id} name={note.author.name} size={4} /><span className={cn('truncate', note.author.former && 'italic text-gray-500')}>{note.author.name}</span></span>
         )}
         <span className="text-[11px] text-gray-400">·</span>
         <time className="text-[11px] text-gray-500" dateTime={note.created_at} title={fmtDate(note.created_at)}>{clockTime(note.created_at)}</time>

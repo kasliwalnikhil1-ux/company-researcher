@@ -660,14 +660,9 @@ function AddFundingModal({ onClose, onComplete }: { onClose: () => void; onCompl
                 ) : result?.status === 'done' ? (
                   <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
                 ) : result?.status === 'error' ? (
-                  <div className="group relative">
+                  <span className="inline-flex" title={result.error || undefined}>
                     <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
-                    {result.error && (
-                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block z-10 bg-gray-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap max-w-xs truncate">
-                        {result.error}
-                      </div>
-                    )}
-                  </div>
+                  </span>
                 ) : null;
 
                 return (

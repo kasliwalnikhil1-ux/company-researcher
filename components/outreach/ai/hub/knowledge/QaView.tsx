@@ -59,7 +59,7 @@ export default function QaView({ ws, canEdit, onAdd, onEdit, notify }: { ws: str
     return (
       <div className="bg-white border border-gray-200 rounded-xl">
         <EmptyState icon={<HelpCircle className="w-6 h-6" />} title="No Q&A yet"
-          description="A pair is a question and the answer you approved. Replies and the Website agent use it when someone asks that question."
+          description="A pair is a question and the answer you approved. AI replies and the Website agent use it when someone asks that question."
           action={canEdit ? <Button onClick={onAdd}><Plus className="w-4 h-4" aria-hidden="true" />Q&amp;A</Button> : undefined} />
       </div>
     );

@@ -114,6 +114,23 @@ type AuthContextType = {
   mfaGetAal: () => Promise<{ currentLevel: AalLevel; nextLevel: AalLevel; error: AuthError | null }>;
 };
 
+/**
+ * Outreach reply alerts (reply-notifications-PRD.md §11 "Person logs out"): a logged-out browser gets no alerts, so its
+ * Web Push subscription is removed from the server and from the browser before the session ends. Best effort, at most
+ * 3 seconds: logging out never waits on it.
+ */
+async function dropOutreachPushSubscription(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  const work = (async () => {
+    const reg = await navigator.serviceWorker.getRegistration('/outreach');
+    const sub = reg && 'pushManager' in reg ? await reg.pushManager.getSubscription() : null;
+    if (!sub) return;
+    await supabase.rpc('outreach_push_unsubscribe', { p_endpoint: sub.endpoint, p_id: null });
+    await sub.unsubscribe();
+  })().catch(() => undefined);
+  await Promise.race([work, new Promise((r) => setTimeout(r, 3000))]);
+}
+
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const SIGNUP_USER_EXISTS_MESSAGE =
@@ -266,6 +283,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = useCallback(async () => {
     writeAal1Deadline(null);
+    await dropOutreachPushSubscription();
     // 'local' ends only this browser's session; the default ('global') would sign out every device. signOutAll does that.
     await supabase.auth.signOut({ scope: 'local' });
     router.push('/login');
@@ -298,6 +316,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOutAll = async () => {
     writeAal1Deadline(null);
+    await dropOutreachPushSubscription();
     await supabase.auth.signOut({ scope: 'global' });
     router.push('/login');
   };

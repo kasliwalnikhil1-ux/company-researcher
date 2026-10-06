@@ -1,4 +1,5 @@
 /** Outreach error type and the `E_CODE` → plain-language map (shared by both backends; see backend/contract.ts). */
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 
 export class OutreachError extends Error {
   code: string;
@@ -15,8 +16,8 @@ export function parseError(err: unknown): OutreachError {
   if (err instanceof OutreachError) return err;
   const raw = (err as any)?.message ?? (err as any)?.error ?? String(err);
   const m = /^(E_[A-Z_]+)(?::\s*(.*))?$/s.exec(String(raw).trim());
-  if (m) return new OutreachError(m[2] || humanize(m[1]), m[1], (err as any)?.details);
-  return new OutreachError(String(raw), 'E_UNKNOWN', err);
+  if (m) return new OutreachError(friendlyErrorText(m[2] || humanize(m[1])), m[1], (err as any)?.details);
+  return new OutreachError(friendlyErrorText(String(raw)), 'E_UNKNOWN', err);
 }
 
 export function humanize(code: string): string {
@@ -80,6 +81,8 @@ export function humanize(code: string): string {
     E_PROFILE_ID_UNRESOLVED: 'LinkedIn did not recognise an id in this change',
     E_PROFILE_IMAGE_REJECTED: 'LinkedIn rejected the image (size, format or dimensions)',
     E_AI_UNAVAILABLE: 'AI drafting is not configured for this workspace',
+    E_AI_BUSY: 'AI is busy right now. Please try again later',
+    E_AI_KEY_INVALID: 'Your AI key didn’t work. Check it in AI → Setup',
     E_AI_VARIABLE_OFF: 'This variable is switched off',
     // Channels (Instagram / WhatsApp)
     E_NO_CONSENT: 'No recorded WhatsApp consent for this lead. Record a consent basis first',

@@ -9,6 +9,7 @@ import { useClients, useMembers } from '@/lib/outreach/queries';
 import { usePlanFeature } from '@/lib/outreach/billing';
 import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Badge, Button, Card, EmptyState, ErrorBox, Input, Modal, Select, Spinner, Table, Td, Th, fmtDate, timeAgo, useToast } from '@/components/outreach/ui';
+import { MemberAvatar } from '@/components/outreach/members';
 import { IntegrationsSubTabs } from '@/components/outreach/settings/SettingsTabs';
 import { ConfirmModal, CopyField, Note, SettingsFrame } from '@/components/outreach/settings/shared';
 import { sk, useApiKeys } from '@/components/outreach/settings/hooks';
@@ -111,7 +112,7 @@ export default function ApiKeysSettingsPage() {
                       const st = keyState(k);
                       return (
                         <tr key={k.id} className={k.revoked_at ? 'opacity-60' : undefined}>
-                          <Td><div className="font-medium text-gray-900">{k.name}</div><div className="text-[11px] text-gray-400">by {memberName.get(k.user_id) ?? (members.isSuccess ? 'a former member' : 'a member')} · {fmtDate(k.created_at, false)}</div></Td>
+                          <Td><div className="font-medium text-gray-900">{k.name}</div><div className="text-[11px] text-gray-400 flex items-center gap-1">by {memberName.has(k.user_id) ? <MemberAvatar userId={k.user_id} name={memberName.get(k.user_id)} size={4} /> : null}{memberName.get(k.user_id) ?? (members.isSuccess ? 'a former member' : 'a member')} · {fmtDate(k.created_at, false)}</div></Td>
                           <Td className="font-mono text-xs whitespace-nowrap">{k.prefix}…</Td>
                           <Td className="whitespace-nowrap">{ROLE_LABEL[k.role]?.replace(' (read only)', '') ?? k.role}</Td>
                           <Td className="max-w-[180px]">{k.client_ids.length === 0 ? <span className="text-gray-500">All clients</span> : <span className="text-xs">{k.client_ids.map((id) => clientName.get(id) ?? 'deleted client').join(', ')}</span>}</Td>

@@ -12,6 +12,7 @@ import { UpgradeNote } from '@/components/outreach/PlanGate';
 import { Note, SettingRow, SettingsFrame, Switch, isEmail } from '@/components/outreach/settings/shared';
 import BrandingPreview from '@/components/outreach/settings/BrandingPreview';
 import DomainsCard from '@/components/outreach/settings/DomainsCard';
+import { saveWorkspaceSettings } from '@/components/outreach/settings/workspaceSettings';
 
 type Form = { product_name: string; logo_url: string; accent: string; support_email: string; help_url: string; docs_url: string; email_from_name: string; email_from_address: string; hide_platform_name: boolean };
 const toForm = (b: Branding | undefined): Form => ({
@@ -123,6 +124,39 @@ function BrandingForm() {
 }
 
 /**
+ * What client viewers may see in their portal (/outreach/c/<client>). Not part of white-label, so not plan-gated.
+ * Saved straight into outreach_workspaces.settings like the Behaviour toggles (owner only, row security);
+ * `outreach_inbox_sent_list` refuses client viewers while `inbox_show_sent_to_clients` is false (missing = on).
+ */
+function ClientPortalCard() {
+  const { workspace, isOwner, canWrite, refresh } = useWorkspace();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const settings = (workspace?.settings ?? {}) as Record<string, unknown>;
+  const showSent = typeof settings.inbox_show_sent_to_clients === 'boolean' ? settings.inbox_show_sent_to_clients : true;
+  const editable = isOwner && canWrite;
+
+  async function setShowSent(v: boolean) {
+    if (!workspace) return;
+    setBusy(true);
+    try { await saveWorkspaceSettings(workspace.id, { inbox_show_sent_to_clients: v }); await refresh(); toast.show(v ? 'Clients now see Sent in their portal.' : 'Sent is hidden from clients.'); }
+    catch (e) { toast.show(parseError(e).message, 'error'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Card title="Client portal">
+      <p className="text-xs text-gray-500 mb-1">What client viewers see when they open their portal. Your own team always sees everything.</p>
+      <div className="divide-y divide-gray-100">
+        <SettingRow title="Show Sent to clients" description="Client viewers see what went out, what is scheduled and what failed for their client, read-only."
+          control={<Switch label="Show Sent to clients" checked={showSent} onChange={setShowSent} disabled={!editable || busy} />} />
+      </div>
+      {toast.node}
+    </Card>
+  );
+}
+
+/**
  * Custom domains are part of white-label too. The card is shared, so the gate sits around it: a disabled fieldset switches
  * off its add form (and its remove buttons) while the plan has no white-label; the domains stay listed.
  */
@@ -143,6 +177,7 @@ export default function BrandingSettingsPage() {
     <SettingsFrame min="owner" deniedMessage="Only the workspace owner can change white-label settings.">
       <div className="space-y-6">
         <BrandingForm />
+        <ClientPortalCard />
         <GatedDomains />
       </div>
     </SettingsFrame>

@@ -124,8 +124,9 @@ Deno.test("gates", () => {
   assertEquals(evaluateGates({ ...GATES, leadTags: ["VIP"] }).escalate, ["vip"]);
   assertEquals(evaluateGates({ ...GATES, leadStagePosition: 4, handoffStagePosition: 3 }).escalate, ["stage"]);
   assertEquals(evaluateGates({ ...GATES, leadCountry: "DE" }).maxMode, "draft");
-  assertEquals(evaluateGates({ ...GATES, leadCountry: null }).maxMode, "draft");
-  assertEquals(evaluateGates({ ...GATES, leadCountry: "DE", disclosure: "Sent with an AI assistant." }).maxMode, "autopilot");
+  assertEquals(evaluateGates({ ...GATES, leadCountry: null }).maxMode, "autopilot");
+  assertEquals(evaluateGates({ ...GATES, leadCountry: "DE", disclosure: "Sent with an AI assistant." }).maxMode, "draft");
+  assertEquals(evaluateGates({ ...GATES, leadCountry: "DE", blockedCountries: [] }).maxMode, "autopilot");
   assertEquals(evaluateGates({ ...GATES, mode: "draft", leadCountry: "DE" }).maxMode, "draft");
 });
 

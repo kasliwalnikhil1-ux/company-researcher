@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import type { Member } from '@/lib/outreach/types';
-import { Avatar } from '@/components/outreach/ui';
+import { MemberAvatar } from '@/components/outreach/members';
 import { groupMembersForPicker, memberDisplayName } from '@/lib/outreach/notes';
 
 export interface MentionPickerProps {
@@ -59,7 +59,7 @@ export default function MentionPicker({ members, currentUserId, query, onPick, o
               <button key={m.user_id} type="button" role="option" aria-selected={i === idx} data-idx={i}
                 onMouseDown={(e) => { e.preventDefault(); onPick(m); }} onMouseEnter={() => setIdx(() => i)}
                 className={cn('w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm', i === idx ? 'bg-amber-50 text-amber-950' : 'text-gray-800 hover:bg-gray-50')}>
-                <Avatar name={name} size={6} />
+                <MemberAvatar member={m} name={name} size={6} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate">{name}</span>
                   {m.email && m.email !== name && <span className="block truncate text-[11px] text-gray-400">{m.email}</span>}

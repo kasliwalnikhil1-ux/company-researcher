@@ -64,7 +64,7 @@ function Header({ s, ws, canEdit, hidden, notify }: { s: CatalogueSourceLike; ws
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="truncate text-base font-semibold text-gray-900" title={s.title}>{s.title}</h2>
             <Badge tone="gray">{PROVIDER_LABEL[c?.provider ?? (isCat ? 'feed' : 'crawl')]}</Badge>
-            {syncing ? <span className="inline-flex items-center gap-1 text-xs text-indigo-700"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />Syncing…</span>
+            {syncing ? <span className="inline-flex items-center gap-1 text-xs text-indigo-700"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />{c?.retry?.tries ? `Syncing… the store did not answer, trying again (${c.retry.tries + 1} of 5)` : 'Syncing…'}</span>
               : isCat && s.status === 'error' ? <Badge tone="red">Failed</Badge> : null}
           </div>
           <p className="mt-1 text-sm text-gray-600">

@@ -8,6 +8,10 @@ import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { qk, useChats, useMessages } from '@/lib/outreach/queries';
+import {
+  CHANNEL_LABEL, SEGMENT_LABEL, SEGMENT_TOOLTIP, SENT_EMPTY, SENT_FILTER_DEFAULTS, STATUS_TONE, dayKey, dayLabel, fmtTime, sourceLine, statusLabel, typePrefix, useInboxCounts, useSentList,
+  type SentFilters, type SentItem, type SentSegment,
+} from '@/lib/outreach/inboxSent';
 import { Avatar, BackLink, Button, Card, EmptyState, ErrorBox, fmtDate, IntentBadge, PageLoader, Spinner, StatusPill, Table, Td, Textarea, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/outreach/types';
@@ -97,6 +101,95 @@ function ClientReport({ ws, clientId, range }: { ws: string; clientId: string; r
   );
 }
 
+const SENT_SEGMENTS: SentSegment[] = ['sent', 'scheduled', 'failed'];
+
+function sentWhen(it: SentItem, tz: string): { short: string; full: string } {
+  const full = (() => { try { return new Date(it.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }); } catch { return new Date(it.at).toLocaleString(); } })();
+  return { short: `${dayLabel(dayKey(it.at, tz), tz)} · ${fmtTime(it.at, tz)}`, full };
+}
+
+/**
+ * Sent, read-only (inbox-replies-sent-PRD §4.8): what went out, what is scheduled and what failed for this client.
+ * Client viewers see it while the workspace setting "Show Sent to clients" is on; the team always sees it here, with a
+ * note when it is hidden from the client. No row actions.
+ */
+function PortalSentCard({ ws, clientId, timezone, isViewer }: { ws: string; clientId: string; timezone: string; isViewer: boolean }) {
+  const counts = useInboxCounts(ws, { client_id: clientId });
+  const showSent = counts.data?.show_sent;
+  const visible = isViewer ? showSent === true : true;
+  const [segment, setSegment] = useState<SentSegment>('sent');
+  const filters: SentFilters = useMemo(() => ({ ...SENT_FILTER_DEFAULTS, client_id: clientId }), [clientId]);
+  const list = useSentList(ws, segment, filters, '', { enabled: visible, limit: 25 });
+
+  if (!visible) return null;
+  const err = list.isError ? parseError(list.error) : null;
+  // The setting was switched off after the counts loaded: a client viewer simply stops seeing the card.
+  if (isViewer && err?.code === 'E_FORBIDDEN') return null;
+  const rows = list.data ?? [];
+
+  return (
+    <Card className="overflow-hidden mt-6" title={<span className="flex items-center gap-2"><Send className="w-4 h-4" /> Sent</span>}
+      actions={
+        <div role="radiogroup" aria-label="Which sends to show" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+          {SENT_SEGMENTS.map((s) => (
+            <button key={s} type="button" role="radio" aria-checked={segment === s} title={SEGMENT_TOOLTIP[s]} onClick={() => setSegment(s)}
+              className={cn('rounded-md px-3 py-1 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500', segment === s ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>
+              {SEGMENT_LABEL[s]}
+            </button>
+          ))}
+        </div>
+      }>
+      <p className="text-xs text-gray-500 mb-3">
+        {segment === 'scheduled' ? 'Everything planned to go out, soonest first.' : segment === 'failed' ? 'Sends that didn’t go out in the last 7 days, and emails that bounced.' : 'Everything that went out in the last 7 days, newest first.'}
+        {' '}Times are in {timezone} time. This list is read-only.
+      </p>
+      {!isViewer && showSent === false && <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">Client viewers don’t see this card: Show Sent to clients is off in Settings → White-label.</div>}
+      {list.isLoading ? <Spinner /> : err ? <ErrorBox message={err.message} /> : !rows.length ? <EmptyState icon={<Send className="w-6 h-6" />} title={SENT_EMPTY[segment]} /> : (
+        <Refreshing active={list.isPlaceholderData}>
+          <Table>
+            <thead><tr><Th>To</Th><Th>What</Th><Th>From</Th><Th>Status</Th><Th className="text-right">When</Th></tr></thead>
+            <tbody>{rows.map((it) => {
+              const prefix = typePrefix(it);
+              const when = sentWhen(it, timezone);
+              const what = it.deleted ? 'Message deleted' : [it.subject, it.preview].filter(Boolean).join(' · ');
+              return (
+                <tr key={it.id}>
+                  <Td>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Avatar src={it.lead?.picture_url} name={it.lead?.name} />
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate max-w-[12rem]">{it.lead?.name ?? 'Unknown'}</div>
+                        {it.lead?.company && <div className="text-xs text-gray-500 truncate max-w-[12rem]">{it.lead.company}</div>}
+                      </div>
+                    </div>
+                  </Td>
+                  <Td>
+                    <div className={cn('text-sm text-gray-800 truncate max-w-[22rem]', it.deleted && 'italic text-gray-400')} title={it.deleted ? undefined : it.preview}>
+                      {prefix && <span className="font-medium text-gray-900">{prefix}{what ? ' · ' : ''}</span>}{what || (prefix ? '' : '—')}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate max-w-[22rem]">{sourceLine(it)}</div>
+                  </Td>
+                  <Td>
+                    <div className="text-sm text-gray-800 truncate max-w-[10rem]">{it.sender.name ?? 'Sender'}</div>
+                    <div className="text-xs text-gray-500">{CHANNEL_LABEL[it.channel] ?? it.channel}</div>
+                  </Td>
+                  <Td>
+                    <span title={it.status_text ?? undefined} className={cn('inline-flex items-center px-2 py-0.5 rounded-full border text-xs font-medium whitespace-nowrap', STATUS_TONE[it.status], it.status_text && 'cursor-help')}>{statusLabel(it, timezone)}</span>
+                  </Td>
+                  <Td className="text-right whitespace-nowrap text-xs text-gray-500"><span title={when.full}>{when.short}</span></Td>
+                </tr>
+              );
+            })}</tbody>
+          </Table>
+          {(list.hasNextPage || list.isFetchingNextPage) && (
+            <div className="flex justify-center mt-3"><Button variant="secondary" size="sm" loading={list.isFetchingNextPage} onClick={() => list.fetchNextPage()}>Load more</Button></div>
+          )}
+        </Refreshing>
+      )}
+    </Card>
+  );
+}
+
 function ClientViewerPage() {
   const params = useParams<{ clientId: string }>();
   const clientId = params?.clientId;
@@ -123,7 +216,8 @@ function ClientViewerPage() {
 
   const branding = useBranding(ws);
   const client = useQuery({ queryKey: ['outreach', 'client', clientId ?? ''], enabled: !!clientId, queryFn: async () => { const { data, error } = await db.from('outreach_clients').select('*').eq('id', clientId!).maybeSingle(); if (error) throw parseError(error); return data as Client | null; } });
-  const chats = useChats(ws, { client_id: clientId });
+  // Replies only (075): conversations where the other person has written. Unanswered sends live in the Sent card.
+  const chats = useChats(ws, { client_id: clientId, view: 'replies' });
   const chat = useMemo(() => (chats.data ?? []).find((c) => c.id === selected) ?? null, [chats.data, selected]);
   const messages = useMessages(selected);
   useEffect(() => { bottomRef.current?.scrollIntoView({ block: 'nearest' }); }, [messages.data?.length, selected]);
@@ -246,6 +340,8 @@ function ClientViewerPage() {
           </div>
         </div>
       </Card>
+
+      <PortalSentCard ws={ws} clientId={clientId} timezone={timezone} isViewer={isViewer} />
 
       <footer className="mt-8 pt-4 border-t border-gray-200 flex flex-wrap items-center justify-between gap-3 text-xs text-gray-500">
         <span>

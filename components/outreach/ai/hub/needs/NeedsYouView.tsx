@@ -6,29 +6,48 @@ import { useSessionUser } from '@/lib/outreach/session';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
 import {
-  NEEDS_YOU_RULE, NEEDS_YOU_TYPES, useHubSetup, useInvalidateHub, useNeedsYou, useNeedsYouCounts, useQuestionAnswer,
-  type NeedsYouCounts, type NeedsYouFilters, type NeedsYouRow,
+  NEEDS_YOU_RULE, NEEDS_YOU_TYPES, NEEDS_YOU_TYPE_LABEL, useHubSetup, useInvalidateHub, useNeedsYou, useNeedsYouCounts, useNeedsYouPictures, useQuestionAnswer,
+  type NeedsYouCounts, type NeedsYouFilters, type NeedsYouRow, type NeedsYouType,
 } from '@/lib/outreach/aiHub';
 import { Button, EmptyState, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import { cn } from '@/lib/utils';
-import FilterBar from './FilterBar';
+import FilterBar, { TAB_HINT } from './FilterBar';
 import ReplyCard from './ReplyCard';
 import LineCard from './LineCard';
 import DraftCard from './DraftCard';
 import WebsiteCard from './WebsiteCard';
 import QuestionCard from './QuestionCard';
 import ProfileCard from './ProfileCard';
+import { NeedsYouPictures } from './NeedCard';
 import UndoBar from './UndoBar';
 import BulkBar from './BulkBar';
 import { useCardActions } from './useCardActions';
 import { cardKey, lineEditDirty, type CardApi, type LineEdit } from './types';
 
+const NO_PICTURES: Record<string, string> = {};
+
+/** The tab Needs you opens on: the first type with something waiting, in the order of the tabs. */
+export function firstTab(counts: NeedsYouCounts | undefined): NeedsYouType {
+  return NEEDS_YOU_TYPES.find((t) => (counts?.[t] ?? 0) > 0) ?? 'reply';
+}
+
 /**
  * Needs you: one queue for every AI output that waits for a person (PRD §4, contract §4).
  * The filters come from the page (they live in the URL). The server orders the cards: a live website suggestion first,
- * then oldest first, so nothing sits for ever.
+ * then oldest first, so nothing sits for ever. Each type is its own tab; a link without ?type= opens on the first tab
+ * with something waiting (picked once, so the tab does not jump when its last card is handled).
  */
 export default function NeedsYouView({ ws, filters, onFilters }: { ws: string; filters: NeedsYouFilters; onFilters: (f: NeedsYouFilters) => void }) {
+  const countsQ = useNeedsYouCounts(ws, filters.mine);
+  const [opened, setOpened] = useState<NeedsYouType | null>(null);
+  if (!filters.type && !opened && countsQ.data) setOpened(firstTab(countsQ.data));
+  const type = filters.type ?? opened;
+  if (!type) return countsQ.isError ? <ErrorBox message={parseError(countsQ.error).message} /> : <Spinner />;
+  return <TypeList ws={ws} filters={{ ...filters, type }} onFilters={onFilters} />;
+}
+
+/** One tab of Needs you: the cards of one type, oldest first, with Load more. */
+function TypeList({ ws, filters, onFilters }: { ws: string; filters: NeedsYouFilters & { type: NeedsYouType }; onFilters: (f: NeedsYouFilters) => void }) {
   const { user } = useSessionUser();
   const { canWrite, canReply, isManager } = useWorkspace();
   const toast = useToast();
@@ -52,10 +71,9 @@ export default function NeedsYouView({ ws, filters, onFilters }: { ws: string; f
     return out;
   }, [listQ.data]);
   const shown = useMemo(() => rows.filter((r) => !isGone(cardKey(r))), [rows, isGone]);
+  const pictures = useNeedsYouPictures(ws, rows).data;
   const shownLines = useMemo(() => shown.filter((r) => r.type === 'line'), [shown]);
-  const selectedLines = useMemo(() => shownLines.filter((r) => selected.has(r.id)), [shownLines, selected]);
   const dirty = useMemo(() => new Set(shownLines.filter((r) => lineEditDirty(r, edits[r.id])).map((r) => r.id)), [shownLines, edits]);
-  const allSelected = shownLines.length > 0 && selectedLines.length === shownLines.length;
 
   // The header counts come from the server; a card removed here is taken off until its call has gone through.
   const counts = useMemo<NeedsYouCounts | undefined>(() => {
@@ -64,6 +82,8 @@ export default function NeedsYouView({ ws, filters, onFilters }: { ws: string; f
     for (const t of NEEDS_YOU_TYPES) { const n = Math.min(c[t], waiting[t] ?? 0); c[t] -= n; c.total = Math.max(0, c.total - n); }
     return c;
   }, [countsQ.data, waiting]);
+  const selectedLines = useMemo(() => shownLines.filter((r) => selected.has(r.id)), [shownLines, selected]);
+  const allSelected = shownLines.length > 0 && selectedLines.length === shownLines.length;
 
   // A step draft that is still being written arrives within a minute: look again sooner than the 60 s of the list.
   const drafting = shown.some((r) => r.type === 'draft' && r.state === 'drafting');
@@ -98,9 +118,8 @@ export default function NeedsYouView({ ws, filters, onFilters }: { ws: string; f
     }
   };
 
-  const filtered = !!filters.type || !!filters.where;
   const whereName = filters.where ? rows.find((r) => r.where_id === filters.where)?.where_name ?? null : null;
-
+  const fetching = listQ.isFetching && !listQ.isFetchingNextPage;
   return (
     <div>
       <FilterBar filters={filters} onFilters={changeFilters} counts={counts} setup={setupQ.data} whereName={whereName} />
@@ -112,20 +131,25 @@ export default function NeedsYouView({ ws, filters, onFilters }: { ws: string; f
         </div>
       ) : (
         <>
-          {canWrite && shownLines.length > 0 && (
-            <label className="mb-2 ml-4 inline-flex items-center gap-2 text-sm text-gray-600">
-              <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(shownLines.map((r) => r.id)))} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
-              Select all shown lines ({shownLines.length.toLocaleString()})
-            </label>
-          )}
           {/* Removed cards stay mounted (hidden) until the server confirms, so an edit is still there if the call fails. */}
-          <ul hidden={shown.length === 0} aria-label="Cards that need you" className={cn('rounded-xl border border-gray-200 bg-white divide-y divide-gray-100 transition-opacity', listQ.isFetching && !listQ.isFetchingNextPage && 'opacity-90')}>
-            {rows.map(card)}
-          </ul>
+          <div className="mb-3 flex min-h-[1.75rem] flex-wrap items-center justify-between gap-x-4 gap-y-1 px-1">
+            <p className="text-sm text-gray-500">{TAB_HINT[filters.type]}</p>
+            {canWrite && shownLines.length > 0 && (
+              <label className="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+                <input type="checkbox" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(shownLines.map((r) => r.id)))} className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" />
+                Select all ({shownLines.length.toLocaleString()})
+              </label>
+            )}
+          </div>
+          <NeedsYouPictures.Provider value={pictures ?? NO_PICTURES}>
+            <ul hidden={shown.length === 0} aria-label={NEEDS_YOU_TYPE_LABEL[filters.type]} className={cn('flex flex-col gap-2 transition-opacity', fetching && 'opacity-90')}>
+              {rows.map(card)}
+            </ul>
+          </NeedsYouPictures.Provider>
           {shown.length === 0 && !listQ.hasNextPage && (
             <div className="rounded-xl border border-gray-200 bg-white">
-              <EmptyState icon={<CheckCircle2 className="w-6 h-6" />} title={filtered ? 'Nothing here' : filters.mine ? 'Nothing needs you' : 'Nothing needs anyone'} description={NEEDS_YOU_RULE}
-                action={filtered ? <Button variant="secondary" size="sm" onClick={() => changeFilters({ type: null, where: null, mine: filters.mine })}>Clear filters</Button> : undefined} />
+              <EmptyState icon={<CheckCircle2 className="w-6 h-6" />} title={`No ${NEEDS_YOU_TYPE_LABEL[filters.type].toLowerCase()} waiting${filters.where ? ' here' : filters.mine ? ' for you' : ''}`} description={NEEDS_YOU_RULE}
+                action={filters.where ? <Button variant="secondary" size="sm" onClick={() => changeFilters({ ...filters, where: null })}>Show every place</Button> : undefined} />
             </div>
           )}
           {listQ.hasNextPage && (

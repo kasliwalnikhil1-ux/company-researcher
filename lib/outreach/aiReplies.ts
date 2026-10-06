@@ -417,7 +417,7 @@ export const ESCALATION_LABEL: Record<string, string> = {
 export const GATE_LABEL: Record<string, string> = {
   G2: 'Group chat', G3: 'They wrote to us first (inbound cold)', G4: 'Lead is blacklisted or do-not-contact', G5: 'Chat archived or Auto paused',
   G6: 'Sender not connected', G7: 'Their message is older than the stale limit', G11: 'Sender reached its AI send limit today',
-  G12: 'Workspace AI allowance used up', G14: 'Lead is in a region that needs a disclosure line', other_sender: 'Another sender is about to reply to the same lead',
+  G12: 'Workspace AI allowance used up', G14: 'Lead is in a blocked country', other_sender: 'Another sender is about to reply to the same lead',
 };
 
 export const MOVE_LABEL: Record<Move, string> = {

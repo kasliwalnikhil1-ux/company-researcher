@@ -9,6 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { AI_BUSY_MESSAGE } from '@/lib/aiErrorMessage';
 
 // -----------------------------------------------------------
 // CONFIG
@@ -300,11 +301,7 @@ export async function POST(req: NextRequest) {
           });
           return NextResponse.json(
             {
-              error: 'Both Vertex AI and Gemini API failed',
-              details: {
-                vertex: vertexError instanceof Error ? vertexError.message : String(vertexError),
-                gemini: geminiError instanceof Error ? geminiError.message : String(geminiError),
-              },
+              error: AI_BUSY_MESSAGE,
             },
             { status: 500 },
           );
@@ -313,8 +310,7 @@ export async function POST(req: NextRequest) {
         console.error('[fashion-deep-search] Vertex AI failed and no Gemini API key available');
         return NextResponse.json(
           {
-            error: 'Vertex AI failed and no fallback available',
-            details: vertexError instanceof Error ? vertexError.message : String(vertexError),
+            error: AI_BUSY_MESSAGE,
           },
           { status: 500 },
         );
@@ -334,8 +330,7 @@ export async function POST(req: NextRequest) {
       });
       return NextResponse.json(
         {
-          error: 'Gemini API failed',
-          details: geminiError instanceof Error ? geminiError.message : String(geminiError),
+          error: AI_BUSY_MESSAGE,
         },
         { status: 500 },
       );

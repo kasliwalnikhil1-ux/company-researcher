@@ -24,6 +24,7 @@ import {
   getOgLogoPath,
 } from '@/lib/whitelabel';
 import { WhitelabelProvider } from '@/contexts/WhitelabelContext';
+import { GlobalTooltips } from '@/components/ui/Tooltip';
 
 // Branding and link-preview tags depend on the request host, so every page must be rendered per request
 // (headers() already opts out of static rendering; this makes it explicit so a shared cached HTML can't
@@ -125,6 +126,7 @@ export default async function RootLayout({
                       <PricingModalProvider>
                         {children}
                         <Analytics />
+                        <GlobalTooltips />
                       </PricingModalProvider>
                     </CompaniesProvider>
                   </MessageTemplatesProvider>

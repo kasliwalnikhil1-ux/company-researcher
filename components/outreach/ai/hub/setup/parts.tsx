@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 
 export const plural = (n: number, one: string, many = `${one}s`) => (n === 1 ? one : many);
 
-/** Title and one line of a Setup sub-page (Replies, Website agents, General). */
+/** Title and one line of a Setup sub-page (AI replies, Website agents, General). */
 export function SetupHeading({ title, help }: { title: string; help?: React.ReactNode }) {
   return (
     <div className="min-w-0">
@@ -38,7 +38,7 @@ export function NeedsYouLink({ n, href, none = 'Nothing waiting' }: { n: number 
 export function SubTabs<K extends string>({ items, active, label }: { items: Array<{ key: K; label: string; href: string }>; active: K; label: string }) {
   return (
     <div className="border-b border-gray-200">
-      <nav className="flex flex-wrap gap-1 -mb-px" aria-label={label}>
+      <nav className="flex gap-1 -mb-px overflow-x-auto [scrollbar-width:none]" aria-label={label}>
         {items.map((t) => (
           <Link key={t.key} href={t.href} scroll={false} aria-current={active === t.key ? 'page' : undefined}
             className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', active === t.key ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800')}>

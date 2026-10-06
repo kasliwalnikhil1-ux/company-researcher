@@ -83,7 +83,8 @@ export default function SenderDiagnosis({ senderId, senderName, size = 'sm' }: {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button size={size} variant="secondary" onClick={() => setOpen(true)} aria-haspopup="dialog"><HelpCircle className="w-3.5 h-3.5" /> Why isn&apos;t this sending?</Button>
+      {/* same quiet look as the sequence top bar: an icon, with the words only on wide screens */}
+      <Button size={size} variant="ghost" onClick={() => setOpen(true)} aria-haspopup="dialog" title="Why isn't this sending? Check what is holding this sender back" aria-label="Why isn't this sending?"><HelpCircle className="w-4 h-4" /><span className="hidden 2xl:inline">Why isn&apos;t this sending?</span></Button>
       <Modal open={open} onClose={() => setOpen(false)} size="lg" title={senderName ? `Why isn't ${senderName} sending?` : "Why isn't this sending?"}
         footer={<Button variant="secondary" onClick={() => setOpen(false)}>Close</Button>}>
         {open && <DiagnosisBody senderId={senderId} />}

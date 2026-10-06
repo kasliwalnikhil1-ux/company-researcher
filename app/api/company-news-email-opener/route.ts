@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getJsonCompletion } from '@/utils/azureOpenAiHelper';
 import { createClient } from '@supabase/supabase-js';
 import { DEFAULT_B2B_NEWS_PROMPT, DEFAULT_B2B_ADS_PROMPT } from '@/app/personalization/investorAnalyzeDefault';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 
 export const maxDuration = 60;
 
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: 'Failed to generate email opener from news.', details: msg },
+      { error: 'Failed to generate email opener from news.', details: friendlyErrorText(msg) },
       { status: 500 }
     );
   }

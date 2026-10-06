@@ -184,7 +184,7 @@ export default function ActivityTable({ ws, fixed, filters, onFilters, canExport
               </tbody>
             </Table>
           </div>
-          {total > pageSize && <PaginationBar page={page} pageCount={pageCount} setPage={setPage} total={total} from={page * pageSize + 1} to={Math.min(total, (page + 1) * pageSize)} />}
+          <PaginationBar page={page} pageCount={pageCount} setPage={setPage} total={total} from={page * pageSize + 1} to={Math.min(total, (page + 1) * pageSize)} />
         </>
       )}
     </div>

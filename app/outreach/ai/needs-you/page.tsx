@@ -35,7 +35,7 @@ function NeedsYou() {
 
 export default function AiNeedsYouPage() {
   return (
-    <HubFrame subtitle="Needs you: what the AI wrote and a person has to approve, across Replies, Personalized lines, Step drafts, the Website agent and Profile drafts.">
+    <HubFrame>
       <Suspense fallback={<PageLoader />}>
         <NeedsYou />
       </Suspense>

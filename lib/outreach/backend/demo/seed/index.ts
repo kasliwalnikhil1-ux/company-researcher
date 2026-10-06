@@ -11,6 +11,7 @@ import { seedInbox } from './inbox';
 import { seedLeads as seedLeadExtras } from './leads';
 import { seedReports } from './reports';
 import { seedSenders as seedSenderExtras } from './senders';
+import { seedSent } from './sent';
 import { seedSequences as seedSequenceExtras } from './sequences';
 import { seedSettings } from './settings';
 import { seedWebchat } from './webchat';
@@ -36,6 +37,7 @@ export function buildSeed(): DemoState {
   seedAi(s, now);
   seedWebchat(s, now);
   seedInbox(s, now);
+  seedSent(s, now);
   seedSettings(s, now);
   seedReports(s, now);
   seedFaces(s);

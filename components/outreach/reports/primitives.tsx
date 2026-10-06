@@ -1,44 +1,17 @@
 'use client';
 
-import React, { useCallback, useId, useRef, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ArrowDownRight, ArrowUpRight, ArrowUpDown, ChevronDown, ChevronUp, Download, Minus, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button, Th } from '@/components/outreach/ui';
 import { useMetricDefinitions, type Change } from '@/lib/outreach/reports';
+import { InfoTip } from '@/components/ui/Tooltip';
+
+export { InfoTip };
 
 /** Accent colour. The client portal overrides --outreach-accent with the workspace's brand colour. */
 export const ACCENT = 'var(--outreach-accent, #4f46e5)';
 export const ACCENT_SOFT = 'color-mix(in srgb, var(--outreach-accent, #4f46e5) 14%, white)';
-
-// ---------------------------------------------------------------------------
-// Tooltip that is not clipped by scrolling tables (fixed position, keyboard reachable)
-// ---------------------------------------------------------------------------
-export function InfoTip({ text, children, className }: { text?: string | null; children: React.ReactNode; className?: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const id = useId();
-  const [pos, setPos] = useState<{ x: number; y: number; below: boolean } | null>(null);
-  const show = useCallback(() => {
-    const r = ref.current?.getBoundingClientRect();
-    if (!r) return;
-    const below = r.top < 120;
-    const x = Math.min(Math.max(r.left + r.width / 2, 150), window.innerWidth - 150);
-    setPos({ x, y: below ? r.bottom + 6 : r.top - 6, below });
-  }, []);
-  const hide = useCallback(() => setPos(null), []);
-  if (!text) return <span className={className}>{children}</span>;
-  return (
-    <span ref={ref} tabIndex={0} aria-describedby={pos ? id : undefined} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}
-      className={cn('cursor-help underline decoration-dotted decoration-gray-300 underline-offset-4 outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 rounded-sm', className)}>
-      {children}
-      {pos && (
-        <span id={id} role="tooltip" style={{ left: pos.x, top: pos.y, transform: `translate(-50%, ${pos.below ? '0' : '-100%'})` }}
-          className="fixed z-[70] w-72 max-w-[90vw] rounded-lg bg-gray-900 px-3 py-2 text-xs font-normal normal-case tracking-normal leading-relaxed text-white shadow-lg pointer-events-none whitespace-normal text-left">
-          {text}
-        </span>
-      )}
-    </span>
-  );
-}
 
 /** A metric name with its definition from outreach_metric_definitions(). */
 export function MetricLabel({ metric, children, className }: { metric: string; children: React.ReactNode; className?: string }) {

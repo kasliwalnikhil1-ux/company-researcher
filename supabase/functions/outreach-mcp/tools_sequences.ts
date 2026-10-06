@@ -69,7 +69,7 @@ async function poolInfo(ctx: Ctx, pool: string[]): Promise<Row[]> {
 }
 
 /**
- * Replies block of a sequence (AI-REPLIES-V2-CONTRACT §5 sequence_ai_summary): mode, effective mode, open conversations per
+ * AI replies block of a sequence (AI-REPLIES-V2-CONTRACT §5 sequence_ai_summary): mode, effective mode, open conversations per
  * stage, hand-offs in the last 7 days. Member-only RPC: a client_viewer (or a failure) gets no block, never a broken row.
  */
 async function aiRepliesOf(ctx: Ctx, sequenceId: string): Promise<Row | undefined> {
@@ -83,9 +83,9 @@ async function aiRepliesOf(ctx: Ctx, sequenceId: string): Promise<Row | undefine
 }
 
 const aiRepliesCreate = z.object({
-  mode: z.enum(["off", "review", "draft"]).optional().describe("Every new sequence starts on Review (the AI drafts every eligible reply; a person sends). `draft` is the stored name of Review and means the same. Auto is turned on later with sequence_ai_replies_set (consent, confirmation)."),
-  copy_prompt_from: z.string().optional().describe("Sequence id whose Replies prompt, scenario cards, knowledge links and Q&A are copied as an independent copy (default: the workspace default prompt or the template)"),
-}).strict().describe("Replies of the new sequence: {mode: off | review, copy_prompt_from?: sequence_id}");
+  mode: z.enum(["off", "review", "draft"]).optional().describe("Every new sequence starts on Review (the AI drafts every eligible reply; a person sends). `draft` is the stored name of Review and means the same. Auto is turned on later with sequence_ai_replies_set (confirmation)."),
+  copy_prompt_from: z.string().optional().describe("Sequence id whose AI replies prompt, scenario cards, knowledge links and Q&A are copied as an independent copy (default: the workspace default prompt or the template)"),
+}).strict().describe("AI replies of the new sequence: {mode: off | review, copy_prompt_from?: sequence_id}");
 
 function nodeTextField(n: GraphNode): "text" | "note" | "html" | null {
   switch (n.type) { case "send_invite": return "note"; case "send_message": case "send_inmail": case "comment_latest_post": case "send_voice_note": return "text"; case "send_email": return "html"; default: return null; }

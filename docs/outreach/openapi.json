@@ -5327,6 +5327,315 @@
         }
       }
     },
+    "/v1/sent": {
+      "get": {
+        "operationId": "get_sent",
+        "tags": [
+          "Inbox"
+        ],
+        "summary": "List sends (the inbox's Sent view: sent, scheduled, failed)",
+        "description": "Database function: `outreach_inbox_sent_list`.\n\nOne row per thing a person on the other side receives from us: connection requests (with or without a note), LinkedIn messages and InMails, emails, WhatsApp and Instagram messages, a teammate's replies, AI replies, and messages the account owner sent from LinkedIn or their phone. Website chat messages and private notes are never listed, nor anything sent before the account was connected.\n\nSegments: `sent` (newest first, default range the last 7 days), `scheduled` (planned sends that have not gone out, soonest first), `failed` (did not go out, plus bounced emails; newest first, last 7 days). `from` / `to` may be at most 90 days apart.\n\nPaging: pass `next_cursor` back as `cursor` until it is null.\n\nMinimum key role: client_viewer (a client viewer gets 403 when the workspace does not share Sent with clients).\n\nRate class: read.",
+        "parameters": [
+          {
+            "name": "segment",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sent",
+                "scheduled",
+                "failed"
+              ],
+              "default": "sent"
+            }
+          },
+          {
+            "name": "sender_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Comma-separated sender ids (at most 100)."
+          },
+          {
+            "name": "my_senders",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "true = only senders owned by the member who created the key."
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "LINKEDIN",
+                "EMAIL",
+                "WHATSAPP",
+                "INSTAGRAM"
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "sequence",
+                "teammate",
+                "ai",
+                "outside_app"
+              ]
+            },
+            "description": "Where it came from: a sequence step, a teammate in the app, an AI reply, or the account owner outside the app."
+          },
+          {
+            "name": "sequence_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "connection_request",
+                "message",
+                "inmail",
+                "email"
+              ]
+            }
+          },
+          {
+            "name": "replied",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            },
+            "description": "Sent segment only: true = they answered it."
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Sent / failed: start of the range (default 7 days before `to`)."
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": "Sent / failed: end of the range (default now)."
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "description": "Recipient name, text or subject (at least 2 characters)."
+          },
+          {
+            "name": "lead_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The `next_cursor` of the previous page."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SentItem"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as `cursor` for the next page; null on the last page."
+                    },
+                    "segment": {
+                      "type": "string",
+                      "enum": [
+                        "sent",
+                        "scheduled",
+                        "failed"
+                      ]
+                    },
+                    "range": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "from": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "to": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "description": "The date range used (sent / failed); null for scheduled."
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "segment"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid key (E_UNAUTHORIZED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "Workspace suspended (E_PLAN_SUSPENDED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The key's role or client scope does not allow this (E_FORBIDDEN).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found or not visible to this key (E_NOT_FOUND).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid input (E_PAYLOAD_INVALID, E_TOO_MANY, E_GRAPH_INVALID).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit reached (E_RATE_LIMITED).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds until the hourly window resets."
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error (E_INTERNAL). Nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/senders": {
       "get": {
         "operationId": "get_senders",
@@ -10968,6 +11277,60 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "first_inbound_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "null = nobody on the other side has written (the thread is not in Replies). Auto-replies count, bounces do not."
+          },
+          "last_inbound_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Their last message from a person (auto-replies and bounces excluded)."
+          },
+          "first_outbound_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_outbound_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_auto_reply_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Their latest out-of-office."
+          },
+          "waiting_on": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "us",
+              "them",
+              null
+            ],
+            "description": "us = their message is the latest, them = ours is, null = they never wrote."
+          },
+          "ai_answering": {
+            "type": "boolean",
+            "description": "The AI is answering their latest message."
           }
         },
         "required": [
@@ -10998,6 +11361,349 @@
             "additionalProperties": true
           }
         ]
+      },
+      "SentItem": {
+        "type": "object",
+        "description": "One send. `status` is the furthest reached: replied, accepted, read, delivered, sent (segment sent); scheduled, held, sending (segment scheduled); failed, bounced (segment failed).",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "src": {
+            "type": "string",
+            "enum": [
+              "message",
+              "invite",
+              "queued",
+              "ai_hold",
+              "failed",
+              "bounce"
+            ]
+          },
+          "segment": {
+            "type": "string",
+            "enum": [
+              "sent",
+              "scheduled",
+              "failed"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Time sent, planned time, or time it failed."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "held",
+              "sending",
+              "sent",
+              "delivered",
+              "read",
+              "accepted",
+              "replied",
+              "failed",
+              "bounced"
+            ]
+          },
+          "status_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Held: sender_reconnect, sender_paused, sequence_paused, allowance_used, hourly_allowance, waiting_slot. Scheduled AI reply on its warm-up hold: warmup_hold. Failed: the error code. Bounced: email_bounced."
+          },
+          "status_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is held or failed, in the words of why-not-sending."
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "LINKEDIN",
+              "EMAIL",
+              "WHATSAPP",
+              "INSTAGRAM"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "connection_request",
+              "message",
+              "inmail",
+              "email"
+            ]
+          },
+          "action_type": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "sequence",
+              "teammate",
+              "ai",
+              "outside_app"
+            ]
+          },
+          "from_ai_draft": {
+            "type": "boolean",
+            "description": "A teammate sent or edited an AI draft."
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preview": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Full text, up to 8000 characters."
+          },
+          "deleted": {
+            "type": "boolean"
+          },
+          "edited": {
+            "type": "boolean"
+          },
+          "replied_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "chat_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "message_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "action_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "ai_reply_run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "enrollment_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "enrollment_status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recoverable": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "A failed sequence step that POST /enrollments/recover can retry, skip or exit."
+          },
+          "lead": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "company": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "headline": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "picture_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "sender": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "picture_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "identifier": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "sequence": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "step": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "node_id": {
+                "type": "string"
+              },
+              "number": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "variant": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "variant_label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "sent_by": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "required": [
+          "id",
+          "src",
+          "segment",
+          "at",
+          "status",
+          "channel",
+          "type",
+          "source"
+        ],
+        "additionalProperties": true
       },
       "Budget": {
         "type": "object",

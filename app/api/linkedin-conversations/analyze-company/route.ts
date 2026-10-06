@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getJsonCompletion, Message } from '@/utils/azureOpenAiHelper';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 
 const SYSTEM_PROMPT = `You are an expert startup analyst and investment research assistant.
 
@@ -88,7 +89,7 @@ ${companyDescription}`;
   } catch (err) {
     console.error('[analyze-company] Error:', err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Failed to analyze company' },
+      { error: err instanceof Error ? friendlyErrorText(err.message) : 'Failed to analyze company' },
       { status: 500 }
     );
   }

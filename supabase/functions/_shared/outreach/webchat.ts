@@ -16,7 +16,7 @@ import { admin, FUNCTIONS_BASE, log, rpc, SERVICE_ROLE_KEY, WEB_ORIGIN } from ".
 import { hmacSha256Hex } from "./crypto.ts";
 import { unipile } from "./unipile.ts";
 import { brandName, esc, layout, sendEmail, workspaceBranding } from "./notify.ts";
-import { llmCallDetailed, resolveLlm } from "./llm.ts";
+import { AI_BUSY_MESSAGE, llmCallDetailed, resolveLlm } from "./llm.ts";
 
 // ---------------------------------------------------------------------------
 // Visitor token
@@ -525,7 +525,10 @@ export async function streamAnswer(c: AiContext, prompt: { system: string; user:
   if (/gemini-3/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingLevel: "LOW" };
   else if (/gemini-2\.5/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingBudget: 512 };
   const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt.system }] }, contents: [{ role: "user", parts: [{ text: prompt.user }] }], generationConfig }) });
-  if (!res.ok || !res.body) throw new Error(`E_AI_FAILED: gemini ${res.status} ${(await res.text().catch(() => "")).slice(0, 200)}`);
+  if (!res.ok || !res.body) {
+    log({ fn: "webchat", error: "answer stream failed", status: res.status, detail: (await res.text().catch(() => "")).slice(0, 300) });
+    throw new Error(`E_AI_BUSY: ${AI_BUSY_MESSAGE}`);
+  }
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = "", raw = "", answerSoFar = "", tokens_in: number | null = null, tokens_out: number | null = null;

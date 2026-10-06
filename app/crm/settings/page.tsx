@@ -5,6 +5,7 @@ import { useCrm } from '@/contexts/CrmContext';
 import { useChannelCosts } from '@/lib/crm/queries';
 import type { Lookup, LookupKind, Member } from '@/lib/crm/types';
 import { Badge, Button, Card, ErrorBox, Input, PageHeader, Select, Table, Td, Th, Textarea, fmtDate } from '@/components/crm/ui';
+import { MemberAvatar } from '@/components/crm/members';
 import { TZ_OPTIONS, useWrite } from '@/components/crm/forms';
 import { INVITE_DEFAULTS, INVITE_PLACEHOLDERS, inviteDescription, inviteTitle, type InviteVars } from '@/lib/crm/invite';
 import { ArrowDown, ArrowUp, Pencil, Plus, UserPlus } from 'lucide-react';
@@ -94,9 +95,6 @@ function LookupList({ kind, title, hint }: { kind: LookupKind; title: string; hi
   );
 }
 
-const AVATAR_TONES = ['bg-indigo-100 text-indigo-700', 'bg-emerald-100 text-emerald-700', 'bg-amber-100 text-amber-800', 'bg-pink-100 text-pink-700', 'bg-sky-100 text-sky-700', 'bg-purple-100 text-purple-700'];
-const initials = (name: string) => { const p = name.trim().split(/[\s._-]+/).filter(Boolean); return ((p.length > 1 ? p[0][0] + p[1][0] : name.trim().slice(0, 2)) || '?').toUpperCase(); };
-const avatarTone = (key: string) => AVATAR_TONES[[...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % AVATAR_TONES.length];
 
 function MemberRow({ m, isMe, busy, onRename, onToggle }: { m: Member; isMe: boolean; busy: boolean; onRename: (name: string) => void; onToggle: () => void }) {
   const [name, setName] = useState(m.display_name);
@@ -104,7 +102,7 @@ function MemberRow({ m, isMe, busy, onRename, onToggle }: { m: Member; isMe: boo
   const commit = () => { const v = name.trim(); if (v && v !== m.display_name) onRename(v); else setName(m.display_name); };
   return (
     <li className="group px-3 py-2 flex items-center gap-3 text-sm hover:bg-gray-50">
-      <div className={cn('w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-semibold flex-shrink-0', m.is_active ? avatarTone(m.email ?? m.user_id) : 'bg-gray-100 text-gray-400')}>{initials(m.display_name)}</div>
+      <MemberAvatar userId={m.user_id} name={m.display_name} size="lg" />
       <div className={cn('flex-1 min-w-0', !m.is_active && 'opacity-60')}>
         <div className="flex items-center gap-1.5">
           {/* Hidden mirror span sizes the input to its text so the pencil / You badge sit right after the name. */}

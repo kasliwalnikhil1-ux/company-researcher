@@ -15,6 +15,7 @@ import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/c
 import { INTENTS, INTENT_LABELS, useNow } from './hooks';
 import { ESCALATION_LABEL, HANDOFF_LABEL, fmtCountdown, type StageDef } from '@/lib/outreach/aiReplies';
 import { AI_FILTERS, AI_FILTER_LABEL, humanizeKey, type AiChatFilter } from './ai/useAiInbox';
+import { CHIP_LABEL, CHIP_TOOLTIP, sourceLine, statusLabel, STATUS_TONE, waitingFor, type ReplyChip, type SentItem } from '@/lib/outreach/inboxSent';
 
 export type ChatRow = Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 
@@ -51,6 +52,11 @@ export interface ChatListProps {
   mentionsView?: boolean;
   onMentionsView?: (v: boolean) => void;
   onSelectMention?: (chatId: string, noteId: string) => void;
+  /** Replies / Sent (075): the Needs reply count for the chip, and the Sent group under the search results (§4.6). */
+  needsReply?: number;
+  sentMatches?: SentItem[];
+  onOpenSent?: (it: SentItem) => void;
+  onShowAllSent?: () => void;
 }
 
 const ROW_H = 76;
@@ -84,7 +90,7 @@ function ActiveChip({ label, value, onClear }: { label: string; value: string; o
 
 type View = 'all' | 'unread' | 'mine' | 'mentions' | 'archived';
 
-export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note, stages, hasMore, loadingMore, onLoadMore, ws, mentionsView, onMentionsView, onSelectMention }: ChatListProps) {
+export default function ChatList({ rows, loading, error, filters, onFilters, search, onSearch, senders, clients, currentUserId, selectedId, onSelect, sequences, sequenceId, onSequence, restrictLabel, restrictCount, onClearRestrict, note, stages, hasMore, loadingMore, onLoadMore, ws, mentionsView, onMentionsView, onSelectMention, needsReply, sentMatches, onOpenSent, onShowAllSent }: ChatListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // private notes: unread-mention badge for the Mentions tab; note search results shown above the conversation rows
   const badgeQ = useNotesBadge(ws ?? null);
@@ -109,7 +115,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   const visible = useMemo(() => list.slice(start, end), [list, start, end]);
   // "AI in 9 min" badges tick only while a visible row has a scheduled AI reply.
   const anyScheduled = useMemo(() => visible.some((c) => c.ai_run_status === 'scheduled' && c.ai_scheduled_send_at), [visible]);
-  const now = useNow(15_000, anyScheduled);
+  const now = useNow(15_000, anyScheduled || filters.chip === 'needs_reply');
 
   // Infinite scroll: ask for the next page when the bottom is within LOAD_AHEAD_ROWS of the viewport, and also when the
   // rows fetched so far do not fill the viewport (short pages, client-side restriction), so the list never stalls.
@@ -251,7 +257,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
           )}
         </div>
 
-        <div className="flex p-0.5 rounded-lg bg-gray-100" role="tablist" aria-label="Conversation view">
+        <div className="flex p-0.5 rounded-lg border border-gray-200 bg-white" role="tablist" aria-label="Conversation view">
           {views.map((v) => (
             <button
               key={v.id}
@@ -260,13 +266,28 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
               aria-selected={view === v.id}
               title={v.title}
               onClick={() => setView(v.id)}
-              className={cn('flex-1 text-xs py-1 rounded-md transition-colors inline-flex items-center justify-center gap-1', view === v.id ? 'bg-white text-gray-900 font-medium shadow-sm' : 'text-gray-500 hover:text-gray-800')}
+              className={cn('flex-1 text-xs py-1 rounded-md transition-colors inline-flex items-center justify-center gap-1', view === v.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800')}
             >
               {v.label}
               {!!v.count && <span className="min-w-[16px] px-1 rounded-full bg-amber-500 text-white text-[10px] leading-4 tabular-nums">{v.count > 99 ? '99+' : v.count}</span>}
             </button>
           ))}
         </div>
+
+        {!mentionsView && (
+          <div className="flex items-center gap-1 overflow-x-auto -mx-0.5 px-0.5 [scrollbar-width:none]" role="radiogroup" aria-label="Who wrote last">
+            {(['all', 'needs_reply', 'waiting_on_them'] as ReplyChip[]).map((c) => {
+              const on = (filters.chip ?? 'all') === c;
+              return (
+                <button key={c} type="button" role="radio" aria-checked={on} title={CHIP_TOOLTIP[c]} onClick={() => onFilters({ chip: c })}
+                  className={cn('flex-shrink-0 inline-flex items-center gap-1 text-[11px] px-2.5 py-0.5 rounded-full border whitespace-nowrap', on ? 'border-indigo-200 bg-indigo-50 text-indigo-700 font-medium' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50')}>
+                  {CHIP_LABEL[c]}
+                  {c === 'needs_reply' && !!needsReply && <span className="tabular-nums text-[10px] text-indigo-600">{needsReply > 999 ? '999+' : needsReply}</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {active.length > 0 && (
           <div className="flex flex-wrap items-center gap-1">
@@ -296,10 +317,31 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
             ))}
           </div>
         )}
+        {search.trim().length >= 2 && !!sentMatches?.length && onOpenSent && (
+          <div className="border-b border-gray-100 bg-gray-50/60">
+            <div className="px-3 pt-2 pb-1 flex items-center text-[10px] uppercase tracking-wide text-gray-500">
+              <span>Sent matching “{search.trim()}”</span>
+              {onShowAllSent && <button type="button" onClick={onShowAllSent} className="ml-auto normal-case tracking-normal text-[11px] text-indigo-600 hover:text-indigo-800">Show all</button>}
+            </div>
+            {sentMatches.slice(0, 5).map((it) => (
+              <button key={it.id} type="button" onClick={() => onOpenSent(it)} className="w-full text-left flex items-start gap-2 px-3 py-1.5 hover:bg-gray-100/80">
+                <ProviderLogo provider={it.sender.provider ?? 'LINKEDIN'} className="w-3 h-3 mt-0.5 rounded-[2px] flex-shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-medium text-gray-900 truncate">{it.lead?.name ?? 'Unknown recipient'}{it.lead?.company ? ` · ${it.lead.company}` : ''}</span>
+                  <span className="block text-[11px] text-gray-600 truncate">{it.subject ? `${it.subject} · ` : ''}{it.preview}</span>
+                  <span className="block text-[10px] text-gray-400 truncate">{sourceLine(it)}</span>
+                </span>
+                <span className={cn('text-[10px] px-1 rounded border flex-shrink-0', STATUS_TONE[it.status])}>{statusLabel(it)}</span>
+              </button>
+            ))}
+          </div>
+        )}
         {error && <ErrorBox message={error} className="m-3" />}
         {!error && loading && !rows && <Spinner />}
         {!error && rows && rows.length === 0 && (
-          <EmptyState icon={<Inbox className="w-6 h-6" />} title={filters.archived ? 'No archived conversations' : 'No conversations'} description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation carries a step of this sequence with these filters.' : search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id || filters.ai || filters.stage ? 'Try clearing some filters.' : 'Replies land here as soon as a sender receives a message.'} />
+          <EmptyState icon={<Inbox className="w-6 h-6" />}
+            title={filters.archived ? 'No archived conversations' : filters.chip === 'needs_reply' && !search ? "You're all caught up." : filters.chip === 'waiting_on_them' && !search ? 'Nothing waiting on them' : 'No replies yet'}
+            description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation where they wrote carries a step of this sequence with these filters.' : search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id || filters.ai || filters.stage || filters.has_notes ? 'Try clearing some filters.' : filters.chip === 'needs_reply' ? 'Nobody is waiting for an answer.' : filters.chip === 'waiting_on_them' ? 'No conversation where our message is the latest.' : 'When someone answers, the conversation shows up here.'} />
         )}
         {note && rows && rows.length > 0 && <p className="px-3 py-1.5 text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100">{note}</p>}
         {rows && rows.length > 0 && (
@@ -331,6 +373,9 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                       <div className="flex items-center gap-1.5 mt-0.5 min-w-0 overflow-hidden">
                         {c.outreach_senders?.display_name && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[45%]">{c.outreach_senders.display_name}</span>}
                         {c.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: the person has not accepted the conversation yet, so they may not have seen it">Request</span>}
+                        {filters.chip === 'needs_reply' && c.last_inbound_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 whitespace-nowrap flex-shrink-0 tabular-nums" title={`Their last message: ${new Date(c.last_inbound_at).toLocaleString()}`}>{waitingFor(c.last_inbound_at, now)}</span>}
+                        {c.provider !== 'WEBCHAT' && c.first_inbound_at && (!c.first_outbound_at || c.first_inbound_at < c.first_outbound_at) && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 whitespace-nowrap flex-shrink-0" title="They wrote to us first">Wrote first</span>}
+                        {c.last_auto_reply_at && (!c.last_inbound_at || c.last_auto_reply_at > c.last_inbound_at) && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 whitespace-nowrap flex-shrink-0" title="Their latest message is an automatic reply (out of office). It does not count as a reply.">Auto-reply</span>}
                         {c.provider === 'WEBCHAT' && c.status && c.status !== 'open' && <span className={cn('text-[10px] px-1.5 py-0.5 rounded whitespace-nowrap flex-shrink-0', c.status === 'resolved' ? 'bg-emerald-50 text-emerald-700' : c.status === 'snoozed' ? 'bg-sky-50 text-sky-700' : 'bg-amber-50 text-amber-700')} title={`Web chat conversation is ${c.status}`}>{c.status}</span>}
                         {c.provider === 'WEBCHAT' && (c.voice_calls ?? 0) > 0 && <span className="flex-shrink-0 text-gray-400" title={`${c.voice_calls} voice call${c.voice_calls === 1 ? '' : 's'} with the website agent`} aria-label="Had a voice call"><Mic className="w-3 h-3" /></span>}
                         {c.provider === 'WEBCHAT' && c.ai_handled && !c.handed_off_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 whitespace-nowrap flex-shrink-0" title="The website agent is answering this visitor">AI</span>}

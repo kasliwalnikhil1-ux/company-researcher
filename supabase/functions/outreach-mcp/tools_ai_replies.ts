@@ -1,5 +1,5 @@
 // outreach-mcp/tools_ai_replies.ts — AI replies v2 (docs/outreach/AI-REPLIES-V2-CONTRACT.md §5–§6; ai-replies-changes.md §8 / §9.7).
-// The app calls this feature "Replies" (AI hub, docs/outreach/AI-HUB.md §1); its modes are shown as Off · Review · Auto and
+// The app calls this feature "AI replies" (AI hub, docs/outreach/AI-HUB.md §1; renamed from "Replies" by inbox-replies-sent-PRD D1); its modes are shown as Off · Review · Auto and
 // stored as off | draft | autopilot.
 //
 // The model, in one paragraph: AI replies are a SEQUENCE setting (mode Off | Review | Auto, its own master prompt with scenario
@@ -103,7 +103,7 @@ const settingsPatchSchema = z.object({
   stale_after_h: z.number().int().min(1).max(72).optional().describe("Older inbound than this is drafted, never auto-sent"),
   languages: z.array(z.string().regex(/^[a-z]{2,3}$/)).min(1).optional().describe("ISO language codes the AI may answer in, e.g. ['en','hi']"),
   disclosure: z.string().max(200).nullable().optional().describe("Line the platform appends to every AI-sent message (never written by the model); null = none"),
-  blocked_countries: z.array(z.string().regex(/^[A-Z]{2}$/)).nullable().optional().describe("ISO-2 countries where Auto is off while no disclosure is set; [] = none; null = the EU/EEA default"),
+  blocked_countries: z.array(z.string().regex(/^[A-Z]{2}$/)).nullable().optional().describe("ISO-2 countries where Auto never sends (those leads get drafts); a lead whose country is unknown still gets Auto; the disclosure line has no effect on it; null or [] = none, nothing is blocked by default"),
   returning_after_days: z.number().int().min(1).max(30).optional().describe("Gap after which a prospect's message starts a new session (counters reset, stage kept); default 3"),
   dormant_after_days: z.number().int().min(7).max(365).optional().describe("Gap after which the session starts at Re-engage; default 30, above returning_after_days"),
   inactivity_days: z.number().int().min(1).max(60).nullable().optional().describe("A prospect quiet this long mid-conversation → follow-up task for a person (no AI nudge); null = off; default 7"),
@@ -335,7 +335,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "ai_reply_chat_state", title: "AI reply state of a thread", cls: "read", minRole: "client_viewer",
-    description: "For one chat: the effective AI mode (stored value off | draft | autopilot; mode_label says Off · Review · Auto) with requested_mode (+ requested_mode_label) and the plain reason when it is lower (reason_code: channel_not_supported, handed_off, no_sequence, off, sequence_paused / sequence_archived / sequence_draft, consent_missing, paused_escalated, paused_bot), the sequence the conversation belongs to (sequence_id / sequence_name / sequence_status), handed_off = {at, reason (human_replied | meeting_confirmed | calendar_sent | stop_rule | max_replies | stage | booking | manual), rule, run_id} or null (the AI stops for good in a handed-off chat until chat_ai_resume), session = {kind: normal | returning | dormant, started_at, count}, warmup_remaining, the conversation stage (key, label, position of total; 're_engage' for a dormant session), exchanges, ai_replies_count of max_ai_replies, the master prompt in force, fallback (workspace_default | template when the chat has no sequence: Draft with AI still works), lead_notes_summary, the active run (draft, scheduled_send_at, rule_applied) and the last finished run. Use when the user asks \"is the AI handling this thread?\" or why a thread was or was not answered.",
+    description: "For one chat: the effective AI mode (stored value off | draft | autopilot; mode_label says Off · Review · Auto) with requested_mode (+ requested_mode_label) and the plain reason when it is lower (reason_code: channel_not_supported, handed_off, no_sequence, off, sequence_paused / sequence_archived / sequence_draft, paused_escalated, paused_bot), the sequence the conversation belongs to (sequence_id / sequence_name / sequence_status), handed_off = {at, reason (human_replied | meeting_confirmed | calendar_sent | stop_rule | max_replies | stage | booking | manual), rule, run_id} or null (the AI stops for good in a handed-off chat until chat_ai_resume), session = {kind: normal | returning | dormant, started_at, count}, warmup_remaining, the conversation stage (key, label, position of total; 're_engage' for a dormant session), exchanges, ai_replies_count of max_ai_replies, the master prompt in force, fallback (workspace_default | template when the chat has no sequence: Draft with AI still works), lead_notes_summary, the active run (draft, scheduled_send_at, rule_applied) and the last finished run. Use when the user asks \"is the AI handling this thread?\" or why a thread was or was not answered.",
     input: { chat_id: z.string() },
   }, async (a) => {
     const s = await urpc<Row>(ctx, "ai_reply_chat_state", { p_chat: a.chat_id });
@@ -352,25 +352,23 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
 
   // ================================================================ sequence settings (§1, §4)
   tool(server, ctx, {
-    name: "sequence_ai_replies_get", title: "Replies settings of a sequence", cls: "read", minRole: "member",
-    description: "The Replies settings of one sequence (in the app: the sequence's AI tab, and AI → Setup → Replies): mode (stored value off | draft | autopilot; mode_label says Off · Review · Auto) and effective_mode + effective_mode_label (a paused / archived / draft sequence runs at most in Review), the prompt in force (id, version, stop_present, number of scenario cards, Q&A and attached knowledge), pitch_after_replies, max_ai_replies_per_chat, warmup_remaining (read-only: while > 0 every Auto reply waits 30–40 min and the assignee is told), handoff_stage_id, hold (delay_min_s..delay_max_s), debounce, stale_after_h, languages, disclosure, blocked_countries (null = EU/EEA default), returning_after_days / dormant_after_days (sessions), inactivity_days (gone-quiet task), downgraded_at / downgrade_reason (the platform switched Auto off), senders = the pool's LinkedIn senders with owner_is_me and consent (granted | pending | missing: Auto only sends as a sender whose owner consented once), open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open. What the AI SAYS is master_prompt_get; the real per-thread mode is ai_reply_chat_state.",
+    name: "sequence_ai_replies_get", title: "AI replies settings of a sequence", cls: "read", minRole: "member",
+    description: "The AI replies settings of one sequence (in the app: the sequence's AI tab, and AI → Setup → AI replies): mode (stored value off | draft | autopilot; mode_label says Off · Review · Auto) and effective_mode + effective_mode_label (a paused / archived / draft sequence runs at most in Review), the prompt in force (id, version, stop_present, number of scenario cards, Q&A and attached knowledge), pitch_after_replies, max_ai_replies_per_chat, warmup_remaining (read-only: while > 0 every Auto reply waits 30–40 min and the assignee is told), handoff_stage_id, hold (delay_min_s..delay_max_s), debounce, stale_after_h, languages, disclosure, blocked_countries (null or [] = none; no default), returning_after_days / dormant_after_days (sessions), inactivity_days (gone-quiet task), downgraded_at / downgrade_reason (the platform switched Auto off), senders = the pool's LinkedIn senders (every sender in the pool replies on Auto when the sequence is on Auto; no owner approval), open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open. What the AI SAYS is master_prompt_get; the real per-thread mode is ai_reply_chat_state.",
     input: { sequence_id: z.string() },
   }, async (a) => {
     await loadSeq(ctx, a.sequence_id, "member");
     const s = await urpc<Row>(ctx, "sequence_ai_replies_get", { p_sequence: a.sequence_id });
     const notes: string[] = [];
-    const missing = ((s?.senders ?? []) as Row[]).filter((x) => x.consent !== "granted");
-    if (s?.mode === "autopilot" && missing.length) notes.push(`Auto is on, but ${missing.map((x) => `${x.sender_name} (${x.consent})`).join(", ")} run in Review until their owner approves AI replies (one approval per sender; the platform emails them, or the owner approves in the app).`);
     if (s?.mode === "autopilot" && Number(s?.warmup_remaining ?? 0) > 0) notes.push(`Warm-up: the next ${s.warmup_remaining} Auto replies wait 30–40 min so someone can check them.`);
     if (s?.downgraded_at) notes.push(`The platform switched Auto off on ${dateOf(s.downgraded_at)} (${s.downgrade_reason ?? "breaker"}); turning it back on needs a note from a manager.`);
     if (s?.prompt && !s.prompt.stop_present) notes.push(`The prompt has no "Stop when" section: the AI only stops after ${s.max_ai_replies_per_chat} replies.`);
-    if (s?.effective_mode !== s?.mode) notes.push(`The sequence is ${s?.sequence_status}: Replies run as ${MODE_LABEL[String(s?.effective_mode)]} until it is active (drafts wait in the inbox and in AI → Needs you; nothing auto-sends).`);
+    if (s?.effective_mode !== s?.mode) notes.push(`The sequence is ${s?.sequence_status}: AI replies run as ${MODE_LABEL[String(s?.effective_mode)]} until it is active (drafts wait in the inbox and in AI → Needs you; nothing auto-sends).`);
     return { ...settingsView(s ?? {}), notes: notes.length ? notes : undefined, next: "Change with sequence_ai_replies_set (confirmation). Prompt: master_prompt_get / master_prompt_update; cards: scenarios_list; knowledge: knowledge_sources_list + knowledge_attach; Q&A: qa_list; questions the AI could not answer: unanswered_list." };
   });
 
   tool(server, ctx, {
-    name: "sequence_ai_replies_set", title: "Change a sequence's Replies settings", cls: "gated", minRole: "manager",
-    description: "Change the Replies settings of one sequence: mode off | review | auto (Off = nothing happens when a prospect replies · Review = the AI drafts every reply and a person sends it · Auto = the AI sends its reply after a short hold, and anything it should not answer comes to Needs you; the stored values draft = review and autopilot = auto are accepted too), pitch_after_replies, max_ai_replies_per_chat, handoff_stage_id, hold delays, debounce, stale limit, languages, disclosure, blocked_countries, returning_after_days / dormant_after_days, inactivity_days. Only the fields in patch change. Turning Auto on asks every pool sender's owner for consent once (skipped when the caller owns the account; the result's consent block says who was emailed or granted); until they approve, their threads run in Review. Switching to Off or Review turns scheduled AI sends back into drafts. Re-enabling Auto after the platform downgraded it needs a note. warmup_remaining is read-only. Confirmation-gated: the summary shows each field before → after. Manager only.",
+    name: "sequence_ai_replies_set", title: "Change a sequence's AI replies settings", cls: "gated", minRole: "manager",
+    description: "Change the AI replies settings of one sequence: mode off | review | auto (Off = nothing happens when a prospect replies · Review = the AI drafts every reply and a person sends it · Auto = the AI sends its reply after a short hold, and anything it should not answer comes to Needs you; the stored values draft = review and autopilot = auto are accepted too), pitch_after_replies, max_ai_replies_per_chat, handoff_stage_id, hold delays, debounce, stale limit, languages, disclosure, blocked_countries, returning_after_days / dormant_after_days, inactivity_days. Only the fields in patch change. Turning Auto on applies to every sender in the sequence's pool at once (no owner approval). Switching to Off or Review turns scheduled AI sends back into drafts. Re-enabling Auto after the platform downgraded it needs a note. warmup_remaining is read-only. Confirmation-gated: the summary shows each field before → after. Manager only.",
     input: { sequence_id: z.string(), patch: settingsPatchSchema, note: z.string().max(500).optional().describe("Why (audited; required to re-enable Auto after a downgrade)"), confirmation_token: z.string().optional() },
     annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: true },
   }, async (a) => {
@@ -388,34 +386,25 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
     const show = (v: unknown) => (v === null || v === undefined ? "none" : Array.isArray(v) ? (v.length ? v.join(",") : "none") : typeof v === "string" && MODE_LABEL[v] ? MODE_LABEL[v] : JSON.stringify(v));
     const lines = keys.map((k) => `${k}: ${show(cur?.[k])} → ${show(patch[k])}`);
     const warn: string[] = [];
-    const senders = ((cur?.senders ?? []) as Row[]);
     if (patch.mode === "autopilot") {
-      const missing = senders.filter((s) => s.consent !== "granted");
       warn.push(`Auto sends replies without a person after the hold, in the sender's working hours, until a Stop rule, a calendar link, the reply cap or a person's message hands the chat off.${Number(cur?.warmup_remaining ?? 0) > 0 ? ` The first ${cur.warmup_remaining} replies wait 30–40 min so someone can check them.` : ""}`);
-      if (missing.length) warn.push(`Consent: ${missing.map((s) => `${s.sender_name}${s.owner_is_me ? " (yours: granted on the spot)" : ` (owner ${s.owner_email ?? "unknown"} is emailed an approval link)`}`).join(", ")}; their threads run in Review until approved.`);
       if (cur?.sequence_status !== "active") warn.push(`The sequence is ${cur?.sequence_status}: nothing auto-sends until it is active.`);
     }
     if (patch.mode === "off") warn.push("Off: nothing happens when a prospect replies. AI replies already scheduled in this sequence turn back into drafts (nothing already sent changes), and no new drafts are written.");
     if (patch.mode === "draft") warn.push("Review: the AI drafts every reply and a person sends it (the drafts wait in the inbox and in AI → Needs you). AI replies already scheduled in this sequence turn back into drafts (nothing already sent changes).");
-    if (a.patch.disclosure === null && cur?.disclosure) warn.push("Removing the disclosure turns Auto off again for leads in blocked countries.");
-    const summary = `Change the Replies settings of ${seqLabel(seq)} (applies to the next reply in ${cur?.open_conversations ?? 0} open conversation(s)):\n${lines.map((l) => `• ${l}`).join("\n")}${warn.length ? `\n${warn.join(" ")}` : ""}${a.note ? `\nNote: "${short(a.note, 200)}"` : ""}`;
+    const summary = `Change the AI replies settings of ${seqLabel(seq)} (applies to the next reply in ${cur?.open_conversations ?? 0} open conversation(s)):\n${lines.map((l) => `• ${l}`).join("\n")}${warn.length ? `\n${warn.join(" ")}` : ""}${a.note ? `\nNote: "${short(a.note, 200)}"` : ""}`;
     const g = await gate(ctx, "sequence_ai_replies_set", a as Record<string, unknown>, summary, ws.id);
     if (!g.proceed) return g.result;
     const r = await callFn<Row>(ctx, "ai-reply", { action: "ai_replies_set", sequence_id: seq.id, patch, note: a.note ?? null });
-    const consent = (r.consent ?? null) as Row | null;
-    const requested = ((consent?.requested ?? []) as Row[]);
     return {
-      saved: true, sequence_id: seq.id, settings: settingsView((r.settings ?? {}) as Row), applies_to: (r.settings as Row)?.applies_to, consent: consent ?? undefined,
-      next: requested.some((x) => x.link)
-        ? "Some sender owners could not be emailed: give each consent link ONLY to that sender's owner (the person whose account it is). Never open or accept a consent link yourself; consent is theirs to give."
-        : requested.length ? "Sender owners were emailed an approval link; until they approve, their threads run in Review. sequence_ai_replies_get shows consent per sender."
-        : "Saved. ai_reply_chat_state shows what a given thread now does.",
+      saved: true, sequence_id: seq.id, settings: settingsView((r.settings ?? {}) as Row), applies_to: (r.settings as Row)?.applies_to,
+      next: "Saved. ai_reply_chat_state shows what a given thread now does.",
     };
   });
 
   tool(server, ctx, {
-    name: "workspace_reply_settings_get", title: "Workspace Replies defaults", cls: "read", minRole: "member",
-    description: "The two workspace-level Replies settings (in the app: AI → Setup → General): max_ai_sends_per_sender_day (the per-sender daily cap, counted across all sequences) and the default library prompt new sequences copy (default_prompt_id / default_prompt_name). Everything else is per sequence (sequence_ai_replies_get).",
+    name: "workspace_reply_settings_get", title: "Workspace AI replies defaults", cls: "read", minRole: "member",
+    description: "The two workspace-level AI replies settings (in the app: AI → Setup → General): max_ai_sends_per_sender_day (the per-sender daily cap, counted across all sequences) and the default library prompt new sequences copy (default_prompt_id / default_prompt_name). Everything else is per sequence (sequence_ai_replies_get).",
     input: { ...wsParam },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id); requireRole(ws, "member");
@@ -424,7 +413,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
   });
 
   tool(server, ctx, {
-    name: "workspace_reply_settings_set", title: "Change the workspace Replies defaults", cls: "gated", minRole: "manager",
+    name: "workspace_reply_settings_set", title: "Change the workspace AI replies defaults", cls: "gated", minRole: "manager",
     description: "Change max_ai_sends_per_sender_day (1–40) and / or default_prompt_id (a library prompt of the workspace, null = the built-in template). Never raise the cap to push volume. Confirmation-gated. Manager only.",
     input: { ...wsParam, max_ai_sends_per_sender_day: z.number().int().min(1).max(40).optional(), default_prompt_id: z.string().nullable().optional(), confirmation_token: z.string().optional() },
     annotations: { destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -436,14 +425,14 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
     if (!Object.keys(patch).length) throw new McpError("E_PAYLOAD_INVALID", "pass max_ai_sends_per_sender_day and / or default_prompt_id");
     const cur = await urpc<Row>(ctx, "workspace_reply_settings_get", { p_ws: ws.id });
     const lines = Object.keys(patch).map((k) => `${k}: ${JSON.stringify(cur?.[k] ?? null)}${k === "default_prompt_id" && cur?.default_prompt_name ? ` (${cur.default_prompt_name})` : ""} → ${JSON.stringify(patch[k])}`);
-    const g = await gate(ctx, "workspace_reply_settings_set", a as Record<string, unknown>, `Change the workspace Replies defaults of "${ws.name}":\n${lines.map((l) => `• ${l}`).join("\n")}${patch.max_ai_sends_per_sender_day ? "\nThe cap counts Auto sends per sender per day across every sequence." : ""}`, ws.id);
+    const g = await gate(ctx, "workspace_reply_settings_set", a as Record<string, unknown>, `Change the workspace AI replies defaults of "${ws.name}":\n${lines.map((l) => `• ${l}`).join("\n")}${patch.max_ai_sends_per_sender_day ? "\nThe cap counts Auto sends per sender per day across every sequence." : ""}`, ws.id);
     if (!g.proceed) return g.result;
     return { saved: true, ...(await urpc<Row>(ctx, "workspace_reply_settings_set", { p_ws: ws.id, p_patch: patch }) ?? {}) };
   });
 
   // ================================================================ master prompt per sequence
   tool(server, ctx, {
-    name: "master_prompt_get", title: "Read a sequence's Replies prompt", cls: "read", minRole: "member",
+    name: "master_prompt_get", title: "Read a sequence's AI replies prompt", cls: "read", minRole: "member",
     description: "The master prompt of one sequence (every sequence has its own; a new one copies the workspace default or the template): editor_mode (guided = sections + stage settings + scenario cards the engine enforces; raw = one text), version, body (compiled), sections (who, flow, situations, handoff, stop, facts, style), settings (stages, skip_to_pitch_when, bot_question, max_length …), scenarios (situation cards: id, title, when_text, do_text, enabled), faqs (Q&A pairs), knowledge (attached sources: title, status, chunks), stop_present (a 'Stop when' section exists), situations_text_convertible (free-text Situations that could become cards), copied_from_prompt_id, and leftover <placeholders>. version = an older version's text. history:true adds the version list. Read this before proposing any edit.",
     input: { sequence_id: z.string(), version: z.number().int().min(1).optional(), history: z.boolean().optional() },
   }, async (a) => {
@@ -477,7 +466,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "master_prompt_update", title: "Save a prompt edit", cls: "gated", minRole: "manager",
-    description: "Save a new version of one sequence's Replies prompt. Pass only what changes: sections (guided mode, partial), body (raw mode, whole text), settings (partial), editor_mode; the rest is taken from the current version. Scenario cards, Q&A and knowledge are NOT edited here (scenario_save, qa_save, knowledge_attach). change_kind is REQUIRED and is the human's call: 'style' (wording, tone, length: scheduled sends still go out, warm-up unchanged) or 'substantive' (what the AI offers, says, the facts it may use, when it hands over or stops: warm-up restarts at ≥ 10 held replies and scheduled sends are redrafted on the new version). Edits to Situations, Facts, Stop when or Hand to a person are always substantive. No re-consent is needed for prompt edits (consent is once per sender). Pass base_version (the version you read) so a concurrent save is detected. Before calling: simulate the edit and let the human see the replies. Never write a prompt that makes the AI claim to be human (the platform's safety floor overrides it anyway). Confirmation-gated. Manager only.",
+    description: "Save a new version of one sequence's AI replies prompt. Pass only what changes: sections (guided mode, partial), body (raw mode, whole text), settings (partial), editor_mode; the rest is taken from the current version. Scenario cards, Q&A and knowledge are NOT edited here (scenario_save, qa_save, knowledge_attach). change_kind is REQUIRED and is the human's call: 'style' (wording, tone, length: scheduled sends still go out, warm-up unchanged) or 'substantive' (what the AI offers, says, the facts it may use, when it hands over or stops: warm-up restarts at ≥ 10 held replies and scheduled sends are redrafted on the new version). Edits to Situations, Facts, Stop when or Hand to a person are always substantive. Pass base_version (the version you read) so a concurrent save is detected. Before calling: simulate the edit and let the human see the replies. Never write a prompt that makes the AI claim to be human (the platform's safety floor overrides it anyway). Confirmation-gated. Manager only.",
     input: {
       sequence_id: z.string(), ...promptPatchShape,
       change_kind: z.enum(["style", "substantive"]).describe("Ask the human if unsure. Situations / Facts / Stop / Hand-off edits are substantive."),
@@ -500,7 +489,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
     const ph = placeholdersIn([m.editor_mode === "raw" ? m.body : null, ...SECTION_KEYS.map((k) => (m.sections?.[k] as string | undefined))]);
     const stopMissing = m.editor_mode === "guided" ? !String(m.sections?.stop ?? "").trim() : !/##\s*Stop when/i.test(m.body);
     const summary = [
-      `Save the Replies prompt of ${seqLabel(seq)} as version ${Number(cur.version) + 1} (${m.editor_mode}, on top of version ${cur.version}).`,
+      `Save the AI replies prompt of ${seqLabel(seq)} as version ${Number(cur.version) + 1} (${m.editor_mode}, on top of version ${cur.version}).`,
       `Changes: ${describeChanges(m)}.`,
       kind === "substantive" ? `Change kind: SUBSTANTIVE${kind !== a.change_kind ? " (switching to raw mode always is)" : ""}. ${SUBSTANTIVE_NOTE}` : "Change kind: STYLE-ONLY: scheduled AI replies still go out as drafted and warm-up is unchanged. Only choose this if the edit does not change what the AI offers, claims, hands over or stops on.",
       stopMissing ? `No "Stop when" section: the AI will only stop after the sequence's reply cap.` : "",
@@ -523,7 +512,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "master_prompt_copy", title: "Copy the prompt from another sequence", cls: "gated", minRole: "manager",
-    description: "Replace one sequence's Replies prompt with an independent copy of another sequence's prompt (or a library prompt): prompt text, scenario cards, Q&A and knowledge links are copied; later edits on either side stay separate. Substantive (warm-up restarts, scheduled replies redrafted). Confirmation-gated. Manager only.",
+    description: "Replace one sequence's AI replies prompt with an independent copy of another sequence's prompt (or a library prompt): prompt text, scenario cards, Q&A and knowledge links are copied; later edits on either side stay separate. Substantive (warm-up restarts, scheduled replies redrafted). Confirmation-gated. Manager only.",
     input: { sequence_id: z.string().describe("The sequence that receives the copy"), from_sequence_id: z.string().optional(), from_library_id: z.string().optional().describe("A library prompt id (workspace_reply_settings_get shows the default one)"), confirmation_token: z.string().optional() },
     annotations: { destructiveHint: true, idempotentHint: false, openWorldHint: false },
   }, async (a) => {
@@ -540,7 +529,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
       fromLabel = `library prompt "${lib?.name ?? a.from_library_id}" (v${lib?.version})`;
     }
     const cur = await urpc<Row>(ctx, "master_prompt_get", { p_sequence: seq.id });
-    const g = await gate(ctx, "master_prompt_copy", a as Record<string, unknown>, `Replace the Replies prompt of ${seqLabel(seq)} (now v${cur?.version}, ${(cur?.scenarios ?? []).length} card(s), ${(cur?.faqs ?? []).length} Q&A) with a copy of ${fromLabel}. The current text, cards and Q&A of "${seq.name}" are overwritten (older versions stay in history). ${SUBSTANTIVE_NOTE}`, ws.id);
+    const g = await gate(ctx, "master_prompt_copy", a as Record<string, unknown>, `Replace the AI replies prompt of ${seqLabel(seq)} (now v${cur?.version}, ${(cur?.scenarios ?? []).length} card(s), ${(cur?.faqs ?? []).length} Q&A) with a copy of ${fromLabel}. The current text, cards and Q&A of "${seq.name}" are overwritten (older versions stay in history). ${SUBSTANTIVE_NOTE}`, ws.id);
     if (!g.proceed) return g.result;
     const r = await urpc<Row>(ctx, "master_prompt_copy", { p_sequence: seq.id, p_from_sequence: a.from_sequence_id ?? null, p_from_library: a.from_library_id ?? null });
     return { copied: true, sequence_id: seq.id, version: r?.version, scenarios: (r?.scenarios ?? []).length, faqs: (r?.faqs ?? []).length, knowledge: (r?.knowledge ?? []).length, copied_from_prompt_id: r?.copied_from_prompt_id };
@@ -684,7 +673,7 @@ export function registerAiReplies(server: McpServer, ctx: Ctx): void {
   // ================================================================ knowledge + Q&A (§9.2)
   tool(server, ctx, {
     name: "knowledge_sources_list", title: "Knowledge sources of the workspace", cls: "read", minRole: "member",
-    description: "Every knowledge source of the workspace (one library, shared by Replies and the Website agent): id, kind (website crawl | document | pasted text), title, url, status (pending | crawling | ready | error), error, pages, chunks, crawled_at, refresh_days, used_by (prompts it is attached to). Sources are added in the app (AI → Knowledge); here you attach / detach them to a sequence's prompt. PDF / DOCX uploads are accepted but not extracted yet (status error unsupported_type).",
+    description: "Every knowledge source of the workspace (one library, shared by AI replies and the Website agent): id, kind (website crawl | document | pasted text), title, url, status (pending | crawling | ready | error), error, pages, chunks, crawled_at, refresh_days, used_by (prompts it is attached to). Sources are added in the app (AI → Knowledge); here you attach / detach them to a sequence's prompt. PDF / DOCX uploads are accepted but not extracted yet (status error unsupported_type).",
     input: { ...wsParam },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id); requireRole(ws, "member");

@@ -195,7 +195,25 @@ export function applyAiChatFilter<Q>(q: Q, ai: AiChatFilter | null | undefined):
   return q;
 }
 
-export interface ChatFilters { sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null; /** private notes: only conversations that carry at least one note */ has_notes?: boolean | null }
+export interface ChatFilters {
+  sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null; /** private notes: only conversations that carry at least one note */ has_notes?: boolean | null;
+  /**
+   * Replies / Sent (075). `view` 'replies' (default) lists only conversations where the other person has written;
+   * 'all' every conversation (search results, the lead page). `chip`: needs_reply = their message is the latest, the
+   * conversation is open and the AI is not answering it (longest waiting first); waiting_on_them = ours is the latest.
+   */
+  view?: 'replies' | 'all';
+  chip?: 'all' | 'needs_reply' | 'waiting_on_them' | null;
+}
+
+/** Applies the Replies view and chip to an outreach_chats query (shared by useChats and intel.useChatsByIds). */
+export function applyRepliesView<Q>(q: Q, f: Pick<ChatFilters, 'view' | 'chip'>): Q {
+  let b = q as any;   // eslint-disable-line @typescript-eslint/no-explicit-any
+  if ((f.view ?? 'replies') === 'replies') b = b.not('first_inbound_at', 'is', null);
+  if (f.chip === 'needs_reply') b = b.eq('waiting_on', 'us').eq('ai_answering', false).not('status', 'in', '(resolved,snoozed)');
+  else if (f.chip === 'waiting_on_them') b = b.eq('waiting_on', 'them');
+  return b;
+}
 
 export type ChatListRow = Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 /** Keyset cursor for the inbox list: the last row of the previous page (raw DB timestamp, so microsecond values round-trip). */
@@ -207,13 +225,16 @@ type ChatPage = { rows: ChatListRow[]; next: ChatCursor | null };
  * Inbox list, newest first, loaded page by page as the user scrolls (WhatsApp-style, no "next" button).
  * `data` is the flat, de-duplicated list of every page fetched so far; `fetchNextPage` / `hasNextPage` drive the loading.
  * Pages are keyed on (last_message_at desc nulls last, id desc), so a new reply arriving between two fetches never skips a row.
+ * The Needs reply chip pages on (last_inbound_at asc, id asc) instead: longest waiting first (`at` then holds last_inbound_at).
  */
 export function useChats(ws: string | null | undefined, f: ChatFilters) {
+  const waiting = f.chip === 'needs_reply';
   return useInfiniteQuery({
     queryKey: qk.chats(ws ?? '', f), enabled: !!ws, placeholderData: (prev) => prev,
     initialPageParam: null as ChatCursor | null,
     queryFn: async ({ pageParam }): Promise<ChatPage> => {
       let q = db.from('outreach_chats').select('*, outreach_leads(id, full_name, company, headline, picture_url), outreach_senders(id, display_name, provider)').eq('workspace_id', ws!).eq('archived', !!f.archived);
+      q = applyRepliesView(q, f);
       if (f.sender_id) q = q.eq('sender_id', f.sender_id);
       if (f.client_id) q = q.eq('client_id', f.client_id);
       if (f.intent) q = q.eq('intent', f.intent);
@@ -224,6 +245,13 @@ export function useChats(ws: string | null | undefined, f: ChatFilters) {
       if (f.stage) q = q.eq('conversation_stage', f.stage);
       if (f.has_notes) q = q.not('last_note_at', 'is', null);
       if (f.search) q = q.or(`attendee_name.ilike.%${f.search}%,subject.ilike.%${f.search}%,last_message_preview.ilike.%${f.search}%`);
+      if (waiting) {
+        // Needs reply: last_inbound_at is always set (waiting_on = 'us'); strictly after the cursor in (asc, id asc) order.
+        if (pageParam?.at) q = q.or(`last_inbound_at.gt.${pageParam.at},and(last_inbound_at.eq.${pageParam.at},id.gt.${pageParam.id})`);
+        const rows = (await sel<ChatListRow[]>(q.order('last_inbound_at', { ascending: true }).order('id', { ascending: true }).limit(CHATS_PAGE_SIZE))) ?? [];
+        const last = rows[rows.length - 1];
+        return { rows, next: rows.length === CHATS_PAGE_SIZE && last ? { at: last.last_inbound_at ?? null, id: last.id } : null };
+      }
       if (pageParam) {
         // Everything strictly after the cursor in (last_message_at desc nulls last, id desc) order.
         q = pageParam.at
@@ -270,7 +298,7 @@ export function useTasks(ws: string | null | undefined, f: { open?: boolean; kin
   return useQuery({
     queryKey: qk.tasks(ws ?? '', f), enabled: !!ws,
     queryFn: () => {
-      let q = db.from('outreach_tasks').select('*, outreach_leads(id, full_name, company, public_identifier, picture_url), outreach_senders(id, display_name)').eq('workspace_id', ws!);
+      let q = db.from('outreach_tasks').select('*, outreach_leads(id, full_name, company, public_identifier, picture_url), outreach_senders(id, display_name, picture_url)').eq('workspace_id', ws!);
       if (f.open !== false) q = q.is('completed_at', null); else q = q.not('completed_at', 'is', null);
       if (f.kind) q = q.eq('kind', f.kind);
       if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
@@ -285,7 +313,7 @@ export function useTasksPage(ws: string | null | undefined, f: { open: boolean; 
   return useQuery({
     queryKey: qk.tasks(ws ?? '', { ...f, paged: true }), enabled: !!ws, placeholderData: keepPreviousData,
     queryFn: async () => {
-      let q = db.from('outreach_tasks').select('*, outreach_leads(id, full_name, company, public_identifier, picture_url), outreach_senders(id, display_name)', { count: 'exact' }).eq('workspace_id', ws!);
+      let q = db.from('outreach_tasks').select('*, outreach_leads(id, full_name, company, public_identifier, picture_url), outreach_senders(id, display_name, picture_url)', { count: 'exact' }).eq('workspace_id', ws!);
       if (f.open) q = q.is('completed_at', null); else q = q.not('completed_at', 'is', null);
       // AI review items are not tasks: an AI-written step message and a reply the AI handed over wait in AI → Needs you.
       if (f.kind) q = q.eq('kind', f.kind); else q = q.not('kind', 'in', '(review_ai_draft,ai_escalation)');
@@ -391,6 +419,9 @@ export function useOutreachRealtime(ws: string | null | undefined) {
       const chatId = p.new?.chat_id ?? p.old?.chat_id;
       if (chatId) inv(qk.messages(chatId));
       inv(['outreach', ws, 'chats']);
+      // Replies / Sent (075): a send of ours (composer, AI, sequence, phone) shows up in Sent at once; the counts follow
+      if (p.new?.direction === 'out' || p.old?.direction === 'out') inv(['outreach', ws, 'sent']);
+      inv(['outreach', ws, 'inbox-counts']);
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_chats', filter: `workspace_id=eq.${ws}` }, (p: any) => {
       inv(['outreach', ws, 'chats']);

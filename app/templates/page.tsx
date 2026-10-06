@@ -66,7 +66,7 @@ export default function TemplatesPage() {
       <MainLayout>
         <div className="flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col md:h-[100dvh]">
           <div className="flex flex-none items-end gap-2 border-b border-gray-200 bg-white px-4 pt-1">
-          <div className="flex items-end gap-1" role="tablist" aria-label="Templates">
+          <div className="-mb-px flex min-w-0 items-end gap-1 overflow-x-auto overflow-y-hidden [scrollbar-width:none]" role="tablist" aria-label="Templates">
             {(
               [
                 ['studio', 'Sequence studio'],
@@ -79,7 +79,7 @@ export default function TemplatesPage() {
                 role="tab"
                 aria-selected={view === id}
                 onClick={() => choose(id)}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${view === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
+                className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium ${view === id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800'}`}
               >
                 {label}
               </button>
@@ -567,12 +567,12 @@ function TemplatesContent() {
 
       {/* Tabs + Preview Company Selector */}
       <div className="mb-6 border-b border-gray-200 flex items-end justify-between gap-4">
-        <nav className="-mb-px flex space-x-8">
+        <nav className="-mb-px flex min-w-0 space-x-8 overflow-x-auto [scrollbar-width:none]">
           {tabOptions.map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`py-4 px-1 border-b-2 font-medium text-sm ${
+              className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
                 activeTab === tab
                   ? 'border-indigo-500 text-indigo-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'

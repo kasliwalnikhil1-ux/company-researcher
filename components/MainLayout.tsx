@@ -853,7 +853,7 @@ export default function MainLayout({ children, subnav, demo = false }: { childre
           window a scrollbar and a strip of empty body background under every full-height page. */}
       <main className={`
         ${isMobile ? 'ml-0' : isCollapsed ? 'ml-16' : 'ml-64'}
-        relative flex-1 flex flex-col overflow-hidden transition-all duration-300
+        relative flex-1 min-w-0 flex flex-col overflow-clip transition-all duration-300
         ${isMobile ? (demo ? 'pt-24 isolate' : 'pt-14 isolate') : demo ? 'pt-10' : ''}
       `} style={demo ? { '--demo-bar': '2.5rem' } as React.CSSProperties : undefined}>
         {children}

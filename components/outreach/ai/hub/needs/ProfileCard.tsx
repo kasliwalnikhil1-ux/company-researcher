@@ -20,8 +20,8 @@ export default function ProfileCard({ row, hidden, api }: CardProps) {
   const headline = metaText(row, 'field') === 'headline';
   return (
     <NeedCard row={row} hidden={hidden}
-      trigger={row.trigger_text ? <Part label="Note:"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
-      ai={<Part label={headline ? 'Headline:' : 'About:'}><ClampText text={(row.ai_text ?? '').trim()} /></Part>}
+      trigger={row.trigger_text ? <Part tone="them" label="Note"><ClampText text={row.trigger_text} className="text-gray-700" /></Part> : undefined}
+      ai={<Part tone="ai" label={headline ? 'AI headline' : 'AI About section'}><ClampText text={(row.ai_text ?? '').trim()} /></Part>}
       extra={api.canWrite && senderId ? <Hint>Edit and apply opens this draft in Profile Studio, where the owner&apos;s permission and the schedule are checked.</Hint> : undefined}
       actions={api.canWrite ? (
         <>

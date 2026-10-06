@@ -64,7 +64,7 @@ Note JSON: `{id, chat_id, lead_id, client_id, workspace_id, author{id,type,name,
 
 - Composer tabs **Reply / Private note**, Alt+P (`event.code === 'KeyP'`), separate drafts per chat and mode in localStorage, amber `--note-bg`, "Only your team sees this", **Add note** (Cmd/Ctrl+Enter; Enter = new line), @ picker grouped Team / Client (client viewers only when *Visible to client* is ticked), markdown toolbar, up to 10 files (paste works), *Improve my text* on LinkedIn chats. Notes are allowed when replies are locked (sender down, no reply permission, suspended is still read-only).
 - Timeline: notes interleaved by time, `NoteBubble` (lock label, author, time, Visible to client / Hidden from AI tags, chips with your own mention stronger, attachments via signed URLs, Seen by, ⋯ Edit / Make task / Copy link / visibility / Edit history / Delete, deleted placeholder). Header eye toggle **Show notes** with a count; `?note=<id>` scrolls + flashes; an unread mention of yours is marked read after being in view for 1 s.
-- List: **Mentions** tab (unread badge, Unread-only, Mark all read), **Has private notes** filter, bell next to Filters, "Private notes matching …" block on search. Toasts for fresh mentions (`MentionToast`, mounted in the Shell).
+- List: **Mentions** tab (unread badge, Unread-only, Mark all read), **Has private notes** filter, bell next to Filters, "Private notes matching …" block on search. Toasts for fresh mentions (`AlertToast (components/outreach/alerts; was MentionToast)`, mounted in the Shell).
 - Settings → Notifications: email on/off + delay. Lead page: **Team notes** card across the lead's conversations. Workspace settings: *Include private notes* on the messages export.
 
 ## 7. Tests

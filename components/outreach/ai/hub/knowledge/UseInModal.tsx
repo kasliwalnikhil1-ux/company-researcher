@@ -1,6 +1,6 @@
 'use client';
 
-// Knowledge → "Use in…": which sequences (Replies) and websites (Website agent) answer from one source.
+// Knowledge → "Use in…": which sequences (AI replies) and websites (Website agent) answer from one source.
 // Every tick is saved at once through outreach_hub_knowledge_link; there is no Save button.
 // A product catalogue is used by websites only: ticking one adds it to that website's catalogues (Assistant → Products).
 import { useState } from 'react';

@@ -20,6 +20,7 @@ export interface RouteEntry {
 export const ROUTES: RouteEntry[] = [
   { file: 'page.tsx', url: '/outreach' },
   { file: 'inbox/page.tsx', url: '/outreach/inbox' },
+  { file: 'inbox/sent/page.tsx', url: '/outreach/inbox/sent' },
   { file: 'inbox/[chatId]/page.tsx', url: '/outreach/inbox/__first_chat__' },
   { file: 'senders/page.tsx', url: '/outreach/senders' },
   { file: 'senders/new/page.tsx', url: '/outreach/senders/new' },

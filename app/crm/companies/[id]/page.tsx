@@ -7,6 +7,7 @@ import { useCrm } from '@/contexts/CrmContext';
 import { useCompanyBrief } from '@/lib/crm/queries';
 import { fmtMoney, READINESS_LABELS, STAGE_LABELS, type Capture, type Contact, type Deal } from '@/lib/crm/types';
 import { Badge, Button, Card, CompanyLogo, daysAgo, EmptyState, ErrorBox, Flags, fmtDate, logoDomain, PageLoader, StageBadge } from '@/components/crm/ui';
+import { MemberName } from '@/components/crm/members';
 import { ActivityModal, CompanyModal, ContactModal, DealModal, MeetingModal, NextStepModal, StageSelect } from '@/components/crm/forms';
 import { TranscriptModal, fmtDuration, type TranscriptTab } from '@/components/crm/transcript';
 import { RecordingModal, UploadRecordingButton } from '@/components/crm/recording';
@@ -94,7 +95,7 @@ export default function CompanyPage() {
                     <StageSelect deal={{ id: d.id, company: c.name, stage: d.stage }} />
                     <span className="font-semibold text-gray-900 tabular-nums">{fmtMoney(d.value_monthly, d.currency)}<span className="text-gray-400 text-xs">/mo</span></span>
                     {d.videos_per_month && <span className="text-gray-500 text-xs">{d.videos_per_month} videos/mo</span>}
-                    <span className="text-gray-500 text-xs">· {d.owner_name ?? 'no owner'} · {d.days_in_stage}d in stage</span>
+                    <span className="text-gray-500 text-xs inline-flex items-center gap-1">· <MemberName userId={d.owner_id} name={d.owner_name} size="xs" empty="no owner" /> · {d.days_in_stage}d in stage</span>
                     <Flags stale={d.is_stale} stuck={d.is_stuck} slipping={d.is_slipping} />
                   </div>
                   {d.title && <div className="text-xs text-gray-500 mt-0.5">{d.title}</div>}

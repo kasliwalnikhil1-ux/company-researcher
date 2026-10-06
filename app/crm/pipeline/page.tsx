@@ -7,6 +7,7 @@ import { useCrm } from '@/contexts/CrmContext';
 import { usePipeline, type PipelineFilters } from '@/lib/crm/queries';
 import { STAGE_LABELS, fmtMoney, fmtUsd, stageRank, type DealStage, type PipelineDeal } from '@/lib/crm/types';
 import { Badge, Button, calendarDaysAgo, CompanyLogo, DayTag, EmptyState, ErrorBox, Flags, fmtDate, PageHeader, Select, Spinner, TimeRangeFilter, timeWindow, type TimeFilter } from '@/components/crm/ui';
+import { MemberName, MemberSelect } from '@/components/crm/members';
 import { IndustryBadge } from '@/components/crm/about';
 import { NextStepModal, StageModal, useWrite } from '@/components/crm/forms';
 import { cn } from '@/lib/utils';
@@ -35,7 +36,7 @@ function DealCard({ d, stage, sort, onNextStep, dragging }: { d: PipelineDeal; s
       {sort === 'activity' && <div className="mt-0.5 flex items-center gap-1 text-[11px] text-gray-500">Activity <DayTag days={calendarDaysAgo(d.last_activity_at)} suffix=" ago" title={d.last_activity_at ? fmtDate(d.last_activity_at, { time: true }) : 'No activity logged'} /></div>}
       <div className="mt-1 flex items-center justify-between gap-1">
         <span className="font-medium text-gray-800 tabular-nums">{fmtMoney(d.value_monthly, d.currency)}<span className="text-gray-400 text-[11px]">/mo</span></span>
-        <span className="text-[11px] text-gray-500 truncate">{d.owner ?? '—'}</span>
+        <MemberName name={d.owner} size="xs" className="text-[11px] text-gray-500" />
       </div>
       <div className="mt-1 text-xs text-gray-600 flex items-start gap-1">
         {d.next_step ? <span className="truncate" title={d.next_step}>{d.next_step} <span className="text-gray-400">{fmtDate(d.next_step_date)}</span></span> : <button className="text-amber-700 underline" onPointerDown={(e) => e.stopPropagation()} onClick={() => onNextStep(d)}>set next step</button>}
@@ -59,7 +60,7 @@ function Column({ stage, count, value, children }: { stage: DealStage; count: nu
 }
 
 export default function PipelinePage() {
-  const { activeMembers, lookups } = useCrm();
+  const { lookups } = useCrm();
   const [filters, setFilters] = useState<{ owner?: string; icp_segment?: string; source_channel?: string; include_closed?: boolean }>({});
   const [created, setCreated] = useState<TimeFilter>({ range: '' });
   const [activity, setActivity] = useState<TimeFilter>({ range: '' });
@@ -91,7 +92,7 @@ export default function PipelinePage() {
       <PageHeader title="Pipeline" subtitle={t ? `${t.open_deals} open · ${fmtUsd(t.open_value_monthly_usd)}/mo · ${t.stale} stale · ${t.stuck} stuck · ${t.slipping} slipping` : undefined}
         actions={
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={filters.owner ?? ''} onChange={(e) => setFilters({ ...filters, owner: e.target.value || undefined })}><option value="">All owners</option>{activeMembers.map((m) => <option key={m.user_id} value={m.user_id}>{m.display_name}</option>)}</Select>
+            <MemberSelect aria-label="Owner" value={filters.owner ?? ''} onChange={(v) => setFilters({ ...filters, owner: v || undefined })} emptyLabel="All owners" className="w-44" />
             <Select value={filters.icp_segment ?? ''} onChange={(e) => setFilters({ ...filters, icp_segment: e.target.value || undefined })}><option value="">All segments</option>{lookups('icp_segment', true).map((s) => <option key={s.id} value={s.id}>{s.label}{s.is_active ? '' : ' (inactive)'}</option>)}</Select>
             <Select value={filters.source_channel ?? ''} onChange={(e) => setFilters({ ...filters, source_channel: e.target.value || undefined })}><option value="">All channels</option>{lookups('source_channel', true).map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</Select>
             <TimeRangeFilter label="Created" value={created} onChange={setCreated} title="When the deal was created" />

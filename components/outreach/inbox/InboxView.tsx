@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { notePreview } from './notes/NoteBody';
 import { useChatNotes, useCreateNote, useDeleteNote, useMarkNoteRead, useUpdateNote, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import { useQueryClient } from '@tanstack/react-query';
-import { MessageSquare } from 'lucide-react';
+import { MessageSquare, Send } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSessionUser } from '@/lib/outreach/session';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -24,6 +24,11 @@ import { isTypingTarget, useDebounced, useMediaQuery, useNoZoom } from './hooks'
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { useStageOptions } from './ai/useAiInbox';
 import { useChatAiState } from '@/lib/outreach/aiReplies';
+import { SENT_FILTER_DEFAULTS, sanitizeSentFilters, useInboxCounts, useSentList, useSentSearch, writeInboxViewState, type InboxView as InboxListView, type SentFilters, type SentItem, type SentSegment } from '@/lib/outreach/inboxSent';
+import InboxViewSwitch from './InboxViewSwitch';
+import SentList from './sent/SentList';
+import SentDetail from './sent/SentDetail';
+import AlertPromptBanner from '../alerts/AlertPromptBanner';
 
 
 /** `?chats=<ids>&label=<text>`: the reports page opens the inbox on exactly these threads. */
@@ -33,19 +38,32 @@ type InboxFilters = ChatFilters & { sequence_id?: string | null };
 // Filters are remembered per workspace in this browser; the search is never stored (it is not a key of the defaults).
 const LIST_MIN = 260, LIST_MAX = 640, PANEL_MIN = 280, PANEL_MAX = 560, THREAD_MIN = 360;
 
-const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null, ai: null, stage: null };
+const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null, ai: null, stage: null, chip: 'all' };
+const SEGMENTS: SentSegment[] = ['sent', 'scheduled', 'failed'];
 
-export default function InboxView({ chatId, initialFilters, restrict }: { chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null }) {
+/**
+ * The inbox: list | thread | lead panel. The list column has two views (inbox-replies-sent-PRD.md): Replies
+ * (conversations where the other person has written, the default) and Sent (one row per send: Sent · Scheduled · Failed).
+ * `listView` comes from the route: /outreach/inbox/sent, or `?view=sent` beside an open conversation.
+ */
+export default function InboxView({ chatId, initialFilters, restrict, listView = 'replies', segment: segmentProp, sentItemId }: {
+  chatId: string | null; initialFilters?: Partial<InboxFilters>; restrict?: InboxRestrict | null;
+  listView?: InboxListView; segment?: SentSegment | null; sentItemId?: string | null;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const { user } = useSessionUser();
   const { workspace, canWrite, canReply, suspended, isManager, isClientViewer } = useWorkspace();
   const ws = workspace?.id ?? null;
+  const tz = ((workspace?.settings as Record<string, unknown> | undefined)?.timezone as string | undefined) ?? null;
   const toast = useToast();
   const userId = user?.id ?? null;
   // Private notes: `?note=<id>` deep link (scroll + flash), `?view=mentions` opens the Mentions view of the list.
   const params = useSearchParams();
   const noteParam = params.get('note');
+  const messageParam = params.get('m');
+  const segment: SentSegment = segmentProp && SEGMENTS.includes(segmentProp) ? segmentProp : 'sent';
+  const sentView = listView === 'sent';
   const [mentionsView, setMentionsView] = useState(params.get('view') === 'mentions');
   const notesQ = useChatNotes(chatId);
   const createNote = useCreateNote(ws ?? '');
@@ -74,7 +92,50 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     Math.min(cap, (rootRef.current?.clientWidth ?? 0) - (other.current?.offsetWidth ?? 0) - THREAD_MIN);
 
 
-  const effectiveFilters = useMemo<ChatFilters>(() => { const { sequence_id: _seq, ...rest } = filters; return { ...rest, search: debouncedSearch || undefined }; }, [filters, debouncedSearch]);
+  // Replies: only conversations where they wrote; a reports drill-down (?chats=) shows exactly the threads it names
+  const effectiveFilters = useMemo<ChatFilters>(() => { const { sequence_id: _seq, ...rest } = filters; return { ...rest, view: restrict ? 'all' : 'replies', chip: rest.chip ?? 'all', search: debouncedSearch || undefined }; }, [filters, debouncedSearch, restrict]);
+
+  // ---------------------------------------------------------------- Sent (075)
+  const { filters: sentFilters, patch: patchSentFilters, ready: sentReady } = usePersistedFilters<SentFilters>('inbox-sent', ws, SENT_FILTER_DEFAULTS, { sanitize: sanitizeSentFilters });
+  const [sentSearch, setSentSearch] = useState('');
+  const debouncedSentSearch = useDebounced(sentSearch.trim(), 300);
+  const countsQ = useInboxCounts(ws, { assigned_to: filters.assigned_to, sender_id: filters.sender_id, client_id: filters.client_id, provider: filters.provider });
+  const showSent = countsQ.data?.show_sent !== false;
+  const sentQ = useSentList(sentReady && showSent ? ws : null, segment, sentFilters, debouncedSentSearch, { enabled: sentView });
+  const sentMatchesQ = useSentSearch(showSent ? ws : null, debouncedSearch, !sentView && !mentionsView);
+  const sentRows = sentQ.data;
+  const sentItem = useMemo(() => (sentItemId ? sentRows?.find((r) => r.id === sentItemId) ?? null : null), [sentItemId, sentRows]);
+  const segQs = segment !== 'sent' ? `segment=${segment}` : '';
+  const switchView = useCallback((v: InboxListView) => {
+    writeInboxViewState(ws, { view: v });
+    router.replace(v === 'sent' ? `/outreach/inbox/sent${segQs ? `?${segQs}` : ''}` : '/outreach/inbox');
+  }, [ws, router, segQs]);
+  const setSegment = useCallback((s: SentSegment) => {
+    writeInboxViewState(ws, { view: 'sent', segment: s });
+    router.replace(`/outreach/inbox/sent${s !== 'sent' ? `?segment=${s}` : ''}`);
+  }, [ws, router]);
+  // a Sent row opens the conversation at that message; a send without one (planned, failed, a request with no
+  // conversation yet) opens its detail pane
+  const openSentChat = useCallback((it: SentItem) => {
+    if (!it.chat_id) { router.replace(`/outreach/inbox/sent?${segQs ? `${segQs}&` : ''}item=${it.id}`); return; }
+    router.replace(`/outreach/inbox/${it.chat_id}?view=sent${segQs ? `&${segQs}` : ''}${it.message_id ? `&m=${it.message_id}` : ''}`);
+    setPanelOpen(false);
+  }, [router, segQs]);
+  const selectSent = useCallback((it: SentItem) => {
+    if (it.chat_id && it.message_id && it.src === 'message') openSentChat(it);
+    else router.replace(`/outreach/inbox/sent?${segQs ? `${segQs}&` : ''}item=${it.id}`);
+  }, [openSentChat, router, segQs]);
+  const openSentLead = useCallback((it: SentItem) => { if (it.lead?.id) router.push(`/outreach/leads/${it.lead.id}`); }, [router]);
+  // Replies search → "Show all" in the Sent group: Sent with the same search
+  const showAllSent = useCallback(() => { setSentSearch(search.trim()); switchView('sent'); }, [search, switchView]);
+  const openFromSearch = useCallback((it: SentItem) => {
+    writeInboxViewState(ws, { view: 'sent', segment: 'sent' });
+    if (it.chat_id) router.replace(`/outreach/inbox/${it.chat_id}?view=sent${it.message_id ? `&m=${it.message_id}` : ''}`);
+    else router.replace(`/outreach/inbox/sent?item=${it.id}`);
+  }, [ws, router]);
+  // client viewers without "Show Sent to clients" never stay on Sent
+  useEffect(() => { if (sentView && countsQ.data && !countsQ.data.show_sent) router.replace('/outreach/inbox'); }, [sentView, countsQ.data, router]);
+  useEffect(() => { if (sentView) writeInboxViewState(ws, { view: 'sent', segment }); }, [sentView, ws, segment]);
 
   // Restrictions by thread id: the reports drill-down (?chats=) and the sequence filter (outreach_sequence_chat_ids).
   const sequenceId = filters.sequence_id ?? null;
@@ -123,8 +184,9 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   const restrictQs = useMemo(() => (restrict ? `?chats=${encodeURIComponent(restrict.ids.join(','))}&label=${encodeURIComponent(restrict.label)}` : ''), [restrictKey, restrict?.label]); // eslint-disable-line react-hooks/exhaustive-deps
   const mentionsQs = mentionsView ? (restrictQs ? '&view=mentions' : '?view=mentions') : '';
   const select = useCallback((id: string) => { router.replace(`/outreach/inbox/${id}${restrictQs}${mentionsQs}`); setPanelOpen(false); }, [router, restrictQs, mentionsQs]);
+  const sentBackUrl = `/outreach/inbox/sent${segQs ? `?${segQs}` : ''}`;
   const selectMention = useCallback((id: string, noteId: string) => { router.replace(`/outreach/inbox/${id}?note=${noteId}&view=mentions`); setPanelOpen(false); }, [router]);
-  const back = useCallback(() => router.replace(`/outreach/inbox${restrictQs}${mentionsQs}`), [router, restrictQs, mentionsQs]);
+  const back = useCallback(() => router.replace(sentView ? sentBackUrl : `/outreach/inbox${restrictQs}${mentionsQs}`), [router, restrictQs, mentionsQs, sentView, sentBackUrl]);
   const clearRestrict = useCallback(() => router.replace(chatId ? `/outreach/inbox/${chatId}` : '/outreach/inbox'), [router, chatId]);
 
   // ---------------------------------------------------------------- chat mutations
@@ -141,6 +203,12 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     }
     qc.invalidateQueries({ queryKey: qk.dashboard(ws ?? '') });
   }, [qc, ws, toast]);
+
+  // Reply alerts: opening a conversation reads your alerts on it, on every device (the bell, the desktop notification).
+  useEffect(() => {
+    if (!chatId) return;
+    rpc('alerts_mark_chat_read', { p_chat: chatId }).catch(() => { /* alerts are best effort */ });
+  }, [chatId]);
 
   // Mark read when the chat opens (or when a new unread message arrives while it is open).
   useEffect(() => {
@@ -169,22 +237,23 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     if (!chat) return;
     await updateChat(chat.id, { archived });
     toast.show(archived ? 'Conversation archived' : 'Conversation restored');
-    if (archived !== !!filters.archived) {
+    if (archived !== !!filters.archived && !sentView) {
       // It just left the current list: move on to the next row for a smooth keyboard flow.
       const idx = rows?.findIndex((r) => r.id === chat.id) ?? -1;
       const next = rows?.[idx + 1] ?? rows?.[idx - 1];
       if (next) select(next.id); else back();
     }
-  }, [chat, updateChat, toast, filters.archived, rows, select, back]);
+  }, [chat, updateChat, toast, filters.archived, rows, select, back, sentView]);
   const markUnread = useCallback(async () => {
     if (!chat) return;
     await updateChat(chat.id, { unread: true, unread_count: Math.max(1, chat.unread_count) });
     if (chat.provider === 'WHATSAPP') callFn('edit-message', { chat_id: chat.id, action: 'unread' }).catch(() => { /* best effort */ });
     toast.show('Marked as unread');
+    if (sentView) return;
     const idx = rows?.findIndex((r) => r.id === chat.id) ?? -1;
     const next = rows?.[idx + 1];
     if (next) select(next.id); else back();
-  }, [chat, updateChat, toast, rows, select, back]);
+  }, [chat, updateChat, toast, rows, select, back, sentView]);
 
   const editMessage = useCallback(async (message_id: string, text: string) => {
     if (!chat) return;
@@ -241,7 +310,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
-      if (!rows?.length) return;
+      if (sentView || !rows?.length) return;
       const idx = chatId ? rows.findIndex((r) => r.id === chatId) : -1;
       if (e.key === 'j') { e.preventDefault(); const n = rows[Math.min(rows.length - 1, idx + 1)]; if (n && n.id !== chatId) select(n.id); }
       else if (e.key === 'k') { e.preventDefault(); const n = rows[Math.max(0, idx - 1)]; if (n && n.id !== chatId) select(n.id); }
@@ -250,19 +319,35 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [rows, chatId, chat, canWrite, select, archive, markUnread]);
+  }, [rows, chatId, chat, canWrite, select, archive, markUnread, sentView]);
 
   if (!ws) return null;
 
-  const showList = !chatId;
+  const showList = !chatId && !(sentView && sentItemId);
   return (
-    <div ref={rootRef} className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh_-_3.5rem_-_var(--demo-bar,0px))] md:h-[calc(100dvh_-_var(--demo-bar,0px))] min-h-[520px] flex bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
+    <div className="-mx-4 md:-mx-6 -my-6 h-[calc(100dvh_-_3.5rem_-_var(--demo-bar,0px))] md:h-[calc(100dvh_-_var(--demo-bar,0px))] min-h-[520px] flex flex-col bg-white border-t border-gray-200 md:border md:rounded-none overflow-hidden">
+      {/* Reply alerts: the app's own prompt, before the browser's (reply-notifications-PRD.md §5.1) */}
+      {ws && <AlertPromptBanner ws={ws} userId={userId} className="mb-0 rounded-none border-x-0 border-t-0" />}
+      <div ref={rootRef} className="flex flex-1 min-h-0">
       {/* Left: chat list */}
       <aside
         ref={listRef}
         style={listW ? ({ '--inbox-list-w': `${listW}px` } as CSSProperties) : undefined}
         className={cn('w-full flex-shrink-0 border-r border-gray-200 min-h-0', listW ? 'md:w-[var(--inbox-list-w)] md:max-w-[50%]' : 'md:w-72 lg:w-80 2xl:w-96', showList ? 'flex' : 'hidden md:flex', 'flex-col')}
       >
+        <InboxViewSwitch view={sentView ? 'sent' : 'replies'} onChange={switchView} unread={countsQ.data?.replies_unread ?? 0} failed={countsQ.data?.failed ?? 0} showSent={showSent} />
+        {sentView ? (
+          <SentList
+            ws={ws} segment={segment} onSegment={setSegment} counts={countsQ.data ?? null}
+            rows={sentRows} loading={!sentReady || sentQ.isLoading} error={sentQ.error ? parseError(sentQ.error).message : null}
+            hasMore={!!sentQ.hasNextPage} loadingMore={sentQ.isFetchingNextPage} onLoadMore={() => { if (sentQ.hasNextPage && !sentQ.isFetchingNextPage) sentQ.fetchNextPage(); }}
+            filters={sentFilters} onFilters={patchSentFilters} search={sentSearch} onSearch={setSentSearch}
+            senders={sendersQ.data} clients={clientsQ.data} sequences={sequencesQ.data}
+            selectedId={sentItemId ?? (messageParam ? sentRows?.find((r) => r.message_id === messageParam)?.id ?? null : null)}
+            onSelect={selectSent} onOpenChat={openSentChat} onOpenLead={openSentLead}
+            canWrite={canWrite && !isClientViewer} isManager={isManager} tz={tz} toast={toast.show}
+          />
+        ) : (
         <ChatList
           rows={rows} loading={!filtersReady || chatsQ.isLoading || waitingForSeq} error={listError ? parseError(listError).message : null}
           sequences={sequencesQ.data} sequenceId={sequenceId} onSequence={(id) => patchFilters({ sequence_id: id })}
@@ -271,15 +356,28 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
           senders={sendersQ.data} clients={clientsQ.data} currentUserId={userId} selectedId={chatId} onSelect={select} stages={stageOptions}
           hasMore={hasMore} loadingMore={loadingMore} onLoadMore={loadMore}
           ws={ws} mentionsView={mentionsView} onMentionsView={(v) => { setMentionsView(v); router.replace(chatId ? `/outreach/inbox/${chatId}${v ? '?view=mentions' : ''}` : `/outreach/inbox${v ? '?view=mentions' : ''}`); }} onSelectMention={selectMention}
+          needsReply={countsQ.data?.needs_reply} sentMatches={showSent ? sentMatchesQ.data?.items : undefined} onOpenSent={openFromSearch} onShowAllSent={showSent ? showAllSent : undefined}
         />
+        )}
       </aside>
       <ColumnResizer className="hidden md:block" paneRef={listRef} edge="right" min={LIST_MIN} max={spaceFor(panelRef, LIST_MAX)} onResize={setListW} />
 
       {/* Middle: thread */}
       <main className={cn('flex-1 min-w-0 min-h-0', showList ? 'hidden md:flex' : 'flex', 'flex-col')}>
-        {!chatId && (
+        {!chatId && sentView && sentItem && (
+          <SentDetail ws={ws} item={sentItem} onBack={() => router.replace(sentBackUrl)} onOpenChat={openSentChat} onOpenLead={openSentLead}
+            canWrite={canWrite && !isClientViewer} isManager={isManager} tz={tz} toast={toast.show} />
+        )}
+        {!chatId && sentView && sentItemId && !sentItem && (
           <div className="flex-1 flex items-center justify-center bg-gray-50">
-            <EmptyState icon={<MessageSquare className="w-6 h-6" />} title="Select a conversation" description="Use j / k to move between conversations, e to archive, u to mark unread." />
+            {sentQ.isLoading ? <Spinner /> : <EmptyState icon={<Send className="w-6 h-6" />} title="This send is not in the list" description="It may have gone out, been cancelled, or fall outside the filters and period you picked." />}
+          </div>
+        )}
+        {!chatId && !(sentView && sentItemId) && (
+          <div className="flex-1 flex items-center justify-center bg-gray-50">
+            {sentView
+              ? <EmptyState icon={<Send className="w-6 h-6" />} title="Select a send" description="A sent message opens in its conversation; planned and failed sends open here with what you can do about them." />
+              : <EmptyState icon={<MessageSquare className="w-6 h-6" />} title="Select a conversation" description="Use j / k to move between conversations, e to archive, u to mark unread." />}
           </div>
         )}
         {chatId && chatQ.isLoading && <Spinner className="flex-1" />}
@@ -306,7 +404,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
             onDeleteMessage={deleteMessage}
             onError={(m) => toast.show(m, 'error')}
             onNotice={(m) => toast.show(m)}
-            notes={notesQ.data} currentUserId={userId} isManager={isManager} isClientViewer={isClientViewer} highlightNoteId={noteParam}
+            notes={notesQ.data} currentUserId={userId} isManager={isManager} isClientViewer={isClientViewer} highlightNoteId={noteParam} highlightMessageId={messageParam}
             onAddNote={addNote} onUpdateNote={updateNoteFn} onDeleteNote={deleteNoteFn} onMakeTaskFromNote={makeTaskFromNote} onNoteSeen={noteSeen}
           />
         )}
@@ -337,6 +435,7 @@ export default function InboxView({ chatId, initialFilters, restrict }: { chatId
           )}
         </>
       )}
+      </div>
       {toast.node}
     </div>
   );

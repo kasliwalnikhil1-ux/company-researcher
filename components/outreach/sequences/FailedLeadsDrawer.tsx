@@ -88,9 +88,9 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         {onKindChange && (
-          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs" role="tablist" aria-label="Failed or skipped">
+          <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs" role="tablist" aria-label="Failed or skipped">
             {(['failed', 'skipped'] as FailedKind[]).map((k) => (
-              <button key={k} type="button" role="tab" aria-selected={kind === k} onClick={() => onKindChange(k)} className={cn('px-3 py-1.5 capitalize', kind === k ? 'bg-indigo-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50')}>
+              <button key={k} type="button" role="tab" aria-selected={kind === k} onClick={() => onKindChange(k)} className={cn('px-3 py-1 rounded-md capitalize', kind === k ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>
                 {k}{counts?.[k] != null ? ` (${fmtInt(counts[k])})` : ''}
               </button>
             ))}

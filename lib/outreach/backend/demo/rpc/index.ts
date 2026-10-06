@@ -11,6 +11,7 @@ import { aiRpc, registerAi } from './ai';
 import { webchatRpc, registerWebchat } from './webchat';
 import { settingsRpc, registerSettings } from './settings';
 import { reportsRpc, registerReports } from './reports';
+import { alertsRpc, registerAlerts } from './alerts';
 
 export const rpcHandlers: RpcHandlers = {
   ...sequencesRpc,
@@ -21,6 +22,7 @@ export const rpcHandlers: RpcHandlers = {
   ...webchatRpc,
   ...settingsRpc,
   ...reportsRpc,
+  ...alertsRpc,
 };
 
 /** Table hooks of every area. */
@@ -33,4 +35,5 @@ export function registerAll(): void {
   registerWebchat();
   registerSettings();
   registerReports();
+  registerAlerts();
 }

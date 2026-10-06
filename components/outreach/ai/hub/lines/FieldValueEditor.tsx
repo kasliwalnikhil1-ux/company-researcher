@@ -131,13 +131,13 @@ export function FieldValueEditor({ fields, edit, onChange, onSave, onDiscard, sh
                   onChange={(e) => set(f.key, e.target.value)} placeholder="Leave empty when not known" className={cn(control, 'sm:max-w-[14rem] tabular-nums', problem ? 'border-red-400' : 'border-gray-300')} />
               )}
               {f.type === 'yes_no' && (
-                <div role="radiogroup" aria-labelledby={`${id}-label`} className="inline-flex rounded-lg border border-gray-300 p-0.5 bg-gray-50">
+                <div role="radiogroup" aria-labelledby={`${id}-label`} className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
                   {([['true', 'Yes'], ['false', 'No'], ['', 'Empty']] as const).map(([v, label], j) => {
                     const on = value === v;
                     return (
                       <button key={label} type="button" role="radio" aria-checked={on} disabled={disabled} autoFocus={focus && j === 0} onClick={() => set(f.key, v)}
                         className={cn('px-3 py-1 text-sm rounded-md transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 disabled:cursor-not-allowed',
-                          on ? (v === '' ? 'bg-white text-gray-700 shadow-sm font-medium' : 'bg-indigo-600 text-white shadow-sm font-medium') : 'text-gray-600 hover:text-gray-900')}>
+                          on ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>
                         {label}
                       </button>
                     );

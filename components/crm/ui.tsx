@@ -2,6 +2,7 @@
 
 import React, { useEffect } from 'react';
 import { cn } from '@/lib/utils';
+import { friendlyErrorText } from '@/lib/aiErrorMessage';
 import { Loader2, X, AlertCircle, Inbox, ChevronLeft, ChevronRight } from 'lucide-react';
 import { STAGE_LABELS, type DealStage } from '@/lib/crm/types';
 
@@ -130,7 +131,7 @@ export function PageLoader({ className }: { className?: string }) {
 }
 
 export function ErrorBox({ message, className }: { message: string; className?: string }) {
-  return <div className={cn('flex items-start gap-2 p-3 rounded-md bg-red-50 text-red-700 text-sm', className)}><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span className="whitespace-pre-wrap">{message}</span></div>;
+  return <div className={cn('flex items-start gap-2 p-3 rounded-md bg-red-50 text-red-700 text-sm', className)}><AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span className="whitespace-pre-wrap">{friendlyErrorText(message)}</span></div>;
 }
 
 export function EmptyState({ title, description, action, icon, compact }: { title: string; description?: string; action?: React.ReactNode; icon?: React.ReactNode; compact?: boolean }) {
@@ -305,7 +306,7 @@ export function useToast() {
   const [toast, setToast] = React.useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const show = React.useCallback((message: string, type: 'success' | 'error' = 'success', ms?: number) => {
-    setToast({ message, type });
+    setToast({ message: type === 'error' ? friendlyErrorText(message) : message, type });
     clearTimeout(timer.current); // a newer toast gets its full time, not the rest of the old one's
     timer.current = setTimeout(() => setToast(null), ms ?? (type === 'error' ? 6000 : 2500));
   }, []);

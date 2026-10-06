@@ -1,17 +1,24 @@
 /**
  * The demo "database": one in-memory object of tables (the production table names), a seeded random generator and
- * the simulation clock. Saved to sessionStorage (debounced) so a reload keeps the visitor's changes; a new tab starts
- * fresh. Every write emits a change event: the demo realtime channels forward it, exactly like Postgres changes.
+ * the simulation clock. Saved to sessionStorage (debounced, deflated) so a reload keeps the visitor's changes; a new tab
+ * starts fresh. Every write emits a change event: the demo realtime channels forward it, exactly like Postgres changes.
  *
  * Nothing here talks to the network (lint rule + import-graph check, docs/outreach/PRODUCT-TOUR.md §3.4).
  */
+
+import { deflateSync, inflateSync, strFromU8, strToU8 } from 'fflate';
 
 export type Row = Record<string, any>;   // eslint-disable-line @typescript-eslint/no-explicit-any
 export type Tables = Record<string, Row[]>;
 
 /** Bump when the seed changes shape: older saved states are discarded. */
-export const SEED_VERSION = 10;
+export const SEED_VERSION = 12;
 const STATE_KEY = `gxdemo:v${SEED_VERSION}:state`;
+/**
+ * Saved tour data older than this (since the seed was built) is dropped on the next load, and the tour starts fresh:
+ * state, filters, tour progress, widget. Measured from `builtAt`, since every page leave saves again.
+ */
+const SAVED_TTL_MS = 4 * 60 * 60 * 1000;
 
 export interface DemoState {
   v: number;
@@ -168,12 +175,17 @@ export class DemoStore {
   emit(e: ChangeEvent): void { for (const l of this.listeners) { try { l(e); } catch (err) { console.error('[demo] listener failed', err); } } }
 
   // --- persistence ----------------------------------------------------------
-  /** Marks the state changed: saved to sessionStorage 500 ms after the last change. */
+  /** Marks the state changed: saved to sessionStorage 500 ms after the last change, when the browser is idle. */
   touch(): void {
     this.rev++;
     if (!this.persistent || typeof window === 'undefined') return;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.flush(), 500);
+    // compressing the state takes ~100 ms, so keep it off scrolls and clicks
+    const save = () => this.flush();
+    this.saveTimer = setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(save, { timeout: 2000 });
+      else save();
+    }, 500);
   }
 
   /** Saves now (also called on pagehide, so a full-page navigation inside the demo keeps the changes). */
@@ -181,11 +193,12 @@ export class DemoStore {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     if (!this.persistent || typeof window === 'undefined') return;
     try {
-      window.sessionStorage.setItem(STATE_KEY, JSON.stringify(encodeState(this.state)));
+      window.sessionStorage.setItem(STATE_KEY, pack(JSON.stringify(encodeState(this.state))));
     } catch (e) {
-      // full or blocked: keep working in memory only
+      // full or blocked: keep working in memory only, and drop the older save so a reload starts fresh, not stale
       console.warn('[demo] sessionStorage unavailable, the demo keeps its changes in memory only', e);
       this.persistent = false;
+      try { window.sessionStorage.removeItem(STATE_KEY); } catch { /* storage blocked */ }
     }
   }
 
@@ -193,7 +206,8 @@ export class DemoStore {
     try {
       const raw = window.sessionStorage.getItem(STATE_KEY);
       if (!raw) return null;
-      const s = decodeState(JSON.parse(raw));
+      const s = decodeState(JSON.parse(unpack(raw)));
+      if (s && !(Date.now() - s.builtAt <= SAVED_TTL_MS)) { DemoStore.clearSaved(); return null; }
       return s && s.v === SEED_VERSION && s.tables ? s : null;
     } catch { return null; }
   }
@@ -206,6 +220,18 @@ export class DemoStore {
       for (const k of keys) window.sessionStorage.removeItem(k);
     } catch { /* storage blocked */ }
   }
+}
+
+/**
+ * The seed alone is ~2.5M characters of JSON, about the whole sessionStorage quota (5 MB of UTF-16), so the save is
+ * deflated and base64'd: ~0.5M characters.
+ */
+const PACKED = 'z1:';
+function pack(json: string): string {
+  return PACKED + btoa(strFromU8(deflateSync(strToU8(json), { level: 6 }), true));
+}
+function unpack(raw: string): string {
+  return raw.startsWith(PACKED) ? strFromU8(inflateSync(strToU8(atob(raw.slice(PACKED.length)), true))) : raw;
 }
 
 /**

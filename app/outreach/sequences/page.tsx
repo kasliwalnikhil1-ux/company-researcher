@@ -238,8 +238,13 @@ export default function SequencesPage() {
         <Table>
           <thead>
             <tr>
-              <Th>Sequence</Th><Th>Status</Th><Th>Client</Th><Th>Pool</Th>
-              <Th className="text-right">Live</Th><Th className="text-right">Completed</Th><Th className="text-right">Replied</Th><Th className="text-right">Sent</Th><Th className="text-right">Queued</Th>
+              <Th>Sequence</Th><Th>Status</Th><Th title="The client this sequence runs for, if any.">Client</Th>
+              <Th title="The senders this sequence sends from. A ! means at least one of them isn't connected.">Senders</Th>
+              <Th className="text-right" title="Leads still in the sequence: running, waiting for a connection, a delay or a task, or paused.">Live</Th>
+              <Th className="text-right" title="Leads that reached the end of the sequence.">Completed</Th>
+              <Th className="text-right" title="Leads that replied and left the sequence automatically.">Replied</Th>
+              <Th className="text-right" title="Actions sent so far across all steps (invites, messages, emails). One lead can count more than once.">Sent</Th>
+              <Th className="text-right" title="Actions waiting to go out, for example until the next sending window or until today's limit resets.">Queued</Th>
               <Th>Updated</Th><Th className="w-10"></Th>
             </tr>
           </thead>

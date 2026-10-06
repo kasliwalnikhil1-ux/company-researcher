@@ -11,6 +11,7 @@ import { useClients } from '@/lib/outreach/queries';
 import { useCreateInbox, useWebchatInboxes } from '@/lib/outreach/webchat';
 import { Badge, Button, Card, EmptyState, ErrorBox, Input, Modal, Select, Spinner, timeAgo, useToast } from '@/components/outreach/ui';
 import { Note } from '@/components/outreach/settings/shared';
+import { MemberAvatar } from '@/components/outreach/members';
 import WebsitesFrame, { WEBSITES_PATH } from '@/components/outreach/settings/websites/WebsitesFrame';
 import { websiteHubMode, websiteModeText } from '@/lib/outreach/aiHub';
 import { usePlanFeature } from '@/lib/outreach/billing';
@@ -51,20 +52,58 @@ export default function WebsitesPage() {
           <div className="grid gap-3 md:grid-cols-2">
             {q.data.map((i) => {
               const seen = Object.entries(i.installed_origins ?? {}).sort((a, b) => (a[1] < b[1] ? 1 : -1))[0];
+              const aiOn = websiteHubMode({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode }).mode !== 'off';
+              const { accent, logo_url } = i.settings.appearance;
+              const stats: Array<{ label: string; value: number; tip: string; warn?: boolean }> = [
+                { label: 'Open', value: i.stats.open, tip: 'Conversations still open or pending a reply on this website.' },
+                { label: 'Waiting', value: i.stats.unassigned, tip: 'Open conversations nobody is assigned to yet. These need someone to pick them up.', warn: i.stats.unassigned > 0 },
+                { label: 'Today', value: i.stats.today, tip: 'New conversations started today (since midnight UTC).' },
+                { label: 'Visitors', value: i.stats.visitors_30d, tip: 'Visitors seen on the website in the last 30 days, whether or not they chatted.' },
+              ];
               return (
-                <Link key={i.id} href={`${WEBSITES_PATH}/${i.id}`} className="block">
-                  <Card className="hover:border-indigo-300 transition-colors h-full">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap"><span className="font-medium text-gray-900 truncate">{i.name}</span>{!i.is_active && <Badge tone="gray">Off</Badge>}{websiteHubMode({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode }).mode !== 'off' && <Badge tone="indigo">AI agent: {websiteModeText({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode })}</Badge>}{i.availability.online ? <Badge tone="green">Online</Badge> : <Badge tone="gray">Offline</Badge>}</div>
-                        <div className="text-xs text-gray-500 mt-0.5 truncate">{i.allowed_domains.join(', ') || 'No domains yet'}</div>
+                <Link key={i.id} href={`${WEBSITES_PATH}/${i.id}`} className="group block">
+                  <Card className="h-full transition-all group-hover:border-indigo-300 group-hover:shadow-md">
+                    <div className="flex items-start gap-3">
+                      {/* the logo never gets a background tile; without one, a globe on a tint of the widget accent */}
+                      {logo_url
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={logo_url} alt="" className="w-10 h-10 object-contain flex-shrink-0" />
+                        : <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: `color-mix(in srgb, ${accent} 12%, white)`, color: accent }} aria-hidden="true"><Globe className="w-5 h-5" /></div>}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-gray-900 truncate">{i.name}</span>
+                          <span className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 flex-shrink-0" title={i.availability.online ? 'A teammate is online to answer chats' : 'No teammate is online right now'}>
+                            <span className={`w-2 h-2 rounded-full ${i.availability.online ? 'bg-green-500' : 'bg-gray-300'}`} />{i.availability.online ? 'Online' : 'Offline'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5 truncate" title={i.allowed_domains.join(', ') || undefined}>{i.allowed_domains.join(', ') || 'No domains yet'}</div>
+                        {(!i.is_active || aiOn) && (
+                          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                            {!i.is_active && <Badge tone="gray">Widget off</Badge>}
+                            {aiOn && <Badge tone="indigo">AI agent: {websiteModeText({ ai_enabled: i.ai_enabled, mode: i.settings.ai.mode })}</Badge>}
+                          </div>
+                        )}
                       </div>
-                      <div className="w-8 h-8 rounded-full flex-shrink-0" style={{ background: i.settings.appearance.accent }} aria-hidden="true" />
                     </div>
-                    <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                      {[['Open', i.stats.open], ['Waiting', i.stats.unassigned], ['Today', i.stats.today], ['Visitors 30d', i.stats.visitors_30d]].map(([l, v]) => <div key={String(l)}><div className="text-lg font-semibold text-gray-900 tabular-nums">{v as number}</div><div className="text-[11px] text-gray-500">{l}</div></div>)}
+                    <div className="mt-4 grid grid-cols-4 divide-x divide-gray-100 rounded-lg bg-gray-50/80 py-2.5">
+                      {stats.map((s) => (
+                        <div key={s.label} className="px-2 text-center cursor-help" title={s.tip}>
+                          <div className={`text-xl font-semibold tabular-nums ${s.warn ? 'text-amber-600' : 'text-gray-900'}`}>{s.value}</div>
+                          <div className="text-[11px] text-gray-500">{s.label}{s.label === 'Visitors' && <span className="text-gray-400"> · 30d</span>}</div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="mt-3 text-xs text-gray-500">{seen ? <>Seen on <span className="text-gray-700">{seen[0].replace(/^https?:\/\//, '')}</span> {timeAgo(seen[1])}</> : <span className="text-amber-700">Not installed yet</span>} · {i.members.length} collaborator{i.members.length === 1 ? '' : 's'}</div>
+                    <div className="mt-3 flex items-center justify-between gap-3 text-xs text-gray-500">
+                      {seen
+                        ? <span className="min-w-0 truncate" title={`Widget last loaded on ${seen[0]}`}><span className="inline-block w-1.5 h-1.5 rounded-full bg-green-500 mr-1.5 align-middle" />Seen on <span className="text-gray-700">{seen[0].replace(/^https?:\/\//, '')}</span> {timeAgo(seen[1])}</span>
+                        : <span className="text-amber-700"><span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500 mr-1.5 align-middle" />Not installed yet</span>}
+                      <span className="flex items-center gap-1.5 flex-shrink-0" title={i.members.map((m) => m.name).join(', ') || 'No collaborators yet'}>
+                        <span className="flex -space-x-1.5">
+                          {i.members.slice(0, 3).map((m) => <span key={m.user_id} className="flex rounded-full ring-2 ring-white"><MemberAvatar userId={m.user_id} name={m.name} size={6} /></span>)}
+                        </span>
+                        {i.members.length} collaborator{i.members.length === 1 ? '' : 's'}
+                      </span>
+                    </div>
                   </Card>
                 </Link>
               );

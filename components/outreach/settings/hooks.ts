@@ -15,7 +15,7 @@ export const sk = {
   apiKeys: (ws: string) => ['outreach', ws, 'api-keys'] as const,
   deliveries: (ws: string) => ['outreach', ws, 'webhook-deliveries'] as const,
   integrations: (ws: string) => ['outreach', ws, 'integrations'] as const,
-  syncLog: (id: string, errorsOnly: boolean) => ['outreach', 'integration', id, 'sync-log', errorsOnly] as const,
+  syncLog: (id: string, errorsOnly: boolean, page = 0) => ['outreach', 'integration', id, 'sync-log', errorsOnly, page] as const,
   domains: (ws: string) => ['outreach', ws, 'domains'] as const,
 };
 
@@ -89,19 +89,25 @@ export function useIntegrations(ws: Id) {
   });
 }
 
-export function useSyncLog(integrationId: Id, errorsOnly: boolean) {
+/** One page of the log, newest first, with the total so the table can page through all of it. */
+export const SYNC_LOG_PAGE_SIZE = 25;
+export function useSyncLog(integrationId: Id, errorsOnly: boolean, page = 0) {
   return useQuery({
-    queryKey: sk.syncLog(integrationId ?? '', errorsOnly), enabled: !!integrationId, refetchInterval: 30_000,
+    queryKey: sk.syncLog(integrationId ?? '', errorsOnly, page), enabled: !!integrationId, refetchInterval: 30_000, placeholderData: (prev) => prev,
     queryFn: async () => {
-      let q = db.from('outreach_crm_sync_log').select('id, integration_id, workspace_id, lead_id, direction, op, status, detail, at').eq('integration_id', integrationId!).order('at', { ascending: false }).limit(200);
+      let q = db.from('outreach_crm_sync_log').select('id, integration_id, workspace_id, lead_id, direction, op, status, detail, at', { count: 'exact' }).eq('integration_id', integrationId!);
       if (errorsOnly) q = q.eq('status', 'error');
-      const rows = await sel<SyncLogRow[]>(q);
+      const from = page * SYNC_LOG_PAGE_SIZE;
+      const { data, error, count } = await q.order('at', { ascending: false }).range(from, from + SYNC_LOG_PAGE_SIZE - 1);
+      if (error) throw parseError(error);
+      const rows = (data ?? []) as SyncLogRow[];
+      const total = count ?? from + rows.length;
       // The log has no foreign key to leads, so names are fetched in a second query (RLS applies).
       const ids = [...new Set(rows.map((r) => r.lead_id).filter((x): x is string => !!x))];
-      if (!ids.length) return rows;
+      if (!ids.length) return { rows, total };
       const leads = await sel<Array<{ id: string; full_name: string | null }>>(db.from('outreach_leads').select('id, full_name').in('id', ids));
       const byId = new Map(leads.map((l) => [l.id, l]));
-      return rows.map((r) => ({ ...r, outreach_leads: r.lead_id ? byId.get(r.lead_id) ?? null : null }));
+      return { rows: rows.map((r) => ({ ...r, outreach_leads: r.lead_id ? byId.get(r.lead_id) ?? null : null })), total };
     },
   });
 }

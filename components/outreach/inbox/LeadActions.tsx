@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { Member, Sequence } from '@/lib/outreach/types';
 import { Button, Input, Modal, Select, Textarea } from '@/components/outreach/ui';
-import { memberLabel } from './hooks';
+import { MemberPicker } from '@/components/outreach/members';
 
 export interface CreateTaskInput { title: string; body: string | null; due_at: string | null; assigned_to: string | null }
 
@@ -34,10 +34,7 @@ export function CreateTaskModal({ open, onClose, onCreate, members, currentUserI
         <Input label="Title" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} />
         <Textarea label="Notes (optional)" value={body} onChange={(e) => setBody(e.target.value)} className="min-h-[70px]" />
         <Input label="Due" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
-        <Select label="Assign to" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-          <option value="">Unassigned</option>
-          {members?.map((m) => <option key={m.user_id} value={m.user_id}>{memberLabel(m)}{m.user_id === currentUserId ? ' (me)' : ''}</option>)}
-        </Select>
+        <MemberPicker label="Assign to" value={assignee} onChange={setAssignee} members={members} currentUserId={currentUserId} />
       </div>
     </Modal>
   );

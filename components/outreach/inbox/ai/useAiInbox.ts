@@ -101,13 +101,12 @@ export function handoffLine(s: ChatAiState): string | null {
   return ['AI handed off', HANDOFF_LABEL[s.handed_off.reason] ?? humanizeKey(s.handed_off.reason), date].filter(Boolean).join(' · ');
 }
 
-/** "Stage 2 · Relate", "Re-engage" (dormant session), null when the conversation has no stage yet. */
+/** "Relate", "Re-engage" (dormant session), null when the conversation has no stage yet. No "Stage 2 ·": the step bar shows the order. */
 export function stageShort(s: ChatAiState): string | null {
-  if (!s.stage) return null;
-  return s.stage.position > 0 ? `Stage ${s.stage.position} · ${s.stage.label}` : s.stage.label;
+  return s.stage?.label ?? null;
 }
 
-/** "Stage 2 · Relate · 2 exchanges" */
+/** "Relate · 2 exchanges" */
 export function stageLine(s: ChatAiState): string | null {
   const st = stageShort(s);
   if (!st) return null;
@@ -120,7 +119,7 @@ export function repliesLeftText(s: ChatAiState): string {
   return `AI replies left ${left}/${s.max_ai_replies ?? 0}`;
 }
 
-/** The stage a draft was written in: the chat's stage, plus where the draft moves it ("Stage 1 · Engage → Relate"). */
+/** The stage a draft was written in: the chat's stage, plus where the draft moves it ("Engage → Relate"). */
 export function runStageText(run: RunSummary, s: ChatAiState | null | undefined): string | null {
   const cur = s?.stage ? stageShort(s) : run.stage_before ? humanizeKey(run.stage_before) : null;
   const curKey = s?.stage?.key ?? run.stage_before;

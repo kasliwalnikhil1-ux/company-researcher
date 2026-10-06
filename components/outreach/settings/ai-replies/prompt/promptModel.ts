@@ -12,7 +12,7 @@ export const SKIP_FLAGS = ['asked_offer', 'pricing', 'meeting_request', 'meeting
 /** The guided sections in prompt order. `situations` is the pre-cards free text: shown only while it can still be converted. */
 export const SECTION_META: Array<{ key: keyof PromptSectionsV2; title: string; hint: string; rows: number; legacy?: boolean }> = [
   { key: 'who', title: 'Who I am', hint: 'Who the AI speaks for and one line on what you do and for whom.', rows: 4 },
-  { key: 'flow', title: 'How a conversation goes', hint: 'The general shape of a conversation. Per-stage rules go in the stage table below.', rows: 6 },
+  { key: 'flow', title: 'How a conversation goes', hint: 'The general shape of a conversation. Per-stage rules go in Conversation stages below.', rows: 6 },
   { key: 'situations', title: 'Situations (old free text)', hint: 'Replaced by the Scenario cards below. Convert it to cards, or clear it.', rows: 6, legacy: true },
   { key: 'handoff', title: 'Hand to a person when', hint: 'When the AI should pass the chat to your team without replying.', rows: 5 },
   { key: 'stop', title: 'Stop when', hint: 'After any of these the AI sends its reply (if the rule allows one) and a person takes over for good.', rows: 5 },
@@ -111,10 +111,10 @@ export function validate(d: DraftPromptV2): string[] {
     const seen = new Set<string>();
     s.stages.forEach((st, i) => {
       const n = `Stage ${i + 1}`;
-      if (!st.label.trim()) errs.push(`${n} needs a name.`);
+      if (!st.label.trim()) { errs.push(`${n} needs a name.`); return; }
       if (!STAGE_KEY_RE.test(st.key)) errs.push(`${n}: the key must start with a letter and use 2 to 30 lowercase letters, digits or underscores.`);
       else if (st.key === 'closing') errs.push(`${n}: "closing" is reserved. Pick another key.`);
-      else if (seen.has(st.key)) errs.push(`${n}: another stage already uses the key "${st.key}".`);
+      else if (seen.has(st.key)) errs.push(`${n}: another stage has the same name. Rename one of them.`);
       seen.add(st.key);
     });
   }
