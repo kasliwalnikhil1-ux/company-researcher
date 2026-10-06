@@ -14,6 +14,7 @@ import BlacklistUpload from '@/components/outreach/settings/BlacklistUpload';
 import { sk, useBlacklist } from '@/components/outreach/settings/hooks';
 import type { AddSuppressionsResult, BlacklistKind, BlacklistRow, BlacklistScope } from '@/components/outreach/settings/types';
 import { cn } from '@/lib/utils';
+import { Tabs } from '@/components/ui/Tabs';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 
 const KINDS: Array<{ value: BlacklistKind; label: string; placeholder: string; hint: string; tone: 'blue' | 'purple' | 'indigo' | 'amber' }> = [
@@ -220,9 +221,7 @@ export default function BlacklistsSettingsPage() {
                 </Select>
               )}
 
-              <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5" role="tablist" aria-label="How to add">
-                {([['one', 'Add one'], ['csv', 'Upload CSV']] as const).map(([m, label]) => <button key={m} type="button" role="tab" aria-selected={mode === m} onClick={() => setMode(m)} className={cn('px-3 py-1.5 text-sm font-medium rounded-md', mode === m ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{label}</button>)}
-              </div>
+              <Tabs label="How to add" value={mode} onChange={setMode} items={[{ value: 'one', label: 'Add one' }, { value: 'csv', label: 'Upload CSV' }]} />
 
               {mode === 'one' ? (
                 <form onSubmit={addOne} className="space-y-3" noValidate>

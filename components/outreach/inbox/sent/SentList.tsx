@@ -175,11 +175,11 @@ export default function SentList(p: SentListProps) {
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="p-3 border-b border-gray-100 space-y-2">
-        <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 overflow-x-auto" role="tablist" aria-label="Sent segment">
+        <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 overflow-x-auto" role="radiogroup" aria-label="Sent segment">
           {segments.map((s) => {
             const n = s === 'scheduled' ? p.counts?.scheduled ?? 0 : s === 'failed' ? p.counts?.failed ?? 0 : 0;
             return (
-              <button key={s} type="button" role="tab" aria-selected={segment === s} title={SEGMENT_TOOLTIP[s]} onClick={() => p.onSegment(s)}
+              <button key={s} type="button" role="radio" aria-checked={segment === s} title={SEGMENT_TOOLTIP[s]} onClick={() => p.onSegment(s)}
                 className={cn('flex-1 whitespace-nowrap text-xs py-1 px-2 rounded-md inline-flex items-center justify-center gap-1', segment === s ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>
                 {SEGMENT_LABEL[s]}
                 {n > 0 && <span className={cn('min-w-[16px] px-1 rounded-full text-[10px] leading-4 tabular-nums', s === 'failed' ? 'bg-rose-500 text-white' : 'bg-gray-200 text-gray-700')}>{n > 999 ? '999+' : n}</span>}

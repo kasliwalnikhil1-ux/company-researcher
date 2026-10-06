@@ -99,7 +99,7 @@ function DraftStatusText({ i, dirty, publishMode, readOnly }: { i: DraftIndicato
   );
 }
 
-const tabClass = (active: boolean) => cn('px-3.5 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors', active ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-800');
+const tabClass = (active: boolean) => cn('px-3.5 py-2 text-sm font-medium whitespace-nowrap border-b-2 transition-colors', active ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800');
 
 export default function TopBar(p: Props) {
   const { sequence, draft, dirty, saving, version, readOnly, canManage, publishMode, modeKnown, canDiscard, indicator, inflight, failedCount, tab, onTab, tabBadges, onChange, onSave, onPublish, onDiscard, onStatus, onWhy, onFailed, onNavigate } = p;

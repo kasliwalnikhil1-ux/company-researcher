@@ -257,13 +257,13 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
           )}
         </div>
 
-        <div className="flex p-0.5 rounded-lg border border-gray-200 bg-white" role="tablist" aria-label="Conversation view">
+        <div className="flex p-0.5 rounded-lg border border-gray-200 bg-white" role="radiogroup" aria-label="Conversation view">
           {views.map((v) => (
             <button
               key={v.id}
               type="button"
-              role="tab"
-              aria-selected={view === v.id}
+              role="radio"
+              aria-checked={view === v.id}
               title={v.title}
               onClick={() => setView(v.id)}
               className={cn('flex-1 text-xs py-1 rounded-md transition-colors inline-flex items-center justify-center gap-1', view === v.id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800')}

@@ -11,7 +11,7 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { hubHref, useHubKnowledge, type QaPair } from '@/lib/outreach/aiHub';
 import { Button, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import { errText } from '@/components/outreach/sequences/ai/shared';
-import { cn } from '@/lib/utils';
+import { tabClass, tabStripClass } from '@/components/ui/Tabs';
 import { AddDocumentModal, AddWebsiteModal, type AddedSource } from './AddSourceModals';
 import AddCatalogueModal from './AddCatalogueModal';
 import QaEditorModal from './QaEditorModal';
@@ -40,10 +40,9 @@ export default function KnowledgeLibrary({ ws, view }: { ws: string; view: Knowl
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <nav aria-label="Knowledge views" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+        <nav aria-label="Knowledge views" className={tabStripClass}>
           {VIEWS.map((v) => (
-            <Link key={v.key} href={hubHref.knowledge(v.key)} aria-current={view === v.key ? 'page' : undefined}
-              className={cn('px-3 py-1 text-sm rounded-md', view === v.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{v.label}</Link>
+            <Link key={v.key} href={hubHref.knowledge(v.key)} aria-current={view === v.key ? 'page' : undefined} className={tabClass(view === v.key)}>{v.label}</Link>
           ))}
         </nav>
         {canEdit && (

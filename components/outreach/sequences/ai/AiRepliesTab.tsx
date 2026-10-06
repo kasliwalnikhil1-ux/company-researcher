@@ -22,6 +22,7 @@ import TestConversationDrawer from './TestConversationDrawer';
 import UnansweredSection from './UnansweredSection';
 import { Section, errText } from './shared';
 import { cn } from '@/lib/utils';
+import { Tabs } from '@/components/ui/Tabs';
 import { changedParts, normalize } from '@/components/outreach/settings/ai-replies/prompt/promptModel';
 import Link from '@/lib/outreach/nav';
 import ActivityTable from '@/components/outreach/ai/hub/ActivityTable';
@@ -78,17 +79,13 @@ export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null
             actions={<Button size="sm" variant="secondary" onClick={() => setTestOpen(true)} title={draft ? 'Tests your unsaved edits too.' : 'Play the prospect and see what the AI would do. Nothing is sent.'}><MessageSquareText className="w-4 h-4" />Test a conversation</Button>} />
 
           {/* What the AI works from, one part at a time. Panels stay mounted so unsaved prompt edits survive a switch. */}
-          <div role="tablist" aria-label="AI replies settings" className="inline-flex max-w-full overflow-x-auto rounded-lg border border-gray-200 bg-white p-0.5">
-            {tabs.map((t) => (
-              <button key={t.k} type="button" role="tab" aria-selected={sub === t.k} onClick={() => setSub(t.k)} title={t.title}
-                className={cn('px-3.5 py-1 text-sm rounded-md transition-colors whitespace-nowrap inline-flex items-center gap-1.5', sub === t.k ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>
-                {t.label}
-                {((t.k === 'prompt' && draftParts.some((x) => x !== 'Settings')) || (t.k === 'rules' && draftParts.includes('Settings'))) && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-label="Unsaved edits" />}
-                {t.count ? <span className="min-w-[1.25rem] px-1 rounded-full bg-amber-100 text-amber-800 text-[11px] font-medium tabular-nums text-center">{t.count}</span> : null}
-              </button>
-            ))}
-          </div>
-          {current && <p className="-mt-2 text-xs text-gray-500">{current.title}</p>}
+          <Tabs label="AI replies settings" value={sub} onChange={setSub} className="pt-2"
+            items={tabs.map((t) => ({ value: t.k, title: t.title, label: <>
+              {t.label}
+              {((t.k === 'prompt' && draftParts.some((x) => x !== 'Settings')) || (t.k === 'rules' && draftParts.includes('Settings'))) && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" aria-label="Unsaved edits" />}
+              {t.count ? <span className="min-w-[1.25rem] px-1 rounded-full bg-amber-100 text-amber-800 text-[11px] font-medium tabular-nums text-center">{t.count}</span> : null}
+            </> }))} />
+          {current && <p className="-mt-1 text-xs text-gray-500">{current.title}</p>}
 
           <div className={panel('prompt')}>
             <PromptCard key={s.prompt.id ?? 'prompt'} sequenceId={sequenceId} ws={ws} s={s} canEdit={canEdit} sequences={sequencesQ.data ?? []} notify={toast.show} onDraftChange={onDraftChange} onReload={reload} settingsHost={settingsHost} />

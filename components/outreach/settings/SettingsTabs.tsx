@@ -5,6 +5,7 @@ import { usePathname } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useLocalhostOnly } from '@/lib/outreach/platformAdmin';
 import { cn } from '@/lib/utils';
+import { tabClass, tabStripClass } from '@/components/ui/Tabs';
 import type { Role } from '@/lib/outreach/types';
 
 const ROLE_RANK: Record<Role, number> = { owner: 0, manager: 1, member: 2, client_viewer: 3 };
@@ -59,11 +60,11 @@ export function IntegrationsSubTabs() {
   const pathname = usePathname();
   const items = [{ href: '/outreach/settings/integrations', label: 'Connected apps' }, { href: '/outreach/settings/api', label: 'API keys' }, { href: '/outreach/settings/webhooks', label: 'Webhooks' }];
   return (
-    <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 mb-5" role="tablist" aria-label="Integrations sections">
+    <nav className={cn(tabStripClass, 'mb-5')} aria-label="Integrations sections">
       {items.map((i) => {
         const active = pathname === i.href;
-        return <Link key={i.href} href={i.href} role="tab" aria-selected={active} className={cn('px-3 py-1.5 text-sm font-medium rounded-md', active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{i.label}</Link>;
+        return <Link key={i.href} href={i.href} aria-current={active ? 'page' : undefined} className={tabClass(active)}>{i.label}</Link>;
       })}
-    </div>
+    </nav>
   );
 }

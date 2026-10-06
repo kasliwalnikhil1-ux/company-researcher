@@ -9,7 +9,7 @@ import { KNOWLEDGE_FILE_ACCEPT, useInvalidateKnowledge } from '@/lib/outreach/ai
 import { Button, ErrorBox, Input, Modal, Textarea } from '@/components/outreach/ui';
 import { Note } from '@/components/outreach/settings/shared';
 import { errText } from '@/components/outreach/sequences/ai/shared';
-import { cn } from '@/lib/utils';
+import { Tabs } from '@/components/ui/Tabs';
 import type { Notify } from './shared';
 
 export interface AddedSource { id: string; title: string }
@@ -99,12 +99,8 @@ export function AddDocumentModal({ ws, onClose, onAdded, notify }: AddProps) {
     <Modal open onClose={onClose} title="Add a document" size="md"
       footer={<><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!canSubmit}>Add</Button></>}>
       <div className="space-y-4">
-        <div role="tablist" aria-label="How to add the document" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
-          {DOC_TABS.map((t) => (
-            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} disabled={busy} onClick={() => { setTab(t.key); setError(null); }}
-              className={cn('px-3 py-1 text-sm rounded-md', tab === t.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{t.label}</button>
-          ))}
-        </div>
+        <Tabs label="How to add the document" value={tab} disabled={busy} onChange={(k) => { setTab(k); setError(null); }}
+          items={DOC_TABS.map((t) => ({ value: t.key, label: t.label }))} />
         {tab === 'file' && (
           <div className="space-y-3">
             <input ref={fileRef} type="file" accept={KNOWLEDGE_FILE_ACCEPT} className="hidden" aria-label="File to upload" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />

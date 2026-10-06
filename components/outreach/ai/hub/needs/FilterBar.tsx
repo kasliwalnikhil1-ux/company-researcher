@@ -168,7 +168,7 @@ export default function FilterBar({ filters, onFilters, counts, setup, whereName
     const n = counts?.[type];
     const TabIcon = TAB_ICON[type];
     return (
-      <button key={type} type="button" role="tab" aria-selected={on} onClick={() => setType(type)}
+      <button key={type} type="button" role="radio" aria-checked={on} onClick={() => setType(type)}
         className={cn('inline-flex items-center gap-1.5 rounded-md px-3 text-sm font-medium whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500',
           on ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>
         <TabIcon className={cn('h-3.5 w-3.5', on ? 'text-indigo-600' : 'text-gray-400')} aria-hidden="true" />
@@ -198,7 +198,7 @@ export default function FilterBar({ filters, onFilters, counts, setup, whereName
     <div className="mb-5">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="max-w-full overflow-x-auto [scrollbar-width:none]">
-          <div role="tablist" aria-label="What needs you" className="inline-flex h-8 rounded-lg border border-gray-200 bg-white p-0.5">
+          <div role="radiogroup" aria-label="What needs you" className="inline-flex h-8 rounded-lg border border-gray-200 bg-white p-0.5">
             {types.map(tab)}
           </div>
         </div>

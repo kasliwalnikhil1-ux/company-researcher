@@ -12,7 +12,7 @@ import {
 import { KNOWLEDGE_FILE_ACCEPT, hubHref, useQaList } from '@/lib/outreach/aiHub';
 import { Badge, Button, ErrorBox, Input, Modal, Spinner, Textarea, fmtDate } from '@/components/outreach/ui';
 import { ConfirmModal, Note } from '@/components/outreach/settings/shared';
-import { cn } from '@/lib/utils';
+import { Tabs } from '@/components/ui/Tabs';
 import { Section, errText } from './shared';
 
 const STATUS_TONE: Record<KnowledgeRef['status'], 'gray' | 'blue' | 'green' | 'red'> = { pending: 'gray', crawling: 'blue', ready: 'green', error: 'red' };
@@ -115,11 +115,7 @@ function AddKnowledgeModal({ sequenceId, ws, attached, onClose, notify }: { sequ
     <Modal open onClose={onClose} title="Add knowledge" size="md"
       footer={tab === 'existing' ? <Button variant="secondary" onClick={onClose}>Close</Button> : <><Button variant="secondary" onClick={onClose} disabled={busy}>Cancel</Button><Button onClick={submit} loading={busy} disabled={!canSubmit}>Add</Button></>}>
       <div className="space-y-4">
-        <div role="tablist" className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
-          {tabs.map((t) => (
-            <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)} className={cn('px-3 py-1 text-sm rounded-md', tab === t.key ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{t.label}</button>
-          ))}
-        </div>
+        <Tabs label="How to add knowledge" value={tab} onChange={setTab} items={tabs.map((t) => ({ value: t.key, label: t.label }))} />
         {tab === 'website' && (
           <div className="space-y-3">
             <Input label="Website address" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com" autoFocus />

@@ -29,8 +29,8 @@ export default function PendingPanel({ ws, canWrite, notify }: { ws: string; can
   }
   return (
     <div>
-      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 mb-4" role="tablist">
-        {VIEWS.map((x) => <button key={x.key} role="tab" aria-selected={view === x.key} onClick={() => setView(x.key)} className={cn('px-3 py-1.5 text-sm font-medium rounded-md', view === x.key ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{x.label}</button>)}
+      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 mb-4" role="radiogroup" aria-label="Which changes to show">
+        {VIEWS.map((x) => <button key={x.key} type="button" role="radio" aria-checked={view === x.key} onClick={() => setView(x.key)} className={cn('px-3 py-1.5 text-sm font-medium rounded-md', view === x.key ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50')}>{x.label}</button>)}
       </div>
       {q.isLoading ? <Spinner /> : (q.data ?? []).length === 0 ? <EmptyState title="Nothing here" description="Profile changes are drafted on each sender's Profile tab, from a template, or by an experiment." /> : (
         <Table>
