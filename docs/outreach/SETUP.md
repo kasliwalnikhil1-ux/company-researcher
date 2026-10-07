@@ -95,11 +95,22 @@ The table lists the original 29. The 10 added by the product plan (`outreach-wor
 Shared modules (`supabase/functions/_shared/outreach/`): `supabase.ts` (client, CORS, `serve`, `requireUser`, `requireCron`, `rpc`, `rateLimit`, `flag`), `unipile.ts` (typed client), `errors.ts` (Unipile error → decision table), `execute.ts` (action execution), `planner.ts`, `health.ts`, `inbound.ts` (webhook handlers), `workers.ts` (reconnect / imports / withdraw / poll / webhooks / classify / billing), `drafts.ts`, `ai.ts` + `prompts.ts`, `notify.ts` (Resend), `crypto.ts` (AES-GCM cookies, HMAC), `render.ts` (templates).
 
 ### 1.4 pg_cron jobs (`outreach-*`, from `004_seed_cron.sql`; the 9 jobs added by `016_seed_cron_v2.sql` are in §9.3)
+
+**Since `084_cron_dispatcher.sql` (Oct 2026) the frequent workers are not pg_cron jobs any more.** One job, `outreach-tick`
+(every 10 s), runs `outreach_cron_tick()`: it reads `outreach_cron_jobs` (16 rows: inbound 10 s, notify-push 10 s, ai-classify
+15 s, ai-reply draft 15 s, lead-notes 30 s, outbound-hooks 30 s, and tick / ai-reply dispatch / knowledge / ai-variables /
+notes-emails / transcribe / webchat continuity / review / voice every 60 s, plus a 5-minute voice sweep), and calls a worker
+only when `outreach_cron_has_work(name)` finds something in its queue. Before 084 these 15 jobs made ~45,000 edge-function
+invocations and ~250,000 log rows a day on an idle platform. Each call is recorded in `outreach_cron_invocations` (7 days);
+`select name, every_s, last_run_at, last_had_work, last_invoked_at, last_error, invocations from outreach_cron_jobs` shows
+what is being called. Kill switch per worker: `update outreach_cron_jobs set active = false where name = 'ai-classify'`.
+The rows marked *dispatcher* below are those jobs; the rest are still pg_cron jobs.
+
 | Job | Schedule | Runs |
 |---|---|---|
-| `outreach-tick` | `* * * * *` | `outreach_invoke('outreach-worker-tick')` |
-| `outreach-inbound` | every 10 s | `outreach-process-inbound` |
-| `outreach-ai-classify` | every 15 s | `outreach-ai-classify` |
+| `outreach-tick` | every 10 s | `outreach_cron_tick()` — the dispatcher (084); before 084: `outreach-worker-tick` every minute, now dispatcher row `tick` (60 s) |
+| `outreach-inbound` | dispatcher, 10 s | `outreach-process-inbound` when `outreach_inbound_events` has unprocessed rows |
+| `outreach-ai-classify` | dispatcher, 15 s | `outreach-ai-classify` when `outreach_ai_classify_queue` has rows |
 | `outreach-planner` | `5 * * * *` | `outreach-worker-planner` (nightly) |
 | `outreach-planner-topup` | `*/20 * * * *` | `outreach-worker-planner` `{"mode":"topup"}` |
 | `outreach-health` | `20 * * * *` | `outreach-worker-health` |
@@ -107,7 +118,7 @@ Shared modules (`supabase/functions/_shared/outreach/`): `supabase.ts` (client, 
 | `outreach-imports` | `*/5 * * * *` | `outreach-worker-imports` |
 | `outreach-withdraw` | `40 * * * *` | `outreach-worker-withdraw` |
 | `outreach-relations-poll` | `50 * * * *` | `outreach-worker-relations-poll` |
-| `outreach-outbound-hooks` | every 30 s | `outreach-outbound-webhooks` |
+| `outreach-outbound-hooks` | dispatcher, 30 s | `outreach-outbound-webhooks` when a delivery is due |
 | `outreach-billing` | `7 * * * *` | `outreach-billing-sync` `{mode:"hourly"}` |
 | `outreach-billing-daily` | `15 3 * * *` | `outreach-billing-sync` `{mode:"daily"}` |
 | `outreach-sweep` | `*/5 * * * *` | `select outreach_sweep_stale_reservations()` (SQL only) |
@@ -535,7 +546,7 @@ Verify after switching on, as the plan's checklist asks:
 | `outreach-auto-enroll` | `*/10 * * * *` | `select outreach_run_auto_enroll()` (SQL only) | nothing |
 | `outreach-import-schedules` | `*/15 * * * *` | `select outreach_run_import_schedules()` (SQL only). The jobs it creates are run by the existing `outreach-worker-imports` | nothing |
 | `outreach-enrich` | `*/10 * * * *` | edge function `outreach-worker-enrich` | function deployed |
-| `outreach-ai-variables` | `* * * * *` | edge function `outreach-ai-variables`: AI lines and AI routing decisions | function deployed; an AI key (platform Gemini key, or the workspace's own) |
+| `outreach-ai-variables` | dispatcher row `ai-variables`, 60 s (084; was `* * * * *`) | edge function `outreach-ai-variables`: AI lines and AI routing decisions | function deployed; an AI key (platform Gemini key, or the workspace's own) |
 | `outreach-crm-sync` | `*/5 * * * *` | edge function `outreach-crm-sync` | function deployed; does nothing for workspaces without an active integration |
 | `outreach-reports` | `0 * * * *` | edge function `outreach-worker-reports`. Sends at 08:00–08:59 workspace time, and catches up in the next two hourly runs | function deployed; Resend |
 | `outreach-domain-check` | `*/30 * * * *` | edge function `outreach-domain-check` | function deployed |

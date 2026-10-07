@@ -409,6 +409,14 @@ A voice note is a `message` action with `payload.voice = true` and spends the me
 | RLS helpers: `outreach_is_service()`, `outreach_workspace_ids()`, `outreach_role_in(ws)`, `outreach_client_visible(ws, cid)`, `outreach_visible_clients(ws)`, `outreach_plan_active(ws)`, `outreach_can_write(ws)`, `outreach_can_manage(ws)`, `outreach_require(ws, p_min)`, `outreach_ws_tz(ws)` | `role_in` and `client_visible` also honour an API key's narrower scope (§21) |
 | Triggers: `outreach_trg_reply_exit`, `outreach_trg_relation`, `outreach_trg_enrollment_exit`, `outreach_trg_sender_status`, `outreach_trg_sender_reconnected`, `outreach_trg_lead_dnc` (also stage → milestone), `outreach_trg_lead_list_rule`, `outreach_trg_action_stats`, `outreach_trg_message_stamp`, `outreach_trg_message_reply_stat`, `outreach_trg_message_rollup`, `outreach_trg_workspace_report_defaults`, `outreach_set_updated_at` | not callable directly |
 
+### Cron dispatcher (084)
+| Object | Who calls it | What it does |
+|---|---|---|
+| `outreach_cron_jobs` | pg_cron job `outreach-tick` (every 10 s) via `outreach_cron_tick()` | One row per frequent worker: `fn`, `body`, `every_s`, `guarded`, `active`, and the last run / invocation / guard error. Operators edit `active` and `every_s`; 084 re-applies `fn`, `body`, `guarded`, `note` |
+| `outreach_cron_tick(p_dry boolean default false)` | the `outreach-tick` job; smoke tests with `p_dry => true` | For each active row that is due (`last_run_at + every_s <= now()`), asks `outreach_cron_has_work(name)` and calls `outreach_invoke(fn, body)` only when it says yes (or the row is unguarded, or the guard raised — fail open). Writes `outreach_cron_invocations`. Advisory lock: two ticks never overlap |
+| `outreach_cron_has_work(p_name text)` | the tick | A cheap `exists` over the worker's queue, a superset of its claim RPC. Unknown name → true |
+| `outreach_cron_invocations` | the tick; Health `job-3` / `sys-2` | One row per real call (`name`, `fn`, `at`, pg_net `request_id`); kept 7 days |
+
 ### Tasks
 
 `outreach_complete_task(p_id, p_text, p_result)` (member+): `review_ai_draft` queues the real action with the approved text, or skips the step on `{decision:'reject'}`. `manual_node` queues or advances. **`call`** requires `p_result.outcome` in `connected | voicemail | no_answer | wrong_number` and advances down that branch. **`reply_hold`** resumes or exits on `{decision:'resume'|'exit'}`.
