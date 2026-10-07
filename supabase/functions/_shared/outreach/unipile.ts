@@ -1,6 +1,7 @@
 // Typed Unipile client (subset used by the outreach platform).
 // Base: https://{DSN}/api/v1 ; header X-API-KEY.
 import { log } from "./supabase.ts";
+import { fetchWithHealth, endpointGroup, noteCallError } from "../health.ts";
 
 const DSN = (Deno.env.get("UNIPILE_DSN") ?? "").replace(/\/+$/, "");
 const API_KEY = Deno.env.get("UNIPILE_API_KEY") ?? "";
@@ -66,14 +67,15 @@ async function request<T = any>(path: string, opts: ReqOpts = {}): Promise<T> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 20000);
     try {
-      const res = await fetch(url, { method: opts.method ?? "GET", headers, body, signal: ctrl.signal });
+      const group = endpointGroup(opts.method ?? "GET", path);
+      const res = await fetchWithHealth("unipile", group, url, { method: opts.method ?? "GET", headers, body, signal: ctrl.signal });
       clearTimeout(timer);
       log({ fn: "unipile", endpoint: `${opts.method ?? "GET"} ${path}`, account_id: opts.accountId, status: res.status, latency_ms: Date.now() - t0 });
       if (opts.raw) return res as unknown as T;
       const text = await res.text();
       let data: any = null;
       try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
-      if (!res.ok) throw new UnipileError(res.status, data?.type ?? "", data?.detail ?? data?.title ?? text?.slice(0, 200), data);
+      if (!res.ok) { noteCallError("unipile", group, `${data?.type ?? ""} ${data?.detail ?? data?.title ?? ""}`.trim() || text?.slice(0, 200)); throw new UnipileError(res.status, data?.type ?? "", data?.detail ?? data?.title ?? text?.slice(0, 200), data); }
       return data as T;
     } catch (e) {
       clearTimeout(timer);

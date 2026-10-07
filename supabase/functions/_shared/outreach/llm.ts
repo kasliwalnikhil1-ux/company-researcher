@@ -5,6 +5,7 @@
 import { admin, log, sha256Hex } from "./supabase.ts";
 import { decrypt } from "./crypto.ts";
 import { PROMPT_VERSION } from "./prompts.ts";
+import { fetchWithHealth, noteCallError } from "../health.ts";
 
 export type LlmProvider = "gemini" | "anthropic" | "openai";
 export type ThinkingLevel = "LOW" | "MEDIUM" | "HIGH";
@@ -19,9 +20,20 @@ export const DEFAULT_MODELS: Record<LlmProvider, string> = {
   openai: Deno.env.get("OUTREACH_OPENAI_MODEL") ?? "gpt-5-mini",
 };
 
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent";
+// The only file that may name an AI provider's host (health-page-PRD.md D11; scripts/check-health-coverage.mjs enforces it).
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/";
+const GEMINI_URL = `${GEMINI_BASE}{model}:generateContent`;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+
+/**
+ * One raw Gemini request for a transport this file does not own (audio transcription, the website assistant's SSE stream),
+ * measured under the given purpose. `own` marks a workspace key (counted apart, D13). The caller reads the Response.
+ */
+export function geminiFetch(purpose: string, model: string, method: "generateContent" | "streamGenerateContent", key: string, body: unknown, opts: { own?: boolean; stream?: boolean; timeoutMs?: number } = {}): Promise<Response> {
+  const url = `${GEMINI_BASE}${encodeURIComponent(model)}:${method}${opts.stream ? "?alt=sse" : ""}`;
+  return fetchWithHealth("ai", purpose, url, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body), signal: AbortSignal.timeout(opts.timeoutMs ?? 90_000) }, { own: opts.own });
+}
 
 export interface LlmConfig { provider: LlmProvider; model: string; key: string; own: boolean }
 export interface LlmCallOpts {
@@ -29,7 +41,37 @@ export interface LlmCallOpts {
   /** A different model on the PLATFORM key only (e.g. a cheaper verifier). A workspace on its own key always uses its own model. */
   platformModel?: string | null;
 }
-export interface LlmResult { text: string; provider: LlmProvider; model: string; ownKey: boolean }
+export interface LlmResult { text: string; provider: LlmProvider; model: string; ownKey: boolean; callId: number | null; truncated: boolean }
+
+/** What became of an AI call (health-page-PRD.md §5.2). The first three are the provider's doing; the rest are "answered, but unusable". */
+export type AiOutcome = "ok" | "provider_error" | "timeout" | "empty" | "cut_off" | "refused" | "bad_format";
+
+export interface AiCallLog {
+  workspaceId: string | null; purpose: string; model: string | null; outcome: AiOutcome; httpStatus?: number | null; attempts?: number;
+  ownKey?: boolean; promptSha?: string | null; responseSha?: string | null; tokensIn?: number | null; tokensOut?: number | null; latencyMs?: number | null;
+}
+
+/** One outreach_ai_calls row. Never throws. Returns the row id so the caller can mark the answer unusable later. */
+export async function logAiCall(c: AiCallLog): Promise<number | null> {
+  try {
+    const { data, error } = await admin.from("outreach_ai_calls").insert({
+      workspace_id: c.workspaceId, purpose: c.purpose, model: c.model, prompt_sha256: c.promptSha ?? null, response_sha256: c.responseSha ?? null,
+      tokens_in: c.tokensIn || null, tokens_out: c.tokensOut || null, latency_ms: c.latencyMs ?? null,
+      outcome: c.outcome, http_status: c.httpStatus ?? null, attempts: Math.max(1, c.attempts ?? 1), own_key: !!c.ownKey,
+    }).select("id").single();
+    if (error) throw error;
+    return data?.id ?? null;
+  } catch (e) { log({ fn: "llm", warn: "ai_calls insert failed", error: String((e as any)?.message ?? e) }); return null; }
+}
+
+/**
+ * The calling code found the answer unusable by its own rules (required parts missing, a value outside its limits): the
+ * row's outcome becomes `bad_format` (or the given one) and the AI check counts it. Never throws.
+ */
+export async function markUnusable(callId: number | null | undefined, outcome: Exclude<AiOutcome, "ok"> = "bad_format"): Promise<void> {
+  if (!callId) return;
+  try { await admin.from("outreach_ai_calls").update({ outcome }).eq("id", callId); } catch (e) { log({ fn: "llm", warn: "markUnusable failed", error: String(e) }); }
+}
 
 /** Errors carry an `E_CODE: message` text so errorResponse() and parseError() map them. */
 export class LlmError extends Error {
@@ -96,8 +138,14 @@ export async function aiAvailable(workspaceId?: string | null): Promise<boolean>
 // ---------------------------------------------------------------------------
 // Transports
 // ---------------------------------------------------------------------------
-interface TransportReq { system: string; user: string; maxTokens: number; temperature: number; json: boolean; level: ThinkingLevel }
+interface TransportReq { system: string; user: string; maxTokens: number; temperature: number; json: boolean; level: ThinkingLevel; purpose: string; own: boolean; meta: CallMeta }
 interface TransportRes { text: string; tokensIn: number | null; tokensOut: number | null; truncated: boolean; finish: string }
+/** Per-call counters the transports fill in: how many requests went out, and the last HTTP status seen. */
+interface CallMeta { attempts: number; status: number | null }
+
+/** The model declined to answer (a safety stop, a refusal): recorded as `refused`, not as a provider error. */
+class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
+const isTimeout = (e: unknown) => (e as any)?.name === "TimeoutError" || (e as any)?.name === "AbortError";
 
 class HttpFail extends Error {
   status: number; providerMessage: string;
@@ -112,19 +160,22 @@ class HttpFail extends Error {
 const NAMES: Record<LlmProvider, string> = { gemini: "Gemini", anthropic: "Anthropic", openai: "OpenAI" };
 
 /** POST with the shared retry policy: 3 tries, back off on 429 / 5xx / network errors, 60 s timeout each. */
-async function post(provider: LlmProvider, url: string, headers: Record<string, string>, body: unknown): Promise<any> {
+async function post(provider: LlmProvider, url: string, headers: Record<string, string>, body: unknown, q: TransportReq): Promise<any> {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= 2; attempt++) {
     try {
-      const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(60_000) });
+      q.meta.attempts++;
+      const r = await fetchWithHealth("ai", q.purpose, url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), signal: AbortSignal.timeout(60_000) }, { own: q.own });
+      q.meta.status = r.status;
       if ((r.status === 429 || r.status >= 500) && attempt < 2) {
         lastErr = new HttpFail(NAMES[provider], r.status, await r.text());
+        noteCallError("ai", q.purpose, (lastErr as HttpFail).providerMessage, q.own);
         // OpenAI answers 429 for an empty wallet too; retrying cannot fix that.
         if (/insufficient_quota|exceeded your current quota/i.test((lastErr as HttpFail).message)) throw lastErr;
         await new Promise((x) => setTimeout(x, 1000 * (attempt + 1)));
         continue;
       }
-      if (!r.ok) throw new HttpFail(NAMES[provider], r.status, await r.text());
+      if (!r.ok) { const f = new HttpFail(NAMES[provider], r.status, await r.text()); noteCallError("ai", q.purpose, f.providerMessage, q.own); throw f; }
       return await r.json();
     } catch (e) {
       lastErr = e;
@@ -150,11 +201,14 @@ async function geminiOnce(cfg: LlmConfig, q: TransportReq): Promise<TransportRes
     systemInstruction: { parts: [{ text: q.system }] },
     contents: [{ role: "user", parts: [{ text: q.user }] }],
     generationConfig,
-  });
+  }, q);
   const candidate = data.candidates?.[0];
-  if (!candidate) throw new Error(`No candidates in Gemini response${data.promptFeedback?.blockReason ? ` (${data.promptFeedback.blockReason})` : ""}`);
+  if (!candidate) {
+    if (data.promptFeedback?.blockReason) throw new Refused(`Gemini declined the request (${data.promptFeedback.blockReason})`);
+    throw new Error("No candidates in Gemini response");
+  }
   const finish = String(candidate.finishReason ?? "");
-  if (finish === "SAFETY" || finish === "PROHIBITED_CONTENT") throw new Error(`Gemini declined the request (${finish})`);
+  if (finish === "SAFETY" || finish === "PROHIBITED_CONTENT") throw new Refused(`Gemini declined the request (${finish})`);
   const parts: Array<{ text?: string; thought?: boolean }> = candidate.content?.parts ?? [];
   // Thinking models emit thought parts first; the answer is the last non-thought part.
   let text = "";
@@ -180,9 +234,9 @@ async function anthropicOnce(cfg: LlmConfig, q: TransportReq): Promise<Transport
   };
   if (legacy) body.temperature = Math.max(0, Math.min(1, q.temperature));
   else body.output_config = { effort: q.level.toLowerCase() };
-  const data = await post("anthropic", ANTHROPIC_URL, { "x-api-key": cfg.key, "anthropic-version": "2023-06-01" }, body);
+  const data = await post("anthropic", ANTHROPIC_URL, { "x-api-key": cfg.key, "anthropic-version": "2023-06-01" }, body, q);
   const finish = String(data.stop_reason ?? "");
-  if (finish === "refusal") throw new Error(`Anthropic declined the request${data.stop_details?.category ? ` (${data.stop_details.category})` : ""}`);
+  if (finish === "refusal") throw new Refused(`Anthropic declined the request${data.stop_details?.category ? ` (${data.stop_details.category})` : ""}`);
   const text = (Array.isArray(data.content) ? data.content : []).filter((b: any) => b?.type === "text" && typeof b.text === "string").map((b: any) => b.text).join("").trim();
   return { text, tokensIn: data.usage?.input_tokens ?? null, tokensOut: data.usage?.output_tokens ?? null, truncated: finish === "max_tokens", finish };
 }
@@ -200,12 +254,12 @@ async function openaiOnce(cfg: LlmConfig, q: TransportReq): Promise<TransportRes
   if (OPENAI_REASONING.test(cfg.model)) body.reasoning_effort = q.level.toLowerCase();
   else body.temperature = q.temperature;
   if (q.json) body.response_format = { type: "json_object" };
-  const data = await post("openai", OPENAI_URL, { authorization: `Bearer ${cfg.key}` }, body);
+  const data = await post("openai", OPENAI_URL, { authorization: `Bearer ${cfg.key}` }, body, q);
   const choice = data.choices?.[0];
   if (!choice) throw new Error("No choices in OpenAI response");
   const finish = String(choice.finish_reason ?? "");
-  if (finish === "content_filter") throw new Error("OpenAI declined the request (content_filter)");
-  if (choice.message?.refusal) throw new Error("OpenAI declined the request (refusal)");
+  if (finish === "content_filter") throw new Refused("OpenAI declined the request (content_filter)");
+  if (choice.message?.refusal) throw new Refused("OpenAI declined the request (refusal)");
   return { text: String(choice.message?.content ?? "").trim(), tokensIn: data.usage?.prompt_tokens ?? null, tokensOut: data.usage?.completion_tokens ?? null, truncated: finish === "length", finish };
 }
 
@@ -228,20 +282,30 @@ export async function llmCallDetailed(o: LlmCallOpts): Promise<LlmResult> {
   if (!resolved) throw new LlmError("E_AI_UNAVAILABLE", "AI is not configured: no platform key and no workspace key");
   const cfg: LlmConfig = !resolved.own && o.platformModel ? { ...resolved, model: o.platformModel } : resolved;
   const t0 = Date.now();
-  const q: TransportReq = { system: `${o.system}\n\n[prompt-version ${PROMPT_VERSION}]`, user: o.user, maxTokens: o.maxTokens, temperature: o.temperature, json: o.json, level: o.thinking ?? (o.json ? "MEDIUM" : "HIGH") };
+  const meta: CallMeta = { attempts: 0, status: null };
+  const q: TransportReq = { system: `${o.system}\n\n[prompt-version ${PROMPT_VERSION}]`, user: o.user, maxTokens: o.maxTokens, temperature: o.temperature, json: o.json, level: o.thinking ?? (o.json ? "MEDIUM" : "HIGH"), purpose: o.purpose, own: cfg.own, meta };
+  // One outreach_ai_calls row per call, written after the last retry whatever happened (health-page-PRD.md §5.2).
+  const record = (outcome: AiOutcome, extra: { tokensIn?: number; tokensOut?: number; promptSha?: string; responseSha?: string } = {}) =>
+    logAiCall({ workspaceId: o.workspaceId, purpose: o.purpose, model: cfg.model, outcome, httpStatus: meta.status, attempts: meta.attempts, ownKey: cfg.own, latencyMs: Date.now() - t0, ...extra });
 
-  let text = "", finish = "", tokensIn = 0, tokensOut = 0;
+  let text = "", finish = "", tokensIn = 0, tokensOut = 0, truncated = false;
   try {
     const first = await once(cfg, q);
-    text = first.text; finish = first.finish; tokensIn = first.tokensIn ?? 0; tokensOut = first.tokensOut ?? 0;
+    text = first.text; finish = first.finish; tokensIn = first.tokensIn ?? 0; tokensOut = first.tokensOut ?? 0; truncated = first.truncated;
     // Reasoning can eat the whole budget and leave the answer truncated or empty: retry once with more
     // room and shallower thinking, which is enough for these structured tasks.
     if (first.truncated || !text || (o.json && !text.includes("{"))) {
       log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, retry: "budget", finish_reason: finish, chars: text.length });
       const retry = await once(cfg, { ...q, maxTokens: o.maxTokens * 4, level: "LOW" });
-      if (retry.text) { text = retry.text; finish = retry.finish; tokensIn += retry.tokensIn ?? 0; tokensOut += retry.tokensOut ?? 0; }
+      if (retry.text) { text = retry.text; finish = retry.finish; tokensIn += retry.tokensIn ?? 0; tokensOut += retry.tokensOut ?? 0; truncated = retry.truncated; }
     }
   } catch (e) {
+    if (e instanceof Refused) {
+      log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, workspace_id: o.workspaceId, error: String(e.message).slice(0, 300), refused: true });
+      await record("refused");
+      throw new LlmError("E_AI_BUSY", AI_BUSY_MESSAGE, meta.status, cfg.provider);
+    }
+    await record(isTimeout(e) ? "timeout" : "provider_error");
     if (authFailure(e)) {
       if (cfg.own) {
         if (o.workspaceId) cache.delete(o.workspaceId);   // pick up a corrected key at once
@@ -258,20 +322,20 @@ export async function llmCallDetailed(o: LlmCallOpts): Promise<LlmResult> {
   }
   if (!text) {
     log({ fn: "llm", purpose: o.purpose, provider: cfg.provider, error: "empty response", finish_reason: finish });
+    await record("empty", { tokensIn, tokensOut });
     throw new LlmError("E_AI_BUSY", AI_BUSY_MESSAGE, null, cfg.provider);
   }
 
   const [ph, rh] = await Promise.all([sha256Hex(o.system + "\n" + o.user), sha256Hex(text)]);
+  // A truncated answer comes back from the provider as a success (D12): it is recorded as cut_off and still returned,
+  // because the caller may be able to use it; if it cannot, markUnusable() keeps cut_off (never downgrades to bad_format).
+  const callId = await record(truncated ? "cut_off" : "ok", { tokensIn, tokensOut, promptSha: ph, responseSha: rh });
   try {
-    await admin.from("outreach_ai_calls").insert({
-      workspace_id: o.workspaceId, purpose: o.purpose, model: cfg.model, prompt_sha256: ph, response_sha256: rh,
-      tokens_in: tokensIn || null, tokens_out: tokensOut || null, latency_ms: Date.now() - t0,
-    });
     if (o.workspaceId) {
       await admin.from("outreach_audit_log").insert({ workspace_id: o.workspaceId, actor_type: "ai", action: `ai.${o.purpose}`, entity: "ai_call", entity_id: rh.slice(0, 16), diff: { prompt_sha256: ph, response_sha256: rh, model: cfg.model, provider: cfg.provider, own_key: cfg.own } });
     }
-  } catch (e) { log({ fn: "llm", warn: "ai_calls insert failed", error: String(e) }); }
-  return { text, provider: cfg.provider, model: cfg.model, ownKey: cfg.own };
+  } catch (e) { log({ fn: "llm", warn: "audit insert failed", error: String(e) }); }
+  return { text, provider: cfg.provider, model: cfg.model, ownKey: cfg.own, callId, truncated };
 }
 
 export async function llmCall(o: LlmCallOpts): Promise<string> {
@@ -283,7 +347,7 @@ export async function llmTestKey(input: { provider: LlmProvider; model?: string 
   const cfg: LlmConfig = { provider: input.provider, model: String(input.model ?? "").trim() || DEFAULT_MODELS[input.provider], key: input.key, own: true };
   try {
     // Room for a reasoning model to think a little and still answer; the answer itself does not matter.
-    await once(cfg, { system: "You are a connection test.", user: "Reply with the single word: ok", maxTokens: 512, temperature: 0, json: false, level: "LOW" });
+    await once(cfg, { system: "You are a connection test.", user: "Reply with the single word: ok", maxTokens: 512, temperature: 0, json: false, level: "LOW", purpose: "test_key", own: true, meta: { attempts: 0, status: null } });
   } catch (e) {
     if (e instanceof HttpFail && e.status !== 429 && e.status < 500 || authFailure(e) || (e instanceof HttpFail && /insufficient_quota|exceeded your current quota/i.test(e.message))) {
       const f = e as HttpFail;
@@ -294,7 +358,7 @@ export async function llmTestKey(input: { provider: LlmProvider; model?: string 
       log({ fn: "llm", purpose: "test_key", provider: cfg.provider, error: String((e as any)?.message ?? e).slice(0, 300) });
       throw new LlmError("E_AI_UNAVAILABLE", "Couldn't check the key right now. Try again in a minute.", (e as any)?.status ?? null, cfg.provider);
     }
-    // "declined" / "no candidates" on a harmless prompt still proves the key was accepted.
+    // "declined" / "no candidates" on a harmless prompt still proves the key was accepted (a Refused lands here too).
   }
   return { provider: cfg.provider, model: cfg.model };
 }

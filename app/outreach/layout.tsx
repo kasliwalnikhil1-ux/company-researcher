@@ -11,6 +11,7 @@ import { EmptyState, ErrorBox, PageLoader } from '@/components/outreach/ui';
 import { useOutreachAccess } from '@/lib/outreach/session';
 import { IS_DEMO } from '@/lib/outreach/mode';
 import WebchatPresence from '@/components/outreach/WebchatPresence';
+import HealthClientEvents from '@/components/outreach/HealthClientEvents';
 import dynamic from 'next/dynamic';
 import '@/components/outreach/demo/guard';
 
@@ -31,7 +32,7 @@ function Gate({ children }: { children: React.ReactNode }) {
   if (loading) return <PageLoader className="min-h-[calc(100dvh_-_3.5rem_-_var(--demo-bar,0px))] md:min-h-[calc(100dvh_-_var(--demo-bar,0px))]" />;
   if (error) return <div className="p-6"><ErrorBox message={error} /></div>;
   if (!workspace) return <div className="p-6"><ErrorBox message="No workspace available." /></div>;
-  return <OutreachShell><WebchatPresence />{children}</OutreachShell>;
+  return <OutreachShell><WebchatPresence /><HealthClientEvents />{children}</OutreachShell>;
 }
 
 const noSubscribe = () => () => {};

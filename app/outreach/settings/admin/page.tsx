@@ -12,6 +12,7 @@ import PlatformSetupCard from '@/components/outreach/settings/admin/PlatformSetu
 import BillingAdminCard from '@/components/outreach/settings/admin/BillingAdminCard';
 import PlatformLimits from '@/components/outreach/settings/admin/PlatformLimits';
 import AiReplyAdmin from '@/components/outreach/settings/admin/AiReplyAdmin';
+import HealthEntryCard from '@/components/outreach/settings/admin/HealthEntryCard';
 
 /**
  * Settings → Admin: everything that is the same for every workspace, sender and user. Rendered only when the app runs on
@@ -37,10 +38,13 @@ export default function AdminSettingsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="lg:col-span-2"><PlatformSetupCard /></div>
-        <Card title="Accounts and workspaces">
-          <p className="text-sm text-gray-600">Approve or block sign-ups, set plans and credits, turn features on per account, suspend outreach workspaces and manage the CRM team.</p>
-          <Link href="/admin" className="inline-flex items-center gap-1 mt-3 text-sm text-indigo-600 hover:underline">Open the admin console <ArrowUpRight className="w-3.5 h-3.5" /></Link>
-        </Card>
+        <div className="space-y-6">
+          <HealthEntryCard />
+          <Card title="Accounts and workspaces">
+            <p className="text-sm text-gray-600">Approve or block sign-ups, set plans and credits, turn features on per account, suspend outreach workspaces and manage the CRM team.</p>
+            <Link href="/admin" className="inline-flex items-center gap-1 mt-3 text-sm text-indigo-600 hover:underline">Open the admin console <ArrowUpRight className="w-3.5 h-3.5" /></Link>
+          </Card>
+        </div>
       </div>
 
       <BillingAdminCard />

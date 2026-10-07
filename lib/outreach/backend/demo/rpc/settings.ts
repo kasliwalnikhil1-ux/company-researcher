@@ -401,6 +401,20 @@ export const settingsRpc = {
   // --- platform admin (hidden in the tour) ----------------------------------------
   ai_reply_admin_list: () => demoError('E_FORBIDDEN', 'platform admin required'),
   ai_reply_admin_set: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  // Health page (health-page-PRD.md D1): never rendered in the tour, every RPC refuses
+  health_overview: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_check: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_usage: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_stuck: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_snooze: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_set_threshold: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_set_enabled: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_settings_set: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_set_manual_usage: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_recheck_limits: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  health_run_now: () => demoError('E_FORBIDDEN', 'platform admin required'),
+  // the tour records nothing (lib/outreach/clientEvents.ts returns before calling); accepted silently if it ever does
+  report_client_event: () => null,
 } satisfies RpcArea;
 
 /** Table hooks (insert defaults, side effects) for this area's tables. Called once at boot. */

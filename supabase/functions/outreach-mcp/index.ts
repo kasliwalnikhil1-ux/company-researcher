@@ -44,6 +44,7 @@ import { registerNotes } from "./tools_notes.ts";
 import { registerWebchat } from "./tools_webchat.ts";
 import { registerAiHub } from "./tools_ai_hub.ts";
 import { registerResources, registerPrompts } from "./resources_prompts.ts";
+import { withHealth } from "../_shared/health.ts";
 
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/outreach-mcp`;
 const RESOURCE_URL = `${FUNCTION_BASE}/mcp`;
@@ -176,4 +177,4 @@ app.get("/", (c) =>
   }),
 );
 
-Deno.serve(app.fetch);
+Deno.serve(withHealth("outreach-mcp", (req) => app.fetch(req)));

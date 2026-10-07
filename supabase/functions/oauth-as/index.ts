@@ -23,6 +23,7 @@
 //   supabase functions deploy oauth-as --no-verify-jwt --project-ref ktwqkvjuzsunssudqnrt
 import { Hono } from "npm:hono@4.9.7";
 import { type Brand, BRANDS } from "../_shared/brands.ts";
+import { withHealth } from "../_shared/health.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ISSUER = `${SUPABASE_URL}/functions/v1/oauth-as`;
@@ -112,4 +113,4 @@ app.get("/:brand/authorize", async (c) => {
   });
 });
 
-Deno.serve(app.fetch);
+Deno.serve(withHealth("oauth-as", (req) => app.fetch(req)));

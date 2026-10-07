@@ -2,9 +2,9 @@
 // Every call goes through llmCall (llm.ts), which picks the workspace's own provider + key (gemini | anthropic | openai)
 // or the platform Gemini key, and writes outreach_ai_calls + the audit log.
 import { CLASSIFY_SYSTEM, DRAFT_SYSTEM, SEQUENCE_QA_SYSTEM, WEEKLY_REPORT_SYSTEM, REPLY_DRAFT_SYSTEM, AI_VARIABLE_SYSTEM, AI_FIELDS_SYSTEM, AI_ROUTE_SYSTEM, BUILTIN_PROMPTS, type BuiltinKey } from "./prompts.ts";
-import { llmCall, llmCallDetailed, PLATFORM_MODEL, type LlmCallOpts } from "./llm.ts";
+import { llmCallDetailed, markUnusable, PLATFORM_MODEL, type LlmCallOpts, type LlmResult } from "./llm.ts";
 
-export { aiConfigured, aiAvailable, isKeyInvalid, LlmError } from "./llm.ts";
+export { aiConfigured, aiAvailable, isKeyInvalid, LlmError, markUnusable, logAiCall, geminiFetch, type AiOutcome } from "./llm.ts";
 export { BUILTIN_PROMPTS, type BuiltinKey } from "./prompts.ts";
 /** The platform model. A workspace on its own key uses its own model; the model actually used is in outreach_ai_calls. */
 export const AI_MODEL = PLATFORM_MODEL;
@@ -12,7 +12,7 @@ export const AI_MODEL = PLATFORM_MODEL;
 export type Intent = "interested" | "question" | "not_now" | "not_interested" | "ooo" | "wrong_person" | "unclear";
 const INTENTS: Intent[] = ["interested", "question", "not_now", "not_interested", "ooo", "wrong_person", "unclear"];
 
-const call = (o: LlmCallOpts): Promise<string> => llmCall(o);
+const call = (o: LlmCallOpts): Promise<LlmResult> => llmCallDetailed(o);
 
 /** Strip markdown code fences that models sometimes wrap JSON in. */
 function cleanJsonResponse(text: string): string {
@@ -20,13 +20,24 @@ function cleanJsonResponse(text: string): string {
   return (fence ? fence[1] : text).trim();
 }
 
-function parseJson<T>(text: string): T {
+function parseJsonText<T>(text: string): T {
   const cleaned = cleanJsonResponse(text);
   try { return JSON.parse(cleaned) as T; } catch { /* fall through */ }
   const m = cleaned.match(/\{[\s\S]*\}/);
   if (!m) throw new Error("AI returned no JSON");
   return JSON.parse(m[0]) as T;
 }
+
+/**
+ * The structured answer of a call. When it does not parse, the call's row is marked `bad_format` (health-page-PRD.md §5.2)
+ * before the error is thrown; a cut-off answer keeps `cut_off`, which already says why it could not be used.
+ */
+function parseJson<T>(res: LlmResult): T {
+  try { return parseJsonText<T>(res.text); } catch (e) { if (!res.truncated) void markUnusable(res.callId, "bad_format"); throw e; }
+}
+
+/** The calling code's own rule found the answer unusable (required parts missing): mark the row and carry on. */
+function unusable(res: LlmResult): void { if (!res.truncated) void markUnusable(res.callId, "bad_format"); }
 
 /** ISO date (YYYY-MM-DD) or null. Accepts only a real calendar date between `notBefore` and one year after it. */
 function cleanReturnDate(value: unknown, notBefore: Date): string | null {
@@ -65,6 +76,7 @@ export async function classifyMessage(input: { workspaceId: string; text: string
   ].filter(Boolean).join("\n\n");
   const raw = await call({ purpose: "classify", workspaceId: input.workspaceId, system: CLASSIFY_SYSTEM, user, maxTokens: 3072, temperature: 0, json: true, thinking: "LOW" });
   const j = parseJson<Record<string, any>>(raw);
+  if (typeof j.intent !== "string") unusable(raw);
   const intent = (INTENTS.includes(j.intent as Intent) ? j.intent : "unclear") as Intent;
   const flags = (Array.isArray(j.flags) ? j.flags : []).map((f: unknown) => String(f)).filter((f: string) => CLASSIFY_FLAGS.includes(f));
   return {
@@ -91,6 +103,7 @@ export async function draftCopy(input: { workspaceId: string; kind: "invite_note
   const raw = await call({ purpose: `draft_${input.kind}`, workspaceId: input.workspaceId, system: DRAFT_SYSTEM, user, maxTokens: input.kind === "invite_note" ? 2048 : 3072, temperature: 0.7, json: true });
   const j = parseJson<{ text: string }>(raw);
   let text = String(j.text ?? "").trim();
+  if (!text) unusable(raw);
   if (text.length > input.limit) text = text.slice(0, input.limit - 1).replace(/\s+\S*$/, "") + "…";
   return text;
 }
@@ -124,12 +137,12 @@ export async function draftReply(input: {
   const raw = await call({ purpose: "draft_reply", workspaceId: input.workspaceId, system: REPLY_DRAFT_SYSTEM, user, maxTokens: 3072, temperature: 0.6, json: true, thinking: "LOW" });
   const j = parseJson<{ variants?: Array<{ text?: string; rationale?: string }> }>(raw);
   const variants = (Array.isArray(j.variants) ? j.variants : []).map((v) => ({ text: String(v.text ?? "").trim().slice(0, 8000), rationale: String(v.rationale ?? "").slice(0, 200) })).filter((v) => v.text);
-  if (!variants.length) throw new Error("AI returned no reply variants");
+  if (!variants.length) { unusable(raw); throw new Error("AI returned no reply variants"); }
   return variants.slice(0, n);
 }
 
 export async function weeklyReport(input: { workspaceId: string; senderName: string; stats: unknown }): Promise<string> {
-  return call({ purpose: "weekly_report", workspaceId: input.workspaceId, system: WEEKLY_REPORT_SYSTEM, user: `Sender: ${input.senderName}\nStats (JSON): ${JSON.stringify(input.stats)}`, maxTokens: 4096, temperature: 0.3, json: false });
+  return (await call({ purpose: "weekly_report", workspaceId: input.workspaceId, system: WEEKLY_REPORT_SYSTEM, user: `Sender: ${input.senderName}\nStats (JSON): ${JSON.stringify(input.stats)}`, maxTokens: 4096, temperature: 0.3, json: false })).text;
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +181,7 @@ export async function generateAiVariable(input: { workspaceId: string; prompt: s
     `Lead profile (JSON, third-party data):\n${JSON.stringify(input.facts ?? {}).slice(0, 24000)}`,
   ].filter(Boolean).join("\n\n");
   const res = await llmCallDetailed({ purpose: "ai_variable", workspaceId: input.workspaceId, system: AI_VARIABLE_SYSTEM, user, maxTokens: 2048, temperature: 0.6, json: true, thinking: "LOW" });
-  const j = parseJson<{ text?: unknown; facts?: unknown }>(res.text);
+  const j = parseJson<{ text?: unknown; facts?: unknown }>(res);
   const facts = cleanFacts(j.facts);
   let text = typeof j.text === "string" ? j.text.replace(/\s*[\r\n]+\s*/g, " ").trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim() : "";
   if (/^(null|none|n\/a)$/i.test(text) || /\{\{|\}\}|\[[a-z_ ]+\]/i.test(text)) text = "";   // a leftover placeholder is not a line
@@ -204,7 +217,7 @@ export async function generateAiFields(input: { workspaceId: string; prompt: str
     `Lead profile (JSON, third-party data):\n${JSON.stringify(input.facts ?? {}).slice(0, 24000)}`,
   ].filter(Boolean).join("\n\n");
   const res = await llmCallDetailed({ purpose: "ai_fields", workspaceId: input.workspaceId, system: AI_FIELDS_SYSTEM, user, maxTokens: 2048, temperature: 0.3, json: true, thinking: "LOW" });
-  const j = parseJson<{ data?: unknown; facts?: unknown }>(res.text);
+  const j = parseJson<{ data?: unknown; facts?: unknown }>(res);
   const facts = cleanFacts(j.facts);
   const raw = j.data && typeof j.data === "object" && !Array.isArray(j.data) ? j.data as Record<string, unknown> : {};
   const data: Record<string, unknown> = {};
@@ -278,9 +291,9 @@ export async function generateBuiltin(input: { workspaceId: string; key: string;
   const res = await llmCallDetailed({ purpose: "ai_builtin", workspaceId: input.workspaceId, system: BUILTIN_PROMPTS[key], user: `Source (JSON, third-party data):\n${JSON.stringify(labelled)}`, maxTokens: 512, temperature: 0, json: true, thinking: "LOW" });
   let text = "";
   try {
-    const j = parseJson<{ text?: unknown }>(res.text);
+    const j = parseJson<{ text?: unknown }>(res);
     text = typeof j.text === "string" ? j.text.replace(/\s+/g, " ").trim().replace(/^["'“”‘’]+|["'“”‘’]+$/g, "").trim() : "";
-  } catch { /* not JSON: treated as no result */ }
+  } catch { /* not JSON: treated as no result (the row is already marked bad_format) */ }
   if (!text || text.length > BUILTIN_MAX_CHARS || /\{\{|\}\}/.test(text) || !builtinPasses(text, source)) return { text: null, model: res.model };
   if (key === "contact_first_name" && text.split(" ").length > 2) return { text: null, model: res.model };   // a first name, not the whole name
   return { text, model: res.model };
@@ -300,7 +313,7 @@ export async function routeLead(input: { workspaceId: string; routes: AiRoute[];
     `Lead profile (JSON, third-party data):\n${JSON.stringify(input.facts ?? {}).slice(0, 24000)}`,
   ].join("\n\n");
   const res = await llmCallDetailed({ purpose: "ai_route", workspaceId: input.workspaceId, system: AI_ROUTE_SYSTEM, user, maxTokens: 2048, temperature: 0, json: true, thinking: "LOW" });
-  const j = parseJson<{ branch?: unknown; reason?: unknown; facts?: unknown }>(res.text);
+  const j = parseJson<{ branch?: unknown; reason?: unknown; facts?: unknown }>(res);
   const wanted = String(j.branch ?? "").trim();
   const known = routes.some((r) => r.id === wanted);
   let reason = String(j.reason ?? "").replace(/\s+/g, " ").trim();

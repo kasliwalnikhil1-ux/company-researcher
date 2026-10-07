@@ -4,6 +4,7 @@
 // invoice.confirmation_secret (expand it). See docs/outreach/BILLING.md §Stripe.
 import { log } from "./supabase.ts";
 import { hmacSha256Hex } from "./crypto.ts";
+import { fetchWithHealth, endpointGroup, noteCallError } from "../health.ts";
 
 export const STRIPE_API_VERSION = Deno.env.get("STRIPE_API_VERSION") ?? "2026-08-26.dahlia";
 const API_BASE = (Deno.env.get("STRIPE_API_BASE") ?? "https://api.stripe.com").replace(/\/+$/, "");
@@ -45,9 +46,10 @@ export function encodeForm(params: Record<string, unknown>): URLSearchParams {
 }
 
 type Fetch = (input: string, init: RequestInit) => Promise<Response>;
-let fetchImpl: Fetch = (input, init) => fetch(input, init);
+const liveFetch: Fetch = (input, init) => fetchWithHealth("stripe", endpointGroup(String(init.method ?? "GET"), new URL(input).pathname.replace(/^\/v1/, "")), input, init);
+let fetchImpl: Fetch = liveFetch;
 /** Tests replace the transport with a fake Stripe. */
-export function setStripeFetch(f: Fetch | null): void { fetchImpl = f ?? ((input, init) => fetch(input, init)); }
+export function setStripeFetch(f: Fetch | null): void { fetchImpl = f ?? liveFetch; }
 
 export interface StripeOpts { idempotencyKey?: string; retries?: number }
 
@@ -82,6 +84,7 @@ export async function stripe<T = any>(method: "GET" | "POST" | "DELETE", path: s
     log({ fn: "stripe", endpoint: `${method} ${path}`, status: res.status, latency_ms: Date.now() - t0, request_id: res.headers.get("request-id") });
     if (res.ok) return data as T;
     if ((res.status === 429 || res.status >= 500) && attempt < max) { await new Promise((r) => setTimeout(r, 500 * (attempt + 1))); continue; }
+    noteCallError("stripe", endpointGroup(method, path), data?.error?.message ?? `Stripe returned ${res.status}`);
     throw new StripeError(res.status, data?.error, `Stripe returned ${res.status}`);
   }
 }

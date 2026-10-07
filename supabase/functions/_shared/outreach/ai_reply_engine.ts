@@ -5,7 +5,7 @@
 // except the `Trigger:` line of the STATE block and the optional GUIDANCE block (ai_reply_engine_test.ts).
 // No database writes here; callers persist the result.
 import { rpc, sha256Hex } from "./supabase.ts";
-import { llmCallDetailed } from "./llm.ts";
+import { llmCallDetailed, markUnusable, type LlmResult } from "./llm.ts";
 import type { Classification } from "./ai.ts";
 import { AI_REPLY_FLOOR, AI_REPLY_DRAFT_SYSTEM, AI_REPLY_VERIFY_SYSTEM } from "./prompts.ts";
 import {
@@ -177,6 +177,11 @@ export function buildDraftPrompt(c: EngineInput, opts: EngineOpts, knowledge: Kn
   return { system: `${AI_REPLY_FLOOR}\n\n${AI_REPLY_DRAFT_SYSTEM}`, user };
 }
 
+/** parseJsonLoose over a call's answer; a failure marks the call's row bad_format (health-page-PRD.md §5.2) before throwing. */
+function parseCall(r: LlmResult): Record<string, unknown> {
+  try { return parseJsonLoose(r.text); } catch (e) { if (!r.truncated) void markUnusable(r.callId, "bad_format"); throw e; }
+}
+
 export function parseJsonLoose(text: string): Record<string, unknown> {
   const fence = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
   const t = (fence ? fence[1] : text).trim();
@@ -233,7 +238,7 @@ async function draftCall(c: EngineInput, opts: EngineOpts, knowledge: KnowledgeC
   const p = buildDraftPrompt(c, opts, knowledge, faqs, violation);
   const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: c.tz || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const r = await llmCallDetailed({ purpose: c.purpose, workspaceId: c.workspaceId, system: p.system, user: p.user, maxTokens: 8192, temperature, json: true, thinking: "MEDIUM" });
-  return { draft: parseDraft(parseJsonLoose(r.text), c.settings, todayIso, c.scenarios.map((s) => s.id)), model: r.model };
+  return { draft: parseDraft(parseCall(r), c.settings, todayIso, c.scenarios.map((s) => s.id)), model: r.model };
 }
 
 async function verifyCall(c: EngineInput, d: DraftOutput, knowledge: KnowledgeChunk[], faqs: Faq[]): Promise<NonNullable<PipelineResult["verifier"]>> {
@@ -250,7 +255,7 @@ async function verifyCall(c: EngineInput, d: DraftOutput, knowledge: KnowledgeCh
   ].filter(Boolean).join("\n\n");
   const r = await llmCallDetailed({ purpose: c.purpose === "reply_simulate" ? "reply_simulate_verify" : "reply_verify", workspaceId: c.workspaceId, system: AI_REPLY_VERIFY_SYSTEM, user,
     maxTokens: 2048, temperature: 0, json: true, thinking: "LOW", platformModel: VERIFY_MODEL });
-  const j = parseJsonLoose(r.text);
+  const j = parseCall(r);
   return {
     supported: j.supported === true, follows_rule: j.follows_rule === true, answers_their_questions: j.answers_their_questions === true,
     unsupported_claims: (Array.isArray(j.unsupported_claims) ? j.unsupported_claims : []).map(String).slice(0, 8),

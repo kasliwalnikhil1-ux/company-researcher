@@ -2,6 +2,7 @@
 // Every email is branded from outreach_workspaces.branding (item 23). Emails that can reach client viewers never show the
 // platform name when branding.hide_platform_name is true.
 import { admin, log, WEB_ORIGIN, audit } from "./supabase.ts";
+import { fetchWithHealth, noteCallError } from "../health.ts";
 
 const RESEND_KEY = Deno.env.get("RESEND_API_KEY") ?? "";
 const FROM = Deno.env.get("OUTREACH_EMAIL_FROM") ?? Deno.env.get("EMAIL_FROM") ?? "GrowthxAI Outreach <no-reply@capitalxai.com>";
@@ -90,13 +91,16 @@ function fromHeaders(b: Branding | undefined): { primary: string; fallback: stri
 export interface SendEmailOpts { branding?: Branding; replyTo?: string }
 
 async function resendSend(payload: Record<string, unknown>): Promise<{ ok: boolean; status: number; error: string }> {
-  const res = await fetch("https://api.resend.com/emails", {
+  const res = await fetchWithHealth("resend", "emails.send", "https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${RESEND_KEY}`, "content-type": "application/json" },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(20_000),
   });
   if (res.ok) { await res.body?.cancel(); return { ok: true, status: res.status, error: "" }; }
-  return { ok: false, status: res.status, error: await res.text() };
+  const error = await res.text();
+  noteCallError("resend", "emails.send", error);
+  return { ok: false, status: res.status, error };
 }
 
 export async function sendEmail(to: string, subject: string, html: string, text?: string, opts: SendEmailOpts = {}): Promise<boolean> {

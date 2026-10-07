@@ -11,6 +11,7 @@
 //   supabase functions deploy cleanup-temp-bucket --no-verify-jwt
 
 import { createClient } from "npm:@supabase/supabase-js@2.76.1";
+import { withHealth } from "../_shared/health.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -48,7 +49,7 @@ async function collectFiles(prefix: string, out: FileEntry[]): Promise<void> {
   }
 }
 
-Deno.serve(async (req) => {
+Deno.serve(withHealth("cleanup-temp-bucket", async (req) => {
   const token = req.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
   if (token !== SERVICE_ROLE_KEY) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -83,4 +84,4 @@ Deno.serve(async (req) => {
   };
   console.log("cleanup-temp-bucket:", JSON.stringify(result));
   return Response.json(result);
-});
+}));

@@ -9,6 +9,7 @@
 //   errors     ElError: status + the provider's own message, never the key.
 import { admin, log, sleep } from "./supabase.ts";
 import { decrypt, hmacSha256Hex } from "./crypto.ts";
+import { fetchWithHealth, endpointGroup, noteCallError } from "../health.ts";
 
 const PLATFORM_KEY = Deno.env.get("OUTREACH_ELEVENLABS_API_KEY") ?? "";
 const API_BASE = (Deno.env.get("OUTREACH_ELEVENLABS_API_BASE") ?? "https://api.elevenlabs.io").replace(/\/+$/, "");
@@ -54,7 +55,7 @@ async function raw(a: ElAccount, method: string, path: string, body?: unknown, o
   let last: Response | null = null, err: unknown = null;
   for (let i = 0; i < tries; i++) {
     try {
-      last = await fetch(url, { method, headers: { "xi-api-key": a.key, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(o.timeoutMs ?? 15_000) });
+      last = await fetchWithHealth("elevenlabs", endpointGroup(method, path), url, { method, headers: { "xi-api-key": a.key, ...(body !== undefined ? { "content-type": "application/json" } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(o.timeoutMs ?? 15_000) }, { own: a.account === "own" });
       if (last.status !== 429 && last.status < 500) return last;
       err = null;
       if (i < tries - 1) { const ra = Number(last.headers.get("retry-after")); await last.body?.cancel().catch(() => {}); await sleep(Math.min(3000, ra > 0 ? ra * 1000 : 400 * (i + 1) * (i + 1))); }
@@ -72,7 +73,7 @@ async function call<T = any>(a: ElAccount, method: string, path: string, body?: 
   const text = await res.text();
   let j: any = null;
   try { j = text ? JSON.parse(text) : null; } catch { j = { detail: text.slice(0, 300) }; }
-  if (!res.ok) throw new ElError(res.status, messageOf(j, res.status), j);
+  if (!res.ok) { noteCallError("elevenlabs", endpointGroup(method, path), messageOf(j, res.status), a.account === "own"); throw new ElError(res.status, messageOf(j, res.status), j); }
   return j as T;
 }
 

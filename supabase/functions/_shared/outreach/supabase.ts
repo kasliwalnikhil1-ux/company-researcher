@@ -1,5 +1,6 @@
 // Shared runtime helpers for outreach-* edge functions (Deno).
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.76.1";
+import { withHealth, reportErrorCode, errorCodeOf } from "../health.ts";
 
 export const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 export const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -41,9 +42,9 @@ export function errorResponse(e: unknown): Response {
   return json({ error: msg, code: "E_INTERNAL" }, 500);
 }
 
-/** Wrap a handler with CORS preflight + error mapping + JSON logging. */
+/** Wrap a handler with CORS preflight + error mapping + JSON logging, measured by withHealth (health-page-PRD.md §5.1). */
 export function serve(fn: string, handler: (req: Request) => Promise<Response>): void {
-  Deno.serve(async (req) => {
+  Deno.serve(withHealth(fn, async (req) => {
     if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
     const t0 = Date.now();
     try {
@@ -52,9 +53,10 @@ export function serve(fn: string, handler: (req: Request) => Promise<Response>):
       return res;
     } catch (e) {
       log({ fn, outcome: "error", error: (e as any)?.message ?? String(e), duration_ms: Date.now() - t0 });
+      reportErrorCode(errorCodeOf(e));
       return errorResponse(e);
     }
-  });
+  }));
 }
 
 export function log(fields: Record<string, unknown>): void {

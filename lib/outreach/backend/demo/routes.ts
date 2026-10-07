@@ -73,5 +73,6 @@ export const ROUTES: RouteEntry[] = [
   { file: 'settings/websites/[id]/page.tsx', url: `/outreach/settings/websites/${WEBCHAT.inbox}` },
   // not in the tour
   { file: 'settings/admin/page.tsx', url: '/outreach/settings/admin', demo: false, why: 'Platform admin: an internal tool, localhost only, hidden in the demo' },
+  { file: 'settings/admin/health/page.tsx', url: '/outreach/settings/admin/health', demo: false, why: 'Health (health-page-PRD.md D1): platform admins only, localhost only, hidden in the demo' },
   { file: 'invite/[token]/page.tsx', url: '/outreach/invite/demo-invite-token', demo: false, why: 'The entry page of a real invitation' },
 ];

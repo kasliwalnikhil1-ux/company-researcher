@@ -27,6 +27,7 @@ import { registerSequences } from "./routes_sequences.ts";
 import { registerInbox } from "./routes_inbox.ts";
 import { registerSenders } from "./routes_senders.ts";
 import { registerReports } from "./routes_reports.ts";
+import { withHealth } from "../_shared/health.ts";
 
 const BASE = "/outreach-api";
 const API_VERSION = "2026-09-20";
@@ -170,4 +171,4 @@ app.onError((e, c) => {
   return c.json(errorBody(err, requestId), err.status as 400, headers);
 });
 
-Deno.serve(app.fetch);
+Deno.serve(withHealth("outreach-api", (req) => app.fetch(req)));

@@ -37,6 +37,7 @@ import { registerResources, registerPrompts } from "./resources_prompts.ts";
 import { registerSkill } from "../_shared/mcp-skills.ts";
 import { GROWTHXAI as BRAND, brandAuthServer } from "../_shared/brands.ts";
 import { SKILLS } from "./skills.gen.ts";
+import { withHealth } from "../_shared/health.ts";
 
 const FUNCTION_BASE = `${SUPABASE_URL}/functions/v1/smartlead-mcp`;
 const RESOURCE_URL = `${FUNCTION_BASE}/mcp`;
@@ -170,4 +171,4 @@ app.get("/", (c) =>
   }),
 );
 
-Deno.serve(app.fetch);
+Deno.serve(withHealth("smartlead-mcp", (req) => app.fetch(req)));

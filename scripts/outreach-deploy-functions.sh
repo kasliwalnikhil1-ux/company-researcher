@@ -57,6 +57,7 @@ WEBHOOK_FUNCS=(
   outreach-webchat           # public widget API: website token + Origin + visitor token checked in code (web-chat-PRD.md §13)
   outreach-voice-tools       # the voice agent's tools: per-agent secret + signed session token checked in code (web-chat-voice-elevenlabs-PRD.md §5.3)
   outreach-elevenlabs-webhook # voice provider's post-call webhook: HMAC signature (OUTREACH_ELEVENLABS_WEBHOOK_SECRET) checked in code
+  outreach-health-ping       # F50: public `ok` / `stale` for an outside uptime monitor (health-page-PRD.md §11)
 )
 # Cron workers (x-cron-secret via outreach_invoke / pg_net):
 CRON_FUNCS=(
@@ -83,6 +84,8 @@ CRON_FUNCS=(
   outreach-notes-worker      # private notes: mention emails (every minute), purge of deleted notes (daily)
   outreach-webchat-worker    # web chat: continuity email digests (every minute), maintenance (every 5 min), review (every minute), voice (every minute)
   outreach-notify-push       # reply alerts F47: Web Push sender (every 10 s + nudged by each alert) AND user JWT (?action=public_key)
+  outreach-health-collect    # Health F48: metrics endpoint + logs API + urgent emails (every 5 min)
+  outreach-health-daily      # Health F49: advisors, daily snapshot, upgrade answer, the daily email (hourly; acts once a day)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
@@ -108,6 +111,9 @@ USER_FUNCS=(
   outreach-ai-reply          # AI replies: send now, simulator, regression, prompt save (JWT) + the owner's public consent pages (token)
 )
 ALL_FUNCS=("${WEBHOOK_FUNCS[@]}" "${CRON_FUNCS[@]}" "${USER_FUNCS[@]}")
+
+# Health build check (health-page-PRD.md §5.1): refuse to deploy a function that skips the measuring
+if command -v node >/dev/null 2>&1; then node scripts/check-health-coverage.mjs || exit 1; else echo "WARN: node not found; check-health-coverage skipped" >&2; fi
 
 # --- resolve targets ---------------------------------------------------------------------------------------------
 TARGETS=()

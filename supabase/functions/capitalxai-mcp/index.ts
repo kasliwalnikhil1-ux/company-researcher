@@ -29,6 +29,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.76.1";
 import { registerSkill } from "../_shared/mcp-skills.ts";
 import { CAPITALXAI as BRAND, brandAuthServer } from "../_shared/brands.ts";
 import { SKILLS } from "./skills.gen.ts";
+import { withHealth } from "../_shared/health.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -2089,4 +2090,4 @@ app.get("/", (c) =>
   }),
 );
 
-Deno.serve(app.fetch);
+Deno.serve(withHealth("capitalxai-mcp", (req) => app.fetch(req)));

@@ -16,7 +16,7 @@ import { admin, FUNCTIONS_BASE, log, rpc, SERVICE_ROLE_KEY, WEB_ORIGIN } from ".
 import { hmacSha256Hex } from "./crypto.ts";
 import { unipile } from "./unipile.ts";
 import { brandName, esc, layout, sendEmail, workspaceBranding } from "./notify.ts";
-import { AI_BUSY_MESSAGE, llmCallDetailed, resolveLlm } from "./llm.ts";
+import { AI_BUSY_MESSAGE, llmCallDetailed, resolveLlm, geminiFetch, logAiCall } from "./llm.ts";
 
 // ---------------------------------------------------------------------------
 // Visitor token
@@ -520,13 +520,22 @@ export async function streamAnswer(c: AiContext, prompt: { system: string; user:
     emit(parsed.answer);
     return { raw: r.text, model: r.model, tokens_in: null, tokens_out: null };
   }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cfg.model}:streamGenerateContent?alt=sse&key=${cfg.key}`;
   const generationConfig: Record<string, unknown> = { temperature: 0.3, maxOutputTokens: 2500, responseMimeType: "application/json" };
   if (/gemini-3/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingLevel: "LOW" };
   else if (/gemini-2\.5/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingBudget: 512 };
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt.system }] }, contents: [{ role: "user", parts: [{ text: prompt.user }] }], generationConfig }) });
+  const t0 = Date.now();
+  const body = { systemInstruction: { parts: [{ text: prompt.system }] }, contents: [{ role: "user", parts: [{ text: prompt.user }] }], generationConfig };
+  let res: Response;
+  try {
+    res = await geminiFetch("webchat_answer", cfg.model, "streamGenerateContent", cfg.key, body, { own: cfg.own, stream: true, timeoutMs: 60_000 });
+  } catch (e) {
+    // the row for a failed stream: the SQL that records a turn writes the ok row, so this is the only place failures are counted
+    await logAiCall({ workspaceId: c.workspace_id, purpose: "webchat_answer", model: cfg.model, outcome: (e as any)?.name === "TimeoutError" ? "timeout" : "provider_error", ownKey: cfg.own, latencyMs: Date.now() - t0 });
+    throw e;
+  }
   if (!res.ok || !res.body) {
     log({ fn: "webchat", error: "answer stream failed", status: res.status, detail: (await res.text().catch(() => "")).slice(0, 300) });
+    await logAiCall({ workspaceId: c.workspace_id, purpose: "webchat_answer", model: cfg.model, outcome: "provider_error", httpStatus: res.status, ownKey: cfg.own, latencyMs: Date.now() - t0 });
     throw new Error(`E_AI_BUSY: ${AI_BUSY_MESSAGE}`);
   }
   const reader = res.body.getReader();

@@ -4,12 +4,11 @@
 // Model: OUTREACH_AI_MODEL → GEMINI_MODEL_ID → gemini-3-flash-preview; key: GEMINI_API_KEY (the platform key only: audio never goes to a workspace's own provider).
 import { admin, log, sha256Hex } from "./supabase.ts";
 import { unipile, unipileConfigured, UnipileError } from "./unipile.ts";
-import { PLATFORM_MODEL } from "./llm.ts";
+import { PLATFORM_MODEL, geminiFetch, logAiCall } from "./llm.ts";
 
 type Row = Record<string, any>;
 
 const GEMINI_KEY = Deno.env.get("GEMINI_API_KEY") ?? "";
-const GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent";
 const MAX_BYTES = 15 * 1024 * 1024;
 export const TRANSCRIBE_PROMPT = "Transcribe this voice note verbatim in its original language. Return only the transcript.";
 
@@ -36,7 +35,7 @@ function audioMime(attachment: Row, response: Response): string {
 }
 
 /** One Gemini call with inline audio. Returns the transcript text and token counts. */
-async function geminiTranscribe(mime: string, data: string): Promise<{ text: string; tokensIn: number | null; tokensOut: number | null }> {
+async function geminiTranscribe(mime: string, data: string, meta: { attempts: number; status: number | null }): Promise<{ text: string; tokensIn: number | null; tokensOut: number | null }> {
   const model = PLATFORM_MODEL;
   const body = {
     contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data } }, { text: TRANSCRIBE_PROMPT }] }],
@@ -45,7 +44,9 @@ async function geminiTranscribe(mime: string, data: string): Promise<{ text: str
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= 2; attempt++) {
     try {
-      const r = await fetch(GEMINI_URL.replace("{model}", encodeURIComponent(model)), { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": GEMINI_KEY }, body: JSON.stringify(body), signal: AbortSignal.timeout(90_000) });
+      meta.attempts++;
+      const r = await geminiFetch("transcribe", model, "generateContent", GEMINI_KEY, body, { timeoutMs: 90_000 });
+      meta.status = r.status;
       if ((r.status === 429 || r.status >= 500) && attempt < 2) { lastErr = new Error(`Gemini ${r.status}`); await new Promise((x) => setTimeout(x, 1500 * (attempt + 1))); continue; }
       const txt = await r.text();
       if (!r.ok) throw new Error(`Gemini API returned ${r.status}: ${txt.slice(0, 300)}`);
@@ -107,22 +108,25 @@ export async function transcribeVoiceNote(messageId: string): Promise<Transcribe
   }
 
   let transcript: string, tokensIn: number | null = null, tokensOut: number | null = null;
+  const meta = { attempts: 0, status: null as number | null };
   try {
-    const r = await geminiTranscribe(mime, base64Of(bytes));
+    const r = await geminiTranscribe(mime, base64Of(bytes), meta);
     transcript = r.text; tokensIn = r.tokensIn; tokensOut = r.tokensOut;
   } catch (e) {
     const m = String((e as any)?.message ?? e);
     log({ fn: "transcribe", message_id: msg.id, error: m.slice(0, 300) });
+    await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, outcome: (e as any)?.name === "TimeoutError" ? "timeout" : "provider_error", httpStatus: meta.status, attempts: meta.attempts, latencyMs: Date.now() - t0 });
     if (/returned 4\d\d/.test(m) && !/returned 429/.test(m)) return fail("model_rejected");
     return { status: "retry", reason: m.slice(0, 200) };
   }
-  if (!transcript) return fail("empty_transcript");
+  if (!transcript) {
+    await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, outcome: "empty", httpStatus: meta.status, attempts: meta.attempts, tokensIn, tokensOut, latencyMs: Date.now() - t0 });
+    return fail("empty_transcript");
+  }
   transcript = transcript.slice(0, 20000);
   await admin.from("outreach_messages").update({ transcript, transcript_status: "done" }).eq("id", msg.id);
-  try {
-    const [ph, rh] = await Promise.all([sha256Hex(`${TRANSCRIBE_PROMPT}\n[audio ${mime} ${bytes.byteLength} bytes]`), sha256Hex(transcript)]);
-    await admin.from("outreach_ai_calls").insert({ workspace_id: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, prompt_sha256: ph, response_sha256: rh, tokens_in: tokensIn, tokens_out: tokensOut, latency_ms: Date.now() - t0 });
-  } catch (e) { log({ fn: "transcribe", warn: `ai_calls insert failed: ${String(e)}` }); }
+  const [ph, rh] = await Promise.all([sha256Hex(`${TRANSCRIBE_PROMPT}\n[audio ${mime} ${bytes.byteLength} bytes]`), sha256Hex(transcript)]);
+  await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, outcome: "ok", httpStatus: meta.status, attempts: meta.attempts, promptSha: ph, responseSha: rh, tokensIn, tokensOut, latencyMs: Date.now() - t0 });
   if (msg.direction === "in") {
     // the classifier reads text || transcript: queue it now that the transcript exists
     const { error } = await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
