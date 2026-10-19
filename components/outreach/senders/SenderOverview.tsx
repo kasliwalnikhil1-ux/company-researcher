@@ -363,6 +363,13 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
             <div className={cn('text-4xl font-bold tabular-nums', healthTextClass(sender.health_score))}>{sender.health_score}</div>
             <div className="text-xs text-gray-500 pb-1.5">{sender.health_score >= 85 ? 'Excellent — eligible for level-up after 14 days' : sender.health_score >= 70 ? 'Good' : sender.health_score >= 50 ? 'Caps scaled ×0.6' : 'Below 50 — sender auto-paused'}</div>
           </div>
+          {typeof sender.health_breakdown?.average === 'number' && (
+            <div className="text-xs text-gray-500 mt-1" title="Every check counts towards a weighted average. The weakest check puts a ceiling on the score, so one bad check lowers it without deciding it.">
+              {typeof sender.health_breakdown?.limited_by === 'string' && sender.health_breakdown.limited_by
+                ? <>Weighted average {Math.round(sender.health_breakdown.average)}, held to {sender.health_score} by {HEALTH_KEYS.find((k) => k.key === String(sender.health_breakdown.limited_by))?.label.toLowerCase() ?? String(sender.health_breakdown.limited_by).replace(/_/g, ' ')}</>
+                : <>Weighted average of all checks</>}
+            </div>
+          )}
           <div className="mt-4 space-y-2.5">
             {breakdown.map((b) => (
               <div key={b.key} title={b.hint}>

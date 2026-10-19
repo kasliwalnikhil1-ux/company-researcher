@@ -113,7 +113,7 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "sender_health", title: "Sender health", cls: "read", minRole: "client_viewer",
-    description: "Health score (0–100 = the lowest of six categories), the per-category breakdown, the platform's own rule-based recommendations (severity, area, text: never AI, the same lines the sender page shows) and the 14-day score trend. Below 50 every allowance is 0; below 70 allowances drop to 60%. For warm-up progress, headroom and the invites-vs-cap chart use sender_insights.",
+    description: "Health score (0–100: a weighted average of six categories, held to a ceiling set by the weakest one; the breakdown carries average, cap and limited_by), the per-category breakdown, the platform's own rule-based recommendations (severity, area, text: never AI, the same lines the sender page shows) and the 14-day score trend. Below 50 every allowance is 0; below 70 allowances drop to 60%. For warm-up progress, headroom and the invites-vs-cap chart use sender_insights.",
     input: { sender_id: z.string() },
   }, async (a) => {
     const s = await loadSender(ctx, a.sender_id, "id, health_high_since, paused_until, status_reason");

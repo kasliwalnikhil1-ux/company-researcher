@@ -182,7 +182,7 @@ export default function SendersPage() {
         <Table>
           <thead><tr>
             <Th>Sender</Th><Th>Status</Th>
-            <Th title="How safe this account is to send from, 0 to 100. It's the lowest of six checks and is updated every hour. A lower score cuts today's limits, and below 50 sending pauses.">Health</Th>
+            <Th title="How safe this account is to send from, 0 to 100. A weighted average of six checks, held to a ceiling set by the weakest one, updated every hour. A lower score cuts today's limits, and below 50 sending pauses.">Health</Th>
             <Th title="LinkedIn only: how complete and convincing the LinkedIn profile is. Click the score to open the Profile tab.">Profile</Th>
             <Th title="Warm-up level. New accounts start at L0 with low daily limits, and each level allows more. A lock date means the account can't move up before then.">Level</Th>
             <Th title="The country this account sends from. It's set when the account is connected and should match where the owner lives.">Proxy</Th>

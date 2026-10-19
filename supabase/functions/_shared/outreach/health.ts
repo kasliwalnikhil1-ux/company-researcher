@@ -1,63 +1,13 @@
-// Health scoring (PRD §8.2 F5 / §13.5). score = min(categories).
+// Health scoring (PRD §8.2 F5 / §13.5). The maths lives in health_score.ts (pure, unit-tested): every category counts
+// (weighted average) and the weakest category only caps the score. This file applies the effects: pause below 50,
+// level-up at ≥ 85 for 14 days, the WhatsApp governor, events and notifications.
 import { admin, log, rpc, emitEvent } from "./supabase.ts";
 import { notifySender } from "./notify.ts";
-
-export interface HealthInputs {
-  currently_ok: boolean; disconnects_14d: number; checkpoints_30d: number; rejects_14d: number; actions_14d: number;
-  invites_14d: number; accepted_14d: number; messages_14d: number; replies_14d: number; daily_actions_14d: number[];
-  today_actions: number; idle_days_before_today: number; health_score: number; health_high_since: string | null;
-  warmup_level: number; warmup_locked_until: string | null; is_premium: boolean;
-  // channels (026): only read for INSTAGRAM / WHATSAPP senders; a LinkedIn breakdown never contains the two categories below
-  provider?: string; blocks_30d?: number; new_chats_14d?: number; new_chats_replied_14d?: number;
-  new_chats_all?: number; new_chats_replied_all?: number; days_connected?: number; inbound_conversations?: number;
-  account_age_attested?: boolean; disconnect_within_24h_of_outreach?: boolean; provider_warning?: boolean;
-}
-
-export function scoreHealth(i: HealthInputs): { score: number; breakdown: Record<string, number> } {
-  const b: Record<string, number> = {};
-  const provider = String(i.provider ?? "LINKEDIN").toUpperCase();
-  if (provider === "INSTAGRAM" || provider === "WHATSAPP") {
-    // block_signals: 0 blocks → 100, −30 per detected block in 30 days, floor 0
-    b.block_signals = Math.max(0, 100 - 30 * Number(i.blocks_30d ?? 0));
-  }
-  if (provider === "WHATSAPP") {
-    // new_chat_reply_rate: the governor's input, surfaced as a health category (≥ 25 new chats in 14 days; fewer → 100)
-    const n = Number(i.new_chats_14d ?? 0);
-    if (n >= 25) {
-      const rate = Number(i.new_chats_replied_14d ?? 0) / n;
-      b.new_chat_reply_rate = rate >= 0.5 ? 100 : rate >= 0.4 ? 85 : rate >= 0.25 ? 60 : 30;
-    } else b.new_chat_reply_rate = 100;
-  }
-  b.session_stability = Math.max(0, 100 - 25 * i.disconnects_14d) - (i.currently_ok ? 0 : 20);
-  b.session_stability = Math.max(0, b.session_stability);
-  const rr = i.actions_14d > 0 ? i.rejects_14d / i.actions_14d : 0;
-  b.rejection_rate = rr < 0.01 ? 100 : rr < 0.03 ? 80 : rr < 0.06 ? 60 : rr < 0.10 ? 40 : 20;
-  if (i.invites_14d >= 20) {
-    const ar = i.accepted_14d / i.invites_14d;
-    b.acceptance_rate = ar >= 0.35 ? 100 : ar >= 0.25 ? 85 : ar >= 0.15 ? 65 : ar >= 0.08 ? 45 : 25;
-  } else b.acceptance_rate = 100;
-  if (i.messages_14d >= 20) {
-    const pr = i.replies_14d / i.messages_14d;
-    b.reply_rate = pr >= 0.15 ? 100 : pr >= 0.08 ? 80 : pr >= 0.04 ? 60 : 40;
-  } else b.reply_rate = 100;
-  const daily = i.daily_actions_14d ?? [];
-  const active = daily.filter((d) => d > 0);
-  if (active.length >= 3) {
-    const mean = daily.reduce((a, c) => a + c, 0) / daily.length;
-    const sd = Math.sqrt(daily.reduce((a, c) => a + (c - mean) ** 2, 0) / daily.length);
-    const cv = mean > 0 ? sd / mean : 0;
-    b.consistency = cv < 0.5 ? 100 : cv < 1.0 ? 75 : 50;
-  } else b.consistency = 100;
-  const trailing = daily.filter((d) => d > 0);
-  const trailingAvg = trailing.length ? trailing.reduce((a, c) => a + c, 0) / trailing.length : 0;
-  if (i.idle_days_before_today >= 5 && trailingAvg > 0 && i.today_actions > 3 * trailingAvg) b.consistency = 10;
-  b.verification = i.checkpoints_30d === 0 ? 100 : i.checkpoints_30d === 1 ? 70 : 40;
-  const score = Math.max(0, Math.min(100, Math.round(Math.min(...Object.values(b)))));
-  return { score, breakdown: b };
-}
+import { scoreHealth, type HealthInputs, type HealthResult } from "./health_score.ts";
+export { scoreHealth, scoreCategories, combineHealth, healthCap, HEALTH_WEIGHTS, type HealthInputs, type HealthResult } from "./health_score.ts";
 
 /** Recompute health for one sender and apply effects. trigger: 'nightly' | 'disconnect' | 'reject' | 'reconnect' */
-export async function healthForSender(senderId: string, trigger: string): Promise<{ score: number; breakdown: Record<string, number> } | null> {
+export async function healthForSender(senderId: string, trigger: string): Promise<HealthResult | null> {
   const { data: s } = await admin.from("outreach_senders").select("*").eq("id", senderId).maybeSingle();
   if (!s || s.deleted_at || s.status === "disabled" || s.status === "disconnected") return null;
   if (trigger !== "nightly") {
@@ -66,9 +16,10 @@ export async function healthForSender(senderId: string, trigger: string): Promis
     if (last && Date.now() - new Date(last.at).getTime() < 10 * 60_000) return null;
   }
   const inputs = await rpc<HealthInputs>("health_inputs", { p_sender: senderId });
-  const { score, breakdown } = scoreHealth(inputs);
+  const result = scoreHealth(inputs);
+  const { score, breakdown, average, cap, limited_by } = result;
   const today = new Date().toISOString().slice(0, 10);
-  const patch: Record<string, unknown> = { health_score: score, health_breakdown: { ...breakdown, computed_at: new Date().toISOString(), trigger } };
+  const patch: Record<string, unknown> = { health_score: score, health_breakdown: { ...breakdown, average, cap, limited_by, computed_at: new Date().toISOString(), trigger } };
 
   if (score >= 85) patch.health_high_since = s.health_high_since ?? today;
   else patch.health_high_since = null;
@@ -113,8 +64,8 @@ export async function healthForSender(senderId: string, trigger: string): Promis
   }
   await admin.from("outreach_senders").update(patch).eq("id", senderId);
   if (score !== s.health_score) await emitEvent(s.workspace_id, "sender.health", { id: senderId, score, breakdown, trigger });
-  log({ fn: "health", sender_id: senderId, score, trigger });
-  return { score, breakdown };
+  log({ fn: "health", sender_id: senderId, score, average, cap, limited_by, trigger });
+  return result;
 }
 
 /** Reject burst rule: ≥3 × (429/500) within 1h → pause 24h. Returns true if paused now. */
