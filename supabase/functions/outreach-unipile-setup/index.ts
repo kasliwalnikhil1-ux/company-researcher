@@ -5,7 +5,45 @@
 // checkout. The web app only renders the card on localhost (lib/outreach/platformAdmin.ts); this is the API-side mirror.
 import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, FUNCTIONS_BASE, audit } from "../_shared/outreach/supabase.ts";
 import { unipile, unipileConfigured, unipileBase } from "../_shared/outreach/unipile.ts";
-import { aiConfigured, AI_MODEL } from "../_shared/outreach/ai.ts";
+import { aiConfigured, platformAi } from "../_shared/outreach/ai.ts";
+import { clearLlmCache, isLlmProvider, LLM_PROVIDERS, type LlmProvider } from "../_shared/outreach/llm.ts";
+
+const MODEL_ID = /^[A-Za-z0-9._:\/-]{2,80}$/;
+
+/**
+ * Settings → Admin → AI provider: which platform key answers by default, and the model per provider. Written to the
+ * flags `ai_platform_provider` (a provider name, or null = the environment / the first configured provider) and
+ * `ai_platform_models` ({provider: model} overrides; an empty value goes back to the env default) and `ai_platform_reply_models`
+ * (the same for the model that writes replies to prospects). Every function
+ * instance picks the change up within 60 s (llm.ts caches the flags that long).
+ */
+async function setPlatformAi(input: { provider?: unknown; models?: unknown; reply_models?: unknown }): Promise<void> {
+  const rows: Array<{ key: string; value: unknown }> = [];
+  if ("provider" in input) {
+    const p = input.provider == null || input.provider === "" ? null : String(input.provider).trim().toLowerCase();
+    if (p !== null && !isLlmProvider(p)) throw new HttpError(400, "E_PAYLOAD_INVALID", `ai.provider must be one of: ${LLM_PROVIDERS.join(", ")}, or null`);
+    rows.push({ key: "ai_platform_provider", value: p });
+  }
+  for (const [field, flag] of [["models", "ai_platform_models"], ["reply_models", "ai_platform_reply_models"]] as const) {
+    const given = input[field];
+    if (given === undefined) continue;
+    if (!given || typeof given !== "object" || Array.isArray(given)) throw new HttpError(400, "E_PAYLOAD_INVALID", `ai.${field} must be an object of provider → model`);
+    const { data } = await admin.from("outreach_flags").select("value").eq("key", flag).maybeSingle();
+    const next: Record<string, string> = data?.value && typeof data.value === "object" && !Array.isArray(data.value) ? { ...(data.value as Record<string, string>) } : {};
+    for (const [k, v] of Object.entries(given as Record<string, unknown>)) {
+      if (!isLlmProvider(k)) throw new HttpError(400, "E_PAYLOAD_INVALID", `ai.${field}: unknown provider ${k}`);
+      const m = String(v ?? "").trim();
+      if (!m) { delete next[k as LlmProvider]; continue; }
+      if (!MODEL_ID.test(m)) throw new HttpError(400, "E_PAYLOAD_INVALID", `ai.${field}.${k}: use the model id exactly as the provider writes it`);
+      next[k] = m;
+    }
+    rows.push({ key: flag, value: next });
+  }
+  if (!rows.length) throw new HttpError(400, "E_PAYLOAD_INVALID", "ai.provider, ai.models or ai.reply_models required");
+  const { error } = await admin.from("outreach_flags").upsert(rows, { onConflict: "key" });
+  if (error) throw new HttpError(500, "E_INTERNAL", `could not save the AI settings: ${error.message}`);
+  clearLlmCache();
+}
 
 const WEBHOOK_SECRET = Deno.env.get("UNIPILE_WEBHOOK_SECRET") ?? "";
 const NAME = "capitalxai-outreach";
@@ -22,17 +60,25 @@ function isLocalOrigin(req: Request): boolean {
 
 serve("unipile-setup", async (req) => {
   const user = await requireUser(req);
-  const body = await readJson<{ workspace_id: string; action?: "status" | "register" }>(req);
+  const body = await readJson<{ workspace_id: string; action?: "status" | "register" | "set_ai"; ai?: { provider?: unknown; models?: unknown; reply_models?: unknown } }>(req);
   const m = await membership(user.id, body.workspace_id ?? "");
   requireRole(m, "owner");
   if (!user.email || !PLATFORM_ADMIN_EMAILS.includes(user.email.trim().toLowerCase())) throw new HttpError(403, "E_FORBIDDEN", "platform admin required");
   if (!isLocalOrigin(req)) throw new HttpError(403, "E_FORBIDDEN", "platform setup is only available from a local checkout");
+  if (body.action === "set_ai") {
+    await setPlatformAi(body.ai ?? {});
+    await audit(body.workspace_id, "platform.ai_provider_set", "platform", null, body.ai ?? null, "user");
+  }
+  const ai = await platformAi();
   const status = {
     unipile: unipileConfigured(), unipile_dsn: unipileConfigured() ? unipileBase().replace(/^https?:\/\//, "") : null,
     webhook_secret: !!WEBHOOK_SECRET, cookie_key: !!Deno.env.get("OUTREACH_COOKIE_KEY"), cron_secret: !!Deno.env.get("OUTREACH_CRON_SECRET"),
-    ai: aiConfigured(), ai_model: AI_MODEL, resend: !!Deno.env.get("RESEND_API_KEY"), stripe: !!Deno.env.get("STRIPE_SECRET_KEY"), stripe_webhook: !!Deno.env.get("STRIPE_WEBHOOK_SECRET"),
+    ai: aiConfigured(), ai_model: ai.model, ai_provider: ai.provider, ai_source: ai.source, ai_wanted: ai.wanted, ai_fallback_reason: ai.fallback_reason,
+    ai_providers: ai.configured, ai_models: ai.models, ai_default_models: ai.default_models, ai_reply_model: ai.reply_model, ai_reply_models: ai.reply_models, ai_default_reply_models: ai.default_reply_models,
+    resend: !!Deno.env.get("RESEND_API_KEY"), stripe: !!Deno.env.get("STRIPE_SECRET_KEY"), stripe_webhook: !!Deno.env.get("STRIPE_WEBHOOK_SECRET"),
     webhook_url: `${FUNCTIONS_BASE}outreach-unipile-webhook`,
   };
+  if (body.action === "set_ai") return json({ ok: true, status });
   let webhooks: any[] = [];
   if (unipileConfigured()) {
     try { webhooks = (await unipile.webhooks.list()).items ?? []; } catch (e) { (status as any).unipile_error = String((e as any)?.message ?? e); }

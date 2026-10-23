@@ -12,7 +12,7 @@ import type { LlmProvider } from './types';
 
 export const LLM_PROVIDERS: Array<{ value: LlmProvider; label: string; modelPlaceholder: string; keyPlaceholder: string; keyHelp: string }> = [
   { value: 'gemini', label: 'Google Gemini', modelPlaceholder: 'gemini-3-flash-preview', keyPlaceholder: 'AIza…', keyHelp: 'Create one in Google AI Studio.' },
-  { value: 'anthropic', label: 'Anthropic Claude', modelPlaceholder: 'claude-sonnet-5', keyPlaceholder: 'sk-ant-…', keyHelp: 'Create one in the Anthropic console.' },
+  { value: 'anthropic', label: 'Anthropic Claude', modelPlaceholder: 'claude-sonnet-5-5', keyPlaceholder: 'sk-ant-…', keyHelp: 'Create one in the Anthropic console, inside a workspace.' },
   { value: 'openai', label: 'OpenAI', modelPlaceholder: 'gpt-5-mini', keyPlaceholder: 'sk-…', keyHelp: 'Create one on the OpenAI platform page.' },
 ];
 const providerLabel = (p: string | null | undefined) => LLM_PROVIDERS.find((x) => x.value === p)?.label ?? p ?? '';
@@ -37,6 +37,7 @@ export default function LlmKeyCard() {
   const [confirmRemove, setConfirmRemove] = useState(false);
 
   const own = !!settings.data?.uses_own_key;
+  const platformLabel = providerLabel(settings.data?.platform_provider) || 'Gemini';
   useEffect(() => {
     if (!settings.data) return;
     if (settings.data.llm_provider !== 'platform') setProvider(settings.data.llm_provider);
@@ -91,7 +92,7 @@ export default function LlmKeyCard() {
                 <div className="text-xs text-gray-500 mt-0.5">{providerLabel(settings.data?.llm_provider)} · {settings.data?.llm_model || 'default model'} · key <span className="font-mono">{maskHint(settings.data?.llm_key_hint)}</span></div>
               </div>
             ) : (
-              <div><div className="text-sm font-medium text-gray-900">Platform default (Gemini)</div><div className="text-xs text-gray-500 mt-0.5">Included in your plan. Nothing to set up.</div></div>
+              <div><div className="text-sm font-medium text-gray-900">Platform default ({platformLabel})</div><div className="text-xs text-gray-500 mt-0.5">Included in your plan. Nothing to set up.</div></div>
             )}
             {canWrite && !editing && (
               <div className="flex items-center gap-2">
@@ -117,7 +118,7 @@ export default function LlmKeyCard() {
         </div>
       )}
       <ConfirmModal open={confirmRemove} onClose={() => setConfirmRemove(false)} onConfirm={remove} loading={busy === 'remove'} title="Remove your AI key?" confirmLabel="Remove key">
-        <p>The stored key is deleted and the workspace goes back to the platform default (Gemini). Nothing else changes: approved lines and drafts stay as they are.</p>
+        <p>The stored key is deleted and the workspace goes back to the platform default ({platformLabel}). Nothing else changes: approved lines and drafts stay as they are.</p>
       </ConfirmModal>
       {toast.node}
     </Card>

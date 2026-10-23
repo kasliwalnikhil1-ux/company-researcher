@@ -16,7 +16,7 @@ import { admin, FUNCTIONS_BASE, log, rpc, SERVICE_ROLE_KEY, WEB_ORIGIN } from ".
 import { hmacSha256Hex } from "./crypto.ts";
 import { unipile } from "./unipile.ts";
 import { brandName, esc, layout, sendEmail, workspaceBranding } from "./notify.ts";
-import { AI_BUSY_MESSAGE, llmCallDetailed, resolveLlm, geminiFetch, logAiCall } from "./llm.ts";
+import { AI_BUSY_MESSAGE, llmCallDetailed, resolveLlm, geminiFetch, anthropicStreamFetch, logAiCall, type LlmConfig } from "./llm.ts";
 
 // ---------------------------------------------------------------------------
 // Visitor token
@@ -513,21 +513,17 @@ export function sanitizeQuery(q: unknown): { ok: true; query: string } | { ok: f
 export async function streamAnswer(c: AiContext, prompt: { system: string; user: string }, emit: (delta: string) => void): Promise<{ raw: string; model: string; tokens_in: number | null; tokens_out: number | null }> {
   const cfg = await resolveLlm(c.workspace_id);
   if (!cfg) throw new Error("E_AI_UNAVAILABLE: no model configured");
-  if (cfg.provider !== "gemini") {
-    // own Anthropic / OpenAI key: no streaming transport here; one shot, emitted as a single delta
+  if (cfg.provider === "openai") {
+    // OpenAI key: no streaming transport here; one shot, emitted as a single delta
     const r = await llmCallDetailed({ workspaceId: c.workspace_id, purpose: "webchat_answer", system: prompt.system, user: prompt.user, maxTokens: 1500, temperature: 0.3, json: true, thinking: "LOW" });
     const parsed = parseAnswer(r.text);
     emit(parsed.answer);
     return { raw: r.text, model: r.model, tokens_in: null, tokens_out: null };
   }
-  const generationConfig: Record<string, unknown> = { temperature: 0.3, maxOutputTokens: 2500, responseMimeType: "application/json" };
-  if (/gemini-3/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingLevel: "LOW" };
-  else if (/gemini-2\.5/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingBudget: 512 };
   const t0 = Date.now();
-  const body = { systemInstruction: { parts: [{ text: prompt.system }] }, contents: [{ role: "user", parts: [{ text: prompt.user }] }], generationConfig };
   let res: Response;
   try {
-    res = await geminiFetch("webchat_answer", cfg.model, "streamGenerateContent", cfg.key, body, { own: cfg.own, stream: true, timeoutMs: 60_000 });
+    res = await openAnswerStream(cfg, prompt);
   } catch (e) {
     // the row for a failed stream: the SQL that records a turn writes the ok row, so this is the only place failures are counted
     await logAiCall({ workspaceId: c.workspace_id, purpose: "webchat_answer", model: cfg.model, outcome: (e as any)?.name === "TimeoutError" ? "timeout" : "provider_error", ownKey: cfg.own, latencyMs: Date.now() - t0 });
@@ -561,17 +557,50 @@ export async function streamAnswer(c: AiContext, prompt: { system: string; user:
       if (!payload || payload === "[DONE]") continue;
       try {
         const o = JSON.parse(payload);
-        const parts = o.candidates?.[0]?.content?.parts ?? [];
-        for (const p of parts) if (typeof p.text === "string" && !p.thought) raw += p.text;
-        if (o.usageMetadata) { tokens_in = o.usageMetadata.promptTokenCount ?? tokens_in; tokens_out = o.usageMetadata.candidatesTokenCount ?? tokens_out; }
+        const frame = readStreamFrame(cfg.provider, o);
+        raw += frame.text;
+        if (frame.tokens_in != null) tokens_in = frame.tokens_in;
+        if (frame.tokens_out != null) tokens_out = frame.tokens_out;
+        if (frame.refused) {
+          log({ fn: "webchat", error: "answer refused", provider: cfg.provider });
+          await logAiCall({ workspaceId: c.workspace_id, purpose: "webchat_answer", model: cfg.model, outcome: "refused", httpStatus: res.status, ownKey: cfg.own, latencyMs: Date.now() - t0 });
+          throw new Error(`E_AI_BUSY: ${AI_BUSY_MESSAGE}`);
+        }
         emitAnswer();
-      } catch { /* partial frame */ }
+      } catch (e) { if (/^E_AI_BUSY/.test(String((e as any)?.message))) throw e; /* partial frame */ }
     }
   }
   const final = parseAnswer(raw);
   if (final.answer.length > answerSoFar.length && final.answer.startsWith(answerSoFar)) emit(final.answer.slice(answerSoFar.length));
   else if (!answerSoFar && final.answer) emit(final.answer);
   return { raw, model: cfg.model, tokens_in, tokens_out };
+}
+
+/** The answer stream for the provider in use: Gemini streamGenerateContent, or Anthropic Messages with stream: true. Both speak SSE. */
+function openAnswerStream(cfg: LlmConfig, prompt: { system: string; user: string }): Promise<Response> {
+  if (cfg.provider === "anthropic") {
+    return anthropicStreamFetch("webchat_answer", cfg, { system: prompt.system, user: prompt.user, maxTokens: 2500, temperature: 0.3, json: true, level: "LOW" }, { timeoutMs: 60_000 });
+  }
+  const generationConfig: Record<string, unknown> = { temperature: 0.3, maxOutputTokens: 2500, responseMimeType: "application/json" };
+  if (/gemini-3/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingLevel: "LOW" };
+  else if (/gemini-2\.5/i.test(cfg.model)) generationConfig.thinkingConfig = { thinkingBudget: 512 };
+  const body = { systemInstruction: { parts: [{ text: prompt.system }] }, contents: [{ role: "user", parts: [{ text: prompt.user }] }], generationConfig };
+  return geminiFetch("webchat_answer", cfg.model, "streamGenerateContent", cfg.key, body, { own: cfg.own, stream: true, timeoutMs: 60_000 });
+}
+
+/** One parsed SSE frame of either stream: the text it adds, the usage it carries, and whether the model declined. Exported for the tests. */
+export function readStreamFrame(provider: LlmConfig["provider"], o: any): { text: string; tokens_in: number | null; tokens_out: number | null; refused: boolean } {
+  if (provider === "anthropic") {
+    if (o?.type === "content_block_delta" && o.delta?.type === "text_delta" && typeof o.delta.text === "string") return { text: o.delta.text, tokens_in: null, tokens_out: null, refused: false };
+    if (o?.type === "message_start") return { text: "", tokens_in: o.message?.usage?.input_tokens ?? null, tokens_out: null, refused: false };
+    if (o?.type === "message_delta") return { text: "", tokens_in: o.usage?.input_tokens ?? null, tokens_out: o.usage?.output_tokens ?? null, refused: o.delta?.stop_reason === "refusal" };
+    return { text: "", tokens_in: null, tokens_out: null, refused: false };
+  }
+  let text = "";
+  const parts = o?.candidates?.[0]?.content?.parts ?? [];
+  for (const p of parts) if (typeof p.text === "string" && !p.thought) text += p.text;
+  const finish = String(o?.candidates?.[0]?.finishReason ?? "");
+  return { text, tokens_in: o?.usageMetadata?.promptTokenCount ?? null, tokens_out: o?.usageMetadata?.candidatesTokenCount ?? null, refused: finish === "SAFETY" || finish === "PROHIBITED_CONTENT" || !!o?.promptFeedback?.blockReason };
 }
 
 // ---------------------------------------------------------------------------

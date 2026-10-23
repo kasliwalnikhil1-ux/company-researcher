@@ -34,6 +34,8 @@ export interface AiSettings {
   llm_model: string | null;
   llm_key_hint: string | null;
   uses_own_key: boolean;
+  /** 086: the provider the platform default goes to (flag `ai_platform_provider`; Settings → Admin → AI provider) */
+  platform_provider?: LlmProvider;
   finders: Array<KeyHint<FinderProvider>>;
   verifier: KeyHint<VerifierProvider> | null;
   booking_webhook_secret: string | null;   // owner only

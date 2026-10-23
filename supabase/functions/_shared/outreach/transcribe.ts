@@ -1,10 +1,11 @@
 // Voice-note transcription (Instagram / WhatsApp inbox, PRD §10). A queued message's audio attachment is downloaded through
 // the connector, sent to Gemini generateContent as inline audio, and the transcript is stored on the message. An inbound
 // message is then (re)queued for intent classification, whose input is `text || transcript`.
-// Model: OUTREACH_AI_MODEL → GEMINI_MODEL_ID → gemini-3-flash-preview; key: GEMINI_API_KEY (the platform key only: audio never goes to a workspace's own provider).
+// Model: OUTREACH_AI_MODEL → GEMINI_MODEL_ID → gemini-3-flash-preview; key: GEMINI_API_KEY (the platform Gemini key only, whatever the
+// default text provider is: audio never goes to a workspace's own provider, and Gemini is the only transport here that takes audio).
 import { admin, log, sha256Hex } from "./supabase.ts";
 import { unipile, unipileConfigured, UnipileError } from "./unipile.ts";
-import { PLATFORM_MODEL, geminiFetch, logAiCall } from "./llm.ts";
+import { GEMINI_MODEL, geminiFetch, logAiCall } from "./llm.ts";
 
 type Row = Record<string, any>;
 
@@ -36,7 +37,7 @@ function audioMime(attachment: Row, response: Response): string {
 
 /** One Gemini call with inline audio. Returns the transcript text and token counts. */
 async function geminiTranscribe(mime: string, data: string, meta: { attempts: number; status: number | null }): Promise<{ text: string; tokensIn: number | null; tokensOut: number | null }> {
-  const model = PLATFORM_MODEL;
+  const model = GEMINI_MODEL;
   const body = {
     contents: [{ role: "user", parts: [{ inlineData: { mimeType: mime, data } }, { text: TRANSCRIBE_PROMPT }] }],
     generationConfig: { temperature: 0, maxOutputTokens: 4096, ...(/gemini-3/i.test(model) ? { thinkingConfig: { thinkingLevel: "LOW" } } : /gemini-2\.5/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}) },
@@ -115,18 +116,18 @@ export async function transcribeVoiceNote(messageId: string): Promise<Transcribe
   } catch (e) {
     const m = String((e as any)?.message ?? e);
     log({ fn: "transcribe", message_id: msg.id, error: m.slice(0, 300) });
-    await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, outcome: (e as any)?.name === "TimeoutError" ? "timeout" : "provider_error", httpStatus: meta.status, attempts: meta.attempts, latencyMs: Date.now() - t0 });
+    await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: GEMINI_MODEL, outcome: (e as any)?.name === "TimeoutError" ? "timeout" : "provider_error", httpStatus: meta.status, attempts: meta.attempts, latencyMs: Date.now() - t0 });
     if (/returned 4\d\d/.test(m) && !/returned 429/.test(m)) return fail("model_rejected");
     return { status: "retry", reason: m.slice(0, 200) };
   }
   if (!transcript) {
-    await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, outcome: "empty", httpStatus: meta.status, attempts: meta.attempts, tokensIn, tokensOut, latencyMs: Date.now() - t0 });
+    await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: GEMINI_MODEL, outcome: "empty", httpStatus: meta.status, attempts: meta.attempts, tokensIn, tokensOut, latencyMs: Date.now() - t0 });
     return fail("empty_transcript");
   }
   transcript = transcript.slice(0, 20000);
   await admin.from("outreach_messages").update({ transcript, transcript_status: "done" }).eq("id", msg.id);
   const [ph, rh] = await Promise.all([sha256Hex(`${TRANSCRIBE_PROMPT}\n[audio ${mime} ${bytes.byteLength} bytes]`), sha256Hex(transcript)]);
-  await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: PLATFORM_MODEL, outcome: "ok", httpStatus: meta.status, attempts: meta.attempts, promptSha: ph, responseSha: rh, tokensIn, tokensOut, latencyMs: Date.now() - t0 });
+  await logAiCall({ workspaceId: msg.workspace_id, purpose: "transcribe", model: GEMINI_MODEL, outcome: "ok", httpStatus: meta.status, attempts: meta.attempts, promptSha: ph, responseSha: rh, tokensIn, tokensOut, latencyMs: Date.now() - t0 });
   if (msg.direction === "in") {
     // the classifier reads text || transcript: queue it now that the transcript exists
     const { error } = await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });

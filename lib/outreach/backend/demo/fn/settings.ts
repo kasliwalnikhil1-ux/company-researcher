@@ -216,7 +216,7 @@ async function crmOauth(req: FnRequest, ctx: Ctx): Promise<unknown> {
 const FINDERS = ['hunter', 'prospeo', 'findymail'];
 const VERIFIERS = ['zerobounce', 'reacher'];
 const LLMS = ['gemini', 'anthropic', 'openai'];
-const DEFAULT_MODELS: Record<string, string> = { gemini: 'gemini-2.5-flash', anthropic: 'claude-sonnet-4-5', openai: 'gpt-4.1-mini' };
+const DEFAULT_MODELS: Record<string, string> = { gemini: 'gemini-3-flash-preview', anthropic: 'claude-sonnet-5-5', openai: 'gpt-5-mini' };
 const MASK = 'demo:masked';
 
 function cleanKey(v: unknown, what: string): string {
@@ -232,7 +232,7 @@ function pickOne(v: unknown, allowed: string[], what: string): string {
 
 function publicView(r: Row): Row {
   return {
-    llm_provider: r.llm_key_enc ? r.llm_provider : 'platform', llm_model: r.llm_key_enc ? r.llm_model : null, llm_key_hint: r.llm_key_enc ? r.llm_key_hint : null, uses_own_key: !!r.llm_key_enc,
+    llm_provider: r.llm_key_enc ? r.llm_provider : 'platform', llm_model: r.llm_key_enc ? r.llm_model : null, llm_key_hint: r.llm_key_enc ? r.llm_key_hint : null, uses_own_key: !!r.llm_key_enc, platform_provider: 'anthropic',
     finders: (Array.isArray(r.finder_keys) ? r.finder_keys : []).map((f: Row) => ({ provider: f.provider, hint: f.hint ?? null })),
     verifier: r.verifier ? { provider: r.verifier.provider, hint: r.verifier.hint ?? null } : null,
     elevenlabs_key_hint: r.elevenlabs_key_enc ? r.elevenlabs_key_hint ?? null : null,

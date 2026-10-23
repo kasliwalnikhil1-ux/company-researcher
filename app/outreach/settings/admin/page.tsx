@@ -12,6 +12,7 @@ import PlatformSetupCard from '@/components/outreach/settings/admin/PlatformSetu
 import BillingAdminCard from '@/components/outreach/settings/admin/BillingAdminCard';
 import PlatformLimits from '@/components/outreach/settings/admin/PlatformLimits';
 import AiReplyAdmin from '@/components/outreach/settings/admin/AiReplyAdmin';
+import AiProviderCard from '@/components/outreach/settings/admin/AiProviderCard';
 import HealthEntryCard from '@/components/outreach/settings/admin/HealthEntryCard';
 
 /**
@@ -47,6 +48,7 @@ export default function AdminSettingsPage() {
         </div>
       </div>
 
+      <AiProviderCard />
       <BillingAdminCard />
       <PlatformLimits />
       <AiReplyAdmin />

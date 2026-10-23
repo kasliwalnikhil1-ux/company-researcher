@@ -10,8 +10,8 @@
 #   * lines are KEY=VALUE (optional `export ` prefix, optional single/double quotes around VALUE); # comments and
 #     blank lines are ignored.
 #   * ONLY allowlisted keys are pushed (UNIPILE_*, OUTREACH_* except OUTREACH_TEST_*, STRIPE_*, SMARTLEAD_*, CRM_*,
-#     HUBSPOT_*, PIPEDRIVE_*, SALESFORCE_*, RESEND_API_KEY, GEMINI_API_KEY, GEMINI_MODEL_ID, EMAIL_FROM,
-#     TEMP_MAX_AGE_HOURS). Everything else in the file (Next.js keys, test logins, ...) stays local.
+#     HUBSPOT_*, PIPEDRIVE_*, SALESFORCE_*, ANTHROPIC_*, RESEND_API_KEY, GEMINI_API_KEY, GEMINI_MODEL_ID, OPENAI_API_KEY,
+#     EMAIL_FROM, TEMP_MAX_AGE_HOURS). Everything else in the file (Next.js keys, test logins, ...) stays local.
 #   * keys with an empty value are SKIPPED (existing secrets keep their value; nothing is deleted).
 #   * keys starting with SUPABASE_ are skipped — those are reserved and injected by the platform.
 #   * --dry-run prints the key names that would be pushed and exits without calling the API.
@@ -31,6 +31,11 @@
 #                             STRIPE_TAX_ENABLED=true (after a Stripe Tax registration), STRIPE_API_VERSION.
 #                             Limits and plan gates only apply once the platform flag billing_enforced is on (Settings → Admin → Billing).
 #   OUTREACH_PLATFORM_ALERT_EMAIL   where operator alerts go (card disputes, connector deletes stuck for a day, account swaps).
+#   GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY   platform AI keys, one per provider. Which one answers by default is the flag
+#                             ai_platform_provider (Settings → Admin → AI provider), else OUTREACH_AI_PROVIDER, else the first with a key.
+#                             ANTHROPIC_WORKSPACE_ID: required for an Anthropic user / service-account key that is not scoped to a workspace.
+#                             Everyday models: OUTREACH_AI_MODEL (Gemini; also audio transcription), OUTREACH_ANTHROPIC_MODEL (claude-sonnet-5-5),
+#                             OUTREACH_OPENAI_MODEL. Replies to prospects: OUTREACH_<PROVIDER>_REPLY_MODEL (Anthropic default claude-opus-5-5).
 #
 # Secrets take effect on the next invocation of each function (no redeploy needed).
 # Optional env: OUTREACH_PROJECT_REF (default ktwqkvjuzsunssudqnrt)
@@ -69,7 +74,7 @@ trap 'rm -f "$TMP"' EXIT
 "$PY" - "$FILE" > "$TMP" <<'PY'
 import json, re, sys
 path = sys.argv[1]
-ALLOW = re.compile(r'^(UNIPILE_|OUTREACH_|STRIPE_|SMARTLEAD_|CRM_|HUBSPOT_|PIPEDRIVE_|SALESFORCE_)|^(RESEND_API_KEY|GEMINI_API_KEY|GEMINI_MODEL_ID|EMAIL_FROM|TEMP_MAX_AGE_HOURS)$')
+ALLOW = re.compile(r'^(UNIPILE_|OUTREACH_|STRIPE_|SMARTLEAD_|CRM_|HUBSPOT_|PIPEDRIVE_|SALESFORCE_|ANTHROPIC_)|^(RESEND_API_KEY|GEMINI_API_KEY|GEMINI_MODEL_ID|OPENAI_API_KEY|EMAIL_FROM|TEMP_MAX_AGE_HOURS)$')
 out, skipped_empty, skipped_reserved, bad = [], [], [], []
 for ln, raw in enumerate(open(path, encoding="utf-8"), 1):
     line = raw.strip()

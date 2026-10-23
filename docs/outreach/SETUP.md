@@ -132,7 +132,7 @@ The rows marked *dispatcher* below are those jobs; the rest are still pg_cron jo
 ### 2.0 Prerequisites
 * Supabase CLI, `curl`, `python` (3.x), `bash` (Git Bash on Windows works).
 * `CAPITALXAI_SUPABASE_ACCESS_TOKEN` — a Supabase personal access token (`sbp_…`) **with access to project `ktwqkvjuzsunssudqnrt`**. The account the CLI is logged in with locally may be a different one and get `403`; the scripts pass this token explicitly.
-* A Unipile account (DSN + API key), and optionally Gemini, Stripe and Resend keys.
+* A Unipile account (DSN + API key), and optionally an AI key (Gemini, Anthropic or OpenAI), Stripe and Resend keys.
 
 Generate the platform secrets once and keep them in a password manager:
 ```bash
@@ -205,8 +205,18 @@ Limits, trial expiry and plan features apply only after the platform flag `billi
 ### 2.6 Resend
 Verify the sending domain in Resend, set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM` (e.g. `CapitalxAI Outreach <no-reply@capitalxai.com>`). Without a key the functions log `RESEND_API_KEY unset` and continue. The full list of emails (sender notices, invitation, stall and running-dry alerts, weekly sender report, digest, client reports) and how to verify each is in §9.2.
 
-### 2.7 Gemini (AI)
-`GEMINI_API_KEY` + optional `OUTREACH_AI_MODEL` (default `gemini-3-flash-preview`, falling back to `GEMINI_MODEL_ID`). This is the same key and model family the rest of the app uses (`utils/azureOpenAiHelper.ts`), called over the REST `generateContent` endpoint: system instruction separated, `thinkingLevel: MEDIUM` + `responseMimeType: application/json` for the JSON tasks, thought parts skipped, markdown fences stripped. Every call is recorded in `outreach_ai_calls` (hashes + token counts) and audited. Without a key: replies are stored as `unclear` (confidence 0), sequence QA returns static checks only (`ai_available:false`), AI drafts cannot be generated.
+### 2.7 AI provider (Gemini, Anthropic Claude or OpenAI)
+The platform holds one key per provider: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. Every workspace without its own key (AI → Setup) uses the **platform default provider**, chosen in this order:
+
+1. the flag `ai_platform_provider` (Settings → Admin → AI provider, localhost only; written by `outreach-unipile-setup` action `set_ai`, picked up by every function within 60 s),
+2. the secret `OUTREACH_AI_PROVIDER`,
+3. the first provider with a key: Gemini, then Anthropic, then OpenAI.
+
+A default that has no key is skipped with a warning in the logs. Two models per provider: the **everyday model** (classification, Personalized lines, step drafts, sequence QA, website agents: `OUTREACH_AI_MODEL` for Gemini, default `gemini-3-flash-preview`, falling back to `GEMINI_MODEL_ID`; `OUTREACH_ANTHROPIC_MODEL`, default `claude-sonnet-5-5`; `OUTREACH_OPENAI_MODEL`, default `gpt-5-mini`) and the **reply model** for messages written to prospects (the inbox reply draft and the AI auto-reply draft, llm.ts tier `reply`: `OUTREACH_<PROVIDER>_REPLY_MODEL`, default `claude-opus-5-5` for Anthropic and the everyday model for the others). The admin screen overrides each in the flags `ai_platform_models` / `ai_platform_reply_models` (086, 087). Since 2026-10-23 the live default is **Anthropic**: Sonnet 5.5 everyday, Opus 5.5 for replies.
+
+Anthropic: a key created inside a workspace works as is. A user or service-account key that is *not* scoped to a workspace is rejected with "must include the anthropic-workspace-id header" — set `ANTHROPIC_WORKSPACE_ID` to the `wrkspc_…` id (list workspaces with `GET /v1/organizations/workspaces?include_default=true` using that key). Current Claude models are called with `output_config.effort` (no temperature), adaptive thinking, the server-side refusal fallback (`fallbacks: "default"`) and, for JSON tasks, a system-prompt instruction to answer with JSON only. The website assistant streams from Gemini and Anthropic; an OpenAI key answers in one shot.
+
+All transports are plain `fetch` in `supabase/functions/_shared/outreach/llm.ts` (the only file allowed to name an AI host). Every call is recorded in `outreach_ai_calls` (hashes + token counts) and audited. Audio transcription of voice notes is Gemini only (`GEMINI_API_KEY` + `OUTREACH_AI_MODEL`), whatever the default text provider is. Without any key: replies are stored as `unclear` (confidence 0), sequence QA returns static checks only (`ai_available:false`), AI drafts cannot be generated.
 
 ### 2.8 Chrome extension
 Ship `extension/` unpacked (developer notes: `extension/README.md`). Zip the folder and send it to the account holder together with [EXTENSION-UNPACKED-INSTALL.md](EXTENSION-UNPACKED-INSTALL.md), which is written for a non-technical reader and covers install, pairing, updating, removal and what the extension reads. The extension is optional: the hosted re-login link is a complete fallback. Pairing token: Sender detail → Extension tab → *Generate pairing token* (RPC `outreach_issue_sender_token`, manager+, shown once).
@@ -258,8 +268,8 @@ curl -s -X POST "$BASE/outreach-worker-tick" -H "x-cron-secret: $OUTREACH_CRON_S
 | — | `OUTREACH_APP_NAME` | secrets | optional, default `Outreach`. Shown by the browser-extension sign-in (UniLogin) as the publisher name and tab label (≤60 chars) |
 | `CRON_SECRET` | `OUTREACH_CRON_SECRET` | secrets **and** Vault `outreach_cron_secret` | must match |
 | `VAULT_COOKIE_KEY_ID` (pgsodium) | `OUTREACH_COOKIE_KEY` (base64 32 bytes, AES-256-GCM in `crypto.ts`) | secrets | Vault is used for the cron secret only |
-| `ANTHROPIC_API_KEY` | `GEMINI_API_KEY` (Gemini replaces Claude here, matching the rest of the app) | secrets | optional |
-| — | `OUTREACH_AI_MODEL` | secrets | default `gemini-3-flash-preview` |
+| `ANTHROPIC_API_KEY` | `GEMINI_API_KEY`, `ANTHROPIC_API_KEY` (+ `ANTHROPIC_WORKSPACE_ID` for an unscoped key), `OPENAI_API_KEY` | secrets | one per provider, all optional; the default provider is the flag `ai_platform_provider` → `OUTREACH_AI_PROVIDER` → first with a key (§2.7) |
+| — | `OUTREACH_AI_MODEL`, `OUTREACH_ANTHROPIC_MODEL`, `OUTREACH_OPENAI_MODEL`; `OUTREACH_<PROVIDER>_REPLY_MODEL` | secrets | everyday defaults `gemini-3-flash-preview`, `claude-sonnet-5-5`, `gpt-5-mini`; reply default `claude-opus-5-5` (Anthropic); overridable per provider in Settings → Admin |
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | same | secrets | optional — while unset, billing enforcement (trial sender cap, trial-expiry and past-due suspension) is disabled entirely |
 | `STRIPE_PORTAL_CONFIGURATION`, `STRIPE_TAX_ENABLED`, `STRIPE_API_VERSION` | same | secrets | printed by `scripts/stripe-setup.ts`; tax only after a Stripe Tax registration. Prices are found by lookup key (`STRIPE_PRICE_*` is no longer read) |
 | `RESEND_API_KEY` | same | secrets | optional |
@@ -546,7 +556,7 @@ Verify after switching on, as the plan's checklist asks:
 | `outreach-auto-enroll` | `*/10 * * * *` | `select outreach_run_auto_enroll()` (SQL only) | nothing |
 | `outreach-import-schedules` | `*/15 * * * *` | `select outreach_run_import_schedules()` (SQL only). The jobs it creates are run by the existing `outreach-worker-imports` | nothing |
 | `outreach-enrich` | `*/10 * * * *` | edge function `outreach-worker-enrich` | function deployed |
-| `outreach-ai-variables` | dispatcher row `ai-variables`, 60 s (084; was `* * * * *`) | edge function `outreach-ai-variables`: AI lines and AI routing decisions | function deployed; an AI key (platform Gemini key, or the workspace's own) |
+| `outreach-ai-variables` | dispatcher row `ai-variables`, 60 s (084; was `* * * * *`) | edge function `outreach-ai-variables`: AI lines and AI routing decisions | function deployed; an AI key (a platform key, or the workspace's own) |
 | `outreach-crm-sync` | `*/5 * * * *` | edge function `outreach-crm-sync` | function deployed; does nothing for workspaces without an active integration |
 | `outreach-reports` | `0 * * * *` | edge function `outreach-worker-reports`. Sends at 08:00–08:59 workspace time, and catches up in the next two hourly runs | function deployed; Resend |
 | `outreach-domain-check` | `*/30 * * * *` | edge function `outreach-domain-check` | function deployed |

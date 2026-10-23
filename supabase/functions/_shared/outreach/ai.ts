@@ -1,13 +1,11 @@
 // AI layer: classification, drafting, sequence QA, weekly report, AI variables (item 14), AI routing (item 15).
 // Every call goes through llmCall (llm.ts), which picks the workspace's own provider + key (gemini | anthropic | openai)
-// or the platform Gemini key, and writes outreach_ai_calls + the audit log.
+// or the platform default provider (flag `ai_platform_provider`), and writes outreach_ai_calls + the audit log.
 import { CLASSIFY_SYSTEM, DRAFT_SYSTEM, SEQUENCE_QA_SYSTEM, WEEKLY_REPORT_SYSTEM, REPLY_DRAFT_SYSTEM, AI_VARIABLE_SYSTEM, AI_FIELDS_SYSTEM, AI_ROUTE_SYSTEM, BUILTIN_PROMPTS, type BuiltinKey } from "./prompts.ts";
-import { llmCallDetailed, markUnusable, PLATFORM_MODEL, type LlmCallOpts, type LlmResult } from "./llm.ts";
+import { llmCallDetailed, markUnusable, type LlmCallOpts, type LlmResult } from "./llm.ts";
 
-export { aiConfigured, aiAvailable, isKeyInvalid, LlmError, markUnusable, logAiCall, geminiFetch, type AiOutcome } from "./llm.ts";
+export { aiConfigured, aiAvailable, isKeyInvalid, LlmError, markUnusable, logAiCall, geminiFetch, platformAi, type AiOutcome, type PlatformAi } from "./llm.ts";
 export { BUILTIN_PROMPTS, type BuiltinKey } from "./prompts.ts";
-/** The platform model. A workspace on its own key uses its own model; the model actually used is in outreach_ai_calls. */
-export const AI_MODEL = PLATFORM_MODEL;
 
 export type Intent = "interested" | "question" | "not_now" | "not_interested" | "ooo" | "wrong_person" | "unclear";
 const INTENTS: Intent[] = ["interested", "question", "not_now", "not_interested", "ooo", "wrong_person", "unclear"];
@@ -20,7 +18,8 @@ function cleanJsonResponse(text: string): string {
   return (fence ? fence[1] : text).trim();
 }
 
-function parseJsonText<T>(text: string): T {
+/** The JSON object in a model answer: as is, out of a code fence, or the first {...} in surrounding prose. Exported for the tests. */
+export function parseJsonText<T>(text: string): T {
   const cleaned = cleanJsonResponse(text);
   try { return JSON.parse(cleaned) as T; } catch { /* fall through */ }
   const m = cleaned.match(/\{[\s\S]*\}/);
@@ -134,7 +133,7 @@ export async function draftReply(input: {
     input.guidance ? `Operator guidance for this reply:\n${String(input.guidance).slice(0, 1000)}` : "",
     `Thread, oldest first (out = sender, in = prospect):\n${input.thread.slice(-20).map((m) => `[${m.direction === "in" ? "PROSPECT" : "SENDER"} ${m.at.slice(0, 16)}] ${m.text.slice(0, 1200)}`).join("\n")}`,
   ].filter(Boolean).join("\n\n");
-  const raw = await call({ purpose: "draft_reply", workspaceId: input.workspaceId, system: REPLY_DRAFT_SYSTEM, user, maxTokens: 3072, temperature: 0.6, json: true, thinking: "LOW" });
+  const raw = await call({ purpose: "draft_reply", workspaceId: input.workspaceId, system: REPLY_DRAFT_SYSTEM, user, maxTokens: 3072, temperature: 0.6, json: true, thinking: "LOW", tier: "reply" });
   const j = parseJson<{ variants?: Array<{ text?: string; rationale?: string }> }>(raw);
   const variants = (Array.isArray(j.variants) ? j.variants : []).map((v) => ({ text: String(v.text ?? "").trim().slice(0, 8000), rationale: String(v.rationale ?? "").slice(0, 200) })).filter((v) => v.text);
   if (!variants.length) { unusable(raw); throw new Error("AI returned no reply variants"); }

@@ -237,7 +237,8 @@ export interface PipelineResult {
 async function draftCall(c: EngineInput, opts: EngineOpts, knowledge: KnowledgeChunk[], faqs: Faq[], violation?: Failure[], temperature = 0.4): Promise<{ draft: DraftOutput; model: string }> {
   const p = buildDraftPrompt(c, opts, knowledge, faqs, violation);
   const todayIso = new Intl.DateTimeFormat("en-CA", { timeZone: c.tz || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-  const r = await llmCallDetailed({ purpose: c.purpose, workspaceId: c.workspaceId, system: p.system, user: p.user, maxTokens: 8192, temperature, json: true, thinking: "MEDIUM" });
+  // a real reply to a prospect gets the platform reply model (tier "reply"); a simulation stays on the default model
+  const r = await llmCallDetailed({ purpose: c.purpose, workspaceId: c.workspaceId, system: p.system, user: p.user, maxTokens: 8192, temperature, json: true, thinking: "MEDIUM", tier: c.purpose === "reply_draft" ? "reply" : "default" });
   return { draft: parseDraft(parseCall(r), c.settings, todayIso, c.scenarios.map((s) => s.id)), model: r.model };
 }
 

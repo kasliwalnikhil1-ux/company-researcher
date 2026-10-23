@@ -7,8 +7,10 @@ import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { Badge, Button, Card, ErrorBox, Spinner, useToast } from '@/components/outreach/ui';
 import { copyText } from '@/components/outreach/settings/shared';
+import { label as providerLabel } from '@/components/outreach/settings/admin/AiProviderCard';
+import type { LlmProvider } from '@/components/outreach/settings/types';
 
-type SetupStatus = { unipile: boolean; unipile_dsn?: string | null; webhook_secret: boolean; cookie_key: boolean; cron_secret?: boolean; ai: boolean; ai_model?: string; resend: boolean; stripe: boolean; stripe_webhook?: boolean; webhook_url: string; unipile_error?: string };
+type SetupStatus = { unipile: boolean; unipile_dsn?: string | null; webhook_secret: boolean; cookie_key: boolean; cron_secret?: boolean; ai: boolean; ai_model?: string | null; ai_provider?: LlmProvider | null; ai_reply_model?: string | null; resend: boolean; stripe: boolean; stripe_webhook?: boolean; webhook_url: string; unipile_error?: string };
 type SetupResp = { status: SetupStatus; webhooks: Array<{ id: string; source: string; events?: string[]; request_url?: string; enabled?: boolean }> };
 
 function StatusRow({ ok, label, hint, optional }: { ok: boolean; label: string; hint?: string; optional?: boolean }) {
@@ -52,7 +54,7 @@ export default function PlatformSetupCard() {
             <StatusRow ok={setup.data.status.webhook_secret} label="Connector webhook secret" hint="UNIPILE_WEBHOOK_SECRET" />
             <StatusRow ok={setup.data.status.cookie_key} label="Cookie encryption key" hint="OUTREACH_COOKIE_KEY" />
             {setup.data.status.cron_secret != null && <StatusRow ok={setup.data.status.cron_secret} label="Cron secret" hint="OUTREACH_CRON_SECRET" />}
-            <StatusRow ok={setup.data.status.ai} label="AI (classify / drafts)" hint={setup.data.status.ai_model ?? 'GEMINI_API_KEY'} />
+            <StatusRow ok={setup.data.status.ai} label="AI (classify / drafts)" hint={setup.data.status.ai_provider ? `${providerLabel(setup.data.status.ai_provider)} · ${setup.data.status.ai_model ?? ''} (replies to prospects: ${setup.data.status.ai_reply_model ?? ''}). Change it under AI provider below` : 'GEMINI_API_KEY, ANTHROPIC_API_KEY or OPENAI_API_KEY'} />
             <StatusRow ok={setup.data.status.resend} label="Resend (email notifications)" hint="RESEND_API_KEY. Optional: reconnect and invite links can be copied from the app instead" optional />
             <StatusRow ok={setup.data.status.stripe} label="Stripe (billing)" hint="STRIPE_SECRET_KEY. Optional: billing and trial limits are off while it is unset" optional />
           </div>

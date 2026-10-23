@@ -139,7 +139,7 @@ const REMEDIES: Record<string, string> = {
   E_DRAFT_EXPIRED: "Drafts live 30 minutes; call draft_reply again.",
   E_DRAFT_ALREADY_SENT: "This draft was already sent; nothing to do.",
   E_NO_IDENTIFIER: "Each lead needs a LinkedIn public_identifier/URL or an email.",
-  E_AI_UNAVAILABLE: "AI drafting is not configured (GEMINI_API_KEY); write the reply yourself and pass it as text.",
+  E_AI_UNAVAILABLE: "AI drafting is not configured (no platform AI key and no workspace key); write the reply yourself and pass it as text.",
   // Instagram & WhatsApp channels (CHANNELS-BUILD-CONTRACT §6)
   E_NO_CONSENT: "WhatsApp messages to new people need a recorded consent basis. Ask the human what the basis is; if there is none, do not contact the lead on WhatsApp.",
   E_NO_IDENTITY: "The lead has no verified identity for this channel. identity_add records one (unverified) and a person verifies it in the app.",

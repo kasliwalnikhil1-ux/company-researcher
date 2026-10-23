@@ -31,7 +31,7 @@ async function fetchProfileForDraft(sender: Row, lead: Row): Promise<Row> {
 export async function draftForTask(taskId: string): Promise<string | null> {
   const { data: t } = await admin.from("outreach_tasks").select("*").eq("id", taskId).single();
   if (!t || t.kind !== "review_ai_draft" || t.completed_at) return null;
-  if (!aiConfigured()) { await admin.from("outreach_tasks").update({ body: (t.body ?? "") + "\n\n[AI drafting unavailable: GEMINI_API_KEY not configured — write the copy manually]" }).eq("id", taskId); return null; }
+  if (!aiConfigured()) { await admin.from("outreach_tasks").update({ body: (t.body ?? "") + "\n\n[AI drafting unavailable: no AI key is configured — write the copy manually]" }).eq("id", taskId); return null; }
   const [{ data: lead }, { data: sender }] = await Promise.all([
     t.lead_id ? admin.from("outreach_leads").select("*").eq("id", t.lead_id).single() : Promise.resolve({ data: null } as any),
     t.sender_id ? admin.from("outreach_senders").select("*").eq("id", t.sender_id).single() : Promise.resolve({ data: null } as any),
