@@ -68,7 +68,7 @@ serve("outreach-health-daily", async (req) => {
   } else {
     const m = renderDaily(payload);
     let sent = 0;
-    for (const addr of to) { if (await sendEmail(addr, m.subject, m.html, m.text)) sent++; }
+    for (const addr of to) { if (await sendEmail(addr, m.subject, m.html, m.text, { type: "health_daily", idempotencyKey: `health_daily:${now.date}:${addr}` })) sent++; }
     result.email = `${sent} of ${to.length} sent`; result.subject = m.subject;
     if (!sent) log({ fn: "health-daily", error: "the daily email could not be sent", to: to.length });
   }

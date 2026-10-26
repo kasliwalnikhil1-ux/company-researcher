@@ -29,7 +29,7 @@ export function seedWorkspace(s: DemoStore, now: number) {
     id: DEMO_WS_ID, name: 'Northwind Growth', slug: 'northwind-growth', plan: 'scale', stripe_customer_id: 'cus_demo', stripe_subscription_id: 'sub_demo',
     stripe_status: 'active', past_due_since: null, trial_ends_at: null, created_by: MEMBER.maya, created_at: iso(now - 210 * D), deleted_at: null,
     settings: {
-      timezone: 'America/New_York', recruiter_enabled: false, ai_auto_send: false, create_leads_from_inbound: true, cookie_mode_opt_in: true,
+      timezone: 'America/New_York', recruiter_enabled: false, ai_auto_send: false, create_leads_from_inbound: 'people_only', cookie_mode_opt_in: true,
       track_replies: true, profile_owner_approval: false, default_booking_link: 'https://example.com/book/northwind',
     },
   });
@@ -59,6 +59,7 @@ function sender(id: string, o: Partial<Row>, now: number): Row {
   return {
     id, workspace_id: DEMO_WS_ID, client_id: null, owner_user_id: MEMBER.maya, owner_email: DEMO_USER_EMAIL, provider: 'LINKEDIN', unipile_account_id: `demo-acc-${id.slice(-4)}`,
     previous_unipile_account_id: null, disconnected_at: null, billing_paused_at: null, auth_method: 'credentials', display_name: 'Demo Sender', label: null,
+    connected_by: MEMBER.maya, pause_reason: null, holder_notified_at: null, holder_reminders_sent: 0, holder_email_held_until: null, team_notified_at: null, team_final_notified_at: null, last_reconnected_at: null,
     public_identifier: null, provider_user_id: `demo-${id.slice(-6)}`, picture_url: SENDER_FACES[String(o.display_name)] ?? null, is_premium: false, has_sales_nav: false, has_recruiter: false,
     connections_count: 1200, status: 'ok', status_reason: null, deleted_at: null, proxy_country: 'US', user_agent: null, timezone: 'America/New_York',
     schedule: WEEKDAYS, warmup_level: 4, warmup_locked_until: null, health_score: 92, health_breakdown: { acceptance: 95, pending: 90, rejects: 100, activity: 88 },
@@ -76,10 +77,10 @@ export function seedSenders(s: DemoStore, now: number) {
     sender(SENDER.li_maya, { display_name: 'Maya Chen', public_identifier: 'demo-maya-chen', is_premium: true, connections_count: 3412, health_score: 94 }, now),
     sender(SENDER.li_sam, { display_name: 'Sam Okafor', owner_user_id: MEMBER.sam, owner_email: 'sam.okafor@example.com', public_identifier: 'demo-sam-okafor', has_sales_nav: true, is_premium: true, monthly_cost: 129, connections_count: 5120, health_score: 89, label: 'Sam (Sales Navigator)' }, now),
     sender(SENDER.li_priya_warm, { display_name: 'Priya Lindqvist', owner_user_id: MEMBER.priya, owner_email: 'priya.lindqvist@example.com', public_identifier: 'demo-priya-lindqvist', warmup_level: 1, connections_count: 410, health_score: 81, connected_at: iso(now - 9 * D), created_at: iso(now - 9 * D), warmup_locked_until: iso(now + 4 * D) }, now),
-    sender(SENDER.li_reconnect, { display_name: 'Leo Moreau', owner_user_id: MEMBER.leo, owner_email: 'leo.moreau@example.com', client_id: CLIENT.orchard, public_identifier: 'demo-leo-moreau', status: 'credentials', status_reason: 'LinkedIn asked to sign in again', health_score: 64, last_disconnect_at: iso(now - 7 * H), last_ok_at: iso(now - 8 * H), reconnect_attempts: 1 }, now),
-    sender(SENDER.li_paused, { display_name: 'Nadia Haddad', owner_email: 'nadia.haddad@example.com', client_id: CLIENT.lumen, public_identifier: 'demo-nadia-haddad', status: 'paused', status_reason: 'Paused by Maya Chen', paused_until: null, health_score: 86, timezone: 'Europe/London' }, now),
+    sender(SENDER.li_reconnect, { display_name: 'Leo Moreau', owner_user_id: MEMBER.leo, owner_email: 'leo.moreau@example.com', client_id: CLIENT.orchard, public_identifier: 'demo-leo-moreau', status: 'credentials', status_reason: 'LinkedIn asked to sign in again', health_score: 64, last_disconnect_at: iso(now - 7 * H), disconnected_at: iso(now - 7 * H), holder_notified_at: iso(now - 7 * H + 4 * 60_000), holder_reminders_sent: 0, last_ok_at: iso(now - 8 * H), reconnect_attempts: 1 }, now),
+    sender(SENDER.li_paused, { display_name: 'Nadia Haddad', owner_user_id: null, owner_email: 'nadia.haddad@example.com', client_id: CLIENT.lumen, public_identifier: 'demo-nadia-haddad', status: 'paused', status_reason: 'Paused by Maya Chen', pause_reason: 'manual', paused_until: null, health_score: 86, timezone: 'Europe/London' }, now),
     // more of the team's LinkedIn accounts (the workspace runs mostly on LinkedIn)
-    sender(SENDER.li_jess, { display_name: 'Jess Alvarez', owner_email: 'jess.alvarez@example.com', public_identifier: 'demo-jess-alvarez', is_premium: true, has_sales_nav: true, monthly_cost: 129, connections_count: 4280, health_score: 93, label: 'Jess (Sales Navigator)', connected_at: iso(now - 95 * D), created_at: iso(now - 95 * D) }, now),
+    sender(SENDER.li_jess, { display_name: 'Jess Alvarez', owner_user_id: null, owner_email: 'jess.alvarez@example.com', public_identifier: 'demo-jess-alvarez', is_premium: true, has_sales_nav: true, monthly_cost: 129, connections_count: 4280, health_score: 93, label: 'Jess (Sales Navigator)', connected_at: iso(now - 95 * D), created_at: iso(now - 95 * D) }, now),
     sender(SENDER.li_ravi, { display_name: 'Ravi Menon', owner_email: 'ravi.menon@example.com', public_identifier: 'demo-ravi-menon', connections_count: 2860, health_score: 90, timezone: 'America/Chicago', connected_at: iso(now - 80 * D), created_at: iso(now - 80 * D) }, now),
     sender(SENDER.li_hannah, { display_name: 'Hannah Vogel', owner_email: 'hannah.vogel@example.com', public_identifier: 'demo-hannah-vogel', is_premium: true, connections_count: 3950, health_score: 95, connected_at: iso(now - 70 * D), created_at: iso(now - 70 * D) }, now),
     sender(SENDER.li_vikram, { display_name: 'Vikram Nair', owner_email: 'vikram.nair@example.com', public_identifier: 'demo-vikram-nair', connections_count: 1980, health_score: 88, warmup_level: 3, connected_at: iso(now - 52 * D), created_at: iso(now - 52 * D) }, now),

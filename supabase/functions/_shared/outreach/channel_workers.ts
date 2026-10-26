@@ -44,7 +44,8 @@ async function markFollowedBack(sender: Row, leadId: string, follower: Row): Pro
   if (lss?.relation === "first" || lss?.relation === "blocked" || lss?.relation === "invalid") return false;
   const now = new Date().toISOString();
   await admin.from("outreach_lead_sender_state").upsert({ lead_id: leadId, sender_id: sender.id }, { onConflict: "lead_id,sender_id", ignoreDuplicates: true });
-  await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, updated_at: now }).eq("lead_id", leadId).eq("sender_id", sender.id);
+  // 094: follows_us is the observation; the trigger makes it 'our_invite' when our follow (invite_sent_at) came first, else 'pre_existing'
+  await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, follows_us: true, relation_checked_at: now, updated_at: now }).eq("lead_id", leadId).eq("sender_id", sender.id);
   // a follow back proves the handle; provider_id is NOT set from the follower id: on Instagram it holds the messaging id,
   // which only a profile read returns and which is the only id a new chat accepts. The profile picture fills an empty lead picture.
   await admin.from("outreach_lead_identities").update({ verified: true }).eq("workspace_id", sender.workspace_id).eq("provider", "INSTAGRAM").eq("lead_id", leadId).eq("verified", false);

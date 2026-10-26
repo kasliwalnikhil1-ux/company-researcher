@@ -10,6 +10,7 @@ import type { Row } from '../store';
 import { applyChange, billingState, buildQuote, checkout, downloadInvoice, parseTarget, recordChange } from '../settings/billing';
 import { audit, EMAIL_RE, hex, lowerTrim, origin, requireWs, tourPath, workspaceRow } from '../settings/common';
 import { syncLog } from '../settings/hooks';
+import { sendingDomainFn } from '../settings/emailSending';
 
 const CRM: Record<string, { label: string; segments: Array<{ id: string; name: string; kind: string; count: number }> }> = {
   hubspot: { label: 'HubSpot', segments: [{ id: 'hs-list-118', name: 'Webinar attendees (Q3)', kind: 'list', count: 8 }, { id: 'hs-list-204', name: 'Open deals: SaaS', kind: 'list', count: 6 }, { id: 'hs-list-311', name: 'Churned customers', kind: 'list', count: 5 }] },
@@ -336,6 +337,8 @@ export const settingsFn = {
   'invite-member': inviteMember,
   'crm-oauth': crmOauth,
   'workspace-secrets': workspaceSecrets,
+  // custom sending domain (custom-sending-domain-PRD.md): an in-memory domain that verifies on the second check
+  'sending-domain': (req, ctx) => sendingDomainFn(ctx, req.body),
   // platform setup is an operator tool (Settings → Admin, hidden in the tour)
   'unipile-setup': () => demoError('E_FORBIDDEN', 'platform admin required'),
 } satisfies FnArea;

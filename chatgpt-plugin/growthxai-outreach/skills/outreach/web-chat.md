@@ -35,7 +35,7 @@ When the assistant is answering (`ai_handled: true`, no `handed_off_at`), do not
 1. Website agents (in the sidebar) → Add website (name, domains). The snippet is on the Install & security tab (plain HTML, GTM, WordPress, Shopify, Webflow, Wix, Framer, Next.js, Astro, React). "Seen on …" confirms the install.
 2. Collaborators on the General tab: only they see and take the site's conversations; auto-assignment is round-robin among those online with capacity.
 3. Reply mailbox (General) for email continuity. Business hours (Availability). Pre-chat form, CSAT, features as needed.
-4. Website agent: pick knowledge sources (the shared library under AI → Knowledge, the same one Replies use), set the mode (Off · Review · Auto; also under AI → Setup → Website agents), persona and handoff rules. Answers cost one AI action each from the workspace allowance; when it is used up the widget quietly becomes live chat.
+4. Website agent: pick knowledge sources (the shared library under AI → Knowledge, the same one AI replies use), set the mode (Off · Review · Auto; also under AI → Setup → Website agents), persona and handoff rules. Answers cost one AI action each from the workspace allowance; when it is used up the widget quietly becomes live chat.
 5. Security: identity validation (HMAC) when the site has logged-in users; localhost allowed only for development.
 
 Use `webchat_settings_update` for changes the user states precisely; show the effect summary verbatim and wait for a yes. Never change `allowed_domains` or `enforce_identity` without the user naming the value.

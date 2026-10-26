@@ -1,30 +1,43 @@
 'use client';
 
+// The Sequences list (sequence-stats-PRD.md §6): results counted in people with a rate next to each — Contacted ·
+// Accepted · Replied · Positive — plus a progress ring; a period selector (All time · 7d · 14d · 30d · 90d · Custom)
+// and channel chips above the table; sortable result columns. Every number comes from outreach_report_sequences.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from '@/lib/outreach/nav';
 import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX, X } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph } from '@/lib/outreach/graph';
 import { qk, useClients, useSenders, useSequences } from '@/lib/outreach/queries';
+import { fmtInt, useReportSequences, type SequenceRow } from '@/lib/outreach/reports';
+import {
+  acceptedTip, contactedTip, periodFromString, periodRange, periodToString, positiveTip, progressTip, rateSortValue, repliedTip,
+  STATS_CHANNEL_LABEL, type StatsChannel, type StatsPeriod,
+} from '@/lib/outreach/sequenceStats';
 import type { Sequence, SequenceStatus } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
-import { useFailedCounts, useSequenceSummary } from '@/components/outreach/sequences/hooks';
+import { useFailedCounts } from '@/components/outreach/sequences/hooks';
 import FailedLeadsDrawer from '@/components/outreach/sequences/FailedLeadsDrawer';
 import TemplatePicker from '@/components/outreach/sequences/TemplatePicker';
 import { WhyNotSendingDialog } from '@/components/outreach/sequences/WhyNotSendingDialog';
-import { fmtInt, type SequenceExt } from '@/components/outreach/sequences/publishTypes';
+import { type SequenceExt } from '@/components/outreach/sequences/publishTypes';
 import { formatGraphError, nodeCount, senderName, STATUS_TONE } from '@/components/outreach/sequences/helpers';
+import StatsPeriodPicker from '@/components/outreach/sequences/stats/StatsPeriodPicker';
+import { ProgressRing } from '@/components/outreach/sequences/stats/ProgressRing';
+import { ChannelGlyphs } from '@/components/outreach/sequences/stats/ChannelGlyphs';
+import { Dash, MetricCell } from '@/components/outreach/sequences/stats/MetricCell';
 import { sanitizeLike, usePersistedFilters } from '@/lib/outreach/persistedFilters';
 import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 
 const STATUSES: SequenceStatus[] = ['draft', 'active', 'paused', 'archived'];
+const CHANNELS: StatsChannel[] = ['linkedin', 'instagram', 'whatsapp', 'email'];
 
 /** Same compact control as the leads filter bar. */
 const SEL = 'px-2.5 py-1.5 text-sm rounded-lg border border-gray-300 bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500';
@@ -80,6 +93,7 @@ function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequen
           <div ref={menuRef} role="menu" style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
             className="fixed z-50 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
             <Link href={`/outreach/sequences/${s.id}`} className={MENU_ITEM} role="menuitem" onClick={close}><ExternalLink className="w-4 h-4 flex-shrink-0" /> Open</Link>
+            <Link href={`/outreach/sequences/${s.id}?tab=results`} className={MENU_ITEM} role="menuitem" onClick={close}><GitBranch className="w-4 h-4 flex-shrink-0" /> Analytics</Link>
             {canManage && <button type="button" onClick={() => { close(); onDuplicate(); }} className={MENU_ITEM} role="menuitem"><Copy className="w-4 h-4 flex-shrink-0" /> Duplicate</button>}
             {canManage && s.status !== 'archived' && <button type="button" onClick={() => { close(); onArchive(); }} className={MENU_ITEM} role="menuitem"><Archive className="w-4 h-4 flex-shrink-0" /> Archive</button>}
             {canManage && <button type="button" disabled={!deletable} title={deletable ? undefined : 'Only draft or archived sequences can be deleted'} onClick={() => { close(); onDelete(); }} className={cn(MENU_ITEM, 'hover:bg-red-50 text-red-600 disabled:opacity-40 disabled:hover:bg-transparent')} role="menuitem"><Trash2 className="w-4 h-4 flex-shrink-0" /> Delete</button>}
@@ -126,8 +140,45 @@ function NewSequenceMenu({ onTemplate, onBlank }: { onTemplate: () => void; onBl
   );
 }
 
+// ---------------------------------------------------------------------------
+// Sorting the result columns (count or rate; small bases last)
+// ---------------------------------------------------------------------------
+type SortKey = 'name' | 'progress' | 'contacted' | 'accepted' | 'accepted_rate' | 'replied' | 'replied_rate' | 'positive' | 'positive_rate' | 'updated';
+interface SortState { key: SortKey; dir: 'asc' | 'desc' }
+
+function sortValue(key: SortKey, s: Sequence, st: SequenceRow | undefined, dir: 'asc' | 'desc'): number | string {
+  if (key === 'name') return s.name.toLowerCase();
+  if (key === 'updated') return s.updated_at;
+  if (!st || s.status === 'draft') return dir === 'desc' ? -2 : Number.MAX_SAFE_INTEGER;   // drafts have no results: always last
+  switch (key) {
+    case 'progress': return st.progress.pct_done ?? -1;
+    case 'contacted': return st.contacted;
+    case 'accepted': return st.na.accepted ? -1 : st.accepted;
+    case 'accepted_rate': return st.na.accepted ? (dir === 'desc' ? -2 : Number.MAX_SAFE_INTEGER) : rateSortValue(st.accepted_rate, st.invited, dir);
+    case 'replied': return st.replied;
+    case 'replied_rate': return rateSortValue(st.replied_rate, st.contacted, dir);
+    case 'positive': return st.positive;
+    case 'positive_rate': return rateSortValue(st.positive_rate, st.replied, dir);
+  }
+}
+
+function SortableTh({ label, k, rateKey, sort, onSort, title, className }: { label: string; k: SortKey; rateKey?: SortKey; sort: SortState; onSort: (k: SortKey) => void; title?: string; className?: string }) {
+  const active = sort.key === k || (!!rateKey && sort.key === rateKey);
+  const Icon = !active ? ArrowUpDown : sort.dir === 'desc' ? ArrowDown : ArrowUp;
+  return (
+    <Th className={cn('text-right', className)} title={title}>
+      <span className="inline-flex items-center gap-1">
+        <button type="button" onClick={() => onSort(k)} aria-sort={sort.key === k ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined} className={cn('inline-flex items-center gap-1 hover:text-gray-900', sort.key === k && 'text-gray-900')} title={`Sort by ${label.toLowerCase()}`}>
+          {label}<Icon className={cn('w-3 h-3', sort.key === k ? 'text-gray-700' : 'text-gray-300')} aria-hidden />
+        </button>
+        {rateKey && <button type="button" onClick={() => onSort(rateKey)} className={cn('text-[10px] font-medium rounded px-1 border', sort.key === rateKey ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'text-gray-400 border-gray-200 hover:text-gray-700')} title={`Sort by ${label.toLowerCase()} rate`}>%</button>}
+      </span>
+    </Th>
+  );
+}
+
 export default function SequencesPage() {
-  const { workspace, isManager, canWrite, suspended } = useWorkspace();
+  const { workspace, isManager, canWrite, suspended, timezone } = useWorkspace();
   const ws = workspace?.id ?? null;
   const router = useRouter();
   const qc = useQueryClient();
@@ -138,17 +189,33 @@ export default function SequencesPage() {
   const [failedFor, setFailedFor] = useState<Sequence | null>(null);
   const senders = useSenders(ws);
   const clients = useClients(ws);
-  const summary = useSequenceSummary(ws);
   const canManage = isManager && !suspended;
 
-  // Status and client filters are remembered per workspace in this browser; the search is not.
-  const { filters: listFilters, patch: patchListFilters } = usePersistedFilters<{ status: '' | SequenceStatus; client: string }>('sequences', ws, { status: '', client: '' }, {
-    sanitize: (raw, d) => { const v = sanitizeLike(raw, d); if (v.status && !(STATUSES as readonly string[]).includes(v.status)) v.status = ''; return v; },
+  // Status, client, period and channel are remembered per workspace in this browser; the search is not.
+  const { filters: listFilters, patch: patchListFilters } = usePersistedFilters<{ status: '' | SequenceStatus; client: string; period: string; channel: '' | StatsChannel }>('sequences', ws, { status: '', client: '', period: 'all', channel: '' }, {
+    sanitize: (raw, d) => {
+      const v = sanitizeLike(raw, d);
+      if (v.status && !(STATUSES as readonly string[]).includes(v.status)) v.status = '';
+      if (v.channel && !(CHANNELS as readonly string[]).includes(v.channel)) v.channel = '';
+      v.period = periodToString(periodFromString(v.period));
+      return v;
+    },
   });
-  const { status, client } = listFilters;
+  const { status, client, channel } = listFilters;
+  const period: StatsPeriod = useMemo(() => periodFromString(listFilters.period), [listFilters.period]);
   const setStatus = (v: '' | SequenceStatus) => patchListFilters({ status: v });
   const setClient = (v: string) => patchListFilters({ client: v });
+  const setPeriod = (p: StatsPeriod) => patchListFilters({ period: periodToString(p) });
+  const setChannel = (c: '' | StatsChannel) => patchListFilters({ channel: c });
+  const range = periodRange(period, timezone);
+  // Results for every status (archived included): the status filter is applied client-side with the search.
+  const stats = useReportSequences({ ws, range, status: 'all', refetchInterval: 30000 });
+  const statsMap = useMemo(() => Object.fromEntries((stats.data ?? []).map((r) => [r.sequence_id, r])), [stats.data]);
+  const usedChannels = useMemo(() => CHANNELS.filter((c) => (stats.data ?? []).some((r) => r.channels.some((x) => x.channel === c))), [stats.data]);
+
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<SortState>({ key: 'replied', dir: 'desc' });
+  const onSort = (k: SortKey) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key: k, dir: k === 'name' ? 'asc' : 'desc' }));
   const [createOpen, setCreateOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
   const [newName, setNewName] = useState('');
@@ -157,16 +224,22 @@ export default function SequencesPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'archive' | 'delete'; s: Sequence } | null>(null);
 
-  const summaryMap = useMemo(() => Object.fromEntries((summary.data ?? []).map((r) => [r.sequence_id, r])), [summary.data]);
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return (seqs.data ?? []).filter((s) => (!status || s.status === status) && (!client || s.client_id === client) && (!needle || s.name.toLowerCase().includes(needle)));
-  }, [seqs.data, status, client, search]);
-  const { pageRows, ...pager } = usePagedRows(rows, [ws, search.trim().toLowerCase(), status, client].join('|'));
-  const filtered = !!(search.trim() || status || client);
-  const clearFilters = () => { setSearch(''); patchListFilters({ status: '', client: '' }); };
+    const list = (seqs.data ?? []).filter((s) => (!status || s.status === status) && (!client || s.client_id === client) && (!needle || s.name.toLowerCase().includes(needle))
+      && (!channel || (statsMap[s.id]?.channels ?? []).some((c) => c.channel === channel)));
+    const sign = sort.dir === 'desc' ? -1 : 1;
+    return [...list].sort((a, b) => {
+      const va = sortValue(sort.key, a, statsMap[a.id], sort.dir), vb = sortValue(sort.key, b, statsMap[b.id], sort.dir);
+      if (va === vb) return a.name.localeCompare(b.name);
+      return (va < vb ? -1 : 1) * sign;
+    });
+  }, [seqs.data, status, client, channel, search, sort, statsMap]);
+  const { pageRows, ...pager } = usePagedRows(rows, [ws, search.trim().toLowerCase(), status, client, channel, sort.key, sort.dir].join('|'));
+  const filtered = !!(search.trim() || status || client || channel);
+  const clearFilters = () => { setSearch(''); patchListFilters({ status: '', client: '', channel: '' }); };
 
-  const invalidate = () => { if (ws) { qc.invalidateQueries({ queryKey: qk.sequences(ws) }); qc.invalidateQueries({ queryKey: ['outreach', ws, 'sequence_summary'] }); } };
+  const invalidate = () => { if (ws) { qc.invalidateQueries({ queryKey: qk.sequences(ws) }); qc.invalidateQueries({ queryKey: ['outreach', ws, 'reports', 'sequences'] }); } };
 
   const create = async () => {
     if (!ws || !newName.trim()) return;
@@ -206,12 +279,14 @@ export default function SequencesPage() {
     finally { setBusyId(null); setConfirm(null); }
   };
 
+  const chip = (active: boolean) => cn('px-2.5 py-1 text-xs font-medium rounded-full border transition-colors', active ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50');
+
   return (
     <div>
-      <PageHeader title="Sequences" subtitle="Multi-step LinkedIn and email flows run by your sender pool."
+      <PageHeader title="Sequences" subtitle="Multi-step LinkedIn, Instagram, WhatsApp and email flows run by your sender pool."
         actions={canManage && <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} />} />
 
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-3">
         <label className="relative flex-1 min-w-[200px]">
           <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input aria-label="Search sequences" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sequences…" className={cn(SEL, 'w-full pl-8')} />
@@ -229,73 +304,98 @@ export default function SequencesPage() {
         {filtered && <Button variant="ghost" size="sm" onClick={clearFilters}><X className="w-3.5 h-3.5" /> Clear</Button>}
       </div>
 
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <StatsPeriodPicker value={period} onChange={setPeriod} timezone={timezone} compact />
+        {usedChannels.length > 0 && (
+          <div className="inline-flex flex-wrap items-center gap-1" role="group" aria-label="Channel">
+            <button type="button" aria-pressed={!channel} onClick={() => setChannel('')} className={chip(!channel)}>All channels</button>
+            {usedChannels.map((c) => <button key={c} type="button" aria-pressed={channel === c} onClick={() => setChannel(channel === c ? '' : c)} className={chip(channel === c)}>{STATS_CHANNEL_LABEL[c]}</button>)}
+          </div>
+        )}
+      </div>
+
       {seqs.isLoading ? <Spinner className="min-h-[50vh]" /> : seqs.error ? <ErrorBox message={parseError(seqs.error).message} /> : rows.length === 0 ? (
         <EmptyState icon={<GitBranch className="w-6 h-6" />} title={seqs.data?.length ? 'No sequences match these filters' : 'No sequences yet'}
-          description={seqs.data?.length ? 'Try a different status, client or search.' : 'Start from a ready-made flow (connect, follow up, rotate senders, nurture) or build your own: invitation, wait for connection, follow-up messages, and CRM updates.'}
+          description={seqs.data?.length ? 'Try a different status, client, channel or search.' : 'Start from a ready-made flow (connect, follow up, rotate senders, nurture) or build your own: invitation, wait for connection, follow-up messages, and CRM updates.'}
           action={seqs.data?.length ? <Button variant="secondary" onClick={clearFilters}>Clear filters</Button> : canManage ? <NewSequenceMenu onTemplate={() => setTemplateOpen(true)} onBlank={() => { setNewName(''); setNewClient(''); setCreateOpen(true); }} /> : undefined} />
       ) : (
         <>
+        {stats.error && <ErrorBox className="mb-3" message={`Results could not be loaded: ${parseError(stats.error).message}`} />}
+        <div className={cn(stats.isPlaceholderData && 'opacity-70 transition-opacity')}>
         <Table>
           <thead>
             <tr>
-              <Th>Sequence</Th><Th>Status</Th><Th title="The client this sequence runs for, if any.">Client</Th>
+              <Th title="The ring shows the share of enrolments that are done: finished, replied, removed or failed."><button type="button" onClick={() => onSort('name')} className={cn('inline-flex items-center gap-1 hover:text-gray-900', sort.key === 'name' && 'text-gray-900')}>Sequence {sort.key === 'name' ? (sort.dir === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 text-gray-300" />}</button><button type="button" onClick={() => onSort('progress')} className={cn('ml-1.5 text-[10px] font-medium rounded px-1 border normal-case tracking-normal', sort.key === 'progress' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'text-gray-400 border-gray-200 hover:text-gray-700')} title="Sort by progress: the share of enrolments that are done (the ring)">Progress{sort.key === 'progress' ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}</button></Th>
+              <Th>Status</Th>
+              <SortableTh label="Contacted" k="contacted" sort={sort} onSort={onSort} title="People who got at least one invite, follow or message from this sequence. Visits and likes don't count." />
+              <SortableTh label="Accepted" k="accepted" rateKey="accepted_rate" sort={sort} onSort={onSort} title="LinkedIn invitations accepted and Instagram follows followed back. Rate: accepted ÷ invited, with the number still pending." />
+              <SortableTh label="Replied" k="replied" rateKey="replied_rate" sort={sort} onSort={onSort} title="People who wrote back as a person after this sequence contacted them, counted once. Out-of-office and auto-replies don't count. Rate: replied ÷ contacted." />
+              <SortableTh label="Positive" k="positive" rateKey="positive_rate" sort={sort} onSort={onSort} title="Replies classified interested or question, plus meetings booked. Rate: positive ÷ replied." />
               <Th title="The senders this sequence sends from. A ! means at least one of them isn't connected.">Senders</Th>
-              <Th className="text-right" title="Leads still in the sequence: running, waiting for a connection, a delay or a task, or paused.">Live</Th>
-              <Th className="text-right" title="Leads that reached the end of the sequence.">Completed</Th>
-              <Th className="text-right" title="Leads that replied and left the sequence automatically.">Replied</Th>
-              <Th className="text-right" title="Actions sent so far across all steps (invites, messages, emails). One lead can count more than once.">Sent</Th>
-              <Th className="text-right" title="Actions waiting to go out, for example until the next sending window or until today's limit resets.">Queued</Th>
-              <Th>Updated</Th><Th className="w-10"></Th>
+              <Th title="The client this sequence runs for, if any.">Client</Th>
+              <Th className="w-10"></Th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map((s) => {
-              const sm = summaryMap[s.id];
+              const st = statsMap[s.id];
               const ext = s as SequenceExt;
-              const failed = failedCounts.data?.[s.id] ?? 0;
+              const draft = s.status === 'draft';
+              const failed = failedCounts.data?.[s.id] ?? st?.ops.failed_leads ?? 0;
               const pool = s.sender_pool.map((id) => senders.data?.find((x) => x.id === id)).filter(Boolean) as NonNullable<typeof senders.data>;
               const clientName = clients.data?.find((c) => c.id === s.client_id)?.name;
               return (
                 <tr key={s.id} className={cn('hover:bg-gray-50', busyId === s.id && 'opacity-50')}>
-                  <Td>
-                    <Link href={`/outreach/sequences/${s.id}`} className="font-medium text-gray-900 hover:text-indigo-700">{s.name}</Link>
-                    <div className="text-xs text-gray-400">{nodeCount(s.graph)} steps · v{s.head_version}</div>
+                  <Td className="min-w-[260px] max-w-[400px]">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <ProgressRing pct={draft || !st ? undefined : st.progress.pct_done} title={draft ? 'Not started yet' : st ? progressTip(st) : undefined} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Link href={`/outreach/sequences/${s.id}`} className="font-medium text-gray-900 hover:text-indigo-700 truncate" title={s.name}>{s.name}</Link>
+                          {st && <ChannelGlyphs channels={st.channels} />}
+                        </div>
+                        <div className="text-xs text-gray-400 whitespace-nowrap">{nodeCount(s.graph)} steps · v{s.head_version} · <span title={s.updated_at}>updated {timeAgo(s.updated_at)}</span></div>
+                      </div>
+                    </div>
                   </Td>
-                  <Td>
-                    <div className="flex items-center gap-1.5 flex-wrap">
+                  <Td className="whitespace-nowrap">
+                    <div className="flex items-center gap-1.5">
                       <Badge tone={STATUS_TONE[s.status]} className="capitalize">{s.status}</Badge>
                       {ext.stalled_at && s.status === 'active' && (
-                        <button type="button" onClick={() => setWhyFor(s.id)} title={`${ext.stalled_reason ?? 'Nothing was sent in the last sending window'}. Stalled ${timeAgo(ext.stalled_at)}. Click to see why.`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200"><AlertTriangle className="w-3 h-3" /> Stalled</button>
+                        <button type="button" onClick={() => setWhyFor(s.id)} title={`${ext.stalled_reason ?? 'Nothing was sent in the last sending window'}. Stalled ${timeAgo(ext.stalled_at)}. Click to see why.`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 whitespace-nowrap"><AlertTriangle className="w-3 h-3" /> Stalled</button>
                       )}
-                      {s.throttled_reason && <Badge tone="amber" className="cursor-help"><span title={s.throttled_reason} className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> throttled</span></Badge>}
+                      {s.throttled_reason && <Badge tone="amber" className="cursor-help whitespace-nowrap"><span title={s.throttled_reason} className="inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Throttled</span></Badge>}
                       {failed > 0 && (
-                        <button type="button" onClick={() => setFailedFor(s)} title="Leads that failed a step. Click to see why and to retry, skip or exit them." className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 tabular-nums"><UserX className="w-3 h-3" /> {fmtInt(failed)}{failed >= 5000 ? '+' : ''} failed</button>
+                        <button type="button" onClick={() => setFailedFor(s)} title="Leads that failed a step. Click to see why and to retry, skip or exit them." className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 tabular-nums whitespace-nowrap"><UserX className="w-3 h-3" /> {fmtInt(failed)}{failed >= 5000 ? '+' : ''} failed</button>
                       )}
                     </div>
                   </Td>
-                  <Td className="text-gray-600">{clientName ?? <span className="text-gray-400">—</span>}</Td>
+                  <Td className="text-right">{st ? <MetricCell count={st.contacted} draft={draft} tip={contactedTip(st)} /> : <Dash />}</Td>
+                  <Td className="text-right">{st ? <MetricCell count={st.accepted} rate={st.accepted_rate} denominator={st.invited} pending={st.pending} early={st.accepted_early} na={st.na.accepted} draft={draft} tip={acceptedTip(st)} /> : <Dash />}</Td>
+                  <Td className="text-right">{st ? <MetricCell count={st.replied} rate={st.replied_rate} denominator={st.contacted} draft={draft} tip={repliedTip(st)} /> : <Dash />}</Td>
+                  <Td className="text-right">{st ? <MetricCell count={st.positive} rate={st.positive_rate} denominator={st.replied} draft={draft} tip={positiveTip(st)} /> : <Dash />}</Td>
                   <Td>
                     {pool.length === 0 ? <span className="text-xs text-gray-400">Empty</span> : (
-                      <div className="flex items-center gap-1.5" title={pool.map(senderName).join(', ')}>
-                        <span className="flex -space-x-2">{pool.slice(0, 4).map((p) => <span key={p.id} className="ring-2 ring-white rounded-full"><Avatar src={p.picture_url} name={senderName(p)} size={6} /></span>)}</span>
-                        <span className="text-xs text-gray-600">{pool.length === 1 ? senderName(pool[0]) : `${pool.length} senders`}</span>
+                      <div className="flex items-center gap-1.5 whitespace-nowrap" title={pool.map(senderName).join(', ')}>
+                        {/* Explicit width: the table under-measures a stack built from negative margins, and the label then spills into the next column. */}
+                        <span className="relative h-6 shrink-0" style={{ width: 24 + (Math.min(pool.length, 4) - 1) * 16 }}>
+                          {pool.slice(0, 4).map((p, i) => <span key={p.id} className="absolute top-0 ring-2 ring-white rounded-full" style={{ left: i * 16, zIndex: 4 - i }}><Avatar src={p.picture_url} name={senderName(p)} size={6} /></span>)}
+                        </span>
+                        <span className="text-xs text-gray-600 whitespace-nowrap">{pool.length === 1 ? senderName(pool[0]) : `${pool.length} senders`}</span>
                         {pool.some((p) => p.status !== 'ok') && <span className="text-xs text-amber-700" title="Some senders are not connected">!</span>}
                       </div>
                     )}
                   </Td>
-                  <Td className="text-right tabular-nums">{sm?.live ?? 0}</Td>
-                  <Td className="text-right tabular-nums">{sm?.completed ?? 0}</Td>
-                  <Td className="text-right tabular-nums">{sm?.replied ?? 0}</Td>
-                  <Td className="text-right tabular-nums">{sm?.sent ?? 0}</Td>
-                  <Td className="text-right tabular-nums">{sm?.queued ?? 0}</Td>
-                  <Td className="text-gray-500 whitespace-nowrap" title={s.updated_at}>{timeAgo(s.updated_at)}</Td>
+                  <Td className="text-gray-600 whitespace-nowrap">{clientName ?? <span className="text-gray-400">—</span>}</Td>
                   <Td className="text-right"><RowMenu s={s} canManage={canManage} onDuplicate={() => duplicate(s)} onArchive={() => setConfirm({ kind: 'archive', s })} onDelete={() => setConfirm({ kind: 'delete', s })} /></Td>
                 </tr>
               );
             })}
           </tbody>
         </Table>
+        </div>
         <PaginationBar {...pager} />
+        <p className="text-xs text-gray-400 mt-2">People, counted once. The percent next to each count is its rate: accepted ÷ invited, replied ÷ contacted, positive ÷ replied. A dotted underline means the rate rests on fewer than 20 people or on invites that are mostly still pending. Hover a number for the full sentence.</p>
         </>
       )}
 
@@ -313,7 +413,7 @@ export default function SequencesPage() {
       <TemplatePicker open={templateOpen} onClose={() => setTemplateOpen(false)} />
 
       <ConfirmModal open={confirm?.kind === 'archive'} title="Archive sequence" confirmLabel="Archive" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-        body={<p>Archiving “{confirm?.s.name}” takes all {summaryMap[confirm?.s.id ?? '']?.live ?? 0} leads currently in it out of the sequence and stops sending. The steps and history are kept.</p>} />
+        body={<p>Archiving “{confirm?.s.name}” takes all {statsMap[confirm?.s.id ?? '']?.progress.live ?? 0} leads currently in it out of the sequence and stops sending. The steps and history are kept.</p>} />
       <ConfirmModal open={confirm?.kind === 'delete'} title="Delete sequence" confirmLabel="Delete permanently" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
         body={<p>This permanently deletes “{confirm?.s.name}”, its versions, its step statistics and the history of every lead that went through it. This cannot be undone.</p>} />
       <WhyNotSendingDialog open={!!whyFor} onClose={() => setWhyFor(null)} sequenceId={whyFor} />

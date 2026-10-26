@@ -136,7 +136,7 @@ export default function SenderSettings({ sender, isManager, canWrite, notify, wo
             <div>
               <Input label="Booking link" type="url" inputMode="url" value={form.booking_link} onChange={(e) => setForm((f) => ({ ...f, booking_link: e.target.value }))} disabled={!canManage} placeholder="https://calendly.com/name/intro" error={bookingError}
                 hint="Use it in messages as {{sender.booking_link}}. A booking marks the lead as “Meeting booked” and takes them out of the sequence." />
-              <p className="text-xs text-gray-500 mt-1">Bookings reach us through a Calendly or Cal.com webhook. The webhook URL to paste there is in <Link href="/outreach/settings/email" className="text-indigo-600 hover:underline">Settings → Email &amp; booking</Link>.</p>
+              <p className="text-xs text-gray-500 mt-1">Bookings reach us through a Calendly or Cal.com webhook. The webhook URL to paste there is in <Link href="/outreach/settings/email/booking" className="text-indigo-600 hover:underline">Settings → Email &amp; booking → Meeting booking</Link>.</p>
             </div>
             <Input label={`Monthly cost (${currency})`} type="number" min={0} step="0.01" inputMode="decimal" value={form.monthly_cost} onChange={(e) => setForm((f) => ({ ...f, monthly_cost: e.target.value }))} disabled={!canManage} error={costError}
               placeholder={defaultCost != null && defaultCost !== '' ? `${String(defaultCost)} (workspace default)` : 'Not set'}

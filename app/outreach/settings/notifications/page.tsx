@@ -21,6 +21,11 @@ export default function NotificationSettingsPage() {
   const prefs = useNotificationPrefs(ws || null);
   const set = useSetNotificationPref(ws);
   const mention = prefs.data?.note_mention ?? { push: true, email: true, email_delay_min: 10 as const };
+  // sender-lifecycle v1.2 §5.8.3: the combined team email, 4 h after an account's sign-in email; default on. The outage email has no toggle.
+  const disconnected = prefs.data?.sender_disconnected ?? { push: true, email: true, email_delay_min: 10 as const };
+  const saveDisconnected = (email: boolean) => {
+    set.mutate({ kind: 'sender_disconnected', email, email_delay_min: 10, push: true }, { onError: (e) => toast.show(parseError(e).message, 'error'), onSuccess: () => toast.show('Saved') });
+  };
   const saveEmail = (patch: { email?: boolean; email_delay_min?: 10 | 30 | 60 }) => {
     set.mutate({ kind: 'note_mention', email: patch.email ?? mention.email, email_delay_min: patch.email_delay_min ?? mention.email_delay_min, push: mention.push },
       { onError: (e) => toast.show(parseError(e).message, 'error'), onSuccess: () => toast.show('Saved') });
@@ -42,6 +47,13 @@ export default function NotificationSettingsPage() {
                 </Select>
                 <Toggle checked={mention.email} disabled={set.isPending} onChange={(v) => saveEmail({ email: v })} />
               </div>
+            </div>
+          </Card>
+          <Card title="Disconnected accounts">
+            <p className="text-sm text-gray-600 mb-3">An account needs signing in again and is still down 4 hours after the sign-in email went to whoever signs in to it.</p>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div className="min-w-0 flex-[1_1_14rem]"><div className="text-sm font-medium text-gray-900">Combined email after 4 hours when accounts need signing in again</div><div className="text-xs text-gray-500">One email per workspace listing every such account, at most once a day per account, for 7 days. The &ldquo;likely an outage&rdquo; email when many accounts drop at once has no toggle.</div></div>
+              <div className="flex items-center gap-2 ml-auto"><Toggle checked={disconnected.email} disabled={set.isPending} onChange={saveDisconnected} /></div>
             </div>
           </Card>
         </div>

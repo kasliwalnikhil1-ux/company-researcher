@@ -14,6 +14,7 @@ import { STATUS_DOT, STATUS_LABELS, type HealthOverview } from '@/lib/outreach/h
 import { cn } from '@/lib/utils';
 import HealthNow from '@/components/outreach/settings/admin/health/HealthNow';
 import HealthUsage from '@/components/outreach/settings/admin/health/HealthUsage';
+import EmailHealthCard from '@/components/outreach/settings/admin/health/EmailHealthCard';
 import HealthStuck from '@/components/outreach/settings/admin/health/HealthStuck';
 import HealthSettings from '@/components/outreach/settings/admin/health/HealthSettings';
 
@@ -88,7 +89,7 @@ function HealthPageInner() {
       <div className="mb-5"><Tabs value={tab} onChange={(v) => setParams({ tab: v })} items={TABS} label="Health sections" /></div>
       {overview.isLoading && !o ? <PageLoader /> : null}
       {tab === 'now' && o && <HealthNow overview={o} openKey={openKey} onOpenKey={(k) => { setOpenKey(k); setParams({ check: k }); }} />}
-      {tab === 'usage' && <HealthUsage />}
+      {tab === 'usage' && <><HealthUsage /><div className="mt-6"><EmailHealthCard /></div></>}
       {tab === 'stuck' && <HealthStuck />}
       {tab === 'settings' && o && <HealthSettings key={o.settings.updated_at} settings={o.settings} checks={o.checks} />}
       {node}

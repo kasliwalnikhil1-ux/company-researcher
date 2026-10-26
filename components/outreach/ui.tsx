@@ -303,7 +303,8 @@ export function Badge({ children, tone = 'gray', className }: { children: React.
 export function StatusPill({ status, reason }: { status: SenderStatus; reason?: string | null }) {
   const map: Record<SenderStatus, { tone: any; label: string }> = {
     ok: { tone: 'green', label: 'Connected' }, connecting: { tone: 'blue', label: 'Connecting' }, credentials: { tone: 'red', label: 'Re-login needed' },
-    error: { tone: 'red', label: 'Error' }, paused: { tone: 'amber', label: 'Paused' }, disabled: { tone: 'gray', label: 'Disabled' }, disconnected: { tone: 'gray', label: 'Disconnected' },
+    error: { tone: 'red', label: 'Error' }, paused: { tone: 'amber', label: 'Paused' }, disabled: { tone: 'gray', label: 'Disabled' }, disconnected: { tone: 'gray', label: 'Removed' },
+    removed: { tone: 'gray', label: 'Removed' }, erased: { tone: 'gray', label: 'Erased' },
   };
   const m = map[status] ?? { tone: 'gray', label: status };
   return <Badge tone={m.tone} className={reason ? 'cursor-help' : ''}><span title={reason ?? undefined}>{m.label}</span></Badge>;
@@ -314,10 +315,14 @@ export function EnrollmentBadge({ status }: { status: EnrollmentStatus }) {
   return <Badge tone={tone}>{enrollmentStatusText(status)}</Badge>;
 }
 
+/** The colour of each reply intent, shared by the badge on a conversation row and the Reply intent filter tags. */
+export const INTENT_TONE: Record<Intent, 'gray' | 'green' | 'red' | 'amber' | 'blue' | 'purple'> = {
+  interested: 'green', question: 'blue', not_interested: 'red', not_now: 'amber', ooo: 'purple', wrong_person: 'gray', unclear: 'gray', unclassified: 'gray',
+};
+
 export function IntentBadge({ intent }: { intent: Intent | null | undefined }) {
   if (!intent || intent === 'unclassified') return <Badge tone="gray">unclassified</Badge>;
-  const tone: any = intent === 'interested' ? 'green' : intent === 'question' ? 'blue' : intent === 'not_interested' ? 'red' : intent === 'not_now' ? 'amber' : intent === 'ooo' ? 'purple' : 'gray';
-  return <Badge tone={tone}>{intent.replace(/_/g, ' ')}</Badge>;
+  return <Badge tone={INTENT_TONE[intent] ?? 'gray'}>{intent.replace(/_/g, ' ')}</Badge>;
 }
 
 export function HealthBar({ score, className }: { score: number; className?: string }) {

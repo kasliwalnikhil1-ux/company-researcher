@@ -8,6 +8,7 @@ import type { DemoStore, Row } from '../store';
 import { billingState } from '../settings/billing';
 import { audit, EMAIL_RE, hex, lowerTrim, memberOf, nextNum, requireWs, workspaceRow } from '../settings/common';
 import { registerSettingsHooks } from '../settings/hooks';
+import { emailLogSearch, typesByRule } from '../settings/emailSending';
 
 const ROLES = ['owner', 'manager', 'member', 'client_viewer'];
 const RANK: Record<string, number> = { owner: 0, manager: 1, member: 2, client_viewer: 3 };
@@ -42,7 +43,7 @@ function createWorkspace(ctx: Ctx, name: unknown): Row {
   const now = Date.now();
   const w = s.insert('outreach_workspaces', {
     name: String(name ?? '').trim() || 'My Workspace', slug, plan: 'trial', created_by: ctx.userId, deleted_at: null,
-    settings: { recruiter_enabled: false, create_leads_from_inbound: true, cookie_mode_opt_in: true, timezone: 'UTC', auto_stage_interested: true, track_replies: false },
+    settings: { recruiter_enabled: false, create_leads_from_inbound: 'people_only', cookie_mode_opt_in: true, timezone: 'UTC', auto_stage_interested: true, track_replies: false },
     branding: {}, stripe_customer_id: null, stripe_subscription_id: null, stripe_status: null, past_due_since: null, trial_ends_at: new Date(now + 7 * DAY).toISOString(),
     trial_account_limit: 1, billing_period: null, accounts_requested: null, accounts_billed: null, current_period_start: null, current_period_end: null,
     cancel_at_period_end: false, cancelled_at: null, data_delete_after: null, scheduled_change: null, pending_payment: null, price_version: 'v1',
@@ -415,6 +416,10 @@ export const settingsRpc = {
   health_run_now: () => demoError('E_FORBIDDEN', 'platform admin required'),
   // the tour records nothing (lib/outreach/clientEvents.ts returns before calling); accepted silently if it ever does
   report_client_event: () => null,
+  // custom sending domain + email log (custom-sending-domain-PRD.md §8)
+  email_types_by_rule: () => typesByRule(),
+  email_log_search: (a, ctx) => emailLogSearch(ctx, a),
+  email_platform_stats: () => demoError('E_FORBIDDEN', 'platform admin required'),
 } satisfies RpcArea;
 
 /** Table hooks (insert defaults, side effects) for this area's tables. Called once at boot. */

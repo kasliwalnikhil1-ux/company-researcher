@@ -9,7 +9,8 @@ import { unipile, unipileConfigured } from "./unipile.ts";
 import { stripeConfigured } from "./stripe.ts";
 import { settlePendingChange, syncWorkspaceFromStripe } from "./billing.ts";
 import { processAccountDeletions } from "./disconnect.ts";
-import { platformAlert, sendBillingNotice, type BillingNoticeKind } from "./billing_emails.ts";
+import { platformAlert, sendBillingNotice, billingRecipients, type BillingNoticeKind } from "./billing_emails.ts";
+import { runBillingSteps, notifyDataDeleted } from "./billing_clock.ts";
 
 type Row = Record<string, any>;
 
@@ -22,8 +23,10 @@ async function flagOn(key: string): Promise<boolean> {
 
 async function sendDueNotices(): Promise<number> {
   const due = (await rpc<Array<{ workspace_id: string; kind: BillingNoticeKind; period_key: string; data: Row }>>("billing_notices_due")) ?? [];
+  // the payment-failure and cancellation clocks (billing_clock.ts) own these kinds now; the trial notices stay here
+  const CLOCK_OWNED = new Set<string>(["past_due_reminder", "suspended", "cancel_data_30d", "cancel_data_7d", "cancel_data_1d"]);
   let sent = 0;
-  for (const n of due) sent += await sendBillingNotice(n.workspace_id, n.kind, n.period_key, n.data ?? {});
+  for (const n of due) if (!CLOCK_OWNED.has(n.kind)) sent += await sendBillingNotice(n.workspace_id, n.kind, n.period_key, n.data ?? {});
   return sent;
 }
 
@@ -53,8 +56,9 @@ export async function runBillingHourly(): Promise<Row> {
     await platformAlert(`${tick.reconciled.length} workspace(s) had more active accounts than their plan`, ["The extra accounts were paused (over_plan_limit). No code path should allow this: check the audit log entry billing.reconciled."], tick.reconciled);
   }
   const notices = await sendDueNotices();
+  const clock = await runBillingSteps().catch((e) => { log({ fn: "billing-sync", error: `clock: ${String((e as Error)?.message ?? e)}` }); return null; });
   const caughtUp = await catchUpWithStripe();
-  return { mode: "hourly", ...tick, account_deletions: { deleted: deletions.deleted, failed: deletions.failed }, notices_sent: notices, subscriptions_reread: caughtUp };
+  return { mode: "hourly", ...tick, account_deletions: { deleted: deletions.deleted, failed: deletions.failed }, notices_sent: notices, clock, subscriptions_reread: caughtUp };
 }
 
 /** Remove every stored file of a workspace (objects live under `<workspace id>/` in each bucket). */
@@ -112,9 +116,14 @@ export async function runBillingDaily(): Promise<Row> {
     if (await flagOn("billing_data_deletion")) {
       for (const w of due) {
         try {
+          const recipients = await billingRecipients(w.workspace_id).catch(() => [] as string[]);   // captured before the purge (§5.9.2 day 67)
           const files = await emptyWorkspaceStorage(w.workspace_id);
           const r = await rpc<Row>("purge_workspace", { p_ws: w.workspace_id });
-          if (r?.deleted) { deleted.push(w.workspace_id); await audit(null, "workspace.data_deleted", "workspace", w.workspace_id, { name: w.name, plan: w.plan, files_removed: files, owner: w.owner_email }); }
+          if (r?.deleted) {
+            deleted.push(w.workspace_id);
+            await audit(null, "workspace.data_deleted", "workspace", w.workspace_id, { name: w.name, plan: w.plan, files_removed: files, owner: w.owner_email });
+            await notifyDataDeleted(w.workspace_id, recipients, String(w.name ?? "your workspace")).catch(() => null);
+          }
         } catch (e) { log({ fn: "billing-sync", workspace: w.workspace_id, error: `deletion failed: ${String((e as Error)?.message ?? e)}` }); }
       }
     } else {

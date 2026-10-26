@@ -12,7 +12,8 @@ import { useAlertSettings } from '@/lib/outreach/alerts';
 import { useAlertEngine, useTabBadge, type AlertRow } from '@/lib/outreach/alerts/engine';
 import { useInboxCounts } from '@/lib/outreach/inboxSent';
 import AlertToast from './alerts/AlertToast';
-import { changeHref, longDate, useBilling } from '@/lib/outreach/billing';
+import { changeHref, longDate, useBilling, useBillingClock } from '@/lib/outreach/billing';
+import { SuspendedOverlay } from './billing/SuspendedOverlay';
 
 function BrandMark({ branding, fallback }: { branding: Branding; fallback: string }) {
   const [failed, setFailed] = useState(false);
@@ -58,7 +59,12 @@ function HelpMenu({ branding }: { branding: Branding }) {
 }
 
 export default function OutreachShell({ children }: { children: React.ReactNode }) {
-  const { workspace, workspaces, switchWorkspace, suspended, isClientViewer, isOwner } = useWorkspace();
+  const { workspace, workspaces, switchWorkspace, suspended, isClientViewer, isOwner, isManager } = useWorkspace();
+  // the payment-failure clock (sender-lifecycle v1.2 §5.9): past_due day 0–5 amber for owners and managers, day 6 red for all
+  const clock = useBillingClock(workspace?.id).data;
+  const pastDue = clock?.billing_status === 'past_due';
+  const clockDay = clock?.day ?? 0;
+  const suspendedForBilling = clock?.billing_status === 'suspended';
   // plan state for the banners (billing v2): trial ending, trial ended, subscription ended, client access not on the plan
   const billing = useBilling(workspace?.id).data;
   const plan = billing?.plan ?? workspace?.plan;
@@ -100,16 +106,17 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
           <HelpMenu branding={branding} />
         </div>
       )}
+      {suspendedForBilling && isOwner && <SuspendedOverlay clock={clock!} workspaceId={workspace?.id ?? ''} />}
       {suspended && (
         <div className="bg-red-50 border-b border-red-200 text-red-800 text-sm px-6 py-2 flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 flex-shrink-0" />
           {isClientViewer
-            ? <span>This workspace is paused. Your data is safe and read-only for now.{branding.support_email ? <> Questions: <a className="underline font-medium" href={`mailto:${branding.support_email}`}>{branding.support_email}</a></> : null}</span>
+            ? <span>This workspace is temporarily paused. Your data is safe and read-only for now.{branding.support_email ? <> Questions: <a className="underline font-medium" href={`mailto:${branding.support_email}`}>{branding.support_email}</a></> : null}</span>
             : plan === 'trial_expired'
               ? <span>The trial has ended. The account is disconnected and nothing is being sent. Everything is kept{billing?.data_delete_after ? ` until ${longDate(billing.data_delete_after)}` : ' for 30 days'}. {isOwner ? <Link href={changeHref()} className="underline font-medium">Subscribe</Link> : 'The workspace owner can subscribe on the Billing page.'}</span>
               : plan === 'cancelled'
                 ? <span>This subscription has ended. Senders are paused and the workspace is read-only{billing?.data_delete_after ? `; your data is kept until ${longDate(billing.data_delete_after)}` : ''}. {isOwner ? <Link href={changeHref()} className="underline font-medium">Subscribe again</Link> : 'The workspace owner can subscribe again on the Billing page.'}</span>
-                : <span>This workspace is suspended for non-payment. Senders are paused and the workspace is read-only. They resume on their own once billing is fixed. {isOwner ? <Link href="/outreach/billing" className="underline font-medium">Update billing</Link> : 'The workspace owner can fix it on the Billing page.'}</span>}
+                : <span>This workspace is paused because of billing. Replies keep arriving; nothing can be sent, edited or enrolled until payment is updated.{clock?.steps?.find((x) => x.step === 'remove' && !x.done) ? ` Connected accounts are disconnected on ${longDate(clock.steps.find((x) => x.step === 'remove')!.at)}.` : ''} {isOwner ? <Link href="/outreach/billing" className="underline font-medium">Update payment</Link> : `Ask ${clock?.owner_name ?? 'the workspace owner'} to update payment.`}</span>}
         </div>
       )}
       {trialDays != null && trialDays <= 2 && !isClientViewer && (
@@ -123,9 +130,19 @@ export default function OutreachShell({ children }: { children: React.ReactNode 
           <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>Your subscription ends on {longDate(billing.current_period_end)}. <Link href="/outreach/billing" className="underline font-medium">Keep it</Link></span>
         </div>
       )}
-      {workspace?.stripe_status === 'past_due' && !suspended && !isClientViewer && (
+      {pastDue && !suspended && !isClientViewer && clockDay >= 6 && (
+        <div className="bg-red-50 border-b border-red-200 text-red-800 text-sm px-6 py-2 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span><strong>Sending stops tomorrow.</strong> The payment for this workspace is still open. {isOwner ? <>{clock?.overdue_invoice_url && <a href={clock.overdue_invoice_url} target="_blank" rel="noopener noreferrer" className="underline font-medium">Pay invoice</a>}{clock?.overdue_invoice_url ? ' · ' : ''}<Link href="/outreach/billing" className="underline font-medium">Update card</Link></> : `Ask ${clock?.owner_name ?? 'the workspace owner'} to update payment.`}</span>
+        </div>
+      )}
+      {(pastDue || workspace?.stripe_status === 'past_due') && !suspended && !isClientViewer && clockDay < 6 && isManager && (
         <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-sm px-6 py-2 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span>Payment is past due. The workspace becomes read-only 7 days after the failed payment. <Link href="/outreach/billing" className="underline font-medium">Update billing</Link></span>
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span><strong>Your payment failed.</strong> Update your card to avoid interruption{clock?.steps?.[0] ? ` (sending stops on ${longDate(clock.steps[0].at)})` : ''}. {isOwner && clock?.overdue_invoice_url && <><a href={clock.overdue_invoice_url} target="_blank" rel="noopener noreferrer" className="underline font-medium">Pay invoice</a> · </>}<Link href="/outreach/billing" className="underline font-medium">Update card</Link></span>
+        </div>
+      )}
+      {clock?.billing_action_required && !suspended && isOwner && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-800 text-sm px-6 py-2 flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" /> <span><strong>Confirm your payment.</strong> Your bank needs you to approve the charge. {clock.overdue_invoice_url ? <a href={clock.overdue_invoice_url} target="_blank" rel="noopener noreferrer" className="underline font-medium">Confirm the payment</a> : <Link href="/outreach/billing" className="underline font-medium">Open Billing</Link>}</span>
         </div>
       )}
       <div className="flex-1 min-w-0 overflow-x-clip">

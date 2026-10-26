@@ -25,14 +25,16 @@ function InboxPageInner() {
     if (st.view === 'sent') router.replace(`/outreach/inbox/sent${st.segment !== 'sent' ? `?segment=${st.segment}` : ''}`);
   }, [ws, plain, router]);
   const initial: Partial<ChatFilters> & { sequence_id?: string | null } = {};
-  const intent = params.get('intent');
-  if (intent) initial.intent = intent;
+  // `?intent=a,b` and `?sender_id=a,b` take one value or a comma-separated list (the filters are multi-select)
+  const list = (key: string) => (params.get(key) ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const intents = list('intent');
+  if (intents.length) initial.intents = intents;
   if (params.get('unread') === '1') initial.unread = true;
   // the "6 new replies" notification opens Replies → Needs reply
   const chip = params.get('chip');
   if (chip === 'needs_reply' || chip === 'waiting_on_them' || chip === 'all') initial.chip = chip;
-  const sender = params.get('sender_id');
-  if (sender) initial.sender_id = sender;
+  const senders = list('sender_id').filter((id) => UUID.test(id));
+  if (senders.length) initial.sender_ids = senders;
   const client = params.get('client_id');
   if (client) initial.client_id = client;
   const sequence = params.get('sequence_id');

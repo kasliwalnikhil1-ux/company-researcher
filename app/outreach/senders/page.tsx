@@ -9,8 +9,8 @@ import { useRunningDryAlerts, type SenderV2 } from '@/components/outreach/sender
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useDashboard, useSenders } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, fmtDate, HealthBar, PageHeader, Spinner, StatusPill, Table, Td, Th, timeAgo } from '@/components/outreach/ui';
-import { PROVIDER_LABELS, STATUS_OPTIONS, addAccountAction, disconnectedReasonText, isAbandonedSignIn, isFuture, scheduleSummary, statusReasonText } from '@/components/outreach/senders/helpers';
-import { accountsMeter, changeHref, useBilling } from '@/lib/outreach/billing';
+import { PROVIDER_LABELS, STATUS_OPTIONS, addAccountAction, disconnectBadge, isAbandonedSignIn, isFuture, isRemovedStatus, lifecycleBadge, removedReasonText, scheduleSummary, senderProfileUrl, statusReasonText } from '@/components/outreach/senders/helpers';
+import { accountsMeter, changeHref, useBilling, useBillingClock } from '@/lib/outreach/billing';
 import type { Provider, Sender } from '@/lib/outreach/types';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { cn } from '@/lib/utils';
@@ -40,7 +40,7 @@ function Budget({ label, b }: { label: string; b?: Usage }) {
 /** Why a connected sender may still be sending little or nothing, from the sender row itself. */
 function blockedHint(s: SenderV2): string | null {
   if (isAbandonedSignIn(s)) return `${statusReasonText(s.status_reason) ?? 'Sign-in not completed'}: open the sender and send a fresh link`;
-  if (s.status === 'disconnected') return disconnectedReasonText(s.status_reason) ?? 'The connected account was removed';
+  if (isRemovedStatus(s.status)) return removedReasonText(s.removed_via, s.status_reason) ?? 'The account was removed; its history is kept';
   if (s.status !== 'ok') return s.status === 'connecting' || s.status === 'error' ? statusReasonText(s.status_reason) : null;   // the pill says the state; a sign-in reason goes under it
   if (s.provider_warning) return 'Paused after an Instagram warning';
   if (isFuture(s.paused_until)) return `Resting until ${fmtDate(s.paused_until)}`;
@@ -69,6 +69,8 @@ export default function SendersPage() {
   const { workspace, isManager, isOwner, canWrite } = useWorkspace();
   const ws = workspace?.id;
   const billing = useBilling(ws);
+  const clock = useBillingClock(ws).data;
+  const billingSuspended = clock?.billing_status === 'suspended';
   const senders = useSenders(ws);
   const clients = useClients(ws);
   const dash = useDashboard(ws);
@@ -92,7 +94,7 @@ export default function SendersPage() {
   const clientName = useMemo(() => new Map((clients.data ?? []).map((c) => [c.id, c.name])), [clients.data]);
 
   // Newest additions first.
-  const rows = useMemo(() => ((senders.data ?? []) as SenderV2[]).filter((s: Sender) => (!q || [s.display_name, s.public_identifier, s.owner_email].some((f) => f?.toLowerCase().includes(q))) && (!channel || s.provider === channel) && (!status || s.status === status) && (!client || (client === '__none' ? !s.client_id : s.client_id === client))).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')), [senders.data, status, client, channel, q]);
+  const rows = useMemo(() => ((senders.data ?? []) as SenderV2[]).filter((s: Sender) => (!q || [s.display_name, s.public_identifier, s.owner_email].some((f) => f?.toLowerCase().includes(q))) && (!channel || s.provider === channel) && (status ? (s.status === status || (status === 'removed' && s.status === 'disconnected')) : !isRemovedStatus(s.status) && s.status !== 'erased') && (!client || (client === '__none' ? !s.client_id : s.client_id === client))).sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? '')), [senders.data, status, client, channel, q]);
   // Paged on the client: the full sender list is already loaded; any filter change goes back to page 1.
   const { pageRows, ...pager } = usePagedRows(rows, [ws, q, status, client, channel].join('|'));
   const filtered = !!(q || status || client || channel);
@@ -107,6 +109,9 @@ export default function SendersPage() {
 
   // Accounts are bought up front: the meter, and what Connect turns into once every account on the plan is in use.
   const slots = billing.data?.accounts;
+  // a disabled sender keeps its connector link, so it still uses one of the paid accounts (sender lifecycle D7)
+  const disabledUsing = (senders.data ?? []).filter((s) => s.status === 'disabled' && s.unipile_account_id).length;
+  const removedCount = (senders.data ?? []).filter((s) => isRemovedStatus(s.status)).length;
   const limit = accountsMeter(slots);
   const meter = limit && limit.billed > 0 ? limit : null;   // a lapsed plan has no accounts to show; the banner at the top covers it
   const atLimit = !!limit?.full;
@@ -123,7 +128,7 @@ export default function SendersPage() {
           <>
             {meter && (
               <div className="min-w-[150px]" title="An account is a LinkedIn account, a mailbox, an Instagram account or a WhatsApp number">
-                <div className="text-xs text-gray-500 whitespace-nowrap"><span className="font-medium text-gray-900 tabular-nums">{meter.text}</span>{slots?.reserved ? ` · ${slots.reserved} being connected` : ''}</div>
+                <div className="text-xs text-gray-500 whitespace-nowrap"><span className="font-medium text-gray-900 tabular-nums">{meter.text}</span>{slots?.reserved ? ` · ${slots.reserved} being connected` : ''}{disabledUsing ? ` · ${disabledUsing} disabled (still uses a slot)` : ''}</div>
                 <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={meter.billed} aria-valuenow={meter.used} aria-label="Accounts used">
                   <div className={cn('h-full rounded-full', meter.used > meter.billed ? 'bg-red-500' : meter.full ? 'bg-amber-500' : 'bg-indigo-500')} style={{ width: `${meter.pct}%` }} />
                 </div>
@@ -161,6 +166,12 @@ export default function SendersPage() {
           <Search className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input aria-label="Search senders" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, handle, email…" className={cn(SEL, 'w-full pl-8')} />
         </label>
+        <div className="flex items-center gap-1" role="group" aria-label="Lifecycle">
+          {([['', 'Active'], ['paused', 'Paused'], ['disabled', 'Disabled'], ['removed', `Removed${removedCount ? ` ${removedCount}` : ''}`]] as Array<[string, string]>).map(([v, label]) => (
+            <button key={v || 'active'} type="button" onClick={() => setStatus(v)} aria-pressed={status === v}
+              className={cn('px-3 py-1.5 rounded-full text-xs font-medium border', status === v ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>{label}</button>
+          ))}
+        </div>
         <select aria-label="Status" value={status} onChange={(e) => setStatus(e.target.value)} className={SEL}>
           <option value="">All statuses</option>
           {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -197,28 +208,38 @@ export default function SendersPage() {
               const dryAlert = dry.data?.get(s.id);
               const isDry = !!s.running_dry_at || !!dryAlert;
               const hint = blockedHint(s);
+              const badge = lifecycleBadge(s);
+              const down = disconnectBadge(s);
+              const billingPaused = s.status === 'paused' && (s.pause_reason === 'billing' || billingSuspended);
+              const profileUrl = senderProfileUrl(s.provider, s.public_identifier);
               return (
                 <tr key={s.id} onClick={() => router.push(`/outreach/senders/${s.id}`)} className="cursor-pointer hover:bg-gray-50" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/outreach/senders/${s.id}`); }}>
                   <Td>
-                    <div className="flex items-center gap-3 min-w-[200px]">
+                    <div className="flex items-center gap-3 w-[220px]">
                       <div className="relative shrink-0">
                         <Avatar src={s.picture_url} name={s.display_name} />
                         <span className="absolute -bottom-0.5 -right-0.5 rounded bg-white p-px ring-1 ring-white" title={PROVIDER_LABELS[s.provider]}><ProviderLogo provider={s.provider} className="w-3.5 h-3.5" /></span>
                       </div>
                       <div className="min-w-0">
-                        <div className="font-medium text-gray-900 truncate">{s.display_name ?? 'Unnamed sender'}</div>
-                        <div className="text-xs text-gray-500 truncate">{PROVIDER_LABELS[s.provider]}{s.public_identifier ? ` · ${s.public_identifier}` : ''}{s.owner_email ? ` · ${s.owner_email}` : ''}</div>
+                        <div className="font-medium text-gray-900 truncate" title={s.display_name ?? undefined}>{s.display_name ?? 'Unnamed sender'}</div>
+                        {profileUrl
+                          ? <a href={profileUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} title={`Open ${s.public_identifier} on ${PROVIDER_LABELS[s.provider]}`} className="block text-xs text-gray-500 truncate hover:text-indigo-600 hover:underline">{PROVIDER_LABELS[s.provider]} · {s.public_identifier}</a>
+                          : <div className="text-xs text-gray-500 truncate" title={s.public_identifier ?? undefined}>{PROVIDER_LABELS[s.provider]}{s.public_identifier ? ` · ${s.public_identifier}` : ''}</div>}
+                        {s.owner_email && <div className="text-xs text-gray-500 truncate" title={s.owner_email}>{s.owner_email}</div>}
                       </div>
                     </div>
                   </Td>
                   <Td>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <StatusPill status={s.status} reason={statusReasonText(s.status_reason)} />
-                      {s.status === 'paused' && s.status_reason === 'over_plan_limit' && <Badge tone="amber" className="cursor-help"><span title="The plan has fewer accounts than are connected. It resumes once the plan has room for it.">Paused by plan</span></Badge>}
+                      {billingPaused ? <Badge tone="amber" className="cursor-help"><span title="The workspace is paused for billing. It resumes on its own once payment is updated.">Paused · billing</span></Badge> : <StatusPill status={s.status} reason={statusReasonText(s.status_reason)} />}
+                      {s.status === 'paused' && s.status_reason === 'over_plan_limit' && !billingPaused && <Badge tone="amber" className="cursor-help"><span title="The plan has fewer accounts than are connected. It resumes once the plan has room for it.">Paused by plan</span></Badge>}
+                      {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
                       {isDry && <RunningDryBadge alert={dryAlert} />}
                     </div>
-                    {hint && <div className="text-[11px] text-amber-700 mt-1 max-w-[220px]">{hint}</div>}
-                    {s.status === 'disconnected' && isManager && <Link href={`/outreach/senders/${s.id}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="inline-block text-xs font-medium text-indigo-600 hover:underline mt-0.5">Reconnect</Link>}
+                    {down && <div className={cn('text-[11px] mt-1 w-[260px]', down.held ? 'text-amber-700' : 'text-red-700')}>{down.text}</div>}
+                    {billingPaused && isOwner && <Link href="/outreach/billing" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="inline-block text-xs font-medium text-indigo-600 hover:underline mt-0.5">Update payment</Link>}
+                    {hint && !down && <div className="text-[11px] text-amber-700 mt-1 w-[260px]">{hint}</div>}
+                    {isRemovedStatus(s.status) && isManager && <Link href={`/outreach/senders/${s.id}`} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="inline-block text-xs font-medium text-indigo-600 hover:underline mt-0.5">Reconnect</Link>}
                   </Td>
                   <Td><HealthBar score={s.health_score} /></Td>
                   <Td>{s.provider === 'LINKEDIN'

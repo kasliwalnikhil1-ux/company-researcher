@@ -20,6 +20,21 @@ function totalsSentence(t: Row | null | undefined): string {
 }
 
 const periodText = (p: Row | undefined) => (p ? `${p.from} to ${p.to}${p.timezone ? ` (${p.timezone})` : ""}` : "the period");
+
+const CH_LABEL: Record<string, string> = { linkedin: "LinkedIn", instagram: "Instagram", whatsapp: "WhatsApp", email: "Email" };
+const pctWord = (v: unknown) => (v === null || v === undefined ? "n/a" : `${Math.round(Number(v))}%`);
+/** The sequence-stats sentence (sequence-stats-PRD.md §8), built ONLY from a results block returned by the database. */
+export function statsSentence(r: Row | null | undefined): string {
+  if (!r) return "no results yet";
+  const accepted = r.na?.accepted ? "accepted n/a" : `${r.accepted ?? 0} accepted of ${r.invited ?? 0} invited (${pctWord(r.accepted_rate)}, ${r.pending ?? 0} pending)`;
+  return `${r.contacted ?? 0} contacted, ${accepted}, ${r.replied ?? 0} replied (${pctWord(r.replied_rate)}), ${r.positive ?? 0} positive`;
+}
+export function otherChannelText(other: Row | null | undefined): string {
+  const parts = Object.entries(other ?? {}).filter(([, n]) => Number(n) > 0);
+  if (!parts.length) return "";
+  return ` Replied on another channel: ${parts.map(([ch, n]) => `${n} (${CH_LABEL[ch] ?? ch})`).join(", ")}.`;
+}
+const cohortNote = (p: Row | null) => (p ? `Cohort: leads first contacted ${p.from} to ${p.to}, and what they did after.` : "All time.");
 const filterShape = { sequence_id: z.string().optional(), sender_id: z.string().optional() };
 const cleanFilters = (f: Record<string, unknown>) => Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== null && v !== ""));
 
@@ -141,13 +156,13 @@ export function registerTasksReports(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "report_sequences", title: "All sequences report", cls: "read", minRole: "client_viewer",
-    description: "One row per sequence with the standard totals for the period, plus live leads, failed_leads, stalled + stalled_reason and has_ab_test. Sorted by replies. Use report_sequence for the per-step view of one. Default period 30d.",
-    input: { ...wsParam, period: periodSchema, client_id: z.string().optional() },
+    description: "One row per sequence with results counted in PEOPLE (sequence-stats-PRD.md; identical to the Sequences list and the sequence page): channels[], progress {enrolled, live, done, pct_done}, contacted, invited, accepted + accepted_rate (÷ invited) + pending + accepted_early + accepted_split, replied + replied_rate (÷ contacted) + auto_replied, positive + positive_rate (÷ replied) + meetings, ops {queued, actions_sent, failed, failed_leads}, na {accepted?, seen?} reasons, stalled + stalled_reason, has_ab_test, and a quotable `summary` per row. Period = a COHORT: leads first contacted in the period and everything they did after, up to today (omit for all time). Sorted by replied. Use report_sequence for one sequence's channel blocks and steps.",
+    input: { ...wsParam, period: periodSchema.optional().describe("Omit for all time"), client_id: z.string().optional(), channel: z.enum(["linkedin", "instagram", "whatsapp", "email"]).optional(), status: z.enum(["draft", "active", "paused", "archived", "all"]).optional().describe("Default: every status but archived") },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
-    const p = period(a.period ?? "30d", wsTz(ws));
-    const rows = (await urpc<Row[]>(ctx, "report_sequences", { p_ws: ws.id, p_client: a.client_id ?? null, p_from: p.from, p_to: p.to })) ?? [];
-    return { workspace: ws.name, period: p, count: rows.length, sequences: rows };
+    const p = a.period ? period(a.period, wsTz(ws)) : null;
+    const rows = (await urpc<Row[]>(ctx, "report_sequences", { p_ws: ws.id, p_client: a.client_id ?? null, p_from: p?.from ?? null, p_to: p?.to ?? null, p_channel: a.channel ?? null, p_status: a.status ?? null })) ?? [];
+    return { workspace: ws.name, period: p ?? "all", note: cohortNote(p), definitions_version: 2, count: rows.length, sequences: rows.map((r) => ({ ...r, summary: statsSentence(r) })) };
   });
 
   tool(server, ctx, {
@@ -185,13 +200,13 @@ export function registerTasksReports(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "report_sequence", title: "Sequence report", cls: "read", minRole: "client_viewer",
-    description: "One sequence over a period: totals, per-step rows (sent, failed, skipped, accepted, replies, interested, reply / positive-reply / acceptance rate, leads_here, failed_here), best_step and worst_step (each needs 20+ sends), ab_tests (same shape as sequence_ab_results), exits by reason and live leads. Default period 30d.",
-    input: { sequence_id: z.string(), period: periodSchema },
+    description: "One sequence: funnel (the people-level header: contacted, invited, accepted + rate + pending, replied + rate + auto_replied, positive + rate + meetings, progress, ops, na), channels[] (one block per channel with only its stages; seen is 'at least'), replied_other_channel, plus totals, per-step rows (sent, failed, skipped, accepted, replies, interested, rates, leads_here, failed_here), best_step and worst_step (20+ sends), ab_tests (same shape as sequence_ab_results), exits by reason and live leads. Period = a cohort (leads first contacted in it); omit for all time.",
+    input: { sequence_id: z.string(), period: periodSchema.optional().describe("Omit for all time") },
   }, async (a) => {
     const ws = await wsOf(ctx, "outreach_sequences", a.sequence_id, "sequence");
-    const p = period(a.period ?? "30d", wsTz(ws));
-    const r = await urpc<Row>(ctx, "report_sequence", { p_sequence: a.sequence_id, p_from: p.from, p_to: p.to });
-    return { ...r, summary: `"${r.sequence?.name}" (${r.sequence?.status}) from ${periodText(r.period)}: ${totalsSentence(r.totals)} ${r.live ?? 0} lead(s) live.${r.best_step ? ` Best step: ${r.best_step.label} (reply rate ${pctText(r.best_step.reply_rate)}).` : ""}${r.worst_step ? ` Weakest step: ${r.worst_step.label} (reply rate ${pctText(r.worst_step.reply_rate)}).` : ""}${r.sequence?.stalled_reason ? ` Stalled: ${r.sequence.stalled_reason}` : ""}` };
+    const p = a.period ? period(a.period, wsTz(ws)) : null;
+    const r = await urpc<Row>(ctx, "report_sequence", { p_sequence: a.sequence_id, p_from: p?.from ?? null, p_to: p?.to ?? null });
+    return { ...r, summary: `"${r.sequence?.name}" (${r.sequence?.status}), ${p ? `leads first contacted ${periodText(p)}` : "all time"}: ${statsSentence(r.funnel)}.${otherChannelText(r.replied_other_channel)} ${r.live ?? 0} lead(s) live.${r.best_step ? ` Best step: ${r.best_step.label} (reply rate ${pctText(r.best_step.reply_rate)}).` : ""}${r.worst_step ? ` Weakest step: ${r.worst_step.label} (reply rate ${pctText(r.worst_step.reply_rate)}).` : ""}${r.sequence?.stalled_reason ? ` Stalled: ${r.sequence.stalled_reason}` : ""}` };
   });
 
   tool(server, ctx, {
@@ -235,7 +250,7 @@ export function registerTasksReports(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "metric_definitions", title: "What each number means", cls: "read", minRole: "client_viewer",
-    description: "The written definition of every metric (day, invites, accepted, acceptance_rate, touches, replies, reply_rate, interested, positive / negative reply rate, meetings, won, cost_per_reply, funnel, headroom). The same text the Reports page shows as tooltips. Quote it when a user asks how a number is counted; never improvise a definition.",
+    description: "The written definition of every metric: the sequence results (contacted, invited, accepted, pending, replied, auto_replied, positive, seen, bounced, cohort, progress; definitions_version 2) and the report totals (day, invites, acceptance_rate, touches, replies, reply_rate, interested, positive / negative reply rate, meetings, won, cost_per_reply, funnel, headroom). The same text the app shows as tooltips. Quote it when a user asks how a number is counted; never improvise a definition.",
     input: {},
   }, async () => ({ definitions: await urpc<Row>(ctx, "metric_definitions", {}), note: "Dashboard, Reports page, this connector and the public API all call the same report functions, so their numbers are identical for the same dates." }));
 

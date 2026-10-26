@@ -203,7 +203,7 @@ Billing v2 (plans Launch / Scale / Enterprise, accounts bought up front) is desc
 Limits, trial expiry and plan features apply only after the platform flag `billing_enforced` is turned on (Settings → Admin → Billing, localhost only). Until then every workspace is unlimited, as before.
 
 ### 2.6 Resend
-Verify the sending domain in Resend, set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM` (e.g. `CapitalxAI Outreach <no-reply@capitalxai.com>`). Without a key the functions log `RESEND_API_KEY unset` and continue. The full list of emails (sender notices, invitation, stall and running-dry alerts, weekly sender report, digest, client reports) and how to verify each is in §9.2.
+The sending domain `updates.growthxai.com` is verified in Resend (set up 2026-10-26, send-only key). Verify any new sending domain in Resend, then set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM` (e.g. `GrowthxAI <updates@updates.growthxai.com>`). Without a key the functions log `RESEND_API_KEY unset` and continue. The full list of emails (sender notices, invitation, stall and running-dry alerts, weekly sender report, digest, client reports) and how to verify each is in §9.2.
 
 ### 2.7 AI provider (Gemini, Anthropic Claude or OpenAI)
 The platform holds one key per provider: `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`. Every workspace without its own key (AI → Setup) uses the **platform default provider**, chosen in this order:
@@ -273,7 +273,8 @@ curl -s -X POST "$BASE/outreach-worker-tick" -H "x-cron-secret: $OUTREACH_CRON_S
 | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | same | secrets | optional — while unset, billing enforcement (trial sender cap, trial-expiry and past-due suspension) is disabled entirely |
 | `STRIPE_PORTAL_CONFIGURATION`, `STRIPE_TAX_ENABLED`, `STRIPE_API_VERSION` | same | secrets | printed by `scripts/stripe-setup.ts`; tax only after a Stripe Tax registration. Prices are found by lookup key (`STRIPE_PRICE_*` is no longer read) |
 | `RESEND_API_KEY` | same | secrets | optional |
-| `EMAIL_FROM` | `OUTREACH_EMAIL_FROM` (falls back to `EMAIL_FROM`) | secrets | default `CapitalxAI Outreach <no-reply@capitalxai.com>` |
+| `EMAIL_FROM` | `OUTREACH_EMAIL_FROM` (falls back to `EMAIL_FROM`) | secrets | default `GrowthxAI <updates@updates.growthxai.com>` |
+| `OUTREACH_EMAIL_REPLY_TO` | same | secrets | Reply-To on every email sent from the platform address, e.g. `naman@growthxai.com`; agency-branded emails use their own Reply-To |
 | `WEB_ORIGIN` | `OUTREACH_WEB_ORIGIN` | secrets | default `https://app.capitalxai.com`; used for redirects and email links (CORS itself is `*`) |
 | `FUNCTIONS_BASE_URL` | `OUTREACH_FUNCTIONS_BASE_URL` + flag `functions_base_url` | secrets + DB | default `<SUPABASE_URL>/functions/v1/` |
 | `SENTRY_DSN` | not implemented | — | logs are JSON lines in Supabase function logs |
@@ -517,7 +518,7 @@ Follow [BILLING.md §5 Rollout](BILLING.md#5-rollout) and [§6 Verify in Stripe 
 Without `RESEND_API_KEY` every email is skipped and logged (`RESEND_API_KEY unset`); alerts still show in the app and fire webhooks.
 
 1. In Resend, add and verify the sending **domain** (SPF and DKIM records at the DNS host).
-2. Set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM`, for example `CapitalxAI Outreach <no-reply@capitalxai.com>`. The domain in `OUTREACH_EMAIL_FROM` must be the verified one. Run the secrets script.
+2. Set `RESEND_API_KEY` and `OUTREACH_EMAIL_FROM`, for example `GrowthxAI <updates@updates.growthxai.com>`. The domain in `OUTREACH_EMAIL_FROM` must be the verified one. Run the secrets script.
 3. White-label workspaces can set their own sender in **Settings → White-label** (`branding.email_from_address`). It is used only when **that** domain is also verified in the same Resend account. Otherwise the platform address is used with the agency's name and reply-to. Verifying a customer's domain is an operator task.
 4. Check **Platform setup** shows `resend` as present.
 

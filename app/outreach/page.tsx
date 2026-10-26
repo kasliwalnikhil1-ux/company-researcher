@@ -40,7 +40,7 @@ const isAutoPaused = (s: DashSender) => !!s.paused_until && new Date(s.paused_un
 function healthGroup(s: DashSender): HealthGroup {
   // A first sign-in that never finished (page closed, link expired, or the hosted page reported a failure) is not "connecting":
   // nothing will change until a manager sends a fresh link. A disconnected sender sends nothing until it is reconnected.
-  if (s.status === 'credentials' || s.status === 'error' || s.status === 'disconnected' || isAbandonedSignIn(s) || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
+  if (s.status === 'credentials' || s.status === 'error' || s.status === 'disconnected' || s.status === 'removed' || isAbandonedSignIn(s) || (s.status === 'ok' && s.health_score < LOW_HEALTH)) return 'attention';
   if (s.status === 'paused' || s.status === 'disabled' || isAutoPaused(s)) return 'paused';
   if (s.running_dry) return 'dry';
   if (s.status === 'connecting') return 'connecting';

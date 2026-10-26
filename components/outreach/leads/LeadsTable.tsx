@@ -1,17 +1,27 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import Link from '@/lib/outreach/nav';
-import type { Client, Lead, List, Stage, Tag } from '@/lib/outreach/types';
-import { Avatar, Badge, Td, Th, fmtDate } from '@/components/outreach/ui';
-import { MessageSquare, ShieldOff, Sparkles } from 'lucide-react';
+import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
+import { parseError, rpc } from '@/lib/outreach/api';
+import type { Client, Lead, LeadSummary, List, Sender, Stage, Tag } from '@/lib/outreach/types';
+import { Avatar, Badge, SearchableSelect, Td, Th, fmtDate, type SelectOption } from '@/components/outreach/ui';
+import type { ToastFn } from './helpers';
+import { ExternalLink, ShieldOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { profileOf, type LeadIntelFields, type LeadProfileSummary } from '@/lib/outreach/intel';
+import { profileOf, summaryOf, type LeadIntelFields, type LeadProfileSummary } from '@/lib/outreach/intel';
 import { EMPTY_LAYOUT, MAX_COL_WIDTH, MIN_COL_WIDTH, mergeColumnOrder, moveColumn, type TableLayout } from '@/lib/outreach/tableLayout';
-import { chipStyle, leadName } from './helpers';
+import { chipStyle, leadLinkedInUrl, leadName } from './helpers';
 import { SelectionMenu, type SelectionRequest } from './SelectionMenu';
+import { ChannelsCell, ConnectedViaCell, EnrichmentCell, LeadStatusBadge } from './relationships';
+import { KIND_LABEL } from '@/lib/outreach/leadsRelationships';
 
-export type LeadRow = Lead & LeadIntelFields & { outreach_lead_tags: { tag_id: string }[]; outreach_lead_profiles?: LeadProfileSummary | LeadProfileSummary[] | null };
+export type LeadRow = Lead & LeadIntelFields & { outreach_lead_tags: { tag_id: string }[]; outreach_lead_profiles?: LeadProfileSummary | LeadProfileSummary[] | null; outreach_lead_summary?: LeadSummary | LeadSummary[] | null };
+
+/** The LinkedIn internal id ("ACoAA…") is never shown: the row offers the profile link instead (094 §5.2). */
+const isInternalId = (v: string | null | undefined) => !!v && /^aco[a-z0-9_-]{15,}$/i.test(v);
+const isHiddenMember = (l: Partial<Lead>) => /^linkedin member$/i.test((l.full_name ?? '').trim());
 
 const DASH = <span className="text-gray-300">—</span>;
 
@@ -46,6 +56,73 @@ function CustomValue({ value }: { value: unknown }) {
   return <span className="block truncate text-gray-600" title={s}>{s}</span>;
 }
 
+/** Custom-field names compared without case, spaces or punctuation ("Account LinkedIn URL" = "account_linkedin_url"). */
+const normKey = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, '');
+/** Imported copies of a built-in column: the table already shows Created, so these get no column of their own. */
+const DUPLICATE_KEYS = new Set(['createdat', 'created', 'createddate']);
+/** An imported owner column ("Account", the teammate the lead belongs to) and its LinkedIn link become one Account column. */
+const ACCOUNT_KEYS = new Set(['account', 'accountname']);
+const ACCOUNT_URL_KEYS = new Set(['accountlinkedinurl', 'accountlinkedin', 'accounturl', 'accountprofileurl']);
+const UNASSIGNED = new Set(['toassign', 'unassigned', 'none', 'na']);
+const linkedInSlug = (url: string) => url.match(/linkedin\.com\/in\/([^/?#]+)/i)?.[1]?.toLowerCase() ?? null;
+
+/** The imported account as the sender it names (photo + name), matched on the LinkedIn slug first, then the name. */
+function AccountCell({ name, url, senders }: { name: string; url: string; senders?: Sender[] }) {
+  if (!name && !url) return DASH;
+  if (UNASSIGNED.has(normKey(name))) {
+    return (
+      <span className="flex items-center gap-2 min-w-0 text-gray-500" title="No account is assigned to this lead yet">
+        <span className="w-6 h-6 rounded-full border border-dashed border-gray-300 shrink-0" aria-hidden />
+        <span className="truncate">To assign</span>
+      </span>
+    );
+  }
+  const slug = url ? linkedInSlug(url) : null;
+  const sender = (slug && senders?.find((s) => s.public_identifier?.toLowerCase() === slug))
+    || (name && senders?.find((s) => normKey(s.display_name ?? '') === normKey(name))) || null;
+  const label = sender?.display_name || name || (slug ? `in/${slug}` : 'Account');
+  const href = url && /^https?:\/\//i.test(url) ? url : null;
+  const body = (
+    <>
+      <Avatar src={sender?.picture_url} name={label} size={6} />
+      <span className="truncate">{label}</span>
+    </>
+  );
+  return href
+    ? <a href={href} target="_blank" rel="noopener noreferrer" title={`${label}: open LinkedIn profile`} className="flex items-center gap-2 min-w-0 text-gray-800 hover:text-indigo-700">{body}</a>
+    : <span className="flex items-center gap-2 min-w-0 text-gray-800" title={label}>{body}</span>;
+}
+
+/**
+ * A cell whose value can be changed in place (stage, list, client): the same dropdown as the forms, drawn without a border so
+ * the table stays calm, and the same `bulk_leads` write as the bulk bar, for one lead. The list refreshes after the write.
+ */
+function EditableCell({ ws, qc, leadId, op, value, options, emptyOption, placeholder, label, toast }: {
+  ws: string; qc: QueryClient; leadId: string; op: 'set_stage' | 'set_list' | 'set_client'; value: string; options: SelectOption[];
+  emptyOption: string; placeholder: string; label: string; toast?: ToastFn;
+}) {
+  const [busy, setBusy] = useState(false);
+  const change = async (v: string) => {
+    if (v === value || busy) return;
+    setBusy(true);
+    try {
+      await rpc<number>('bulk_leads', { p_ws: ws, p_lead_ids: [leadId], p_op: op, p_value: v || null });
+      qc.invalidateQueries({ queryKey: ['outreach', ws, 'leads'] });
+      qc.invalidateQueries({ queryKey: ['outreach', ws, 'dashboard'] });
+      qc.invalidateQueries({ queryKey: ['outreach', 'lead', leadId] });
+    } catch (e) {
+      toast?.(parseError(e).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SearchableSelect size="sm" aria-label={label} value={value} onChange={change} options={options} emptyOption={emptyOption} placeholder={placeholder} disabled={busy}
+      searchPlaceholder={`Search ${label.toLowerCase()}…`} className="-my-1" triggerClassName={cn('border-transparent bg-transparent hover:border-gray-200 hover:bg-white focus:bg-white', !value && 'text-gray-400')} />
+  );
+}
+const colorDot = (color: string | null | undefined) => <span aria-hidden className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color || '#9ca3af' }} />;
+
 interface Col { id: string; label: string; title?: string; width: number; cell: (l: LeadRow) => React.ReactNode }
 
 const CHECK_COL_WIDTH = 48;
@@ -58,20 +135,30 @@ const customColId = (key: string) => `custom:${key}`;
  * for the default width); `layout` holds the result and `onLayoutChange` stores it. Custom fields are columns too: by default they
  * come last, after Created.
  */
-export function LeadsTable({ rows, total, selected, onToggle, onSelect, selecting, clients, lists, stages, tags, selectable, customKeys, layout = EMPTY_LAYOUT, onLayoutChange }: {
+export function LeadsTable({ rows, total, selected, onToggle, onSelect, selecting, clients, lists, stages, tags, selectable, customKeys, layout = EMPTY_LAYOUT, onLayoutChange, senders, includeRemoved = false, toast }: {
   rows: LeadRow[]; selected: Set<string>; onToggle: (id: string) => void;
   /** Leads under the current filters, over every page: the number "Select all" shows. `selecting` is true while its ids are collected. */
   total: number; onSelect: (req: SelectionRequest) => void; selecting?: boolean;
-  clients?: Client[]; lists?: List[]; stages?: Stage[]; tags?: Tag[]; selectable: boolean;
+  /** `selectable` (the person can write) also makes the Stage / List / Client cells editable in place. */
+  clients?: Client[]; lists?: List[]; stages?: Stage[]; tags?: Tag[]; selectable: boolean; toast?: ToastFn;
   /** Custom-field names of the workspace. Names found on the rows of this page are added to them. */
   customKeys?: string[]; layout?: TableLayout; onLayoutChange?: (next: TableLayout) => void;
+  /** The workspace's accounts, for the Connected via avatars; `includeRemoved` also shows removed accounts (094). */
+  senders?: Sender[]; includeRemoved?: boolean;
 }) {
+  const { workspace } = useWorkspace();
+  const qc = useQueryClient();
+  const ws = workspace?.id;
+  const editable = selectable && !!ws;
   const allOnPage = rows.length > 0 && rows.every((r) => selected.has(r.id));
   const someOnPage = rows.some((r) => selected.has(r.id));
   const tagMap = new Map((tags ?? []).map((t) => [t.id, t]));
   const stageMap = new Map((stages ?? []).map((s) => [s.id, s]));
   const listMap = new Map((lists ?? []).map((l) => [l.id, l]));
   const clientMap = new Map((clients ?? []).map((c) => [c.id, c]));
+  const stageOptions = useMemo<SelectOption[]>(() => (stages ?? []).map((s) => ({ value: s.id, label: s.name, icon: colorDot(s.color) })), [stages]);
+  const listOptions = useMemo<SelectOption[]>(() => (lists ?? []).map((l) => ({ value: l.id, label: l.name })), [lists]);
+  const clientOptions = useMemo<SelectOption[]>(() => (clients ?? []).map((c) => ({ value: c.id, label: c.name })), [clients]);
 
   const keys = useMemo(() => {
     const known = customKeys ?? []; const seen = new Set(known); const extra = new Set<string>();
@@ -81,17 +168,35 @@ export function LeadsTable({ rows, total, selected, onToggle, onSelect, selectin
     }
     return [...known, ...[...extra].sort()];
   }, [customKeys, rows]);
+  // The Account column takes the account key's place; its LinkedIn key and duplicates of built-in columns are not shown alone.
+  const accountKey = keys.find((k) => ACCOUNT_KEYS.has(normKey(k))) ?? null;
+  const accountUrlKey = keys.find((k) => ACCOUNT_URL_KEYS.has(normKey(k))) ?? null;
+  const customOf = (l: LeadRow, k: string | null) => (k ? customText((l.custom as Record<string, unknown> | null)?.[k]).trim() : '');
+  const plainKeys = keys.filter((k) => k !== accountUrlKey && !DUPLICATE_KEYS.has(normKey(k)));
 
   const cols: Col[] = [
-    { id: 'lead', label: 'Lead', width: 230, cell: (l) => (
-      <Link href={`/outreach/leads/${l.id}`} className="flex items-center gap-2.5 min-w-0 group">
-        <Avatar src={l.picture_url} name={leadName(l)} size={8} />
-        <span className="min-w-0 flex-1">
-          <span className="block font-medium text-gray-900 group-hover:text-indigo-700 truncate">{leadName(l)}</span>
-          {l.public_identifier && <span className="block text-xs text-gray-400 truncate">in/{l.public_identifier}</span>}
+    { id: 'lead', label: 'Lead', width: 230, cell: (l) => {
+      const linkedIn = leadLinkedInUrl(l);
+      // 094 §5.2: the slug when known; otherwise the profile link the connector gave, never the internal id
+      const slug = l.public_identifier && !isInternalId(l.public_identifier) ? l.public_identifier : null;
+      const name = isHiddenMember(l) ? 'LinkedIn Member (name hidden)' : leadName(l);
+      const kind = l.kind && l.kind !== 'person' ? KIND_LABEL[l.kind] : null;
+      return (
+        <span className="flex items-center gap-2.5 min-w-0">
+          <Link href={`/outreach/leads/${l.id}`} className="shrink-0"><Avatar src={l.picture_url} name={leadName(l)} size={8} /></Link>
+          <span className="min-w-0 flex-1">
+            <Link href={`/outreach/leads/${l.id}`} className="block font-medium text-gray-900 hover:text-indigo-700 truncate">{name}{kind && <span className="ml-1.5 text-[10px] font-normal text-gray-400 uppercase tracking-wide">{kind}</span>}</Link>
+            {slug
+              ? (linkedIn
+                ? <a href={linkedIn} target="_blank" rel="noreferrer" title="Open LinkedIn profile in a new tab" className="block text-xs text-gray-400 hover:text-indigo-600 hover:underline truncate">in/{slug}</a>
+                : <span className="block text-xs text-gray-400 truncate">in/{slug}</span>)
+              : l.profile_url && /linkedin\.com\//i.test(l.profile_url)
+                ? <a href={l.profile_url} target="_blank" rel="noreferrer" title="Open LinkedIn profile in a new tab (the profile was not fetched yet, so there is no slug)" className="inline-flex items-center gap-0.5 text-xs text-gray-400 hover:text-indigo-600 hover:underline">LinkedIn <ExternalLink className="w-3 h-3" /></a>
+                : null}
+          </span>
         </span>
-      </Link>
-    ) },
+      );
+    } },
     { id: 'headline', label: 'Headline', width: 220, cell: (l) => <span className="block truncate text-gray-600" title={l.headline ?? undefined}>{l.headline ?? '—'}</span> },
     { id: 'company', label: 'Company / title', width: 180, cell: (l) => (
       <>
@@ -111,27 +216,40 @@ export function LeadsTable({ rows, total, selected, onToggle, onSelect, selectin
         </span>
       );
     } },
-    { id: 'signals', label: 'Signals', width: 170, cell: (l) => {
+    // 094 §5.2: Status (furthest reached, with its channel), Connected via (accounts), Channels (reachable / used / replied), Enrichment (with why it waits)
+    { id: 'status', label: 'Status', title: 'The furthest point reached on any channel, with the channel it was reached on. Do not contact, Bounced and Wrote to us are shown instead of the ladder.', width: 150, cell: (l) => <LeadStatusBadge summary={summaryOf(l)} /> },
+    { id: 'connected_via', label: 'Connected via', title: 'Accounts connected to this person now (solid), invites still pending (dashed). Hover for every account, with how the connection came about and when it was last checked.', width: 130, cell: (l) => <ConnectedViaCell leadId={l.id} summary={summaryOf(l)} senders={senders} includeRemoved={includeRemoved} /> },
+    { id: 'channels', label: 'Channels', title: 'Where this person can be reached (light), where something was sent (dark), where they answered (dot).', width: 110, cell: (l) => <ChannelsCell summary={summaryOf(l)} lead={l} /> },
+    { id: 'enrichment', label: 'Enrichment', title: 'Profile enrichment: done, or why a queued enrichment is still waiting.', width: 190, cell: (l) => {
       const prof = profileOf(l);
       return (
         <span className="flex flex-wrap items-center gap-1 min-w-0">
-          {l.last_replied_at && <Badge tone="purple"><span title={`Last replied ${fmtDate(l.last_replied_at)}${l.last_replied_channel ? ` on ${l.last_replied_channel}` : ''}`} className="inline-flex items-center"><MessageSquare className="w-3 h-3 mr-1" />Replied</span></Badge>}
-          {l.enrich_status === 'done' || l.enriched_at ? <Badge tone="green"><span title={l.enriched_at ? `Enriched ${fmtDate(l.enriched_at)}` : 'Enriched'} className="inline-flex items-center"><Sparkles className="w-3 h-3 mr-1" />Enriched</span></Badge>
-            : l.enrich_status === 'waiting' ? <Badge tone="blue">Enrichment waiting</Badge> : l.enrich_status === 'failed' ? <Badge tone="red">Enrichment failed</Badge> : null}
+          <EnrichmentCell lead={l} />
           {prof?.follower_count != null && <span className="text-[11px] text-gray-500 tabular-nums" title={`${prof.follower_count.toLocaleString()} followers`}>{compact(prof.follower_count)} followers</span>}
-          {!l.last_replied_at && !l.enriched_at && (!l.enrich_status || l.enrich_status === 'none') && DASH}
         </span>
       );
     } },
-    { id: 'stage', label: 'Stage', width: 130, cell: (l) => { const stage = l.stage_id ? stageMap.get(l.stage_id) : undefined; return stage ? <StageChip stage={stage} /> : DASH; } },
-    { id: 'list', label: 'List', width: 140, cell: (l) => { const name = l.list_id ? listMap.get(l.list_id)?.name : undefined; return <span className="block truncate text-gray-600" title={name}>{name ?? '—'}</span>; } },
-    ...(clients && clients.length > 0 ? [{ id: 'client', label: 'Client', width: 140, cell: (l: LeadRow) => { const name = l.client_id ? clientMap.get(l.client_id)?.name : undefined; return <span className="block truncate text-gray-600" title={name}>{name ?? '—'}</span>; } }] : []),
+    // Stage / List / Client change in place for members (viewers see the value only)
+    { id: 'stage', label: 'Stage', title: editable ? 'Click a cell to change the stage' : undefined, width: 140, cell: (l) => {
+      if (editable) return <EditableCell ws={ws} qc={qc} leadId={l.id} op="set_stage" value={l.stage_id ?? ''} options={stageOptions} emptyOption="None" placeholder="—" label="Stage" toast={toast} />;
+      const stage = l.stage_id ? stageMap.get(l.stage_id) : undefined; return stage ? <StageChip stage={stage} /> : DASH;
+    } },
+    { id: 'list', label: 'List', title: editable ? 'Click a cell to change the list' : undefined, width: 150, cell: (l) => {
+      if (editable) return <EditableCell ws={ws} qc={qc} leadId={l.id} op="set_list" value={l.list_id ?? ''} options={listOptions} emptyOption="None" placeholder="—" label="List" toast={toast} />;
+      const name = l.list_id ? listMap.get(l.list_id)?.name : undefined; return <span className="block truncate text-gray-600" title={name}>{name ?? '—'}</span>;
+    } },
+    ...(clients && clients.length > 0 ? [{ id: 'client', label: 'Client', title: editable ? 'Click a cell to change the client' : undefined, width: 150, cell: (l: LeadRow) => {
+      if (editable) return <EditableCell ws={ws} qc={qc} leadId={l.id} op="set_client" value={l.client_id ?? ''} options={clientOptions} emptyOption="None" placeholder="—" label="Client" toast={toast} />;
+      const name = l.client_id ? clientMap.get(l.client_id)?.name : undefined; return <span className="block truncate text-gray-600" title={name}>{name ?? '—'}</span>;
+    } }] : []),
     { id: 'dnc', label: 'DNC', title: 'Do not contact — flagged leads are excluded from every sequence', width: 110, cell: (l) => (
       l.do_not_contact ? <span title="Do not contact — this lead is excluded from every sequence" className="cursor-help"><Badge tone="red"><ShieldOff className="w-3 h-3 mr-1" /> DNC</Badge></span>
         : l.unsubscribed ? <span title="Unsubscribed — this lead opted out of emails" className="cursor-help"><Badge tone="amber">unsubscribed</Badge></span> : DASH
     ) },
     { id: 'created', label: 'Created', width: 110, cell: (l) => <span className="whitespace-nowrap text-gray-500 text-xs">{fmtDate(l.created_at, false)}</span> },
-    ...keys.map((k): Col => ({ id: customColId(k), label: k.replace(/_/g, ' '), title: `Custom field: ${k}`, width: 150, cell: (l) => <CustomValue value={(l.custom as Record<string, unknown> | null)?.[k]} /> })),
+    ...plainKeys.map((k): Col => (k === accountKey
+      ? { id: customColId(k), label: 'Account', title: `The account this lead belongs to (custom fields: ${[k, accountUrlKey].filter(Boolean).join(', ')})`, width: 170, cell: (l) => <AccountCell name={customOf(l, k)} url={customOf(l, accountUrlKey)} senders={senders} /> }
+      : { id: customColId(k), label: k.replace(/_/g, ' '), title: `Custom field: ${k}`, width: 150, cell: (l) => <CustomValue value={(l.custom as Record<string, unknown> | null)?.[k]} /> })),
   ];
 
   // Saved order first; columns it does not mention (a new custom field) take their default place.

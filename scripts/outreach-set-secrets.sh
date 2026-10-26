@@ -20,7 +20,8 @@
 # Optional secrets (a feature stays off, without errors, while its secret is missing):
 #   RESEND_API_KEY            transactional email: reconnect / paused notices, invitations, stall + running-dry + failed-import
 #                             alerts, the weekly sender report, digests and client reports. Unset = emails are skipped and logged.
-#   OUTREACH_EMAIL_FROM       platform From header, e.g. "CapitalxAI Outreach <no-reply@capitalxai.com>". The domain must be
+#   OUTREACH_EMAIL_REPLY_TO   Reply-To for emails sent from the platform address (the From mailbox does not receive mail).
+#   OUTREACH_EMAIL_FROM       platform From header, e.g. "GrowthxAI <updates@updates.growthxai.com>". The domain must be
 #                             verified in Resend. White-label workspaces send from branding.email_from_address when THAT domain is
 #                             verified in Resend too; otherwise the platform address is used with the agency's name and Reply-To.
 #   HUBSPOT_CLIENT_ID / HUBSPOT_CLIENT_SECRET           CRM sync (item 22): OAuth app credentials, one pair per CRM you offer.

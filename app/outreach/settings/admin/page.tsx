@@ -14,6 +14,7 @@ import PlatformLimits from '@/components/outreach/settings/admin/PlatformLimits'
 import AiReplyAdmin from '@/components/outreach/settings/admin/AiReplyAdmin';
 import AiProviderCard from '@/components/outreach/settings/admin/AiProviderCard';
 import HealthEntryCard from '@/components/outreach/settings/admin/HealthEntryCard';
+import { EmailTypesCatalogue } from '@/components/outreach/settings/EmailSendingPanel';
 
 /**
  * Settings → Admin: everything that is the same for every workspace, sender and user. Rendered only when the app runs on
@@ -50,6 +51,7 @@ export default function AdminSettingsPage() {
 
       <AiProviderCard />
       <BillingAdminCard />
+      <div className="mb-6"><EmailTypesCatalogue /></div>
       <PlatformLimits />
       <AiReplyAdmin />
     </div>

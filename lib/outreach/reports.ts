@@ -10,6 +10,7 @@ import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 import { qk } from './queries';
 import type { Provider, SenderStatus } from './types';
+import type { ChannelBlock, SequenceStatsBlock, SequenceStatsRow } from './sequenceStats';
 
 // ---------------------------------------------------------------------------
 // Shapes returned by the report functions
@@ -65,10 +66,8 @@ export interface ReportFilters { sequence_id?: string; sender_id?: string; node_
 
 export interface ReplyThread { chat_id: string; lead_id: string | null; lead_name: string | null; sender_id: string; intent: string; replied_at: string; sequence_id: string | null; node_id: string | null; variant_id: string | null; preview: string }
 
-export interface SequenceRow {
-  sequence_id: string; name: string; status: string; client_id: string | null; stalled: boolean; stalled_reason: string | null;
-  live: number; failed_leads: number; has_ab_test: boolean; totals: Totals;
-}
+/** One row of outreach_report_sequences (089): people-level results, progress and ops. Shape in lib/outreach/sequenceStats.ts. */
+export type SequenceRow = SequenceStatsRow;
 export interface StepRow {
   node_id: string; type: string; label: string; sent: number; failed: number; skipped: number; accepted: number; replies: number; interested: number;
   reply_rate: Rate; positive_reply_rate: Rate; acceptance_rate: Rate; leads_here: number; failed_here: number;
@@ -82,8 +81,17 @@ export interface AbTest {
   enough_data: boolean; min_sends_per_variant: number; variants: AbVariant[]; leader: string | null; can_promote: boolean;
 }
 export interface SequenceReport {
-  sequence: { id: string; name: string; status: string; head_version: number; stalled_reason: string | null };
-  period: Period; totals: Totals; steps: StepRow[]; best_step: StepRow | null; worst_step: StepRow | null; ab_tests: AbTest[]; exits: Record<string, number>; live: number;
+  sequence: { id: string; name: string; status: string; head_version: number; stalled_reason: string | null; client_id?: string | null };
+  /** from/to are null for all time; steps_from/steps_to is the window the per-step table (013) was read for. */
+  period: { from: string | null; to: string | null; all: boolean; timezone: string; steps_from: string; steps_to: string };
+  /** The header funnel: the same block as the list row (089). */
+  funnel: SequenceStatsBlock & { sequence_id: string };
+  channels: ChannelBlock[];
+  replied_other_channel: Record<string, number>;
+  seen_since: string | null;
+  seen_partial: boolean;
+  definitions_version: number;
+  totals: Totals; steps: StepRow[]; best_step: StepRow | null; worst_step: StepRow | null; ab_tests: AbTest[]; exits: Record<string, number>; live: number;
 }
 
 export interface SenderRow {
@@ -326,12 +334,21 @@ export function fetchReplyThreads(s: Scope, intent: IntentKey | null, filters?: 
   return rpc<ReplyThread[]>('report_reply_threads', { ...base(s), p_intent: intent, p_filters: f });
 }
 
-export function useReportSequences(s: Scope) {
-  return useQuery({ queryKey: rk(s.ws ?? '', 'sequences', s.client ?? null, s.range), enabled: on(s), placeholderData: keepPreviousData, queryFn: () => rpc<SequenceRow[]>('report_sequences', base(s)) });
+/** Sequences list / Reports → Sequences. range null = all time (cached per sequence); status 'all' includes archived. */
+export function useReportSequences(s: { ws: string | null | undefined; client?: string | null; range: DateRange | null; channel?: string | null; status?: string | null; enabled?: boolean; refetchInterval?: number }) {
+  const ready = !!s.ws && s.enabled !== false && (s.range === null || !validRange(s.range));
+  return useQuery({
+    queryKey: rk(s.ws ?? '', 'sequences', s.client ?? null, s.range, s.channel ?? null, s.status ?? null), enabled: ready, placeholderData: keepPreviousData, refetchInterval: s.refetchInterval,
+    queryFn: () => rpc<SequenceRow[]>('report_sequences', { p_ws: s.ws, p_client: s.client || null, p_from: s.range?.from ?? null, p_to: s.range?.to ?? null, p_channel: s.channel || null, p_status: s.status || null }),
+  });
 }
 
-export function useReportSequence(sequenceId: string | null | undefined, range: DateRange) {
-  return useQuery({ queryKey: ['outreach', 'reports', 'sequence', sequenceId ?? '', range], enabled: !!sequenceId && !validRange(range), queryFn: () => rpc<SequenceReport>('report_sequence', { p_sequence: sequenceId, p_from: range.from, p_to: range.to }) });
+/** One sequence's results. range null = all time. */
+export function useReportSequence(sequenceId: string | null | undefined, range: DateRange | null) {
+  return useQuery({
+    queryKey: ['outreach', 'reports', 'sequence', sequenceId ?? '', range], enabled: !!sequenceId && (range === null || !validRange(range)), placeholderData: keepPreviousData,
+    queryFn: () => rpc<SequenceReport>('report_sequence', { p_sequence: sequenceId, p_from: range?.from ?? null, p_to: range?.to ?? null }),
+  });
 }
 
 export function useReportSenders(s: Scope) {

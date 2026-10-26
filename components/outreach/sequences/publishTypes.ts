@@ -70,10 +70,12 @@ export interface MoveToLatestResult { moved: number; kept_on_old_version: number
 
 export interface QueuedActionRow { action_id: string; lead_id: string | null; lead_name: string | null; sender_id: string; payload: Record<string, any> | null; scheduled_for: string; variant_id: string | null }
 
-export type FailedKind = 'failed' | 'skipped';
+/** The kinds rpc failed_leads lists: one per step chip on the canvas (098). `at` is when it is due for queued. */
+export type FailedKind = 'failed' | 'skipped' | 'queued' | 'sent' | 'accepted' | 'replied';
 export interface FailedLeadRow {
   enrollment_id: string; lead_id: string; lead_name: string | null; company: string | null; sender_id: string; sender_name: string | null;
-  node_id: string | null; error_code: string | null; reason: string; at: string | null; recoverable: boolean;
+  /** failed / skipped: the plain reason; queued: 'Sending now' | 'Waiting to send'; replied: the reply text; otherwise null. */
+  node_id: string | null; error_code: string | null; reason: string | null; at: string | null; recoverable: boolean;
 }
 export type RecoverAction = 'retry' | 'skip' | 'exit';
 export interface RecoverResult { done: number; action?: RecoverAction; refused: Array<{ id: string; reason: string }> }

@@ -7,15 +7,20 @@ import NotificationBell from './notes/NotificationBell';
 import { useNoteSearch, useNotesBadge, noteLink } from '@/lib/outreach/notes';
 import Link from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
-import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel, chatTitle } from '@/lib/outreach/channels';
+import { CHANNEL_PROVIDERS, MAIL_PROVIDERS, channelLabel, chatTitle, senderAccountLabel } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
-import type { ChatFilters } from '@/lib/outreach/queries';
-import type { Chat, Client, Lead, Sender, Sequence } from '@/lib/outreach/types';
-import { Avatar, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/components/outreach/ui';
+import { useSenderLabels, type ChatFilters } from '@/lib/outreach/queries';
+import type { Chat, Client, Intent, Lead, Provider, Sender, Sequence } from '@/lib/outreach/types';
+import { Avatar, INTENT_TONE, IntentBadge, Spinner, ErrorBox, EmptyState, timeAgo } from '@/components/outreach/ui';
 import { INTENTS, INTENT_LABELS, useNow } from './hooks';
 import { ESCALATION_LABEL, HANDOFF_LABEL, fmtCountdown, type StageDef } from '@/lib/outreach/aiReplies';
 import { AI_FILTERS, AI_FILTER_LABEL, humanizeKey, type AiChatFilter } from './ai/useAiInbox';
 import { CHIP_LABEL, CHIP_TOOLTIP, sourceLine, statusLabel, STATUS_TONE, waitingFor, type ReplyChip, type SentItem } from '@/lib/outreach/inboxSent';
+import SenderMultiSelect from './filters/SenderMultiSelect';
+import MultiSelect from './filters/MultiSelect';
+import ReplyDateRange, { fmtReplyRange } from './filters/ReplyDateRange';
+import { MENU_ATTR } from './filters/AnchoredMenu';
+import { INBOX_FILTERS_CLEARED, anyInboxFilter } from './filters/inboxFilters';
 
 export type ChatRow = Chat & { outreach_leads: Partial<Lead> | null; outreach_senders: Partial<Sender> | null };
 
@@ -141,7 +146,12 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   const popRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!filtersOpen) return;
-    const onDown = (e: MouseEvent) => { if (popRef.current && !popRef.current.contains(e.target as Node)) setFiltersOpen(false); };
+    // a click inside one of the floating filter menus (portaled to the body) is inside the popover for this purpose
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (t instanceof Element && t.closest(`[${MENU_ATTR}]`)) return;
+      if (popRef.current && !popRef.current.contains(t)) setFiltersOpen(false);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFiltersOpen(false); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -163,16 +173,41 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
   ];
 
   const senderName = (s: Partial<Sender>) => s.display_name ?? s.public_identifier ?? s.provider ?? 'Sender';
+  // The account each conversation runs through, in every channel: live senders come with the row, removed ones (hidden
+  // by RLS, but their chats stay) come from the labels RPC, so a WhatsApp / Instagram / mailbox chat always names its account.
+  const senderLabelsQ = useSenderLabels(ws);
+  const labelById = useMemo(() => new Map((senderLabelsQ.data ?? []).map((l) => [l.id, l] as const)), [senderLabelsQ.data]);
+  const removedSenders = useMemo(() => (senderLabelsQ.data ?? []).filter((l) => l.removed && l.provider !== 'WEBCHAT'), [senderLabelsQ.data]);
+  const accountOf = (c: ChatRow): { label: string; title: string; removed: boolean } | null => {
+    const l = labelById.get(c.sender_id) ?? (c.outreach_senders ? { ...c.outreach_senders, removed: false } : null);
+    if (!l) return null;
+    const label = senderAccountLabel({ ...l, provider: l.provider ?? c.provider });
+    const ident = [l.public_identifier, l.owner_email].filter((v): v is string => !!v && v !== label).join(' · ');
+    const channel = channelLabel(c.provider);
+    const title = l.removed
+      ? `${channel} account "${label}"${ident ? ` (${ident})` : ''} — removed from Senders. The messages stay; nothing new can be sent from it.`
+      : `${c.provider === 'WEBCHAT' ? 'Website agent' : `${channel} account`}: ${label}${ident ? ` (${ident})` : ''}`;
+    return { label, title, removed: !!l.removed };
+  };
+  // Multi-select values, in the order the popover shows them; a list reads "A, B" up to three names, then "4 senders".
+  const senderIds = filters.sender_ids ?? [], intents = filters.intents ?? [], providers = filters.providers ?? [], aiPicked = filters.ai ?? [], stagePicked = filters.stages ?? [];
+  const summarize = (labels: string[], noun: string) => (labels.length <= 3 ? labels.join(', ') : `${labels.length} ${noun}`);
+  const senderLabel = (id: string) => { const s = senders?.find((x) => x.id === id); const l = labelById.get(id); return s ? senderName(s) : l ? `${senderAccountLabel(l)}${l.removed ? ' (removed)' : ''}` : 'Selected'; };
+  const stageLabel = (key: string) => stages?.find((x) => x.key === key)?.label ?? humanizeKey(key);
   const active: { key: string; label: string; value: string; clear: () => void }[] = [];
-  if (filters.sender_id) { const s = senders?.find((x) => x.id === filters.sender_id); active.push({ key: 'sender', label: 'Sender', value: s ? senderName(s) : 'Selected', clear: () => onFilters({ sender_id: null }) }); }
-  if (filters.client_id) active.push({ key: 'client', label: 'Client', value: clients?.find((x) => x.id === filters.client_id)?.name ?? 'Selected', clear: () => onFilters({ client_id: null }) });
+  if (senderIds.length) active.push({ key: 'sender', label: 'Sender', value: summarize(senderIds.map(senderLabel), 'senders'), clear: () => onFilters({ sender_ids: [] }) });
+  if (intents.length) active.push({ key: 'intent', label: 'Reply intent', value: summarize(intents.map((i) => INTENT_LABELS[i as Intent] ?? i), 'intents'), clear: () => onFilters({ intents: [] }) });
+  if (providers.length) active.push({ key: 'channel', label: 'Channel', value: summarize(providers.map((p) => channelLabel(p)), 'channels'), clear: () => onFilters({ providers: [] }) });
+  if (aiPicked.length) active.push({ key: 'ai', label: 'AI replies', value: summarize(aiPicked.map((a) => AI_FILTER_LABEL[a] ?? a), 'AI filters'), clear: () => onFilters({ ai: [] }) });
+  if (stagePicked.length) active.push({ key: 'stage', label: 'Stage', value: summarize(stagePicked.map(stageLabel), 'stages'), clear: () => onFilters({ stages: [] }) });
   if (sequenceId && onSequence) active.push({ key: 'sequence', label: 'Sequence', value: sequences?.find((x) => x.id === sequenceId)?.name ?? 'Selected', clear: () => onSequence(null) });
-  if (filters.intent) active.push({ key: 'intent', label: 'Intent', value: INTENT_LABELS[filters.intent as keyof typeof INTENT_LABELS] ?? filters.intent, clear: () => onFilters({ intent: null }) });
-  if (filters.provider) active.push({ key: 'channel', label: 'Channel', value: channelLabel(filters.provider as Parameters<typeof channelLabel>[0]), clear: () => onFilters({ provider: null }) });
-  if (filters.ai) active.push({ key: 'ai', label: 'AI', value: AI_FILTER_LABEL[filters.ai] ?? filters.ai, clear: () => onFilters({ ai: null }) });
-  if (filters.stage) active.push({ key: 'stage', label: 'Stage', value: stages?.find((x) => x.key === filters.stage)?.label ?? humanizeKey(filters.stage), clear: () => onFilters({ stage: null }) });
+  if (filters.replied_from || filters.replied_to) active.push({ key: 'replied', label: 'Reply date', value: fmtReplyRange(filters.replied_from, filters.replied_to), clear: () => onFilters({ replied_from: null, replied_to: null }) });
+  if (filters.client_id) active.push({ key: 'client', label: 'Client', value: clients?.find((x) => x.id === filters.client_id)?.name ?? 'Selected', clear: () => onFilters({ client_id: null }) });
   if (filters.has_notes) active.push({ key: 'notes', label: 'Notes', value: 'Has private notes', clear: () => onFilters({ has_notes: null }) });
-  const clearAll = () => { onFilters({ sender_id: null, client_id: null, intent: null, provider: null, ai: null, stage: null, has_notes: null }); onSequence?.(null); };
+  const clearAll = () => { const { sequence_id: _seq, ...rest } = INBOX_FILTERS_CLEARED; onFilters(rest); onSequence?.(null); };
+  // Channel chips: every channel the app knows, with its logo; Stage chips: the open chat's stages plus any remembered key they no longer list.
+  const channelOptions = ([...CHANNEL_PROVIDERS, ...MAIL_PROVIDERS, 'WEBCHAT'] as Provider[]).map((p) => ({ value: p as string, label: channelLabel(p), icon: <ProviderLogo provider={p} className="w-3 h-3 rounded-[2px]" /> }));
+  const stageOptions = [...(stages ?? []).map((st) => ({ value: st.key, label: st.label })), ...stagePicked.filter((k) => !stages?.some((st) => st.key === k)).map((k) => ({ value: k, label: humanizeKey(k) }))];
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -205,50 +240,33 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
           {ws && <NotificationBell ws={ws} />}
 
           {filtersOpen && (
-            <div role="dialog" aria-label="Filters" className="absolute right-0 top-full mt-1.5 z-30 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-gray-200 bg-white shadow-lg p-3 space-y-2.5">
+            <div role="dialog" aria-label="Filters" className="absolute right-0 top-full mt-1.5 z-30 w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-8rem)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg p-3 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-gray-900">Filters</span>
                 {active.length > 0 && <button type="button" onClick={clearAll} className="text-xs text-indigo-600 hover:text-indigo-800">Clear all</button>}
               </div>
-              <FilterField label="Sender" value={filters.sender_id ?? ''} onChange={(v) => onFilters({ sender_id: v || null })}>
-                <option value="">All senders</option>
-                {senders?.map((s) => <option key={s.id} value={s.id}>{senderName(s)}</option>)}
-              </FilterField>
-              {!!clients?.length && (
-                <FilterField label="Client" value={filters.client_id ?? ''} onChange={(v) => onFilters({ client_id: v || null })}>
-                  <option value="">All clients</option>
-                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </FilterField>
-              )}
+              <SenderMultiSelect senders={senders ?? []} removed={removedSenders} value={senderIds} onChange={(ids) => onFilters({ sender_ids: ids })} />
+              <MultiSelect<string> label="Reply intent" noun="intent" anyLabel="Any" value={intents} onChange={(v) => onFilters({ intents: v })}
+                options={INTENTS.map((i) => ({ value: i as string, label: INTENT_LABELS[i], tone: INTENT_TONE[i] }))} />
+              <div className="grid grid-cols-2 gap-2">
+                <MultiSelect<string> label="Channel" noun="channel" anyLabel="All" value={providers} onChange={(v) => onFilters({ providers: v })} options={channelOptions} />
+                <MultiSelect<AiChatFilter> label="AI replies" noun="AI filter" anyLabel="Any" value={aiPicked} onChange={(v) => onFilters({ ai: v })}
+                  options={AI_FILTERS.map((a) => ({ value: a, label: AI_FILTER_LABEL[a] }))} />
+              </div>
+              <MultiSelect<string> label="Stage" noun="stage" anyLabel="Any" value={stagePicked} onChange={(v) => onFilters({ stages: v })} options={stageOptions} />
               {onSequence && !!sequences?.length && (
                 <FilterField label="Sequence" value={sequenceId ?? ''} onChange={(v) => onSequence(v || null)}>
                   <option value="">All sequences</option>
                   {sequences.filter((q) => q.status !== 'archived' || q.id === sequenceId).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
                 </FilterField>
               )}
-              <div className="grid grid-cols-2 gap-2">
-                <FilterField label="Intent" value={filters.intent ?? ''} onChange={(v) => onFilters({ intent: v || null })}>
-                  <option value="">Any</option>
-                  {INTENTS.map((i) => <option key={i} value={i}>{INTENT_LABELS[i]}</option>)}
+              <ReplyDateRange from={filters.replied_from ?? null} to={filters.replied_to ?? null} onChange={(r) => onFilters(r)} />
+              {!!clients?.length && (
+                <FilterField label="Client" value={filters.client_id ?? ''} onChange={(v) => onFilters({ client_id: v || null })}>
+                  <option value="">All clients</option>
+                  {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </FilterField>
-                <FilterField label="Channel" value={filters.provider ?? ''} onChange={(v) => onFilters({ provider: v || null })}>
-                  <option value="">All</option>
-                  {CHANNEL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
-                  {MAIL_PROVIDERS.map((p) => <option key={p} value={p}>{channelLabel(p)}</option>)}
-                  <option value="WEBCHAT">{channelLabel('WEBCHAT')}</option>
-                </FilterField>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <FilterField label="AI replies" value={filters.ai ?? ''} onChange={(v) => onFilters({ ai: (v || null) as AiChatFilter | null })}>
-                  <option value="">Any</option>
-                  {AI_FILTERS.map((a) => <option key={a} value={a}>{AI_FILTER_LABEL[a]}</option>)}
-                </FilterField>
-                <FilterField label="Stage" value={filters.stage ?? ''} onChange={(v) => onFilters({ stage: v || null })}>
-                  <option value="">Any</option>
-                  {stages?.map((st) => <option key={st.key} value={st.key}>{st.label}</option>)}
-                  {filters.stage && !stages?.some((st) => st.key === filters.stage) && <option value={filters.stage}>{humanizeKey(filters.stage)}</option>}
-                </FilterField>
-              </div>
+              )}
               <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
                 <input type="checkbox" className="accent-amber-600" checked={!!filters.has_notes} onChange={(e) => onFilters({ has_notes: e.target.checked ? true : null })} />
                 <Lock className="w-3.5 h-3.5 text-amber-600" /> Has private notes
@@ -276,7 +294,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
 
         {!mentionsView && (
           <div className="flex items-center gap-1 overflow-x-auto -mx-0.5 px-0.5 [scrollbar-width:none]" role="radiogroup" aria-label="Who wrote last">
-            {(['all', 'needs_reply', 'waiting_on_them'] as ReplyChip[]).map((c) => {
+            {(['all', 'needs_reply', 'waiting_on_them', 'other'] as ReplyChip[]).map((c) => {
               const on = (filters.chip ?? 'all') === c;
               return (
                 <button key={c} type="button" role="radio" aria-checked={on} title={CHIP_TOOLTIP[c]} onClick={() => onFilters({ chip: c })}
@@ -341,7 +359,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
         {!error && rows && rows.length === 0 && (
           <EmptyState icon={<Inbox className="w-6 h-6" />}
             title={filters.archived ? 'No archived conversations' : filters.chip === 'needs_reply' && !search ? "You're all caught up." : filters.chip === 'waiting_on_them' && !search ? 'Nothing waiting on them' : 'No replies yet'}
-            description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation where they wrote carries a step of this sequence with these filters.' : search || filters.sender_id || filters.intent || filters.unread || filters.assigned_to || filters.provider || filters.client_id || filters.ai || filters.stage || filters.has_notes ? 'Try clearing some filters.' : filters.chip === 'needs_reply' ? 'Nobody is waiting for an answer.' : filters.chip === 'waiting_on_them' ? 'No conversation where our message is the latest.' : 'When someone answers, the conversation shows up here.'} />
+            description={restrictLabel != null ? 'None of the linked conversations match the filters. Close the chip above to see everything.' : sequenceId ? 'No conversation where they wrote carries a step of this sequence with these filters.' : search || anyInboxFilter(filters) ? 'Try clearing some filters.' : filters.chip === 'needs_reply' ? 'Nobody is waiting for an answer.' : filters.chip === 'waiting_on_them' ? 'No conversation where our message is the latest.' : 'When someone answers, the conversation shows up here.'} />
         )}
         {note && rows && rows.length > 0 && <p className="px-3 py-1.5 text-[11px] text-gray-500 bg-gray-50 border-b border-gray-100">{note}</p>}
         {rows && rows.length > 0 && (
@@ -371,7 +389,7 @@ export default function ChatList({ rows, loading, error, filters, onFilters, sea
                         <span className="ml-auto text-[11px] text-gray-400 flex-shrink-0 tabular-nums">{timeAgo(c.last_message_at)}</span>
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 min-w-0 overflow-hidden">
-                        {c.outreach_senders?.display_name && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 truncate max-w-[45%]">{c.outreach_senders.display_name}</span>}
+                        {(() => { const a = accountOf(c); return a ? <span title={a.title} className={cn('text-[10px] px-1.5 py-0.5 rounded truncate max-w-[45%]', a.removed ? 'bg-white text-gray-400 border border-dashed border-gray-300' : 'bg-gray-100 text-gray-600')}>{a.label}</span> : null; })()}
                         {c.is_request && <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800" title="Instagram message request: the person has not accepted the conversation yet, so they may not have seen it">Request</span>}
                         {filters.chip === 'needs_reply' && c.last_inbound_at && <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 whitespace-nowrap flex-shrink-0 tabular-nums" title={`Their last message: ${new Date(c.last_inbound_at).toLocaleString()}`}>{waitingFor(c.last_inbound_at, now)}</span>}
                         {c.provider !== 'WEBCHAT' && c.first_inbound_at && (!c.first_outbound_at || c.first_inbound_at < c.first_outbound_at) && <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-50 text-violet-700 whitespace-nowrap flex-shrink-0" title="They wrote to us first">Wrote first</span>}

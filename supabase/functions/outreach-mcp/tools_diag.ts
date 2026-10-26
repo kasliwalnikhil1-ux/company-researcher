@@ -19,14 +19,23 @@ export async function workspaceContext(ctx: Ctx, ws: Membership) {
   // plan and accounts (billing v2): accounts = LinkedIn accounts + mailboxes + Instagram accounts + WhatsApp numbers; billed null = no limit
   const billing = await urpc<Row>(ctx, "billing_state", { p_ws: ws.id }).catch(() => null);
   const acc = billing?.accounts as Row | undefined;
+  // the billing clock (sender-lifecycle-PRD v1.2 §5.9) and the sending domain (custom-sending-domain-PRD §11)
+  const clock = await urpc<Row>(ctx, "billing_clock", { p_ws: ws.id }).catch(() => null);
+  const nextStep = (clock?.steps as Row[] | undefined)?.find((x) => !x.done);
+  const domains = ws.role === "owner" || ws.role === "manager" ? await urpc<Row>(ctx, "sending_domains", { p_ws: ws.id }).catch(() => null) : null;
+  const domainOf = (clientId: string | null) => (domains?.domains as Row[] | undefined)?.find((d) => (d.client_id ?? null) === clientId);
+  const dview = (d: Row | undefined) => d ? { domain: d.domain, state: d.paused_at ? "paused" : d.state, paused_reason: d.paused_reason ?? undefined } : undefined;
   return {
     workspace: { id: ws.id, name: ws.name, slug: ws.slug, plan: billing?.plan ?? ws.plan, settings: ws.settings,
       ...(billing ? { read_only: billing.read_only || undefined, billing_period: billing.billing_period ?? undefined,
         accounts: acc ? { billed: acc.billed ?? null, used: acc.used, available: acc.available ?? null, paused_over_plan_limit: acc.over_limit || undefined } : undefined,
         trial_ends_at: billing.plan === "trial" ? billing.trial?.ends_at : undefined,
+        billing_status: clock?.billing_status ?? undefined,
+        next_billing_step: nextStep ? { step: nextStep.step, what: nextStep.label, at: nextStep.at } : undefined,
+        sending_domain: dview(domainOf(null)),
         features_off: billing.features ? Object.entries(billing.features as Record<string, Row>).filter(([, v]) => v.enabled === false).map(([k, v]) => `${k} (on ${v.min_plan})`) : undefined } : {}) },
     you: { user_id: ctx.userId, email: ctx.email, role: ws.role, can_reply: ws.can_reply, client_scope: ws.client_ids.length ? ws.client_ids : "all" },
-    clients: clients ?? [], stages: stages ?? [], tags: tags ?? [], lists: lists ?? [],
+    clients: (clients ?? []).map((c: Row) => ({ ...c, sending_domain: dview(domainOf(c.id)) })), stages: stages ?? [], tags: tags ?? [], lists: lists ?? [],
     members: members ? members.map((m) => ({ user_id: m.user_id, email: m.email, name: m.display_name, role: m.role })) : undefined,
     other_workspaces: ctx.memberships.filter((m) => m.id !== ws.id).map((m) => ({ id: m.id, name: m.name, role: m.role })),
   };
@@ -79,8 +88,8 @@ export function registerDiag(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "alerts_list", title: "Open alerts", cls: "read", minRole: "client_viewer",
-    description: "Alerts the platform raised on its own: sequence_stalled, sender_running_dry, import_failed, hold_expiring. Each has the entity, a label, the plain reason (the same sentence why_not_sending gives) and when it opened. Open alerts only by default; an alert closes by itself when the cause is gone, and owners and managers were already emailed once per occurrence. include_resolved adds the recent history.",
-    input: { ...wsParam, kind: z.enum(["sequence_stalled", "sender_running_dry", "import_failed", "hold_expiring"]).optional(), include_resolved: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional() },
+    description: "Alerts the platform raised on its own: sequence_stalled, sender_running_dry, import_failed, hold_expiring, sender_disconnected (an account needs signing in; whoever signs in was emailed, the team 4 h later), mass_disconnect (several accounts dropped within an hour: sign-in emails held 2 h, usually a provider incident). Each has the entity, a label, the plain reason (the same sentence why_not_sending gives) and when it opened. Open alerts only by default; an alert closes by itself when the cause is gone, and owners and managers were already emailed once per occurrence. include_resolved adds the recent history.",
+    input: { ...wsParam, kind: z.enum(["sequence_stalled", "sender_running_dry", "import_failed", "hold_expiring", "sender_disconnected", "mass_disconnect"]).optional(), include_resolved: z.boolean().optional(), limit: z.number().int().min(1).max(100).optional() },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     let q = ctx.user.from("outreach_alerts").select("id, kind, entity, entity_id, client_id, label, reason, detail, opened_at, notified_at, resolved_at").eq("workspace_id", ws.id).order("opened_at", { ascending: false }).limit(a.limit ?? 50);
@@ -92,5 +101,15 @@ export function registerDiag(server: McpServer, ctx: Ctx): void {
       alerts: rows.map((r) => ({ id: r.id, kind: r.kind, entity: r.entity, entity_id: r.entity_id, label: r.label, reason: r.reason, detail: Object.keys(r.detail ?? {}).length ? r.detail : undefined, opened_at: r.opened_at, emailed: r.notified_at ? true : undefined, resolved_at: r.resolved_at })),
       next: rows.length ? "For a stalled sequence or a sender, why_not_sending gives the current causes and remedies. Never answer an alert by raising volume elsewhere." : "No open alerts.",
     };
+  });
+
+  tool(server, ctx, {
+    name: "email_log_search", title: "Email log", cls: "read", minRole: "manager",
+    description: "Did an email reach someone? Search the workspace's platform emails (sign-in links, permission requests, reports, billing, alerts) by recipient, type, delivery status or date: each row has when, type, to, from (and whether it fell back to the GrowthxAI domain), status (sent, delivered, delayed, bounced, complained, failed, suppressed) and the delivery events. Bodies are never returned (they carry links). Owners and managers. custom-sending-domain-PRD §8.2.",
+    input: { ...wsParam, to: z.string().optional().describe("recipient address, or part of it"), type: z.string().optional(), status: z.enum(["sent", "delivered", "delayed", "bounced", "complained", "failed", "suppressed"]).optional(), since: z.string().optional().describe("ISO date"), limit: z.number().int().min(1).max(200).optional() },
+  }, async (a) => {
+    const ws = resolveWs(ctx, a.workspace_id);
+    const r = await urpc<Row>(ctx, "email_log_search", { p_ws: ws.id, p_to: a.to ?? null, p_type: a.type ?? null, p_status: a.status ?? null, p_since: a.since ?? null, p_until: null, p_limit: a.limit ?? 50 });
+    return { workspace: ws.name, total: r?.total ?? 0, rows: (r?.rows ?? []).map((x: Row) => ({ at: x.at, type: x.type, to: x.to, from: x.fell_back ? `${x.from} (fallback: ${x.fallback_reason ?? "domain"})` : x.from, status: x.status, bounce_type: x.bounce_type ?? undefined, events: (x.events ?? []).map((e: Row) => `${e.event} ${e.at}`) })) };
   });
 }

@@ -14,7 +14,7 @@ import { exitTone, formatDelay, layoutPositions, nodeSummary, NODE_W, openExits,
 import { StepIcon } from './StepPicker';
 
 export type IssueLevel = 'error' | 'warning';
-export type StatKind = 'failed' | 'skipped';
+export type StatKind = 'queued' | 'sent' | 'accepted' | 'replied' | 'failed' | 'skipped';
 /** One step's figures, summed over its variants (sumNodeStats in lib/outreach/graph.ts). */
 export type StepStats = Omit<NodeStats, 'variant_id'>;
 /** "Add a step here": on exit `handle` of `source`; `target` is set when the exit already leads to a step (insert between). */
@@ -30,13 +30,13 @@ export type OutreachRFNode = Node<OutreachNodeData, 'outreach'>;
 export type OutreachEdgeData = { handle: string; label: string | null; tone: ExitTone; onAdd?: AddHere };
 export type OutreachRFEdge = Edge<OutreachEdgeData, 'outreach'>;
 
-const STAT_CHIPS: Array<{ key: keyof StepStats; label: string; cls: string; open?: StatKind }> = [
-  { key: 'queued', label: 'queued', cls: 'bg-gray-100 text-gray-700' },
-  { key: 'sent', label: 'sent', cls: 'bg-blue-100 text-blue-800' },
-  { key: 'accepted', label: 'accepted', cls: 'bg-green-100 text-green-800' },
-  { key: 'replied', label: 'replied', cls: 'bg-purple-100 text-purple-800' },
-  { key: 'failed', label: 'failed', cls: 'bg-red-100 text-red-800 hover:bg-red-200', open: 'failed' },
-  { key: 'skipped', label: 'skipped', cls: 'bg-amber-100 text-amber-800 hover:bg-amber-200', open: 'skipped' },
+const STAT_CHIPS: Array<{ key: keyof StepStats & StatKind; label: string; cls: string; hint: string }> = [
+  { key: 'queued', label: 'queued', cls: 'bg-gray-100 text-gray-700 hover:bg-gray-200', hint: 'Show the leads waiting to go out' },
+  { key: 'sent', label: 'sent', cls: 'bg-blue-100 text-blue-800 hover:bg-blue-200', hint: 'Show the leads this step went out to' },
+  { key: 'accepted', label: 'accepted', cls: 'bg-green-100 text-green-800 hover:bg-green-200', hint: 'Show the leads who accepted' },
+  { key: 'replied', label: 'replied', cls: 'bg-purple-100 text-purple-800 hover:bg-purple-200', hint: 'Show the leads who replied' },
+  { key: 'failed', label: 'failed', cls: 'bg-red-100 text-red-800 hover:bg-red-200', hint: 'Show the failed leads and why' },
+  { key: 'skipped', label: 'skipped', cls: 'bg-amber-100 text-amber-800 hover:bg-amber-200', hint: 'Show the skipped leads and why' },
 ];
 const chipValue = (stats: StepStats, key: keyof StepStats): number => Number(stats[key] ?? 0) || 0;
 
@@ -140,9 +140,9 @@ export const OutreachNode = memo(function OutreachNode({ data, selected }: NodeP
           {STAT_CHIPS.filter((c) => chipValue(stats, c.key) > 0).map((c) => {
             const text = `${chipValue(stats, c.key).toLocaleString()} ${c.label}`;
             const cls = cn('text-[10px] font-medium rounded-full px-1.5 py-0.5 tabular-nums', c.cls);
-            // failed / skipped open the recovery list; nodrag + nopan keep React Flow from treating the click as a drag
-            return c.open && onStat
-              ? <button key={c.key} type="button" title={`Show ${c.label} leads and why`} onClick={(e) => { e.stopPropagation(); onStat(node.id, c.open!); }} className={cn(cls, 'nodrag nopan cursor-pointer underline decoration-dotted underline-offset-2 focus:outline-none focus:ring-2 focus:ring-indigo-400')}>{text}</button>
+            // every chip opens its leads; nodrag + nopan keep React Flow from treating the click as a drag
+            return onStat
+              ? <button key={c.key} type="button" title={c.hint} onClick={(e) => { e.stopPropagation(); onStat(node.id, c.key); }} className={cn(cls, 'nodrag nopan cursor-pointer underline decoration-dotted underline-offset-2 focus:outline-none focus:ring-2 focus:ring-indigo-400')}>{text}</button>
               : <span key={c.key} className={cls}>{text}</span>;
           })}
         </div>

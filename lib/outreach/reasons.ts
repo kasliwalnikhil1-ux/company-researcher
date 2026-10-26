@@ -47,19 +47,22 @@ const DECISIONS: Record<string, string> = {
 };
 
 /** Where a lead stands in a sequence, in words (enrollment status). */
+// Names from the sequence-leads PRD (26 Oct 2026): label-only renames, the stored keys are unchanged. waiting_delay
+// (the Delay-step wait) reads as Active, waiting_connection as Invite sent: the engine sets it the moment the invite
+// goes out. The full vocabulary (groups, help text) is lib/outreach/sequenceLeads.ts.
 export const ENROLLMENT_STATUS_LABEL: Record<string, string> = {
   active: 'Active',
-  waiting_connection: 'Waiting to connect',
-  waiting_delay: 'Waiting',
+  waiting_connection: 'Invite sent',
+  waiting_delay: 'Active',
   waiting_task: 'Waiting on a task',
   paused: 'Paused',
   completed: 'Finished',
-  exited_replied: 'Stopped: replied',
-  exited_manual: 'Stopped by a teammate',
-  exited_suppressed: 'Stopped: do not contact',
-  exited_sender_disabled: 'Stopped: sender disabled',
+  exited_replied: 'Human handoff',
+  exited_manual: 'Stopped by teammate',
+  exited_suppressed: 'Do not contact',
+  exited_sender_disabled: 'Sender disabled',
   failed: 'Failed',
-  cancelled: 'Cancelled',
+  cancelled: 'Unenrolled',
 };
 
 export function enrollmentStatusText(status: string | null | undefined): string {
@@ -69,6 +72,8 @@ export function enrollmentStatusText(status: string | null | undefined): string 
 
 const EXIT_REASONS: Record<string, string> = {
   manual: 'Stopped by a teammate',
+  unenrolled: 'Unenrolled by a teammate',
+  undo: 'Put back by a teammate',
   end_of_graph: 'Reached the end of the sequence',
   end: 'Reached an end step',
   meeting_booked: 'A meeting was booked',

@@ -1,28 +1,26 @@
-// F13 — Disable a sender: cancels queued actions, exits enrollments (trigger), and removes the connected account on the
-// connector side the same day (a connected account nobody uses still costs us; pricing-billing-PRD §12). `delete_unipile`
-// also removes the sender from the workspace for good. Disabling frees the account slot at once.
-import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, emitEvent, rpc } from "../_shared/outreach/supabase.ts";
-import { dropConnectorAccount } from "../_shared/outreach/disconnect.ts";
+// F13 (legacy name) — kept for older clients and the MCP skill text. The lifecycle lives in outreach-sender-lifecycle
+// (sender-lifecycle-PRD.md). Body {sender_id, delete_unipile?} → delete_unipile: Remove (connector account deleted,
+// history kept); otherwise Disable (leads exit, the connector link and the paid account stay).
+import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError } from "../_shared/outreach/supabase.ts";
+import { removeSender } from "../_shared/outreach/lifecycle.ts";
 
 serve("sender-disable", async (req) => {
   const user = await requireUser(req);
   const body = await readJson<{ sender_id: string; delete_unipile?: boolean; purge_secrets?: boolean }>(req);
-  const { data: s } = await admin.from("outreach_senders").select("*").eq("id", body.sender_id ?? "").maybeSingle();
-  if (!s) throw new HttpError(404, "E_NOT_FOUND");
+  const { data: s } = await admin.from("outreach_senders").select("id, workspace_id, status, provider, deleted_at").eq("id", body.sender_id ?? "").maybeSingle();
+  if (!s || s.deleted_at) throw new HttpError(404, "E_NOT_FOUND");
   const m = await membership(user.id, s.workspace_id);
   requireRole(m, "manager");
-  const account = s.unipile_account_id as string | null;
-  const { error } = await admin.from("outreach_senders").update({
-    status: "disabled", status_reason: "disabled_by_user", deleted_at: body.delete_unipile ? new Date().toISOString() : null,
-    unipile_account_id: null, previous_unipile_account_id: account ?? s.previous_unipile_account_id ?? null,
-  }).eq("id", s.id);
-  if (error) throw new HttpError(500, "E_INTERNAL", error.message);
-  await rpc("slot_release_sender", { p_sender: s.id, p_reason: "failed" }).catch(() => null);
-  const unipileDeleted = account ? await dropConnectorAccount(account, s.workspace_id, "disabled") : false;
-  // the saved sign-in only works for an account that still exists
-  await admin.from("outreach_sender_secrets").delete().eq("sender_id", s.id);
-  if (body.delete_unipile || body.purge_secrets) await admin.from("outreach_sender_tokens").delete().eq("sender_id", s.id);
-  await audit(s.workspace_id, "sender.disabled", "sender", s.id, { by: user.id, removed: !!body.delete_unipile, account_deleted: unipileDeleted, account_queued: !!account && !unipileDeleted }, "user");
-  await emitEvent(s.workspace_id, "sender.disconnected", { id: s.id, status: "disabled" });
-  return json({ ok: true, unipile_deleted: unipileDeleted, account_queued: !!account && !unipileDeleted });
+  if (s.provider === "WEBCHAT") throw new HttpError(400, "E_PAYLOAD_INVALID", "A website inbox is managed from its Website agents page.");
+  if (body.delete_unipile) {
+    const r = await removeSender(s.id, "app", { by: user.id, reason: "sender-disable delete_unipile" });
+    return json({ ok: true, state: r.state === "pending" ? "removal_pending" : r.state, unipile_deleted: r.account_deleted, account_queued: r.state === "pending" }, r.state === "pending" ? 202 : 200);
+  }
+  const { data, error } = await user.client.rpc("outreach_sender_disable", { p_sender: s.id, p_reason: null });
+  if (error) {
+    const mm = /^(E_[A-Z_]+):?\s*(.*)$/s.exec(error.message.trim());
+    if (mm) throw new HttpError(mm[1] === "E_FORBIDDEN" ? 403 : 409, mm[1], mm[2] || undefined);
+    throw new Error(error.message);
+  }
+  return json({ ok: true, state: "disabled", unipile_deleted: false, account_queued: false, ...(data as Record<string, unknown>) });
 });

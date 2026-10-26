@@ -54,7 +54,7 @@ function StageProgress({ s }: { s: ChatAiState }) {
   return (
     <div>
       <div className="text-[11px] text-gray-400 mb-1 cursor-help w-max underline decoration-dotted decoration-gray-300 underline-offset-2"
-        title={'The steps the AI follows to move the conversation toward a meeting. You set them on the sequence\'s AI tab.'}>Progress</div>
+        title={'The steps the AI follows to move the conversation toward a meeting. You set them on the sequence\'s AI Replies tab.'}>Progress</div>
       <ol className="flex items-start" aria-label="Conversation progress">
         {stages.map((x, i) => {
           const state = i < done ? 'done' : i === at ? 'now' : 'next';
@@ -147,7 +147,7 @@ export default function AiModeChip({ chatId, onError, onNotice, density = 'full'
                   {st.sequence_id && st.sequence_name && (
                     <Row label="Set by">
                       <Link href={`/outreach/sequences/${st.sequence_id}?tab=ai`} onClick={() => setOpen(false)} className="inline-flex items-center gap-1 min-w-0 text-indigo-700 hover:underline"
-                        title={`Open this sequence's AI tab to change the mode, limit or instructions.${st.master_prompt ? `\nUsing its instructions, version ${st.master_prompt.version}.` : ''}`}>
+                        title={`Open this sequence's AI Replies tab to change the mode, limit or instructions.${st.master_prompt ? `\nUsing its instructions, version ${st.master_prompt.version}.` : ''}`}>
                         <span className="truncate">{st.sequence_name}</span><ExternalLink className="w-3 h-3 flex-shrink-0" />
                       </Link>
                     </Row>
@@ -171,7 +171,7 @@ export default function AiModeChip({ chatId, onError, onNotice, density = 'full'
               )}
               {!canStop && !canResume && (
                 <div className="px-3 py-1.5 text-[11px] text-gray-500">
-                  {st.handed_off ? 'Only owners and managers can resume the AI in a handed-off chat.' : st.mode === 'off' ? 'AI replies are turned on per sequence, on its AI tab.' : 'You can view this setting but not change it.'}
+                  {st.handed_off ? 'Only owners and managers can resume the AI in a handed-off chat.' : st.mode === 'off' ? 'AI replies are turned on per sequence, on its AI Replies tab.' : 'You can view this setting but not change it.'}
                 </div>
               )}
             </div>

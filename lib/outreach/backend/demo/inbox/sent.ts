@@ -281,7 +281,7 @@ export function sentRows(store: DemoStore, ws: string, sources: SentSrc[]): Sent
         const reserved = a.status === 'reserved';
         const status = reserved ? 'sending' : due && s.status === 'ok' && !senderPaused && e?.status !== 'paused' && seqActive ? 'scheduled' : 'held';
         const reason = reserved ? null
-          : ['credentials', 'error', 'disconnected', 'connecting'].includes(s.status) ? 'sender_reconnect'
+          : ['credentials', 'error', 'disconnected', 'removed', 'connecting'].includes(s.status) ? 'sender_reconnect'
           : ['paused', 'disabled'].includes(s.status) || senderPaused ? 'sender_paused'
           : e?.status === 'paused' || !seqActive ? 'sequence_paused'
           : due ? null : a.decision === 'budget_deferred' ? 'allowance_used' : a.decision === 'hourly_deferred' ? 'hourly_allowance' : 'waiting_slot';
@@ -516,14 +516,20 @@ export function inboxCounts(a: Record<string, unknown>, ctx: Ctx): Row {
   const store = ctx.store;
   if (a.p_ws && a.p_ws !== ctx.ws) demoError('E_FORBIDDEN');
   const f = (a.p_filters ?? {}) as Row;
-  const assigned = uuidOrNull(f.assigned_to), sender = uuidOrNull(f.sender_id), client = uuidOrNull(f.client_id);
-  const provider = nz(f.provider);
+  const assigned = uuidOrNull(f.assigned_to), client = uuidOrNull(f.client_id);
+  // several senders / channels at once (093); the older single keys still count as a list of one
+  const listOf = (plural: unknown, single: unknown): string[] | null => {
+    const xs = (Array.isArray(plural) ? plural : []).filter((x): x is string => typeof x === 'string' && !!x);
+    if (typeof single === 'string' && single) xs.push(single);
+    return xs.length ? xs : null;
+  };
+  const senders = listOf(f.sender_ids, f.sender_id), providers = listOf(f.providers, nz(f.provider));
   catchUp(store);
   const visible = clientVisible(ctx);
   const chats = store.t('outreach_chats').filter((c) => c.workspace_id === ctx.ws && visible(c.client_id ?? null));
   const unread = chats.filter((c) => c.unread && !c.archived).length;
   const needs = chats.filter((c) => c.waiting_on === 'us' && !c.archived && !['resolved', 'snoozed'].includes(String(c.status ?? 'open')) && !c.ai_answering
-    && (!assigned || c.assigned_to === assigned) && (!sender || c.sender_id === sender) && (!client || c.client_id === client) && (!provider || c.provider === provider)).length;
+    && (!assigned || c.assigned_to === assigned) && (!senders || senders.includes(String(c.sender_id))) && (!client || c.client_id === client) && (!providers || providers.includes(String(c.provider)))).length;
   const allowed = sentAllowed(ctx);
   let scheduled = 0, failed = 0;
   if (allowed) {

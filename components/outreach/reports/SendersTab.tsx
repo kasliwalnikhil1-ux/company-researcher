@@ -91,6 +91,7 @@ export default function SendersTab({ ws, client, range }: TabProps) {
   const q = useReportSenders({ ws, client, range });
   const { sorted, sort, toggle } = useSort(q.data, { key: 'replies', dir: 'desc' }, ACCESSORS);
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const [includeRemoved, setIncludeRemoved] = useState(true);   // sender lifecycle: removed senders keep their numbers
   const box = useElementWidth<HTMLDivElement>();
   const flip = (id: string) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
@@ -105,11 +106,16 @@ export default function SendersTab({ ws, client, range }: TabProps) {
   ], sorted);
 
   const th = { sort, onSort: toggle };
+  const gone = (st: string) => st === 'removed' || st === 'erased' || st === 'disconnected';
+  const shown = includeRemoved ? sorted : sorted.filter((r) => !gone(String(r.status)));
   return (
     <Refreshing active={q.isPlaceholderData}>
       <div className="flex items-center justify-between gap-3 mb-3">
         <p className="text-xs text-gray-500">Sorted by replies, so the accounts that carry the results come first. Open a row for the daily trend.</p>
-        <ExportButton onClick={exportCsv} />
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-gray-600 whitespace-nowrap"><input type="checkbox" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={includeRemoved} onChange={(e) => setIncludeRemoved(e.target.checked)} /> Include removed senders</label>
+          <ExportButton onClick={exportCsv} />
+        </div>
       </div>
       <div ref={box.ref} className="[&_td]:px-3 [&_th]:px-3"><Table>
         <thead><tr>
@@ -117,8 +123,9 @@ export default function SendersTab({ ws, client, range }: TabProps) {
           <SortTh label="Invites" sortKey="invites" metric="invites" {...th} /><SortTh label="Acceptance" sortKey="acceptance_rate" metric="acceptance_rate" {...th} /><SortTh label="Touches" sortKey="touches" metric="touches" {...th} />
           <SortTh label="Replies" sortKey="replies" metric="replies" {...th} /><SortTh label="Interested" sortKey="interested" metric="interested" {...th} /><SortTh label="Restrictions" sortKey="limit_hits" align="left" {...th} />
         </tr></thead>
-        <tbody>{sorted.map((r) => {
-          const isOpen = open.has(r.sender_id); const t = r.totals; const name = r.name ?? 'Unnamed sender';
+        <tbody>{shown.map((r) => {
+          const isOpen = open.has(r.sender_id); const t = r.totals;
+          const name = String(r.status) === 'erased' ? 'Erased sender' : `${r.name ?? 'Unnamed sender'}${gone(String(r.status)) ? ' (removed)' : ''}`;
           return (
             <React.Fragment key={r.sender_id}>
               <tr className={cn('hover:bg-gray-50', isOpen && 'bg-gray-50')}>

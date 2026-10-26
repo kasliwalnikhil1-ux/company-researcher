@@ -2,11 +2,12 @@
 
 // Query hooks and fetch helpers specific to the sequences area (kept out of lib/outreach/queries.ts to avoid
 // concurrent edits to the shared file). Query keys start with ['outreach', ws] so the shell's invalidation applies.
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { LIVE_ENROLLMENT_STATUSES, type ActionType } from '@/lib/outreach/types';
 import type { LeadFilters } from '@/lib/outreach/queries';
+import { BULK_CHUNK, type AnalyticsLeadsPage, type BulkAction, type BulkPreview, type BulkResult, type LeadCounts, type LeadListQuery, type SequenceAnalytics, type SequenceLeadsPage, type UndoResult } from '@/lib/outreach/sequenceLeads';
 import type { AutoEnrolLogRow, AutoEnrolRule, FailedKind, FailedLeadRow, QueuedActionRow, VersionUsageRow, WhyNotSendingResult } from './publishTypes';
 
 export interface SequenceSummaryRow { sequence_id: string; live: number; completed: number; replied: number; sent: number; queued: number }
@@ -229,4 +230,110 @@ export function useWhyNotSending(target: { sequenceId?: string | null; senderId?
     gcTime: 0,
     queryFn: () => rpc<WhyNotSendingResult>('why_not_sending', { p_sequence: target.sequenceId ?? null, p_sender: target.senderId ?? null, p_enrollment: target.enrollmentId ?? null }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Sequence lead filters, bulk unenroll & Analytics (migration 101)
+// ---------------------------------------------------------------------------
+export type EnrolledRange = { from: string; to: string } | null;
+
+const rangeArgs = (range: EnrolledRange) => ({ p_from: range?.from ?? null, p_to: range?.to ?? null });
+
+/** One count per filter option (and the teammates behind Stopped by teammate). Keyed under 'enrollments' so every existing invalidation refreshes it. */
+export function useSequenceLeadCounts(sequenceId: string | null | undefined, range: EnrolledRange = null) {
+  return useQuery({
+    queryKey: ['outreach', 'enrollments', 'seq_counts', sequenceId ?? '', range],
+    enabled: !!sequenceId,
+    refetchInterval: 30000,
+    placeholderData: keepPreviousData,
+    queryFn: () => rpc<LeadCounts>('sequence_lead_counts', { p_sequence: sequenceId, ...rangeArgs(range) }),
+  });
+}
+
+export const SEQUENCE_LEADS_PAGE = 50;
+
+/** The paginated table of the Leads tab: exact total, 50 a page. */
+export function useSequenceLeads(sequenceId: string | null | undefined, q: LeadListQuery, page: number, enabled = true) {
+  return useQuery({
+    queryKey: ['outreach', 'enrollments', 'seq_leads', sequenceId ?? '', q.filter, q.teammate ?? '', q.from ?? '', q.to ?? '', q.search ?? '', page],
+    enabled: enabled && !!sequenceId,
+    refetchInterval: 30000,
+    placeholderData: keepPreviousData,
+    queryFn: () => rpc<SequenceLeadsPage>('sequence_leads', {
+      p_sequence: sequenceId, p_filter: q.filter, p_teammate: q.teammate || null, p_from: q.from || null, p_to: q.to || null, p_search: q.search || null,
+      p_limit: SEQUENCE_LEADS_PAGE, p_offset: page * SEQUENCE_LEADS_PAGE,
+    }),
+  });
+}
+
+export function useSequenceAnalytics(sequenceId: string | null | undefined, range: EnrolledRange) {
+  return useQuery({
+    queryKey: ['outreach', 'reports', 'sequence_analytics', sequenceId ?? '', range],
+    enabled: !!sequenceId,
+    refetchInterval: 60000,
+    placeholderData: keepPreviousData,
+    queryFn: () => rpc<SequenceAnalytics>('sequence_analytics', { p_sequence: sequenceId, ...rangeArgs(range) }),
+  });
+}
+
+export function useSequenceAnalyticsLeads(sequenceId: string | null | undefined, range: EnrolledRange, page: number, search: string) {
+  return useQuery({
+    queryKey: ['outreach', 'reports', 'sequence_analytics_leads', sequenceId ?? '', range, page, search],
+    enabled: !!sequenceId,
+    placeholderData: keepPreviousData,
+    queryFn: () => rpc<AnalyticsLeadsPage>('sequence_analytics_leads', { p_sequence: sequenceId, ...rangeArgs(range), p_limit: SEQUENCE_LEADS_PAGE, p_offset: page * SEQUENCE_LEADS_PAGE, p_search: search || null }),
+  });
+}
+
+/** The ids of the first `max` enrolments matching a filter, over every page (the header checkbox's "first N"). */
+export async function fetchSequenceLeadIds(sequenceId: string, q: LeadListQuery, max: number): Promise<string[]> {
+  const ids: string[] = [];
+  const page = 200;
+  for (let offset = 0; offset < max; offset += page) {
+    const r = await rpc<SequenceLeadsPage>('sequence_leads', { p_sequence: sequenceId, p_filter: q.filter, p_teammate: q.teammate || null, p_from: q.from || null, p_to: q.to || null, p_search: q.search || null, p_limit: Math.min(page, max - offset), p_offset: offset });
+    for (const row of r.rows) ids.push(row.id);
+    if (r.rows.length < Math.min(page, max - offset)) break;
+  }
+  return ids;
+}
+
+export type BulkTarget = { ids: string[] } | { query: LeadListQuery };
+
+function bulkQueryArgs(t: BulkTarget) {
+  return 'ids' in t
+    ? { p_ids: t.ids, p_filter: null, p_teammate: null, p_from: null, p_to: null, p_search: null }
+    : { p_ids: null, p_filter: t.query.filter, p_teammate: t.query.teammate || null, p_from: t.query.from || null, p_to: t.query.to || null, p_search: t.query.search || null };
+}
+
+/** "N leads that have already ended will be skipped": the confirm text, from the same predicate the action uses. */
+export function previewBulk(sequenceId: string, action: BulkAction, target: BulkTarget): Promise<BulkPreview> {
+  return rpc<BulkPreview>('sequence_bulk_preview', { p_sequence: sequenceId, p_action: action, ...bulkQueryArgs(target) });
+}
+
+/**
+ * Run a bulk action. Ids go 500 a call; a filter target repeats until the database reports nothing left. Every call
+ * shares one batch id, so one Undo restores the whole run. `onProgress(done, total)` feeds the action bar.
+ */
+export async function runBulk(sequenceId: string, action: BulkAction, target: BulkTarget, total: number, onProgress?: (done: number, total: number) => void): Promise<BulkResult> {
+  let batch: string | null = null; let done = 0; let skipped = 0; let remaining = 0;
+  if ('ids' in target) {
+    for (let i = 0; i < target.ids.length; i += BULK_CHUNK) {
+      const r: BulkResult = await rpc<BulkResult>('sequence_bulk', { p_sequence: sequenceId, p_action: action, ...bulkQueryArgs({ ids: target.ids.slice(i, i + BULK_CHUNK) }), p_batch: batch, p_limit: BULK_CHUNK });
+      batch = r.batch_id; done += r.done; skipped += r.skipped;
+      onProgress?.(done + skipped, total);
+    }
+  } else {
+    let guard = 0;
+    do {
+      const r: BulkResult = await rpc<BulkResult>('sequence_bulk', { p_sequence: sequenceId, p_action: action, ...bulkQueryArgs(target), p_batch: batch, p_limit: BULK_CHUNK });
+      batch = r.batch_id; done += r.done; skipped += r.skipped; remaining = r.remaining;
+      onProgress?.(done, Math.max(total, done + remaining));
+      if (r.done === 0 && remaining > 0) break;   // nothing moved (another teammate acted first): stop rather than spin
+    } while (remaining > 0 && ++guard < 1000);
+  }
+  return { batch_id: batch ?? '', action, done, skipped, remaining };
+}
+
+export function undoBulk(batchId: string): Promise<UndoResult> {
+  return rpc<UndoResult>('sequence_bulk_undo', { p_batch: batchId });
 }

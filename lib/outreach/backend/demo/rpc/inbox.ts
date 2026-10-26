@@ -234,7 +234,7 @@ export const inboxRpc = {
   notification_prefs_get: (_a, ctx) => prefsOf(ctx),
 
   notification_prefs_set: (a, ctx) => {
-    if (!['note_mention', 'ai_handoff', 'assigned'].includes(a.p_kind)) demoError('E_PAYLOAD_INVALID', 'kind');
+    if (!['note_mention', 'ai_handoff', 'assigned', 'sender_disconnected'].includes(a.p_kind)) demoError('E_PAYLOAD_INVALID', 'kind');
     const delay = Number(a.p_email_delay_min ?? 10);
     if (![10, 30, 60].includes(delay)) demoError('E_PAYLOAD_INVALID', 'email_delay_min');
     ctx.store.upsert(PREFS, { user_id: ctx.userId, workspace_id: ctx.ws, kind: a.p_kind, push: a.p_push ?? true, email: a.p_email ?? true, email_delay_min: delay, updated_at: ctx.now() }, ['user_id', 'workspace_id', 'kind']);

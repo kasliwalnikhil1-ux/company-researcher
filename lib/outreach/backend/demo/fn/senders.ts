@@ -1,5 +1,5 @@
 /**
- * Demo edge functions: sender-connect, sender-disable, sender-manage, sender-update-proxy, profile.
+ * Demo edge functions: sender-connect, sender-disable, sender-lifecycle, sender-manage, sender-update-proxy, profile.
  *
  * Connecting or reconnecting an account shows the shell's fake connect screen (`ctx.ui.dialog({ kind: 'connect' })`) and
  * then creates / revives a fictional sender locally. The "sign-in link" handed back is a same-app page
@@ -14,8 +14,9 @@ import { engineFor } from '../sim/engine';
 import {
   baselineDoc, computeQa, experimentPayload, experimentResult, latestSnapshot, newChange, ownerApprove, recordSnapshot, revertBuild, settleProfiles, submitChange, T, tokenHex, validate,
 } from '../senders/profile';
-import { addEvent, D, dropFromPools, iso, isMail, senderOr404, setStatus } from '../senders/util';
-import { profileOverview } from '../rpc/senders';
+import { addEvent, D, iso, isMail, MIN, senderOr404, setStatus } from '../senders/util';
+import { holderView, profileOverview } from '../rpc/senders';
+import { DEMO_USER_EMAIL } from '../seed/ids';
 import { DEMO_PREFIX } from '@/lib/outreach/mode';
 
 const PROVIDERS = ['LINKEDIN', 'INSTAGRAM', 'WHATSAPP', 'GMAIL', 'OUTLOOK', 'IMAP'];
@@ -96,31 +97,40 @@ async function senderConnect(req: FnRequest, ctx: Ctx) {
     if (!Number.isFinite(m) || m < 6 || b.account_age_attested !== true) demoError('E_ACCOUNT_TOO_NEW', 'WhatsApp numbers need at least 6 months of real use before outreach');
     ageMonths = Math.floor(m);
   }
-  const ownerEmail = String(b.owner_email ?? '').trim().toLowerCase() || null;
+  // Whose account is this? Mine → the demo user; a teammate's email → that member; anyone else is refused (103)
+  const typed = String(b.holder?.email ?? b.owner_email ?? '').trim().toLowerCase();
+  let ownerUserId: string | null = ctx.userId; let holderMember: Row | undefined;
+  if (b.holder?.mine !== true && typed) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(typed)) demoError('E_PAYLOAD_INVALID', 'Enter the email of the person who signs in to this account');
+    if (typed !== DEMO_USER_EMAIL.toLowerCase()) {
+      holderMember = st.t('outreach_members').find((m) => m.workspace_id === ctx.ws && String(m.email ?? '').toLowerCase() === typed);
+      if (!holderMember) demoError('E_HOLDER_OUTSIDE', `Emails about an account only go to a teammate's sign-in email. Invite ${typed} to the workspace first, or connect the account under your own name.`);
+      ownerUserId = holderMember.user_id;
+    }
+  }
   const browser = provider === 'LINKEDIN' && b.connect_method === 'browser';
   // one sender per owner email and channel (an unfinished sign-in for the same owner is reused)
   let reused: Row | undefined;
-  if (ownerEmail) {
-    const twins = st.t('outreach_senders').filter((s) => s.workspace_id === ctx.ws && s.provider === provider && s.owner_email === ownerEmail && !s.deleted_at && s.status !== 'disabled')
+  if (ownerUserId) {
+    const twins = st.t('outreach_senders').filter((s) => s.workspace_id === ctx.ws && s.provider === provider && s.owner_user_id === ownerUserId && !s.owner_email && !s.deleted_at && s.status !== 'disabled')
       .sort((x, y) => String(x.created_at).localeCompare(String(y.created_at)));
     const connected = twins.find((t) => t.unipile_account_id);
     if (connected && !b.allow_duplicate) {
       const details = { existing_sender_id: connected.id, existing_display_name: connected.display_name, existing_status: connected.status };
-      throw new OutreachError(`${connected.display_name ?? 'This account'} is already connected with this owner email. Reconnect it instead of connecting it again.`, 'E_DUPLICATE_SENDER', { code: 'E_DUPLICATE_SENDER', details });
+      throw new OutreachError(`${connected.display_name ?? 'This account'} is already connected for this person. Reconnect it instead of connecting it again.`, 'E_DUPLICATE_SENDER', { code: 'E_DUPLICATE_SENDER', details });
     }
     reused = twins.find((t) => !t.unipile_account_id && t.status === 'connecting');
   }
 
   await fakeSignIn(ctx, provider, connectMethod(provider, browser ? 'browser' : 'credentials'));
 
-  const who = fictional(ctx, provider, String(b.display_name ?? '').trim() || null, ownerEmail);
+  const who = fictional(ctx, provider, String(b.display_name ?? '').trim() || null, null);
   const mail = isMail(provider);
   const nowMs = Date.now();
   const base: Row = {
-    client_id: b.client_id || null, owner_email: ownerEmail, provider,
+    client_id: b.client_id || null, owner_email: null, owner_user_id: ownerUserId, connected_by: ctx.userId, provider,
     auth_method: browser ? 'browser' : mail ? 'oauth' : 'credentials', timezone: b.timezone || 'UTC', warmup_level: mail ? 3 : 1,
     has_recruiter: provider === 'LINKEDIN' && !!b.recruiter, ...who,
-    ...(mail && !ownerEmail ? { owner_email: who.display_name.includes('@') ? who.display_name : null } : {}),
     warmup_locked_until: provider === 'LINKEDIN' || provider === 'INSTAGRAM' ? iso(nowMs + 7 * D) : null,
     ...(provider === 'WHATSAPP' ? { account_age_attested_at: ctx.now(), account_age_attested_by: ctx.userId, account_age_months: ageMonths } : {}),
   };
@@ -133,7 +143,7 @@ async function senderConnect(req: FnRequest, ctx: Ctx) {
   s = setStatus(st, s, 'ok', null, { unipile_account_id: `demo-acc-${s.id.slice(-8)}`, connected_at: ctx.now(), last_synced_at: ctx.now() });
   if (provider === 'LINKEDIN') { recordSnapshot(st, s, 'baseline', baselineDoc(st, s)); computeQa(st, st.get('outreach_senders', s.id)!); }
   ctx.ui.simulated('Demo account connected. Nothing left the browser.');
-  return { link: landing(s.id), sender_id: s.id, reused: !!reused };
+  return { link: landing(s.id), sender_id: s.id, reused: !!reused, holder: { kind: 'member', user_id: ownerUserId, name: holderMember?.display_name ?? null, mine: ownerUserId === ctx.userId } };
 }
 
 async function senderManage(req: FnRequest, ctx: Ctx) {
@@ -153,15 +163,14 @@ async function senderManage(req: FnRequest, ctx: Ctx) {
     }
     case 'disconnect': {
       if (s.provider === 'WEBCHAT') demoError('E_PAYLOAD_INVALID', 'a website inbox has no connected account');
-      if (s.status === 'disabled') demoError('E_SENDER_NOT_OK', 'This sender is disabled.');
-      const fresh = setStatus(st, s, 'disconnected', 'user_disconnected', { disconnected_at: ctx.now(), previous_unipile_account_id: s.unipile_account_id ?? s.previous_unipile_account_id ?? null, unipile_account_id: null });
+      const fresh = lifecycleRemove(ctx, s, 'app');
       ctx.ui.simulated();
-      return { ok: true, account_deleted: true, sender: fresh };
+      return { ok: true, account_deleted: true, state: 'removed', sender: fresh };
     }
     case 'enable': {
       if (s.status !== 'disabled' || s.deleted_at) demoError('E_SENDER_NOT_OK', 'Only a disabled sender can be re-enabled.');
-      const fresh = setStatus(st, s, 'disconnected', 'user_disconnected', { disconnected_at: s.disconnected_at ?? ctx.now(), unipile_account_id: null });
-      return { ok: true, sender: fresh };
+      const fresh = lifecycleEnable(ctx, s);
+      return { ok: true, state: fresh.status === 'removed' ? 'removed' : 'ok', sender: fresh };
     }
     case 'reconnect_cookie': {
       if (s.auth_method !== 'cookie' || s.status !== 'credentials') return { ok: false, reason: s.auth_method !== 'cookie' ? 'no_cookie' : 'not_disconnected' };
@@ -256,16 +265,184 @@ async function senderManage(req: FnRequest, ctx: Ctx) {
 }
 
 function senderDisable(req: FnRequest, ctx: Ctx) {
-  const st = ctx.store;
   const s = senderOr404(ctx, req.body.sender_id);
-  const remove = !!req.body.delete_unipile;
-  const account = s.unipile_account_id ?? null;
-  setStatus(st, s, 'disabled', 'disabled_by_user', { deleted_at: remove ? ctx.now() : null, unipile_account_id: null, previous_unipile_account_id: account ?? s.previous_unipile_account_id ?? null });
-  // a disabled sender sends nothing: it leaves the sequence pools (a removed one always does, 032)
-  dropFromPools(st, s.id);
-  if (remove || req.body.purge_secrets) st.remove('outreach_sender_tokens', (t) => t.sender_id === s.id);
+  if (req.body.delete_unipile) { lifecycleRemove(ctx, s, 'app'); ctx.ui.simulated(); return { ok: true, state: 'removed', unipile_deleted: true, account_queued: false }; }
+  lifecycleDisable(ctx, s, null);
   ctx.ui.simulated();
-  return { ok: true, unipile_deleted: !!account, account_queued: false };
+  return { ok: true, state: 'disabled', unipile_deleted: false, account_queued: false };
+}
+
+// ---------------------------------------------------------------------------
+// sender-lifecycle (sender-lifecycle-PRD.md): what the database functions of migration 096 do, on the local store
+// ---------------------------------------------------------------------------
+const LIVE_ENR = ['active', 'waiting_connection', 'waiting_delay', 'waiting_task', 'paused'];
+
+function lifecyclePreview(ctx: Ctx, s: Row, action: string): Row {
+  const st = ctx.store;
+  const actions = st.t('outreach_actions').filter((a) => a.sender_id === s.id);
+  const enr = st.t('outreach_enrollments').filter((e) => e.sender_id === s.id && LIVE_ENR.includes(e.status));
+  const seqs = st.t('outreach_sequences').filter((q) => q.workspace_id === ctx.ws);
+  const otherOk = (q: Row) => (q.sender_pool ?? []).filter((id: string) => id !== s.id && st.get('outreach_senders', id)?.status === 'ok' && !st.get('outreach_senders', id)?.deleted_at).length;
+  const bySeq = new Map<string, number>();
+  for (const e of enr) bySeq.set(e.sequence_id, (bySeq.get(e.sequence_id) ?? 0) + 1);
+  const left = seqs.filter((q) => q.status === 'active' && (q.sender_pool ?? []).includes(s.id) && otherOk(q) === 0);
+  const chats = st.t('outreach_chats').filter((c) => c.sender_id === s.id);
+  const chatIds = new Set(chats.map((c) => c.id));
+  return {
+    sender: { id: s.id, name: s.display_name, provider: s.provider, status: s.status, status_reason: s.status_reason, unipile_linked: !!s.unipile_account_id, auto_remove_after_days: s.auto_remove_after_days ?? 30, auto_remove_at: s.auto_remove_at ?? null,
+      erase_scheduled_at: s.erase_scheduled_at ?? null, pause_resume_at: s.pause_resume_at ?? null, removal_pending: false },
+    action,
+    queued_actions: actions.filter((a) => a.status === 'queued').length, in_flight_actions: actions.filter((a) => a.status === 'reserved').length, live_enrollments: enr.length,
+    sequences: [...bySeq.entries()].map(([id, leads]) => { const q = st.get('outreach_sequences', id); return { sequence_id: id, name: q?.name ?? 'Sequence', status: q?.status ?? 'active', leads, other_active_senders: q ? otherOk(q) : 0 }; }).sort((a, b) => b.leads - a.leads),
+    sequences_left_without_sender: left.length,
+    rules_to_pause: st.t('outreach_auto_enroll_rules').filter((r) => r.active && left.some((q) => q.id === r.sequence_id)).length,
+    imports_to_pause: st.t('outreach_import_jobs').filter((j) => j.sender_id === s.id && (j.status === 'queued' || j.status === 'running')).length,
+    ai_runs_scheduled: st.t('outreach_ai_reply_runs').filter((r) => r.sender_id === s.id && r.status === 'scheduled').length,
+    profile_changes_queued: st.t('outreach_profile_changes').filter((c) => c.sender_id === s.id && c.status === 'queued').length,
+    open_tasks: st.t('outreach_tasks').filter((t) => t.sender_id === s.id && !t.completed_at).length,
+    chats: chats.length, messages: st.t('outreach_messages').filter((m) => chatIds.has(m.chat_id)).length,
+    leads_contacted: st.t('outreach_lead_sender_state').filter((x) => x.sender_id === s.id && (x.last_outbound_at || x.invite_sent_at)).length,
+    ai_consents: 0, profile_authority: 0,
+    slot_freed: (action === 'remove' || action === 'erase') && !!s.unipile_account_id && s.provider !== 'WEBCHAT',
+  };
+}
+
+function lifecycleDisable(ctx: Ctx, s: Row, reason: string | null): Row {
+  const st = ctx.store;
+  const pv = lifecyclePreview(ctx, s, 'disable');
+  const exited = pv.sequences.map((q: Row) => ({ sequence_id: q.sequence_id, name: q.name, lead_ids: st.t('outreach_enrollments').filter((e) => e.sender_id === s.id && e.sequence_id === q.sequence_id && LIVE_ENR.includes(e.status)).map((e) => e.lead_id) }));
+  const left = new Set(st.t('outreach_sequences').filter((q) => q.status === 'active' && (q.sender_pool ?? []).includes(s.id) && !(q.sender_pool ?? []).some((id: string) => id !== s.id && st.get('outreach_senders', id)?.status === 'ok')).map((q) => q.id));
+  const fresh = setStatus(st, s, 'disabled', reason ?? 'disabled_by_user', { disabled_at: ctx.now(), disabled_by: ctx.userId, disable_reason: reason, auto_remove_at: iso(Date.now() + (s.auto_remove_after_days ?? 30) * D), paused_at: null, pause_resume_at: null });
+  st.update('outreach_auto_enroll_rules', (r) => r.active && left.has(r.sequence_id), { active: false, paused_reason: 'sender_disabled', paused_at: ctx.now() });
+  st.update('outreach_import_jobs', (j) => j.sender_id === s.id && (j.status === 'queued' || j.status === 'running'), { status: 'paused', paused_reason: 'sender_disabled' });
+  st.update('outreach_ai_reply_runs', (r) => r.sender_id === s.id && r.status === 'scheduled', { status: 'cancelled' });
+  addEvent(st, s.id, 'lifecycle', { action: 'disable', by: ctx.userId, reason, counts: { queued_actions: pv.queued_actions, live_enrollments: pv.live_enrollments } });
+  return { ...fresh, exited, counts: pv };
+}
+
+function lifecycleEnable(ctx: Ctx, s: Row): Row {
+  const st = ctx.store;
+  if (!s.unipile_account_id) {
+    const fresh = setStatus(st, s, 'removed', s.status_reason ?? 'disabled_by_user', { removed_at: s.disabled_at ?? ctx.now(), removed_via: 'app', auto_remove_at: null });
+    addEvent(st, s.id, 'lifecycle', { action: 'enable', by: ctx.userId, result: 'removed' });
+    return fresh;
+  }
+  const fresh = setStatus(st, s, 'ok', null, { disabled_at: null, disabled_by: null, disable_reason: null, auto_remove_at: null, auto_remove_notice_at: null });
+  addEvent(st, s.id, 'lifecycle', { action: 'enable', by: ctx.userId, result: 'ok' });
+  return fresh;
+}
+
+function lifecycleRemove(ctx: Ctx, s: Row, via: string): Row {
+  const st = ctx.store;
+  let cur = s;
+  if (cur.status !== 'disabled') cur = lifecycleDisable(ctx, cur, `remove:${via}`);
+  const account = cur.unipile_account_id ?? null;
+  const fresh = setStatus(st, cur, 'removed', cur.status_reason ?? null, { removed_at: ctx.now(), removed_via: via, removed_by: ctx.userId, previous_unipile_account_id: account ?? cur.previous_unipile_account_id ?? null,
+    unipile_account_id_history: [...(cur.unipile_account_id_history ?? []), ...(account ? [account] : [])], auto_remove_at: null, auto_remove_notice_at: null, extension_token_issued_at: null });
+  st.update('outreach_import_jobs', (j) => j.sender_id === s.id && ['queued', 'running', 'paused'].includes(j.status), { status: 'cancelled', error: 'sender_removed' });
+  st.update('outreach_tasks', (t) => t.sender_id === s.id && t.kind === 'reconnect' && !t.completed_at, { completed_at: ctx.now() });
+  addEvent(st, s.id, 'lifecycle', { action: 'remove', via, by: ctx.userId, account_id: account });
+  return fresh;
+}
+
+function senderLifecycle(req: FnRequest, ctx: Ctx) {
+  const st = ctx.store;
+  const b = req.body;
+  const s = senderOr404(ctx, b.sender_id);
+  const action = String(b.action ?? '');
+  if (s.provider === 'WEBCHAT' && action !== 'preview') demoError('E_PAYLOAD_INVALID', 'A website inbox is managed from its Website agents page.');
+  switch (action) {
+    case 'preview': return lifecyclePreview(ctx, s, String(b.preview_action ?? 'disable'));
+    case 'pause': {
+      if (s.status !== 'ok') demoError('E_SENDER_NOT_OK', `only a connected sender can be paused (it is ${s.status})`);
+      const at = b.resume_at ? String(b.resume_at) : null;
+      const fresh = setStatus(st, s, 'paused', 'user_paused', { paused_at: ctx.now(), paused_by: ctx.userId, pause_resume_at: at });
+      st.update('outreach_ai_reply_runs', (r) => r.sender_id === s.id && r.status === 'scheduled', { status: 'draft_ready' });
+      addEvent(st, s.id, 'lifecycle', { action: 'pause', by: ctx.userId, resume_at: at });
+      return { ok: true, pause_resume_at: at, sender: fresh };
+    }
+    case 'resume': {
+      if (s.status !== 'paused') demoError('E_SENDER_NOT_OK', 'the sender is not paused');
+      if (s.status_reason === 'over_plan_limit') demoError('E_ACCOUNT_LIMIT', 'This account is paused because the plan has fewer accounts than are connected.');
+      const overdue = st.t('outreach_actions').filter((a) => a.sender_id === s.id && a.status === 'queued' && new Date(a.scheduled_for).getTime() < Date.now());
+      overdue.forEach((a, i) => st.update('outreach_actions', a.id, { scheduled_for: iso(Date.now() + Math.floor(i / 5) * D + (5 + (i % 5) * 90) * MIN) }));
+      const fresh = setStatus(st, s, 'ok', null, { paused_at: null, paused_by: null, pause_resume_at: null });
+      addEvent(st, s.id, 'lifecycle', { action: 'resume', by: ctx.userId, backlog_spread: overdue.length });
+      return { ok: true, backlog_spread: overdue.length, sender: fresh };
+    }
+    case 'disable': {
+      if (s.status === 'removed' || s.status === 'erased') demoError('E_SENDER_NOT_OK', `this sender is ${s.status}`);
+      if (s.status === 'disabled') return { ok: true, already: true, sender: s };
+      const r = lifecycleDisable(ctx, s, b.reason ? String(b.reason) : null);
+      ctx.ui.simulated();
+      const { exited, counts, ...sender } = r;
+      return { ok: true, exited, counts, sender };
+    }
+    case 'enable': {
+      if (s.status !== 'disabled') demoError('E_SENDER_NOT_OK', `only a disabled sender can be enabled (it is ${s.status})`);
+      const fresh = lifecycleEnable(ctx, s);
+      return { ok: true, state: fresh.status === 'removed' ? 'removed' : 'ok', sender: fresh };
+    }
+    case 'remove': {
+      if (s.status === 'removed' || s.status === 'erased') return { ok: true, state: 'already', sender: s };
+      const fresh = lifecycleRemove(ctx, s, 'app');
+      ctx.ui.simulated();
+      return { ok: true, state: 'removed', account_deleted: true, sender: fresh };
+    }
+    case 'erase_schedule': {
+      let cur = s;
+      if (cur.status !== 'removed' && cur.status !== 'erased') cur = lifecycleRemove(ctx, cur, 'app');
+      const at = iso(Date.now() + 24 * 60 * MIN);
+      const fresh = st.update('outreach_senders', cur.id, { erase_scheduled_at: at, erase_requested_by: ctx.userId })[0] ?? cur;
+      addEvent(st, s.id, 'lifecycle', { action: 'erase_scheduled', by: ctx.userId, at });
+      ctx.ui.simulated('Demo: the erase is scheduled; nothing is deleted in the tour.');
+      return { ok: true, erase_scheduled_at: at, sender: fresh };
+    }
+    case 'erase_cancel': {
+      const fresh = st.update('outreach_senders', s.id, { erase_scheduled_at: null, erase_requested_by: null })[0] ?? s;
+      addEvent(st, s.id, 'lifecycle', { action: 'erase_cancelled', by: ctx.userId });
+      return { ok: true, sender: fresh };
+    }
+    // ---------------------------------------------------------------- whose account (sender-lifecycle v1.2 §5.8.1)
+    case 'holder': return holderView(ctx, s);
+    case 'set_holder': {
+      const h = b.holder && typeof b.holder === 'object' ? (b.holder as Row) : null;
+      if (!h || (!h.mine && !h.user_id && !h.email)) demoError('E_PAYLOAD_INVALID', 'holder must be {mine: true}, {user_id} or {email}');
+      if (s.status === 'erased') demoError('E_CONFLICT', 'an erased sender has no holder');
+      const old = { user_id: s.owner_user_id ?? null, email: s.owner_email ?? null };
+      let user_id: string | null = ctx.userId; const email: string | null = null; let notify_member: string | null = null;
+      if (!h.mine && h.user_id) {
+        const m = st.t('outreach_members').find((x) => x.workspace_id === ctx.ws && x.user_id === String(h.user_id));
+        if (!m) demoError('E_PAYLOAD_INVALID', 'that person is not a member of this workspace');
+        user_id = m.user_id; if (m.user_id !== ctx.userId) notify_member = m.user_id;
+      } else if (!h.mine) {
+        const em = String(h.email ?? '').trim().toLowerCase();
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) demoError('E_PAYLOAD_INVALID', 'enter the email of the person who signs in to this account');
+        if (em !== DEMO_USER_EMAIL.toLowerCase()) {
+          const m = st.t('outreach_members').find((x) => x.workspace_id === ctx.ws && String(x.email ?? '').toLowerCase() === em);
+          if (!m) demoError('E_HOLDER_OUTSIDE', `Emails about an account only go to a teammate's sign-in email. Invite ${em} to the workspace first.`);
+          user_id = m.user_id; notify_member = m.user_id;
+        }
+      }
+      const changed = user_id !== old.user_id || email !== old.email;
+      if (!changed) return { ok: true, changed: false, holder: holderView(ctx, s), view: holderView(ctx, s) };
+      const fresh = st.update('outreach_senders', s.id, { owner_user_id: user_id, owner_email: email, connected_by: s.connected_by ?? ctx.userId })[0] ?? s;
+      const links = st.update(T.links, (l) => l.sender_id === s.id && !l.accepted_at && !l.declined_at && new Date(l.expires_at).getTime() > Date.now(), { expires_at: ctx.now() }).length;
+      const grants = st.update('outreach_profile_authority', (g) => g.sender_id === s.id && !g.revoked_at, { revoked_at: ctx.now(), revoked_reason: 'holder_changed' }).length
+        + st.update('outreach_ai_reply_consent', (g) => g.sender_id === s.id && !g.revoked_at, { revoked_at: ctx.now(), revoked_reason: 'holder_changed' }).length;
+      addEvent(st, s.id, 'lifecycle', { action: 'holder_changed', by: ctx.userId, from: old, to: { user_id, email }, links_cancelled: links, grants_revoked: grants });
+      ctx.ui.simulated(old.email && !user_id ? undefined : old.email ? `Demo: ${old.email} would be told they are no longer the contact.` : undefined);
+      return { ok: true, changed: true, old, new: { user_id, email }, notify_member, old_outside_email: old.user_id ? null : old.email, links_cancelled: links, grants_revoked: grants, holder: holderView(ctx, fresh), view: holderView(ctx, fresh) };
+    }
+    case 'send_signin_link': {
+      if (!['credentials', 'error'].includes(String(s.status))) demoError('E_SENDER_NOT_OK', 'This sender is not signed out');
+      const fresh = st.update('outreach_senders', s.id, { holder_notified_at: ctx.now(), holder_reminders_sent: 0, holder_email_held_until: null, reconnect_notified_at: ctx.now(), reconnect_reminders: 0 })[0] ?? s;
+      const h = holderView(ctx, fresh);
+      ctx.ui.simulated('Demo: the sign-in email is not sent in the tour.');
+      return { ok: true, sent: true, to: h.email ?? DEMO_USER_EMAIL, sender: fresh };
+    }
+    default: demoError('E_PAYLOAD_INVALID', `unknown action ${action}`);
+  }
 }
 
 function senderUpdateProxy(req: FnRequest, ctx: Ctx) {
@@ -478,6 +655,7 @@ async function profileFn(req: FnRequest, ctx: Ctx) {
 export const sendersFn = {
   'sender-connect': senderConnect,
   'sender-disable': senderDisable,
+  'sender-lifecycle': senderLifecycle,
   'sender-manage': senderManage,
   'sender-update-proxy': senderUpdateProxy,
   profile: profileFn,

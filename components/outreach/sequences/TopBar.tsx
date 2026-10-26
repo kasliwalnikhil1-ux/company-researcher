@@ -12,9 +12,9 @@ import { fmtClock, fmtInt, plural, type SequenceExt } from './publishTypes';
 export type StatusAction = 'activate' | 'pause' | 'resume' | 'archive' | 'draft';
 
 /** Sections of the builder shown as tabs, in the order of the tab row. */
-export type BuilderTab = 'steps' | 'senders' | 'leads' | 'auto' | 'ai' | 'settings' | 'versions';
-export const BUILDER_TABS: BuilderTab[] = ['steps', 'senders', 'leads', 'auto', 'ai', 'settings', 'versions'];
-const TAB_LABEL: Record<BuilderTab, string> = { steps: 'Steps', senders: 'Senders', leads: 'Leads', auto: 'Auto-enrol', ai: 'AI', settings: 'Settings', versions: 'Versions' };
+export type BuilderTab = 'steps' | 'results' | 'senders' | 'leads' | 'auto' | 'ai' | 'settings' | 'versions';
+export const BUILDER_TABS: BuilderTab[] = ['steps', 'results', 'senders', 'leads', 'auto', 'ai', 'settings', 'versions'];
+const TAB_LABEL: Record<BuilderTab, string> = { steps: 'Steps', results: 'Analytics', senders: 'Senders', leads: 'Leads', auto: 'Auto-enrol', ai: 'AI Replies', settings: 'Settings', versions: 'Versions' };
 
 export interface DraftIndicator {
   status: DraftSaveStatus;

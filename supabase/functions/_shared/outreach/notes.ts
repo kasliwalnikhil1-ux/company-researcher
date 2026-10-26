@@ -66,7 +66,7 @@ export async function runMentionEmails(): Promise<Record<string, unknown>> {
        <p style="margin-top:18px">${button(open, "Open in inbox", branding)}</p>
        <p style="font-size:12px;color:#9ca3af;margin-top:14px">You get this email because the mention was still unread after your delay. Change it under Settings → Notifications.</p>`,
       branding, { audience: "team" });
-    const ok = await sendEmail(first.email, subject, html, undefined, { branding });
+    const ok = await sendEmail(first.email, subject, html, undefined, { branding, type: "mention", workspaceId: first.workspace_id, recipientUserId: first.user_id, idempotencyKey: `mention:${items.map((i) => i.note_id).join(",").slice(0, 200)}:${first.user_id}` });
     if (ok) emails++; else failed++;
     // a failed send is not retried forever: the in-app notification stands, and the mention is marked to keep the queue bounded
     done.push(...items.map((i) => ({ note_id: i.note_id, user_id: i.user_id })));

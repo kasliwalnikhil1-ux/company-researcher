@@ -54,7 +54,7 @@ export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null
 
   if (!sequenceId) {
     return (
-      <TabPage title="AI replies" subtitle="AI automatically replies to prospects who respond to this sequence." wide>
+      <TabPage title="AI Replies" subtitle="AI automatically replies to prospects who respond to this sequence." wide>
         <Note>Save the sequence first. AI replies are set per sequence once it exists.</Note>
       </TabPage>
     );
@@ -70,7 +70,7 @@ export default function AiRepliesTab({ sequenceId }: { sequenceId: string | null
   const current = tabs.find((t) => t.k === sub);
   const panel = (k: SubTab) => cn('space-y-4', sub !== k && 'hidden');
   return (
-    <TabPage title="AI replies" subtitle="AI automatically replies to prospects who respond to this sequence." wide>
+    <TabPage title="AI Replies" subtitle="AI automatically replies to prospects who respond to this sequence." wide>
       {q.isLoading && <Spinner />}
       {q.error && <ErrorBox message={errText(q.error)} />}
       {s && ws && (

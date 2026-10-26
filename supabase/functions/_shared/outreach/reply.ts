@@ -187,7 +187,9 @@ export async function sendReply(input: ReplyInput): Promise<Record<string, unkno
     const msg = await rpc<Record<string, unknown>>("webchat_agent_send", { p_chat: chat.id, p_text: input.text ?? "", p_content_type: stored.length ? "attachment" : "text", p_attrs: input.suggestion_id ? { internal: { suggestion_id: input.suggestion_id } } : {}, p_attachments: stored, p_actor: input.userId });
     return msg;
   }
-  if (!sender || sender.status !== "ok" || !sender.unipile_account_id) throw new HttpError(409, "E_SENDER_NOT_OK", "sender is not connected");
+  if (!sender || !sender.unipile_account_id || !(sender.status === "ok" || (sender.status === "paused" && sender.pause_reason !== "billing"))) {
+    throw new HttpError(409, sender?.status === "paused" ? "E_SENDER_PAUSED" : "E_SENDER_NOT_OK", sender?.status === "paused" ? "The workspace is paused for billing; replies resume once payment is updated" : "sender is not connected");
+  }
   let text = (input.text ?? "").trim();
   let bookingUrl: string | null = null;
   if (input.booking) {

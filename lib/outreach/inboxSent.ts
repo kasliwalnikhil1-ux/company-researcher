@@ -19,7 +19,8 @@ import type { Provider } from './types';
 
 // --------------------------------------------------------------------------------------------- types
 export type InboxView = 'replies' | 'sent';
-export type ReplyChip = 'all' | 'needs_reply' | 'waiting_on_them';
+/** `other` (094): conversations with newsletters, notifications and company pages; never in the three people chips. */
+export type ReplyChip = 'all' | 'needs_reply' | 'waiting_on_them' | 'other';
 export type SentSegment = 'sent' | 'scheduled' | 'failed';
 export type SentChannel = 'LINKEDIN' | 'EMAIL' | 'WHATSAPP' | 'INSTAGRAM';
 export type SentSource = 'sequence' | 'teammate' | 'ai' | 'outside_app';
@@ -98,11 +99,12 @@ export const VIEW_TOOLTIP: Record<InboxView, string> = {
   replies: 'Conversations where the other person has written.',
   sent: "Everything that went out from your senders, and what's about to.",
 };
-export const CHIP_LABEL: Record<ReplyChip, string> = { all: 'All', needs_reply: 'Needs reply', waiting_on_them: 'Waiting on them' };
+export const CHIP_LABEL: Record<ReplyChip, string> = { all: 'All', needs_reply: 'Needs reply', waiting_on_them: 'Waiting on them', other: 'Other' };
 export const CHIP_TOOLTIP: Record<ReplyChip, string> = {
-  all: 'Every conversation where they have written, latest message first',
+  all: 'Every conversation where a person has written, latest message first',
   needs_reply: 'Their message is the latest, the conversation is open and the AI is not answering it. Longest waiting first.',
   waiting_on_them: 'Our message is the latest',
+  other: 'Newsletters, notifications, no-reply senders and company pages. They are not leads and never count as replies.',
 };
 export const SEGMENT_LABEL: Record<SentSegment, string> = { sent: 'Sent', scheduled: 'Scheduled', failed: 'Failed' };
 export const SEGMENT_TOOLTIP: Record<SentSegment, string> = {
@@ -302,8 +304,10 @@ export function useSentSearch(ws: string | null | undefined, search: string, ena
   });
 }
 
-export function useInboxCounts(ws: string | null | undefined, f: { assigned_to?: string | null; sender_id?: string | null; client_id?: string | null; provider?: string | null }) {
-  const args = { assigned_to: f.assigned_to ?? null, sender_id: f.sender_id ?? null, client_id: f.client_id ?? null, provider: f.provider ?? null };
+/** The Needs reply count follows the inbox's Sender / Channel / Client filters (several senders or channels at once, 093). */
+export function useInboxCounts(ws: string | null | undefined, f: { assigned_to?: string | null; sender_ids?: string[] | null; client_id?: string | null; providers?: string[] | null }) {
+  const list = (xs: string[] | null | undefined) => (xs?.length ? Array.from(new Set(xs)).sort() : null);
+  const args = { assigned_to: f.assigned_to ?? null, sender_ids: list(f.sender_ids), client_id: f.client_id ?? null, providers: list(f.providers) };
   return useQuery({
     queryKey: sentKeys.counts(ws ?? '', args), enabled: !!ws,
     refetchInterval: 60_000, refetchOnWindowFocus: true, staleTime: 15_000,

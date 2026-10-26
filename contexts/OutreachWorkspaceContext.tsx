@@ -80,7 +80,8 @@ export function OutreachWorkspaceProvider({ children }: { children: React.ReactN
 
   const workspace = useMemo(() => workspaces.find((w) => w.id === currentId) ?? null, [workspaces, currentId]);
   const role = workspace?.role ?? null;
-  const suspended = ['suspended', 'cancelled', 'trial_expired'].includes(workspace?.plan ?? '');
+  // read-only: suspended for billing, subscription ended, trial ended. billing_status (sender-lifecycle v1.2 D17) is derived from the plan; both are checked.
+  const suspended = ['suspended', 'cancelled', 'trial_expired'].includes(workspace?.plan ?? '') || ['suspended', 'canceled', 'trial_expired'].includes(workspace?.billing_status ?? '');
   const tz = (workspace?.settings as Record<string, unknown> | undefined)?.timezone;
 
   const value: Ctx = {

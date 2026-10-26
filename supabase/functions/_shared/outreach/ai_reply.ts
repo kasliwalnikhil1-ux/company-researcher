@@ -11,6 +11,7 @@ import { deliverChatMessage } from "./reply.ts";
 import { classifyMessageById } from "./workers.ts";
 import { UnipileError } from "./unipile.ts";
 import { sendEmail, layout, button, esc, workspaceBranding, workspaceRecipients, emailConfigured } from "./notify.ts";
+import { sendHolderEmail, teamRecipients } from "./email.ts";
 import { computeSendAt, evaluateGates, floorPrecheck, minMode, nextWindowStart, parseCountry, validateDraft, factsOf, CLOSING, type Mode, type Schedule } from "./ai_reply_rules.ts";
 import {
   runEngine, contextFromFacts, patchFromResult, floorSha, settingsOf, parseJsonLoose, stopRulesOf, effectiveBody, fillPrompt,
@@ -631,8 +632,9 @@ async function assigneeEmails(workspaceId: string, chat: Row | null, sequenceId:
     userId = q?.created_by ?? null;
   }
   if (userId) {
-    const { data: m } = await admin.from("outreach_members").select("email").eq("workspace_id", workspaceId).eq("user_id", userId).maybeSingle();
-    if (m?.email) return [String(m.email).toLowerCase()];
+    // the assignee's sign-in email (sender-lifecycle-PRD v1.2 D13), never a stored copy
+    const [p] = await teamRecipients(workspaceId, { user_ids: [userId] });
+    if (p?.email) return [p.email];
   }
   return workspaceRecipients(workspaceId, { senderId: chat?.sender_id ?? null, clientId: chat?.client_id ?? null });
 }
@@ -652,7 +654,7 @@ async function notifyEscalation(runId: string, headline?: string): Promise<void>
   const html = layout(esc(headline ?? `The AI handed ${who} to you`),
     `<p><b>Why:</b> ${why}.</p><p><b>They wrote:</b></p>${words}${r.draft_text ? `<p style="margin-top:14px"><b>The AI's draft</b> (not sent):</p><p style="padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px">${esc(r.draft_text)}</p>` : ""}
      <p style="margin-top:18px">${button(url, r.draft_text ? "Review and send the draft" : "Open the conversation", branding)}</p>`, branding, { audience: "team" });
-  for (const to of recipients) await sendEmail(to, `${headline ?? "AI handed over a conversation"}: ${who}`, html, undefined, { branding });
+  for (const to of recipients) await sendEmail(to, `${headline ?? "AI handed over a conversation"}: ${who}`, html, undefined, { branding, type: "ai_handoff", workspaceId: r.workspace_id, clientId: r.client_id, idempotencyKey: `ai_handoff:${r.id}:${to}` });
 }
 
 const REASON_TEXT: Record<string, string> = {
@@ -682,7 +684,7 @@ export async function notifyHandoff(chatId: string, handoff: Row): Promise<void>
     `<p>The AI stopped replying in this conversation: <b>${esc(label)}</b>.${chat.ai_handoff_rule ? ` Rule: “${esc(chat.ai_handoff_rule)}”.` : ""}</p>
      <p>It will not answer again here unless you resume it. Reply from the inbox.</p>
      <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/inbox/${chatId}`, "Open the conversation", branding)}</p>`, branding, { audience: "team" });
-  for (const to of recipients) await sendEmail(to, `Over to you: ${who} · ${label}`, html, undefined, { branding });
+  for (const to of recipients) await sendEmail(to, `Over to you: ${who} · ${label}`, html, undefined, { branding, type: "ai_handoff", workspaceId: chat.workspace_id, clientId: chat.client_id, idempotencyKey: `ai_handoff:${chatId}:${handoff.reason}:${new Date().toISOString().slice(0, 10)}:${to}` });
 }
 
 /** §6: a handed-off prospect came back after a gap — the owner is told, the task was reopened by SQL. */
@@ -698,7 +700,7 @@ export async function notifyReturned(chatId: string, gapDays: number | null): Pr
   const html = layout(esc(`${who} came back${gapDays != null ? ` after ${Math.round(gapDays)} days` : ""}`),
     `<p>They wrote again in a conversation the AI handed to a person${when ? ` on ${esc(when)}` : ""}${chat.ai_handoff_reason ? ` (${esc(HANDOFF_TEXT[chat.ai_handoff_reason] ?? chat.ai_handoff_reason)})` : ""}. The AI does not reply here; it is yours.</p>
      <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/inbox/${chatId}`, "Open the conversation", branding)}</p>`, branding, { audience: "team" });
-  for (const to of recipients) await sendEmail(to, `${who} came back — over to you`, html, undefined, { branding });
+  for (const to of recipients) await sendEmail(to, `${who} came back — over to you`, html, undefined, { branding, type: "ai_handback", workspaceId: chat.workspace_id, clientId: chat.client_id, idempotencyKey: `ai_handback:${chatId}:${new Date().toISOString().slice(0, 10)}:${to}` });
 }
 
 /** §4.3 warm-up: "AI will reply to Priya in 30 min — Send now · Edit · Cancel". */
@@ -715,7 +717,7 @@ async function notifyWarmupHold(runId: string, sendAt: Date, left: number): Prom
     `<p>Warm-up: the first replies of this sequence wait so you can check them (${esc(Math.max(0, left - 1))} left after this one).</p>
      <p style="padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px">${esc(r.draft_text ?? "")}</p>
      <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/inbox/${r.chat_id}`, "Send now · Edit · Cancel", branding)}</p>`, branding, { audience: "team" });
-  for (const to of recipients) await sendEmail(to, `AI will reply to ${who} in ${mins} min`, html, undefined, { branding });
+  for (const to of recipients) await sendEmail(to, `AI will reply to ${who} in ${mins} min`, html, undefined, { branding, type: "ai_reply_scheduled", workspaceId: r.workspace_id, idempotencyKey: `ai_reply_scheduled:${runId}:${to}` });
 }
 
 async function managerRecipients(workspaceId: string): Promise<string[]> { return workspaceRecipients(workspaceId, {}); }
@@ -734,12 +736,12 @@ async function notifyBreaker(it: Row): Promise<void> {
       ? `<p>${esc(it.bad)} of the last ${esc(it.n)} AI replies in <b>${esc(name)}</b> were cancelled or edited during the hold, above the ${Math.round(Number(it.threshold) * 100)}% limit. AI replies there are drafts for a person again.</p>${reasons ? `<p>What people changed:</p><ul>${reasons}</ul>` : ""}<p>Fix the prompt rules named above, then turn Auto back on with a note.</p>`
       : `<p>${esc(it.bot_questions)} of ${esc(it.sent)} AI replies in <b>${esc(name)}</b> drew an "are you a bot?" answer (limit 2%). AI replies there are drafts for a person again.</p>`;
     const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/sequences/${it.sequence_id}?tab=ai`, "Open the sequence", branding)}</p>`, branding, { audience: "team" });
-    for (const e of to) await sendEmail(e, subject, html, undefined, { branding });
+    for (const e of to) await sendEmail(e, subject, html, undefined, { branding, type: "ai_reply_breaker", workspaceId: it.workspace_id, idempotencyKey: `ai_reply_breaker:${it.kind}:${it.sequence_id}:${new Date().toISOString().slice(0, 10)}:${e}` });
   } else if (it.kind === "too_early_to_pitch") {
     subject = "AI replies are pitching too early";
     body = `<p>${esc(it.n)} AI replies were cancelled this week as "too early to pitch". Consider raising <b>Pitch after</b> in the sequence's AI replies, or making the early stages ask more.</p>`;
     const html = layout(esc(subject), `${body}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/setup/replies?tab=reports`, "Open AI replies", branding)}</p>`, branding, { audience: "team" });
-    for (const e of to) await sendEmail(e, subject, html, undefined, { branding });
+    for (const e of to) await sendEmail(e, subject, html, undefined, { branding, type: "ai_reply_breaker", workspaceId: it.workspace_id, idempotencyKey: `ai_reply_breaker:${it.kind}:${new Date().toISOString().slice(0, 10)}:${e}` });
   }
 }
 
@@ -755,7 +757,7 @@ async function sendManagerDigests(): Promise<number> {
     const html = layout("AI replies: last 24 hours",
       `<p><b>${esc(w.sent_ai)}</b> sent on Auto · <b>${esc(w.sent_draft)}</b> AI drafts sent by your team · <b>${esc(w.handed_off ?? 0)}</b> handed off · <b>${esc(w.escalated)}</b> handed to a person · <b>${esc(w.cancelled)}</b> cancelled · <b>${esc(w.no_reply)}</b> needed no reply.</p>${reasons ? `<p>Why things were cancelled or handed over:</p><ul>${reasons}</ul>` : ""}${downs}
        <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/activity?feature=reply`, "Open Activity", branding)}</p>`, branding, { audience: "team" });
-    for (const e of to) if (await sendEmail(e, "AI replies: daily summary", html, undefined, { branding })) n++;
+    for (const e of to) if (await sendEmail(e, "AI replies: daily summary", html, undefined, { branding, type: "manager_daily_digest", workspaceId: w.workspace_id, idempotencyKey: `manager_daily_digest:${w.workspace_id}:${new Date().toISOString().slice(0, 10)}:${e}` })) n++;
   }
   return n;
 }
@@ -764,14 +766,16 @@ async function sendOwnerDigests(): Promise<number> {
   const rows = await rpc<Row[]>("ai_reply_digest_data", { p_kind: "owner", p_since: new Date(Date.now() - 7 * 24 * 3600_000).toISOString() });
   let n = 0;
   for (const s of rows ?? []) {
-    if (!s.owner_email) continue;
     const branding = await workspaceBranding(s.workspace_id);
     const items = (s.items ?? []).slice(0, 100).map((i: Row) =>
       `<li style="margin-bottom:8px"><b>${esc(i.lead ?? "Lead")}</b> — ${esc(String(i.text ?? "").slice(0, 200))} <a href="${WEB_ORIGIN}/outreach/inbox/${i.chat_id}">open</a></li>`).join("");
     const seqs = (s.sequences ?? []).length ? `<p>Sequences that used your approval: ${(s.sequences as string[]).map((x) => `<b>${esc(x)}</b>`).join(", ")}.</p>` : "";
-    const html = layout(`What the AI sent as ${esc(s.sender_name ?? "you")} this week`,
-      `<p>These replies went out on your LinkedIn account through Auto in the last 7 days:</p>${seqs}<ul>${items}</ul><p>You can turn it off at any time with the link in your approval email, or ask your team to switch it off.</p>`, branding, { audience: "client" });
-    if (await sendEmail(String(s.owner_email), "Your weekly AI reply summary", html, undefined, { branding })) n++;
+    void branding;
+    // members only (sender lifecycle open question 9): an outside holder sees nothing until they opt in
+    const r = await sendHolderEmail({ sender_id: String(s.sender_id), type: "ai_reply_owner_digest", subject: `What the AI sent as ${String(s.sender_name ?? "you")} this week`,
+      body: `<p>These replies went out on your LinkedIn account through Auto in the last 7 days:</p>${seqs}<ul>${items}</ul><p>You can turn it off at any time from the sender page, or ask your team to switch it off.</p>`,
+      audience: "members_only", idempotency_key: `ai_reply_owner_digest:${s.sender_id}:${new Date().toISOString().slice(0, 10)}` });
+    if (r.sent) n++;
   }
   return n;
 }
@@ -1012,19 +1016,23 @@ export async function consentRequest(user: AuthedUser, b: { workspace_id: string
     if (error) throw rpcError(error.message);
     return { granted: true, sender_name: s.display_name };
   }
+  // a teammate's own account: they grant it in the app (sender-lifecycle-PRD v1.2 §5.8.1); nobody can grant on their behalf
+  if (s.owner_user_id) {
+    const holder = await rpc<Row>("sender_holder", { p_sender: s.id }).catch(() => null);
+    return { granted: false, member_holder: true, holder_name: holder?.name ?? null, sender_name: s.display_name };
+  }
   const { data: w } = await admin.from("outreach_workspace_reply_settings").select("max_ai_sends_per_sender_day").eq("workspace_id", b.workspace_id).maybeSingle();
   const scope = { daily_cap: Math.min(40, Number(w?.max_ai_sends_per_sender_day ?? 25)), grant: "AI may reply as me in the sequences my team turns on." };
   const examples = await consentExamples(b.workspace_id, s.id).catch(() => []);
   const link = await rpc<Row>("ai_consent_link_create", { p_sender: s.id, p_by: user.id, p_email: s.owner_email, p_scope: scope, p_examples: examples });
   const url = `${WEB_ORIGIN}/ai-reply-consent/${link.token}`;
   let emailed = false;
-  if (s.owner_email && emailConfigured()) {
-    const branding = await workspaceBranding(b.workspace_id);
-    const html = layout("Can the AI answer LinkedIn replies as you?",
-      `<p>Your team would like the AI to answer replies from prospects as <b>${esc(s.display_name ?? "your LinkedIn account")}</b> in the sequences they turn on: after a short hold, following a written prompt. It never claims to be human, and a person takes over as soon as a meeting is on the table.</p>
+  if (emailConfigured()) {
+    const r = await sendHolderEmail({ sender_id: s.id, type: "ai_reply_consent_request", subject: "Approve AI replies on your LinkedIn account", audience: "outside_only",
+      body: `<p>Your team would like the AI to answer replies from prospects as <b>${esc(s.display_name ?? "your LinkedIn account")}</b> in the sequences they turn on: after a short hold, following a written prompt. It never claims to be human, and a person takes over as soon as a meeting is on the table.</p>
        <p>Before anything is sent, read what it may do, the limit (up to ${esc(scope.daily_cap)} replies a day) and three example replies from your own conversations. One approval covers every sequence your team turns on; you get a weekly summary and can turn it off with one click.</p>
-       <p style="margin-top:18px">${button(url, "Review and decide", branding)}</p><p>The link works for 7 days. Nothing changes if you ignore it.</p>`, branding, { audience: "client" });
-    emailed = await sendEmail(String(s.owner_email), "Approve AI replies on your LinkedIn account", html, undefined, { branding });
+       <p>The link works for 7 days. Nothing changes if you ignore it.</p>`, action: { label: "Review and decide", url }, idempotency_key: `ai_reply_consent_request:${s.id}:${link.token.slice(0, 12)}` });
+    emailed = r.sent;
   }
   return { link: emailed ? undefined : url, emailed, expires_at: link.expires_at, sender_name: s.display_name };
 }
@@ -1041,11 +1049,10 @@ export async function consentAccept(token: string, evidence: Row): Promise<Row> 
   try { r = await rpc<Row>("ai_consent_link_accept", { p_token: token, p_evidence: evidence }); }
   catch (e) { throw rpcError(String((e as any)?.message ?? e)); }
   const revokeUrl = `${WEB_ORIGIN}/ai-reply-consent/revoke/${r.revoke_token}`;
-  if (r.email && emailConfigured()) {
-    const branding = await workspaceBranding(r.workspace_id);
-    const html = layout("AI replies are approved for your LinkedIn account",
-      `<p>Thanks. The AI may now answer LinkedIn replies as you in the sequences your team turns on, within the limits you saw. You get a weekly summary of what it sent.</p><p>To turn it off at any time, use this link. It works in one click and cancels any reply waiting to go out:</p><p style="margin-top:14px">${button(revokeUrl, "Turn AI replies off", branding)}</p>`, branding, { audience: "client" });
-    await sendEmail(String(r.email), "AI replies are on — how to turn them off", html, undefined, { branding }).catch(() => false);
+  if (r.sender_id && emailConfigured()) {
+    await sendHolderEmail({ sender_id: String(r.sender_id), type: "ai_reply_consent_confirmed", subject: "AI replies are on — how to turn them off",
+      body: `<p>Thanks. The AI may now answer LinkedIn replies as you in the sequences your team turns on, within the limits you saw. You get a weekly summary of what it sent.</p><p>To turn it off at any time, use this link. It works in one click and cancels any reply waiting to go out.</p>`,
+      action: { label: "Turn AI replies off", url: revokeUrl }, idempotency_key: `ai_reply_consent_confirmed:${r.consent_id}` }).catch(() => null);
   }
   return { ok: true, revoke_url: revokeUrl };
 }

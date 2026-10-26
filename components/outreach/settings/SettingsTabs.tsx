@@ -22,7 +22,7 @@ export const SETTINGS_TABS: Array<{ href: string; label: string; blurb: string; 
   { href: '/outreach/settings/safety', label: 'Safety', blurb: 'Consent and the sending limits that keep your sender accounts safe.', min: 'member' },
   { href: '/outreach/settings/suppressions', label: 'Blacklists', blurb: 'Emails, domains, LinkedIn profiles and companies your campaigns will never contact.', min: 'member' },
   { href: '/outreach/settings/notifications', label: 'Notifications', blurb: 'Desktop notifications and sounds for replies, mentions and handoffs. These settings are yours; every teammate has their own.', min: 'client_viewer' },
-  { href: '/outreach/settings/email', label: 'Email & booking', blurb: 'The unsubscribe link in your emails and the link leads use to book a meeting.', min: 'manager' },
+  { href: '/outreach/settings/email', label: 'Email & booking', blurb: 'Your own sending domain for notification emails, the tracking domain, the unsubscribe link, meeting booking and the email log.', min: 'manager' },
   { href: '/outreach/settings/integrations', label: 'Integrations', blurb: 'Connect other apps, create API keys and send events to your own systems with webhooks.', min: 'manager', also: ['/outreach/settings/api', '/outreach/settings/webhooks'] },
   { href: '/outreach/settings/branding', label: 'White-label', blurb: 'Put your own name, logo and colours on the app for your clients.', min: 'owner' },
   { href: '/outreach/settings/admin', label: 'Admin', blurb: 'Platform-wide setup, limits and accounts. Only visible when running locally.', min: 'member', localOnly: true },
@@ -52,6 +52,26 @@ export default function SettingsTabs() {
       </div>
       {current && <p className="mt-3 text-sm text-gray-500">{current.blurb}</p>}
     </div>
+  );
+}
+
+/** Second-level switch between the parts of "Email & booking": each one is its own route. */
+export function EmailSubTabs() {
+  const pathname = usePathname();
+  const items = [
+    { href: '/outreach/settings/email', label: 'Sending domain' },
+    { href: '/outreach/settings/email/tracking', label: 'Tracking domain' },
+    { href: '/outreach/settings/email/unsubscribe', label: 'Unsubscribe link' },
+    { href: '/outreach/settings/email/booking', label: 'Meeting booking' },
+    { href: '/outreach/settings/email/log', label: 'Email log' },
+  ];
+  return (
+    <nav className={cn(tabStripClass, 'mb-5')} aria-label="Email & booking sections">
+      {items.map((i) => {
+        const active = pathname === i.href;
+        return <Link key={i.href} href={i.href} aria-current={active ? 'page' : undefined} className={tabClass(active)}>{i.label}</Link>;
+      })}
+    </nav>
   );
 }
 

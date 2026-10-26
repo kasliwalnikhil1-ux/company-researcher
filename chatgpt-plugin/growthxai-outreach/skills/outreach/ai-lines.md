@@ -1,6 +1,6 @@
 # Personalized lines (AI first lines: generate → check → approved lines only)
 
-The app calls this **Personalized lines**. Lines that wait for a person are Line cards in **AI → Needs you**; the variables and all their lines are under **AI → Setup → Personalized lines**. It is separate from **Replies** (answers to inbound messages; see ai-replies.md).
+The app calls this **Personalized lines**. Lines that wait for a person are Line cards in **AI → Needs you**; the variables and all their lines are under **AI → Setup → Personalized lines**. It is separate from **AI replies** (answers to inbound messages; see ai-replies.md).
 
 The platform's rule: **nothing AI-written sends unless it is approved.** `{{ai.<key>|fallback}}` resolves only to a line whose status is `approved`. Pending, unreviewed, skipped, blank and failed lines all send the **fallback**. Every approved line records who approved it. A variable has a mode:
 

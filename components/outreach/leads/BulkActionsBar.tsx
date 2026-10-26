@@ -5,18 +5,20 @@ import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { useClients, useStages, useTags } from '@/lib/outreach/queries';
-import { parseError, rpc } from '@/lib/outreach/api';
+import { callFn, parseError, rpc } from '@/lib/outreach/api';
 import { Button, ErrorBox, Modal, Select } from '@/components/outreach/ui';
-import { AlertTriangle, GitBranch, ShieldCheck, ShieldOff, Sparkles, Tag as TagIcon, Trash2, Wand2, X } from 'lucide-react';
+import { AlertTriangle, Download, Eye, EyeOff, GitBranch, Loader2, ShieldCheck, ShieldOff, Sparkles, Tag as TagIcon, Trash2, UserPlus, Wand2, X } from 'lucide-react';
 import { requestEnrichment, stashSelection, type EnrichResult } from '@/lib/outreach/intel';
 import { BULK_CAP, type ToastFn } from './helpers';
 import { ListPicker } from './ListPicker';
 
-type Op = 'add_tag' | 'remove_tag' | 'set_list' | 'set_stage' | 'set_client' | 'set_dnc' | 'clear_dnc' | 'delete';
-const OP_LABEL: Record<Op, string> = { add_tag: 'Add tag', remove_tag: 'Remove tag', set_list: 'Set list', set_stage: 'Set stage', set_client: 'Set client', set_dnc: 'Mark do-not-contact', clear_dnc: 'Clear do-not-contact', delete: 'Delete leads' };
+type Op = 'add_tag' | 'remove_tag' | 'set_list' | 'set_stage' | 'set_client' | 'set_dnc' | 'clear_dnc' | 'delete' | 'promote' | 'hide' | 'unhide';
+const OP_LABEL: Record<Op, string> = { add_tag: 'Add tag', remove_tag: 'Remove tag', set_list: 'Set list', set_stage: 'Set stage', set_client: 'Set client', set_dnc: 'Mark do-not-contact', clear_dnc: 'Clear do-not-contact', delete: 'Delete leads', promote: 'Add to outbound', hide: 'Hide leads', unhide: 'Unhide leads' };
+/** 094: the three relationship ops go to their own RPCs, not outreach_bulk_leads. */
+const RELATIONSHIP_OPS: Op[] = ['promote', 'hide', 'unhide'];
 
-export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selected: string[]; onClear: () => void; onEnroll: () => void; toast: ToastFn }) {
-  const { workspace } = useWorkspace();
+export function BulkActionsBar({ selected, onClear, onEnroll, toast, hiddenView = false, tab = 'prospects' }: { selected: string[]; onClear: () => void; onEnroll: () => void; toast: ToastFn; hiddenView?: boolean; tab?: 'prospects' | 'inbox' | 'all' }) {
+  const { workspace, isManager } = useWorkspace();
   const qc = useQueryClient();
   const tags = useTags(workspace?.id);
   const stages = useStages(workspace?.id);
@@ -30,6 +32,7 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
   const [enrichOpen, setEnrichOpen] = useState(false);
   const [wantPosts, setWantPosts] = useState(false);
   const [enrichResult, setEnrichResult] = useState<EnrichResult | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const n = selected.length;
   const overCap = n > BULK_CAP;
@@ -45,13 +48,17 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
     if (needsValue && !value) return;
     setBusy(true); setError(null);
     try {
-      const count = await rpc<number>('bulk_leads', { p_ws: workspace.id, p_lead_ids: selected, p_op: op, p_value: value || null });
+      const count = RELATIONSHIP_OPS.includes(op)
+        ? (op === 'promote'
+          ? await rpc<number>('lead_promote', { p_ws: workspace.id, p_lead_ids: selected })
+          : await rpc<number>('lead_hide', { p_ws: workspace.id, p_lead_ids: selected, p_hide: op === 'hide' }))
+        : await rpc<number>('bulk_leads', { p_ws: workspace.id, p_lead_ids: selected, p_op: op, p_value: value || null });
       qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'leads'] });
       qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'dashboard'] });
       for (const id of selected.slice(0, 50)) qc.invalidateQueries({ queryKey: ['outreach', 'lead', id] });
       toast(`${OP_LABEL[op]}: ${count.toLocaleString()} ${op === 'add_tag' || op === 'remove_tag' ? 'change' : 'lead'}${count === 1 ? '' : 's'}`);
       setOp(null);
-      if (op === 'delete') onClear();
+      if (op === 'delete' || RELATIONSHIP_OPS.includes(op)) onClear();
     } catch (e) {
       setError(parseError(e).message);
     } finally {
@@ -73,15 +80,27 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
   };
   // AI lines: at most 2000 leads per batch (outreach_ai_generate_request). The selection travels in sessionStorage, not the URL.
   const toAiReview = () => { const key = stashSelection(selected.slice(0, 2000)); router.push(`/outreach/ai/setup/lines?view=lines&generate=1&selection=${key}`); };
+  // Export CSV (managers): exactly the selected leads, via outreach-exports-create {kind:'leads', lead_ids}; the signed URL opens in a new tab.
+  const exportCsv = async () => {
+    if (!workspace || exporting) return;
+    setExporting(true);
+    try {
+      const res = await callFn<{ url: string; rows: number }>('exports-create', { workspace_id: workspace.id, kind: 'leads', lead_ids: selected });
+      if (res?.url) { window.open(res.url, '_blank', 'noopener'); toast(`Export ready — ${(res.rows ?? n).toLocaleString()} lead${(res.rows ?? n) === 1 ? '' : 's'}, opened in a new tab`); }
+      else toast('Export created but no download URL was returned', 'error');
+    } catch (e) { toast(parseError(e).message, 'error'); }
+    finally { setExporting(false); }
+  };
 
   const valueLabel = op === 'add_tag' || op === 'remove_tag' ? 'Tag' : op === 'set_list' ? 'List' : op === 'set_stage' ? 'Stage' : op === 'set_client' ? 'Client' : '';
 
   return (
     <>
-      <div className="sticky top-0 z-10 bg-indigo-600 text-white rounded-xl px-4 py-2.5 flex flex-wrap items-center gap-2 shadow-md">
-        <span className="text-sm font-medium mr-2">{n.toLocaleString()} selected</span>
-        {overCap && <span className="inline-flex items-center gap-1 text-xs bg-amber-400 text-amber-950 rounded-full px-2 py-0.5"><AlertTriangle className="w-3 h-3" /> Bulk actions are capped at {BULK_CAP.toLocaleString()} leads</span>}
-        <div className="flex flex-wrap items-center gap-1.5">
+      {/* One row that never wraps as a whole: the count and the close button stay at the two ends; only the action chips wrap between them. */}
+      <div className="sticky top-0 z-10 bg-indigo-600 text-white rounded-xl px-4 py-2.5 flex items-center gap-2 shadow-md">
+        <span className="text-sm font-medium mr-2 shrink-0">{n.toLocaleString()} selected</span>
+        <div className="flex flex-1 min-w-0 flex-wrap items-center gap-1.5">
+          {overCap && <span className="inline-flex items-center gap-1 text-xs bg-amber-400 text-amber-950 rounded-full px-2 py-0.5"><AlertTriangle className="w-3 h-3" /> Bulk actions are capped at {BULK_CAP.toLocaleString()} leads</span>}
           <BulkBtn onClick={() => open('add_tag')}><TagIcon className="w-3.5 h-3.5" /> Add tag</BulkBtn>
           <BulkBtn onClick={() => open('remove_tag')}>Remove tag</BulkBtn>
           <BulkBtn onClick={() => open('set_list')}>Set list</BulkBtn>
@@ -92,9 +111,14 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
           <BulkBtn onClick={openEnrich}><Sparkles className="w-3.5 h-3.5" /> Enrich</BulkBtn>
           <BulkBtn onClick={toAiReview}><Wand2 className="w-3.5 h-3.5" /> Generate lines</BulkBtn>
           <BulkBtn onClick={onEnroll}><GitBranch className="w-3.5 h-3.5" /> Enrol in sequence</BulkBtn>
+          {/* 094: inbound contacts move to outbound; managers can hide junk the rules missed (and bring hidden leads back) */}
+          {(tab !== 'prospects' || hiddenView) && <BulkBtn onClick={() => open('promote')} title="Move these people to the Outbound tab (hidden ones are unhidden too)"><UserPlus className="w-3.5 h-3.5" /> Add to outbound</BulkBtn>}
+          {isManager && !hiddenView && <BulkBtn onClick={() => open('hide')} title="Hide from every tab. Conversations and history stay; the Hidden filter shows them again."><EyeOff className="w-3.5 h-3.5" /> Hide</BulkBtn>}
+          {isManager && hiddenView && <BulkBtn onClick={() => open('unhide')} title="Bring these leads back to their tab"><Eye className="w-3.5 h-3.5" /> Unhide</BulkBtn>}
+          {isManager && <BulkBtn onClick={exportCsv} disabled={exporting} title="Download the selected leads as a CSV file">{exporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Export CSV</BulkBtn>}
           <BulkBtn onClick={() => open('delete')} danger><Trash2 className="w-3.5 h-3.5" /> Delete</BulkBtn>
         </div>
-        <button type="button" onClick={onClear} title="Clear selection" className="ml-auto p-1 rounded-md hover:bg-white/15"><X className="w-4 h-4" /></button>
+        <button type="button" onClick={onClear} title="Clear selection" className="ml-auto shrink-0 self-center p-1 rounded-md hover:bg-white/15"><X className="w-4 h-4" /></button>
       </div>
 
       <Modal open={!!op} onClose={() => !busy && setOp(null)} title={op ? `${OP_LABEL[op]} — ${n.toLocaleString()} lead${n === 1 ? '' : 's'}` : ''} size="sm"
@@ -106,6 +130,9 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
         {op === 'delete' && (
           <p className="text-sm text-gray-700">This permanently deletes {n.toLocaleString()} lead{n === 1 ? '' : 's'} together with their tags, relation states, enrollments and tasks. Conversations remain in the inbox. This cannot be undone.</p>
         )}
+        {op === 'promote' && <p className="text-sm text-gray-700">These people move to the <strong>Outbound</strong> tab and count in outreach numbers from now on. Hidden leads among them are unhidden. Enrolling, adding to a list or setting a stage does this on its own; replying never does.</p>}
+        {op === 'hide' && <p className="text-sm text-gray-700">Hidden leads disappear from every tab. Their conversations, relation states and history stay. The <strong>Hidden</strong> filter shows them again, with Unhide and Delete.</p>}
+        {op === 'unhide' && <p className="text-sm text-gray-700">These leads come back to the tab their origin puts them in: Outbound when they were imported, added or promoted, Inbound when they only wrote to you.</p>}
         {op === 'set_dnc' && <p className="text-sm text-gray-700">Marked leads are excluded from every sequence; live enrollments exit with <em>suppressed</em> and queued actions are cancelled.</p>}
         {op === 'clear_dnc' && <p className="text-sm text-gray-700">Leads become eligible for outreach again. Existing enrollments are not restarted.</p>}
         {op === 'set_list' && <ListPicker label="List" emptyLabel="None (clear)" value={value} onChange={setValue} disabled={busy} onNaming={setNamingList} />}
@@ -152,6 +179,6 @@ export function BulkActionsBar({ selected, onClear, onEnroll, toast }: { selecte
   );
 }
 
-function BulkBtn({ children, onClick, danger, title }: { children: React.ReactNode; onClick: () => void; danger?: boolean; title?: string }) {
-  return <button type="button" onClick={onClick} title={title} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap ${danger ? 'bg-red-500/90 hover:bg-red-500' : 'bg-white/15 hover:bg-white/25'}`}>{children}</button>;
+function BulkBtn({ children, onClick, danger, title, disabled }: { children: React.ReactNode; onClick: () => void; danger?: boolean; title?: string; disabled?: boolean }) {
+  return <button type="button" onClick={onClick} title={title} disabled={disabled} className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap disabled:opacity-60 disabled:cursor-wait ${danger ? 'bg-red-500/90 hover:bg-red-500' : 'bg-white/15 hover:bg-white/25'}`}>{children}</button>;
 }

@@ -28,6 +28,12 @@ export function visibleName(v: string | null | undefined): string | null {
   return s.replace(/[\s⠀​-‏⁠﻿ㅤᅟᅠ]/g, '') ? s : null;
 }
 
+/** The account a conversation runs through, as the inbox names it: the sender's name, else its handle / number / mailbox, else the channel. */
+export function senderAccountLabel(s: { provider?: Provider | string | null; display_name?: string | null; public_identifier?: string | null; owner_email?: string | null } | null | undefined): string {
+  if (!s) return 'Unknown account';
+  return visibleName(s.display_name) || s.public_identifier || s.owner_email || `${channelLabel(s.provider)} account`;
+}
+
 /** The inbox title of a chat: contact name, lead name, then the phone / handle, then a group's subject. */
 export function chatTitle(c: { attendee_name?: string | null; attendee_public_identifier?: string | null; subject?: string | null; outreach_leads?: { full_name?: string | null } | null }): string {
   return visibleName(c.attendee_name) || visibleName(c.outreach_leads?.full_name) || c.attendee_public_identifier || visibleName(c.subject) || 'Unknown';

@@ -12,7 +12,9 @@ const DEFAULT_NAME: Record<Provider, string> = { LINKEDIN: "LinkedIn sender", IN
 const MIN_WHATSAPP_MONTHS = 6;
 
 interface Body {
-  workspace_id: string; provider: Provider; client_id?: string | null; owner_email?: string | null; display_name?: string | null; recruiter?: boolean; timezone?: string;
+  workspace_id: string; provider: Provider; client_id?: string | null; display_name?: string | null; recruiter?: boolean; timezone?: string;
+  /** Whose account is this? Mine (default) or a teammate's sign-in email. Emails only ever go to a member's sign-in email (migration 103); any other address is refused. `owner_email` is the old field name and means the same. */
+  holder?: { mine?: boolean; email?: string | null } | null; owner_email?: string | null;
   connect_method?: "credentials" | "browser";
   /** WhatsApp only: the operator attests the number has at least 6 months of real use. */
   account_age_months?: number; account_age_attested?: boolean;
@@ -46,8 +48,23 @@ serve("sender-connect", async (req) => {
   const isChannel = provider === "INSTAGRAM" || provider === "WHATSAPP";
   const isMail = !isLinkedIn && !isChannel;
   const browser = isLinkedIn && body.connect_method === "browser";
+  // Whose account is this? Mine → owner_user_id = me. A teammate's sign-in email → that member. Anyone else is refused: account emails only go to members (103).
+  const typed = String(body.holder?.email ?? body.owner_email ?? "").trim().toLowerCase();
+  let ownerUserId: string | null = user.id; let holderMember: { user_id: string; name: string | null } | null = null;
+  if (body.holder?.mine !== true && typed) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(typed)) throw new HttpError(400, "E_PAYLOAD_INVALID", "Enter the email of the person who signs in to this account");
+    if (typed !== String(user.email ?? "").toLowerCase()) {
+      const { data: members } = await admin.from("outreach_members").select("user_id, display_name").eq("workspace_id", body.workspace_id);
+      for (const mm of members ?? []) {
+        const e = (await admin.auth.admin.getUserById(mm.user_id).catch(() => null))?.data?.user?.email?.toLowerCase();
+        if (e && e === typed) { holderMember = { user_id: mm.user_id, name: mm.display_name ?? null }; break; }
+      }
+      if (!holderMember) throw new HttpError(400, "E_HOLDER_OUTSIDE", `Emails about an account only go to a teammate's sign-in email. Invite ${typed} to the workspace first, or connect the account under your own name.`);
+      ownerUserId = holderMember.user_id;
+    }
+  }
   const row: Record<string, unknown> = {
-    workspace_id: body.workspace_id, client_id: body.client_id ?? null, owner_email: String(body.owner_email ?? "").trim().toLowerCase() || null, owner_user_id: user.id,
+    workspace_id: body.workspace_id, client_id: body.client_id ?? null, owner_email: null, owner_user_id: ownerUserId, connected_by: user.id,
     provider, auth_method: browser ? "browser" : isMail ? "oauth" : "credentials", display_name: body.display_name ?? DEFAULT_NAME[provider],
     status: "connecting", proxy_ip_hint: ip, user_agent: ua, timezone: body.timezone ?? "UTC", warmup_level: isMail ? 3 : 0,
   };
@@ -61,12 +78,13 @@ serve("sender-connect", async (req) => {
   // row has no account yet) is reused: the new link replaces the expired one instead of leaving two "connecting" rows behind.
   // An owner that is already connected is refused unless the manager explicitly wants a second sender.
   let reused: Record<string, unknown> | null = null;
-  if (row.owner_email) {
-    const { data: twins } = await admin.from("outreach_senders").select("id, display_name, status, unipile_account_id, created_at")
-      .eq("workspace_id", body.workspace_id).eq("provider", provider).eq("owner_email", String(row.owner_email)).is("deleted_at", null).neq("status", "disabled").order("created_at");
+  if (ownerUserId) {
+    let tq = admin.from("outreach_senders").select("id, display_name, status, unipile_account_id, created_at").eq("workspace_id", body.workspace_id).eq("provider", provider).is("deleted_at", null).neq("status", "disabled").order("created_at");
+    tq = tq.eq("owner_user_id", String(ownerUserId));
+    const { data: twins } = await tq;
     const connected = (twins ?? []).find((t) => t.unipile_account_id);
     if (connected && !body.allow_duplicate) {
-      throw new HttpError(409, "E_DUPLICATE_SENDER", `${connected.display_name ?? "This account"} is already connected with this owner email. Reconnect it instead of connecting it again.`,
+      throw new HttpError(409, "E_DUPLICATE_SENDER", `${connected.display_name ?? "This account"} is already connected for this person. Reconnect it instead of connecting it again.`,
         { existing_sender_id: connected.id, existing_display_name: connected.display_name, existing_status: connected.status });
     }
     reused = (twins ?? []).find((t) => !t.unipile_account_id && t.status === "connecting") ?? null;
@@ -110,7 +128,7 @@ serve("sender-connect", async (req) => {
     if (provider === "WHATSAPP") await audit(body.workspace_id, "sender.attest_account_age", "sender", senderId, { months: ageMonths, by: user.id, at_connect: true }, "user");
     // the sweep that flags abandoned sign-ins counts from the latest link, not from the row's creation
     await admin.from("outreach_sender_events").insert({ sender_id: senderId, kind: "reconnect", data: { method: "connect_link", reused: !!reused, connect_method: browser ? "browser" : "credentials" } });
-    return json({ link: link.url, sender_id: senderId, reused: !!reused });
+    return json({ link: link.url, sender_id: senderId, reused: !!reused, holder: { kind: "member", user_id: ownerUserId, name: holderMember?.name ?? null, mine: ownerUserId === user.id } });
   } catch (e) {
     await rpc("slot_release_sender", { p_sender: senderId, p_reason: "failed" }).catch(() => null);
     if (!reused) await admin.from("outreach_senders").delete().eq("id", senderId);

@@ -1,6 +1,6 @@
 /**
  * Demo handlers: Senders: pause, settings, caps, schedule, insights, tracking domains, "why not sending", Profile Studio.
- * Owns: add_tracking_domain, channel_capacity, effective_cap, issue_sender_token, pause_sender, profile_authority_list, profile_authority_revoke, profile_authority_self, profile_bulk_preview, profile_cancel_change, profile_changes_list, profile_draft_change, profile_experiment_abandon, profile_experiment_create, profile_experiment_result, profile_experiments_list, profile_history, profile_link_sequence, profile_overview, profile_qa_correlation, profile_revert_build, profile_template_delete, profile_template_save, profile_update_draft, remove_tracking_domain, sender_insights, sender_scopes_today, set_manual_caps, set_sender_schedule, update_sender, weekly_invites_used, why_not_sending
+ * Owns: add_tracking_domain, sender_holder_view, email_log_sender_last, channel_capacity, effective_cap, issue_sender_token, pause_sender, profile_authority_list, profile_authority_revoke, profile_authority_self, profile_bulk_preview, profile_cancel_change, profile_changes_list, profile_draft_change, profile_experiment_abandon, profile_experiment_create, profile_experiment_result, profile_experiments_list, profile_history, profile_link_sequence, profile_overview, profile_qa_correlation, profile_revert_build, profile_template_delete, profile_template_save, profile_update_draft, remove_tracking_domain, sender_insights, sender_labels, sender_landing, sender_scopes_today, set_manual_caps, set_sender_schedule, update_sender, weekly_invites_used, why_not_sending
  */
 import { demoError, inWs, type Ctx, type RpcArea } from '../ctx';
 import { tableHooks } from '../query';
@@ -78,7 +78,34 @@ function draftChange(ctx: Ctx, a: Row): Row {
   return { id: ch.id, status: 'draft', field_groups: groups, validation: validate(store, s, p, assets, { change: ch.id, experiment: a.p_experiment ?? null }) };
 }
 
+/** Whose account is this (sender-lifecycle v1.2 §5.8.1): owner_user_id = a member's own account; owner_email = someone outside. */
+export function holderView(ctx: Ctx, s: Row): Row {
+  const member = (uid: string | null | undefined) => (uid ? ctx.store.t('outreach_members').find((m) => m.workspace_id === s.workspace_id && m.user_id === uid) : undefined);
+  const cb = member(s.connected_by);
+  const connected_by = s.connected_by ? { user_id: s.connected_by, name: cb?.display_name ?? null, member: !!cb } : null;
+  const base = { connected_by, can_change: true, holder_notified_at: s.holder_notified_at ?? null, holder_reminders_sent: s.holder_reminders_sent ?? 0, holder_email_held_until: s.holder_email_held_until ?? null, disconnected_at: s.disconnected_at ?? null };
+  if (s.status === 'erased') return { kind: 'none', user_id: null, name: null, mine: false, email: null, copied_to: [], ...base, can_change: false };
+  if (s.owner_user_id) {
+    const m = member(s.owner_user_id);
+    const mine = s.owner_user_id === ctx.userId;
+    if (!m) return { kind: 'member_left', user_id: null, name: cb?.display_name ?? null, mine: false, email: null, copied_to: [], ...base };
+    return { kind: 'member', user_id: s.owner_user_id, name: m.display_name ?? null, mine, email: mine ? DEMO_USER_EMAIL : null, copied_to: [], ...base };
+  }
+  // no member holder on the row (an old outside row): the member who connected it, else the owners (103)
+  if (cb) return { kind: 'member', user_id: String(s.connected_by), name: cb.display_name ?? null, mine: s.connected_by === ctx.userId, email: s.connected_by === ctx.userId ? DEMO_USER_EMAIL : null, copied_to: [], ...base };
+  return { kind: 'member_left', user_id: null, name: null, mine: false, email: null, copied_to: [], ...base };
+}
+
 export const sendersRpc = {
+  // ---------------------------------------------------------------- whose account (sender-lifecycle v1.2)
+  sender_holder_view: (a, ctx) => holderView(ctx, senderOr404(ctx, a.p_sender)),
+  email_log_sender_last: (a, ctx) => {
+    const s = senderOr404(ctx, a.p_sender);
+    // the tour keeps no outbox: the last sign-in email is derived from the disconnect clock
+    if (!s.holder_notified_at) return null;
+    const h = holderView(ctx, s);
+    return { type: (s.holder_reminders_sent ?? 0) > 0 ? 'sender_reconnect_reminder' : 'sender_reconnect_needed', to: h.email ?? DEMO_USER_EMAIL, status: 'delivered', sent_at: s.holder_notified_at, updated_at: s.holder_notified_at, bounce_type: null, outside: h.kind === 'outside' };
+  },
   // ---------------------------------------------------------------- tracking domains
   add_tracking_domain: (a, ctx) => {
     const h = String(a.p_hostname ?? '').trim().toLowerCase();
@@ -112,6 +139,16 @@ export const sendersRpc = {
     return effectiveCap(ctx.store, s, String(a.p_type ?? ''));
   },
   sender_scopes_today: (a, ctx) => scopesToday(ctx.store, senderOr404(ctx, a.p_sender)),
+  // the account labels of every sender the workspace ever had: removed ones included, so the inbox can still name them
+  sender_labels: (a, ctx) => {
+    if (a.p_workspace !== ctx.ws) demoError('E_FORBIDDEN', 'not a member of workspace');
+    return inWs(ctx, 'outreach_senders').map((s) => ({ id: s.id, provider: s.provider, display_name: s.display_name ?? null, public_identifier: s.public_identifier ?? null, owner_email: s.owner_email ?? null, picture_url: s.picture_url ?? null, removed: !!s.deleted_at }));
+  },
+  // the demo never folds a sender into another: the id lands on itself when it is in the workspace, else nowhere
+  sender_landing: (a, ctx) => {
+    const s = typeof a.p_sender === 'string' ? ctx.store.get('outreach_senders', a.p_sender) : undefined;
+    return s && s.workspace_id === ctx.ws && !s.deleted_at ? s.id : null;
+  },
   weekly_invites_used: (a, ctx) => {
     const s = senderOr404(ctx, a.p_sender);
     return weeklyInvitesUsed(ctx.store, s, String(a.p_day ?? localParts(Date.now(), s.timezone ?? 'UTC').day));

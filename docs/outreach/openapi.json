@@ -3699,8 +3699,8 @@
         "tags": [
           "Sequences"
         ],
-        "summary": "Sequence report",
-        "description": "Database function: `outreach_report_sequence`.\n\nMinimum key role: client_viewer.\n\nRate class: read.",
+        "summary": "Sequence results: people-level funnel, channel blocks, steps",
+        "description": "Database function: `outreach_report_sequence`.\n\nNo dates = all time; dates = the cohort of leads first contacted in the period.\n\nMinimum key role: client_viewer.\n\nRate class: read.",
         "parameters": [
           {
             "name": "id",
@@ -7426,8 +7426,8 @@
         "tags": [
           "Reports"
         ],
-        "summary": "One row of totals per sequence",
-        "description": "Database function: `outreach_report_sequences`.\n\nMinimum key role: client_viewer.\n\nRate class: read.",
+        "summary": "One row of results per sequence, counted in people",
+        "description": "Database function: `outreach_report_sequences`.\n\nNo dates = all time (cached per sequence). With dates = the cohort of leads first contacted in the period, and everything they did afterwards. Rows are sorted by replied.\n\nMinimum key role: client_viewer.\n\nRate class: read.",
         "parameters": [
           {
             "name": "from",
@@ -7457,6 +7457,37 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "linkedin",
+                "instagram",
+                "whatsapp",
+                "email"
+              ]
+            },
+            "description": "Only sequences that use this channel; the numbers stay whole-sequence."
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "active",
+                "paused",
+                "archived",
+                "all"
+              ]
+            },
+            "description": "Default: every status but archived."
           }
         ],
         "responses": {
@@ -7470,13 +7501,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "totals": {
-                            "$ref": "#/components/schemas/Totals"
-                          }
-                        },
-                        "additionalProperties": true
+                        "$ref": "#/components/schemas/SequenceStatsRow"
                       }
                     }
                   },
@@ -10674,7 +10699,7 @@
           },
           "live": {
             "type": "integer",
-            "description": "Leads currently in the sequence."
+            "description": "Deprecated: use stats.progress.live (kept until 2027-01-26)."
           },
           "created_at": {
             "type": [
@@ -10689,6 +10714,9 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/SequenceStats"
           }
         },
         "required": [
@@ -10806,14 +10834,72 @@
           "live": {},
           "period": {
             "type": "object",
-            "properties": {},
-            "additionalProperties": true
+            "properties": {
+              "from": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              },
+              "to": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date"
+              },
+              "all": {
+                "type": "boolean"
+              },
+              "timezone": {
+                "type": "string"
+              },
+              "steps_from": {
+                "type": "string",
+                "format": "date"
+              },
+              "steps_to": {
+                "type": "string",
+                "format": "date"
+              }
+            }
+          },
+          "funnel": {
+            "$ref": "#/components/schemas/SequenceStats"
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SequenceChannelBlock"
+            }
+          },
+          "replied_other_channel": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "Replies on a channel the sequence has no step on."
+          },
+          "seen_since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "seen_partial": {
+            "type": "boolean"
+          },
+          "definitions_version": {
+            "type": "integer"
           }
         },
         "required": [
           "totals"
         ],
-        "additionalProperties": true
+        "additionalProperties": true,
+        "description": "One sequence's results (sequence-stats-PRD.md): funnel = the people-level header, channels = one block per channel, replied_other_channel, plus the per-step table, best / worst step, A/B tests, exits and live leads. No dates = all time."
       },
       "WhyNotSending": {
         "type": "object",
@@ -12346,6 +12432,319 @@
           "role"
         ],
         "additionalProperties": true
+      },
+      "SequenceChannelUse": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "enum": [
+              "linkedin",
+              "instagram",
+              "whatsapp",
+              "email"
+            ]
+          },
+          "invite_step": {
+            "type": "boolean",
+            "description": "The head version has a LinkedIn invitation or Instagram follow step on this channel."
+          },
+          "from_earlier_version": {
+            "type": "boolean",
+            "description": "Seen only in activity (older versions, channel switches), not in the current steps."
+          }
+        },
+        "required": [
+          "channel",
+          "invite_step",
+          "from_earlier_version"
+        ]
+      },
+      "SequenceStats": {
+        "type": "object",
+        "description": "Sequence results counted in PEOPLE (sequence-stats-PRD.md). For a period: the cohort of leads first contacted in it, and everything they did afterwards up to today. All time when no dates are given.",
+        "properties": {
+          "contacted": {
+            "type": "integer",
+            "description": "People who got at least one invitation, follow or message from the sequence."
+          },
+          "invited": {
+            "type": "integer",
+            "description": "People sent a LinkedIn connection request or an Instagram follow."
+          },
+          "accepted": {
+            "type": "integer"
+          },
+          "accepted_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "accepted ÷ invited"
+          },
+          "pending": {
+            "type": "integer",
+            "description": "Invited, not accepted, request still open."
+          },
+          "accepted_early": {
+            "type": "boolean",
+            "description": "More than half of the invitations are still pending: the rate will change."
+          },
+          "accepted_split": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "invited": {
+                  "type": "integer"
+                },
+                "accepted": {
+                  "type": "integer"
+                },
+                "pending": {
+                  "type": "integer"
+                },
+                "accepted_rate": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "description": "Percent with one decimal; null when there is nothing to divide by (shown as n/a)."
+                }
+              }
+            }
+          },
+          "replied": {
+            "type": "integer",
+            "description": "People who wrote back as a person; credited to the sequence that contacted them last; counted once. Out-of-office and automatic replies excluded."
+          },
+          "replied_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "replied ÷ contacted"
+          },
+          "auto_replied": {
+            "type": "integer",
+            "description": "People from whom only an out-of-office / automatic reply arrived."
+          },
+          "positive": {
+            "type": "integer",
+            "description": "Replies classified interested or question (within 30 days of the credited reply), or a Meeting stage reached."
+          },
+          "positive_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "positive ÷ replied"
+          },
+          "meetings": {
+            "type": "integer"
+          },
+          "replied_by_channel": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "cohort": {
+            "type": "integer",
+            "description": "People in the cohort (contacted, plus WhatsApp numbers that failed the check before any message)."
+          },
+          "progress": {
+            "type": "object",
+            "properties": {
+              "enrolled": {
+                "type": "integer"
+              },
+              "live": {
+                "type": "integer"
+              },
+              "done": {
+                "type": "integer"
+              },
+              "pct_done": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Percent with one decimal; null when there is nothing to divide by (shown as n/a)."
+              }
+            }
+          },
+          "ops": {
+            "type": "object",
+            "properties": {
+              "queued": {
+                "type": "integer"
+              },
+              "actions_sent": {
+                "type": "integer",
+                "description": "Actions sent so far (the old `sent`)."
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "failed_leads": {
+                "type": "integer"
+              }
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SequenceChannelUse"
+            }
+          },
+          "na": {
+            "type": "object",
+            "description": "A metric that does not apply, with the reason. Never shown as 0.",
+            "properties": {
+              "accepted": {
+                "type": "string"
+              },
+              "seen": {
+                "type": "string"
+              }
+            }
+          },
+          "cached_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "All-time rows come from a per-sequence cache; null when computed live."
+          },
+          "definitions_version": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "SequenceChannelBlock": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SequenceChannelUse"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "stages": {
+                "type": "object",
+                "description": "Only the stages the channel has. seen is 'at least' (read receipts can be off); email has no seen.",
+                "properties": {
+                  "contacted": {
+                    "type": "integer"
+                  },
+                  "invited": {
+                    "type": "integer"
+                  },
+                  "accepted": {
+                    "type": "integer"
+                  },
+                  "accepted_rate": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Percent with one decimal; null when there is nothing to divide by (shown as n/a)."
+                  },
+                  "messaged": {
+                    "type": "integer"
+                  },
+                  "seen": {
+                    "type": "integer"
+                  },
+                  "replied": {
+                    "type": "integer"
+                  },
+                  "replied_rate": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Percent with one decimal; null when there is nothing to divide by (shown as n/a)."
+                  },
+                  "replied_of_accepted": {
+                    "type": "integer"
+                  },
+                  "replied_of_accepted_rate": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "description": "Percent with one decimal; null when there is nothing to divide by (shown as n/a)."
+                  },
+                  "bounced": {
+                    "type": "integer",
+                    "description": "Email hard bounces, or numbers not on WhatsApp."
+                  }
+                },
+                "additionalProperties": true
+              }
+            }
+          }
+        ]
+      },
+      "SequenceStatsRow": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/SequenceStats"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sequence_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "client_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "uuid"
+              },
+              "head_version": {
+                "type": "integer"
+              },
+              "steps": {
+                "type": "integer"
+              },
+              "stalled": {
+                "type": "boolean"
+              },
+              "stalled_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "throttled_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "has_ab_test": {
+                "type": "boolean"
+              },
+              "updated_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            }
+          }
+        ]
       }
     }
   }

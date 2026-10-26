@@ -78,7 +78,8 @@ export function sanitizeLike<T extends object>(raw: unknown, defaults: T): T {
 }
 
 function isDefault<T extends object>(value: T, defaults: T): boolean {
-  const norm = (v: unknown) => (v == null || v === '' || v === false ? null : v);
+  // an empty list (multi-select with nothing picked) counts as unset, like null / '' / false
+  const norm = (v: unknown) => (v == null || v === '' || v === false || (Array.isArray(v) && v.length === 0) ? null : v);
   return Object.keys(defaults).every((k) => norm((value as Record<string, unknown>)[k]) === norm((defaults as Record<string, unknown>)[k]))
     && Object.keys(value).every((k) => k in defaults || norm((value as Record<string, unknown>)[k]) === null);
 }

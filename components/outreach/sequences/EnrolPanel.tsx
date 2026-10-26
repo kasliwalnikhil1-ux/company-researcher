@@ -11,7 +11,7 @@ import { SEQUENCE_ASSIGNMENTS, type EnrollResult } from '@/lib/outreach/types';
 import { useClients, useLeads, useLists, useSenders, useSequence, useStages, useTags, type LeadFilters } from '@/lib/outreach/queries';
 import { Avatar, Badge, Button, Card, EmptyState, ErrorBox, Input, PageLoader, Select, Spinner, StatusPill, Table, Td, Th, Toggle, useToast } from '@/components/outreach/ui';
 import { ProjectionView } from '@/components/outreach/sequences/Projection';
-import EnrollmentsTable from '@/components/outreach/sequences/EnrollmentsTable';
+import SequenceLeads, { type LeadsLink } from '@/components/outreach/sequences/leads/SequenceLeads';
 import { fetchLeadIds, projectSequence, useEffectiveCaps, type ProjectionRow } from '@/components/outreach/sequences/hooks';
 import { senderName } from '@/components/outreach/sequences/helpers';
 import { commitEnrollment, EnrollOptions, EnrollPreviewPanel, EnrollResultPanel, requestAiLines, useEnrollPreview, useSequenceAiVariables, type AiBatchLink, type EnrollOptionsValue } from '@/app/outreach/sequences/[id]/enroll/EnrollGuard';
@@ -29,7 +29,7 @@ function Step({ n, label, active, done }: { n: number; label: string; active: bo
 }
 
 /** The Leads tab of the builder: enrol leads (a three-step wizard) and the table of everyone in the sequence. */
-export default function EnrolPanel({ id, onOpenBuilder }: { id: string; onOpenBuilder: () => void }) {
+export default function EnrolPanel({ id, onOpenBuilder, link }: { id: string; onOpenBuilder: () => void; /** A request from Analytics: open the table on a filter (and an enrolled-in window). */ link?: LeadsLink | null }) {
   const { workspace, canWrite } = useWorkspace();
   const ws = workspace?.id ?? null;
   const qc = useQueryClient();
@@ -263,7 +263,7 @@ export default function EnrolPanel({ id, onOpenBuilder }: { id: string; onOpenBu
         </Card>
       )}
 
-      <EnrollmentsTable sequence={s} canWrite={canWrite} />
+      <SequenceLeads sequence={s} canWrite={canWrite} link={link} />
       {toast.node}
     </div>
   );

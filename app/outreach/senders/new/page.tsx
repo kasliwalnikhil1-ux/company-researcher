@@ -4,13 +4,14 @@ import { useMemo, useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink, KeyRound, Linkedin, Mail, MonitorSmartphone } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
+import { useSessionUser } from '@/lib/outreach/session';
 import { useClients } from '@/lib/outreach/queries';
 import { callFn, parseError } from '@/lib/outreach/api';
 import { BackLink, Button, Card, ErrorBox, Input, PageHeader, SearchableSelect, Select, Toggle, useToast } from '@/components/outreach/ui';
 import { billingRefusalRemedy, browserTimezone, copyText, isBillingRefusal, timezoneChoices } from '@/components/outreach/senders/helpers';
 import { accountsMeter, useBilling, useInvalidateBilling } from '@/lib/outreach/billing';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
-import { cn, normalizeEmail } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import type { Provider } from '@/lib/outreach/types';
 import { BROWSER_SIGNIN_ENABLED } from '@/lib/outreach/features';
 
@@ -38,6 +39,7 @@ const LEGAL_LINKS = [
 
 export default function ConnectSenderPage() {
   const { workspace, isManager, isOwner, canWrite } = useWorkspace();
+  const { user } = useSessionUser();
   const ws = workspace?.id;
   const clients = useClients(ws);
   const billing = useBilling(ws);
@@ -50,14 +52,14 @@ export default function ConnectSenderPage() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [clientId, setClientId] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [ownerEmail, setOwnerEmail] = useState('');
+  // Every email about the account (sign-in links, notices, permission requests) goes to the connecting member's sign-in email (103).
   const [timezone, setTimezone] = useState(browserTimezone());
   const [recruiter, setRecruiter] = useState(false);
   // WhatsApp: the number must be at least 6 months old with real conversations (PRD §7.4). Both fields are required.
   const [ageAttested, setAgeAttested] = useState(false);
   const [ageMonths, setAgeMonths] = useState('');
   const [launching, setLaunching] = useState<'redirect' | 'copy' | null>(null);
-  const [result, setResult] = useState<{ link: string; sender_id: string; reused?: boolean } | null>(null);
+  const [result, setResult] = useState<{ link: string; sender_id: string; reused?: boolean; holder?: { kind: 'member'; email?: string; name?: string | null; mine?: boolean } } | null>(null);
   // The owner email is already connected on this channel: offer the existing sender, or a deliberate second one.
   const [duplicate, setDuplicate] = useState<{ id: string; name: string | null; status: string } | null>(null);
   const [allowDuplicate, setAllowDuplicate] = useState(false);
@@ -67,8 +69,6 @@ export default function ConnectSenderPage() {
   const [refused, setRefused] = useState<{ code: string; message: string } | null>(null);
   const tzList = useMemo(() => timezoneChoices(), []);
   const recruiterEnabled = !!(workspace?.settings as Record<string, unknown> | undefined)?.recruiter_enabled;
-  const ownerEmailClean = normalizeEmail(ownerEmail);
-  const emailOk = !ownerEmailClean || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmailClean);
   const isWhatsApp = provider === 'WHATSAPP';
   const isInstagram = provider === 'INSTAGRAM';
   const isMailbox = !['LINKEDIN', 'INSTAGRAM', 'WHATSAPP'].includes(provider);
@@ -88,8 +88,8 @@ export default function ConnectSenderPage() {
 
   async function ensureLink(force = allowDuplicate): Promise<{ link: string; sender_id: string; reused?: boolean }> {
     if (result) return result;
-    const r = await callFn<{ link: string; sender_id: string; reused?: boolean }>('sender-connect', {
-      workspace_id: ws, provider, client_id: clientId || null, owner_email: ownerEmailClean || null, display_name: displayName.trim() || null,
+    const r = await callFn<NonNullable<typeof result>>('sender-connect', {
+      workspace_id: ws, provider, client_id: clientId || null, holder: { mine: true }, display_name: displayName.trim() || null,
       recruiter: provider === 'LINKEDIN' && recruiterEnabled ? recruiter : false, timezone,
       connect_method: provider === 'LINKEDIN' ? connectMethod : 'credentials',
       ...(isWhatsApp ? { account_age_months: monthsNum, account_age_attested: true } : {}),
@@ -199,8 +199,6 @@ export default function ConnectSenderPage() {
         <Card title="2. Account details">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             <Input label="Display name" placeholder={provider === 'LINKEDIN' ? 'e.g. Jane (Sales)' : isInstagram ? 'e.g. @acme.studio' : isWhatsApp ? 'e.g. Jane’s WhatsApp' : 'e.g. jane@acme.com'} value={displayName} onChange={(e) => setDisplayName(e.target.value)} hint="Shown in lists and the inbox. The real profile name is filled in once the account is connected." />
-            <Input label="Owner email" type="email" placeholder="owner@company.com" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} onBlur={() => setOwnerEmail(ownerEmailClean)} error={emailOk ? undefined : 'Enter a valid email address'}
-              hint="The person who owns this account. They sign in themselves. We email them here if the account ever needs to be signed in again." />
             <div>
               <SearchableSelect label="Timezone" value={timezone} onChange={setTimezone} options={tzList} searchPlaceholder="Search city, region or GMT offset…" />
               <div className="text-xs text-gray-500 mt-1">Outreach is sent during the account owner&apos;s working hours (Mon–Fri, 9am–6pm by default). Choose where they actually work. You can change the hours later.</div>
@@ -260,7 +258,7 @@ export default function ConnectSenderPage() {
           </div>
           <div className="flex justify-between mt-5">
             <Button variant="secondary" onClick={() => setStep(1)}><ArrowLeft className="w-4 h-4" /> Back</Button>
-            <Button disabled={!emailOk || !attestationOk} onClick={() => setStep(3)} title={!attestationOk ? 'Tick the attestation and enter the months in use to continue' : undefined}>Continue <ArrowRight className="w-4 h-4" /></Button>
+            <Button disabled={!attestationOk} onClick={() => setStep(3)} title={!attestationOk ? 'Tick the attestation and enter the months in use to continue' : undefined}>Continue <ArrowRight className="w-4 h-4" /></Button>
           </div>
         </Card>
       )}
@@ -271,7 +269,7 @@ export default function ConnectSenderPage() {
             <dt className="text-gray-500">Account type</dt><dd className="text-gray-900 font-medium">{PROVIDERS.find((p) => p.id === provider)?.label}</dd>
             {clientId && (<><dt className="text-gray-500">Client</dt><dd className="text-gray-900">{clients.data?.find((c) => c.id === clientId)?.name ?? '—'}</dd></>)}
             {displayName && (<><dt className="text-gray-500">Display name</dt><dd className="text-gray-900">{displayName}</dd></>)}
-            {ownerEmailClean && (<><dt className="text-gray-500">Owner email</dt><dd className="text-gray-900">{ownerEmailClean}</dd></>)}
+            <dt className="text-gray-500">Signs in</dt><dd className="text-gray-900">You{user?.email ? ` (${user.email})` : ''}</dd>
             <dt className="text-gray-500">Timezone</dt><dd className="text-gray-900">{timezone}</dd>
             {provider === 'LINKEDIN' && BROWSER_SIGNIN_ENABLED && (<><dt className="text-gray-500">Sign-in</dt><dd className="text-gray-900">{CONNECT_METHODS.find((m) => m.id === connectMethod)?.label}</dd></>)}
             {provider === 'LINKEDIN' && recruiterEnabled && (<><dt className="text-gray-500">Recruiter</dt><dd className="text-gray-900">{recruiter ? 'Enabled' : 'Disabled'}</dd></>)}
@@ -292,7 +290,7 @@ export default function ConnectSenderPage() {
           )}
           {duplicate && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <div className="font-semibold">{duplicate.name ?? 'This account'} is already connected with {ownerEmailClean}</div>
+              <div className="font-semibold">{duplicate.name ?? 'This account'} is already connected for you</div>
               <p className="mt-1">{duplicate.status === 'ok' ? 'It is connected and working. Connecting it again would create a second copy of the same account.' : 'It needs a fresh sign-in rather than a new connection: reconnecting keeps its conversations, leads and sequences.'}</p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <Link href={`/outreach/senders/${duplicate.id}`}><Button size="sm">{duplicate.status === 'ok' ? 'Open the connected account' : 'Reconnect the existing account'}</Button></Link>
@@ -307,7 +305,8 @@ export default function ConnectSenderPage() {
                 <input readOnly value={result.link} onFocus={(e) => e.currentTarget.select()} className="flex-1 px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-gray-50 text-gray-700" aria-label="Sign-in link" />
                 <Button variant="secondary" onClick={() => launch('copy')} loading={launching === 'copy'}>{copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />} Copy</Button>
               </div>
-              <div className="text-xs text-gray-500 mt-1">{result.reused ? 'An earlier sign-in for this owner was never completed; this link replaces it on the same ' : 'The account now shows as '}<Link href={`/outreach/senders/${result.sender_id}`} className="text-indigo-600 hover:underline">{result.reused ? 'sender' : 'connecting'}</Link>. It becomes active once the sign-in is complete.</div>
+              <div className="text-xs text-gray-500 mt-1">{result.reused ? 'An earlier sign-in for this account holder was never completed; this link replaces it on the same ' : 'The account now shows as '}<Link href={`/outreach/senders/${result.sender_id}`} className="text-indigo-600 hover:underline">{result.reused ? 'sender' : 'connecting'}</Link>. It becomes active once the sign-in is complete.</div>
+              {result.holder?.kind === 'member' && !result.holder.mine && <div className="text-xs text-indigo-700 mt-1">That&apos;s {result.holder.name ?? 'a teammate'} on your team. We&apos;ll email them on their sign-in email.</div>}
             </div>
           )}
           <div className="flex flex-wrap justify-between gap-2">

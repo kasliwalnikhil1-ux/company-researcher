@@ -80,7 +80,24 @@ export function leadDefaults(row: Row, ws: string): Row {
     custom: row.custom && typeof row.custom === 'object' && !Array.isArray(row.custom) ? row.custom : {},
     do_not_contact: !!row.do_not_contact,
     enrich_status: row.enrich_status ?? 'none',
+    // 094 (outreach_trg_lead_origin): origin from the creation path's source; a non-inbound lead is a prospect from creation
+    origin: row.origin && row.origin !== 'import' ? row.origin : originOf(row.source),
+    kind: row.kind ?? 'person',
+    prospect_since: row.prospect_since ?? ((row.origin && row.origin !== 'import' ? row.origin : originOf(row.source)) !== 'inbound' || row.list_id || row.stage_id ? (row.created_at ?? new Date().toISOString()) : null),
+    hidden_at: row.hidden_at ?? null,
+    hidden_reason: row.hidden_at ? (row.hidden_reason ?? 'manual') : null,
+    enrich_wait_reason: row.enrich_wait_reason ?? null,
   };
+}
+
+/** outreach__origin_of (094): the creation path's `source` → origin. */
+export function originOf(source: unknown): 'import' | 'manual' | 'api' | 'search' | 'inbound' {
+  const s = typeof source === 'string' ? source : '';
+  if (s === 'inbound' || s === 'inbound_email') return 'inbound';
+  if (s === 'search_url') return 'search';
+  if (s === 'api' || s === 'mcp' || s === 'connector' || s.startsWith('crm') || s === 'hubspot' || s === 'pipedrive' || s === 'salesforce') return 'api';
+  if (s === 'manual' || s === 'inbox' || s === 'webchat' || s === 'widget') return 'manual';
+  return 'import';
 }
 
 /** Tables that point at a lead, and what a lead delete does to them (the foreign keys' on delete rules). */

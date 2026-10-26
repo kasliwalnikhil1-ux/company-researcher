@@ -81,7 +81,7 @@ function DomainRow({ d, own, canManage, notify, onRemove, planPaused }: { d: Tra
       <div className="text-xs text-gray-500">
         {d.status !== 'active' && 'The default tracking domain is used until this one is active. '}
         {d.checked_at ? `Last checked ${timeAgo(d.checked_at)}.` : d.status === 'pending_dns' ? 'Not checked yet.' : ''}
-        {!own && <> Manage the workspace default in <Link href="/outreach/settings/email" className="text-indigo-600 hover:underline">Settings → Email &amp; booking</Link>.</>}
+        {!own && <> Manage the workspace default in <Link href="/outreach/settings/email/tracking" className="text-indigo-600 hover:underline">Settings → Email &amp; booking → Tracking domain</Link>.</>}
       </div>
     </div>
   );

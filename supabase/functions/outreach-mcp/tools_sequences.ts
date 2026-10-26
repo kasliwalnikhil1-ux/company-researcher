@@ -7,7 +7,8 @@
 // they are on). Queued text is never re-rendered in TypeScript: outreach_refresh_queued_text
 // drops the pre-rendered copy so the step renders again at send time, with the one renderer.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
-import { type Ctx, tool, z, wsParam, resolveWs, requireRole, urpc, unwrap, McpError, gate, callFn, roleAtLeast, short, todayIn, wsTz, untrusted, mapPool } from "./ctx.ts";
+import { type Ctx, tool, z, wsParam, resolveWs, requireRole, urpc, unwrap, McpError, gate, callFn, roleAtLeast, short, wsTz, untrusted, mapPool, periodSchema, period } from "./ctx.ts";
+import { otherChannelText, statsSentence } from "./tools_tasks_reports.ts";
 import { compileSteps, renderGraph, TEMPLATES, templateByKey, parseWait, type Graph, type GraphNode } from "./steps.ts";
 
 type Row = Record<string, any>;
@@ -164,19 +165,34 @@ async function publishFlow(ctx: Ctx, toolName: string, s: Row, graph: Graph | nu
 export function registerSequences(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "sequences_list", title: "List sequences", cls: "read", minRole: "client_viewer",
-    description: "Sequences of a workspace with status, pool size, live/completed/replied counts, throttle reason, stalled reason (the stall alert), whether an unpublished draft exists, and ai_replies = {mode (stored: off | draft | autopilot; the app says Off | Review | Auto), effective_mode (when lower: paused / archived sequences run at most on Review), open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open} (members; included for up to 50 rows, or always with include_ai:true).",
-    input: { ...wsParam, status: z.enum(["draft", "active", "paused", "archived"]).optional(), client_id: z.string().optional(), include_ai: z.boolean().optional().describe("Force the ai_replies block on every row (one extra read per sequence)") },
+    description: "Sequences of a workspace with their results counted in PEOPLE (sequence-stats-PRD.md, the same numbers as the Sequences list, the Reports page and the API): channels[] (linkedin | instagram | whatsapp | email, from_earlier_version), progress {enrolled, live, done, pct_done}, contacted, invited, accepted + accepted_rate (÷ invited) + pending + accepted_early + accepted_split per channel, replied + replied_rate (÷ contacted) + auto_replied (OOO / automatic replies, never counted as replied), positive + positive_rate (÷ replied) + meetings, ops {queued, actions_sent, failed, failed_leads}, na {accepted?: reason, seen?: reason} (a metric that does not apply: say NA with the reason, never 0), and a quotable `summary`. All time by default; pass period for a cohort (leads first contacted in the period, and everything they did after). Also: pool size, throttle reason, stalled reason, whether an unpublished draft exists, and ai_replies = {mode, effective_mode, open_conversations, open_by_stage, handed_off_7d, drafts_waiting, unanswered_open} (members; included for up to 50 rows, or always with include_ai:true). `sent` is deprecated: use ops.actions_sent (gone after 2027-01-26).",
+    input: { ...wsParam, status: z.enum(["draft", "active", "paused", "archived"]).optional(), client_id: z.string().optional(), channel: z.enum(["linkedin", "instagram", "whatsapp", "email"]).optional().describe("Only sequences that use this channel; the numbers stay whole-sequence"), period: periodSchema.optional().describe("Omit for all time"), include_ai: z.boolean().optional().describe("Force the ai_replies block on every row (one extra read per sequence)") },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     let q = ctx.user.from("outreach_sequences").select(SEQ_COLS).eq("workspace_id", ws.id).order("updated_at", { ascending: false }).limit(100);
     if (a.status) q = q.eq("status", a.status); else q = q.neq("status", "archived");
     if (a.client_id) q = q.eq("client_id", a.client_id);
     const rows = unwrap<Row[]>(await q);
-    const summary = await urpc<Row[]>(ctx, "sequence_summary", { p_ws: ws.id }).catch(() => []);
-    const byId = new Map((summary ?? []).map((s: Row) => [s.sequence_id, s]));
-    const withAi = roleAtLeast(ws.role, "member") && (a.include_ai || rows.length <= 50);
-    const ai = withAi ? new Map(await mapPool(rows, 6, async (s) => [s.id, await aiRepliesOf(ctx, s.id)] as [string, Row | undefined])) : new Map<string, Row | undefined>();
-    return { workspace: ws.name, count: rows.length, ai_replies_included: withAi || undefined, sequences: rows.map((s) => { const m = byId.get(s.id) ?? {}; return { id: s.id, name: s.name, status: s.status, version: s.head_version, pool: s.sender_pool?.length ?? 0, assignment: s.assignment, client_id: s.client_id, live: m.live, completed: m.completed, replied: m.replied, sent: m.sent, queued: m.queued, throttled: s.throttled_reason, stalled: s.stalled_at ? s.stalled_reason ?? true : undefined, unpublished_draft: s.draft_updated_at ? s.draft_updated_at : undefined, ai_replies: ai.get(s.id), updated: s.updated_at?.slice(0, 10) }; }) };
+    const p = a.period ? period(a.period, wsTz(ws)) : null;
+    const stats = (await urpc<Row[]>(ctx, "report_sequences", { p_ws: ws.id, p_client: a.client_id ?? null, p_from: p?.from ?? null, p_to: p?.to ?? null, p_channel: a.channel ?? null, p_status: a.status ?? "all" }).catch(() => [])) ?? [];
+    const byId = new Map(stats.map((s: Row) => [s.sequence_id, s]));
+    const kept = a.channel ? rows.filter((s) => byId.has(s.id)) : rows;
+    const withAi = roleAtLeast(ws.role, "member") && (a.include_ai || kept.length <= 50);
+    const ai = withAi ? new Map(await mapPool(kept, 6, async (s) => [s.id, await aiRepliesOf(ctx, s.id)] as [string, Row | undefined])) : new Map<string, Row | undefined>();
+    return {
+      workspace: ws.name, count: kept.length, period: p ?? "all", definitions_version: 2, ai_replies_included: withAi || undefined,
+      sequences: kept.map((s) => {
+        const m = byId.get(s.id);
+        return {
+          id: s.id, name: s.name, status: s.status, version: s.head_version, pool: s.sender_pool?.length ?? 0, assignment: s.assignment, client_id: s.client_id,
+          channels: m?.channels, progress: m?.progress, contacted: m?.contacted, invited: m?.invited, accepted: m?.accepted, accepted_rate: m?.accepted_rate, pending: m?.pending, accepted_early: m?.accepted_early, accepted_split: m?.accepted_split,
+          replied: m?.replied, replied_rate: m?.replied_rate, auto_replied: m?.auto_replied, positive: m?.positive, positive_rate: m?.positive_rate, meetings: m?.meetings, ops: m?.ops, na: m?.na,
+          summary: m ? statsSentence(m) : undefined,
+          live: m?.progress?.live, queued: m?.ops?.queued, sent: m?.ops?.actions_sent, sent_deprecated: m ? "use ops.actions_sent" : undefined,
+          throttled: s.throttled_reason, stalled: s.stalled_at ? s.stalled_reason ?? true : undefined, unpublished_draft: s.draft_updated_at ? s.draft_updated_at : undefined, ai_replies: ai.get(s.id), updated: s.updated_at?.slice(0, 10),
+        };
+      }),
+    };
   });
 
   tool(server, ctx, {
@@ -538,20 +554,19 @@ export function registerSequences(server: McpServer, ctx: Ctx): void {
   });
 
   tool(server, ctx, {
-    name: "sequence_stats", title: "Sequence stats (lifetime)", cls: "read", minRole: "client_viewer",
-    description: "Lifetime view of one sequence from the report functions (the same numbers as the Reports page): totals, per-step rows, exits, live leads, plus the cohort funnel enrolled → invited → accepted → messaged → replied → interested → meeting → won for every lead ever enrolled. Covers up to the last 2 years. For a date range use report_sequence / report_funnel.",
+    name: "sequence_stats", title: "Sequence stats (all time)", cls: "read", minRole: "client_viewer",
+    description: "One sequence's results, all time, from the same report function as the sequence page (sequence-stats-PRD.md): funnel = the people-level header (contacted, invited, accepted + rate + pending, replied + rate + auto_replied, positive + rate + meetings, progress, ops, na reasons), channels[] = one block per channel with only the stages that channel has (LinkedIn: contacted → invited → accepted → messaged → seen → replied, replied_of_accepted; Instagram: followed / followed back / DM'd; WhatsApp: contacted → seen → replied, bounced = not on WhatsApp; Email: contacted → replied, bounced; seen is 'at least': read receipts can be off; seen_since / seen_partial say from when receipts were kept), replied_other_channel {channel: n} (replies on a channel the sequence has no step on), plus the per-step table, best / worst step, exits, A/B tests and live leads. For a cohort period use report_sequence. `summary` is quotable and only repeats these numbers.",
     input: { sequence_id: z.string() },
   }, async (a) => {
     const s = await loadSequence(ctx, a.sequence_id, "id, workspace_id, created_at");
-    const ws = resolveWs(ctx, s.workspace_id);
-    const to = todayIn(wsTz(ws));
-    const floor = new Date(`${to}T00:00:00Z`); floor.setUTCDate(floor.getUTCDate() - 730);
-    const created = String(s.created_at).slice(0, 10), from = created > floor.toISOString().slice(0, 10) ? created : floor.toISOString().slice(0, 10);
-    const [rep, funnel] = await Promise.all([
-      urpc<Row>(ctx, "report_sequence", { p_sequence: s.id, p_from: from, p_to: to }),
-      urpc<Row>(ctx, "report_funnel", { p_ws: s.workspace_id, p_client: null, p_from: from, p_to: to, p_filters: { sequence_id: s.id } }),
-    ]);
-    return { sequence: rep.sequence, period: rep.period, live: rep.live, totals: rep.totals, funnel: funnel.stages, steps: rep.steps, best_step: rep.best_step, worst_step: rep.worst_step, exits: rep.exits, ab_tests: (rep.ab_tests ?? []).map((t: Row) => ({ node_id: t.node_id, judged_on: t.judged_on, enough_data: t.enough_data, leader: t.leader, can_promote: t.can_promote })) };
+    const rep = await urpc<Row>(ctx, "report_sequence", { p_sequence: s.id, p_from: null, p_to: null });
+    return {
+      sequence: rep.sequence, period: rep.period, definitions_version: rep.definitions_version, live: rep.live,
+      funnel: rep.funnel, channels: rep.channels, replied_other_channel: rep.replied_other_channel, seen_since: rep.seen_since, seen_partial: rep.seen_partial,
+      summary: `${rep.sequence?.name}: ${statsSentence(rep.funnel)}.${otherChannelText(rep.replied_other_channel)}`,
+      totals: rep.totals, steps: rep.steps, best_step: rep.best_step, worst_step: rep.worst_step, exits: rep.exits,
+      ab_tests: (rep.ab_tests ?? []).map((t: Row) => ({ node_id: t.node_id, judged_on: t.judged_on, enough_data: t.enough_data, leader: t.leader, can_promote: t.can_promote })),
+    };
   });
 }
 

@@ -26,7 +26,10 @@ export function buildExport(ctx: Ctx, body: Row): { columns: string[]; rows: unk
   const pick = (r: Row, cols: string[]) => cols.map((c) => r[c] ?? null);
   switch (body.kind) {
     case 'leads': {
-      const leads = store.t('outreach_leads').filter((l) => l.workspace_id === ws && (!body.client_id || l.client_id === body.client_id)).sort(byTime('created_at'));
+      // lead_ids (the table's selection → Export CSV in the bulk bar) narrows the export to those leads, as the live function does
+      const ids = Array.isArray(body.lead_ids) ? new Set((body.lead_ids as unknown[]).filter((x): x is string => typeof x === 'string')) : null;
+      if (ids && ids.size === 0) demoError('E_PAYLOAD_INVALID', 'lead_ids is empty');
+      const leads = store.t('outreach_leads').filter((l) => l.workspace_id === ws && (!body.client_id || l.client_id === body.client_id) && (!ids || ids.has(String(l.id)))).sort(byTime('created_at'));
       return { columns: LEAD_COLS, rows: leads.map((l) => pick(l, LEAD_COLS)) };
     }
     case 'messages': {

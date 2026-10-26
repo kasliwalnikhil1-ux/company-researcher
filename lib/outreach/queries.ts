@@ -6,12 +6,13 @@ import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
 import type {
   Action, AuditRow, Chat, Client, DashboardData, Enrollment, ImportJob, Invitation, Lead, LeadSenderState, List, Member, Message,
-  NodeStats, OutboundWebhook, PlatformCeiling, Sender, SenderBudget, SenderEvent, Sequence, SequenceVersion, Stage, Suppression, Tag, Task, WarmupCap,
+  NodeStats, OutboundWebhook, PlatformCeiling, Sender, SenderBudget, SenderEvent, SenderLabel, Sequence, SequenceVersion, Stage, Suppression, Tag, Task, WarmupCap,
 } from './types';
 
 export const qk = {
   dashboard: (ws: string) => ['outreach', ws, 'dashboard'] as const,
   senders: (ws: string) => ['outreach', ws, 'senders'] as const,
+  senderLabels: (ws: string) => ['outreach', ws, 'sender-labels'] as const,
   sender: (id: string) => ['outreach', 'sender', id] as const,
   senderBudgets: (id: string) => ['outreach', 'sender', id, 'budgets'] as const,
   senderEvents: (id: string) => ['outreach', 'sender', id, 'events'] as const,
@@ -62,7 +63,24 @@ export function useSenders(ws: string | null | undefined) {
 }
 
 export function useSender(id: string | null | undefined) {
-  return useQuery({ queryKey: qk.sender(id ?? ''), enabled: !!id, queryFn: () => sel<Sender>(db.from('outreach_senders').select('*').eq('id', id!).single()) });
+  // maybeSingle: a sender that was deleted (or folded into another one) is hidden by RLS and reads as null, not as an error.
+  return useQuery({ queryKey: qk.sender(id ?? ''), enabled: !!id, queryFn: () => sel<Sender | null>(db.from('outreach_senders').select('*').eq('id', id!).maybeSingle()) });
+}
+
+/**
+ * The sender to open for an id that did not read back: the hosted sign-in returns to the placeholder sender, which the
+ * webhook may have folded into an already-connected sender (a hidden tombstone). Null when there is nothing to open.
+ */
+export function useSenderLanding(id: string | null | undefined, enabled: boolean) {
+  return useQuery({ queryKey: [...qk.sender(id ?? ''), 'landing'] as const, enabled: !!id && enabled, retry: false, queryFn: () => rpc<string | null>('sender_landing', { p_sender: id }) });
+}
+
+/**
+ * Account labels of every sender the workspace ever had, removed ones included (092). The inbox names the account a
+ * conversation runs through with these: the outreach_senders join reads nothing for a removed sender (RLS hides it).
+ */
+export function useSenderLabels(ws: string | null | undefined) {
+  return useQuery({ queryKey: qk.senderLabels(ws ?? ''), enabled: !!ws, staleTime: 5 * 60_000, queryFn: () => rpc<SenderLabel[]>('sender_labels', { p_workspace: ws }) });
 }
 
 export function useSenderBudgets(id: string | null | undefined) {
@@ -183,35 +201,99 @@ export function useEnrollments(f: { sequence_id?: string; lead_id?: string; send
  */
 export type AiChatFilter = 'scheduled' | 'escalated' | 'sent_by_ai' | 'draft_ready' | 'handed_off' | 'manual_drafts';
 
-/** Applies the AI filter to an outreach_chats query (shared by useChats and intel.useChatsByIds). */
-export function applyAiChatFilter<Q>(q: Q, ai: AiChatFilter | null | undefined): Q {
-  const b = q as any;   // eslint-disable-line @typescript-eslint/no-explicit-any
-  // Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart
-  if (ai === 'scheduled') return b.eq('ai_run_status', 'scheduled');
-  if (ai === 'escalated') return b.or('ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)');
-  if (ai === 'draft_ready' || ai === 'manual_drafts') return b.eq('ai_run_status', 'draft_ready').eq('ai_run_decision', 'send');
-  if (ai === 'sent_by_ai') return b.gt('ai_replies_count', 0);
-  if (ai === 'handed_off') return b.not('ai_handed_off_at', 'is', null);
-  return q;
+/**
+ * Each AI filter as a PostgREST logic term, so several picked at once become one `or(...)` over the same row columns.
+ * Draft mode files an escalation / no-reply suggestion as a draft_ready run: the mirrored decision tells them apart.
+ */
+const AI_FILTER_TERM: Record<AiChatFilter, string> = {
+  scheduled: 'ai_run_status.eq.scheduled',
+  escalated: 'ai_run_status.eq.escalated,and(ai_run_status.eq.draft_ready,ai_run_decision.eq.escalate)',
+  draft_ready: 'and(ai_run_status.eq.draft_ready,ai_run_decision.eq.send)',
+  manual_drafts: 'and(ai_run_status.eq.draft_ready,ai_run_decision.eq.send)',
+  sent_by_ai: 'ai_replies_count.gt.0',
+  handed_off: 'ai_handed_off_at.not.is.null',
+};
+
+/** Applies the AI filter(s) to an outreach_chats query: a conversation matches when any picked filter does. */
+export function applyAiChatFilter<Q>(q: Q, ai: readonly AiChatFilter[] | null | undefined): Q {
+  const terms = Array.from(new Set((ai ?? []).map((a) => AI_FILTER_TERM[a]).filter(Boolean)));
+  if (!terms.length) return q;
+  return (q as any).or(terms.join(','));   // eslint-disable-line @typescript-eslint/no-explicit-any
 }
 
+/**
+ * Inbox list filters. The multi-valued ones (senders, intents, channels, AI, stages) are empty = any; one value becomes
+ * an `eq`, several an `in`, so the planner keeps the index on (workspace_id, last_message_at) in every case.
+ */
 export interface ChatFilters {
-  sender_id?: string | null; client_id?: string | null; intent?: string | null; unread?: boolean | null; assigned_to?: string | null; provider?: string | null; archived?: boolean; search?: string; ai?: AiChatFilter | null; stage?: string | null; /** private notes: only conversations that carry at least one note */ has_notes?: boolean | null;
+  sender_ids?: string[] | null; client_id?: string | null; intents?: string[] | null; unread?: boolean | null; assigned_to?: string | null; providers?: string[] | null; archived?: boolean; search?: string; ai?: AiChatFilter[] | null; stages?: string[] | null; /** private notes: only conversations that carry at least one note */ has_notes?: boolean | null;
+  /**
+   * Reply date: conversations whose latest reply from them (`last_inbound_at`, auto-replies and bounces excluded) falls on a
+   * calendar day from `replied_from` to `replied_to` inclusive (YYYY-MM-DD in the browser's timezone; either end may be open).
+   */
+  replied_from?: string | null; replied_to?: string | null;
   /**
    * Replies / Sent (075). `view` 'replies' (default) lists only conversations where the other person has written;
    * 'all' every conversation (search results, the lead page). `chip`: needs_reply = their message is the latest, the
    * conversation is open and the AI is not answering it (longest waiting first); waiting_on_them = ours is the latest.
    */
   view?: 'replies' | 'all';
-  chip?: 'all' | 'needs_reply' | 'waiting_on_them' | null;
+  /** `other` (094): newsletters, notifications and company pages (chats.counterpart_kind <> person); the three people chips exclude them. */
+  chip?: 'all' | 'needs_reply' | 'waiting_on_them' | 'other' | null;
 }
 
 /** Applies the Replies view and chip to an outreach_chats query (shared by useChats and intel.useChatsByIds). */
 export function applyRepliesView<Q>(q: Q, f: Pick<ChatFilters, 'view' | 'chip'>): Q {
   let b = q as any;   // eslint-disable-line @typescript-eslint/no-explicit-any
-  if ((f.view ?? 'replies') === 'replies') b = b.not('first_inbound_at', 'is', null);
+  if ((f.view ?? 'replies') === 'replies') {
+    b = b.not('first_inbound_at', 'is', null);
+    // 094: the Replies view lists people; automated senders and company pages wait under the Other chip
+    b = f.chip === 'other' ? b.neq('counterpart_kind', 'person') : b.eq('counterpart_kind', 'person');
+  }
   if (f.chip === 'needs_reply') b = b.eq('waiting_on', 'us').eq('ai_answering', false).not('status', 'in', '(resolved,snoozed)');
   else if (f.chip === 'waiting_on_them') b = b.eq('waiting_on', 'them');
+  return b;
+}
+
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** Timestamp bounds of a reply-date filter: [from 00:00, the day after `to` 00:00) in the browser's timezone. */
+export function replyDateBounds(f: Pick<ChatFilters, 'replied_from' | 'replied_to'>): { from: string | null; to: string | null } {
+  const day = (s: string | null | undefined, plusDays = 0) => {
+    if (!s || !DAY_RE.test(s)) return null;
+    const d = new Date(`${s}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setDate(d.getDate() + plusDays);
+    return d.toISOString();
+  };
+  return { from: day(f.replied_from), to: day(f.replied_to, 1) };
+}
+
+/** Characters PostgREST reads as syntax inside an `or(...)` / `ilike` term. */
+export function cleanSearch(s: string): string { return s.replace(/[,()"\\]/g, ' ').trim(); }
+
+const picked = (xs: readonly string[] | null | undefined) => Array.from(new Set((xs ?? []).filter((x) => typeof x === 'string' && x)));
+
+/**
+ * Every inbox filter except `archived` and the page cursor, applied to an outreach_chats query (shared by useChats and
+ * intel.useChatsByIds so both list paths read the same rows).
+ */
+export function applyChatFilters<Q>(q: Q, f: ChatFilters): Q {
+  let b = applyRepliesView(q, f) as any;   // eslint-disable-line @typescript-eslint/no-explicit-any
+  const anyOf = (col: string, xs: readonly string[] | null | undefined) => { const v = picked(xs); if (v.length === 1) b = b.eq(col, v[0]); else if (v.length) b = b.in(col, v); };
+  anyOf('sender_id', f.sender_ids);
+  if (f.client_id) b = b.eq('client_id', f.client_id);
+  anyOf('intent', f.intents);
+  if (f.unread) b = b.eq('unread', true);
+  if (f.assigned_to) b = b.eq('assigned_to', f.assigned_to);
+  anyOf('provider', f.providers);
+  b = applyAiChatFilter(b, f.ai);
+  anyOf('conversation_stage', f.stages);
+  if (f.has_notes) b = b.not('last_note_at', 'is', null);
+  const { from, to } = replyDateBounds(f);
+  if (from) b = b.gte('last_inbound_at', from);
+  if (to) b = b.lt('last_inbound_at', to);
+  const search = f.search ? cleanSearch(f.search) : '';
+  if (search) b = b.or(`attendee_name.ilike.%${search}%,subject.ilike.%${search}%,last_message_preview.ilike.%${search}%`);
   return b;
 }
 
@@ -234,17 +316,7 @@ export function useChats(ws: string | null | undefined, f: ChatFilters) {
     initialPageParam: null as ChatCursor | null,
     queryFn: async ({ pageParam }): Promise<ChatPage> => {
       let q = db.from('outreach_chats').select('*, outreach_leads(id, full_name, company, headline, picture_url), outreach_senders(id, display_name, provider)').eq('workspace_id', ws!).eq('archived', !!f.archived);
-      q = applyRepliesView(q, f);
-      if (f.sender_id) q = q.eq('sender_id', f.sender_id);
-      if (f.client_id) q = q.eq('client_id', f.client_id);
-      if (f.intent) q = q.eq('intent', f.intent);
-      if (f.unread) q = q.eq('unread', true);
-      if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
-      if (f.provider) q = q.eq('provider', f.provider);
-      q = applyAiChatFilter(q, f.ai);
-      if (f.stage) q = q.eq('conversation_stage', f.stage);
-      if (f.has_notes) q = q.not('last_note_at', 'is', null);
-      if (f.search) q = q.or(`attendee_name.ilike.%${f.search}%,subject.ilike.%${f.search}%,last_message_preview.ilike.%${f.search}%`);
+      q = applyChatFilters(q, f);
       if (waiting) {
         // Needs reply: last_inbound_at is always set (waiting_on = 'us'); strictly after the cursor in (asc, id asc) order.
         if (pageParam?.at) q = q.or(`last_inbound_at.gt.${pageParam.at},and(last_inbound_at.eq.${pageParam.at},id.gt.${pageParam.id})`);
@@ -438,7 +510,7 @@ export function useOutreachRealtime(ws: string | null | undefined) {
       if (leadId) inv(leadNotesKey(leadId));
     });
     ch.on('postgres_changes', { event: '*', schema: 'public', table: 'outreach_senders', filter: `workspace_id=eq.${ws}` }, (p: any) => {
-      inv(qk.senders(ws));
+      inv(qk.senders(ws)); inv(qk.senderLabels(ws));
       if (p.new?.id) { inv(qk.sender(p.new.id)); inv(qk.senderEvents(p.new.id)); }
       invDashboard();
     });

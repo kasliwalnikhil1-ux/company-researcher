@@ -36,6 +36,8 @@ import FailedLeadsDrawer from './FailedLeadsDrawer';
 import { WhyNotSendingDialog } from './WhyNotSendingDialog';
 import AutoEnrolRules from './AutoEnrolRules';
 import AiRepliesTab from './ai/AiRepliesTab';
+import SequenceAnalytics from './stats/SequenceAnalytics';
+import type { LeadsLink } from './leads/SequenceLeads';
 
 const EMPTY: never[] = [];
 const NO_AI_VARIABLES: AiVariable[] = [];
@@ -135,6 +137,9 @@ export default function Builder({ id }: { id: string }) {
     const qs = params.toString();
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`);
   }, []);
+  // Analytics → Leads: a count opens the Leads tab on its filter (and the period's enrolled-in window)
+  const [leadsLink, setLeadsLink] = useState<LeadsLink | null>(null);
+  const openLeads = useCallback((link: LeadsLink) => { setLeadsLink({ ...link, nonce: Date.now() }); setTab('leads'); }, [setTab]);
 
   // Load / reload the local draft from the server row. Local edits are never overwritten by a refetch.
   useEffect(() => {
@@ -528,7 +533,7 @@ export default function Builder({ id }: { id: string }) {
         {tab === 'settings' && <SettingsTab sequenceId={sequence.id} draft={draft} clients={clientsQ.data ?? []} readOnly={readOnly} publishMode={publishMode} onChange={patchDraft} />}
         {tab === 'leads' && (
           <TabPage title="Leads" subtitle="Who is enrolled in this sequence and where each lead has got to. Add leads by enrolling them into this sequence." wide>
-            <EnrolPanel id={sequence.id} onOpenBuilder={() => setTab('steps')} />
+            <EnrolPanel id={sequence.id} onOpenBuilder={() => setTab('steps')} link={leadsLink} />
           </TabPage>
         )}
         {tab === 'versions' && (
@@ -538,6 +543,11 @@ export default function Builder({ id }: { id: string }) {
           </TabPage>
         )}
         {tab === 'ai' && <AiRepliesTab sequenceId={sequence.id} />}
+        {tab === 'results' && (
+          <TabPage title="Analytics" subtitle="Where this sequence loses people: by step, by sender and by teammate, for the leads enrolled in a period. Every count opens the matching leads." wide>
+            <SequenceAnalytics sequence={sequence} graph={live.graph} canPromote={canManage} onOpenLeads={openLeads} />
+          </TabPage>
+        )}
         {tab === 'auto' && (
           <TabPage title="Auto-enrol" subtitle="Rules that add new matching leads to this sequence on their own, every day." wide>
             {ws && <AutoEnrolRules sequenceId={sequence.id} workspaceId={ws} canManage={canManage && sequence.status !== 'archived'} sequenceActive={sequence.status === 'active'} />}
@@ -578,7 +588,10 @@ export default function Builder({ id }: { id: string }) {
         <FailedLeadsDrawer
           open={!!failedView} onClose={() => setFailedView(null)} sequenceId={sequence.id} nodeId={failedView?.nodeId ?? null}
           nodeLabel={failedNode ? nodeTitle(failedNode) : undefined} initialKind={failedView?.kind ?? 'failed'} graph={live.graph} canWrite={canWrite}
-          counts={failedStats ? { failed: Number(failedStats.failed ?? 0), skipped: Number(failedStats.skipped ?? 0) } : undefined}
+          counts={failedStats ? {
+            queued: Number(failedStats.queued ?? 0), sent: Number(failedStats.sent ?? 0), accepted: Number(failedStats.accepted ?? 0),
+            replied: Number(failedStats.replied ?? 0), failed: Number(failedStats.failed ?? 0), skipped: Number(failedStats.skipped ?? 0),
+          } : undefined}
         />
 
         <ConfirmModal

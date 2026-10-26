@@ -10,7 +10,7 @@ import { handleUnipileError, isRejectCode, type Decision } from "./errors.ts";
 import { renderTemplate, buildContext, type RenderContext } from "./render.ts";
 import { htmlToText, textToDisplayHtml, PLAIN_TEXT_HEADER } from "./plaintext.ts";
 import { recordReject } from "./health.ts";
-import { notifySender } from "./notify.ts";
+import { sendDueHolderEmails } from "./alerts.ts";
 import { reloginUrl } from "./inbound.ts";
 import { unsubscribeToken } from "./crypto.ts";
 import { enrichBackoff, fetchPosts, fetchPostsBudgeted, postsToRows, saveProfile, sectionsFor, storedPosts, tomorrowMorning } from "./enrich.ts";
@@ -122,12 +122,14 @@ async function syncRelationFromProfile(lead: Row, sender: Row, prof: Row, lss: R
   const rel = distanceToRelation(prof.network_distance);
   const pending = invitationPending(prof);
   let relation = lss?.relation ?? "none";
-  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  // every profile read is an observation of the relation: relation_checked_at moves even when nothing changed (094). A
+  // distance-1 profile with no invite on record becomes relation_source 'pre_existing' in the database trigger.
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString(), relation_checked_at: new Date().toISOString() };
   if (rel === "first") { relation = "first"; patch.relation = "first"; if (!lss?.invite_accepted_at) patch.invite_accepted_at = new Date().toISOString(); patch.invite_detected_at = lss?.invite_detected_at ?? new Date().toISOString(); }
   else if (pending) { relation = "pending_out"; patch.relation = "pending_out"; }
   else if (relation === "first" && rel === "none") { /* keep: profile may be throttled */ }
   else if (relation !== "invalid" && relation !== "blocked" && rel === "none" && relation !== "pending_out") { patch.relation = "none"; relation = "none"; }
-  if (Object.keys(patch).length > 1) await admin.from("outreach_lead_sender_state").update(patch).eq("lead_id", lead.id).eq("sender_id", sender.id);
+  await admin.from("outreach_lead_sender_state").update(patch).eq("lead_id", lead.id).eq("sender_id", sender.id);
   return relation;
 }
 
@@ -262,11 +264,16 @@ async function applyInstagramProfile(sender: Row, lead: Row, identity: LeadIdent
   const { data } = await admin.from("outreach_leads").update(patch).eq("id", lead.id).select("*").single();
   await setIdentityCheck(identity, true, messagingId);
   const followedBy = prof.relationship_status?.followed_by === true;
+  const weFollow = prof.relationship_status?.following === true;
+  const now = new Date().toISOString();
+  // 094: both directions of the follow are kept; a follow-back after our follow is 'our_invite', one that was already
+  // there when first seen is 'pre_existing' (the trigger decides from invite_sent_at = when our follow went out).
+  const obs: Record<string, unknown> = { follows_us: followedBy, we_follow: weFollow, relation_checked_at: now, updated_at: now };
   if (followedBy && lss?.relation !== "first" && lss?.relation !== "blocked" && lss?.relation !== "invalid") {
     // they follow us back: the relation change is what advances a "wait for follow back" step (outreach_trg_relation)
-    const now = new Date().toISOString();
-    await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, updated_at: now }).eq("lead_id", lead.id).eq("sender_id", sender.id);
+    Object.assign(obs, { relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now });
   }
+  if (lss) await admin.from("outreach_lead_sender_state").update(obs).eq("lead_id", lead.id).eq("sender_id", sender.id);
   return { lead: data ?? { ...lead, ...patch }, messagingId, followedBy };
 }
 
@@ -909,12 +916,8 @@ export async function executeAction(action: Row): Promise<ExecResult> {
     if (e instanceof UnipileError && e.code === "checkpoint_error") await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "checkpoint", data: { code } });
     if (decision.kind === "sender_credentials") {
       const { data: flipped } = await admin.from("outreach_senders").update({ status: "credentials", status_reason: code, last_disconnect_at: new Date().toISOString() }).eq("id", sender.id).eq("status", "ok").select("id");
-      // email once, when this action is what ended the session; the reconnect worker sends the daily reminders from here on
-      if (flipped?.length && !(sender.auth_method === "cookie" && sender.provider === "LINKEDIN")) {
-        const link = await reloginUrl(sender).catch(() => null);
-        await notifySender(sender.id, "reconnect_needed", { link });
-        await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: 0 }).eq("id", sender.id);
-      }
+      // the holder path emails whoever signs in (sign-in accounts now, cookie accounts after the silent retries) and the two reminders later
+      if (flipped?.length) await sendDueHolderEmails({ senderId: sender.id }).catch(() => null);
     }
     if (decision.kind === "branch" && decision.name === "connected" && lead) {
       await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? new Date().toISOString(), updated_at: new Date().toISOString() }).eq("lead_id", lead.id).eq("sender_id", sender.id);

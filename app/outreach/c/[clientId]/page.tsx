@@ -16,23 +16,43 @@ import { Avatar, BackLink, Button, Card, EmptyState, ErrorBox, fmtDate, IntentBa
 import { cn } from '@/lib/utils';
 import type { Client } from '@/lib/outreach/types';
 import {
-  INTENT_KEYS, INTENT_LABELS, csvFileName, downloadCsv, fmtInt, fmtRate, isIsoDay, presetRange, safeAccent, safeHttpsUrl, totalsCsvColumns, useBranding, useReportClient, useReportIntents, useReportSequences, validRange,
+  INTENT_KEYS, INTENT_LABELS, csvFileName, downloadCsv, fmtInt, fmtRate, isIsoDay, presetRange, safeAccent, safeHttpsUrl, useBranding, useReportClient, useReportIntents, useReportSequences, validRange,
   type DateRange, type IntentRow, type SequenceRow,
 } from '@/lib/outreach/reports';
 import RangePicker from '@/components/outreach/reports/RangePicker';
 import { ActivityOverTime, HeadlineTiles, hasActivity } from '@/components/outreach/reports/OverviewTab';
 import { ACCENT, ChartSkeleton, CountRate, ExportButton, KpiTile, MetricLabel, Refreshing, RetryError, Section, TableSkeleton, TilesSkeleton } from '@/components/outreach/reports/primitives';
 import { IntentLegend, IntentStackChart } from '@/components/outreach/reports/charts';
+import EmailSendingPanel from '@/components/outreach/settings/EmailSendingPanel';
+import { useSendingDomains } from '@/lib/outreach/emailSending';
 
 const PLATFORM_NAME = 'GrowthxAI';
+
+/** Enterprise: a sending domain per client (custom-sending-domain-PRD.md §4.3). Shown only when the plan has it. */
+function ClientEmailSending({ ws, clientId }: { ws: string; clientId: string }) {
+  const list = useSendingDomains(ws, clientId);
+  if (!list.data?.client_domains) return null;
+  return (
+    <section className="mt-6">
+      <h2 className="text-base font-semibold text-gray-900 mb-1">Email sending</h2>
+      <p className="text-sm text-gray-500 mb-3">Emails to this client and to people who sign in to its accounts can come from the client&apos;s own domain. Without one they use the workspace domain, else GrowthxAI.</p>
+      <EmailSendingPanel clientId={clientId} />
+    </section>
+  );
+}
 
 function ClientReport({ ws, clientId, range }: { ws: string; clientId: string; range: DateRange }) {
   const report = useReportClient(clientId, range);
   const intents = useReportIntents({ ws, client: clientId, range }, 'day');
   const sequences = useReportSequences({ ws, client: clientId, range });
-  const top = useMemo(() => [...(sequences.data ?? [])].filter((s) => s.totals.touches + s.totals.invites + s.totals.replies > 0).sort((a, b) => b.totals.replies - a.totals.replies || b.totals.touches - a.totals.touches).slice(0, 8), [sequences.data]);
+  // 089: rows are people-level results (leads first contacted in the period, and what they did after)
+  const top = useMemo(() => [...(sequences.data ?? [])].filter((s) => s.contacted + s.replied > 0).sort((a, b) => b.replied - a.replied || b.contacted - a.contacted).slice(0, 8), [sequences.data]);
 
-  const exportSequences = () => downloadCsv<SequenceRow>(csvFileName('client-sequences', range, report.data?.client.name), [{ header: 'Sequence', value: (r) => r.name }, { header: 'Status', value: (r) => r.status }, ...totalsCsvColumns<SequenceRow>((r) => r.totals)], top);
+  const exportSequences = () => downloadCsv<SequenceRow>(csvFileName('client-sequences', range, report.data?.client.name), [
+    { header: 'Sequence', value: (r) => r.name }, { header: 'Status', value: (r) => r.status }, { header: 'Contacted', value: (r) => r.contacted },
+    { header: 'Invited', value: (r) => r.invited }, { header: 'Accepted', value: (r) => r.accepted }, { header: 'Accepted rate %', value: (r) => (r.na.accepted ? null : r.accepted_rate) }, { header: 'Pending', value: (r) => r.pending },
+    { header: 'Replied', value: (r) => r.replied }, { header: 'Replied rate %', value: (r) => r.replied_rate }, { header: 'Positive', value: (r) => r.positive }, { header: 'Positive rate %', value: (r) => r.positive_rate }, { header: 'Meetings', value: (r) => r.meetings },
+  ], top);
   const exportIntents = () => downloadCsv<IntentRow>(csvFileName('client-replies', range, report.data?.client.name), [{ header: 'Day', value: (r) => r.key }, { header: 'Replies', value: (r) => r.replies }, ...INTENT_KEYS.map((k) => ({ header: INTENT_LABELS[k], value: (r: IntentRow) => r.intents[k] }))], intents.data?.rows ?? []);
 
   return (
@@ -79,17 +99,17 @@ function ClientReport({ ws, clientId, range }: { ws: string; clientId: string; r
 
       {sequences.isLoading ? <TableSkeleton cols={6} rows={4} /> : sequences.isError ? <RetryError error={sequences.error} onRetry={() => sequences.refetch()} /> : (
         <Refreshing active={sequences.isPlaceholderData}>
-          <Section title="Top sequences" description="Ordered by replies in this period." actions={<ExportButton onClick={exportSequences} disabled={!top.length} />}>
-            {!top.length ? <p className="text-sm text-gray-500">No sequence sent anything in this period.</p> : (
+          <Section title="Top sequences" description="People first contacted in this period, and what they did after. Ordered by replies." actions={<ExportButton onClick={exportSequences} disabled={!top.length} />}>
+            {!top.length ? <p className="text-sm text-gray-500">No sequence contacted anyone in this period.</p> : (
               <Table>
-                <thead><tr><Th>Sequence</Th><Th className="text-right"><MetricLabel metric="touches">Touches</MetricLabel></Th><Th className="text-right"><MetricLabel metric="accepted">Accepted</MetricLabel></Th><Th className="text-right"><MetricLabel metric="replies">Replies</MetricLabel></Th><Th className="text-right"><MetricLabel metric="interested">Interested</MetricLabel></Th><Th className="text-right"><MetricLabel metric="meetings">Meetings</MetricLabel></Th></tr></thead>
+                <thead><tr><Th>Sequence</Th><Th className="text-right"><MetricLabel metric="contacted">Contacted</MetricLabel></Th><Th className="text-right"><MetricLabel metric="accepted">Accepted</MetricLabel></Th><Th className="text-right"><MetricLabel metric="replied">Replied</MetricLabel></Th><Th className="text-right"><MetricLabel metric="positive">Positive</MetricLabel></Th><Th className="text-right"><MetricLabel metric="meetings">Meetings</MetricLabel></Th></tr></thead>
                 <tbody>{top.map((s) => (
                   <tr key={s.sequence_id}>
-                    <Td className="font-medium text-gray-900">{s.name}</Td><Td className="text-right tabular-nums">{fmtInt(s.totals.touches)}</Td>
-                    <Td className="text-right"><CountRate count={fmtInt(s.totals.accepted)} rate={fmtRate(s.totals.acceptance_rate)} /></Td>
-                    <Td className="text-right"><CountRate count={fmtInt(s.totals.replies)} rate={fmtRate(s.totals.reply_rate)} /></Td>
-                    <Td className="text-right"><CountRate count={fmtInt(s.totals.interested)} rate={fmtRate(s.totals.positive_reply_rate)} /></Td>
-                    <Td className="text-right tabular-nums">{fmtInt(s.totals.meetings)}</Td>
+                    <Td className="font-medium text-gray-900">{s.name}</Td><Td className="text-right tabular-nums">{fmtInt(s.contacted)}</Td>
+                    <Td className="text-right">{s.na.accepted ? <span className="text-gray-400" title={s.na.accepted}>NA</span> : <CountRate count={fmtInt(s.accepted)} rate={fmtRate(s.accepted_rate)} />}</Td>
+                    <Td className="text-right"><CountRate count={fmtInt(s.replied)} rate={fmtRate(s.replied_rate)} /></Td>
+                    <Td className="text-right"><CountRate count={fmtInt(s.positive)} rate={fmtRate(s.positive_rate)} /></Td>
+                    <Td className="text-right tabular-nums">{fmtInt(s.meetings)}</Td>
                   </tr>
                 ))}</tbody>
               </Table>
@@ -195,6 +215,7 @@ function ClientViewerPage() {
   const clientId = params?.clientId;
   const { workspace, canReply, role } = useWorkspace();
   const ws = workspace?.id;
+  const canManage = role === 'owner' || role === 'manager';
   const qc = useQueryClient();
   const toast = useToast();
   const router = useRouter(); const pathname = usePathname(); const search = useSearchParams();
@@ -280,6 +301,8 @@ function ClientViewerPage() {
       </div>
 
       <ClientReport ws={ws} clientId={clientId} range={range} />
+
+      {canManage && <ClientEmailSending ws={ws} clientId={clientId} />}
 
       <Card className="overflow-hidden mt-6" title={<span className="flex items-center gap-2"><Inbox className="w-4 h-4" /> Conversations</span>} actions={<span className="text-xs text-gray-400">{fmtInt(chats.data?.length ?? 0)} threads</span>}>
         <div className="-m-5 grid grid-cols-1 md:grid-cols-[320px_1fr] min-h-[520px]">

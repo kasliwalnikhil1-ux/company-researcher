@@ -9,7 +9,14 @@ export const MAIL_PROVIDERS: Provider[] = ['GMAIL', 'OUTLOOK', 'IMAP'];
 export type AuthMethod = 'credentials' | 'cookie' | 'oauth' | 'browser';
 /** `disconnected` (billing v2): the connected account was removed (trial ended, plan has fewer accounts, billing, or a teammate did it)
  *  while the sender, its conversations and its leads stay. It comes back with Reconnect, onto the same sender. */
-export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paused' | 'disabled' | 'disconnected';
+/** `removed` / `erased` (sender lifecycle, Oct 2026): the connector account is unlinked and the paid account freed; a removed sender keeps
+ *  every conversation, contacted record and report number and comes back on reconnect; an erased one is a tombstone that keeps counts. */
+export type SenderStatus = 'connecting' | 'ok' | 'credentials' | 'error' | 'paused' | 'disabled' | 'removed' | 'erased' | 'disconnected';
+export type RemovedVia = 'app' | 'owner_link' | 'unipile_deleted' | 'auto_after_disabled' | 'trial_ended' | 'workspace_deleted' | 'reconcile' | 'billing' | 'canceled';
+/** manual = a person paused it (replies still go out) · billing = the workspace is paused for billing (read-only) · system = health / provider warning */
+export type PauseReason = 'manual' | 'billing' | 'system';
+/** trialing · active · past_due · suspended · canceled · trial_expired (sender-lifecycle v1.2 D17; derived from plan + Stripe state) */
+export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'suspended' | 'canceled' | 'trial_expired';
 /** For Instagram, `first` means "follows the sender back"; for WhatsApp, `invalid` means "number is not on WhatsApp". */
 export type Relation = 'none' | 'pending_out' | 'pending_in' | 'first' | 'blocked' | 'invalid';
 export type ActionType =
@@ -55,6 +62,11 @@ export interface Workspace {
   trial_ends_at: string | null;
   stripe_status: string | null;
   past_due_since: string | null;
+  // sender-lifecycle v1.2 §5.9 (not returned by my_workspaces; read through billing_clock)
+  billing_status?: BillingStatus;
+  billing_action_required?: boolean;
+  overdue_invoice_url?: string | null;
+  billing_emails?: string[];
 }
 
 export interface Client {
@@ -102,8 +114,37 @@ export interface Sender {
   unipile_account_id: string | null;
   /** billing v2: the account this sender had before it was disconnected; since when it is disconnected / paused for billing */
   previous_unipile_account_id?: string | null;
+  /** when the sender entered credentials / error (cleared on ok; sender lifecycle v1.2 §5.8) */
   disconnected_at?: string | null;
   billing_paused_at?: string | null;
+  // sender lifecycle (migration 096)
+  paused_at?: string | null;
+  paused_by?: string | null;
+  pause_resume_at?: string | null;
+  disabled_at?: string | null;
+  disabled_by?: string | null;
+  disable_reason?: string | null;
+  auto_remove_after_days?: number;
+  auto_remove_at?: string | null;
+  auto_remove_notice_at?: string | null;
+  removal_requested_at?: string | null;
+  removed_at?: string | null;
+  removed_by?: string | null;
+  removed_via?: RemovedVia | null;
+  unipile_account_id_history?: string[];
+  restored_at?: string | null;
+  erase_scheduled_at?: string | null;
+  erase_requested_by?: string | null;
+  erased_at?: string | null;
+  // sender lifecycle v1.2 (migration 100): pause reason, who connected it, the disconnect clock (§5.8)
+  pause_reason?: PauseReason | null;
+  connected_by?: string | null;
+  holder_notified_at?: string | null;
+  holder_reminders_sent?: number;
+  holder_email_held_until?: string | null;
+  team_notified_at?: string | null;
+  team_final_notified_at?: string | null;
+  last_reconnected_at?: string | null;
   auth_method: AuthMethod;
   display_name: string | null;
   public_identifier: string | null;
@@ -265,8 +306,92 @@ export interface Lead {
   enrich_status: EnrichStatus;
   enriched_at: string | null;
   email_status: EmailStatus | null;
+  // 094 leads relationships (leads-relationships-PRD.md)
+  /** How the lead came to exist. Never changes. */
+  origin?: LeadOrigin;
+  /** person | company_page | automated (newsletter, notification, no-reply). */
+  kind?: LeadKind;
+  /** Set = a prospect (Prospects tab). Inbound contacts get it when enrolled, listed, staged or promoted. */
+  prospect_since?: string | null;
+  hidden_at?: string | null;
+  hidden_reason?: 'automated' | 'company_page' | 'manual' | null;
+  /** While enrich_status = waiting: why ({kind: queue, position} | {kind: budget, sender, resets_at} | {kind: no_sender}). */
+  enrich_wait_reason?: EnrichWaitReason | null;
   created_at: string;
   updated_at: string;
+}
+
+export type LeadOrigin = 'import' | 'manual' | 'api' | 'search' | 'inbound';
+export type LeadKind = 'person' | 'company_page' | 'automated';
+export type RelationSource = 'our_invite' | 'their_invite' | 'pre_existing' | 'unknown';
+export type EnrichWaitReason = { kind: 'queue'; position: number } | { kind: 'budget'; sender_id?: string; sender?: string; resets_at?: string | null } | { kind: 'no_sender' };
+/** The leads page status (094 §4.1): the ladder, plus the three overrides shown instead of it. */
+export type LeadStatus = 'not_contacted' | 'invited' | 'connected' | 'messaged' | 'replied' | 'interested' | 'meeting' | 'do_not_contact' | 'bounced' | 'wrote_to_us';
+/** Channel names as the summary stores them (the three mail providers are one channel). */
+export type LeadChannel = 'linkedin' | 'instagram' | 'whatsapp' | 'email';
+
+/** outreach_lead_summary (094): one row per lead, recomputed from a queue. Embedded on the leads list as `outreach_lead_summary`. */
+export interface LeadSummary {
+  lead_id: string;
+  workspace_id: string;
+  status: LeadStatus;
+  /** The ladder step reached (0 not contacted … 6 meeting), whatever override is shown. */
+  status_rank: number;
+  status_channel: LeadChannel | null;
+  status_at: string | null;
+  connected_sender_ids: string[];
+  connected_via_our_invite_ids: string[];
+  pending_sender_ids: string[];
+  connected_count: number;
+  pending_count: number;
+  /** Distinct relation_source of the current connections. */
+  connection_sources: RelationSource[];
+  identity_channels: LeadChannel[];
+  used_channels: LeadChannel[];
+  replied_channels: LeadChannel[];
+  bounced_channels: LeadChannel[];
+  contacted_sender_ids: string[];
+  replied_sender_ids: string[];
+  first_contacted_at: string | null;
+  connected_ever_at: string | null;
+  replied_at: string | null;
+  last_activity_at: string | null;
+  wrote_first_at: string | null;
+  updated_at: string;
+}
+
+/** One row of outreach_lead_relationships (094 §6): an account and its relationship with the lead. */
+export interface LeadRelationshipRow {
+  sender_id: string;
+  name: string;
+  picture_url: string | null;
+  provider: Provider;
+  channel: LeadChannel;
+  removed: boolean;
+  state: 'connected' | 'pending' | 'pending_in' | 'blocked' | 'invalid' | 'follows_us' | 'disconnected' | 'not_connected' | 'number_invalid' | 'chat' | 'has_number' | 'bounced' | 'emailed' | 'has_address';
+  since: string | null;
+  source: RelationSource | null;
+  invite_sent_at: string | null;
+  invite_had_note: boolean | null;
+  invite_withdrawn_at: string | null;
+  connected_at: string | null;
+  checked_at: string | null;
+  last_touch_at: string | null;
+  last_reply_at: string | null;
+  replied: boolean | null;
+  consent: string | null;
+  we_follow: boolean | null;
+  follows_us: boolean | null;
+  chat_since: string | null;
+}
+
+export interface LeadsTotals {
+  people: number; contacted: number; invited_pending: number; connected: number; connected_via_our_invites: number;
+  replied: number; interested: number; meetings: number; do_not_contact: number; bounced: number; wrote_to_us: number; include_removed: boolean;
+}
+export interface LeadsByAccountRow {
+  sender_id: string; name: string; picture_url: string | null; provider: Provider; channel: LeadChannel; removed: boolean;
+  connected: number | null; via_our_invite: number | null; pending: number | null; contacted: number; replied: number;
 }
 
 export interface LeadSenderState {
@@ -284,6 +409,12 @@ export interface LeadSenderState {
   last_inbound_at: string | null;
   replied: boolean;
   email_bounced: boolean;
+  // 094: where the connection came from and when it was last observed; Instagram follow directions
+  relation_source?: RelationSource | null;
+  connected_at?: string | null;
+  relation_checked_at?: string | null;
+  we_follow?: boolean | null;
+  follows_us?: boolean | null;
   updated_at: string;
 }
 
@@ -291,6 +422,17 @@ export interface List { id: string; workspace_id: string; client_id: string | nu
 export type StageKind = 'new' | 'contacted' | 'connected' | 'replied' | 'interested' | 'meeting' | 'won' | 'lost';
 export interface Stage { id: string; workspace_id: string; name: string; position: number; color: string | null; kind: StageKind | null; deal_value: number | null }
 export interface Tag { id: string; workspace_id: string; name: string; color: string | null }
+/** 092 outreach_sender_labels: the account a conversation runs through, for every sender the workspace ever had (removed ones included). */
+export interface SenderLabel {
+  id: string;
+  provider: Provider;
+  display_name: string | null;
+  public_identifier: string | null;
+  owner_email: string | null;
+  picture_url: string | null;
+  removed: boolean;
+}
+
 export type SuppressionKind = 'domain' | 'public_identifier' | 'email' | 'company';
 /** Scope: both ids null = the whole workspace; `client_id` = one client; `sequence_id` = one sequence (never both). */
 export interface Suppression {
@@ -470,6 +612,8 @@ export interface Chat {
   archived: boolean;
   /** Instagram: the conversation sits in the recipient's message requests (not accepted yet). */
   is_request: boolean;
+  /** 094: who is on the other side. Replies view = person only; company pages and automated senders sit under the Other chip. */
+  counterpart_kind?: LeadKind;
   /** Private notes (046): when the latest internal note was added. Never moves the list or the unread state. */
   last_note_at?: string | null;
   /** Web chat (049): set on WEBCHAT threads; `status` exists on every chat (default open). */

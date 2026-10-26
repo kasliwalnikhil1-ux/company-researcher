@@ -12,7 +12,7 @@ import { upsertLead } from '../leads/upsert';
 import { tableHooks } from '../query';
 import { localParts } from '../sim/caps';
 import { rebuildBudgets, rebuildNodeStats } from '../sim/derived';
-import { engineFor } from '../sim/engine';
+import { engineFor, LIVE } from '../sim/engine';
 import { renderContextJson } from '../sim/render';
 import type { Row } from '../store';
 import {
@@ -102,6 +102,98 @@ function enrollmentOr404(ctx: Ctx, id: unknown): Row {
 function closeHoldTasks(ctx: Ctx, enrollmentId: string, decision: 'exit' | 'resume') {
   ctx.store.update('outreach_tasks', (t) => t.enrollment_id === enrollmentId && t.kind === 'reply_hold' && !t.completed_at, { completed_at: ctx.now(), completed_by: ctx.userId, result: { decision } });
 }
+
+// ---------------------------------------------------------------------------
+// Sequence lead filters, bulk unenroll & Analytics (migration 101). Same vocabulary as outreach__lead_filter_statuses.
+// ---------------------------------------------------------------------------
+const LEAD_FILTER_STATUSES: Record<string, string[] | null> = {
+  live: ['active', 'waiting_connection', 'waiting_delay', 'waiting_task', 'paused'], all: null,
+  active: ['active', 'waiting_delay'], invite_sent: ['waiting_connection'], waiting_task: ['waiting_task'], paused: ['paused'],
+  completed: ['completed'], handoff: ['exited_replied'], stopped_by_teammate: ['exited_manual'], sender_disabled: ['exited_sender_disabled'],
+  failed: ['failed'], unenrolled: ['cancelled'], stopped: ['exited_manual', 'exited_sender_disabled', 'exited_suppressed'], do_not_contact: ['exited_suppressed'],
+};
+const ENDED = new Set(['completed', 'exited_replied', 'exited_manual', 'exited_suppressed', 'exited_sender_disabled', 'failed', 'cancelled']);
+const PASSIVE_NODES = new Set(['start', 'end', 'delay', 'wait_connection', 'wait_for_reply', 'wait_follow_back', 'condition', 'ab_split', 'ai_route', 'switch_channel', 'note', 'goto', 'end_step']);
+const day = (iso: string | null | undefined) => (iso ? String(iso).slice(0, 10) : '');
+const inWindow = (iso: string | null | undefined, from: string | null, to: string | null) => !!iso && (!from || day(iso) >= from) && (!to || day(iso) <= to);
+const pctOf = (n: number, d: number) => (d > 0 ? Math.round((n * 1000) / d) / 10 : null);
+function tbl(ctx: Ctx, name: string): Row[] { try { return ctx.store.t(name); } catch { return []; } }
+
+/** 1-based step numbers of the sending / task steps, walking the graph from the start (outreach_graph_step_numbers). */
+function stepNumbers(graph: Row | null | undefined): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!graph?.nodes) return out;
+  const seen = new Set<string>(); const queue: string[] = [graph.start]; let i = 0;
+  while (queue.length && seen.size < 1000) {
+    const cur = queue.shift()!; if (!cur || seen.has(cur)) continue; seen.add(cur);
+    const n = graph.nodes[cur]; if (!n) continue;
+    if (!PASSIVE_NODES.has(n.type)) out[cur] = ++i;
+    if (n.next) queue.push(n.next);
+    for (const b of Object.values(n.branches ?? {})) if (typeof b === 'string') queue.push(b);
+  }
+  return out;
+}
+const nodeLabel = (graph: Row | null | undefined, id: string | null | undefined) => {
+  const n = id ? graph?.nodes?.[id] : null;
+  return n ? (n.label ?? String(n.type ?? '').replace(/_/g, ' ').replace(/^\w/, (c: string) => c.toUpperCase())) : null;
+};
+function memberName(ctx: Ctx, userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  const m = tbl(ctx, 'outreach_members').find((x) => x.user_id === userId);
+  return m ? (m.display_name ?? m.email ?? 'Teammate') : 'Former teammate';
+}
+function leadRowsFor(ctx: Ctx, s: Row, a: Args): Row[] {
+  const filter = str(a.p_filter) ?? 'live';
+  if (!(filter in LEAD_FILTER_STATUSES)) demoError('E_PAYLOAD_INVALID', `unknown filter ${filter}`);
+  const sts = LEAD_FILTER_STATUSES[filter]; const teammate = str(a.p_teammate); const from = str(a.p_from); const to = str(a.p_to); const q = (str(a.p_search) ?? '').toLowerCase();
+  if ((from && !to) || (!from && to)) demoError('E_PAYLOAD_INVALID', 'from/to must be dates with from <= to, or both empty');
+  return ctx.store.t('outreach_enrollments').filter((e) => e.sequence_id === s.id && (!sts || sts.includes(e.status)) && (!teammate || e.status_changed_by === teammate) && (!from || inWindow(e.created_at, from, to))
+    && (!q || (() => { const l = ctx.store.get('outreach_leads', e.lead_id); return !!l && [l.full_name, l.company, l.public_identifier, l.email_work].some((v) => typeof v === 'string' && v.toLowerCase().includes(q)); })()))
+    .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)) || String(x.id).localeCompare(String(y.id)));
+}
+function chatMessages(ctx: Ctx, leadId: string, senderId: string, direction: 'in' | 'out', since: string): Row[] {
+  const chats = new Set(tbl(ctx, 'outreach_chats').filter((c) => c.lead_id === leadId && c.sender_id === senderId).map((c) => c.id));
+  return tbl(ctx, 'outreach_messages').filter((m) => chats.has(m.chat_id) && m.direction === direction && !m.deleted_at && String(m.sent_at) >= since).sort((x, y) => String(y.sent_at).localeCompare(String(x.sent_at)));
+}
+const snippet = (m: Row | undefined, chat: Row | undefined) => (m ? { text: String(m.text ?? m.summary ?? '').replace(/\s+/g, ' ').trim().slice(0, 140) || null, at: m.sent_at, chat_id: m.chat_id, intent: chat?.intent ?? null } : null);
+function leadRow(ctx: Ctx, s: Row, e: Row, nums: Record<string, number>, stepTotal: number): Row {
+  const lead = ctx.store.get('outreach_leads', e.lead_id); const sender = ctx.store.get('outreach_senders', e.sender_id);
+  const live = !ENDED.has(e.status);
+  const queued = ctx.store.t('outreach_actions').filter((x) => x.enrollment_id === e.id && (x.status === 'queued' || x.status === 'reserved') && !x.payload?.prefetch && !x.payload?.subtask).sort((x, y) => String(x.scheduled_for).localeCompare(String(y.scheduled_for)))[0];
+  const graph = s.graph as Row;
+  let next: Row | null = null;
+  if (live) {
+    if (queued) next = { kind: 'action', type: queued.action_type, node_id: queued.node_id, label: nodeLabel(graph, queued.node_id) ?? String(queued.action_type), at: queued.scheduled_for, status: queued.status };
+    else if (e.status === 'waiting_connection') next = { kind: 'wait', type: 'wait_connection', label: 'Waiting for the invitation to be accepted', at: e.wait_until };
+    else if (e.status === 'waiting_delay') next = { kind: 'wait', type: 'delay', label: 'Next step', at: e.wait_until, node_id: e.current_node_id };
+    else if (e.status === 'waiting_task') next = { kind: 'task', type: e.wait_reason ?? 'task', label: e.wait_reason === 'enrichment' ? 'Waiting for enrichment' : e.wait_reason === 'ai_review' ? 'Waiting for AI review' : e.wait_reason === 'ai_route' ? 'Waiting for the AI route' : 'Waiting on a task', at: null };
+    else if (e.status === 'paused') next = { kind: 'paused', label: e.held_at ? 'Held for review' : 'Paused', at: null };
+  }
+  const out = chatMessages(ctx, e.lead_id, e.sender_id, 'out', e.created_at)[0]; const inn = chatMessages(ctx, e.lead_id, e.sender_id, 'in', e.created_at)[0];
+  const chat = inn ? ctx.store.get('outreach_chats', inn.chat_id) : undefined;
+  return {
+    id: e.id, lead_id: e.lead_id, sender_id: e.sender_id, status: e.status, exit_reason: e.exit_reason ?? null, current_node_id: e.current_node_id ?? null, node_entered_at: e.node_entered_at ?? e.created_at,
+    wait_until: e.wait_until ?? null, created_at: e.created_at, completed_at: e.completed_at ?? null, held_at: e.held_at ?? null, hold_reason: e.hold_reason ?? null, wait_reason: e.wait_reason ?? null, paused_from: e.paused_from ?? null,
+    lead: lead ? { id: lead.id, full_name: lead.full_name ?? null, company: lead.company ?? null, headline: lead.headline ?? null, public_identifier: lead.public_identifier ?? null, picture_url: lead.picture_url ?? null } : null,
+    sender: { id: sender?.id ?? null, display_name: sender?.display_name ?? null, status: sender?.status ?? null },
+    step_index: (e.current_node_id ? nums[e.current_node_id] : undefined) ?? (() => { const sent = ctx.store.t('outreach_actions').filter((x) => x.enrollment_id === e.id && x.status === 'sent' && x.node_id && nums[x.node_id]).map((x) => nums[x.node_id]); return sent.length ? Math.max(...sent) : null; })(), step_total: stepTotal, step_label: nodeLabel(graph, e.current_node_id), step_type: e.current_node_id ? graph?.nodes?.[e.current_node_id]?.type ?? null : null,
+    next, last_message: snippet(out, undefined), last_reply: snippet(inn, chat),
+    changed_by: e.status_changed_by ? { id: e.status_changed_by, name: memberName(ctx, e.status_changed_by) } : null, changed_at: e.status_changed_at ?? null,
+  };
+}
+function bulkCan(action: string, e: Row): boolean {
+  if (action === 'unenroll') return !ENDED.has(e.status);
+  if (action === 'pause') return ['active', 'waiting_connection', 'waiting_delay', 'waiting_task'].includes(e.status);
+  return e.status === 'paused' && !e.held_at;
+}
+function bulkTargets(ctx: Ctx, s: Row, a: Args): Row[] {
+  const ids = Array.isArray(a.p_ids) ? asArr(a.p_ids) : null;
+  if (ids) return ids.map((id) => ctx.store.get('outreach_enrollments', id)).filter((e): e is Row => !!e && e.sequence_id === s.id);
+  if (!str(a.p_filter)) demoError('E_PAYLOAD_INVALID', 'pass ids or a filter');
+  return leadRowsFor(ctx, s, a);
+}
+const UNDO_KEY = 'sequence_bulk_undo';
+function markChanged(ctx: Ctx, id: string) { ctx.store.update('outreach_enrollments', id, { status_changed_by: ctx.userId, status_changed_at: ctx.now() }); }
 
 function exitEnrollment(ctx: Ctx, e: Row, reason: string) {
   if (!LIVE_SET.has(e.status)) return;
@@ -440,7 +532,44 @@ export const sequencesRpc = {
         return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: x.sender_id, sender_name: sd?.display_name ?? null, node_id: x.node_id, error_code: x.error_code ?? null, reason: reasonText(x.error_code), at: x.executed_at ?? null, recoverable: false };
       }).filter((r) => r.lead_name !== undefined);
     }
-    const failedAction = (eid: string) => store.t('outreach_actions').filter((x) => x.enrollment_id === eid && x.status === 'failed').sort((x, y) => String(y.executed_at ?? '').localeCompare(String(x.executed_at ?? '')))[0];
+    // the other chips (098): the same rows sim/derived.ts counts for outreach_node_stats
+    const kind = a.p_kind;
+    if (kind === 'queued' || kind === 'sent' || kind === 'accepted' || kind === 'replied') {
+      const row = (e: Row, senderId: string, nodeId: string | null, reason: string | null, at: string | null) => {
+        const l = lead(e.lead_id);
+        return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: senderId, sender_name: sender(senderId)?.display_name ?? null, node_id: nodeId, error_code: null, reason, at, recoverable: false };
+      };
+      let rows: ReturnType<typeof row>[];
+      if (kind === 'queued') {
+        rows = [...enr.values()].filter((e) => LIVE.includes(e.status) && e.current_node_id && (!node || e.current_node_id === node))
+          .map((e) => row(e, e.sender_id, e.current_node_id, 'Waiting to send', e.wait_until ?? null))
+          .sort((x, y) => String(x.at ?? '').localeCompare(String(y.at ?? '')));
+      } else {
+        const acts = store.t('outreach_actions').filter((x) => x.enrollment_id && enr.has(x.enrollment_id) && x.node_id && x.status === 'sent' && (!node || x.node_id === node));
+        if (kind === 'sent') rows = acts.map((x) => row(enr.get(x.enrollment_id)!, x.sender_id, x.node_id, null, x.executed_at ?? null));
+        else if (kind === 'accepted') {
+          const states = new Map(store.t('outreach_lead_sender_state').map((st) => [`${st.lead_id}|${st.sender_id}`, st]));
+          rows = acts.filter((x) => x.action_type === 'invite').flatMap((x) => {
+            const st = states.get(`${x.lead_id}|${x.sender_id}`);
+            return st?.invite_accepted_at && x.executed_at && st.invite_accepted_at >= x.executed_at ? [row(enr.get(x.enrollment_id)!, x.sender_id, x.node_id, null, st.invite_accepted_at)] : [];
+          });
+        } else {
+          const byId = new Map(acts.map((x) => [x.id, x]));
+          const seen = new Set<string>();
+          rows = store.t('outreach_messages').filter((m) => m.direction === 'in' && m.replied_to_action_id && byId.has(m.replied_to_action_id))
+            .sort((x, y) => String(x.sent_at ?? '').localeCompare(String(y.sent_at ?? '')))
+            .flatMap((m) => {
+              if (seen.has(m.replied_to_action_id)) return [];
+              seen.add(m.replied_to_action_id);
+              const x = byId.get(m.replied_to_action_id)!;
+              return [row(enr.get(x.enrollment_id)!, x.sender_id, x.node_id, String(m.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) || null, m.sent_at ?? null)];
+            });
+        }
+        rows.sort((x, y) => String(y.at ?? '').localeCompare(String(x.at ?? '')));
+      }
+      return rows.slice(offset, offset + limit);
+    }
+    const failedAction =(eid: string) => store.t('outreach_actions').filter((x) => x.enrollment_id === eid && x.status === 'failed').sort((x, y) => String(y.executed_at ?? '').localeCompare(String(x.executed_at ?? '')))[0];
     const rows = [...enr.values()].filter((e) => e.status === 'failed' && (!node || e.current_node_id === node)).sort((x, y) => String(y.completed_at ?? '').localeCompare(String(x.completed_at ?? '')));
     return rows.slice(offset, offset + limit).map((e) => {
       const l = lead(e.lead_id); const sd = sender(e.sender_id); const fa = failedAction(e.id);
@@ -646,6 +775,180 @@ export const sequencesRpc = {
   },
 
   resume_enrollment: (a, ctx) => { resumeEnrollment(ctx, enrollmentOr404(ctx, a.p_id)); return null; },
+
+  // ---- sequence lead filters, bulk unenroll & Analytics (101)
+  sequence_lead_counts: (a, ctx) => {
+    const s = seqOr404(ctx, a.p_sequence);
+    const rows = leadRowsFor(ctx, s, { ...a, p_filter: 'all', p_teammate: null, p_search: null });
+    const n = (sts: string[]) => rows.filter((e) => sts.includes(e.status)).length;
+    const byUser = new Map<string, number>();
+    for (const e of rows) if (e.status === 'exited_manual' && e.status_changed_by) byUser.set(e.status_changed_by, (byUser.get(e.status_changed_by) ?? 0) + 1);
+    return {
+      all: rows.length, live: n(LEAD_FILTER_STATUSES.live!), active: n(LEAD_FILTER_STATUSES.active!), invite_sent: n(['waiting_connection']), waiting_task: n(['waiting_task']), paused: n(['paused']),
+      completed: n(['completed']), handoff: n(['exited_replied']), stopped_by_teammate: n(['exited_manual']), sender_disabled: n(['exited_sender_disabled']), failed: n(['failed']), unenrolled: n(['cancelled']), do_not_contact: n(['exited_suppressed']),
+      teammates: [...byUser].map(([user_id, count]) => ({ user_id, name: memberName(ctx, user_id) ?? 'Teammate', count })).sort((x, y) => y.count - x.count),
+      stopped_by_system: rows.filter((e) => e.status === 'exited_manual' && !e.status_changed_by).length,
+    };
+  },
+
+  sequence_leads: (a, ctx) => {
+    const s = seqOr404(ctx, a.p_sequence);
+    const limit = Math.min(Math.max(Number(a.p_limit ?? 50) || 50, 1), 200); const offset = Math.max(Number(a.p_offset ?? 0) || 0, 0);
+    const nums = stepNumbers(s.graph); const stepTotal = Math.max(0, ...Object.values(nums));
+    const all = leadRowsFor(ctx, s, a);
+    return { total: all.length, limit, offset, step_total: stepTotal, rows: all.slice(offset, offset + limit).map((e) => leadRow(ctx, s, e, nums, stepTotal)) };
+  },
+
+  sequence_bulk_preview: (a, ctx) => {
+    const s = seqOr404(ctx, a.p_sequence); const action = str(a.p_action) ?? '';
+    if (!['unenroll', 'pause', 'resume'].includes(action)) demoError('E_PAYLOAD_INVALID', 'action must be unenroll, pause or resume');
+    const t = bulkTargets(ctx, s, a); const ok = t.filter((e) => bulkCan(action, e)).length;
+    return { total: t.length, eligible: ok, skipped: t.length - ok, sequence_name: s.name };
+  },
+
+  sequence_bulk: (a, ctx) => {
+    const s = seqOr404(ctx, a.p_sequence); const action = str(a.p_action) ?? '';
+    if (!['unenroll', 'pause', 'resume'].includes(action)) demoError('E_PAYLOAD_INVALID', 'action must be unenroll, pause or resume');
+    const byIds = Array.isArray(a.p_ids);
+    if (byIds && asArr(a.p_ids).length > 500) demoError('E_TOO_MANY', 'max 500 ids per call; pass a filter for more');
+    const limit = Math.min(Math.max(Number(a.p_limit ?? 500) || 500, 1), 500);
+    const batch = str(a.p_batch) ?? crypto.randomUUID();
+    const targets = bulkTargets(ctx, s, a);
+    const eligible = byIds ? targets : targets.filter((e) => bulkCan(action, e)).slice(0, limit);
+    let done = 0; let skipped = 0;
+    const undo = ctx.store.meta<Record<string, Row[]>>(UNDO_KEY, () => ({}));
+    for (const e0 of eligible) {
+      const e = ctx.store.get('outreach_enrollments', e0.id)!;
+      if (!bulkCan(action, e)) { skipped++; continue; }
+      if (action === 'unenroll') {
+        const actionIds = ctx.store.t('outreach_actions').filter((x) => x.enrollment_id === e.id && (x.status === 'queued' || x.status === 'reserved')).map((x) => x.id);
+        (undo[batch] ??= []).push({ enrollment_id: e.id, prev_status: e.status, prev_paused_from: e.paused_from ?? null, prev_wait_until: e.wait_until ?? null, prev_node_id: e.current_node_id ?? null, prev_node_entered: e.node_entered_at ?? null, prev_exit_reason: e.exit_reason ?? null, prev_held_at: e.held_at ?? null, prev_hold_reason: e.hold_reason ?? null, action_ids: actionIds, at: ctx.now() });
+        finish(ctx.store, e, 'cancelled', 'unenrolled');
+        ctx.store.update('outreach_enrollments', e.id, { held_at: null, hold_reason: null, paused_from: null });
+        ctx.store.update('outreach_actions', (x) => actionIds.includes(x.id) && x.status !== 'sent', { status: 'cancelled', decision: 'enrollment_cancelled' });
+        closeHoldTasks(ctx, e.id, 'exit');
+      } else if (action === 'pause') {
+        ctx.store.update('outreach_enrollments', e.id, { paused_from: e.status, status: 'paused' });
+      } else {
+        resumeEnrollment(ctx, e);
+      }
+      markChanged(ctx, e.id);
+      done++;
+    }
+    const remaining = byIds ? 0 : leadRowsFor(ctx, s, a).filter((e) => bulkCan(action, e)).length;
+    return { batch_id: batch, action, done, skipped: byIds ? skipped + (targets.length - eligible.length) : skipped, remaining };
+  },
+
+  sequence_bulk_undo: (a, ctx) => {
+    const batch = str(a.p_batch) ?? '';
+    const undo = ctx.store.meta<Record<string, Row[]>>(UNDO_KEY, () => ({}));
+    const rows = undo[batch]; if (!rows) demoError('E_NOT_FOUND', 'batch');
+    if (rows.length && Date.parse(rows[0].at) < Date.now() - 15 * 60_000) demoError('E_UNDO_EXPIRED', 'this can no longer be undone');
+    let restored = 0; let skipped = 0;
+    for (const u of rows) {
+      if (u.restored_at) continue;
+      const e = ctx.store.get('outreach_enrollments', u.enrollment_id);
+      if (!e || e.status !== 'cancelled' || e.exit_reason !== 'unenrolled') { skipped++; continue; }
+      if (ctx.store.t('outreach_enrollments').some((x) => x.lead_id === e.lead_id && x.sender_id === e.sender_id && x.id !== e.id && LIVE_SET.has(x.status))) { skipped++; continue; }
+      ctx.store.update('outreach_enrollments', e.id, { status: u.prev_status, paused_from: u.prev_paused_from, wait_until: u.prev_wait_until, current_node_id: u.prev_node_id, node_entered_at: u.prev_node_entered ?? e.node_entered_at, exit_reason: u.prev_exit_reason, completed_at: null, held_at: u.prev_held_at, hold_reason: u.prev_hold_reason });
+      ctx.store.update('outreach_actions', (x) => (u.action_ids as string[]).includes(x.id) && x.status === 'cancelled' && x.decision === 'enrollment_cancelled', { status: 'queued', decision: null, reserved_at: null });
+      markChanged(ctx, e.id);
+      u.restored_at = ctx.now();
+      restored++;
+    }
+    engineFor(ctx.store).resetIndexes();
+    return { batch_id: batch, restored, skipped };
+  },
+
+  sequence_analytics: (a, ctx) => {
+    const s = seqOr404(ctx, a.p_sequence);
+    const today = day(ctx.now());
+    const addDays = (d: string, n: number) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+    const to = str(a.p_to) ?? today; const from = str(a.p_from) ?? addDays(to, -29);
+    if ((str(a.p_from) && !str(a.p_to)) || (!str(a.p_from) && str(a.p_to))) demoError('E_PAYLOAD_INVALID', 'from/to must be dates with from <= to, or both empty');
+    if (from > to) demoError('E_PAYLOAD_INVALID', 'from/to must be dates with from <= to');
+    const enr = ctx.store.t('outreach_enrollments').filter((e) => e.sequence_id === s.id); const enrIds = new Set(enr.map((e) => e.id));
+    const inRange = enr.filter((e) => inWindow(e.created_at, from, to));
+    const acts = ctx.store.t('outreach_actions').filter((x) => x.enrollment_id && enrIds.has(x.enrollment_id) && !x.payload?.prefetch && !x.payload?.subtask);
+    const sentActs = acts.filter((x) => x.status === 'sent' && inWindow(x.executed_at, from, to));
+    const lssOf = (e: Row) => tbl(ctx, 'outreach_lead_sender_state').find((l) => l.lead_id === e.lead_id && l.sender_id === e.sender_id);
+    const invited = sentActs.filter((x) => x.action_type === 'invite' || x.action_type === 'follow');
+    const accepted = enr.filter((e) => { const l = lssOf(e); return !!l && inWindow(l.invite_accepted_at, from, to); });
+    const replied = enr.filter((e) => e.status === 'exited_replied' && inWindow(e.completed_at, from, to));
+    const chats = tbl(ctx, 'outreach_chats');
+    const interested = replied.filter((e) => chats.some((c) => c.lead_id === e.lead_id && c.sender_id === e.sender_id && c.intent === 'interested'));
+    const meetings = tbl(ctx, 'outreach_lead_milestones').filter((m) => m.kind === 'meeting' && inWindow(m.at, from, to) && enr.some((e) => e.lead_id === m.lead_id));
+    const contacted = new Set(sentActs.filter((x) => ['invite', 'message', 'inmail', 'email', 'new_chat', 'follow'].includes(x.action_type)).map((x) => x.enrollment_id)).size;
+    const cards = { enrolled: inRange.length, invites_sent: invited.length, accepted: accepted.length, replied: replied.length, interested: interested.length, meetings: meetings.length, contacted,
+      accepted_rate: pctOf(accepted.length, invited.length), replied_rate: pctOf(replied.length, accepted.length), replied_of_contacted_rate: pctOf(replied.length, contacted), interested_rate: pctOf(interested.length, replied.length) };
+    const cnt = (sts: string[]) => inRange.filter((e) => sts.includes(e.status)).length;
+    const progress = { live: cnt(LEAD_FILTER_STATUSES.live!), completed: cnt(['completed']), handoff: cnt(['exited_replied']), stopped: cnt(LEAD_FILTER_STATUSES.stopped!), failed: cnt(['failed']), unenrolled: cnt(['cancelled']), total: inRange.length };
+    const graph = s.graph as Row; const nums = stepNumbers(graph);
+    const msgs = tbl(ctx, 'outreach_messages');
+    const steps = Object.entries(graph?.nodes ?? {}).filter(([, n]) => !PASSIVE_NODES.has((n as Row).type)).map(([id, n0]) => {
+      const n = n0 as Row;
+      const mine = acts.filter((x) => x.node_id === id && inWindow(x.executed_at, from, to));
+      const sent = mine.filter((x) => x.status === 'sent').length; const skipped = mine.filter((x) => x.status === 'skipped').length; const failed = mine.filter((x) => x.status === 'failed').length;
+      const acc = n.type === 'send_invite' || n.type === 'follow' ? accepted.filter((e) => acts.some((x) => x.enrollment_id === e.id && x.node_id === id && x.status === 'sent')).length : 0;
+      const read = msgs.filter((m) => m.read_at && m.action_id && mine.some((x) => x.id === m.action_id)).length;
+      const rep = replied.filter((e) => e.current_node_id === id).length;
+      const denom = sent + skipped + failed;
+      return { node_id: id, step_number: nums[id] ?? null, type: n.type, label: nodeLabel(graph, id) ?? n.type, variant_id: null, has_variants: Array.isArray(n.config?.variants) && n.config.variants.length > 1,
+        sent, accepted: acc, read, replied: rep, skipped, failed, accepted_rate: pctOf(acc, sent), read_rate: pctOf(read, sent), replied_rate: pctOf(rep, sent), skipped_rate: pctOf(skipped, denom), failed_rate: pctOf(failed, denom),
+        leads_here: enr.filter((e) => e.current_node_id === id && LIVE_SET.has(e.status)).length };
+    }).sort((x, y) => (x.step_number ?? 9999) - (y.step_number ?? 9999));
+    const days: Row[] = [];
+    for (let d = from; d <= to; d = addDays(d, 1)) days.push({ day: d, planned: acts.filter((x) => day(x.scheduled_for) === d && x.status !== 'cancelled').length, sent: acts.filter((x) => x.status === 'sent' && day(x.executed_at) === d).length, snapshot: false });
+    const td = days.find((x) => x.day === today); const gap = td && td.planned > 0 ? Math.round(((td.planned - td.sent) * 1000) / td.planned) / 10 : null;
+    const pool = new Set<string>(s.sender_pool ?? []); for (const x of sentActs) pool.add(x.sender_id);
+    const senders = [...pool].map((sid) => ctx.store.get('outreach_senders', sid)).filter((x): x is Row => !!x).map((sd) => {
+      const mine = sentActs.filter((x) => x.sender_id === sd.id); const inv = mine.filter((x) => x.action_type === 'invite' || x.action_type === 'follow').length;
+      const acc = accepted.filter((e) => e.sender_id === sd.id).length; const rep = replied.filter((e) => e.sender_id === sd.id).length;
+      const touches = mine.filter((x) => ['invite', 'message', 'inmail', 'email', 'new_chat'].includes(x.action_type)).length;
+      return { id: sd.id, name: sd.display_name ?? sd.owner_email ?? 'Sender', provider: sd.provider, status: sd.status, status_reason: sd.status_reason ?? null, in_pool: (s.sender_pool ?? []).includes(sd.id),
+        sent: mine.length, invites: inv, accepted: acc, replied: rep, failed: acts.filter((x) => x.sender_id === sd.id && x.status === 'failed' && inWindow(x.executed_at, from, to)).length,
+        accepted_rate: pctOf(acc, inv), replied_rate: pctOf(rep, touches), limited: false, live: enr.filter((e) => e.sender_id === sd.id && LIVE_SET.has(e.status)).length };
+    }).sort((x, y) => y.sent - x.sent);
+    const team = new Map<string, { handoffs_taken: number; stopped: number; unenrolled: number }>();
+    const bump = (u: string | null | undefined, k: 'handoffs_taken' | 'stopped' | 'unenrolled') => { if (!u) return; const t = team.get(u) ?? { handoffs_taken: 0, stopped: 0, unenrolled: 0 }; t[k]++; team.set(u, t); };
+    for (const e of enr) {
+      if (e.status === 'exited_manual' && inWindow(e.status_changed_at ?? e.completed_at, from, to)) bump(e.status_changed_by, 'stopped');
+      if (e.status === 'cancelled' && e.exit_reason === 'unenrolled' && inWindow(e.status_changed_at ?? e.completed_at, from, to)) bump(e.status_changed_by, 'unenrolled');
+      if (e.status === 'exited_replied' && inWindow(e.completed_at, from, to)) { const m = chatMessages(ctx, e.lead_id, e.sender_id, 'out', e.completed_at).find((x) => x.sent_by); bump(m?.sent_by, 'handoffs_taken'); }
+    }
+    const untaken = replied.filter((e) => !chatMessages(ctx, e.lead_id, e.sender_id, 'out', e.completed_at).some((x) => x.sent_by)).length;
+    const first = acts.filter((x) => x.status === 'sent' && x.executed_at).map((x) => String(x.executed_at)).sort()[0] ?? null;
+    return {
+      sequence: { id: s.id, name: s.name, status: s.status, head_version: s.head_version }, period: { from, to, timezone: 'UTC', default: !str(a.p_from) && !str(a.p_to) },
+      first_run_at: first, empty: !first, cards, progress, steps,
+      daily: { days, today, today_planned: td?.planned ?? 0, today_sent: td?.sent ?? 0, gap_pct: gap, gap_reason: gap !== null && gap > 20 ? (s.status === 'paused' ? 'The sequence is paused' : 'The day is not over: sends continue in each sender’s working hours') : null },
+      senders, team: [...team].map(([user_id, t]) => ({ user_id, name: memberName(ctx, user_id) ?? 'Teammate', ...t })), handoffs_untaken: untaken, definitions_version: 1,
+    };
+  },
+
+  sequence_analytics_leads: (a, ctx) => {
+    const s = seqOr404(ctx, a.p_sequence);
+    const today = day(ctx.now());
+    const addDays = (d: string, n: number) => { const x = new Date(`${d}T00:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+    const to = str(a.p_to) ?? today; const from = str(a.p_from) ?? addDays(to, -29);
+    const limit = Math.min(Math.max(Number(a.p_limit ?? 50) || 50, 1), 200); const offset = Math.max(Number(a.p_offset ?? 0) || 0, 0); const q = (str(a.p_search) ?? '').toLowerCase();
+    const nums = stepNumbers(s.graph); const stepTotal = Math.max(0, ...Object.values(nums));
+    const all = ctx.store.t('outreach_enrollments').filter((e) => e.sequence_id === s.id && inWindow(e.created_at, from, to) && (!q || (() => { const l = ctx.store.get('outreach_leads', e.lead_id); return !!l && [l.full_name, l.company].some((v) => typeof v === 'string' && v.toLowerCase().includes(q)); })()))
+      .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at)));
+    const rows = all.slice(offset, offset + limit).map((e) => {
+      const lead = ctx.store.get('outreach_leads', e.lead_id); const sender = ctx.store.get('outreach_senders', e.sender_id);
+      const lss = tbl(ctx, 'outreach_lead_sender_state').find((l) => l.lead_id === e.lead_id && l.sender_id === e.sender_id);
+      const sentNodes = ctx.store.t('outreach_actions').filter((x) => x.enrollment_id === e.id && x.status === 'sent' && x.node_id).map((x) => nums[x.node_id] ?? 0);
+      const chat = tbl(ctx, 'outreach_chats').find((c) => c.lead_id === e.lead_id && c.sender_id === e.sender_id);
+      return { id: e.id, lead_id: e.lead_id, status: e.status, created_at: e.created_at, completed_at: e.completed_at ?? null,
+        lead: lead ? { id: lead.id, full_name: lead.full_name ?? null, company: lead.company ?? null, public_identifier: lead.public_identifier ?? null, picture_url: lead.picture_url ?? null } : null,
+        sender: { id: sender?.id ?? null, display_name: sender?.display_name ?? null },
+        step_reached: Math.max(0, ...sentNodes, e.current_node_id ? nums[e.current_node_id] ?? 0 : 0), step_total: stepTotal, step_label: nodeLabel(s.graph, e.current_node_id),
+        invited_at: lss?.invite_sent_at ?? null, accepted_at: lss?.invite_accepted_at ?? null, replied_at: e.status === 'exited_replied' ? e.completed_at ?? null : null,
+        positive_at: e.status === 'exited_replied' && chat?.intent === 'interested' ? e.completed_at ?? null : null, meeting_at: tbl(ctx, 'outreach_lead_milestones').find((m) => m.kind === 'meeting' && m.lead_id === e.lead_id)?.at ?? null };
+    });
+    return { total: all.length, limit, offset, step_total: stepTotal, rows };
+  },
 
   rule_match_count: (a, ctx) => {
     const r = ctx.store.get('outreach_auto_enroll_rules', a.p_rule);

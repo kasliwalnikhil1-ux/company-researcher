@@ -70,18 +70,78 @@ function unchangedFields(sent: Record<string, unknown>, after: Lead): string[] {
   return out;
 }
 
+// Comma-separated list query parameter (`status=replied,interested`).
+const list = (max = 20) => z.string().max(2000).transform((s) => s.split(",").map((x) => x.trim()).filter(Boolean).slice(0, max));
+const LEAD_STATUSES = ["not_contacted", "invited", "connected", "messaged", "replied", "interested", "meeting", "do_not_contact", "bounced", "wrote_to_us"];
+const CHANNELS = z.enum(["LINKEDIN", "INSTAGRAM", "WHATSAPP", "EMAIL"]);
+
+/**
+ * 094 filters shared by GET /v1/leads, /v1/leads/totals and /v1/leads/by-account (the leads page's vocabulary, see
+ * outreach__leads_matching). `tab` defaults to `all` on the API so existing integrations keep seeing every lead; the app
+ * and the connector default to `prospects`.
+ */
+const relationshipFilters = {
+  tab: z.enum(["prospects", "inbox", "all"]).optional(),
+  include_hidden: bool.optional(),
+  status: list().optional().refine((v) => !v || v.every((s) => LEAD_STATUSES.includes(s)), "unknown status"),
+  connected_via: list().optional(), pending_with: list().optional(), not_connected: bool.optional(),
+  connection_source: z.enum(["our_invite", "their_invite", "pre_existing", "unknown"]).optional(),
+  channel_reachable: CHANNELS.optional(), channel_used: CHANNELS.optional(), channel_replied: CHANNELS.optional(),
+  origin: list().optional().refine((v) => !v || v.every((s) => ["import", "manual", "api", "search", "inbound"].includes(s)), "unknown origin"),
+  kind: list().optional().refine((v) => !v || v.every((s) => ["person", "company_page", "automated"].includes(s)), "unknown kind"),
+  include_removed: bool.optional(),
+};
+const legacyFilters = {
+  q: z.string().max(200).optional(), client_id: id.optional(), list_id: id.optional(), stage_id: id.optional(), tag_id: id.optional(),
+  source: z.string().max(60).optional(), email: z.string().max(320).optional(), public_identifier: z.string().max(200).optional(),
+  updated_since: z.iso.datetime({ offset: true }).optional(), replied: bool.optional(), enriched: bool.optional(),
+};
+
+/** Query → outreach__leads_matching keys. */
+function matchingFilters(q: Record<string, unknown>): Record<string, unknown> {
+  const { q: search, include_hidden, channel_reachable, ...rest } = q;
+  const f: Record<string, unknown> = { ...rest, tab: rest.tab ?? "all" };
+  if (search) f.search = search;
+  if (include_hidden) f.hidden = true;
+  if (channel_reachable) f.channel = channel_reachable;
+  return filters(f);
+}
+
 export function registerLeads(app: App): void {
-  // ---- search
+  // ---- search (outreach_leads_list, 094: rows carry status, connected_via, pending_with, channels, origin, tags)
   app.get("/v1/leads", async (c) => {
     const ctx = ctxOf(c);
-    const q = parse(z.object({
-      q: z.string().max(200).optional(), client_id: id.optional(), list_id: id.optional(), stage_id: id.optional(), tag_id: id.optional(),
-      source: z.string().max(60).optional(), email: z.string().max(320).optional(), public_identifier: z.string().max(200).optional(),
-      updated_since: z.iso.datetime({ offset: true }).optional(), replied: bool.optional(), enriched: bool.optional(), ...paging,
-    }), c.req.query());
-    const { limit, offset, ...f } = q;
+    const q = parse(z.object({ ...legacyFilters, ...relationshipFilters, sort: z.enum(["activity", "created", "message"]).optional(), ...paging }), c.req.query());
+    const { limit, offset, sort, ...f } = q;
     scopedClient(ctx, f.client_id);
-    return page(c, await call(ctx, "api_leads", { p_ws: ctx.key.workspace_id, p_filters: filters(f), p_limit: limit, p_offset: offset }));
+    // the three legacy exact-match filters are not part of the shared vocabulary: keep the old function for them
+    if (f.email || f.public_identifier || f.source || f.updated_since) {
+      const legacy = { q: f.q, client_id: f.client_id, list_id: f.list_id, stage_id: f.stage_id, tag_id: f.tag_id, source: f.source, email: f.email, public_identifier: f.public_identifier, updated_since: f.updated_since, replied: f.replied, enriched: f.enriched };
+      return page(c, await call(ctx, "api_leads", { p_ws: ctx.key.workspace_id, p_filters: filters(legacy), p_limit: limit, p_offset: offset }));
+    }
+    const r = await call<Record<string, unknown>>(ctx, "leads_list", { p_ws: ctx.key.workspace_id, p_f: matchingFilters(f), p_sort: sort ?? "activity", p_limit: limit, p_offset: offset });
+    return page(c, { data: r.rows, total: r.total, limit: r.limit, offset: r.offset, has_more: r.has_more });
+  });
+
+  // ---- totals line and by-account panel (094 §5.4, §5.5). Registered before /v1/leads/:id.
+  app.get("/v1/leads/totals", async (c) => {
+    const ctx = ctxOf(c);
+    const q = parse(z.object({ ...legacyFilters, ...relationshipFilters }), c.req.query());
+    scopedClient(ctx, q.client_id);
+    return ok(c, await call(ctx, "leads_totals", { p_ws: ctx.key.workspace_id, p_f: matchingFilters(q), p_include_removed: !!q.include_removed }));
+  });
+  app.get("/v1/leads/by-account", async (c) => {
+    const ctx = ctxOf(c);
+    const q = parse(z.object({ ...legacyFilters, ...relationshipFilters }), c.req.query());
+    scopedClient(ctx, q.client_id);
+    return ok(c, await call(ctx, "leads_by_account", { p_ws: ctx.key.workspace_id, p_f: matchingFilters(q), p_include_removed: !!q.include_removed }));
+  });
+
+  // ---- add to outbound (094 §3.3): inbound leads move to the Outbound tab, hidden leads are unhidden
+  app.post("/v1/leads/promote", async (c) => {
+    const ctx = ctxOf(c);
+    const b = parse(z.object({ lead_ids: z.array(id).min(1).max(1000) }).strict(), body(c));
+    return ok(c, { promoted: await call(ctx, "lead_promote", { p_ws: ctx.key.workspace_id, p_lead_ids: b.lead_ids }) });
   });
 
   // ---- enrich (spends profile views, so it is in the "spend" rate class). Registered before /v1/leads/:id.
@@ -93,6 +153,12 @@ export function registerLeads(app: App): void {
 
   // ---- get
   app.get("/v1/leads/:id", async (c) => ok(c, await getLead(ctxOf(c), pathId(c))));
+  // ---- relationships (094 §6): one row per account with any relationship to the lead, grouped by channel by the reader
+  app.get("/v1/leads/:id/relationships", async (c) => {
+    const ctx = ctxOf(c);
+    const q = parse(z.object({ include_removed: bool.optional() }), c.req.query());
+    return ok(c, { data: await call(ctx, "lead_relationships", { p_lead: pathId(c), p_include_removed: !!q.include_removed }) });
+  });
 
   // ---- create or update (matched by LinkedIn id, then provider id, then work email, then personal email)
   app.post("/v1/leads", async (c) => {

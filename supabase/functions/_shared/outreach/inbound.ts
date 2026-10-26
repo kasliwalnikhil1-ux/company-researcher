@@ -4,8 +4,11 @@ import { webchatMailHook } from "./webchat.ts";
 import { notifyReturned } from "./ai_reply.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending, hostedBrowserOptions } from "./unipile.ts";
 import { notifySender } from "./notify.ts";
+import { sendDueHolderEmails } from "./alerts.ts";
+import { notifyConnected } from "./lifecycle.ts";
 import { healthForSender } from "./health.ts";
 import { dropConnectorAccount } from "./disconnect.ts";
+import { removeSender } from "./lifecycle.ts";
 import { fillChatPicture, persistPictureUrl } from "./avatars.ts";
 import { instagramHandle, phoneDigits, phoneFromAttendeeId, whatsappPhoneOf, isWhatsappGroup, visibleName, PROVIDER_WARNING_RE } from "./channels.ts";
 
@@ -219,6 +222,23 @@ export async function syncOwnProfile(sender: Sender): Promise<Sender> {
 }
 
 /**
+ * sender-lifecycle-PRD.md §5.1: the row that now owns the account was removed earlier (its own Reconnect link, or a fresh
+ * connect that absorbDuplicateSender folded into the removed twin) → clear the removal, decay warmup, write the event.
+ * `removedBefore` is the id the caller knew to be removed before this flow changed its status.
+ */
+async function restoreIfRemoved(sender: Sender, removedBefore?: string): Promise<void> {
+  if (!sender?.id) return;
+  const { data: row } = await admin.from("outreach_senders").select("id, status, removed_at, restored_at, unipile_account_id").eq("id", sender.id).maybeSingle();
+  if (!row) return;
+  const wasRemoved = row.status === "removed" || (row.removed_at && !row.restored_at) || removedBefore === row.id;
+  if (!wasRemoved || !row.removed_at) return;
+  try {
+    const r = await rpc<Record<string, unknown>>("sender_restore_apply", { p_sender: row.id, p_account_id: row.unipile_account_id ?? sender.unipile_account_id ?? null });
+    log({ fn: "restoreIfRemoved", sender_id: row.id, restored: r });
+  } catch (e) { log({ fn: "restoreIfRemoved", sender_id: row.id, error: String(e) }); }
+}
+
+/**
  * A LinkedIn/mailbox identity may only exist once per workspace. When a freshly connected sender turns out to be the
  * same account as an existing (non-deleted) sender — typically the owner used "Connect an account" instead of
  * "Reconnect" after a re-login prompt — fold the new connection into the existing row: it takes over the new Unipile
@@ -244,6 +264,8 @@ export async function absorbDuplicateSender(sender: Sender): Promise<Sender> {
   // 2. the survivor takes over the new account and the fresh profile snapshot
   const patch: Record<string, unknown> = {
     unipile_account_id: newAccountId, status: survivor.status === "disabled" ? "disabled" : "connecting", status_reason: null,
+    // a removed twin comes back: the other removal fields are cleared by restoreIfRemoved (sender_restore_apply) right after
+    ...(survivor.status === "removed" ? { removal_requested_at: null } : {}),
     auth_method: sender.auth_method ?? survivor.auth_method, public_identifier: sender.public_identifier ?? survivor.public_identifier,
     picture_url: sender.picture_url ?? survivor.picture_url, is_premium: sender.is_premium ?? survivor.is_premium,
     has_sales_nav: sender.has_sales_nav ?? survivor.has_sales_nav, has_recruiter: sender.has_recruiter ?? survivor.has_recruiter,
@@ -316,10 +338,13 @@ export async function handleAccountStatus(payload: any): Promise<void> {
     case "CREATION_SUCCESS": {
       sender = await syncOwnProfile(sender);
       sender = await absorbDuplicateSender(sender);
+      await restoreIfRemoved(sender);
       await applyOnboardingGate(sender);
       // the hosted-auth notify usually lands first and may already have polled the account to ok: never move it back to connecting
       const keep = sender.status === "disabled" || sender.status === "ok" || sender.status === "paused";
       await admin.from("outreach_senders").update({ status: keep ? sender.status : "connecting", status_reason: keep ? sender.status_reason : null, connected_at: sender.connected_at ?? new Date().toISOString() }).eq("id", sender.id);
+      // an outside holder learns that the workspace connected their account, with the disconnect link (§5.8.1); once per account
+      await notifyConnected(sender.id, accountId).catch((e) => log({ fn: "account_status", warn: "connected notice", error: String(e) }));
       break;
     }
     case "OK": {
@@ -343,12 +368,8 @@ export async function handleAccountStatus(payload: any): Promise<void> {
     case "CREDENTIALS": {
       await admin.from("outreach_senders").update({ status: sender.status === "disabled" ? "disabled" : "credentials", status_reason: "CREDENTIALS", last_disconnect_at: new Date().toISOString(), reconnect_attempts: 0 }).eq("id", sender.id);
       await healthForSender(sender.id, "disconnect");
-      // LinkedIn cookie senders are retried by the reconnect worker first; every other sender is emailed a re-login link now
-      if (!(sender.auth_method === "cookie" && sender.provider === "LINKEDIN")) {
-        const link = await reloginUrl(sender).catch(() => null);
-        await notifySender(sender.id, "reconnect_needed", { link });
-        await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: 0 }).eq("id", sender.id);
-      }
+      // the holder path sends the sign-in email now (cookie senders wait for 4 silent retries; holds and suspended workspaces wait)
+      await sendDueHolderEmails({ senderId: sender.id }).catch((e) => log({ fn: "account_status", warn: "holder email", error: String(e) }));
       break;
     }
     case "ERROR":
@@ -361,7 +382,18 @@ export async function handleAccountStatus(payload: any): Promise<void> {
     }
     case "CONNECTING": break;
     case "DELETED": {
-      await admin.from("outreach_senders").update({ status: "disabled", status_reason: "DELETED", deleted_at: sender.deleted_at ?? null }).eq("id", sender.id);
+      // The account is gone on the connector side. If we asked for that, finish the removal; otherwise it was deleted in the
+      // connector dashboard (or cleaned up there): the sender is removed with its history kept, never "disabled" with an
+      // Enable that cannot work (sender-lifecycle-PRD.md §5.3). Managers learn it through the removal audit + event.
+      if (sender.status === "removed" || sender.status === "erased") break;
+      if (sender.removal_requested_at) {
+        await rpc("account_deletion_result", { p_account: accountId, p_ok: true }).catch(() => null);
+        const { data: after } = await admin.from("outreach_senders").select("status").eq("id", sender.id).maybeSingle();
+        if (after?.status !== "removed") await rpc("sender_remove_finish", { p_sender: sender.id }).catch((e) => log({ fn: "account_status", error: String(e) }));
+      } else {
+        await removeSender(sender.id, "unipile_deleted", { reason: "DELETED (account removed on the connector side)", skipConnector: true });
+        await admin.from("outreach_sender_events").insert({ sender_id: sender.id, kind: "lifecycle", data: { action: "removed_externally", account_id: accountId } });
+      }
       break;
     }
     case "PERMISSIONS": {
@@ -555,10 +587,10 @@ export async function handleHostedNotify(payload: any): Promise<void> {
   const patch: Record<string, unknown> = { unipile_account_id: accountId };
   if (status === "RECONNECTED") { patch.status = s.status === "paused" || s.status === "disabled" ? s.status : "ok"; patch.status_reason = null; patch.reconnect_attempts = 0; }
   // a first sign-in that completes after an earlier failure / expired link starts the normal connecting → ok path again
-  if (status === "CREATION_SUCCESS") { patch.status_reason = null; if (s.status === "error" || s.status === "credentials" || s.status === "disconnected") patch.status = "connecting"; }
-  // Reconnecting a disconnected sender must bring back the SAME account: its conversations and relations belong to it
+  if (status === "CREATION_SUCCESS") { patch.status_reason = null; if (s.status === "error" || s.status === "credentials" || s.status === "disconnected" || s.status === "removed") patch.status = "connecting"; }
+  // Reconnecting a removed sender must bring back the SAME account: its conversations and relations belong to it
   // (pricing-billing-PRD §12.1, #24e). Another account is refused and removed; it can be connected as a new sender instead.
-  if (status === "CREATION_SUCCESS" && (s.status === "disconnected" || s.previous_unipile_account_id) && !s.unipile_account_id) {
+  if (status === "CREATION_SUCCESS" && (s.status === "disconnected" || s.status === "removed" || s.previous_unipile_account_id) && !s.unipile_account_id) {
     const mismatch = await reconnectIdentityMismatch(s as Sender, accountId);
     if (mismatch) {
       await dropConnectorAccount(accountId, s.workspace_id, "reconnect_wrong_account");
@@ -601,7 +633,10 @@ export async function handleHostedNotify(payload: any): Promise<void> {
   if (status === "CREATION_SUCCESS") {
     // same LinkedIn / mailbox already connected in this workspace → fold into that sender (it now owns accountId)
     const fresh = await absorbDuplicateSender(await syncOwnProfile({ ...s, ...patch, unipile_account_id: accountId }));
+    // a removed sender signing in again on its own Reconnect link, or a fold that landed on a removed twin: its history comes back
+    await restoreIfRemoved(fresh, s.status === "removed" ? s.id : undefined);
     await applyOnboardingGate(fresh);
+    await notifyConnected(fresh.id, accountId).catch((e) => log({ fn: "hosted_notify", warn: "connected notice", error: String(e) }));
     // if the webhook OK never arrives (platform webhook missing), poll account once
     try {
       const acc = await unipile.accounts.get(accountId);
@@ -614,7 +649,35 @@ export async function handleHostedNotify(payload: any): Promise<void> {
 // ---------------------------------------------------------------------------
 // messaging
 // ---------------------------------------------------------------------------
-async function matchLead(workspaceId: string, providerId: string | null, publicIdentifier: string | null, name: string | null, createIfMissing: boolean, profileUrl?: string | null): Promise<{ id: string; created: boolean } | null> {
+// ---------------------------------------------------------------------------
+// Inbound classification (094, leads-relationships-PRD §3): person | company_page | automated
+// ---------------------------------------------------------------------------
+export type InboundKind = "person" | "company_page" | "automated";
+export type InboundLeadMode = "people_only" | "all" | "none";
+
+/** Workspace setting `create_leads_from_inbound`: 'people_only' (default) | 'all' | 'none'; the old boolean still reads (true → people_only, false → none). */
+export function inboundLeadMode(settings: Record<string, unknown> | null | undefined): InboundLeadMode {
+  const v = settings?.create_leads_from_inbound;
+  if (v === false || v === "none") return "none";
+  if (v === "all") return "all";
+  return "people_only";
+}
+
+/** Asks the database (outreach_inbound_kind: built-in rules + ops.inbound_kind_rules). A failure never blocks a message: the sender counts as a person. */
+export async function inboundKind(provider: string, name: string | null, providerId: string | null, identifier: string | null, chatMeta: Row | null, headers?: unknown): Promise<InboundKind> {
+  try {
+    const k = await rpc<string>("inbound_kind", { p_provider: provider, p_name: name, p_provider_id: providerId, p_identifier: identifier, p_chat_meta: chatMeta ?? null, p_headers: headers ?? null });
+    return k === "company_page" || k === "automated" ? k : "person";
+  } catch (e) { log({ fn: "inbound_kind", warn: String((e as any)?.message ?? e) }); return "person"; }
+}
+
+/** A lead created for an automated sender or a company page (setting 'all') is created hidden; its kind is recorded either way. */
+async function markLeadKind(leadId: string, kind: InboundKind): Promise<void> {
+  if (kind === "person") return;
+  await admin.from("outreach_leads").update({ kind, hidden_at: new Date().toISOString(), hidden_reason: kind, prospect_since: null }).eq("id", leadId);
+}
+
+async function matchLead(workspaceId: string, providerId: string | null, publicIdentifier: string | null, name: string | null, createIfMissing: boolean, profileUrl?: string | null, kind: InboundKind = "person"): Promise<{ id: string; created: boolean } | null> {
   if (providerId) {
     const { data } = await admin.from("outreach_leads").select("id").eq("workspace_id", workspaceId).eq("provider_id", providerId).maybeSingle();
     if (data) return { id: data.id, created: false };
@@ -634,6 +697,7 @@ async function matchLead(workspaceId: string, providerId: string | null, publicI
     p_source: "inbound",
   });
   const r = Array.isArray(row) ? row[0] : (row as any);
+  if (r?.created) await markLeadKind(r.id, kind);
   return r ? { id: r.id, created: !!r.created } : null;
 }
 
@@ -648,7 +712,7 @@ function pubIdFromUrl(url: string | null | undefined): string | null {
  * by provider + provider_id, then by identifier), else a new lead through outreach_upsert_lead with the identity recorded
  * as verified (source 'inbound': the person wrote to us from it) when the workspace allows.
  */
-async function matchLeadByIdentity(workspaceId: string, provider: string, identifier: string | null, providerId: string | null, name: string | null, createIfMissing: boolean): Promise<{ id: string; created: boolean } | null> {
+async function matchLeadByIdentity(workspaceId: string, provider: string, identifier: string | null, providerId: string | null, name: string | null, createIfMissing: boolean, kind: InboundKind = "person"): Promise<{ id: string; created: boolean } | null> {
   if (providerId) {
     const { data } = await admin.from("outreach_lead_identities").select("id, lead_id, identifier, verified").eq("workspace_id", workspaceId).eq("provider", provider).eq("provider_id", providerId).limit(1).maybeSingle();
     if (data?.lead_id) {
@@ -679,6 +743,7 @@ async function matchLeadByIdentity(workspaceId: string, provider: string, identi
     p_source: "inbound",
   });
   const r = Array.isArray(row) ? row[0] : (row as any);
+  if (r?.created) await markLeadKind(r.id, kind);
   return r ? { id: r.id, created: !!r.created } : null;
 }
 
@@ -815,17 +880,23 @@ export async function handleMessaging(payload: any): Promise<void> {
   // AI replies G2: only 1:1 conversations are answered. LinkedIn group threads carry more than two attendees.
   const multiParty = group || payload.is_group === true || payload.is_group === 1 || (Array.isArray(payload.attendees) && payload.attendees.length > 2);
   const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).single();
-  const createLeads = (ws?.settings?.create_leads_from_inbound ?? true) !== false;
+  const leadMode = inboundLeadMode(ws?.settings);
 
   // chat upsert
   let { data: chat } = await admin.from("outreach_chats").select("*").eq("sender_id", sender.id).eq("unipile_chat_id", unipileChatId).maybeSingle();
+  // 094 §3.1: who is on the other side, decided once per conversation before any lead exists; the chat keeps the answer.
+  // A person who is already a lead attaches whatever the setting says; a company page or automated sender becomes a
+  // lead only when the setting is 'all' (created hidden). The conversation lands in the inbox either way.
+  const liMeta = provider === "LINKEDIN" ? linkedinChatMeta(payload) : null;
+  const kind: InboundKind = (chat?.counterpart_kind as InboundKind | undefined) ?? (group ? "person" : await inboundKind(provider, attendeeName, attendeeProviderId, attendeePub, liMeta));
+  const createLeads = !group && (leadMode === "all" || (leadMode === "people_only" && kind === "person"));
   let lead = chat?.lead_id
     ? { id: chat.lead_id, created: false }
     : group
       ? null
       : channel
-        ? await matchLeadByIdentity(sender.workspace_id, provider, attendeePub, attendeeProviderId, attendeeName, createLeads && !isOut)
-        : await matchLead(sender.workspace_id, attendeeProviderId, attendeePub, attendeeName, createLeads, attendee?.attendee_profile_url);
+        ? await matchLeadByIdentity(sender.workspace_id, provider, attendeePub, attendeeProviderId, attendeeName, createLeads && !isOut, kind)
+        : await matchLead(sender.workspace_id, attendeeProviderId, attendeePub, attendeeName, createLeads, attendee?.attendee_profile_url, kind);
   if (!chat) {
     // Instagram: a new chat that sits in the Requests folder (theirs to us, or ours to them) is a message request until answered
     let isRequest = false;
@@ -837,6 +908,7 @@ export async function handleMessaging(payload: any): Promise<void> {
       workspace_id: sender.workspace_id, client_id: sender.client_id, sender_id: sender.id, lead_id: lead?.id ?? null, unipile_chat_id: unipileChatId,
       provider: sender.provider, attendee_provider_id: attendeeProviderId, attendee_public_identifier: attendeePub, attendee_name: attendeeName,
       attendee_picture_url: channel ? null : attendee?.attendee_picture_url ?? null,   // channel pictures are stored by avatars.ts
+      counterpart_kind: kind,
     };
     if (group) row.subject = payload.subject ?? null;
     if (multiParty) row.is_group = true;
@@ -914,8 +986,9 @@ export async function handleMessaging(payload: any): Promise<void> {
     if (!isOut) {
       await admin.from("outreach_lead_sender_state").update({ replied: true, last_inbound_at: sentAt, unipile_chat_id: unipileChatId, updated_at: new Date().toISOString() }).eq("lead_id", lead.id).eq("sender_id", sender.id);
       // a voice note without text is classified once its transcript exists (transcribe.ts re-queues it)
-      if (!unsupported && (!hasVoiceNote || String(payload.message ?? "").trim())) await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
-      if (provider === "LINKEDIN") {
+      // a newsletter or a company page is never classified for intent, never enriched (094 D9) and never answered by the AI
+      if (kind === "person" && !unsupported && (!hasVoiceNote || String(payload.message ?? "").trim())) await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
+      if (provider === "LINKEDIN" && kind === "person") {
         // their FIRST message in this conversation: queue a profile read for a lead missing company / location / work email
         // (outreach_enrich_on_reply decides; workspace setting enrich_on_reply, default on). Later messages in a live thread
         // bring no new profile data, so they never spend another profile view.
@@ -956,7 +1029,7 @@ export async function handleMessaging(payload: any): Promise<void> {
   }
   // AI replies (§5, §10.4): an inbound message opens / extends the chat's AI run; an outbound message no send of ours
   // recorded first was typed on the sender's phone or LinkedIn web → human takeover. Never blocks inbound processing.
-  if (!isEvent) {
+  if (!isEvent && kind === "person") {
     const call = () => isOut ? rpc<Record<string, unknown>>("ai_reply_on_outbound_external", { p_message: msg!.id }) : rpc<Record<string, unknown>>("ai_reply_enqueue", { p_chat: chat!.id, p_message: msg!.id });
     try {
       const r = await call();
@@ -986,8 +1059,11 @@ export async function handleNewRelation(payload: any): Promise<void> {
   const now = new Date().toISOString();
   await admin.from("outreach_lead_sender_state").upsert({ lead_id: lead.id, sender_id: sender.id }, { onConflict: "lead_id,sender_id", ignoreDuplicates: true });
   const { data: lss } = await admin.from("outreach_lead_sender_state").select("relation, invite_accepted_at").eq("lead_id", lead.id).eq("sender_id", sender.id).single();
+  // 094: the webhook is an observation; the trigger derives relation_source (our_invite when an invite from this sender is on record)
   if (lss?.relation !== "first") {
-    await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, updated_at: now }).eq("lead_id", lead.id).eq("sender_id", sender.id);
+    await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: lss?.invite_accepted_at ?? now, invite_detected_at: now, relation_checked_at: now, updated_at: now }).eq("lead_id", lead.id).eq("sender_id", sender.id);
+  } else {
+    await admin.from("outreach_lead_sender_state").update({ relation_checked_at: now }).eq("lead_id", lead.id).eq("sender_id", sender.id);
   }
   if (payload.user_picture_url) await admin.from("outreach_leads").update({ picture_url: payload.user_picture_url, provider_id: payload.user_provider_id ?? undefined }).eq("id", lead.id).is("picture_url", null);
 }
@@ -1009,25 +1085,36 @@ export async function handleMail(payload: any): Promise<void> {
   const counterpart = isOut ? to[0] : from;
   const counterpartName = isOut ? payload.to_attendees?.[0]?.display_name : payload.from_attendee?.display_name;
   if (!counterpart) return;
-  // lead by email
-  let leadId: string | null = null;
-  const { data: l } = await admin.from("outreach_leads").select("id").eq("workspace_id", sender.workspace_id).or(`email_work.eq.${counterpart},email_personal.eq.${counterpart}`).maybeSingle();
-  if (l) leadId = l.id;
-  else {
-    const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).single();
-    if ((ws?.settings?.create_leads_from_inbound ?? true) !== false && !isOut) {
-      const r = await rpc<any>("upsert_lead", { p_ws: sender.workspace_id, p_lead: { email_work: counterpart, full_name: counterpartName ?? null }, p_source: "inbound_email" });
-      leadId = (Array.isArray(r) ? r[0] : r)?.id ?? null;
-    }
-  }
   const threadId = payload.thread_id ?? payload.in_reply_to?.id ?? payload.email_id;
   let { data: chat } = await admin.from("outreach_chats").select("*").eq("sender_id", sender.id).eq("unipile_chat_id", threadId).maybeSingle();
+  // 094 §3.1: no-reply / newsletter / notification senders (local part, List-Unsubscribe, Precedence, Auto-Submitted, the
+  // ops rules) never become leads under the default setting; the thread still lands in the inbox, under "Other".
+  const kind: InboundKind = (chat?.counterpart_kind as InboundKind | undefined) ?? (isOut ? "person" : await inboundKind(sender.provider, counterpartName ?? null, counterpart, counterpart, null, payload.headers ?? null));
+  // lead by email
+  let leadId: string | null = chat?.lead_id ?? null;
+  if (!leadId) {
+    const { data: l } = await admin.from("outreach_leads").select("id").eq("workspace_id", sender.workspace_id).or(`email_work.eq.${counterpart},email_personal.eq.${counterpart}`).maybeSingle();
+    if (l) leadId = l.id;
+    else if (!isOut) {
+      const { data: ws } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).single();
+      const mode = inboundLeadMode(ws?.settings);
+      if (mode === "all" || (mode === "people_only" && kind === "person")) {
+        const r = await rpc<any>("upsert_lead", { p_ws: sender.workspace_id, p_lead: { email_work: counterpart, full_name: counterpartName ?? null }, p_source: "inbound_email" });
+        const row = Array.isArray(r) ? r[0] : r;
+        leadId = row?.id ?? null;
+        if (row?.created && leadId) await markLeadKind(leadId, kind);
+      }
+    }
+  }
   if (!chat) {
     const { data: c } = await admin.from("outreach_chats").upsert({
       workspace_id: sender.workspace_id, client_id: sender.client_id, sender_id: sender.id, lead_id: leadId, unipile_chat_id: threadId, provider: sender.provider,
-      attendee_provider_id: counterpart, attendee_name: counterpartName ?? counterpart, subject: payload.subject ?? null,
+      attendee_provider_id: counterpart, attendee_name: counterpartName ?? counterpart, subject: payload.subject ?? null, counterpart_kind: kind,
     }, { onConflict: "sender_id,unipile_chat_id" }).select("*").single();
     chat = c;
+  } else if (!chat.lead_id && leadId) {
+    await admin.from("outreach_chats").update({ lead_id: leadId }).eq("id", chat.id);
+    chat.lead_id = leadId;
   }
   if (!chat) return;
   const { data: dup } = await admin.from("outreach_messages").select("id").eq("unipile_message_id", payload.email_id).maybeSingle();
@@ -1047,7 +1134,7 @@ export async function handleMail(payload: any): Promise<void> {
       await emitEvent(sender.workspace_id, "email.bounced", { lead_id: leadId, sender_id: sender.id });
     } else if (!isOut) {
       await admin.from("outreach_lead_sender_state").update({ replied: true, last_inbound_at: sentAt, updated_at: new Date().toISOString() }).eq("lead_id", leadId).eq("sender_id", sender.id);
-      if (msg) await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
+      if (msg && kind === "person") await admin.from("outreach_ai_classify_queue").insert({ message_id: msg.id });
     } else {
       await admin.from("outreach_lead_sender_state").update({ last_outbound_at: sentAt, updated_at: new Date().toISOString() }).eq("lead_id", leadId).eq("sender_id", sender.id);
     }

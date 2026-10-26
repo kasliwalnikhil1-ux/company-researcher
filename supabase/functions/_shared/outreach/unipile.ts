@@ -138,6 +138,8 @@ export const unipile = {
   },
   accounts: {
     list: () => request<{ items: any[] }>("/accounts", { query: { limit: 250 } }),
+    /** One page of accounts with its cursor (the reconciliation walks every page; never acts on a partial list). */
+    listPage: (cursor?: string) => request<{ items: any[]; cursor: string | null }>("/accounts", { query: { limit: 250, cursor } }),
     get: (id: string) => request<any>(`/accounts/${encodeURIComponent(id)}`, { accountId: id }),
     delete: (id: string) => request<any>(`/accounts/${encodeURIComponent(id)}`, { method: "DELETE", accountId: id }),
     resync: (id: string) => request<any>(`/accounts/${encodeURIComponent(id)}/sync`, { accountId: id, timeoutMs: 30000 }),

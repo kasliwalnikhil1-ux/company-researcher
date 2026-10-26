@@ -192,7 +192,7 @@ export async function sendContinuityDigest(d: DueDigest): Promise<string> {
       }
     }
     if (transport === "none" && !error) {
-      const ok = await sendEmail(d.email, subject, html, text, { branding });
+      const ok = await sendEmail(d.email, subject, html, text, { branding, type: "webchat_continuity", workspaceId: d.workspace_id, idempotencyKey: `webchat_continuity:${d.chat_id}:${ids.join(",").slice(0, 120)}` });
       if (ok) transport = "resend"; else error = "no email transport configured";
     }
   } catch (e) {
@@ -232,7 +232,7 @@ export async function sendTranscript(chatId: string, visitorId: string, kind: "t
         ok = true; transport = "mailbox";
       }
     }
-    if (!ok) { ok = await sendEmail(t.email, `Your conversation with ${brand}`, html, text, { branding }); transport = ok ? "resend" : "none"; if (!ok) error = "no email transport configured"; }
+    if (!ok) { ok = await sendEmail(t.email, `Your conversation with ${brand}`, html, text, { branding, type: "webchat_transcript", workspaceId: t.workspace_id, idempotencyKey: `webchat_transcript:${chatId}:${kind}:${Date.now()}` }); transport = ok ? "resend" : "none"; if (!ok) error = "no email transport configured"; }
   } catch (e) { error = String((e as any)?.message ?? e).slice(0, 500); }
   await rpc("webchat_continuity_record", { p_chat: chatId, p_kind: kind, p_to: t.email, p_message_ids: [], p_transport: transport, p_mailbox: t.reply_mailbox_id, p_tracking: null, p_provider: null, p_subject: `Your conversation with ${brand}`, p_root: null, p_error: error });
   return ok;

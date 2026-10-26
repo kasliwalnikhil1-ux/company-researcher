@@ -156,7 +156,11 @@ Call from the web app with `rpc('<name without outreach_>', args)`, from edge fu
 | `outreach_report_sender` | `p_sender uuid, p_from date DEFAULT NULL::date, p_to date DEFAULT NULL::date` | `jsonb` | user |
 | `outreach_report_senders` | `p_ws uuid, p_client uuid DEFAULT NULL::uuid, p_from date DEFAULT NULL::date, p_to date DEFAULT NULL::date` | `jsonb` | user |
 | `outreach_report_sequence` | `p_sequence uuid, p_from date DEFAULT NULL::date, p_to date DEFAULT NULL::date` | `jsonb` | user |
-| `outreach_report_sequences` | `p_ws uuid, p_client uuid DEFAULT NULL::uuid, p_from date DEFAULT NULL::date, p_to date DEFAULT NULL::date` | `jsonb` | user |
+| `outreach_report_sequences` | `p_ws uuid, p_client uuid DEFAULT NULL::uuid, p_from date DEFAULT NULL::date, p_to date DEFAULT NULL::date, p_channel text DEFAULT NULL::text, p_status text DEFAULT NULL::text` | `jsonb` | user |
+| `outreach_stats_rebuild_lead` | `p_lead uuid` | `integer` | service (089: recompute one lead's sequence facts; the triggers call it) |
+| `outreach_stats_rebuild_sequence` | `p_sequence uuid` | `integer` | service (089: recompute one sequence, 500 leads at a time) |
+| `outreach_stats_refresh_due` | `p_limit integer DEFAULT 500` | `integer` | service (089: drain the all-time cache queue; cron every minute) |
+| `outreach_stats_reconcile` | `p_days integer DEFAULT 7, p_limit integer DEFAULT 500` | `jsonb` | service (089 / F54: nightly repair + Health check stats-1) |
 | `outreach_request_enrichment` | `p_ws uuid, p_lead_ids uuid[], p_want_posts boolean DEFAULT false, p_force boolean DEFAULT false, p_reason text DEFAULT 'manual'::text` | `jsonb` | user |
 | `outreach_requeue_sender_failures` | `p_sender uuid` | `integer` | service |
 | `outreach_require` | `ws uuid, p_min text` | `void` | user |

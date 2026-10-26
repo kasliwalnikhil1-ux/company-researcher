@@ -3,9 +3,9 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
-import { useClients, useSender } from '@/lib/outreach/queries';
+import { useClients, useSender, useSenderLanding } from '@/lib/outreach/queries';
 import { Avatar, BackLink, Badge, ErrorBox, HealthBar, PageLoader, StatusPill, useToast } from '@/components/outreach/ui';
-import { PROVIDER_LABELS, disconnectedReasonText, statusReasonText } from '@/components/outreach/senders/helpers';
+import { PROVIDER_LABELS, isRemovedStatus, lifecycleBadge, removedReasonText, statusReasonText } from '@/components/outreach/senders/helpers';
 import SenderOverview, { DisconnectedPanel } from '@/components/outreach/senders/SenderOverview';
 import ScheduleEditor from '@/components/outreach/senders/ScheduleEditor';
 import BudgetsPanel from '@/components/outreach/senders/BudgetsPanel';
@@ -24,7 +24,7 @@ import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import type { SenderV2 } from '@/components/outreach/senders/insights';
 import { cn } from '@/lib/utils';
 
-const TABS = ['Overview', 'Profile', 'Insights', 'Activity', 'Schedule', 'Limits', 'Events', 'Settings', 'Session', 'Danger'] as const;
+const TABS = ['Overview', 'Profile', 'Insights', 'Activity', 'Schedule', 'Limits', 'Events', 'Settings', 'Session', 'Account'] as const;
 type Tab = (typeof TABS)[number];
 
 function SenderDetail() {
@@ -33,7 +33,7 @@ function SenderDetail() {
   const router = useRouter();
   const search = useSearchParams();
   const connected = search.get('connected');
-  const OLD_TABS: Record<string, string> = { Extension: 'Session', Budgets: 'Limits' }; // renamed tabs; old links still land
+  const OLD_TABS: Record<string, string> = { Extension: 'Session', Budgets: 'Limits', Danger: 'Account' }; // renamed tabs; old links still land
   const rawTab = search.get('tab') ?? '';
   const tabParam = OLD_TABS[rawTab] ?? rawTab;
   const initialTab = (TABS as readonly string[]).includes(tabParam) ? (tabParam as Tab) : 'Overview';
@@ -51,8 +51,12 @@ function SenderDetail() {
     }
   }, [connected, id, router, tab]);
 
-  // A connect that turned out to be an already-connected account was folded into that sender; follow it.
-  const mergedInto = sender.data?.deleted_at && typeof sender.data.status_reason === 'string' && sender.data.status_reason.startsWith('merged_into:') ? sender.data.status_reason.slice('merged_into:'.length) : null;
+  // A connect that turned out to be an already-connected account was folded into that sender; follow it. The folded
+  // placeholder is a deleted row, which RLS hides, so the id reads back as null and outreach_sender_landing says where
+  // the account now lives (a visible tombstone is followed directly, in case the policy ever shows one).
+  const tombstone = sender.data?.deleted_at && typeof sender.data.status_reason === 'string' && sender.data.status_reason.startsWith('merged_into:') ? sender.data.status_reason.slice('merged_into:'.length) : null;
+  const landing = useSenderLanding(id, !sender.isLoading && !sender.isError && sender.data == null);
+  const mergedInto = tombstone ?? (landing.data && landing.data !== id ? landing.data : null);
   useEffect(() => {
     if (mergedInto) router.replace(`/outreach/senders/${mergedInto}${connected != null ? `?connected=${connected}` : ''}`);
   }, [mergedInto, connected, router]);
@@ -60,13 +64,23 @@ function SenderDetail() {
   const selectTab = (t: Tab) => { setTab(t); router.replace(`/outreach/senders/${id}${t !== 'Overview' ? `?tab=${t}` : ''}`); };
 
   if (role === 'client_viewer') return <ErrorBox message="Client viewers cannot open sender pages." />;
-  if (sender.isLoading || mergedInto) return <PageLoader />;
-  if (sender.isError) return <ErrorBox message={(sender.error as Error).message} />;
-  const s = sender.data as SenderV2 | undefined;
-  if (!s || s.workspace_id !== workspace?.id) return <div><BackLink href="/outreach/senders">Back to senders</BackLink><ErrorBox message="Sender not found in this workspace." /></div>;
+  if (sender.isLoading || landing.isLoading || mergedInto) return <PageLoader />;
+  if (sender.isError) return <div><BackLink href="/outreach/senders">Back to senders</BackLink><ErrorBox message={(sender.error as Error).message} /></div>;
+  const s = (sender.data ?? undefined) as SenderV2 | undefined;
+  if (!s || s.workspace_id !== workspace?.id) {
+    return (
+      <div>
+        <BackLink href="/outreach/senders">Back to senders</BackLink>
+        <ErrorBox message={connected != null
+          ? 'This sign-in’s sender is no longer here. If the account was already connected, it is listed under its existing name on the senders page.'
+          : 'Sender not found in this workspace.'} />
+      </div>
+    );
+  }
 
   // Profile Studio and the browser-session tab are LinkedIn features; other channels do not have them.
-  const visibleTabs = TABS.filter((t) => (t !== 'Danger' || isManager) && ((t !== 'Profile' && t !== 'Session') || s.provider === 'LINKEDIN'));
+  const visibleTabs = TABS.filter((t) => (t !== 'Account' || isManager) && ((t !== 'Profile' && t !== 'Session') || s.provider === 'LINKEDIN'));
+  const badge = lifecycleBadge(s);
 
   return (
     <div>
@@ -85,8 +99,9 @@ function SenderDetail() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {s.status !== 'disabled' && <SenderDiagnosis senderId={s.id} senderName={s.display_name} />}
-          <StatusPill status={s.status} reason={s.status === 'disconnected' ? disconnectedReasonText(s.status_reason) : statusReasonText(s.status_reason)} />
+          {!['disabled', 'removed', 'erased', 'disconnected'].includes(s.status) && <SenderDiagnosis senderId={s.id} senderName={s.display_name} />}
+          <StatusPill status={s.status} reason={isRemovedStatus(s.status) ? removedReasonText(s.removed_via, s.status_reason) : statusReasonText(s.status_reason)} />
+          {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
           {s.status === 'paused' && s.status_reason === 'over_plan_limit' && <Badge tone="amber">Paused by plan</Badge>}
           <QuietPeriodBadge sender={s} />
           <Badge tone="indigo">Level {s.warmup_level}</Badge>
@@ -103,7 +118,7 @@ function SenderDetail() {
       <div className="border-b border-gray-200 mb-6">
         <nav className="flex gap-1 -mb-px overflow-x-auto [scrollbar-width:none]" role="tablist">
           {visibleTabs.map((t) => (
-            <button key={t} role="tab" aria-selected={tab === t} onClick={() => selectTab(t)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800', t === 'Danger' && tab !== t && 'text-red-500 hover:text-red-700')}>{t}</button>
+            <button key={t} role="tab" aria-selected={tab === t} onClick={() => selectTab(t)} className={cn('px-3 py-2 text-sm font-medium border-b-2 whitespace-nowrap', tab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-gray-500 hover:text-gray-800')}>{t}</button>
           ))}
         </nav>
       </div>
@@ -117,7 +132,7 @@ function SenderDetail() {
       {tab === 'Limits' &&<BudgetsPanel sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {tab === 'Events' && <EventsTimeline senderId={s.id} />}
       {tab === 'Session' && <ExtensionSetup sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
-      {tab === 'Danger' && isManager && <DangerZone sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
+      {tab === 'Account' && isManager && <DangerZone sender={s} isManager={isManager} canWrite={canWrite} notify={toast.show} />}
       {toast.node}
     </div>
   );

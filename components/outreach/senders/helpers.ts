@@ -27,6 +27,15 @@ export const ACTION_LABELS: Record<ActionType, string> = {
 };
 
 export const PROVIDER_LABELS: Record<Provider, string> = { LINKEDIN: 'LinkedIn', INSTAGRAM: 'Instagram', WHATSAPP: 'WhatsApp', GMAIL: 'Gmail', OUTLOOK: 'Outlook', IMAP: 'IMAP', WEBCHAT: 'Website' };
+/** The account's own page on its network (LinkedIn slug, Instagram handle, WhatsApp "+digits"); null for mailboxes / website. */
+export function senderProfileUrl(provider: Provider, publicIdentifier: string | null | undefined): string | null {
+  const id = publicIdentifier?.trim();
+  if (!id) return null;
+  if (provider === 'LINKEDIN') return `https://www.linkedin.com/in/${id}`;
+  if (provider === 'INSTAGRAM') return `https://www.instagram.com/${id.replace(/^@/, '')}/`;
+  if (provider === 'WHATSAPP') { const digits = id.replace(/[^\d]/g, ''); return digits ? `https://wa.me/${digits}` : null; }
+  return null;
+}
 /** How the sender was connected: password login on the hosted page, cookies from the Chrome extension, OAuth (mailboxes),
  *  or the hosted page's browser-extension sign-in that reuses the LinkedIn session already open on the owner's computer. */
 export const AUTH_METHOD_LABELS: Record<AuthMethod, string> = { credentials: 'Password login', cookie: 'Cookie (extension)', oauth: 'OAuth', browser: 'Signed-in browser' };
@@ -86,9 +95,59 @@ export function isAbandonedSignIn(s: { status: SenderStatus; status_reason: stri
 
 export const STATUS_OPTIONS: Array<{ value: SenderStatus; label: string }> = [
   { value: 'ok', label: 'Connected' }, { value: 'connecting', label: 'Connecting' }, { value: 'credentials', label: 'Re-login needed' },
-  { value: 'error', label: 'Error' }, { value: 'paused', label: 'Paused' }, { value: 'disconnected', label: 'Disconnected' }, { value: 'disabled', label: 'Disabled' },
+  { value: 'error', label: 'Error' }, { value: 'paused', label: 'Paused' }, { value: 'disabled', label: 'Disabled' }, { value: 'removed', label: 'Removed' },
 ];
 
+/** Why a sender was removed (sender lifecycle), in plain words. Falls back to the billing / sign-in wording of the reason. */
+export function removedReasonText(via: string | null | undefined, reason?: string | null): string | null {
+  switch (via) {
+    case 'owner_link': return 'The account owner disconnected it themselves';
+    case 'unipile_deleted': return 'The account was deleted on the connector side';
+    case 'auto_after_disabled': return 'Disabled for too long, so it was removed automatically';
+    case 'trial_ended': return 'The trial ended';
+    case 'billing': return disconnectedReasonText(reason) ?? 'Removed for billing';
+    case 'reconcile': return 'The connector no longer had this account';
+    case 'workspace_deleted': return 'The workspace was deleted';
+    case 'app': return 'Removed by a teammate';
+    default: return disconnectedReasonText(reason);
+  }
+}
+/** A sender that no longer has a connector account (lifecycle `removed`, or billing v2's older `disconnected`). */
+export const isRemovedStatus = (s: string | null | undefined): boolean => s === 'removed' || s === 'disconnected';
+/** The lifecycle badge for a list row or the page header: "Paused until…", "Removed in N days", "Removal pending", "Erase scheduled…". */
+export function lifecycleBadge(s: { status: SenderStatus; pause_resume_at?: string | null; auto_remove_at?: string | null; removal_requested_at?: string | null; erase_scheduled_at?: string | null; removed_at?: string | null }): { text: string; tone: 'amber' | 'gray' | 'red' } | null {
+  const fmt = (v: string) => new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const fmtT = (v: string) => new Date(v).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  if (s.erase_scheduled_at && new Date(s.erase_scheduled_at).getTime() > Date.now()) return { text: `Erase scheduled ${fmtT(s.erase_scheduled_at)}`, tone: 'red' };
+  if (s.removal_requested_at && s.status !== 'removed' && s.status !== 'erased') return { text: 'Removal pending', tone: 'amber' };
+  if (s.status === 'paused' && s.pause_resume_at && new Date(s.pause_resume_at).getTime() > Date.now()) return { text: `Paused until ${fmt(s.pause_resume_at)}`, tone: 'amber' };
+  if (s.status === 'disabled' && s.auto_remove_at) {
+    const days = Math.max(0, Math.ceil((new Date(s.auto_remove_at).getTime() - Date.now()) / 86400000));
+    return { text: days === 0 ? 'Removed tonight' : `Disabled — removed in ${days} day${days === 1 ? '' : 's'}`, tone: 'gray' };
+  }
+  if (s.status === 'removed' && s.removed_at) return { text: `Removed ${fmt(s.removed_at)}`, tone: 'gray' };
+  return null;
+}
+
+/** How long an account has been signed out and what was done about it (sender-lifecycle v1.2 §8.4): "Disconnected 6 h · sign-in email sent 13:05 · reminded 1×". */
+export function disconnectBadge(s: { status: SenderStatus; disconnected_at?: string | null; holder_notified_at?: string | null; holder_reminders_sent?: number; holder_email_held_until?: string | null; last_disconnect_at?: string | null }): { text: string; held: boolean } | null {
+  if (s.status !== 'credentials' && s.status !== 'error') return null;
+  const since = s.disconnected_at ?? s.last_disconnect_at;
+  const parts: string[] = [];
+  if (since) {
+    const h = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 3_600_000));
+    parts.push(h < 1 ? 'Disconnected just now' : h < 48 ? `Disconnected ${h} h` : `Disconnected ${Math.round(h / 24)} days`);
+  } else parts.push('Disconnected');
+  const held = !!s.holder_email_held_until && new Date(s.holder_email_held_until).getTime() > Date.now();
+  if (held) parts.push('sign-in email held: likely outage');
+  else if (s.holder_notified_at) {
+    parts.push(`sign-in email sent ${new Date(s.holder_notified_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`);
+    if ((s.holder_reminders_sent ?? 0) > 0) parts.push(`reminded ${s.holder_reminders_sent}×`);
+  } else parts.push('sign-in email not sent yet');
+  return { text: parts.join(' · '), held };
+}
+
+/** Whose account is this (sender-lifecycle v1.2 §5.8.1): exactly one of owner_user_id (a member) / owner_email (someone outside) is set. */
 export function normalizeSchedule(s: Partial<Schedule> | null | undefined): Schedule {
   const out = { ...DEFAULT_SCHEDULE } as Schedule;
   for (const d of WEEKDAYS) {

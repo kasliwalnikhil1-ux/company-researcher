@@ -39,6 +39,8 @@ export const RELATIONS: Record<string, { kind: 'one' | 'many'; fk: string; ref?:
   'outreach_ai_outputs.outreach_ai_variables': { kind: 'one', fk: 'variable_id' },
   'outreach_leads.outreach_lead_tags': { kind: 'many', fk: 'lead_id' },
   'outreach_leads.outreach_lead_identities': { kind: 'many', fk: 'lead_id' },
+  // 094: one summary row per lead; the demo gives the row `id = lead_id` so the to-one rule (parent.id → child.id) applies
+  'outreach_leads.outreach_lead_summary': { kind: 'one', fk: 'id' },
   'outreach_lead_tags.outreach_leads': { kind: 'one', fk: 'lead_id' },
   'outreach_lead_tags.outreach_tags': { kind: 'one', fk: 'tag_id' },
 };
@@ -359,7 +361,21 @@ export class DemoQuery implements PromiseLike<Result> {
     for (const { embed, isNull } of this.embedNull) out = out.filter((x) => (isEmpty(x.embeds[embed]) === isNull));
     for (const it of items) if (it.kind === 'embed' && it.embed.inner) out = out.filter((x) => !isEmpty(x.embeds[it.embed.alias]));
     const top = this.orders.filter((o) => !o.table);
-    if (top.length) out.sort((a, b) => sortBy(a.src, b.src, top));
+    if (top.length) {
+      // `embed(column)` orders the parent by a to-one embedded column (PostgREST 12); the value is read off the embed
+      const viaEmbed = top.filter((o) => /^\w+\(\w+\)$/.test(o.col));
+      const keyOf = (x: { src: Row; embeds: Record<string, Row | Row[] | null> }): Row => {
+        if (!viaEmbed.length) return x.src;
+        const extra: Row = {};
+        for (const o of viaEmbed) {
+          const m = /^(\w+)\((\w+)\)$/.exec(o.col)!;
+          const e = x.embeds[m[1]];
+          extra[o.col] = Array.isArray(e) ? e[0]?.[m[2]] ?? null : e?.[m[2]] ?? null;
+        }
+        return { ...x.src, ...extra };
+      };
+      out.sort((a, b) => sortBy(keyOf(a), keyOf(b), top));
+    }
     const count = out.length;
     if (this.from_ != null) out = out.slice(this.from_, (this.to_ ?? this.from_) + 1);
     if (this.limit_ != null) out = out.slice(0, this.limit_);

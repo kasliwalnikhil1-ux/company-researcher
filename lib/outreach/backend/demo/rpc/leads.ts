@@ -6,6 +6,7 @@ import { reasonText } from '../../../reasons';
 import type { Ctx, RpcArea } from '../ctx';
 import { demoError } from '../ctx';
 import { processDueEnrichment, requestEnrichment } from '../leads/enrich';
+import { leadHide, leadPromote, leadRelationships, leadsByAccount, leadsTotals, rebuildLeadSummary } from '../leads/relationships';
 import { upsertIdentity } from '../leads/upsert';
 import { audit, cascadeLeadDelete, deleteLeads, initcap, leadDefaults, leadTriggers, profileSearchText, rowsOf } from '../leads/util';
 import { tableHooks } from '../query';
@@ -332,6 +333,12 @@ export const leadsRpc = {
   lead_custom_keys: leadCustomKeys,
   lead_queued_actions: leadQueuedActions,
   lead_timeline: leadTimeline,
+  // 094 leads relationships
+  lead_hide: leadHide,
+  lead_promote: leadPromote,
+  lead_relationships: leadRelationships,
+  leads_by_account: leadsByAccount,
+  leads_totals: leadsTotals,
   request_enrichment: requestEnrichmentRpc,
   save_import_schedule: saveImportSchedule,
   sequence_chat_ids: sequenceChatIds,
@@ -366,8 +373,14 @@ export function registerLeads(): void {
       if (kind === 'delete') cascadeLeadDelete(store, new Set(rows.map((r) => r.id)));
       else leadTriggers(store, rows);
     },
-    beforeRead: (store) => { processDueEnrichment(store); profileTexts(store); },
+    // 094: the summary embed (outreach_lead_summary) is read off the store by the embed resolver, so it is rebuilt here
+    beforeRead: (store) => { processDueEnrichment(store); profileTexts(store); rebuildLeadSummary(store); },
   };
+  tableHooks.outreach_lead_summary = { ...tableHooks.outreach_lead_summary, readOnly: ['lead_id', 'workspace_id'], beforeRead: rebuildLeadSummary };
+  {
+    const prev = tableHooks.outreach_chats ?? {};
+    tableHooks.outreach_chats = { ...prev, beforeRead: (store) => { prev.beforeRead?.(store); for (const c of store.t('outreach_chats')) if (c.counterpart_kind === undefined) c.counterpart_kind = 'person'; } };
+  }
   tableHooks.outreach_lead_profiles = {
     ...tableHooks.outreach_lead_profiles,
     beforeRead: (store) => { processDueEnrichment(store); profileTexts(store); },

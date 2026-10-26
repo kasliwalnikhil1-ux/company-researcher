@@ -39,9 +39,12 @@ export function registerReports(app: App): void {
     return ok(c, await call(r.ctx, "report_cost", { p_ws: r.ws, p_client: r.client, p_from: r.from, p_to: r.to }));
   });
 
+  // Sequence results in people (sequence-stats-PRD.md §8). No dates = all time; dates = the cohort first contacted then.
   app.get("/v1/reports/sequences", async (c) => {
-    const r = read(c);
-    return ok(c, await call(r.ctx, "report_sequences", { p_ws: r.ws, p_client: r.client, p_from: r.from, p_to: r.to }));
+    const q = parse(z.object({ ...range, channel: z.enum(["linkedin", "instagram", "whatsapp", "email"]).optional(), status: z.enum(["draft", "active", "paused", "archived", "all"]).optional() }), c.req.query());
+    const ctx = ctxOf(c);
+    scopedClient(ctx, q.client_id);
+    return ok(c, await call(ctx, "report_sequences", { p_ws: ctx.key.workspace_id, p_client: q.client_id, p_from: q.from, p_to: q.to, p_channel: q.channel, p_status: q.status }));
   });
   app.get("/v1/reports/senders", async (c) => {
     const r = read(c);

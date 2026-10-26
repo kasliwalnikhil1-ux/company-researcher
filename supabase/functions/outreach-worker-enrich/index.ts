@@ -116,6 +116,8 @@ serve("worker-enrich", async (req) => {
       }
     } catch (e) { log({ fn: "worker-enrich", sender_id: sender.id, error: String((e as any)?.message ?? e) }); }
   }
-  log({ fn: "worker-enrich", senders: senders?.length ?? 0, done, failed, duration_ms: Date.now() - t0 });
+  // 094: why each queued lead is still waiting (budget: which account ran out and when it resets; queue: its position), shown in the leads list
+  const waits = await rpc<Row>("enrich_wait_reason_refresh").catch((e) => { log({ fn: "worker-enrich", warn: `wait reasons: ${String((e as any)?.message ?? e)}` }); return null; });
+  log({ fn: "worker-enrich", senders: senders?.length ?? 0, done, failed, wait_reasons: waits ?? undefined, duration_ms: Date.now() - t0 });
   return json({ ok: true, done, failed, results });
 });

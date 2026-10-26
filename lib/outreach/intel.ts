@@ -7,8 +7,9 @@ import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from './api';
-import { applyAiChatFilter, applyRepliesView, type ChatFilters, type LeadFilters } from './queries';
-import type { ActionType, AiField, AiFieldValue, AiVariableOutput, Chat, Enrollment, JobStatus, Lead, Provider, Sender } from './types';
+import { applyChatFilters, cleanSearch, type ChatFilters, type LeadFilters } from './queries';
+import type { LeadTab } from './leadsRelationships';
+import type { ActionType, AiField, AiFieldValue, AiVariableOutput, Chat, Enrollment, JobStatus, Lead, LeadChannel, LeadKind, LeadOrigin, LeadStatus, LeadSummary, Provider, RelationSource, Sender } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,10 +159,40 @@ export interface IntelLeadFilters {
   past_company?: string | null;
   skill?: string | null;
   language?: string | null;
+  // 094 leads relationships (same keys as outreach__leads_matching, so the totals line and the list agree)
+  /** prospects (default) | inbox | all. Hidden leads need `hidden`. */
+  tab?: LeadTab | null;
+  /** true = ONLY hidden leads (automated senders, company pages, hidden by hand), whatever the tab. */
+  hidden?: boolean | null;
+  status?: LeadStatus[] | null;
+  /** Sender ids the lead is currently connected to (LinkedIn 1st / Instagram follow-back). */
+  connected_via?: string[] | null;
+  /** Sender ids with an unanswered invite / follow to the lead. */
+  pending_with?: string[] | null;
+  not_connected?: boolean | null;
+  connection_source?: RelationSource | null;
+  channel_used?: Provider | null;
+  channel_replied?: Provider | null;
+  origin?: LeadOrigin[] | null;
+  kind?: LeadKind[] | null;
+  /** Removed accounts (sender-lifecycle) count in connected / pending. */
+  include_removed?: boolean | null;
 }
 export type LeadListFilters = LeadFilters & IntelLeadFilters;
 export type LeadProfileSummary = Pick<LeadProfile, 'follower_count' | 'connections_count' | 'last_posted_at' | 'current_started_on' | 'profile_language' | 'enriched_at'>;
-export type LeadListRow = LeadWithIntel & { outreach_lead_tags: { tag_id: string }[]; outreach_lead_profiles: LeadProfileSummary | LeadProfileSummary[] | null };
+export type LeadListRow = LeadWithIntel & { outreach_lead_tags: { tag_id: string }[]; outreach_lead_profiles: LeadProfileSummary | LeadProfileSummary[] | null; outreach_lead_summary?: LeadSummary | LeadSummary[] | null };
+/** The embedded summary of a list row (PostgREST gives an object for the to-one embed; the demo may give an array). */
+export function summaryOf(l: { outreach_lead_summary?: LeadSummary | LeadSummary[] | null }): LeadSummary | null {
+  const s = l.outreach_lead_summary;
+  return Array.isArray(s) ? s[0] ?? null : s ?? null;
+}
+/** Channel filter value (a provider) → the summary's channel name. */
+const summaryChannel = (p: Provider | string): LeadChannel => (p === 'INSTAGRAM' ? 'instagram' : p === 'WHATSAPP' ? 'whatsapp' : p === 'LINKEDIN' ? 'linkedin' : 'email');
+const SUMMARY_FILTER_KEYS: (keyof IntelLeadFilters)[] = ['status', 'connected_via', 'pending_with', 'not_connected', 'connection_source', 'channel_used', 'channel_replied'];
+/** A summary filter is set: the embed must be inner (a lead with no summary row yet cannot match). */
+function needsSummaryJoin(f: LeadListFilters): boolean {
+  return SUMMARY_FILTER_KEYS.some((k) => { const v = f[k]; return v != null && v !== false && !(Array.isArray(v) && v.length === 0); }) || (!!f.channel && f.channel !== 'LINKEDIN');
+}
 
 export function profileOf(row: { outreach_lead_profiles?: LeadProfileSummary | LeadProfileSummary[] | null }): LeadProfileSummary | null {
   const p = row.outreach_lead_profiles;
@@ -248,18 +279,7 @@ export function useChatsByIds(ws: string | null | undefined, ids: string[] | nul
       for (let i = 0; i < list.length; i += 150) {
         let q = db.from('outreach_chats').select('*, outreach_leads(id, full_name, company, headline, picture_url), outreach_senders(id, display_name, provider)').eq('workspace_id', ws!).in('id', list.slice(i, i + 150));
         if (f.archived != null) q = q.eq('archived', !!f.archived);
-        if (f.sender_id) q = q.eq('sender_id', f.sender_id);
-        if (f.client_id) q = q.eq('client_id', f.client_id);
-        if (f.intent) q = q.eq('intent', f.intent);
-        if (f.unread) q = q.eq('unread', true);
-        if (f.assigned_to) q = q.eq('assigned_to', f.assigned_to);
-        if (f.provider) q = q.eq('provider', f.provider);
-        q = applyAiChatFilter(q, f.ai);
-        q = applyRepliesView(q, f);
-        if (f.stage) q = q.eq('conversation_stage', f.stage);
-        if (f.has_notes) q = q.not('last_note_at', 'is', null);
-        const search = f.search ? cleanSearch(f.search) : '';
-        if (search) q = q.or(`attendee_name.ilike.%${search}%,subject.ilike.%${search}%,last_message_preview.ilike.%${search}%`);
+        q = applyChatFilters(q, f);
         all.push(...((await sel<ChatRowWithJoins[]>(q)) ?? []));
       }
       // Needs reply: longest waiting first, as the paged list
@@ -309,7 +329,6 @@ function monthsAgo(n: number): string {
 }
 
 /** Characters that would break a PostgREST `or=(…)` expression. */
-function cleanSearch(s: string): string { return s.replace(/[,()"\\]/g, ' ').trim(); }
 
 const PROFILE_COLS = 'follower_count, connections_count, last_posted_at, current_started_on, profile_language, enriched_at';
 
@@ -321,14 +340,32 @@ const PROFILE_COLS = 'follower_count, connections_count, last_posted_at, current
 function leadsQuery(ws: string, f: LeadListFilters, want: 'rows' | 'ids') {
   const inner = needsProfileJoin(f);
   const P = 'outreach_lead_profiles';
-  // LinkedIn lives on the lead itself; Instagram / WhatsApp only as identity rows, so those need an inner join.
-  const identityJoin = f.channel && f.channel !== 'LINKEDIN';
+  const S = 'outreach_lead_summary';
+  const sInner = needsSummaryJoin(f);
   const cols = want === 'rows'
-    ? `*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS})`
-    : `id${f.tag_id ? ', outreach_lead_tags!inner(tag_id)' : ''}${inner ? `, ${P}!inner(lead_id)` : ''}`;
-  let q = db.from('outreach_leads').select(`${cols}${identityJoin ? ', outreach_lead_identities!inner(provider)' : ''}`, want === 'rows' ? { count: 'exact' } : undefined).eq('workspace_id', ws);
+    ? `*, outreach_lead_tags(tag_id), ${P}${inner ? '!inner' : ''}(${PROFILE_COLS}), ${S}${sInner ? '!inner' : ''}(*)`
+    : `id${f.tag_id ? ', outreach_lead_tags!inner(tag_id)' : ''}${inner ? `, ${P}!inner(lead_id)` : ''}, ${S}${sInner ? '!inner' : ''}(lead_id, last_activity_at)`;
+  let q = db.from('outreach_leads').select(cols, want === 'rows' ? { count: 'exact' } : undefined).eq('workspace_id', ws);
+  // 094: tabs and hidden leads (hidden = only hidden leads, whatever the tab)
+  if (f.hidden) q = q.not('hidden_at', 'is', null);
+  else {
+    q = q.is('hidden_at', null);
+    const tab = f.tab ?? 'prospects';
+    if (tab === 'prospects') q = q.not('prospect_since', 'is', null);
+    else if (tab === 'inbox') q = q.eq('origin', 'inbound').is('prospect_since', null);
+  }
+  // reachable on: LinkedIn lives on the lead itself; the other channels are in the summary's identity_channels
   if (f.channel === 'LINKEDIN') q = q.not('public_identifier', 'is', null);
-  else if (identityJoin) q = q.eq('outreach_lead_identities.provider', f.channel!);
+  else if (f.channel) q = q.contains(`${S}.identity_channels`, [summaryChannel(f.channel)]);
+  if (f.status?.length) q = q.in(`${S}.status`, f.status);
+  if (f.connected_via?.length) q = q.overlaps(`${S}.connected_sender_ids`, f.connected_via);
+  if (f.pending_with?.length) q = q.overlaps(`${S}.pending_sender_ids`, f.pending_with);
+  if (f.not_connected) q = q.eq(`${S}.connected_count`, 0);
+  if (f.connection_source) q = q.contains(`${S}.connection_sources`, [f.connection_source]);
+  if (f.channel_used) q = q.contains(`${S}.used_channels`, [summaryChannel(f.channel_used)]);
+  if (f.channel_replied) q = q.contains(`${S}.replied_channels`, [summaryChannel(f.channel_replied)]);
+  if (f.origin?.length) q = q.in('origin', f.origin);
+  if (f.kind?.length) q = q.in('kind', f.kind);
   const search = f.search ? cleanSearch(f.search) : '';
   if (search) q = q.or(`full_name.ilike.%${search}%,company.ilike.%${search}%,headline.ilike.%${search}%,public_identifier.ilike.%${search}%,email_work.ilike.%${search}%`);
   if (f.client_id) q = q.eq('client_id', f.client_id);
@@ -351,7 +388,9 @@ function leadsQuery(ws: string, f: LeadListFilters, want: 'rows' | 'ids') {
   if (f.past_company?.trim()) q = q.ilike(`${P}.companies_text`, like(f.past_company));
   if (f.skill?.trim()) q = q.ilike(`${P}.skills_text`, like(f.skill));
   if (f.language?.trim()) q = q.ilike(`${P}.profile_language`, `${f.language.trim().replace(/[%_]/g, '')}%`);
-  return q.order('created_at', { ascending: false }).order('id', { ascending: false });
+  // 094 §5.1: last activity first (the summary's last_activity_at; a lead with no row yet sorts with the newest-created).
+  // PostgREST orders a parent by a to-one embedded column with `embed(column)`; created_at and id break the ties.
+  return q.order(`${S}(last_activity_at)`, { ascending: false, nullsFirst: false }).order('created_at', { ascending: false }).order('id', { ascending: false });
 }
 
 /** The leads list with the item-13 filters (join on outreach_lead_profiles, inner only when a profile filter is set). */

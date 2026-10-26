@@ -12,6 +12,7 @@ declare
     "scale":      {"monthly": "4,9,18,19,43-49,67-99",    "quarterly": "4,9,18,19,43-49,67-99",   "annual": "4,9,18,19,43-49,67-99"},
     "enterprise": {"monthly": "4,8,9,19,40-49,75-99",     "quarterly": "4,9,18,19,40-49,75-99",   "annual": "4,8,9,19,40-49,75-99"}}';
   rounded text; a int; z int; part text;
+  t2 text;
 begin
   select user_id into u_owner  from platform_user_access where status = 'active' order by created_at limit 1;
   select user_id into u_member from platform_user_access where status = 'active' order by created_at limit 1 offset 1;
@@ -81,7 +82,7 @@ begin
 
   -- ============================================================ 4. enforced: the trial has one account
   update outreach_flags set value = 'true'::jsonb where key = 'billing_enforced';
-  update outreach_senders set status = 'disabled' where id = s2;                       -- frees its account
+  update outreach_senders set status = 'removed', previous_unipile_account_id = unipile_account_id, unipile_account_id = null where id = s2;   -- frees its account (sender lifecycle: disabled keeps it, removed frees it)
   j := outreach__slots(ws);
   begin perform outreach_slot_reserve(ws, 'hosted_auth', null); t := 'reserved'; exception when others then t := sqlerrm; end;
   if (j->>'billed')::int = 1 and (j->>'used')::int = 1 and (j->>'available')::int = 0 and t like 'E_ACCOUNT_LIMIT: Your trial includes 1 account%'
@@ -91,7 +92,7 @@ begin
     insert into outreach_senders(workspace_id, provider, display_name, status, unipile_account_id, timezone) values (ws, 'GMAIL', 'Mailbox', 'ok', 's14m-' || ws, 'UTC');
     t := 'inserted';
   exception when others then t := sqlerrm; end;
-  begin update outreach_senders set status = 'ok' where id = s2; t := t || ' | re-enabled'; exception when others then t := t || ' | ' || sqlerrm; end;
+  begin update outreach_senders set status = 'ok', unipile_account_id = previous_unipile_account_id where id = s2; t := t || ' | re-enabled'; exception when others then t := t || ' | ' || sqlerrm; end;
   -- a website chat inbox is a synthetic sender and never counts
   insert into outreach_senders(workspace_id, provider, auth_method, display_name, status, timezone) values (ws, 'WEBCHAT', 'oauth', 'Site', 'ok', 'UTC');
   if t like 'E_ACCOUNT_LIMIT:%| E_ACCOUNT_LIMIT:%' and (outreach__slots(ws)->>'used')::int = 1
@@ -106,7 +107,7 @@ begin
     then log := log || E'\nok   subscription: the workspace follows Stripe (Scale, 3 accounts, monthly)';
     else fails := fails + 1; log := log || E'\nFAIL apply_subscription: ' || j::text; end if;
 
-  update outreach_senders set status = 'ok' where id = s2;                             -- 2 of 3
+  update outreach_senders set status = 'ok', unipile_account_id = coalesce(unipile_account_id, previous_unipile_account_id) where id = s2;   -- 2 of 3 (removed above: the account comes back with it)
   insert into outreach_senders(workspace_id, provider, display_name, status, timezone, owner_email) values (ws, 'LINKEDIN', 'Third', 'connecting', 'UTC', 'three14@test.local') returning id into s3;
   insert into outreach_senders(workspace_id, provider, display_name, status, timezone, owner_email) values (ws, 'LINKEDIN', 'Fourth', 'connecting', 'UTC', 'four14@test.local') returning id into s4;
   rid := outreach_slot_reserve(ws, 'hosted_auth', s3);
@@ -125,12 +126,12 @@ begin
     then log := log || E'\nok   the reservation holder connects (3 of 3) and uses up its reservation; the sender without one is refused';
     else fails := fails + 1; log := log || E'\nFAIL reservation use: ' || t || ' ' || j::text; end if;
   -- an expired reservation frees the account
-  update outreach_senders set status = 'disabled' where id = s3;
+  update outreach_senders set status = 'removed', previous_unipile_account_id = unipile_account_id, unipile_account_id = null where id = s3;
   rid := outreach_slot_reserve(ws, 'hosted_auth', s4, 15);
   update outreach_slot_reservations set expires_at = now() - interval '1 minute' where id = rid;
   if (outreach__slots(ws)->>'available')::int = 1 then log := log || E'\nok   an expired reservation no longer holds an account';
   else fails := fails + 1; log := log || E'\nFAIL reservation expiry: ' || outreach__slots(ws)::text; end if;
-  update outreach_senders set status = 'ok' where id = s3;
+  update outreach_senders set status = 'ok', unipile_account_id = previous_unipile_account_id where id = s3;
 
   -- features of Scale: clients yes, webhooks no (Enterprise)
   perform set_config('request.jwt.claims', json_build_object('role', 'authenticated', 'sub', u_owner)::text, true);
@@ -173,38 +174,41 @@ begin
   execute 'set local role authenticated';
   begin perform outreach_pause_sender(s4, false); t := 'resumed'; exception when others then t := left(sqlerrm, 16); end;
   execute 'reset role'; perform set_config('request.jwt.claims', '', true);
-  update outreach_senders set status = 'disabled', status_reason = 'disabled_by_user' where id = (select id from outreach_senders where id in (s1, s2, s3) and status = 'ok' and id <> s1 limit 1);
+  update outreach_senders set status = 'removed', status_reason = 'disabled_by_user', previous_unipile_account_id = unipile_account_id, unipile_account_id = null where id = (select id from outreach_senders where id in (s1, s2, s3) and status = 'ok' and id <> s1 limit 1);
   if s4 is not null and t = 'E_ACCOUNT_LIMIT:' and (select status::text from outreach_senders where id = s4) = 'ok'
      and (select count(*) from outreach_senders where id in (s1, s2, s3) and status = 'ok') = 2
     then log := log || E'\nok   a plan-paused account refuses a manual resume and comes back on its own when another account is disabled';
     else fails := fails + 1; log := log || E'\nFAIL freed slot: ' || coalesce(t, '') || ' ' || (select string_agg(display_name || ':' || status::text, ',') from outreach_senders where id in (s1, s2, s3)); end if;
   k := outreach_billing_apply_subscription(ws, jsonb_build_object('subscription_id', 'sub_smoke14', 'status', 'active', 'plan', 'scale', 'billing_period', 'monthly', 'accounts_billed', 3));
-  update outreach_senders set status = 'ok', status_reason = null where id in (s1, s2, s3) and status = 'disabled';
+  update outreach_senders set status = 'ok', status_reason = null, unipile_account_id = previous_unipile_account_id where id in (s1, s2, s3) and status = 'removed';
   -- an account that needs a sign-in anyway gives its slot back instead of being paused
   update outreach_senders set status = 'credentials', status_reason = 'CREDENTIALS' where id = s2;
   k := outreach_billing_apply_subscription(ws, jsonb_build_object('subscription_id', 'sub_smoke14', 'status', 'active', 'plan', 'scale', 'billing_period', 'monthly', 'accounts_billed', 2));
-  if (select status::text || ':' || status_reason from outreach_senders where id = s2) = 'disconnected:over_plan_limit' and (k#>>'{accounts,disconnected}')::int = 1
+  -- sender lifecycle: the signed-out account is removed (disabled + removal requested until the connector confirms), reason kept
+  if (select status::text || ':' || status_reason || ':' || coalesce(removed_via, '') from outreach_senders where id = s2) = 'disabled:over_plan_limit:billing' and (select removal_requested_at is not null from outreach_senders where id = s2) and (k#>>'{accounts,disconnected}')::int = 1
      and (select count(*) from outreach_senders where id in (s1, s3) and status = 'ok') = 2
-    then log := log || E'\nok   decrease 3 → 2 with one signed-out account: that one is disconnected, the two working ones stay';
+    then log := log || E'\nok   decrease 3 → 2 with one signed-out account: that one is removed, the two working ones stay';
     else fails := fails + 1; log := log || E'\nFAIL decrease with broken sender: ' || k::text; end if;
 
-  -- ============================================================ 7. disconnect keeps the sender, queues the connector delete
+  -- ============================================================ 7. remove (was: disconnect) keeps the sender, queues the connector delete
   select * into r from outreach_senders where id = s2;
   select count(*) into n from outreach_account_deletions where account_id = 's14b-' || ws and done_at is null;
-  if r.unipile_account_id is null and r.previous_unipile_account_id = 's14b-' || ws and r.disconnected_at is not null and n = 1
-     and (select status from outreach_enrollments where id = e1) = 'active' and (outreach__slots(ws)->>'used')::int = 2
+  if r.unipile_account_id = 's14b-' || ws and r.removal_requested_at is not null and r.status::text = 'disabled' and n = 1
+     and (select status::text from outreach_enrollments where id = e1) = 'exited_sender_disabled' and (outreach__slots(ws)->>'used')::int = 2
      and exists (select 1 from outreach_account_deletions_due(50) d where d.account_id = 's14b-' || ws)
-    then log := log || E'\nok   disconnect: account id moved to previous_unipile_account_id, delete queued, enrolment still active, slot freed';
-    else fails := fails + 1; log := log || E'\nFAIL disconnect: ' || to_jsonb(r)::text; end if;
+    then log := log || E'\nok   remove requested: delete queued, the lead left its sequence, the slot is free at once, not "removed" until the connector confirms';
+    else fails := fails + 1; log := log || E'\nFAIL remove request: n=' || n || ' enr=' || coalesce((select status::text from outreach_enrollments where id = e1), 'null') || ' used=' || (outreach__slots(ws)->>'used') || ' due=' || (exists (select 1 from outreach_account_deletions_due(50) d where d.account_id = 's14b-' || ws))::text; end if;
   j := outreach_account_deletion_result('s14b-' || ws, false, 'timeout');
   k := outreach_account_deletion_result('s14b-' || ws, true);
+  select * into r from outreach_senders where id = s2;
   if (j->>'done')::boolean = false and (k->>'done')::boolean and not exists (select 1 from outreach_account_deletions_due(50) d where d.account_id = 's14b-' || ws)
-    then log := log || E'\nok   connector delete: a failure backs off, a success closes the row';
-    else fails := fails + 1; log := log || E'\nFAIL deletion result: ' || j::text || k::text; end if;
+     and r.status::text = 'removed' and r.unipile_account_id is null and r.previous_unipile_account_id = 's14b-' || ws and r.removed_at is not null
+    then log := log || E'\nok   connector delete: a failure backs off, a success closes the row and finishes the removal';
+    else fails := fails + 1; log := log || E'\nFAIL deletion result: ' || j::text || k::text || to_jsonb(r)::text; end if;
   -- reconnect onto the same sender: needs a free account, gets the quiet-period path like any reconnect
   k := outreach_billing_apply_subscription(ws, jsonb_build_object('subscription_id', 'sub_smoke14', 'status', 'active', 'plan', 'scale', 'billing_period', 'monthly', 'accounts_billed', 3));
   rid := outreach_slot_reserve(ws, 'reconnect', s2, 60);
-  update outreach_senders set unipile_account_id = 's14b2-' || ws, status = 'connecting', status_reason = null where id = s2;
+  perform outreach_sender_restore_apply(s2, 's14b2-' || ws);   -- what the reconnect flow does for a removed sender (sender lifecycle): account bound, removal cleared, connecting
   update outreach_senders set status = 'ok' where id = s2;
   select * into r from outreach_senders where id = s2;
   if rid is not null and r.status = 'ok' and r.disconnected_at is null and r.previous_unipile_account_id = 's14b-' || ws and (outreach__slots(ws)->>'used')::int = 3
@@ -304,8 +308,9 @@ begin
   -- (the limit still fits, so reconciliation would resume it: hold the limit at 2 for this check)
   update outreach_workspaces set accounts_billed = 2 where id = ws;
   j := outreach_billing_tick();
-  if (select status::text || ':' || status_reason from outreach_senders where id = s3) = 'disconnected:over_plan_limit' and (j->>'senders_disconnected')::int >= 1
-    then log := log || E'\nok   hygiene: an account paused for the plan for 15 days is disconnected (its connector account is queued for deletion)';
+  if (select status::text || ':' || status_reason || ':' || coalesce(removed_via, '') from outreach_senders where id = s3) = 'disabled:over_plan_limit:billing' and (select removal_requested_at is not null from outreach_senders where id = s3) and (j->>'senders_disconnected')::int >= 1
+     and exists (select 1 from outreach_account_deletions where account_id = (select unipile_account_id from outreach_senders where id = s3) and done_at is null)
+    then log := log || E'\nok   hygiene: an account paused for the plan for 15 days is removed (disabled, its connector account queued for deletion; sender lifecycle)';
     else fails := fails + 1; log := log || E'\nFAIL hygiene: ' || j::text; end if;
   -- reconciliation: more active accounts than the plan, no reason on record
   update outreach_workspaces set accounts_billed = 1 where id = ws;
@@ -364,18 +369,22 @@ begin
   update outreach_workspaces set trial_ends_at = now() - interval '1 hour' where id = ws2;
   j := outreach_billing_tick();
   select * into r from outreach_workspaces where id = ws2;
+  -- sender lifecycle: the trial's sender is removed (disabled + removal pending, then the connector confirms the delete)
+  t2 := (select status::text || ':' || status_reason || ':' || coalesce(removed_via, '') || ':' || (removal_requested_at is not null)::text from outreach_senders where id = s4);
+  n := (select count(*) from outreach_account_deletions where account_id = 's14t-' || ws2 and done_at is null);
+  k := outreach_account_deletion_result('s14t-' || ws2, true);
   if b and t = 'trial_ends_soon:Priya Nair' and (j->'trials_expired') ? ws2::text and r.plan = 'trial_expired' and r.data_delete_after between now() + interval '29 days' and now() + interval '30 days'
-     and (select status::text || ':' || status_reason || ':' || coalesce(unipile_account_id, 'null') from outreach_senders where id = s4) = 'disconnected:trial_expired:null'
-     and exists (select 1 from outreach_account_deletions where account_id = 's14t-' || ws2) and outreach_feature_plan(ws2) = 'scale' and not outreach_plan_active(ws2)
-    then log := log || E'\nok   trial ended: plan trial_expired, the account disconnected (delete queued), data kept 30 days, read-only';
-    else fails := fails + 1; log := log || E'\nFAIL trial expiry: ' || coalesce(t, 'no notice') || ' ' || r.plan || ' ' || j::text; end if;
+     and t2 = 'disabled:trial_expired:trial_ended:true' and n = 1 and outreach_feature_plan(ws2) = 'scale' and not outreach_plan_active(ws2)
+     and (select status::text || ':' || coalesce(unipile_account_id, 'null') from outreach_senders where id = s4) = 'removed:null'
+    then log := log || E'\nok   trial ended: plan trial_expired, the account removed (delete queued then confirmed), data kept 30 days, read-only';
+    else fails := fails + 1; log := log || E'\nFAIL trial expiry: ' || coalesce(t, 'no notice') || ' ' || coalesce(t2, 'null') || ' n=' || n || ' ' || r.plan || ' ' || j::text; end if;
   -- reconnect needs a plan
-  begin update outreach_senders set unipile_account_id = 's14t2-' || ws2, status = 'connecting' where id = s4; t := 'bound'; exception when others then t := sqlerrm; end;
+  begin perform outreach_sender_restore_apply(s4, 's14t2-' || ws2); t := 'bound'; exception when others then t := sqlerrm; end;
   if t like 'E_PLAN_SUSPENDED: Your trial has ended%' then log := log || E'\nok   a lapsed trial cannot reconnect before subscribing';
   else fails := fails + 1; log := log || E'\nFAIL lapsed reconnect: ' || t; end if;
   -- subscribe on day 20, reconnect onto the same sender (PRD #24b)
   k := outreach_billing_apply_subscription(ws2, jsonb_build_object('subscription_id', 'sub_smoke14t', 'status', 'active', 'plan', 'launch', 'billing_period', 'monthly', 'accounts_billed', 1));
-  update outreach_senders set unipile_account_id = 's14t2-' || ws2, status = 'connecting', status_reason = null where id = s4;
+  perform outreach_sender_restore_apply(s4, 's14t2-' || ws2);
   update outreach_senders set status = 'ok' where id = s4;
   select * into r from outreach_workspaces where id = ws2;
   if r.plan = 'launch' and r.data_delete_after is null and (select status::text from outreach_senders where id = s4) = 'ok' and (outreach__slots(ws2)->>'used')::int = 1

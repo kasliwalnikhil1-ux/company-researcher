@@ -31,7 +31,8 @@ const SDKS = [/npm:stripe\b/, /npm:resend\b/, /npm:openai\b/, /npm:@anthropic-ai
 const ALLOWED = new Set([
   '_shared/health.ts',
   '_shared/outreach/llm.ts',         // the AI transports (D11: the only place an AI model is called)
-  '_shared/outreach/notify.ts',      // Resend
+  '_shared/outreach/email.ts',       // Resend: the one sending path (custom-sending-domain-PRD §5.1)
+  '_shared/outreach/resend_domains.ts', // Resend: domains + domain-scoped keys
   '_shared/outreach/stripe.ts',      // Stripe
   '_shared/outreach/elevenlabs.ts',  // ElevenLabs
   '_shared/outreach/unipile.ts',     // Unipile (host comes from UNIPILE_DSN; listed so a literal there is still wrapped)

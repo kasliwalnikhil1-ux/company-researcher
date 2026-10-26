@@ -39,7 +39,7 @@ export const totalCents = (plan: PlanId, period: BillingPeriod, accounts: number
 // accounts
 // ---------------------------------------------------------------------------
 /** `outreach__occupies`: a live connection holds an account; website chat inboxes never count. */
-export const occupies = (s: Row) => !s.deleted_at && s.provider !== 'WEBCHAT' && !['disabled', 'disconnected'].includes(String(s.status)) && s.unipile_account_id != null;
+export const occupies = (s: Row) => !s.deleted_at && s.provider !== 'WEBCHAT' && !['removed', 'erased', 'disconnected'].includes(String(s.status)) && s.unipile_account_id != null;
 const MAILBOXES = ['GMAIL', 'OUTLOOK', 'MAIL', 'IMAP', 'GOOGLE', 'MICROSOFT'];
 
 export function slots(store: DemoStore, w: Row) {

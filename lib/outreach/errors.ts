@@ -17,6 +17,9 @@ export function parseError(err: unknown): OutreachError {
   const raw = (err as any)?.message ?? (err as any)?.error ?? String(err);
   const m = /^(E_[A-Z_]+)(?::\s*(.*))?$/s.exec(String(raw).trim());
   if (m) return new OutreachError(friendlyErrorText(m[2] || humanize(m[1])), m[1], (err as any)?.details);
+  // PostgREST's .single() on zero rows ("Cannot coerce the result to a single JSON object" / "JSON object requested,
+  // multiple (or no) rows returned"): the row is gone or hidden by RLS. Say so instead of showing the raw message.
+  if ((err as { code?: unknown } | null)?.code === 'PGRST116') return new OutreachError(humanize('E_NOT_FOUND'), 'E_NOT_FOUND', err);
   return new OutreachError(friendlyErrorText(String(raw)), 'E_UNKNOWN', err);
 }
 
@@ -25,6 +28,15 @@ export function humanize(code: string): string {
     E_BUDGET_EXHAUSTED: 'Today’s sending limit is used up',
     E_OUT_OF_SCHEDULE: 'Outside the sender’s working hours',
     E_SENDER_NOT_OK: 'The sender account is not connected',
+    // sender lifecycle (Oct 2026)
+    E_SENDER_PAUSED: 'The sender is paused',
+    E_SENDER_DISABLED: 'The sender is disabled. Enable it on its Account tab',
+    E_SENDER_REMOVED: 'The sender was removed. The owner can reconnect it from the sender page',
+    E_POOL_NO_ACTIVE_SENDER: 'No sender in the pool is active',
+    E_SENDER_DELETE_BLOCKED: 'A sender with history cannot be deleted. Remove it, or schedule an erase',
+    E_LINK_USED: 'This link was already used',
+    E_LINK_EXPIRED: 'This link has expired',
+    E_INVALID_LINK: 'This link is not valid',
     E_LEAD_SUPPRESSED: 'This lead is on a do-not-contact list',
     E_RELATION_REQUIRED: 'The lead has to be a connection first',
     E_NOTE_TOO_LONG: 'The invitation note is too long',
@@ -38,9 +50,12 @@ export function humanize(code: string): string {
     E_SENDER_NOT_IN_POOL: 'That sender is not in this sequence’s pool',
     E_DUPLICATE_ENROLLMENT: 'This lead is already in the sequence with this sender',
     E_PLAN_SUSPENDED: 'This workspace is paused because of a billing issue',
+    E_BILLING_SUSPENDED: 'The workspace is paused for billing. The workspace owner needs to update payment',
     // Billing v2
     E_ACCOUNT_LIMIT: 'Every account on your plan is in use. Add an account to connect another',
     E_PLAN_REQUIRED: 'This is part of a higher plan',
+    E_PROVIDER: 'Our email provider could not complete that. Try again in a minute',
+    E_SIGNATURE: 'The request signature is not valid',
     E_QUOTE_STALE: 'The price changed. Review the new amount',
     E_PAYMENT_FAILED: 'The payment did not go through. Nothing was changed',
     E_PAYMENT_PENDING: 'A payment is waiting to be confirmed. Finish or abandon it first',

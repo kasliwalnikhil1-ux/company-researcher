@@ -52,7 +52,7 @@ export interface NotificationRow {
 }
 export interface NotesBadge { unread_mentions: number; unread_notifications: number }
 export interface NoteSearchHit { note_id: string; chat_id: string; created_at: string; author: string; snippet: string; chat: { id: string; provider: Provider; attendee_name: string | null; picture_url: string | null; lead_name: string | null; company: string | null } }
-export type NotificationKind = 'note_mention' | 'ai_handoff' | 'assigned';
+export type NotificationKind = 'note_mention' | 'ai_handoff' | 'assigned' | 'sender_disconnected';
 export interface NotificationPref { push: boolean; email: boolean; email_delay_min: 10 | 30 | 60 }
 export type NotificationPrefs = Partial<Record<NotificationKind, NotificationPref>>;
 

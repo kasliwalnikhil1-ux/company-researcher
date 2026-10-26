@@ -22,6 +22,7 @@ import VisitorPanel from './webchat/VisitorPanel';
 import ColumnResizer, { usePaneWidth } from './ColumnResizer';
 import { isTypingTarget, useDebounced, useMediaQuery, useNoZoom } from './hooks';
 import { usePersistedFilters } from '@/lib/outreach/persistedFilters';
+import { INBOX_FILTER_DEFAULTS, sanitizeInboxFilters, type InboxFilters } from './filters/inboxFilters';
 import { useStageOptions } from './ai/useAiInbox';
 import { useChatAiState } from '@/lib/outreach/aiReplies';
 import { SENT_FILTER_DEFAULTS, sanitizeSentFilters, useInboxCounts, useSentList, useSentSearch, writeInboxViewState, type InboxView as InboxListView, type SentFilters, type SentItem, type SentSegment } from '@/lib/outreach/inboxSent';
@@ -33,12 +34,10 @@ import AlertPromptBanner from '../alerts/AlertPromptBanner';
 
 /** `?chats=<ids>&label=<text>`: the reports page opens the inbox on exactly these threads. */
 export interface InboxRestrict { ids: string[]; label: string }
-type InboxFilters = ChatFilters & { sequence_id?: string | null };
 
-// Filters are remembered per workspace in this browser; the search is never stored (it is not a key of the defaults).
+// Filters are remembered per workspace in this browser (filters/inboxFilters.ts); the search is never stored.
 const LIST_MIN = 260, LIST_MAX = 640, PANEL_MIN = 280, PANEL_MAX = 560, THREAD_MIN = 360;
 
-const INBOX_FILTER_DEFAULTS: InboxFilters = { sender_id: null, client_id: null, intent: null, unread: null, assigned_to: null, provider: null, archived: false, sequence_id: null, ai: null, stage: null, chip: 'all' };
 const SEGMENTS: SentSegment[] = ['sent', 'scheduled', 'failed'];
 
 /**
@@ -73,7 +72,7 @@ export default function InboxView({ chatId, initialFilters, restrict, listView =
   const [taskPrefill, setTaskPrefill] = useState<{ title: string; body: string; assigned_to: string | null } | null>(null);
 
   // URL params (e.g. from dashboard links) override the remembered filters.
-  const { filters, patch: patchFilters, ready: filtersReady } = usePersistedFilters<InboxFilters>('inbox', ws, INBOX_FILTER_DEFAULTS, { overrides: initialFilters ?? null });
+  const { filters, patch: patchFilters, ready: filtersReady } = usePersistedFilters<InboxFilters>('inbox', ws, INBOX_FILTER_DEFAULTS, { overrides: initialFilters ?? null, sanitize: sanitizeInboxFilters });
   const [search, setSearch] = useState('');
   const [panelOpen, setPanelOpen] = useState(false);
   const [convert, setConvert] = useState<ConvertKind | null>(null);
@@ -99,7 +98,7 @@ export default function InboxView({ chatId, initialFilters, restrict, listView =
   const { filters: sentFilters, patch: patchSentFilters, ready: sentReady } = usePersistedFilters<SentFilters>('inbox-sent', ws, SENT_FILTER_DEFAULTS, { sanitize: sanitizeSentFilters });
   const [sentSearch, setSentSearch] = useState('');
   const debouncedSentSearch = useDebounced(sentSearch.trim(), 300);
-  const countsQ = useInboxCounts(ws, { assigned_to: filters.assigned_to, sender_id: filters.sender_id, client_id: filters.client_id, provider: filters.provider });
+  const countsQ = useInboxCounts(ws, { assigned_to: filters.assigned_to, sender_ids: filters.sender_ids, client_id: filters.client_id, providers: filters.providers });
   const showSent = countsQ.data?.show_sent !== false;
   const sentQ = useSentList(sentReady && showSent ? ws : null, segment, sentFilters, debouncedSentSearch, { enabled: sentView });
   const sentMatchesQ = useSentSearch(showSent ? ws : null, debouncedSearch, !sentView && !mentionsView);

@@ -82,7 +82,7 @@ function SequenceRow({ ws, s, canEdit, autoLock, notify }: { ws: string; s: HubS
   return (
     <tr>
       <Td className="max-w-[280px] align-top">
-        <Link href={`/outreach/sequences/${s.id}?tab=ai`} title="Open the sequence's AI tab: prompt and limits" className="block truncate font-medium text-gray-900 hover:text-indigo-700 hover:underline">{s.name}</Link>
+        <Link href={`/outreach/sequences/${s.id}?tab=ai`} title="Open the sequence's AI Replies tab: prompt and limits" className="block truncate font-medium text-gray-900 hover:text-indigo-700 hover:underline">{s.name}</Link>
       </Td>
       <Td className="align-top"><Badge tone={STATUS_TONE[s.status] ?? 'gray'} className="capitalize">{s.status}</Badge></Td>
       <Td className="align-top">
@@ -120,7 +120,7 @@ export default function RepliesSequences({ ws, notify }: { ws: string; notify: N
     return (
       <div className="bg-white border border-gray-200 rounded-xl">
         <EmptyState icon={<GitBranch className="w-6 h-6" />} title="No sequences yet"
-          description="AI replies are switched on per sequence. Create a sequence first, then pick its mode here or on its AI tab."
+          description="AI replies are switched on per sequence. Create a sequence first, then pick its mode here or on its AI Replies tab."
           action={<LinkButton href="/outreach/sequences">Open sequences</LinkButton>} />
       </div>
     );

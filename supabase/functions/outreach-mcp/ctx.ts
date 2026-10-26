@@ -107,12 +107,17 @@ export const short = (s: string | null | undefined, n = 120) => (s == null ? und
 const REMEDIES: Record<string, string> = {
   E_FORBIDDEN: "Your role in this workspace does not allow this. Ask an owner/manager, or use a read tool instead.",
   E_PLAN_SUSPENDED: "The workspace is read-only: suspended for billing, its subscription ended, or its trial ended. Only reads work until an owner sorts it out on the Billing page of the app. Billing cannot be changed from here.",
+  E_BILLING_SUSPENDED: "The workspace is paused because a payment failed and was not fixed within 7 days. Reads and exports work; nothing can be sent, edited or enrolled. The workspace owner needs to update payment (Billing page of the app); nothing here can pay, change cards or reactivate.",
   E_ACCOUNT_LIMIT: "Every account on the plan is in use (LinkedIn accounts, mailboxes, Instagram accounts and WhatsApp numbers all count). An owner adds accounts on the Billing page of the app; it cannot be done from here.",
   E_NOT_FOUND: "Check the id; it may belong to a workspace you are not a member of.",
   E_PAYLOAD_INVALID: "Fix the arguments as described in `message` and retry.",
   E_BUDGET_EXHAUSTED: "Do not escalate volume. Wait for the next planner run, or add another healthy sender to the pool.",
   E_OUT_OF_SCHEDULE: "Sends resume in the sender's next schedule window; nothing to fix.",
   E_SENDER_NOT_OK: "The sender must be reconnected by a human in the app (Senders → Reconnect).",
+  E_SENDER_REMOVED: "The sender was removed: its connector account is unlinked, its history is kept. The account owner signs in again from the sender page in the app (Reconnect) and the history comes back; an erased sender is connected again as a new one. Removal is app-only.",
+  E_SENDER_DISABLED: "The sender is disabled: leads left its sequences, late replies still arrive. A manager enables it on the sender page in the app (Account tab) and enrols leads again. Disable / enable are app-only.",
+  E_SENDER_PAUSED: "The sender is paused by a person: sequence and AI sends wait, manual replies still go out, leads stay in their sequences. sender_resume lifts it (confirmation required) unless the pause came from billing.",
+  E_POOL_NO_ACTIVE_SENDER: "Every sender in the pool is paused, disabled or removed. Resume or enable one (sender_resume for a pause; disable / remove are undone in the app), or add another connected sender to the pool.",
   E_SENDER_DISCONNECTED: "The account was disconnected (trial ended, plan has fewer accounts, billing, or by a teammate). Its leads wait. sender_reconnect_link gives a sign-in link for the account owner; it needs an active plan with a free account.",
   E_LEAD_SUPPRESSED: "Suppressed leads cannot be contacted. Do not work around suppression.",
   E_POOL_EMPTY: "Add at least one connected sender to the sequence pool (sequence_update with pool).",
@@ -269,7 +274,8 @@ export function resolveWs(ctx: Ctx, workspaceId?: string | null): Membership {
 
 export function requireRole(m: Membership, min: Role): void {
   if (["suspended", "cancelled", "trial_expired"].includes(m.plan) && min !== "client_viewer") {
-    throw new McpError("E_PLAN_SUSPENDED", m.plan === "trial_expired" ? "the trial has ended" : m.plan === "cancelled" ? "the subscription has ended" : "workspace suspended");
+    if (m.plan === "suspended") throw new McpError("E_BILLING_SUSPENDED", "The workspace owner needs to update payment.");
+    throw new McpError("E_PLAN_SUSPENDED", m.plan === "trial_expired" ? "the trial has ended" : "the subscription has ended");
   }
   if (!roleAtLeast(m.role, min)) throw new McpError("E_FORBIDDEN", `${min} role required in workspace "${m.name}" (you are ${m.role})`);
 }

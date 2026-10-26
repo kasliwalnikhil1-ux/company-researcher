@@ -79,8 +79,9 @@ function mergePreviews(parts: EnrollPreview[]): EnrollPreview {
 }
 
 /** One enroll_preview call for up to 2,000 leads; larger selections are previewed in slices and added up, with the projection asked for the total. */
-export async function runEnrollPreview(sequenceId: string, leadIds: string[], senderId: string | null, includeReplied: boolean): Promise<EnrollPreview> {
-  const args = (ids: string[]) => ({ p_sequence: sequenceId, p_lead_ids: ids, p_sender: senderId, p_include_replied: includeReplied });
+export async function runEnrollPreview(sequenceId: string, leadIds: string[], senderId: string | null, includeReplied: boolean, assignment: string | null = null): Promise<EnrollPreview> {
+  // `assignment` replaces the sequence's own rule for this preview + commit (sender lifecycle D6: "re-enrol with other senders" uses fresh_sender)
+  const args = (ids: string[]) => ({ p_sequence: sequenceId, p_lead_ids: ids, p_sender: senderId, p_include_replied: includeReplied, ...(assignment ? { p_assignment: assignment } : {}) });
   if (leadIds.length <= PREVIEW_CHUNK) return rpc<EnrollPreview>('enroll_preview', args(leadIds));
   const parts: EnrollPreview[] = [];
   for (let i = 0; i < leadIds.length; i += PREVIEW_CHUNK) parts.push(await rpc<EnrollPreview>('enroll_preview', args(leadIds.slice(i, i + PREVIEW_CHUNK))));
@@ -96,7 +97,7 @@ export async function runEnrollPreview(sequenceId: string, leadIds: string[], se
 
 export const EMPTY_RESULT: EnrollResult = { enrolled: 0, skipped_active: 0, skipped_suppressed: 0, skipped_other: 0, skipped_replied: 0, waiting: 0 };
 
-export interface CommitOptions { senderId: string | null; priority: number; includeReplied: boolean; waitEnrichment: boolean | null; onProgress?: (done: number, total: number) => void }
+export interface CommitOptions { senderId: string | null; priority: number; includeReplied: boolean; waitEnrichment: boolean | null; assignment?: string | null; onProgress?: (done: number, total: number) => void }
 
 /** Commit with enroll_leads in slices of 500. On an error the totals so far travel with it (`partial`). */
 export async function commitEnrollment(sequenceId: string, leadIds: string[], o: CommitOptions): Promise<EnrollResult> {
@@ -106,7 +107,7 @@ export async function commitEnrollment(sequenceId: string, leadIds: string[], o:
     try {
       const rows = await rpc<EnrollResult[] | EnrollResult>('enroll_leads', {
         p_sequence: sequenceId, p_lead_ids: leadIds.slice(i, i + COMMIT_CHUNK), p_sender: o.senderId, p_priority: o.priority,
-        p_include_replied: o.includeReplied, p_rule: null, p_wait_enrichment: o.waitEnrichment,
+        p_include_replied: o.includeReplied, p_rule: null, p_wait_enrichment: o.waitEnrichment, ...(o.assignment ? { p_assignment: o.assignment } : {}),
       });
       const r = Array.isArray(rows) ? rows[0] : rows;
       if (r) for (const k of Object.keys(total) as Array<keyof EnrollResult>) total[k] += Number(r[k] ?? 0);

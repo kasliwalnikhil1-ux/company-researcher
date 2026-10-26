@@ -13,7 +13,8 @@ import { unipile, UnipileError } from "./unipile.ts";
 import type { ExecResult } from "./execute.ts";
 import { encodeProfileEdit, toFormData, describeParts, sectionsForGroups, unwrittenFieldsOf, fidelityOf, ProfileSerialiserError, type ProfilePayload, type FieldGroup } from "./profile_serialiser.ts";
 import { tomorrowMorning } from "./enrich.ts";
-import { sendEmail, layout, button, esc, workspaceBranding, emailConfigured, type Branding } from "./notify.ts";
+import { layout, button, esc, workspaceBranding, emailConfigured, type Branding } from "./notify.ts";
+import { sendHolderEmail } from "./email.ts";
 
 type Row = Record<string, any>;
 export const PROFILE_ASSETS_BUCKET = "outreach-profile-assets";
@@ -326,13 +327,6 @@ export function diffTable(change: Row, pre: ProfileDoc | null): string {
   return `<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr><th style="text-align:left;padding:6px 8px">Field</th><th style="text-align:left;padding:6px 8px">Before</th><th style="text-align:left;padding:6px 8px">After</th></tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
-async function ownerRecipients(sender: Row): Promise<string[]> {
-  const out = new Set<string>();
-  const ok = (e: unknown): e is string => typeof e === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e);
-  if (ok(sender.owner_email)) out.add(sender.owner_email.toLowerCase());
-  if (sender.owner_user_id) { try { const { data } = await admin.auth.admin.getUserById(sender.owner_user_id); if (ok(data?.user?.email)) out.add(data.user.email.toLowerCase()); } catch { /* ignore */ } }
-  return [...out];
-}
 
 /** PRD §4.3: every applied change emails the owner with the diff, who did it and a 30-day one-click revert. Not suppressible. */
 export async function notifyOwnerOfChange(change: Row): Promise<{ recipients: string[]; sent: number; revert_link: string | null }> {
@@ -341,7 +335,6 @@ export async function notifyOwnerOfChange(change: Row): Promise<{ recipients: st
   // Workspace toggle off (the default): the owner-permission model is not in use, so no owner emails either.
   const { data: wsRow } = await admin.from("outreach_workspaces").select("settings").eq("id", sender.workspace_id).maybeSingle();
   if (!(wsRow?.settings?.profile_owner_permission === true)) { await rpc("profile_mark_notified", { p_change: change.id, p_recipients: [] }); return { recipients: [], sent: 0, revert_link: null }; }
-  const recipients = await ownerRecipients(sender);
   const branding = await workspaceBranding(sender.workspace_id);
   const { data: preRow } = change.pre_snapshot_id ? await admin.from("outreach_profile_snapshots").select("data").eq("id", change.pre_snapshot_id).maybeSingle() : { data: null };
   const canRevert = change.status === "applied" || change.status === "partially_applied";
@@ -352,16 +345,16 @@ export async function notifyOwnerOfChange(change: Row): Promise<{ recipients: st
   const statusLine = change.status === "failed" ? `<p style="padding:10px 12px;background:#fef2f2;border-radius:8px"><b>The change could not be applied.</b> ${esc(change.error_code ?? "")} Nothing on your profile was modified.</p>`
     : change.status === "partially_applied" ? `<p style="padding:10px 12px;background:#fffbeb;border-radius:8px"><b>Only part of the change landed.</b> LinkedIn did not accept: ${esc(failed.map((f) => GROUP_LABEL[f] ?? f).join(", "))}. Nothing is retried automatically.</p>` : "";
   const subject = change.status === "failed" ? `A change to your LinkedIn profile failed` : `Your LinkedIn profile was updated (${(change.field_groups ?? []).map((g: string) => GROUP_LABEL[g] ?? g).join(", ")})`;
-  const html = layout(change.status === "failed" ? "A profile change failed" : "Your LinkedIn profile was updated",
-    `<p>${esc(sender.display_name ?? "Your LinkedIn profile")} was changed by ${who} on ${esc(new Date(change.applied_at ?? Date.now()).toUTCString())}.</p>${statusLine}${diffTable(change, (preRow?.data as ProfileDoc) ?? null)}` +
-    (link ? `<p style="margin-top:18px">${button(link, "Revert this change", branding)}</p><p style="font-size:12px;color:#666">The revert link works for 30 days and needs no login. Fields LinkedIn does not report back (photo settings, custom link) are restored to the last value written through the platform.</p>` : "") +
-    `<p style="font-size:12px;color:#666;margin-top:14px">You receive this message for every change made to your profile through the platform. It cannot be switched off.</p>`,
-    branding, { audience: "team", width: 640 });
-  let sent = 0;
-  for (const to of recipients) if (await sendEmail(to, subject, html, undefined, { branding })) sent++;
+  void branding;
+  const r = await sendHolderEmail({ sender_id: sender.id, type: "profile_change_applied", subject, width: 640,
+    body: `<p>${esc(sender.display_name ?? "Your LinkedIn profile")} was changed by ${who} on ${esc(new Date(change.applied_at ?? Date.now()).toUTCString())}.</p>${statusLine}${diffTable(change, (preRow?.data as ProfileDoc) ?? null)}` +
+      (link ? `<p style="font-size:12px;color:#666;margin-top:14px">The revert link works for 30 days and needs no login. Fields LinkedIn does not report back (photo settings, custom link) are restored to the last value written through the platform.</p>` : "") +
+      `<p style="font-size:12px;color:#666;margin-top:14px">You receive this message for every change made to your profile through the platform. It cannot be switched off.</p>`,
+    action: link ? { label: "Revert this change", url: link } : null, idempotency_key: `profile_change_applied:${change.id}:${change.status}` });
+  const recipients = r.to ? [r.to, ...r.copies] : [];
   await rpc("profile_mark_notified", { p_change: change.id, p_recipients: recipients });
-  if (!recipients.length) log({ fn: "profile-notify", change_id: change.id, warn: "sender has no owner email; owner notification impossible" });
-  return { recipients, sent, revert_link: link };
+  if (!r.to) log({ fn: "profile-notify", change_id: change.id, warn: "sender has no holder; owner notification impossible" });
+  return { recipients, sent: r.sent ? recipients.length : 0, revert_link: link };
 }
 
 export async function notifyPendingChanges(limit = 30): Promise<{ notified: number; emails: number }> {
@@ -380,29 +373,26 @@ export async function sendApprovalRequest(change: Row, token: string): Promise<{
   const { data: sender } = await admin.from("outreach_senders").select("*").eq("id", change.sender_id).maybeSingle();
   const link = `${WEB_ORIGIN.replace(/\/$/, "")}/profile-approve/${token}`;
   if (!sender) return { recipients: [], sent: 0, link, configured: emailConfigured() };
-  const recipients = await ownerRecipients(sender);
-  const branding = await workspaceBranding(sender.workspace_id);
   const { data: snap } = await admin.from("outreach_profile_snapshots").select("data").eq("sender_id", sender.id).order("captured_at", { ascending: false }).limit(1).maybeSingle();
-  const html = layout("A change to your LinkedIn profile is waiting for you",
-    `<p>${esc(change.requested_by_email ?? "Your outreach team")} proposes the following change to <b>${esc(sender.display_name ?? "your profile")}</b>. Nothing happens until you apply it.</p>${diffTable(change, (snap?.data as ProfileDoc) ?? null)}<p style="margin-top:18px">${button(link, "Review and apply", branding)}</p><p style="font-size:12px;color:#666">The link works for 14 days, needs no login, and lets you decline instead.</p>`, branding, { audience: "team", width: 640 });
-  let sent = 0;
-  for (const to of recipients) if (await sendEmail(to, `Approve a change to your LinkedIn profile`, html, undefined, { branding })) sent++;
-  return { recipients, sent, link, configured: emailConfigured() };
+  const r = await sendHolderEmail({ sender_id: sender.id, type: "profile_change_proposed", subject: "Approve a change to your LinkedIn profile", width: 640,
+    body: `<p>${esc(change.requested_by_email ?? "Your outreach team")} proposes the following change to <b>${esc(sender.display_name ?? "your profile")}</b>. Nothing happens until you apply it.</p>${diffTable(change, (snap?.data as ProfileDoc) ?? null)}<p style="font-size:12px;color:#666">The link works for 14 days, needs no login, and lets you decline instead.</p>`,
+    action: { label: "Review and apply", url: link }, idempotency_key: `profile_change_proposed:${change.id}:${token.slice(0, 12)}` });
+  const recipients = r.to ? [r.to, ...r.copies] : [];
+  return { recipients, sent: r.sent ? recipients.length : 0, link, configured: emailConfigured() };
 }
 
 /** Authority request: the owner grants per-field permission through a signed link. */
-export async function sendAuthorityRequest(sender: Row, token: string, groups: string[], mode: string, requesterEmail: string | null): Promise<{ recipients: string[]; sent: number; link: string; configured: boolean }> {
+export async function sendAuthorityRequest(sender: Row, token: string, groups: string[], mode: string, requesterEmail: string | null): Promise<{ recipients: string[]; sent: number; link: string; configured: boolean; member_holder?: boolean }> {
   const link = `${WEB_ORIGIN.replace(/\/$/, "")}/profile-authority/${token}`;
-  const recipients = await ownerRecipients(sender);
-  const branding = await workspaceBranding(sender.workspace_id);
   const labels: Record<string, string> = { headline: "headline", about: "About section", photo: "profile photo", cover: "cover image", location: "location", experience: "experience entries", education: "education entries", skills: "skills", custom_link: "custom link" };
-  const html = layout("Permission to edit parts of your LinkedIn profile",
-    `<p>${esc(requesterEmail ?? "Your outreach team")} asks for permission to edit these parts of <b>${esc(sender.display_name ?? "your profile")}</b>: <b>${esc(groups.map((g) => labels[g] ?? g).join(", "))}</b>.</p>` +
-    `<p>${mode === "direct" ? "With <b>direct</b> permission they can apply changes without asking each time. You are still emailed after every change, with a revert link." : "With <b>proposal</b> permission they can only send you drafts; each one waits for your click before it reaches LinkedIn."}</p>` +
-    `<p>You choose which parts to allow, you can narrow the request, and you can revoke it later.</p><p style="margin-top:18px">${button(link, "Review the request", branding)}</p><p style="font-size:12px;color:#666">The link works for 7 days and needs no login.</p>`, branding, { audience: "team" });
-  let sent = 0;
-  for (const to of recipients) if (await sendEmail(to, `Permission request: your LinkedIn profile`, html, undefined, { branding })) sent++;
-  return { recipients, sent, link, configured: emailConfigured() };
+  // outside holders only: a member's own account is granted in the app (sender-lifecycle-PRD v1.2 §5.8.1)
+  const r = await sendHolderEmail({ sender_id: sender.id, type: "profile_authority_request", subject: "Permission request: your LinkedIn profile", audience: "outside_only",
+    body: `<p>${esc(requesterEmail ?? "Your outreach team")} asks for permission to edit these parts of <b>${esc(sender.display_name ?? "your profile")}</b>: <b>${esc(groups.map((g) => labels[g] ?? g).join(", "))}</b>.</p>` +
+      `<p>${mode === "direct" ? "With <b>direct</b> permission they can apply changes without asking each time. You are still emailed after every change, with a revert link." : "With <b>proposal</b> permission they can only send you drafts; each one waits for your click before it reaches LinkedIn."}</p>` +
+      `<p>You choose which parts to allow, you can narrow the request, and you can revoke it later.</p><p style="font-size:12px;color:#666">The link works for 7 days and needs no login.</p>`,
+    action: { label: "Review the request", url: link }, idempotency_key: `profile_authority_request:${sender.id}:${token.slice(0, 12)}` });
+  const recipients = r.to ? [r.to, ...r.copies] : [];
+  return { recipients, sent: r.sent ? recipients.length : 0, link, configured: emailConfigured(), member_holder: r.skipped === "member_holder" || undefined };
 }
 
 // ---------------------------------------------------------------------------

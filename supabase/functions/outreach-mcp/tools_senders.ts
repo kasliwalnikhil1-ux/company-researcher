@@ -1,9 +1,10 @@
 // outreach-mcp/tools_senders.ts — sender reads (PRD §5.1). All read-only, any member.
 import type { McpServer } from "npm:@modelcontextprotocol/sdk@1.25.3/server/mcp.js";
-import { type Ctx, tool, z, wsParam, resolveWs, urpc, unwrap, McpError, short, callFn } from "./ctx.ts";
+import { type Ctx, tool, z, wsParam, resolveWs, urpc, unwrap, McpError, short, callFn, gate } from "./ctx.ts";
 
 type Row = Record<string, any>;
-const LIST_COLS = "id, workspace_id, client_id, display_name, provider, status, status_reason, health_score, warmup_level, is_premium, has_sales_nav, timezone, paused_until, invite_blocked_until, connections_count, last_ok_at, updated_at, outreach_allowed_from, provider_warning";
+const LIST_COLS = "id, workspace_id, client_id, display_name, provider, status, status_reason, health_score, warmup_level, is_premium, has_sales_nav, timezone, paused_until, invite_blocked_until, connections_count, last_ok_at, updated_at, outreach_allowed_from, provider_warning, pause_resume_at, disabled_at, auto_remove_at, removed_at, removed_via, erase_scheduled_at, removal_requested_at, disconnected_at, holder_notified_at, holder_reminders_sent, holder_email_held_until, pause_reason, owner_user_id, owner_email";
+const STATUSES = ["connecting", "ok", "credentials", "error", "paused", "disabled", "removed", "erased", "disconnected"] as const;
 // new_chat = a conversation that did not exist yet (metered on every channel); follow / identifier_check are Instagram / WhatsApp
 const CAPPED = ["invite", "message", "new_chat", "profile_view", "inmail", "email", "search_page", "like", "comment", "follow", "identifier_check"];
 const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -44,6 +45,22 @@ export function senderBrief(s: Row, today?: Row, hour?: Row) {
     tz: s.timezone, client_id: s.client_id,
     paused_until: future(s.paused_until),
     invite_blocked_until: future(s.invite_blocked_until),
+    // lifecycle (sender-lifecycle-PRD.md): a person's pause with its auto-resume, a disabled sender's auto-remove date,
+    // a removal (history kept; Reconnect brings it back), a scheduled erase
+    pause_resume_at: s.status === "paused" ? future(s.pause_resume_at) : undefined,
+    disabled_at: s.status === "disabled" ? s.disabled_at ?? undefined : undefined,
+    auto_remove_at: s.status === "disabled" ? s.auto_remove_at ?? undefined : undefined,
+    removal_pending: s.removal_requested_at && s.status !== "removed" && s.status !== "erased" ? true : undefined,
+    removed_at: s.status === "removed" ? s.removed_at ?? undefined : undefined,
+    removed_via: s.status === "removed" ? s.removed_via ?? undefined : undefined,
+    erase_scheduled_at: future(s.erase_scheduled_at),
+    pause_reason: s.status === "paused" ? s.pause_reason ?? undefined : undefined,
+    // disconnect alerts (sender-lifecycle-PRD v1.2 §5.8): when it dropped, who was emailed, whether a mass-disconnect hold delays the email
+    disconnected_at: s.status === "credentials" || s.status === "error" ? s.disconnected_at ?? undefined : undefined,
+    holder_notified_at: s.status === "credentials" || s.status === "error" ? s.holder_notified_at ?? undefined : undefined,
+    holder_reminders_sent: s.status === "credentials" || s.status === "error" ? s.holder_reminders_sent ?? undefined : undefined,
+    holder_email_held_until: future(s.holder_email_held_until),
+    holder: s.owner_user_id ? { kind: "member", user_id: s.owner_user_id } : s.connected_by ? { kind: "member", user_id: s.connected_by } : undefined,
     // channels: a freshly connected WhatsApp number waits 24 h; an Instagram "automated behaviour" notice pauses 48 h until a human resumes
     quiet_until: future(s.outreach_allowed_from),
     provider_warning: s.provider_warning?.text ? { text: String(s.provider_warning.text).slice(0, 300), at: s.provider_warning.at, paused_until: s.provider_warning.paused_until, note: "Only a human may resume this sender in the app." } : undefined,
@@ -55,12 +72,13 @@ export function senderBrief(s: Row, today?: Row, hour?: Row) {
 export function registerSenders(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "senders_list", title: "List senders", cls: "read", minRole: "client_viewer",
-    description: "List the sender accounts of a workspace (LinkedIn, Instagram, WhatsApp, mailboxes) with status, health, level and today's used/cap per action type (`new_chat` = conversations that did not exist yet, metered on every channel). Instagram rows carry `hour` (10 metered actions an hour); WhatsApp rows carry `quiet_until` while a freshly connected number waits 24 h, and `level` is the new-chat governor level (0–4 = 2/5/10/20/35 new chats a day). `provider_warning` = the provider flagged automated behaviour; the sender rests 48 h and only a human may resume it. ≤50 rows. Start here for any capacity or health question; channel_capacity gives the per-channel remaining view.",
-    input: { ...wsParam, status: z.enum(["connecting", "ok", "credentials", "error", "paused", "disabled", "disconnected"]).optional(), client_id: z.string().optional(), provider: z.enum(PROVIDERS).optional() },
+    description: "List the sender accounts of a workspace (LinkedIn, Instagram, WhatsApp, mailboxes) with status, health, level and today's used/cap per action type. Statuses: ok, paused (a person paused it; `pause_resume_at` when it resumes by itself; manual replies still go out), disabled (leads left its sequences, late replies still arrive, removed automatically on `auto_remove_at`), removed (connector account unlinked, history kept, Reconnect in the app brings it back; hidden unless include_removed), credentials / error (needs a sign-in), connecting. (`new_chat` = conversations that did not exist yet, metered on every channel). Instagram rows carry `hour` (10 metered actions an hour); WhatsApp rows carry `quiet_until` while a freshly connected number waits 24 h, and `level` is the new-chat governor level (0–4 = 2/5/10/20/35 new chats a day). `provider_warning` = the provider flagged automated behaviour; the sender rests 48 h and only a human may resume it. ≤50 rows. Start here for any capacity or health question; channel_capacity gives the per-channel remaining view.",
+    input: { ...wsParam, status: z.enum(STATUSES).optional(), client_id: z.string().optional(), provider: z.enum(PROVIDERS).optional(), include_removed: z.boolean().optional().describe("Also list removed senders (hidden by default)") },
   }, async (a) => {
     const ws = resolveWs(ctx, a.workspace_id);
     let q = ctx.user.from("outreach_senders").select(LIST_COLS).eq("workspace_id", ws.id).is("deleted_at", null).order("display_name").limit(50);
     if (a.status) q = q.eq("status", a.status);
+    else if (!a.include_removed) q = q.not("status", "in", "(removed,erased,disconnected)");
     if (a.client_id) q = q.eq("client_id", a.client_id);
     if (a.provider) q = q.eq("provider", a.provider);
     const rows = unwrap<Row[]>(await q);
@@ -73,16 +91,52 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "sender_reconnect_link", title: "Sign-in link for a sender", cls: "write", minRole: "manager",
-    description: "A sign-in link for the owner of a sender that is signed out (`credentials`, `error`) or `disconnected` (its connected account was removed: trial ended, plan has fewer accounts, billing, or a teammate disconnected it). Give the link to the account owner; they sign in and the same sender carries on with its conversations and leads. A disconnected sender needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise: an owner fixes that on the Billing page) and must be reconnected with the SAME account. The link works for about an hour.",
+    description: "A sign-in link for the owner of a sender that is signed out (`credentials`, `error`) or `removed` (its connector account was unlinked: a manager removed it, the trial ended, billing, the owner disconnected it, or it was disabled for too long). Give the link to the account owner; they sign in and the same sender comes back with its conversations, contacted record and reports. A removed sender needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise: an owner fixes that on the Billing page) and must be reconnected with the SAME account. The link works for about an hour.",
     input: { sender_id: z.string() },
   }, async (a) => {
     const s = unwrap<Row | null>(await ctx.user.from("outreach_senders").select("id, display_name, provider, status, status_reason").eq("id", a.sender_id).is("deleted_at", null).maybeSingle());
     if (!s) throw new McpError("E_NOT_FOUND", "no such sender (or it is not visible to you)");
     if (s.status === "ok" || s.status === "paused") return { sender: s.display_name, status: s.status, note: "This sender is connected; no sign-in is needed." };
-    if (s.status === "disabled") throw new McpError("E_SENDER_NOT_OK", "This sender is disabled. A manager re-enables it in the app first.");
+    if (s.status === "disabled") throw new McpError("E_SENDER_DISABLED", "This sender is disabled and still connected. A manager enables it in the app (Account tab).");
+    if (s.status === "erased") throw new McpError("E_SENDER_REMOVED", "This sender was erased. Connect the account again as a new sender in the app.");
     const r = await callFn<Row>(ctx, "sender-manage", { sender_id: s.id, action: "reconnect_link", mode: "copy" });
     return { sender: s.display_name, provider: s.provider, status: s.status, reason: s.status_reason ?? undefined, link: r.link,
-      note: s.status === "disconnected" ? "Valid for about an hour. The owner must sign in with the same account this sender had; a different account is refused." : "Valid for about an hour. Send it to the account owner now." };
+      note: s.status === "removed" || s.status === "disconnected" ? "Valid for about an hour. The owner must sign in with the same account this sender had; a different account is refused. Its history comes back on sign-in." : "Valid for about an hour. Send it to the account owner now." };
+  });
+
+  // sender-lifecycle-PRD.md §9: pause / resume are the only lifecycle actions here. Disable, remove and erase stay app-only:
+  // ending someone's account connection is a human act.
+  tool(server, ctx, {
+    name: "sender_pause", title: "Pause a sender (confirmation required)", cls: "gated", minRole: "manager",
+    description: "Pause a connected sender: sequence and AI sends stop, queued actions wait, leads STAY in their sequences and continue on resume, manual replies from the inbox still go out. Optional resume_at (ISO time) resumes it automatically. First call returns the effect summary (queued actions, leads affected) and a confirmation token. Disable, remove and erase are not available here: a human does those in the app.",
+    input: { sender_id: z.string(), resume_at: z.string().optional().describe("ISO date-time at which the sender resumes by itself"), confirmation_token: z.string().optional() },
+    annotations: { destructiveHint: false },
+  }, async (a) => {
+    const s = await loadSender(ctx, a.sender_id, "id, display_name, status, status_reason, workspace_id, provider");
+    if (s.provider === "WEBCHAT") throw new McpError("E_PAYLOAD_INVALID", "A website inbox is switched off from its Website agents page in the app.");
+    if (s.status !== "ok") throw new McpError("E_SENDER_NOT_OK", `${s.display_name ?? "This sender"} is ${s.status}; only a connected sender can be paused.`);
+    if (a.resume_at && !(new Date(a.resume_at).getTime() > Date.now())) throw new McpError("E_PAYLOAD_INVALID", "resume_at must be a future ISO date-time");
+    const pv = await urpc<Row>(ctx, "sender_lifecycle_preview", { p_sender: s.id, p_action: "pause" });
+    const g = await gate(ctx, "sender_pause", a as Record<string, unknown>,
+      `Pause ${s.display_name ?? "sender"}: ${pv.queued_actions ?? 0} queued action(s) wait, ${pv.live_enrollments ?? 0} lead(s) stay in their sequences, manual replies still allowed${a.resume_at ? `, resumes automatically at ${a.resume_at}` : ""}.`, s.workspace_id);
+    if (!g.proceed) return g.result;
+    const r = await urpc<Row>(ctx, "sender_pause", { p_sender: s.id, p_resume_at: a.resume_at ?? null });
+    return { ok: true, sender: s.display_name, status: "paused", pause_resume_at: r?.pause_resume_at ?? null, ai_runs_to_draft: r?.ai_runs_to_draft ?? 0, note: "Sequence and AI sends stop; replies from the inbox still go out. Resume with sender_resume." };
+  });
+
+  tool(server, ctx, {
+    name: "sender_resume", title: "Resume a paused sender (confirmation required)", cls: "gated", minRole: "manager",
+    description: "Resume a sender a person paused. Overdue actions are spread over the following days inside its daily caps (never a burst). Refused for pauses that are not a person's to lift: a plan limit (E_ACCOUNT_LIMIT), billing (E_PLAN_SUSPENDED) or a provider warning (E_PROVIDER_WARNING: the banner in the app). A disabled or removed sender is not resumed here; a human enables or reconnects it in the app.",
+    input: { sender_id: z.string(), confirmation_token: z.string().optional() },
+    annotations: { destructiveHint: false },
+  }, async (a) => {
+    const s = await loadSender(ctx, a.sender_id, "id, display_name, status, status_reason, workspace_id");
+    if (s.status !== "paused") throw new McpError(s.status === "disabled" ? "E_SENDER_DISABLED" : s.status === "removed" || s.status === "erased" ? "E_SENDER_REMOVED" : "E_SENDER_NOT_OK", `${s.display_name ?? "This sender"} is ${s.status}, not paused.`);
+    const pv = await urpc<Row>(ctx, "sender_lifecycle_preview", { p_sender: s.id, p_action: "resume" });
+    const g = await gate(ctx, "sender_resume", a as Record<string, unknown>, `Resume ${s.display_name ?? "sender"}: ${pv.queued_actions ?? 0} queued action(s) start again inside the daily caps; ${pv.live_enrollments ?? 0} lead(s) continue where they stopped.`, s.workspace_id);
+    if (!g.proceed) return g.result;
+    const r = await urpc<Row>(ctx, "sender_resume", { p_sender: s.id });
+    return { ok: true, sender: s.display_name, status: "ok", backlog_spread: r?.backlog_spread ?? 0 };
   });
 
   tool(server, ctx, {

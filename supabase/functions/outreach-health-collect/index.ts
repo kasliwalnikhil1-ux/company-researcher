@@ -186,7 +186,7 @@ async function collectLogs(): Promise<string> {
 // ---------------------------------------------------------------------------------------------------------------
 async function sendAll(to: string[], m: { subject: string; html: string; text: string }): Promise<number> {
   let sent = 0;
-  for (const addr of to) { if (await sendEmail(addr, m.subject, m.html, m.text)) sent++; }
+  for (const addr of to) { if (await sendEmail(addr, m.subject, m.html, m.text, { type: "health_urgent", idempotencyKey: `health_urgent:${m.subject.slice(0, 80)}:${new Date().toISOString().slice(0, 13)}:${addr}` })) sent++; }
   return sent;
 }
 

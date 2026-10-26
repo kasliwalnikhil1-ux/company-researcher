@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Save } from 'lucide-react';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
-import { Button, Card, Input, SearchableSelect, useToast } from '@/components/outreach/ui';
+import { Button, Card, Input, SearchableSelect, Select, useToast } from '@/components/outreach/ui';
 import { timezoneChoices } from '@/components/outreach/senders/helpers';
+import { INBOUND_LEAD_MODES, inboundLeadMode } from '@/lib/outreach/leadsRelationships';
 import { SettingRow, Switch } from './shared';
 import { CURRENCIES, isValidTimezone, nowIn, saveWorkspaceSettings, timezoneOptions } from './workspaceSettings';
 
@@ -82,8 +83,6 @@ const TOGGLES: ToggleDef[] = [
     description: 'Every sequence email and every manual email reply goes out as plain text instead of HTML. Formatting is removed, and links are written out in full, e.g. "Unsubscribe (https://…)". Plain-text emails are never tracked.' },
   { key: 'track_replies', defaultValue: false, label: 'Track opens and clicks on manual replies',
     description: 'Off by default. A one-to-one reply does not need a tracking pixel, and it can hurt deliverability. A mailbox can override this in its own settings. Has no effect while plain-text emails are on.' },
-  { key: 'create_leads_from_inbound', defaultValue: true, label: 'Create leads from inbound messages',
-    description: 'When someone who is not yet a lead messages one of your senders, a lead is created so the conversation shows up in the inbox with a profile.' },
   { key: 'recruiter_enabled', defaultValue: false, label: 'Recruiter features',
     description: 'Lets the connect wizard keep LinkedIn Recruiter on for senders with a Recruiter seat. Off by default because Recruiter automation carries extra risk.' },
   { key: 'profile_owner_permission', defaultValue: false, label: 'Require the account owner’s permission for profile edits',
@@ -99,17 +98,26 @@ export function BehaviourCard() {
   const settings = (workspace?.settings ?? {}) as Record<string, unknown>;
   const editable = isOwner && canWrite;
 
-  async function set(key: string, value: boolean) {
+  async function set(key: string, value: boolean | string) {
     if (!workspace) return;
     setBusy(key);
     try { await saveWorkspaceSettings(workspace.id, { [key]: value }); await refresh(); toast.show('Setting saved.'); }
     catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusy(null); }
   }
+  const inboundMode = inboundLeadMode(settings);
 
   return (
     <Card title="Behaviour">
       <div className="divide-y divide-gray-100">
+        {/* 094: three-way instead of on / off, so newsletters and company pages never become leads by default */}
+        <SettingRow title="Create leads from inbound messages"
+          description={<>{INBOUND_LEAD_MODES.find((m) => m.value === inboundMode)?.help} People who only wrote to you sit in the leads page&apos;s <em>Inbound</em> tab until you enrol them, add them to a list or stage, or use <em>Add to outbound</em>.</>}
+          control={
+            <Select aria-label="Create leads from inbound messages" value={inboundMode} disabled={!editable || busy === 'create_leads_from_inbound'} onChange={(e) => set('create_leads_from_inbound', e.target.value)} className="w-40">
+              {INBOUND_LEAD_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </Select>
+          } />
         {TOGGLES.map((t) => {
           const value = typeof settings[t.key] === 'boolean' ? (settings[t.key] as boolean) : t.defaultValue;
           return <SettingRow key={t.key} title={t.label} description={t.description} control={<Switch label={t.label} checked={value} onChange={(v) => set(t.key, v)} disabled={!editable || busy === t.key} />} />;

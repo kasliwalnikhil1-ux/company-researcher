@@ -12,6 +12,7 @@ import { webchatRpc, registerWebchat } from './webchat';
 import { settingsRpc, registerSettings } from './settings';
 import { reportsRpc, registerReports } from './reports';
 import { alertsRpc, registerAlerts } from './alerts';
+import { billingClockRpc } from './billingClock';
 
 export const rpcHandlers: RpcHandlers = {
   ...sequencesRpc,
@@ -23,6 +24,7 @@ export const rpcHandlers: RpcHandlers = {
   ...settingsRpc,
   ...reportsRpc,
   ...alertsRpc,
+  ...billingClockRpc,
 };
 
 /** Table hooks of every area. */

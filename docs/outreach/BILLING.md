@@ -50,7 +50,9 @@ A second flag, `billing_data_deletion` (default off), gates the automatic deleti
 
 **State.** One function writes billing state for a Stripe-billed workspace: `outreach_billing_apply_subscription()`. The webhook, every owner action and the hourly catch-up all read the live subscription from Stripe and pass what it says; event order and repeats do not matter. Events are stored once in `outreach_billing_events`.
 
-**Disconnect.** `outreach_disconnect_sender()` marks the sender `disconnected`, moves its account id to `previous_unipile_account_id` and queues the connector delete (tried at once, retried with backoff for 24 hours, then an operator alert). Reconnect is a fresh sign-in bound to the same sender; a different account is refused and removed.
+**Payment failure clock (26 Oct 2026, sender-lifecycle-PRD v1.2 §5.9).** `workspaces.billing_status`, `outreach_billing_steps`, the day 0 / 3 / 6 / 7 / 14 / 21 / 60 / 67 steps and the reactivation emails are described in [SENDER-LIFECYCLE.md](SENDER-LIFECYCLE.md) (v1.2 section). The clock starts in emails-only mode (`billing_clock_enforce = false`); cancellation now removes every account at once and keeps data 60 days (`billing_cancel_data_days`).
+
+**Disconnect.** Since 26 Oct 2026 this is the sender lifecycle's **Remove** (status `removed`, see [SENDER-LIFECYCLE.md](SENDER-LIFECYCLE.md)): leads leave their sequences, stored credentials are wiped, every conversation and report number stays. `outreach_disconnect_sender()` is kept as a wrapper over `outreach_sender_remove_begin()`; it used to mark the sender `disconnected`, moves its account id to `previous_unipile_account_id` and queues the connector delete (tried at once, retried with backoff for 24 hours, then an operator alert). Reconnect is a fresh sign-in bound to the same sender; a different account is refused and removed.
 
 ## 4. Where the build differs from the PRD
 

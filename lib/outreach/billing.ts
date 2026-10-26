@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { callFn, rpc } from './api';
 import { pricing, formatUsd, type BillingPeriod, type PlanId } from './pricing';
+import type { BillingStatus } from './types';
 
 export type WorkspacePlan = 'trial' | 'trial_expired' | 'launch' | 'scale' | 'enterprise' | 'suspended' | 'cancelled';
 export const PLAN_LABEL: Record<string, string> = {
@@ -82,6 +83,42 @@ export interface BillingState {
 }
 
 export const billingKey = (ws: string) => ['outreach', ws, 'billing'] as const;
+export const billingClockKey = (ws: string) => ['outreach', ws, 'billing-clock'] as const;
+
+/** The payment-failure clock (sender-lifecycle-PRD v1.2 §5.9): status, the dates of the next steps, contacts, the open invoice. */
+export interface BillingClock {
+  billing_status: BillingStatus;
+  plan: string;
+  plan_before_suspension: string | null;
+  past_due_since: string | null;
+  suspended_at: string | null;
+  cancelled_at: string | null;
+  cancel_at_period_end: boolean;
+  current_period_end: string | null;
+  data_delete_after: string | null;
+  /** days since the first failed charge (or the cancellation) */
+  day: number | null;
+  steps: Array<{ step: 'suspend' | 'remove' | 'erase'; label: string; at: string; done: boolean }>;
+  billing_action_required: boolean;
+  /** owner only */
+  overdue_invoice_url: string | null;
+  /** owner only */
+  billing_emails: string[] | null;
+  read_only: boolean;
+  owner_name: string | null;
+  removed_for_billing: number;
+  paused_for_billing: number;
+}
+
+export function useBillingClock(ws: string | null | undefined) {
+  return useQuery({
+    queryKey: billingClockKey(ws ?? ''), enabled: !!ws, staleTime: 30_000, refetchOnWindowFocus: true,
+    queryFn: () => rpc<BillingClock>('billing_clock', { p_ws: ws! }),
+  });
+}
+
+/** true while the workspace is paused for billing, its subscription ended or its trial ended (every write is refused). */
+export const billingReadOnly = (s: BillingStatus | null | undefined): boolean => s === 'suspended' || s === 'canceled' || s === 'trial_expired';
 
 /** Billing state of a workspace. Members see the account meter and features; the owner also sees the subscription. */
 export function useBilling(ws: string | null | undefined) {

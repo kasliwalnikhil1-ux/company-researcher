@@ -281,8 +281,9 @@ All take inclusive dates. `p_from` / `p_to` default to the last 7 days (overview
 | `outreach_report_funnel(…, p_filters{sequence_id,sender_id,list_id,tag_id})` | `{cohort, stages[{stage,count,pct_of_enrolled,pct_of_previous,median_hours_from_previous}]}` |
 | `outreach_report_intents(…, p_group, p_filters)` | group by `day`, `sequence`, `step`, `sender`, `variant`, `channel` |
 | `outreach_report_reply_threads(…, p_intent, p_filters)` | the exact threads behind a reply count, at most 1000. The inbox opens these `chat_id`s when a number is clicked |
-| `outreach_report_sequences`, `outreach_report_senders`, `outreach_report_clients` | arrays, each row with a `totals` object |
-| `outreach_report_sequence(p_sequence, …)` | `{sequence, totals, steps[], best_step, worst_step, ab_tests[], exits{}, live}`. Best and worst step need at least 20 sends |
+| `outreach_report_sequences(p_ws, p_client, p_from, p_to, p_channel, p_status)` | **089**: one row per sequence with results counted in people (docs/outreach/SEQUENCE-STATS.md): `channels[]`, `progress{}`, `contacted`, `invited`, `accepted` + `accepted_rate` + `pending` + `accepted_early` + `accepted_split{}`, `replied` + `replied_rate` + `auto_replied`, `positive` + `positive_rate` + `meetings`, `ops{}`, `na{}`. Dates both null = all time (per-sequence cache); dates = the cohort first contacted in the period. `p_status` null = every status but archived, `all` = every status |
+| `outreach_report_senders`, `outreach_report_clients` | arrays, each row with a `totals` object |
+| `outreach_report_sequence(p_sequence, p_from, p_to)` | `{sequence, period{from,to,all,timezone,steps_from,steps_to}, funnel, channels[{channel, invite_step, from_earlier_version, stages{}}], replied_other_channel{}, seen_since, seen_partial, definitions_version, totals, steps[], best_step, worst_step, ab_tests[], exits{}, live}`. Dates both null = all time. Best and worst step need at least 20 sends |
 | `outreach_report_sender(p_sender, …)` | totals, daily series, health trend, restrictions, failures by plain reason |
 | `outreach_report_client(p_client, …)` | the overview shape for one client, plus leads, senders and live enrollments. Used by the client portal and branded reports |
 | `outreach_report_cost(p_ws, p_client, …)` | cost tab; `senders_without_cost` flags missing inputs |
@@ -425,7 +426,7 @@ A voice note is a `message` action with `payload.voice = true` and spends the me
 
 | Function | Who | What |
 |---|---|---|
-| `outreach_failed_leads(p_sequence, p_node_id, p_kind, p_limit, p_offset)` | client_viewer+ | failed enrollments (or skipped actions) with a plain `reason` from `outreach_reason_text(code, decision)` and a `recoverable` flag |
+| `outreach_failed_leads(p_sequence, p_node_id, p_kind, p_limit, p_offset)` | client_viewer+ | failed enrollments (or skipped actions) with a plain `reason` from `outreach_reason_text(code, decision)` and a `recoverable` flag. 098: `p_kind` also `queued` (due actions, `at` = due), `sent`, `accepted` (wait step: leads that went on down its connected branch) and `replied` (first replies to the step, `reason` = reply text): the leads behind each canvas chip. API and connector still take failed / skipped only |
 | `outreach_failed_summary(p_sequence)` | client_viewer+ | grouped by step and reason |
 | `outreach_enrollment_recover(p_enrollment_ids, p_action)` | member+ | at most 500 ids. `retry` re-opens the lead on the same step, `skip` re-opens and advances, `exit` closes it as `exited_manual`. Refused per lead with a reason: `not_failed`, `lead_suppressed`, `profile_invalid` (retry only), `already_enrolled_again`, `sender_gone`. Emits `enrollment.recovered` |
 | `outreach_requeue_sender_failures(p_sender)` | service: trigger `outreach_sender_reconnected` | when a sender goes from `credentials` or `error` to `ok`, its enrollments that failed in the last 7 days for a transient reason (network, 401, 5xx, sender not ok) are retried |
@@ -530,3 +531,30 @@ Tables: `outreach_integrations` (one per workspace and provider: `hubspot | pipe
 `lead.created`, `lead.updated`, `lead.unsubscribed`, `enrollment.started`, `enrollment.completed`, `enrollment.exited`, `enrollment.held`, `enrollment.resumed`, `enrollment.recovered`, `task.created`, `task.completed`, `sequence.activated`, `sequence.paused`, `sequence.published`, `sequence.stalled`, `sequence.recovered`, `sequence.webhook`, `sender.paused`, `sender.connected`, `sender.reconnected`, `sender.disconnected`, `sender.level_changed`, `sender.health`, `sender.running_dry`, `invite.sent`, `invite.accepted`, `invite.withdrawn`, `message.sent`, `message.received`, `message.classified`, `email.sent`, `email.opened`, `email.clicked`, `email.bounced`, `meeting.booked`, `workspace.billing_recovered`.
 
 Subscribe with `outreach_outbound_webhooks.events` (array; `'*'` for all). Deliveries are signed: `x-signature = HMAC-SHA256(secret, body)`.
+
+
+## 25. Leads relationships (094)
+
+Outbound vs inbound leads, the status ladder, who is connected through which account (`leads-relationships-PRD.md`; design notes and deviations in [LEADS-RELATIONSHIPS.md](LEADS-RELATIONSHIPS.md)).
+
+Tables: `outreach_lead_summary` (one row per lead: `status`, `status_rank`, `status_channel`, connected / pending / contacted / replied sender ids, `connection_sources`, identity / used / replied / bounced channels, `last_activity_at`, `wrote_first_at`; written only by the refresh), `outreach_lead_summary_queue` (service), `ops.inbound_kind_rules` (service; extra classification rules).
+
+| Function | Who | What |
+|---|---|---|
+| `outreach_inbound_kind(p_provider, p_name, p_provider_id, p_identifier, p_chat_meta, p_headers)` | service | `person` / `company_page` / `automated` for the other side of a new chat: email local-part list, bulk headers, LinkedIn numeric ids, sponsored / offer chats, then `ops.inbound_kind_rules` |
+| `outreach_lead_summary_enqueue(p_lead)` | internal (triggers) | queues a recompute |
+| `outreach_lead_summary_refresh(p_lead)` | service | recomputes one row; returns true when the status changed |
+| `outreach_lead_summary_process(p_limit)` | service | drains a batch of the queue (F55 tick); a failing lead goes back with `attempts + 1`, dropped after 3 |
+| `outreach_lead_summary_reconcile(p_days, p_limit)` | service | queues leads with activity in `p_days` (and leads with no row) and drains; nightly 03:30 UTC |
+| `outreach__leads_matching(p_ws, p_f)` | internal | the one filter vocabulary (tab, hidden, search, client / list / stage / tag, dnc, status[], connected_via[], pending_with[], not_connected, connection_source, channel / channel_used / channel_replied, origin[], kind[], enriched, replied, profile filters, include_removed, company, title, location, has_email, enrolled_in, not_enrolled_in, created_after) |
+| `outreach_leads_list(p_ws, p_f, p_sort, p_limit, p_offset)` | client_viewer+ | rows for the connector and the API: lead columns + summary fields + `tags` (names) + `connected_via[]` (with source) + `pending_with[]` + `channels{}`; sort `activity` / `created` / `message` |
+| `outreach_leads_totals(p_ws, p_f, p_include_removed)` | client_viewer+ | the totals line, counted in people |
+| `outreach_leads_by_account(p_ws, p_f, p_include_removed)` | client_viewer+ | one row per account: connected / via our invite / pending (LinkedIn, Instagram) · contacted / replied |
+| `outreach_lead_relationships(p_lead, p_include_removed)` | client_viewer+ | one row per account with any relationship to the lead: state, since, source, last touch / reply, checked, consent |
+| `outreach_lead_promote(p_ws, p_lead_ids)` | member+ | Add to outbound (sets `prospect_since`, unhides) |
+| `outreach_lead_hide(p_ws, p_lead_ids, p_hide)` | manager+ | hide / unhide by hand (`hidden_reason = manual`) |
+| `outreach_enrich_wait_reason_refresh()` | service | writes `outreach_leads.enrich_wait_reason` for queued leads (budget: account + reset time; queue: position); drops queue rows of non-persons and hidden leads |
+
+Triggers: `outreach_trg_lead_origin` (before insert / update of list_id, stage_id, hidden_at on leads), `outreach_trg_enrollment_prospect`, `outreach_trg_lss_relation_source` (before insert / update of relation on lead_sender_state), and the `*_zz_summary` enqueue triggers on lead_sender_state, messages, actions (status), leads, lead_identities, lead_consent, lead_milestones, chats (lead_id, counterpart_kind) and suppressions.
+
+Invariants: `origin` never changes; `prospect_since` is set once; `connected_at` survives a lost connection; a message from a `counterpart_kind <> 'person'` chat is never classified, enriched or answered by the AI.

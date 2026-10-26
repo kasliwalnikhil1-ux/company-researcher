@@ -3,7 +3,7 @@
 // disconnected, ready for Reconnect; needs a free account),
 // and the channel actions attest_account_age {months} (WhatsApp), resume_after_warning (Instagram provider warning), check_identifiers (WhatsApp numbers).
 import { admin, json, serve, requireUser, membership, requireRole, readJson, HttpError, audit, rateLimit, rpc } from "../_shared/outreach/supabase.ts";
-import { disconnectSender } from "../_shared/outreach/disconnect.ts";
+import { removeSender } from "../_shared/outreach/lifecycle.ts";
 import { encrypt } from "../_shared/outreach/crypto.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
 import { reconnectLink, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames, SIGN_IN_INCOMPLETE } from "../_shared/outreach/inbound.ts";
@@ -41,31 +41,21 @@ serve("sender-manage", async (req) => {
       return json({ link, ...(body.mode === "copy" ? { relogin_url: link } : {}) });
     }
     case "disconnect": {
-      // The connected account is removed on the connector side (it stops counting towards the plan); conversations, relations and
-      // enrolments stay on this sender and carry on after a later Reconnect.
+      // Legacy name for Remove (sender-lifecycle-PRD.md §3.4): the connector account is deleted, stored credentials wiped,
+      // the paid account freed; conversations, the contacted record and report numbers stay. Leads leave their sequences.
       if (s.provider === "WEBCHAT") throw new HttpError(400, "E_PAYLOAD_INVALID", "a website inbox has no connected account");
-      if (s.status === "disabled") throw new HttpError(409, "E_SENDER_NOT_OK", "This sender is disabled.");
-      const r = await disconnectSender(s.id, "user_disconnected");
-      await audit(s.workspace_id, "sender.disconnect", "sender", s.id, { by: user.id, account_deleted: r.deleted }, "user");
+      const r = await removeSender(s.id, "app", { by: user.id, reason: "sender-manage disconnect" });
       const { data: fresh } = await admin.from("outreach_senders").select("*").eq("id", s.id).single();
-      return json({ ok: true, account_deleted: r.deleted, sender: fresh });
+      return json({ ok: true, account_deleted: r.account_deleted, state: r.state === "pending" ? "removal_pending" : r.state, sender: fresh }, r.state === "pending" ? 202 : 200);
     }
     case "enable": {
-      // A disabled sender comes back without its connected account (that was removed when it was disabled): it becomes
-      // "disconnected" and the owner signs in again. Re-enabling needs a free account, like connecting a new one (PRD #29).
+      // Legacy name for the lifecycle Enable: a disabled sender keeps its connector link, so it comes back as `ok` with no
+      // account check (D7: disabled still occupied the slot). A row disabled before the lifecycle build has no account left:
+      // the database turns it into a removed sender and the owner reconnects.
       if (s.status !== "disabled" || s.deleted_at) throw new HttpError(409, "E_SENDER_NOT_OK", "Only a disabled sender can be re-enabled.");
-      const slots = await rpc<{ available: number | null }>("slots", { p_ws: s.workspace_id });
-      if (slots.available != null && slots.available < 1) throw new HttpError(402, "E_ACCOUNT_LIMIT", "There is no free account on your plan. Add an account to bring this sender back.", { slots });
-      if (s.unipile_account_id) {
-        // disabled before billing v2: the account is still connected. Disconnect it so it comes back through a normal sign-in.
-        await disconnectSender(s.id, "user_disconnected");
-      } else {
-        const { error } = await admin.from("outreach_senders").update({ status: "disconnected", status_reason: "user_disconnected" }).eq("id", s.id);
-        if (error) throw new HttpError(500, "E_INTERNAL", error.message);
-      }
-      await audit(s.workspace_id, "sender.enabled", "sender", s.id, { by: user.id }, "user");
+      const r = await userRpc<{ state?: string }>(user, "outreach_sender_enable", { p_sender: s.id });
       const { data: fresh } = await admin.from("outreach_senders").select("*").eq("id", s.id).single();
-      return json({ ok: true, sender: fresh });
+      return json({ ok: true, state: r?.state ?? "ok", sender: fresh });
     }
     case "reconnect_cookie": {
       const r = await reconnectSender(s);

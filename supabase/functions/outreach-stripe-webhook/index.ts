@@ -8,6 +8,7 @@ import { admin, audit, HttpError, json, log, rpc, serve } from "../_shared/outre
 import { verifyStripeSignature } from "../_shared/outreach/stripe.ts";
 import { completeCheckout, loadWorkspace, resolveEventWorkspace, settlePendingChange, syncWorkspaceFromStripe } from "../_shared/outreach/billing.ts";
 import { platformAlert, sendBillingNotice } from "../_shared/outreach/billing_emails.ts";
+import { paymentFailed, reactivateWorkspace, invoiceFacts } from "../_shared/outreach/billing_clock.ts";
 
 const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
 
@@ -50,24 +51,34 @@ async function handle(event: any, ws: Record<string, any>, subscriptionId: strin
     case "invoice.payment_failed": {
       // a failed renewal (not the first try of a change the customer is watching: that one answers on screen)
       if (obj.billing_reason === "subscription_update") break;
-      await admin.from("outreach_workspaces").update({ stripe_status: "past_due", past_due_since: before.past_due_since ?? new Date().toISOString() }).eq("id", wsId).is("past_due_since", null);
-      await sendBillingNotice(wsId, "payment_failed", String(obj.id ?? event.id), { pay_url: obj.hosted_invoice_url ?? null });
+      // the clock starts from the first failed charge (D15); the day-0 email goes out now, later steps run hourly
+      await paymentFailed(wsId, { ...obj, ...invoiceFacts(obj) });
       break;
     }
     case "invoice.payment_action_required": {
       if (after?.pending_payment) break;                         // the customer is on the confirmation step in the app already
-      await sendBillingNotice(wsId, "payment_action_required", String(obj.id ?? event.id), { pay_url: obj.hosted_invoice_url ?? null });
+      await paymentFailed(wsId, obj, true);
       break;
     }
     case "invoice.paid": {
       await audit(wsId, "billing.invoice_paid", "workspace", wsId, { invoice: obj.id, amount_paid: obj.amount_paid, billing_reason: obj.billing_reason });
       await settlePendingChange(wsId);
+      // the overdue invoice is paid (or the subscription is active again): everything billing paused comes back (§5.9.4)
+      if (["past_due", "suspended"].includes(String(before.billing_status ?? "")) && (!before.overdue_invoice_id || before.overdue_invoice_id === obj.id || obj.billing_reason === "subscription_cycle")) {
+        await reactivateWorkspace(wsId).catch((e) => log({ fn: "stripe-webhook", warn: "reactivation", error: String(e) }));
+      }
       break;
     }
     case "customer.subscription.pending_update_applied":
     case "customer.subscription.pending_update_expired":
     case "customer.subscription.updated":
       if (before.pending_payment || type !== "customer.subscription.updated") await settlePendingChange(wsId);
+      if (type === "customer.subscription.updated" && ["past_due", "suspended"].includes(String(before.billing_status ?? "")) && ["active", "trialing"].includes(String(after?.stripe_status ?? ""))) {
+        await reactivateWorkspace(wsId).catch((e) => log({ fn: "stripe-webhook", warn: "reactivation", error: String(e) }));
+      }
+      if (type === "customer.subscription.updated" && after?.cancel_at_period_end && !before.cancel_at_period_end) {
+        await sendBillingNotice(wsId, "plan_ending", String(after.current_period_end ?? obj.id), { current_period_end: after.current_period_end });
+      }
       break;
     case "customer.subscription.deleted":
       if (after?.plan === "cancelled" && before.plan !== "cancelled") {

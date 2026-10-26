@@ -7,7 +7,7 @@ import NoteBubble from './notes/NoteBubble';
 import { isNoteModeShortcut, readComposerMode, readShowNotes, writeComposerMode, writeShowNotes, type ChatNote, type NoteAttachment, type NoteVisibility } from '@/lib/outreach/notes';
 import Link from '@/lib/outreach/nav';
 import { cn } from '@/lib/utils';
-import { channelLabel, chatTitle, isMailProvider } from '@/lib/outreach/channels';
+import { channelLabel, chatTitle, isMailProvider, senderAccountLabel } from '@/lib/outreach/channels';
 import { ProviderLogo } from '@/components/outreach/senders/ProviderLogo';
 import { ConsentChip } from './ConsentChip';
 import type { Chat, Intent, Lead, Member, Message, Sender } from '@/lib/outreach/types';
@@ -17,7 +17,7 @@ import Compose from './Compose';
 import { INTENTS, INTENT_LABELS, useNow, inEditWindowNow, useNarrowerThan } from './hooks';
 import { useThreadAttribution } from '@/lib/outreach/intel';
 import { callFn, parseError } from '@/lib/outreach/api';
-import { qk } from '@/lib/outreach/queries';
+import { qk, useSenderLabels } from '@/lib/outreach/queries';
 import ForwardDialog from './ForwardDialog';
 import AssigneeSelect from './AssigneeSelect';
 import AiModeChip from './ai/AiModeChip';
@@ -124,6 +124,13 @@ export default function Thread(p: ThreadProps) {
   const lead = chat.outreach_leads;
   const sender = chat.outreach_senders;
   const name = chatTitle(chat);
+  // the account this conversation runs through, named even when the sender was removed (the join reads nothing then)
+  const senderLabelsQ = useSenderLabels(chat.workspace_id);
+  const account = useMemo(() => {
+    const l = senderLabelsQ.data?.find((x) => x.id === chat.sender_id);
+    if (l) return { label: senderAccountLabel({ ...l, provider: l.provider ?? chat.provider }), picture: l.picture_url, removed: l.removed };
+    return sender ? { label: senderAccountLabel(sender), picture: sender.picture_url, removed: false } : null;
+  }, [senderLabelsQ.data, chat.sender_id, chat.provider, sender]);
   const rootRef = useRef<HTMLDivElement>(null);
   // a squeezed thread column (laptop width, or the list / panel dragged wide): controls drop their labels so the
   // header and composer stay one or two short rows and the messages keep the height
@@ -247,7 +254,14 @@ export default function Thread(p: ThreadProps) {
   }, [messages, notes, showNotes, p.highlightNoteId, p.highlightMessageId]);
   useEffect(() => { lastCountRef.current = 0; }, [chat.id]);
 
-  const senderOk = sender?.status === 'ok';
+  // a paused sender may still answer people who replied (sender lifecycle D5); disabled / removed cannot
+  const billingPause = sender?.status === 'paused' && sender?.pause_reason === 'billing';
+  const senderOk = sender?.status === 'ok' || (sender?.status === 'paused' && !billingPause);
+  const lifecycleLine = billingPause ? 'Workspace paused for billing — replies resume once payment is updated'
+    : sender?.status === 'paused' ? 'Sender paused — replies still go out'
+    : sender?.status === 'disabled' ? 'Sender disabled — enable it to reply'
+      : sender?.status === 'removed' || sender?.status === 'disconnected' ? 'Sender removed — read only'
+        : sender?.status === 'erased' ? 'Sender erased — read only' : null;
   const disabledReason = p.suspended
     ? 'This workspace is suspended. Replies are disabled until billing is resolved.'
     : !p.canReply
@@ -255,7 +269,11 @@ export default function Thread(p: ThreadProps) {
       : !sender
         ? 'The sender for this conversation is no longer available.'
         : !senderOk
-          ? `Sender ${sender.display_name ?? ''} is ${sender.status}${sender.status_reason ? ` (${sender.status_reason})` : ''}. Replies are disabled until it is connected again.`
+          ? billingPause ? 'This workspace is paused for billing. Replies resume once payment is updated.'
+            : sender.status === 'disabled' ? `${sender.display_name ?? 'This sender'} is disabled. Enable it on its Account tab to reply.`
+            : sender.status === 'removed' || sender.status === 'disconnected' ? `${sender.display_name ?? 'This sender'} was removed. The conversation is read-only until the account is reconnected.`
+              : sender.status === 'erased' ? 'This sender was erased. The conversation is read-only.'
+                : `Sender ${sender.display_name ?? ''} is ${sender.status}${sender.status_reason ? ` (${sender.status_reason})` : ''}. Replies are disabled until it is connected again.`
           : null;
   const canEditMessages = !disabledReason;
 
@@ -331,7 +349,7 @@ export default function Thread(p: ThreadProps) {
 
   // one meta line under the name: who / subject first, then the channel and the handle (the provider logo is on the avatar)
   const handleText = secondary ? (chat.provider === 'INSTAGRAM' && !secondary.startsWith('@') ? `@${secondary}` : secondary) : null;
-  const metaLine = [subtitle, channelLabel(chat.provider), handleText].filter(Boolean).join(' · ');
+  const metaLine = [subtitle, channelLabel(chat.provider), handleText, account && chat.provider !== 'WEBCHAT' ? `via ${account.label}${account.removed ? ' (removed)' : ''}` : null].filter(Boolean).join(' · ');
   const webchat = chat.provider === 'WEBCHAT';
 
   // Triage controls: one short row under the name — the AI, (web chat: status) / (others: intent), and the assignee.
@@ -389,10 +407,10 @@ export default function Thread(p: ThreadProps) {
                 {CONVERT_ITEMS.map(([k, label, Icon]) => <button key={k} type="button" role="menuitem" onClick={() => { close(); p.onConvert(k); }} className={item}><Icon className={icon} />{label}</button>)}
               </>
             )}
-            {sender && (
+            {account && !webchat && (
               <div className="mt-1 border-t border-gray-100 px-3 py-2 flex items-center gap-2 text-xs text-gray-500 min-w-0">
-                <Avatar src={sender.picture_url} name={sender.display_name} size={5} />
-                <span className="truncate">Sending as <span className="font-medium text-gray-700">{sender.display_name ?? sender.public_identifier}</span></span>
+                <Avatar src={account.picture} name={account.label} size={5} />
+                <span className="truncate">{account.removed ? <>Received on <span className="font-medium text-gray-700">{account.label}</span> · account removed</> : <>Sending as <span className="font-medium text-gray-700">{account.label}</span></>}</span>
               </div>
             )}
           </>
@@ -441,7 +459,8 @@ export default function Thread(p: ThreadProps) {
           <div className="px-3 md:px-5 pb-2 flex items-center gap-1.5 min-w-0">
             <AiModeChip chatId={chat.id} onError={p.onError} onNotice={p.onNotice} density={narrow ? 'narrow' : 'cramped'} />
             {chat.provider === 'WHATSAPP' && !isGroup && <ConsentChip leadId={chat.lead_id} ws={p.workspaceId} canWrite={p.canWrite} toast={(m, t) => (t === 'error' ? p.onError(m) : p.onNotice?.(m))} />}
-            {sender && sender.status !== 'ok' && <StatusPill status={sender.status} reason={sender.status_reason} />}
+            {sender && sender.status !== 'ok' && <StatusPill status={sender.status} reason={lifecycleLine ?? sender.status_reason} />}
+            {lifecycleLine && <span className={cn('text-xs hidden sm:inline', billingPause ? 'text-red-700' : sender?.status === 'paused' ? 'text-amber-700' : 'text-gray-500')}>{lifecycleLine}</span>}
             <span className="flex-1" />
             {intentMenu}
             <AssigneeSelect value={chat.assigned_to} members={members} disabled={!p.canWrite} onChange={p.onAssign} />

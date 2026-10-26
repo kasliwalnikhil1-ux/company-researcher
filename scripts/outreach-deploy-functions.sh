@@ -58,6 +58,9 @@ WEBHOOK_FUNCS=(
   outreach-voice-tools       # the voice agent's tools: per-agent secret + signed session token checked in code (web-chat-voice-elevenlabs-PRD.md §5.3)
   outreach-elevenlabs-webhook # voice provider's post-call webhook: HMAC signature (OUTREACH_ELEVENLABS_WEBHOOK_SECRET) checked in code
   outreach-health-ping       # F50: public `ok` / `stale` for an outside uptime monitor (health-page-PRD.md §11)
+  outreach-resend-webhook    # F57: Resend delivery + domain webhooks (Svix signature checked in code)
+  outreach-auth-send-email   # F58: Supabase Auth Send Email hook (Standard Webhooks signature checked in code); enable in Auth → Hooks
+  outreach-sender-owner-link # F53: the account owner's "disconnect my account" / "request deletion" link (signed single-use token checked in code)
 )
 # Cron workers (x-cron-secret via outreach_invoke / pg_net):
 CRON_FUNCS=(
@@ -85,13 +88,20 @@ CRON_FUNCS=(
   outreach-webchat-worker    # web chat: continuity email digests (every minute), maintenance (every 5 min), review (every minute), voice (every minute)
   outreach-notify-push       # reply alerts F47: Web Push sender (every 10 s + nudged by each alert) AND user JWT (?action=public_key)
   outreach-health-collect    # Health F48: metrics endpoint + logs API + urgent emails (every 5 min)
+  outreach-worker-sender-erase        # F51: due sender erasures + pause auto-resume (dispatcher row sender-lifecycle, every 15 min)
+  outreach-worker-sender-housekeeping # F52: auto-remove notices / removals, connector-delete retries, reconciliation (nightly 02:30 UTC)
+  outreach-email-outbox      # F27: sends due rows of outreach_email_outbox (dispatcher row email-outbox, every 15 s)
+  outreach-worker-sending-domains # F59: domain verification (dispatcher, every 10 min) + nightly health / warm-up / plan sync / retention (04:00 UTC)
+  outreach-worker-account-alerts  # F60: sign-in emails + reminders, combined team emails, mass-disconnect holds (dispatcher, every 15 min)
   outreach-health-daily      # Health F49: advisors, daily snapshot, upgrade answer, the daily email (hourly; acts once a day)
 )
 # User-JWT functions (validate the JWT in code via requireUser; --no-verify-jwt so CORS preflight works):
 USER_FUNCS=(
   outreach-sender-connect
   outreach-sender-update-proxy
-  outreach-sender-disable
+  outreach-sender-disable    # legacy name: forwards to the lifecycle (Disable / Remove)
+  outreach-sender-lifecycle  # F13: preview / pause / resume / disable / enable / remove / erase (sender-lifecycle-PRD.md)
+  outreach-sending-domain    # F56: custom sending domain setup (create / verify / identity / test / activate / pause / resume / remove)
   outreach-sender-manage
   outreach-send-reply
   outreach-edit-message

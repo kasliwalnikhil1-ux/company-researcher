@@ -126,10 +126,11 @@ function attentionLink(a: Row, origin: string): string {
 }
 
 export function digestHtml(d: DigestInput, branding: Branding = {}): string {
-  const top = (d.sequences ?? []).filter((q) => n(q.totals?.touches) > 0 || n(q.totals?.replies) > 0 || n(q.live) > 0).slice(0, 5);
+  // rows of outreach_report_sequences (089): people first contacted in the period, and what they did after
+  const top = (d.sequences ?? []).filter((q) => n(q.contacted) > 0 || n(q.replied) > 0 || n(q.progress?.live) > 0).slice(0, 5);
   const seqTable = top.length
-    ? `<h3 style="font-size:15px;margin:20px 0 4px">Top sequences</h3><table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin:8px 0 16px"><tr><th style="${TH}">Sequence</th><th style="${TH};text-align:right">Live leads</th><th style="${TH};text-align:right">Replies</th><th style="${TH};text-align:right">Reply rate</th><th style="${TH};text-align:right">Interested</th></tr>${top.map((q) =>
-      `<tr><td style="${TD}"><a href="${esc(`${d.origin}/outreach/sequences/${q.sequence_id}`)}" style="color:#111">${esc(q.name)}</a>${q.stalled ? ` <span style="color:#b91c1c;font-size:12px">stopped</span>` : ""}</td><td style="${TD};text-align:right">${fmt(q.live)}</td><td style="${TD};text-align:right">${fmt(q.totals?.replies)}</td><td style="${TD};text-align:right">${pct(q.totals?.reply_rate)}</td><td style="${TD};text-align:right">${fmt(q.totals?.interested)}</td></tr>`).join("")}</table>`
+    ? `<h3 style="font-size:15px;margin:20px 0 4px">Top sequences</h3><p style="font-size:12px;color:#777;margin:0 0 4px">People first contacted in the period, and what they did after.</p><table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin:8px 0 16px"><tr><th style="${TH}">Sequence</th><th style="${TH};text-align:right">Live leads</th><th style="${TH};text-align:right">Contacted</th><th style="${TH};text-align:right">Replied</th><th style="${TH};text-align:right">Reply rate</th><th style="${TH};text-align:right">Positive</th></tr>${top.map((q) =>
+      `<tr><td style="${TD}"><a href="${esc(`${d.origin}/outreach/sequences/${q.sequence_id}`)}" style="color:#111">${esc(q.name)}</a>${q.stalled ? ` <span style="color:#b91c1c;font-size:12px">stopped</span>` : ""}</td><td style="${TD};text-align:right">${fmt(q.progress?.live)}</td><td style="${TD};text-align:right">${fmt(q.contacted)}</td><td style="${TD};text-align:right">${fmt(q.replied)}</td><td style="${TD};text-align:right">${pct(q.replied_rate)}</td><td style="${TD};text-align:right">${fmt(q.positive)}</td></tr>`).join("")}</table>`
     : "";
   const att = (d.attention ?? []).slice(0, 15);
   const attention = att.length

@@ -12,7 +12,7 @@ import RebalanceDialog from './RebalanceDialog';
 import type { SetPoolResult } from './publishTypes';
 
 const STATUS_REASON: Record<Sender['status'], string> = {
-  ok: '', connecting: 'still connecting', credentials: 'needs re-login', error: 'in error', paused: 'paused', disabled: 'disabled', disconnected: 'disconnected',
+  ok: '', connecting: 'still connecting', credentials: 'needs re-login', error: 'in error', paused: 'paused', disabled: 'disabled', disconnected: 'removed', removed: 'removed', erased: 'erased',
 };
 
 const samePool = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join(',') === [...b].sort().join(',');
@@ -34,7 +34,9 @@ interface Props {
   live?: { sequenceId: string; onApplied: (pool: string[], result: SetPoolResult) => void };
 }
 
-export default function PoolSelector({ pool, senders, onChange, disabled, live }: Props) {
+export default function PoolSelector({ pool, senders: allSenders, onChange, disabled, live }: Props) {
+  // removed and erased senders are not offered (sender lifecycle); paused / disabled ones are listed greyed with the reason
+  const senders = allSenders.filter((s) => s.status !== 'removed' && s.status !== 'erased' && s.status !== 'disconnected');
   const [open, setOpen] = useState(false);
   const [staged, setStaged] = useState<string[]>(pool);
   const [review, setReview] = useState<string[] | null>(null);

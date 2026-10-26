@@ -92,6 +92,13 @@ export function setStatus(store: DemoStore, s: Row, status: string, reason: stri
       for (const e of store.t('outreach_enrollments').filter((x) => x.sender_id === s.id && LIVE.includes(x.status))) engine.exit(e, 'exited_sender_disabled', 'sender_disabled', nowMs);
       store.update('outreach_actions', (a) => a.sender_id === s.id && (a.status === 'queued' || a.status === 'reserved'), { status: 'cancelled', decision: 'sender_disabled' });
       engine.resetIndexes();
+    } else if (status === 'removed' || status === 'erased') {
+      // sender lifecycle: the connector account is gone, the sender leaves every pool, its stored sign-in is wiped
+      patch.unipile_account_id = null;
+      if (status === 'removed') patch.removed_at = extra.removed_at ?? iso(nowMs);
+      store.remove('outreach_sender_secrets', (t) => t.sender_id === s.id);
+      store.remove('outreach_sender_tokens', (t) => t.sender_id === s.id);
+      dropFromPools(store, s.id);
     }
   }
   return store.update('outreach_senders', s.id, patch)[0] ?? s;

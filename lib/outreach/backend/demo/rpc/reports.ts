@@ -10,10 +10,14 @@ import { tableHooks } from '../query';
 import type { DemoStore, Row } from '../store';
 import { dashboard } from '../reports/dashboard';
 import {
-  addDays, allFacts, asDay, channelOf, daysBetween, dayIn, eachDay, factFilters, grouped, LIVE_ENROLLMENT, MILESTONES, rate, resolveRange,
-  RUNNING_ENROLLMENT, threadIntent, totalsFrom, totalsOf, type Totals,
+  addDays, allFacts, asDay, channelOf, daysBetween, dayIn, eachDay, factFilters, grouped, MILESTONES, rate, resolveRange,
+  RUNNING_ENROLLMENT, threadIntent, todayIn, totalsFrom, totalsOf, wsTz, type Totals,
 } from '../reports/facts';
 import { sequenceReport } from '../reports/sequence';
+import { channelBlocks, statsRow } from '../reports/stats';
+import { EXECUTABLE_TYPES } from '../../../nodes';
+
+const isExecutable = (t: string) => (EXECUTABLE_TYPES as string[]).includes(t);
 import { DEMO_USER_ID as DEMO_USER } from '../seed/ids';
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
@@ -357,9 +361,21 @@ function consent(store: DemoStore, ws: string, a: Row): Row {
 // metric definitions (026)
 // ---------------------------------------------------------------------------
 const METRIC_DEFINITIONS: Record<string, string> = {
+  definitions_version: '2',
+  // sequence stats (089)
+  contacted: 'People who got at least one connection request, follow or message from this sequence (LinkedIn invitation, message or InMail; Instagram follow or message; WhatsApp message; email). Profile visits, likes, comments and endorsements don\'t count. One person counts once, however many channels or steps reached them.',
+  invited: 'People this sequence sent a LinkedIn connection request or an Instagram follow to. The denominator of the accepted rate.',
+  pending: 'Invited, not accepted, and the request is still open (not withdrawn, not declined or expired).',
+  replied: 'People who wrote back, as a person, after this sequence contacted them. A reply belongs to the sequence that contacted the lead last before it; it is counted once, at the first human reply. Out-of-office and automatic replies don\'t count. Rate: replied ÷ contacted.',
+  auto_replied: 'People from whom only an out-of-office or automatic reply arrived. Shown in the tooltip, never counted as replied.',
+  positive: 'Replied people whose reply (or a later message of theirs within 30 days) was classified interested or question, or who reached a Meeting stage while in or after this sequence. Rate: positive ÷ replied.',
+  seen: 'At least this many people saw a message from this sequence (read receipts on LinkedIn, Instagram and WhatsApp). People can turn read receipts off, so this undercounts. Email opens aren\'t tracked.',
+  bounced: 'Email: the address bounced hard. WhatsApp: the number is not on WhatsApp (the check before the first message).',
+  cohort: 'For a period, the sequence counts the people it FIRST contacted in that period, and everything they did afterwards up to today. All time counts everyone.',
+  progress: 'Enrolled = people in the sequence (ever). Live = enrolments still running, waiting or paused. Done = finished, replied, removed or failed.',
   day: 'A calendar day in the workspace timezone (Settings → Workspace). Ranges include both end dates.',
   invites: 'Connection requests LinkedIn accepted for delivery in the period.',
-  accepted: 'Invitations accepted in the period, whenever they were sent. Attributed to the step and variant that sent the invitation.',
+  accepted: 'People whose connection request (LinkedIn) or follow (Instagram) from this sequence was accepted, whenever that happened. Rate: accepted ÷ invited. Shown with the number still pending; greyed as "early" while more than half are pending.',
   acceptance_rate: 'Accepted ÷ invites sent, both in the period.',
   touches: 'Messages + InMails + emails + new chats + invitations that carried a note. The denominator of every reply rate.',
   new_chats: 'Conversations the platform started with someone it had no chat with yet, on any channel. WhatsApp and Instagram watch this number closely.',
@@ -452,29 +468,49 @@ export const reportsRpc = {
     })).sort((p, q) => q.totals.replies - p.totals.replies || String(p.name ?? '').localeCompare(String(q.name ?? '')));
   },
 
+  // 089: dates both empty = all time; else the cohort of leads first contacted in the period (workspace days)
   report_sequence: (a, ctx) => {
     const q = ctx.store.get('outreach_sequences', str(a.p_sequence));
     if (!q) demoError('E_NOT_FOUND');
     const ws = q.workspace_id ?? ctx.ws;
-    const { from, to, tz } = resolveRange(ctx.store, ws, a.p_from, a.p_to, 30);
-    return sequenceReport(ctx.store, ws, q, from, to, tz);
+    const all = !str(a.p_from) && !str(a.p_to);
+    if (!all && (!str(a.p_from) || !str(a.p_to))) demoError('E_PAYLOAD_INVALID', 'from/to must be dates with from <= to, or both empty for all time');
+    const tz = wsTz(ctx.store, ws);
+    const today = todayIn(tz);
+    const created = q.created_at ? dayIn(Date.parse(q.created_at), tz) : addDays(today, -29);
+    const floor = addDays(today, -730);
+    const { from, to } = all ? { from: created > floor ? created : floor, to: today } : resolveRange(ctx.store, ws, a.p_from, a.p_to, 30);
+    const base = sequenceReport(ctx.store, ws, q, from, to, tz);
+    const b = all ? null : { from, to };
+    const row = statsRow(ctx.store, q, b, tz, isExecutable);
+    const blocks = channelBlocks(ctx.store, q.id, b, tz);
+    const graphCh = new Set((row.channels as Row[]).filter((c) => !c.from_earlier_version).map((c) => c.channel));
+    const other = Object.fromEntries(Object.entries(row.replied_by_channel as Record<string, number>).filter(([ch]) => !graphCh.has(ch)));
+    const funnel: Row = { ...row };
+    for (const k of ['name', 'status', 'client_id', 'head_version', 'steps', 'stalled', 'stalled_reason', 'throttled_reason', 'has_ab_test', 'updated_at']) delete funnel[k];
+    const seenSince = ctx.store.t('outreach_messages').filter((m) => m.direction === 'out' && m.read_at).map((m) => dayIn(Date.parse(m.read_at), tz)).sort()[0] ?? today;
+    return {
+      ...base,
+      sequence: { ...base.sequence, client_id: q.client_id ?? null },
+      period: { from: all ? null : from, to: all ? null : to, all, timezone: tz, steps_from: from, steps_to: to },
+      funnel,
+      channels: (row.channels as Row[]).map((c) => ({ ...c, stages: blocks[c.channel] ?? {} })),
+      replied_other_channel: other, seen_since: seenSince, seen_partial: all || from < seenSince, definitions_version: 2,
+      live: (row.progress as Row).live,
+    };
   },
 
   report_sequences: (a, ctx) => {
-    const s = ctx.store; const ws = wsOf(a, ctx); const client = str(a.p_client);
-    const { from, to } = resolveRange(s, ws, a.p_from, a.p_to, 30);
-    const g = grouped(s, ws, { from, to, client, group: 'sequence' });
-    const enr = s.t('outreach_enrollments');
-    return s.t('outreach_sequences').filter((q) => inWs(ws)(q) && q.status !== 'archived' && (!client || q.client_id === client)).map((q) => {
-      const graph = JSON.stringify(q.graph ?? {});
-      return {
-        sequence_id: q.id, name: q.name, status: q.status, client_id: q.client_id ?? null, stalled: !!q.stalled_at, stalled_reason: q.stalled_reason ?? null,
-        live: enr.filter((e) => e.sequence_id === q.id && LIVE_ENROLLMENT.includes(e.status)).length,
-        failed_leads: enr.filter((e) => e.sequence_id === q.id && e.status === 'failed').length,
-        has_ab_test: graph.includes('"variants"') || graph.includes('"ab_split"'),
-        totals: g.get(q.id) ?? zero(),
-      };
-    }).sort((p, q) => q.totals.replies - p.totals.replies || String(p.name).localeCompare(String(q.name)));
+    const s = ctx.store; const ws = wsOf(a, ctx); const client = str(a.p_client); const channel = str(a.p_channel); const status = str(a.p_status);
+    const all = !str(a.p_from) && !str(a.p_to);
+    if (!all && (!str(a.p_from) || !str(a.p_to))) demoError('E_PAYLOAD_INVALID', 'from/to must be dates with from <= to, or both empty for all time');
+    const tz = wsTz(s, ws);
+    const b = all ? null : (() => { const r = resolveRange(s, ws, a.p_from, a.p_to, 30); return { from: r.from, to: r.to }; })();
+    return s.t('outreach_sequences')
+      .filter((q) => inWs(ws)(q) && (status ? status === 'all' || q.status === status : q.status !== 'archived') && (!client || q.client_id === client))
+      .map((q) => statsRow(s, q, b, tz, isExecutable))
+      .filter((r) => !channel || (r.channels as Row[]).some((c) => c.channel === channel))
+      .sort((p, q) => (q.replied as number) - (p.replied as number) || String(p.name).localeCompare(String(q.name)));
   },
 
   save_range: (a, ctx) => {

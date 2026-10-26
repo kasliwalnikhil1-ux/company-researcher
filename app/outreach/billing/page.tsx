@@ -4,17 +4,18 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, CalendarClock, CheckCircle2, CreditCard, ExternalLink, Plus, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarClock, CheckCircle2, CreditCard, Download, ExternalLink, Mail, Plus, X, XCircle } from 'lucide-react';
 import { PaginationBar, usePagedRows } from '@/components/outreach/Pagination';
 import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import {
-  accountsMeter, billingApi, billingKey, CANCEL_REASONS, changeHref, isPaidPlan, longDate, money, periodLabel, periodNoun, planLabel, planLine, useBilling,
+  accountsMeter, billingApi, billingClockKey, billingKey, CANCEL_REASONS, changeHref, isPaidPlan, longDate, money, periodLabel, periodNoun, planLabel, planLine, useBilling, useBillingClock,
   type BillingState,
 } from '@/lib/outreach/billing';
 import { discountedCents, pricing, type BillingPeriod } from '@/lib/outreach/pricing';
-import { Badge, Button, Card, ErrorBox, fmtDate, Modal, PageHeader, PageLoader, Spinner, Table, Td, Textarea, Th, useToast } from '@/components/outreach/ui';
+import { Badge, Button, Card, ErrorBox, fmtDate, Input, Modal, PageHeader, PageLoader, Spinner, Table, Td, Textarea, Th, useToast } from '@/components/outreach/ui';
+import { normalizeEmail } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
 const HISTORY_PAGE_SIZE = 12;
@@ -60,6 +61,13 @@ function BillingInner() {
   const qc = useQueryClient();
   const billing = useBilling(ws);
   const b = billing.data;
+  // the payment-failure clock (sender-lifecycle v1.2 §5.9): status, the dates of the next steps, contacts, the open invoice
+  const clockQ = useBillingClock(ws);
+  const clock = clockQ.data;
+  const [contactsOpen, setContactsOpen] = useState(false);
+  const [contacts, setContacts] = useState<string[]>([]);
+  const [newContact, setNewContact] = useState('');
+  const [contactsError, setContactsError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -123,6 +131,29 @@ function BillingInner() {
 
   const paid = isPaidPlan(b.plan);
   const meter = accountsMeter(b.accounts);
+  const nextSteps = (clock?.steps ?? []).filter((s) => !s.done);
+  const stepsLine = nextSteps.length ? nextSteps.map((s) => `${s.step === 'suspend' ? 'Sending stops' : s.step === 'remove' ? 'Accounts disconnect' : 'Data deleted'} on ${longDate(s.at)}`).join(' · ') : '';
+  const payInvoice = clock?.overdue_invoice_url
+    ? <a href={clock.overdue_invoice_url} target="_blank" rel="noopener noreferrer"><Button><ExternalLink className="w-4 h-4" /> Pay invoice</Button></a>
+    : b.has_customer ? <Button onClick={() => openUrl('pay', () => billingApi.payNow(ws!), 'There is no open invoice to pay.')} loading={busy === 'pay'}>Pay invoice</Button> : undefined;
+  const updateCard = b.has_customer ? <Button variant="secondary" onClick={() => openUrl('portal', () => billingApi.portal(ws!), 'The billing portal is not available.')} loading={busy === 'portal'}><CreditCard className="w-4 h-4" /> Update card</Button> : undefined;
+  const openContacts = () => { setContacts(clock?.billing_emails ?? []); setNewContact(''); setContactsError(null); setContactsOpen(true); };
+  const addContact = () => {
+    const e = normalizeEmail(newContact);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { setContactsError('Enter a valid email address'); return; }
+    if (contacts.length >= 5) { setContactsError('At most 5 extra billing contacts'); return; }
+    if (!contacts.includes(e)) setContacts([...contacts, e]);
+    setNewContact(''); setContactsError(null);
+  };
+  async function saveContacts() {
+    setBusy('contacts'); setContactsError(null);
+    try {
+      await rpc('billing_emails_set', { p_ws: ws, p_emails: contacts });
+      qc.invalidateQueries({ queryKey: billingClockKey(ws!) });
+      setContactsOpen(false); toast.show('Billing contacts saved.');
+    } catch (e) { setContactsError(parseError(e).message); }
+    finally { setBusy(null); }
+  }
   const discount = b.early_supporter?.discount ?? 0;
   const listCents = paid && b.billing_period && b.accounts_billed && !b.custom_price ? pricing.rawTotal(b.plan as 'launch', b.billing_period, b.accounts_billed) * 100 : null;
   const payCents = listCents != null ? discountedCents(listCents, discount) : null;
@@ -157,17 +188,23 @@ function BillingInner() {
       )}
       {b.plan === 'cancelled' && (
         <Banner tone="red" action={<Link href={changeHref({ plan: isPaidPlan(b.plan_before_suspension) ? b.plan_before_suspension : undefined })}><Button>Subscribe again</Button></Link>}>
-          <strong>This subscription has ended.</strong> Senders are paused and the workspace is read-only. Your data is kept{b.data_delete_after ? ` until ${longDate(b.data_delete_after)}` : ' for 90 days'}.
+          <strong>This subscription has ended.</strong> The connected accounts were disconnected (history kept) and the workspace is read-only. Your data is kept{b.data_delete_after ? ` until ${longDate(b.data_delete_after)}` : ' for 60 days'}; subscribe again before then and reconnect the accounts to carry on.
         </Banner>
       )}
       {b.plan === 'suspended' && (
-        <Banner tone="red" action={b.has_customer ? <Button onClick={() => openUrl('pay', () => billingApi.payNow(ws!), 'There is no open invoice to pay.')} loading={busy === 'pay'}>Pay now</Button> : undefined}>
-          <strong>This workspace is suspended.</strong> {b.disputed ? 'A card dispute is open on a payment for this workspace.' : 'The invoice is still unpaid.'} Senders are paused and nothing sends. Once it is settled they resume on their own.
+        <Banner tone="red" action={<div className="flex flex-wrap gap-2">{payInvoice}{updateCard}</div>}>
+          <strong>This workspace is paused.</strong> {b.disputed ? 'A card dispute is open on a payment for this workspace.' : 'The invoice is still unpaid.'} Nothing is sent, nothing can be edited or enrolled; replies keep arriving. Once it is paid, paused senders resume on their own.{stepsLine ? ` ${stepsLine}.` : ''}
+          {!!clock?.removed_for_billing && <div className="mt-1">{clock.removed_for_billing} account{clock.removed_for_billing === 1 ? ' was' : 's were'} disconnected while paused (history kept). Whoever signs in to each account gets a sign-in link once payment is updated.</div>}
         </Banner>
       )}
-      {b.plan !== 'suspended' && b.past_due && (
-        <Banner tone="amber" action={<Button onClick={() => openUrl('pay', () => billingApi.payNow(ws!), 'There is no open invoice to pay.')} loading={busy === 'pay'}>Pay now</Button>}>
-          <strong>Your last payment didn&apos;t go through.</strong> We&apos;ll try the card again. If it is still open 7 days after {b.past_due_since ? longDate(b.past_due_since) : 'the first attempt'}, sending pauses until it is paid.
+      {b.plan !== 'suspended' && (b.past_due || clock?.billing_status === 'past_due') && (
+        <Banner tone={(clock?.day ?? 0) >= 6 ? 'red' : 'amber'} action={<div className="flex flex-wrap gap-2">{payInvoice}{updateCard}</div>}>
+          <strong>{(clock?.day ?? 0) >= 6 ? 'Sending stops tomorrow.' : 'Your payment failed.'}</strong> Update your card to avoid interruption, or pay the open invoice now. {stepsLine ? `${stepsLine}.` : `If it is still open 7 days after ${b.past_due_since ? longDate(b.past_due_since) : 'the first attempt'}, sending pauses until it is paid.`}
+        </Banner>
+      )}
+      {clock?.billing_action_required && (
+        <Banner tone="amber" action={clock.overdue_invoice_url ? <a href={clock.overdue_invoice_url} target="_blank" rel="noopener noreferrer"><Button>Confirm the payment</Button></a> : undefined}>
+          <strong>Confirm your payment.</strong> Your bank needs you to approve the charge (common with cards that ask for a code on recurring payments). The clock only starts if the charge actually fails.
         </Banner>
       )}
       {b.pending_payment && (
@@ -237,6 +274,20 @@ function BillingInner() {
             {paid && b.has_subscription && !b.cancel_at_period_end && <Button variant="ghost" onClick={() => { setCancelOpen(true); setCancelError(null); }} disabled={!!busy}>Cancel subscription</Button>}
           </div>
           <p className="text-xs text-gray-400 mt-3">More accounts and upgrades apply straight away; you pay the difference for the rest of your billing period. Fewer accounts and downgrades apply from your next billing period. Payments are non-refundable.</p>
+
+          <div className="mt-5 pt-5 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            <div>
+              <div className="flex items-center gap-1.5 text-gray-500"><Mail className="w-3.5 h-3.5" /> Also send billing emails to</div>
+              <div className="text-gray-900 mt-1">{clock?.billing_emails?.length ? clock.billing_emails.join(', ') : 'Only the workspace owners'}</div>
+              <button type="button" onClick={openContacts} className="text-xs text-indigo-600 hover:underline mt-1">Change</button>
+              <div className="text-xs text-gray-400 mt-1">Payment failures, pauses and deletion warnings go to every owner and these contacts. They cannot be turned off.</div>
+            </div>
+            <div>
+              <div className="flex items-center gap-1.5 text-gray-500"><Download className="w-3.5 h-3.5" /> Export everything</div>
+              <div className="text-xs text-gray-500 mt-1">Leads, conversations and reports as files, from the Workspace settings.</div>
+              <Link href="/outreach/settings/workspace" className="text-xs text-indigo-600 hover:underline mt-1 inline-block">Open exports</Link>
+            </div>
+          </div>
         </Card>
 
         <Card title="Accounts connected over time">
@@ -277,10 +328,26 @@ function BillingInner() {
         )}
       </Card>
 
+      <Modal open={contactsOpen} onClose={() => setContactsOpen(false)} title="Also send billing emails to" size="md"
+        footer={<><Button variant="secondary" onClick={() => setContactsOpen(false)}>Cancel</Button><Button onClick={saveContacts} loading={busy === 'contacts'}>Save</Button></>}>
+        <div className="space-y-3 text-sm text-gray-700">
+          <p>Owners always get billing emails on their sign-in email. Add up to 5 more addresses, for example the person who entered the card.</p>
+          <ul className="space-y-1">
+            {contacts.map((c) => <li key={c} className="flex items-center justify-between gap-2 rounded-lg border border-gray-200 px-3 py-1.5"><span>{c}</span><button type="button" onClick={() => setContacts(contacts.filter((x) => x !== c))} aria-label={`Remove ${c}`} className="text-gray-400 hover:text-gray-700"><X className="w-4 h-4" /></button></li>)}
+            {!contacts.length && <li className="text-gray-400">No extra contacts yet.</li>}
+          </ul>
+          <div className="flex gap-2 items-start">
+            <div className="flex-1"><Input type="email" placeholder="finance@company.com" value={newContact} onChange={(e) => setNewContact(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addContact(); } }} /></div>
+            <Button variant="secondary" onClick={addContact} disabled={contacts.length >= 5}>Add</Button>
+          </div>
+          {contactsError && <ErrorBox message={contactsError} />}
+        </div>
+      </Modal>
+
       <Modal open={cancelOpen} onClose={() => setCancelOpen(false)} title="Cancel your subscription?" size="md"
         footer={<><Button variant="secondary" onClick={() => setCancelOpen(false)}>Keep my subscription</Button><Button variant="danger" onClick={cancel} loading={busy === 'cancel'} disabled={!reason}>Cancel subscription</Button></>}>
         <div className="space-y-4 text-sm text-gray-700">
-          <p>You keep full access until <strong>{longDate(b.current_period_end)}</strong>, the end of the period you paid for. After that, senders pause, nothing sends, and the workspace is read-only. Your data is kept for 90 days.</p>
+          <p>You keep full access until <strong>{longDate(b.current_period_end)}</strong>, the end of the period you paid for. After that, the connected accounts are disconnected (history kept) and the workspace is read-only for 60 days, then its data is deleted.</p>
           <p className="text-gray-500">There is no refund for the rest of the period. You can undo this any time before {longDate(b.current_period_end)}.</p>
           <fieldset>
             <legend className="font-medium text-gray-900 mb-2">What&apos;s the main reason?</legend>

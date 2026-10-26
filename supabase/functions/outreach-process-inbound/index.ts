@@ -12,6 +12,16 @@ serve("process-inbound", async (req) => {
     for (const ev of events) {
       await admin.from("outreach_inbound_events").update({ attempts: ev.attempts + 1 }).eq("id", ev.id);
       try {
+        // an event for a connector account we removed changes nothing (sender-lifecycle-PRD.md §5.3)
+        if (ev.unipile_account_id && ev.source !== "hosted_notify") {
+          const { data: gone } = await admin.from("outreach_senders").select("id").contains("unipile_account_id_history", [ev.unipile_account_id]).in("status", ["removed", "erased"]).limit(1);
+          const { data: live } = gone?.length ? await admin.from("outreach_senders").select("id").eq("unipile_account_id", ev.unipile_account_id).limit(1) : { data: [] as unknown[] };
+          if (gone?.length && !live?.length) {
+            await admin.from("outreach_inbound_events").update({ processed_at: new Date().toISOString(), error: "sender_removed" }).eq("id", ev.id);
+            processed++;
+            continue;
+          }
+        }
         switch (ev.source) {
           case "account_status": await handleAccountStatus(ev.payload); break;
           case "hosted_notify": await handleHostedNotify(ev.payload); break;

@@ -11,8 +11,9 @@ import { reasonText } from '@/lib/outreach/reasons';
 import { qk, useActions } from '@/lib/outreach/queries';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { Badge, Button, Card, EmptyState, Input, Select, StatusPill, Table, Td, Th, fmtDate, timeAgo } from '@/components/outreach/ui';
-import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, billingRefusalRemedy, copyText, disconnectedReasonText, healthTextClass, healthTone, isAbandonedSignIn, isBillingRefusal, isFuture, statusReasonText } from './helpers';
-import { cn, normalizeEmail } from '@/lib/utils';
+import { ACTION_LABELS, AUTH_METHOD_LABELS, COUNTRIES, HEALTH_KEYS, PROVIDER_LABELS, billingRefusalRemedy, copyText, isRemovedStatus, removedReasonText, healthTextClass, healthTone, isAbandonedSignIn, isBillingRefusal, isFuture, senderProfileUrl, statusReasonText } from './helpers';
+import { cn } from '@/lib/utils';
+import WhoseAccountCard, { holderText, useHolderView } from './WhoseAccountCard';
 import type { Client, Sender } from '@/lib/outreach/types';
 
 type Notify = (message: string, type?: 'success' | 'error') => void;
@@ -95,7 +96,8 @@ export function DisconnectedPanel({ sender, isManager, canWrite, notify }: { sen
   const [busy, setBusy] = useState<'redirect' | 'copy' | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [refused, setRefused] = useState<Refusal | null>(null);
-  if (sender.status !== 'disconnected') return null;
+  const holder = useHolderView(sender.id);
+  if (!isRemovedStatus(sender.status)) return null;
 
   /** "Reconnect" opens the sign-in here. "Copy" gives the same kind of link to send to the owner; it lasts an hour. */
   async function reconnect(mode: 'redirect' | 'copy') {
@@ -120,7 +122,7 @@ export function DisconnectedPanel({ sender, isManager, canWrite, notify }: { sen
     } finally { setBusy(null); }
   }
 
-  const reason = disconnectedReasonText(sender.status_reason);
+  const reason = removedReasonText(sender.removed_via, sender.status_reason);
   const plan = billing.data?.plan;
   // the last sign-in finished with no free account and there is still none: offer the way out before another attempt
   const stillFull = sender.status_reason === 'NO_FREE_ACCOUNT' && !!accountsMeter(billing.data?.accounts)?.full;
@@ -131,12 +133,12 @@ export function DisconnectedPanel({ sender, isManager, canWrite, notify }: { sen
       <div className="flex items-start gap-3">
         <Unplug className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
         <div className="min-w-0 flex-1 text-sm text-amber-900">
-          <div className="font-semibold">Disconnected{sender.disconnected_at ? ` since ${fmtDate(sender.disconnected_at, false)}` : ''}</div>
+          <div className="font-semibold">Removed{(sender.removed_at ?? sender.disconnected_at) ? ` on ${fmtDate(sender.removed_at ?? sender.disconnected_at, false)}` : ''}</div>
           {reason && <p className="mt-1">{reason}.</p>}
-          <p className="mt-1">The connected account was removed from this workspace. Its conversations and leads are kept; they carry on after you reconnect.</p>
+          <p className="mt-1">The account is unlinked and its stored sign-in deleted. Conversations, contact history and report numbers stay, read-only. Reconnecting brings the history, health and warm-up back; enrol leads again where you want this sender.</p>
           {isManager && canWrite ? (
             <>
-              <p className="mt-1">Sign in with the account this sender had; a different account is refused. Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
+              <p className="mt-1">Sign in with the account this sender had; a different account is refused. Not the person who signs in to it? Copy the link and send it to {holderText(holder.data, 'them')}.</p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <Button onClick={() => reconnect('redirect')} loading={busy === 'redirect'} disabled={!!busy}><ExternalLink className="w-4 h-4" /> Reconnect</Button>
                 <Button variant="secondary" onClick={() => reconnect('copy')} loading={busy === 'copy'} disabled={!!busy}><Copy className="w-4 h-4" /> Copy sign-in link</Button>
@@ -171,8 +173,9 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   const reconnectMethod = BROWSER_SIGNIN_ENABLED ? reconnectChoice : 'credentials';
   const [code, setCode] = useState('');
   const [showCode, setShowCode] = useState(false);
-  const serverForm = { display_name: sender.display_name ?? '', client_id: sender.client_id ?? '', owner_email: sender.owner_email ?? '' };
-  const serverFormKey = `${sender.id}|${serverForm.display_name}|${serverForm.client_id}|${serverForm.owner_email}`;
+  const holder = useHolderView(sender.id);
+  const serverForm = { display_name: sender.display_name ?? '', client_id: sender.client_id ?? '' };
+  const serverFormKey = `${sender.id}|${serverForm.display_name}|${serverForm.client_id}`;
   const [form, setForm] = useState(serverForm);
   const [formKey, setFormKey] = useState(serverFormKey);
   // Reset the draft when the server copy changes (different sender, or a save came back). Done during render, not in an effect.
@@ -243,7 +246,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   async function saveDetails() {
     setBusy('details');
     try {
-      await rpc('update_sender', { p_sender: sender.id, p_patch: { display_name: form.display_name.trim() || null, client_id: form.client_id || null, owner_email: normalizeEmail(form.owner_email) || null } });
+      await rpc('update_sender', { p_sender: sender.id, p_patch: { display_name: form.display_name.trim() || null, client_id: form.client_id || null } });
       notify('Sender details saved.'); invalidate();
     } catch (e) { notify(parseError(e).message, 'error'); }
     finally { setBusy(null); }
@@ -251,10 +254,10 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
 
   const needsRelogin = sender.status === 'credentials';
   // disconnected: the connected account is gone. Reconnect lives in the panel above the tabs; nothing here may assume a live account.
-  const isDisconnected = sender.status === 'disconnected';
+  const isDisconnected = isRemovedStatus(sender.status);
   // the sign-in finished, but the plan had no free account by then, so nothing was connected
   const noFreeAccount = sender.status_reason === 'NO_FREE_ACCOUNT';
-  const reasonWords = isDisconnected ? disconnectedReasonText(sender.status_reason) : statusReasonText(sender.status_reason);
+  const reasonWords = isDisconnected ? removedReasonText(sender.removed_via, sender.status_reason) : statusReasonText(sender.status_reason);
   // a first sign-in that never finished, or that the hosted page reported as failed: the card is highlighted like a re-login
   const signInFailed = isAbandonedSignIn(sender) || (sender.status === 'error' && !sender.unipile_account_id);
   const canReconnect = sender.status !== 'disabled' && !isDisconnected && (sender.status === 'connecting' || sender.status === 'error' || sender.auth_method === 'cookie');
@@ -267,7 +270,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
   const isWhatsApp = sender.provider === 'WHATSAPP';
   const maxLevel = isWhatsApp ? 4 : 5;
   const channelName = PROVIDER_LABELS[sender.provider];
-  const profileHref = isLinkedIn && sender.public_identifier ? `https://www.linkedin.com/in/${sender.public_identifier}` : isInstagram && sender.public_identifier ? `https://www.instagram.com/${sender.public_identifier.replace(/^@/, '')}/` : null;
+  const profileHref = isLinkedIn || isInstagram ? senderProfileUrl(sender.provider, sender.public_identifier) : null;
 
   return (
     <div className="space-y-6">
@@ -315,7 +318,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
                 : noFreeAccount ? `${statusReasonText(sender.status_reason)}.`
                 : signInFailed ? `${sender.status_reason === 'SIGN_IN_FAILED' || sender.status_reason === 'CREATION_FAIL' ? `${channelName} rejected the sign-in (wrong password, or a verification step was not finished).` : 'The sign-in page was closed or its link expired (links last 15 minutes).'} Nothing was connected: send a fresh link and the owner can try again.`
                 : sender.auth_method === 'cookie' ? 'Connected by cookie, so profile edits are locked. Have the owner sign in to unlock them.' : 'Use this if the account is stuck connecting or shows an error.'}</p>
-              <p className={cn('text-sm', urgent ? 'text-red-800' : 'text-gray-600')}>Not the owner? Copy the link and send it to {sender.owner_email ?? 'them'}.</p>
+              <p className={cn('text-sm', urgent ? 'text-red-800' : 'text-gray-600')}>Not the person who signs in to it? Copy the link and send it to {holderText(holder.data, 'them')}.</p>
               {isLinkedIn && BROWSER_SIGNIN_ENABLED && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
                   {RECONNECT_METHODS.map((m) => (
@@ -416,10 +419,12 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
               <option value="">No client</option>
               {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
-            <Input label="Owner email" type="email" value={form.owner_email} onChange={(e) => setForm({ ...form, owner_email: e.target.value })} onBlur={() => setForm((f) => ({ ...f, owner_email: normalizeEmail(f.owner_email) }))} disabled={!canManage} hint="Receives re-login reminders" />
+            <div className="text-sm"><div className="block text-sm font-medium text-gray-700 mb-1">Who signs in</div><div className="text-gray-900 py-2">{holderText(holder.data)}</div><div className="text-xs text-gray-500">Changed under Whose account below.</div></div>
           </div>
         </Card>
       </div>
+
+      <WhoseAccountCard sender={sender} canManage={canManage} notify={notify} />
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         <Card title="Upcoming actions" actions={<span className="text-xs text-gray-400">next 20 queued</span>}>

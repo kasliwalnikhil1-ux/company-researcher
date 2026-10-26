@@ -373,6 +373,12 @@ Also useful: stop contacting someone with `POST /leads/{id}/suppress`, blacklist
 
 Building and publishing sequences, connecting senders and changing caps are not in the API. Do those in the app or through the Claude connector.
 
+### Sequence results (people, counted once)
+
+`GET /reports/sequences` returns one row per sequence with results counted in **people**, the same numbers the Sequences list and the sequence page show (`docs/outreach/SEQUENCE-STATS.md`): `channels[]`, `progress {enrolled, live, done, pct_done}`, `contacted`, `invited`, `accepted` + `accepted_rate` (÷ invited) + `pending` + `accepted_early` + `accepted_split`, `replied` + `replied_rate` (÷ contacted) + `auto_replied`, `positive` + `positive_rate` (÷ replied) + `meetings`, `ops {queued, actions_sent, failed, failed_leads}` and `na` (a metric that does not apply, with the reason; never 0). Without `from` / `to` the row is **all time** (cached per sequence, never more than a minute behind); with dates it is the **cohort** of leads first contacted in that window and everything they did afterwards, up to today. `channel=linkedin|instagram|whatsapp|email` keeps the sequences that use a channel (numbers stay whole-sequence); `status=all` includes archived sequences. Rates are percentages with one decimal and `null` when there is nothing to divide by.
+
+`GET /sequences/{id}/stats` returns the same block as `funnel`, one `channels[]` entry per channel with only the stages that channel has (`seen` is "at least": read receipts can be off; email has none), `replied_other_channel` (replies on a channel the sequence has no step on), `seen_since`, and the per-step table, best / worst step, A/B tests and exits as before. `GET /sequences` rows carry the all-time block under `stats`; the top-level `live` stays until 2027-01-26 (use `stats.progress.live`), and `stats.ops.actions_sent` replaces the old `sent` count.
+
 ## For maintainers
 
 - Code: `supabase/functions/outreach-api/`. `index.ts` holds auth, rate limits, idempotency and error mapping. `dispatch.ts` holds `call(ctx, fn, args)`, the only way a route reaches the database. `routes_*.ts` hold one resource each.
@@ -380,3 +386,17 @@ Building and publishing sequences, connecting senders and changing caps are not 
 - Deploy with JWT verification off (`--no-verify-jwt`). An API key is not a JWT, and the function checks the key itself on every `/v1` route.
 - After changing routes, update `openapi.json` and run `deno run --allow-read supabase/functions/outreach-api/openapi_check.ts`. It fails when a route is missing from the spec or the other way round.
 - Reply hand-over: `outreach-send-reply` keeps its send logic inside its request handler and authenticates with `requireUser` (a member JWT). To switch on `POST /threads/{id}/reply`, move that logic into an exported function, for example `sendReply({ userId, role, clientIds, chatId, text, subject, attachments })` in `_shared/outreach/reply.ts`, call it from both functions, and have it check `can_reply` and client visibility against the role and scope passed in (the key's, not the member's).
+
+
+## Leads: status, connections per account, outbound vs inbound leads (094)
+
+`GET /v1/leads` now takes, besides the filters above: `tab` (`prospects` | `inbox` | `all`; the API defaults to `all` so existing integrations keep every lead), `include_hidden` (`true` = only hidden leads: newsletters, company pages, hidden by hand), `status` (comma list of `not_contacted, invited, connected, messaged, replied, interested, meeting, do_not_contact, bounced, wrote_to_us`), `connected_via` / `pending_with` (comma lists of sender ids), `not_connected`, `connection_source` (`our_invite` | `their_invite` | `pre_existing` | `unknown`), `channel_reachable` / `channel_used` / `channel_replied` (`LINKEDIN` | `INSTAGRAM` | `WHATSAPP` | `EMAIL`), `origin` (comma list of `import, manual, api, search, inbound`), `kind` (`person, company_page, automated`), `include_removed`, `sort` (`activity` default | `created` | `message`). Each row carries `status`, `status_channel`, `status_at`, `origin`, `kind`, `prospect_since`, `hidden_at`, `connected_via[]` (`sender_id`, `name`, `channel`, `source`), `pending_with[]`, `channels` (`reachable`, `used`, `replied`, `bounced`), `tags` (names) and `enrich_wait_reason`. The legacy exact-match filters (`email`, `public_identifier`, `source`, `updated_since`) keep the old row shape.
+
+| Route | What |
+|---|---|
+| `GET /v1/leads/totals` | the totals line for a tab + filters, counted in people: `people, contacted, invited_pending, connected, connected_via_our_invites, replied, interested, meetings, do_not_contact, bounced, wrote_to_us` |
+| `GET /v1/leads/by-account` | one row per account: `connected, via_our_invite, pending` (LinkedIn / Instagram only, null elsewhere), `contacted, replied`; a lead connected to two accounts counts once in each row |
+| `GET /v1/leads/{id}/relationships` | one row per account with any relationship to the lead: `state` (`connected, pending, pending_in, follows_us, disconnected, not_connected, chat, has_number, number_invalid, emailed, has_address, bounced, blocked, invalid`), `since`, `source`, `last_touch_at`, `last_reply_at`, `checked_at`, `consent`, `removed` (with `include_removed=true`) |
+| `POST /v1/leads/promote` `{lead_ids}` | Add to outbound: inbound leads move to the Outbound tab, hidden leads are unhidden (write class) |
+
+Status = the furthest point reached on any channel; "connected" exists only on LinkedIn and Instagram and records whether it came from our invite, their invite or was already there. Enrolling, listing or staging an inbound lead promotes them; replying does not.

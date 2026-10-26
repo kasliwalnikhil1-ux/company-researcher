@@ -14,7 +14,7 @@ import { LeadHeader } from '@/components/outreach/leads/detail/LeadHeader';
 import { LeadEditForm } from '@/components/outreach/leads/detail/LeadEditForm';
 import { LeadTagsEditor } from '@/components/outreach/leads/detail/LeadTagsEditor';
 import { LeadCustomFields } from '@/components/outreach/leads/detail/LeadCustomFields';
-import { LeadRelations } from '@/components/outreach/leads/detail/LeadRelations';
+import { LeadRelationshipsCard } from '@/components/outreach/leads/relationships';
 import { LeadEnrollments } from '@/components/outreach/leads/detail/LeadEnrollments';
 import { LeadChats, LeadRecentActions, LeadTasks, LeadTimeline } from '@/components/outreach/leads/detail/LeadActivity';
 import LeadTeamNotes from '@/components/outreach/leads/detail/LeadTeamNotes';
@@ -47,7 +47,7 @@ export default function LeadDetailPage() {
       : <ErrorBox message={err.message} />}</div>;
   }
   if (!lead.data) return <div>{back}<ErrorBox message="Lead not found." /></div>;
-  const { lead: l, tagIds, states, enrollments, chats, actions, tasks } = lead.data;
+  const { lead: l, tagIds, enrollments, chats, actions, tasks } = lead.data;
   if (workspace && l.workspace_id !== workspace.id) {
     return <div>{back}<div className="bg-white border border-gray-200 rounded-xl"><EmptyState icon={<UserX className="w-6 h-6" />} title="Lead belongs to another workspace" description="Switch workspace from the top bar to view it." action={<Link href="/outreach/leads"><Button variant="secondary">Back to leads</Button></Link>} /></div></div>;
   }
@@ -64,7 +64,7 @@ export default function LeadDetailPage() {
             <HeldNotice key={e.id} enrollment={e} sequenceName={sequences.data?.find((s) => s.id === e.sequence_id)?.name} canWrite={canWrite} toast={toast.show}
               onDone={() => { qc.invalidateQueries({ queryKey: qk.lead(l.id) }); qc.invalidateQueries({ queryKey: ik.queued(l.id) }); qc.invalidateQueries({ queryKey: ik.timeline(l.id) }); if (workspace) qc.invalidateQueries({ queryKey: ['outreach', workspace.id, 'tasks'] }); }} />
           ))}
-          <LeadRelations states={states} />
+          <LeadRelationshipsCard leadId={l.id} />
           <LeadEnrollments leadId={l.id} enrollments={enrollments} onEnroll={() => setEnrollOpen(true)} toast={toast.show} />
           <Card title="Next scheduled actions"><QueuedActions leadId={l.id} leadName={leadName(l)} toast={toast.show} /></Card>
           <LeadChats chats={chats} />

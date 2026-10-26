@@ -2,6 +2,26 @@
 
 Every figure comes from the same database functions the dashboard, the Reports page, the client portal and the public API call. For the same dates the numbers are identical everywhere, so **quote, never recompute**: no adding rows, no dividing, no "about 12%". If the user spots a mismatch with the app, check the dates and the timezone first.
 
+## Sequence results (people, counted once)
+
+`sequences_list`, `sequence_stats`, `report_sequences` and `report_sequence` describe a sequence in **people**, not actions (a lead messaged on three channels is one person): **Contacted → Accepted → Replied → Positive**, each with a rate.
+
+| Field | Means | Rate |
+|---|---|---|
+| `contacted` | people who got at least one LinkedIn invitation / message / InMail, Instagram follow / message, WhatsApp message or email from the sequence. Visits, likes, comments, endorsements don't count | — (÷ `progress.enrolled` in the tooltip) |
+| `invited` | people sent a LinkedIn connection request or an Instagram follow | — (the denominator) |
+| `accepted` · `pending` · `accepted_early` · `accepted_split` | invitations accepted / follows followed back, whenever that happened; `pending` = still open; `accepted_early` = more than half still pending, so say the rate will change; `accepted_split` = per channel | `accepted_rate` = accepted ÷ invited |
+| `replied` · `auto_replied` | people who wrote back **as a person**. A reply belongs to the sequence that contacted the lead **last** before it, counted once at the first human reply. `auto_replied` = only an out-of-office / automatic reply came: say it, never count it | `replied_rate` = replied ÷ contacted |
+| `positive` · `meetings` | the reply (or a later message within 30 days) classified interested / question, or a Meeting stage reached | `positive_rate` = positive ÷ replied |
+| `na` | `{accepted: reason}` when the sequence has no invitation / follow step; `{seen: reason}` for email-only. Say **NA** with the reason, never 0 |
+| `progress` · `ops` | `{enrolled, live, done, pct_done}` and `{queued, actions_sent, failed, failed_leads}`. `actions_sent` is the old "sent" (actions, not people) |
+
+**Periods are cohorts** (`period` on `report_sequences` / `report_sequence`; `sequences_list` / `sequence_stats` are all time): the leads **first contacted** in the window, and everything they did afterwards up to today. Say "leads first contacted 1–26 Oct, and what they did after", never "accepted in October". Rates are `null` when nothing was invited / contacted / replied: say "n/a", never "0%"; call a rate "early" when fewer than 20 people stand behind it.
+
+`sequence_stats` / `report_sequence` add `channels[]`: one block per channel with only the stages that channel has (LinkedIn: contacted → invited → accepted → messaged → seen → replied, plus `replied_of_accepted_rate` = "of people who accepted, N% replied"; Instagram: followed / followed back / DM'd; WhatsApp: contacted → seen → replied, `bounced` = not on WhatsApp; Email: contacted → replied, `bounced`). `seen` is **at least** (read receipts can be off; email has none), `seen_since` says from when receipts were kept. `replied_other_channel` = replies on a channel the sequence has no step on (still credited to it). `from_earlier_version: true` = the channel is gone from the current steps but had activity.
+
+The `summary` string of these tools is the sentence to quote: "113 contacted, 38 accepted of 113 invited (34%, 41 pending), 9 replied (8%), 4 positive".
+
 ## Periods
 
 `period`: `7d` (default for `report_overview` / `report_client`), `14d`, `30d` (default elsewhere), `90d`, or `{from:"2026-09-01", to:"2026-09-14"}`. Inclusive calendar days in the workspace timezone. `7d` = today and the 6 days before it = the dashboard's `last_7_days`. Max range 2 years.
@@ -24,8 +44,8 @@ Definitions worth knowing (full text: `metric_definitions`):
 | "Where do leads drop off?" | `report_funnel` (cohort: leads enrolled in the period followed through enrolled → invited → accepted → messaged → replied → interested → meeting → won, with median hours between stages) |
 | "Which message gets positive replies?" | `report_intents(group: "step" \| "variant" \| "sequence" \| "sender" \| "channel" \| "day")` |
 | "Show me those 14 interested replies" | `report_reply_threads(intent:"interested", sequence_id?, node_id?, variant_id?)` → `chat_id`s → `inbox_thread` |
-| "Which sequences / senders / clients carry the results?" | `report_sequences`, `report_senders`, `report_clients` |
-| "How is this sequence doing, step by step?" | `report_sequence` (steps, `best_step`, `worst_step` with 20+ sends, `ab_tests`, exits, live) · `sequence_stats` for the lifetime view |
+| "Which sequences carry the results?" / "How many people replied to X?" | `report_sequences` (people: contacted, accepted, replied, positive, per sequence; see "Sequence results" above), `report_senders`, `report_clients` |
+| "How is this sequence doing?" | `sequence_stats` (all time: people-level funnel, one block per channel, steps, A/B, exits) · `report_sequence` for a cohort period (steps, `best_step`, `worst_step` with 20+ sends, `ab_tests`, exits, live) |
 | "How is this sender doing?" | `report_sender` (totals, health trend, restrictions, failures in plain words) · `sender_insights` for advice |
 | "What does a reply cost us?" | `report_cost` (needs a monthly cost per sender; return only when deal values exist) |
 | "Email opens and bounces?" | `report_deliverability` |

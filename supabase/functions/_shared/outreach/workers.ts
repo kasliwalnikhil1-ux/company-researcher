@@ -2,7 +2,7 @@
 import { admin, log, rpc, emitEvent, localParts, zonedToUtc, randInt, rand, audit, hasFeature } from "./supabase.ts";
 import { unipile, unipileConfigured, UnipileError, distanceToRelation, invitationPending } from "./unipile.ts";
 import { decrypt, hmacSha256Hex } from "./crypto.ts";
-import { notifySender } from "./notify.ts";
+import { sendDueHolderEmails } from "./alerts.ts";
 import { classifyMessage, aiConfigured } from "./ai.ts";
 import { BOT_TEXT_RE } from "./ai_reply_rules.ts";
 import { _internal as inboundInternal } from "./inbound.ts";
@@ -37,32 +37,19 @@ export async function reconnectSender(sender: Row): Promise<{ ok: boolean; reaso
 }
 
 export async function runReconnect(): Promise<Row> {
-  // every channel gets the re-login reminders; only LinkedIn has the cookie (extension) retry path
-  const { data: senders } = await admin.from("outreach_senders").select("*").eq("status", "credentials").is("deleted_at", null);
-  const out: Row = { attempted: 0, notified: 0 };
+  // LinkedIn cookie (extension) senders are retried silently, hourly, up to 4 times; every other disconnected account gets
+  // its sign-in email through the holder path (sender-lifecycle-PRD v1.2 §5.8.2), which also sends the two reminders and
+  // respects mass-disconnect holds and suspended workspaces.
+  const { data: senders } = await admin.from("outreach_senders").select("*").eq("status", "credentials").eq("auth_method", "cookie").eq("provider", "LINKEDIN").is("deleted_at", null).lt("reconnect_attempts", 4);
+  const out: Row = { attempted: 0 };
   for (const s of senders ?? []) {
     const lastAt = s.last_reconnect_at ? new Date(s.last_reconnect_at).getTime() : 0;
-    if (s.auth_method === "cookie" && s.provider === "LINKEDIN") {
-      if ((s.reconnect_attempts ?? 0) < 4) {
-        if (Date.now() - lastAt < 3600_000) continue;
-        out.attempted++;
-        await reconnectSender(s);
-      } else if (!s.reconnect_notified_at || Date.now() - new Date(s.reconnect_notified_at).getTime() > 86400_000) {
-        if ((s.reconnect_reminders ?? 0) < 4) {
-          await notifySender(s.id, "reconnect_needed_manual", { attempts: s.reconnect_attempts });
-          await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: (s.reconnect_reminders ?? 0) + 1 }).eq("id", s.id);
-          out.notified++;
-        }
-      }
-    } else if (!s.reconnect_notified_at || (Date.now() - new Date(s.reconnect_notified_at).getTime() > 86400_000 && (s.reconnect_reminders ?? 0) < 3)) {
-      const { reloginUrl } = await import("./inbound.ts");
-      const link = await reloginUrl(s).catch(() => null);
-      await notifySender(s.id, "reconnect_needed", { link });
-      await admin.from("outreach_senders").update({ reconnect_notified_at: new Date().toISOString(), reconnect_reminders: (s.reconnect_reminders ?? 0) + 1 }).eq("id", s.id);
-      out.notified++;
-    }
+    if (Date.now() - lastAt < 3600_000) continue;
+    out.attempted++;
+    await reconnectSender(s);
   }
-  return out;
+  const emails = await sendDueHolderEmails();
+  return { ...out, notified: emails.first, reminders: emails.reminders };
 }
 
 // ---------------------------------------------------------------------------
@@ -103,8 +90,10 @@ async function upsertLeadsFromItems(job: Row, items: Row[], source: string): Pro
       if (row?.id && job.tag_ids?.length) await admin.from("outreach_lead_tags").upsert(job.tag_ids.map((t: string) => ({ lead_id: row.id, tag_id: t })), { onConflict: "lead_id,tag_id", ignoreDuplicates: true });
       if (row?.id && job.sender_id && it.network_distance) {
         const rel = distanceToRelation(it.network_distance);
-        if (rel === "first") { await admin.from("outreach_lead_sender_state").upsert({ lead_id: row.id, sender_id: job.sender_id, relation: "first" }, { onConflict: "lead_id,sender_id" }); }
-        else if (it.pending_invitation) { await admin.from("outreach_lead_sender_state").upsert({ lead_id: row.id, sender_id: job.sender_id, relation: "pending_out" }, { onConflict: "lead_id,sender_id" }); }
+        // 094: a connection found by an import with no invite on record is 'pre_existing' (the lss trigger derives it)
+        const checked = new Date().toISOString();
+        if (rel === "first") { await admin.from("outreach_lead_sender_state").upsert({ lead_id: row.id, sender_id: job.sender_id, relation: "first", relation_checked_at: checked }, { onConflict: "lead_id,sender_id" }); }
+        else if (it.pending_invitation) { await admin.from("outreach_lead_sender_state").upsert({ lead_id: row.id, sender_id: job.sender_id, relation: "pending_out", relation_checked_at: checked }, { onConflict: "lead_id,sender_id" }); }
       }
     } catch (e) { log({ fn: "imports", warn: String(e) }); }
   }
@@ -645,8 +634,9 @@ export async function runRelationsPoll(): Promise<Row> {
           await rpc("consume_budget", { p_sender: s.id, p_day: dayStr, p_type: "profile_view" });
           const rel = distanceToRelation(prof.network_distance);
           const now = new Date().toISOString();
-          if (rel === "first") await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: now, invite_detected_at: now, updated_at: now }).eq("lead_id", o.lead_id).eq("sender_id", s.id);
-          else if (!invitationPending(prof)) await admin.from("outreach_lead_sender_state").update({ relation: "none", invite_withdrawn_at: now, updated_at: now }).eq("lead_id", o.lead_id).eq("sender_id", s.id);
+          if (rel === "first") await admin.from("outreach_lead_sender_state").update({ relation: "first", invite_accepted_at: now, invite_detected_at: now, relation_checked_at: now, updated_at: now }).eq("lead_id", o.lead_id).eq("sender_id", s.id);
+          else if (!invitationPending(prof)) await admin.from("outreach_lead_sender_state").update({ relation: "none", invite_withdrawn_at: now, relation_checked_at: now, updated_at: now }).eq("lead_id", o.lead_id).eq("sender_id", s.id);
+          else await admin.from("outreach_lead_sender_state").update({ relation_checked_at: now }).eq("lead_id", o.lead_id).eq("sender_id", s.id);   // still pending: an observation all the same (094)
           await admin.from("outreach_leads").update({ last_profile_fetch_at: now, provider_id: prof.provider_id ?? l.provider_id }).eq("id", o.lead_id);
         } catch (e) { await rpc("release_budget", { p_sender: s.id, p_day: dayStr, p_type: "profile_view" }); log({ fn: "relations-poll", warn: String(e) }); }
       }
