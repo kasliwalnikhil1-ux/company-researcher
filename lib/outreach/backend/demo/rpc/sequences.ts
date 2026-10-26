@@ -1,6 +1,6 @@
 /**
  * Demo handlers: Sequences, versions, publishing, enrolment, enrollments, queued actions, A/B results, auto-enrol rules, tasks.
- * Owns: ab_results, complete_task, create_sequence, delete_auto_enroll_rule, discard_draft, enroll_leads, enroll_preview, enrollment_recover, exit_enrollment, failed_leads, move_to_latest, node_queued_actions, pause_enrollment, project_sequence, promote_variant, publish_impact, publish_sequence, rebalance_preview, render_context, reschedule_action, resume_enrollment, rule_match_count, save_auto_enroll_rule, save_draft, save_sequence, save_voice_clip, sender_today, sequence_summary, set_action_text, set_pool, set_sequence_status, skip_action, upsert_lead, version_usage
+ * Owns: ab_results, complete_task, create_sequence, delete_auto_enroll_rule, delete_sequence, discard_draft, enroll_leads, enroll_preview, enrollment_recover, exit_enrollment, failed_leads, move_to_latest, node_queued_actions, pause_enrollment, project_sequence, promote_variant, publish_impact, publish_sequence, rebalance_preview, render_context, reschedule_action, resume_enrollment, rule_match_count, save_auto_enroll_rule, save_draft, save_sequence, save_voice_clip, sender_today, sequence_summary, set_action_text, set_pool, set_sequence_status, skip_action, upsert_lead, version_usage
  *
  * Shapes follow the last migration that defines each outreach_<name> function (012, 011, 013, 026 …). Everything is
  * computed from the demo tables, so the list, the builder, the dashboard and the reports read the same numbers.
@@ -1143,6 +1143,20 @@ export const sequencesRpc = {
       store.update('outreach_sequences', s.id, { status: 'draft' });
     } else demoError('E_PAYLOAD_INVALID', 'unknown status');
     return { status: to, warnings };
+  },
+
+  // outreach_delete_sequence (104): any status, confirmed by the name; live leads exit first, then the cascade hook below
+  delete_sequence: (a, ctx) => {
+    const store = ctx.store;
+    const s = seqOr404(ctx, a.p_id);
+    const norm = (v: unknown) => String(v ?? '').trim().toLowerCase();
+    if (norm(a.p_confirm) !== norm(s.name)) demoError('E_PAYLOAD_INVALID', 'type the sequence name to confirm');
+    const leads = new Set(store.t('outreach_enrollments').filter((e) => e.sequence_id === s.id).map((e) => e.lead_id)).size;
+    let exited = 0;
+    for (const e of liveEnrollments(store, s.id)) { finish(store, e, 'exited_manual', 'sequence_deleted'); exited++; }
+    const removed = store.remove('outreach_sequences', (r) => r.id === s.id);
+    tableHooks.outreach_sequences?.afterWrite?.('delete', removed, store);
+    return { deleted: true, status: s.status, leads, exited };
   },
 
   skip_action: (a, ctx) => {

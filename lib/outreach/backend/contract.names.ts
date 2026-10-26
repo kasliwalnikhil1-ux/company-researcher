@@ -54,6 +54,7 @@ export const RPC_NAMES = [
   'create_workspace',
   'dashboard',
   'delete_auto_enroll_rule',
+  'delete_sequence',
   'delete_webhook',
   'discard_draft',
   'domains',

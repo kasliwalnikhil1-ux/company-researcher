@@ -10,7 +10,6 @@ import { useRouter } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Archive, ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, Copy, ExternalLink, FilePlus2, GitBranch, LayoutTemplate, MoreHorizontal, Plus, Search, Trash2, UserX, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { normalizeGraph } from '@/lib/outreach/graph';
@@ -23,6 +22,7 @@ import {
 import type { Sequence, SequenceStatus } from '@/lib/outreach/types';
 import { Avatar, Badge, Button, EmptyState, ErrorBox, Input, Modal, PageHeader, Select, Spinner, Table, Td, Th, timeAgo, useToast } from '@/components/outreach/ui';
 import { ConfirmModal } from '@/components/outreach/sequences/Modals';
+import { DeleteSequenceModal } from '@/components/outreach/sequences/DeleteSequenceModal';
 import { useFailedCounts } from '@/components/outreach/sequences/hooks';
 import FailedLeadsDrawer from '@/components/outreach/sequences/FailedLeadsDrawer';
 import TemplatePicker from '@/components/outreach/sequences/TemplatePicker';
@@ -49,7 +49,6 @@ function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequen
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const deletable = s.status === 'draft' || s.status === 'archived';
 
   // The table scrolls horizontally, so an absolutely positioned menu gets clipped by the
   // card. Render it in a portal and anchor it to the button in viewport coordinates.
@@ -96,7 +95,7 @@ function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequen
             <Link href={`/outreach/sequences/${s.id}?tab=results`} className={MENU_ITEM} role="menuitem" onClick={close}><GitBranch className="w-4 h-4 flex-shrink-0" /> Analytics</Link>
             {canManage && <button type="button" onClick={() => { close(); onDuplicate(); }} className={MENU_ITEM} role="menuitem"><Copy className="w-4 h-4 flex-shrink-0" /> Duplicate</button>}
             {canManage && s.status !== 'archived' && <button type="button" onClick={() => { close(); onArchive(); }} className={MENU_ITEM} role="menuitem"><Archive className="w-4 h-4 flex-shrink-0" /> Archive</button>}
-            {canManage && <button type="button" disabled={!deletable} title={deletable ? undefined : 'Only draft or archived sequences can be deleted'} onClick={() => { close(); onDelete(); }} className={cn(MENU_ITEM, 'hover:bg-red-50 text-red-600 disabled:opacity-40 disabled:hover:bg-transparent')} role="menuitem"><Trash2 className="w-4 h-4 flex-shrink-0" /> Delete</button>}
+            {canManage && <button type="button" onClick={() => { close(); onDelete(); }} className={cn(MENU_ITEM, 'hover:bg-red-50 text-red-600')} role="menuitem"><Trash2 className="w-4 h-4 flex-shrink-0" /> Delete</button>}
           </div>
         </>,
         document.body,
@@ -223,6 +222,7 @@ export default function SequencesPage() {
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<{ kind: 'archive' | 'delete'; s: Sequence } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -264,19 +264,35 @@ export default function SequencesPage() {
   };
 
   const runConfirm = async () => {
-    if (!confirm) return;
-    const { kind, s } = confirm;
+    if (confirm?.kind !== 'archive') return;
+    const { s } = confirm;
     setBusyId(s.id);
     try {
-      if (kind === 'archive') { await rpc('set_sequence_status', { p_id: s.id, p_status: 'archived' }); toast.show(`Archived “${s.name}”`); }
-      else {
-        const { error } = await db.from('outreach_sequences').delete().eq('id', s.id);
-        if (error) throw parseError(error);
-        toast.show(`Deleted “${s.name}”`);
-      }
+      await rpc('set_sequence_status', { p_id: s.id, p_status: 'archived' });
+      toast.show(`Archived “${s.name}”`);
       invalidate();
     } catch (e) { toast.show(parseError(e).message, 'error'); }
     finally { setBusyId(null); setConfirm(null); }
+  };
+
+  // Any status: leads still in it are taken out first (outreach_delete_sequence). A wrong name keeps the dialog open
+  // with the reason; a sequence someone else already deleted just leaves the list.
+  const runDelete = async (typedName: string) => {
+    if (confirm?.kind !== 'delete') return;
+    const { s } = confirm;
+    setBusyId(s.id);
+    setDeleteError(null);
+    try {
+      const res = await rpc<{ exited: number }>('delete_sequence', { p_id: s.id, p_confirm: typedName });
+      toast.show(res?.exited ? `Deleted “${s.name}” and took ${fmtInt(res.exited)} ${res.exited === 1 ? 'lead' : 'leads'} out of it` : `Deleted “${s.name}”`);
+      setConfirm(null);
+      invalidate();
+    } catch (e) {
+      const err = parseError(e);
+      if (err.code === 'E_NOT_FOUND') { toast.show(`“${s.name}” was already deleted`); setConfirm(null); invalidate(); }
+      else if (err.code === 'E_PAYLOAD_INVALID') { setDeleteError('The name you typed does not match. It may have just been renamed: close this and try again.'); invalidate(); }
+      else setDeleteError(err.message);
+    } finally { setBusyId(null); }
   };
 
   const chip = (active: boolean) => cn('px-2.5 py-1 text-xs font-medium rounded-full border transition-colors', active ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50');
@@ -414,8 +430,8 @@ export default function SequencesPage() {
 
       <ConfirmModal open={confirm?.kind === 'archive'} title="Archive sequence" confirmLabel="Archive" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
         body={<p>Archiving “{confirm?.s.name}” takes all {statsMap[confirm?.s.id ?? '']?.progress.live ?? 0} leads currently in it out of the sequence and stops sending. The steps and history are kept.</p>} />
-      <ConfirmModal open={confirm?.kind === 'delete'} title="Delete sequence" confirmLabel="Delete permanently" danger busy={!!busyId} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-        body={<p>This permanently deletes “{confirm?.s.name}”, its versions, its step statistics and the history of every lead that went through it. This cannot be undone.</p>} />
+      <DeleteSequenceModal sequence={confirm?.kind === 'delete' ? confirm.s : null} liveLeads={confirm?.kind === 'delete' ? statsMap[confirm.s.id]?.progress.live : undefined}
+        busy={!!busyId} error={deleteError} onClose={() => { setConfirm(null); setDeleteError(null); }} onConfirm={runDelete} />
       <WhyNotSendingDialog open={!!whyFor} onClose={() => setWhyFor(null)} sequenceId={whyFor} />
       <FailedLeadsDrawer open={!!failedFor} onClose={() => setFailedFor(null)} sequenceId={failedFor?.id ?? ''} nodeLabel={undefined} graph={failedFor?.graph ?? null} canWrite={canWrite} />
       {toast.node}
