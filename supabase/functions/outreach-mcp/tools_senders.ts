@@ -73,7 +73,7 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "sender_reconnect_link", title: "Sign-in link for a sender", cls: "write", minRole: "manager",
-    description: "A sign-in link for the owner of a sender that is signed out (`credentials`, `error`) or `disconnected` (its connected account was removed: trial ended, plan has fewer accounts, billing, or a teammate disconnected it). Give the link to the account owner; they sign in and the same sender carries on with its conversations and leads. A disconnected sender needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise: an owner fixes that on the Billing page) and must be reconnected with the SAME account. The link works for about an hour (7 days for a signed-out sender).",
+    description: "A sign-in link for the owner of a sender that is signed out (`credentials`, `error`) or `disconnected` (its connected account was removed: trial ended, plan has fewer accounts, billing, or a teammate disconnected it). Give the link to the account owner; they sign in and the same sender carries on with its conversations and leads. A disconnected sender needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise: an owner fixes that on the Billing page) and must be reconnected with the SAME account. The link works for about an hour.",
     input: { sender_id: z.string() },
   }, async (a) => {
     const s = unwrap<Row | null>(await ctx.user.from("outreach_senders").select("id, display_name, provider, status, status_reason").eq("id", a.sender_id).is("deleted_at", null).maybeSingle());
@@ -82,7 +82,7 @@ export function registerSenders(server: McpServer, ctx: Ctx): void {
     if (s.status === "disabled") throw new McpError("E_SENDER_NOT_OK", "This sender is disabled. A manager re-enables it in the app first.");
     const r = await callFn<Row>(ctx, "sender-manage", { sender_id: s.id, action: "reconnect_link", mode: "copy" });
     return { sender: s.display_name, provider: s.provider, status: s.status, reason: s.status_reason ?? undefined, link: r.link,
-      note: s.status === "disconnected" ? "Valid for about an hour. The owner must sign in with the same account this sender had; a different account is refused." : "Valid for 7 days. Send it to the account owner." };
+      note: s.status === "disconnected" ? "Valid for about an hour. The owner must sign in with the same account this sender had; a different account is refused." : "Valid for about an hour. Send it to the account owner now." };
   });
 
   tool(server, ctx, {

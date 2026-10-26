@@ -393,13 +393,14 @@ async function accountExistsOnDsn(accountId: string): Promise<boolean> {
  * to a `create` link bound to the same sender row via `name`, so the hosted-auth notify re-binds the new
  * account id and the sender keeps its chats, lead state and enrollments.
  */
-/** Lifetime of a hosted sign-in link. It is created when the owner opens it (outreach-relogin, or "Sign in now"). */
+/** Lifetime of a hosted sign-in link ("Sign in now" / "Copy sign-in link" on the sender page, or opening an emailed outreach-relogin URL). */
 export const RECONNECT_LINK_TTL_MIN = 60;
-/** Lifetime of the re-login link that is emailed or copied. The emails and the sender page say "7 days". */
+/** Lifetime of the re-login link that is emailed. The emails say "7 days". */
 export const RELOGIN_URL_TTL_DAYS = 7;
 
-/** Durable re-login link (hosted-auth docs, "Reconnecting an account"): it points at our own outreach-relogin endpoint, which
- *  creates a fresh hosted sign-in link when it is opened and redirects to it, so the email never carries an expired link. */
+/** Durable re-login link for emails (hosted-auth docs, "Reconnecting an account"): it points at our own outreach-relogin endpoint,
+ *  which creates a fresh hosted sign-in link when it is opened and redirects to it, so the email never carries an expired link.
+ *  The sender page does not use it: there, Copy sign-in link returns the hosted link itself (reconnectLink). */
 export async function reloginUrl(sender: Sender, method?: "credentials" | "browser"): Promise<string> {
   const { FUNCTIONS_BASE } = await import("./supabase.ts");
   const { reloginToken } = await import("./crypto.ts");

@@ -211,8 +211,8 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
     finally { setBusy(null); }
   }
 
-  /** "Sign in now" opens a fresh hosted sign-in link here. "Copy" gives the owner a re-login link that lasts 7 days and creates
-   *  the hosted link only when they open it. One copied link per method choice. */
+  /** "Sign in now" opens a fresh hosted sign-in link here. "Copy" gives the owner the same kind of hosted link (as the new-sender
+   *  page does); it lasts an hour. One copied link per method choice. */
   async function reconnect(mode: 'redirect' | 'copy') {
     setBusy(`reconnect_${mode}`); setRefused(null);
     try {
@@ -230,7 +230,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
         setReloginLink(link);
       }
       const ok = await copyText(link);
-      notify(ok ? 'Link copied. It works for 7 days.' : 'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
+      notify(ok ? 'Link copied. It works for 1 hour.' : 'Could not copy automatically. Copy the link below instead.', ok ? 'success' : 'error');
     } catch (e) {
       const err = parseError(e);
       // no free account on the plan, or the plan is not active: shown in the card with the way out
@@ -278,7 +278,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
         <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 text-blue-800 text-sm border border-blue-200"><CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>The sign-in finished. The account is being attached to this sender; this page updates within a minute.</span></div>
       )}
       {connected === '0' && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-800 text-sm border border-red-200"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login did not complete. {isDisconnected ? (canManage ? 'Use Reconnect above to try again.' : 'Ask a manager to reconnect it.') : canManage ? 'Create a fresh sign-in link below (copied links work for 7 days) or disable this sender.' : 'Ask a manager to generate a fresh link.'}</span></div>
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-red-50 text-red-800 text-sm border border-red-200"><XCircle className="w-4 h-4 mt-0.5 flex-shrink-0" /><span>Hosted login did not complete. {isDisconnected ? (canManage ? 'Use Reconnect above to try again.' : 'Ask a manager to reconnect it.') : canManage ? 'Create a fresh sign-in link below (links work for 1 hour) or disable this sender.' : 'Ask a manager to generate a fresh link.'}</span></div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -335,7 +335,7 @@ export default function SenderOverview({ sender, clients, isManager, canWrite, c
               {refused && <RefusalNote refused={refused} workspaceId={sender.workspace_id} className="mt-3" />}
               {reloginLink && (
                 <div className="mt-3">
-                  <div className="text-xs text-gray-600 mb-1">Sign-in link (works for 7 days)</div>
+                  <div className="text-xs text-gray-600 mb-1">Sign-in link (works for 1 hour)</div>
                   <input readOnly value={reloginLink} onFocus={(e) => e.currentTarget.select()} aria-label="Sign-in link" className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-gray-300 bg-white text-gray-700" />
                 </div>
               )}

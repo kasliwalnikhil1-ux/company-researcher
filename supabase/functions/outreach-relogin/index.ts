@@ -1,7 +1,7 @@
 // Re-login link target (hosted-auth docs, "Reconnecting an account with Hosted Auth Wizard"). Public: deploy with --no-verify-jwt.
 //   GET ?s=<sender id>&e=<expiry, unix s>&m=<credentials|browser, optional>&t=<token>
-// The re-login email (and "Copy sign-in link" on the sender page) carries this URL instead of a hosted sign-in link, because
-// hosted links must stay short-lived. Opening it creates a fresh hosted link for the sender and redirects there; it is safe to
+// The re-login email carries this URL instead of a hosted sign-in link, because hosted links must stay short-lived (the sender
+// page's "Copy sign-in link" hands out the hosted link itself). Opening it creates a fresh hosted link for the sender and redirects there; it is safe to
 // open more than once (mail scanners open every link): nothing changes until the owner actually signs in.
 // The token is HMAC-SHA256(OUTREACH_CRON_SECRET, "relogin:<sender>:<expiry>:<method>") (crypto.ts), valid RELOGIN_URL_TTL_DAYS.
 // Invalid / expired link, a sender that is already connected or disabled, or a failure → redirect to the sender page, which

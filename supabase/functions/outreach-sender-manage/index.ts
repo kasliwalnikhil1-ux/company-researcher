@@ -6,7 +6,7 @@ import { admin, json, serve, requireUser, membership, requireRole, readJson, Htt
 import { disconnectSender } from "../_shared/outreach/disconnect.ts";
 import { encrypt } from "../_shared/outreach/crypto.ts";
 import { unipile, unipileConfigured } from "../_shared/outreach/unipile.ts";
-import { reconnectLink, reloginUrl, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames, SIGN_IN_INCOMPLETE } from "../_shared/outreach/inbound.ts";
+import { reconnectLink, syncOwnProfile, applyOnboardingGate, backfillChats, resolveChatNames, SIGN_IN_INCOMPLETE } from "../_shared/outreach/inbound.ts";
 import { backfillChatPictures } from "../_shared/outreach/avatars.ts";
 import { healthForSender } from "../_shared/outreach/health.ts";
 import { planSender } from "../_shared/outreach/planner.ts";
@@ -31,17 +31,14 @@ serve("sender-manage", async (req) => {
     case "reconnect_link": {
       if (!unipileConfigured()) throw new HttpError(503, "E_NOT_CONFIGURED", "Account connection is not configured on this deployment");
       const method = body.connect_method === "browser" || body.connect_method === "credentials" ? body.connect_method : undefined;
-      // copy = the durable re-login URL for the owner (a fresh hosted link is made when they open it); otherwise the hosted link itself ("Sign in now")
-      // a disconnected sender has no account to re-login to: its link is a fresh sign-in bound to this sender, valid for an hour,
-      // and it needs an active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise)
-      if (body.mode === "copy" && s.status !== "disconnected") {
-        const relogin_url = await reloginUrl(s, method);
-        await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, { mode: "copy", ...(method ? { connect_method: method } : {}) }, "user");
-        return json({ link: relogin_url, relogin_url });
-      }
+      // "Sign in now" and "Copy sign-in link" both return the hosted sign-in link itself (the same kind of link the new-sender
+      // page gives, on the white-label auth domain), valid RECONNECT_LINK_TTL_MIN minutes. The durable outreach-relogin URL
+      // (reloginUrl) is only for emails, where a link may be opened days later or by a mail scanner.
+      // a disconnected sender has no account to re-login to: its link is a fresh sign-in bound to this sender, and it needs an
+      // active plan with a free account (E_ACCOUNT_LIMIT / E_PLAN_SUSPENDED otherwise)
       const link = await reconnectLink(s, method);
-      await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, method ? { connect_method: method } : null, "user");
-      return json({ link });
+      await audit(s.workspace_id, "sender.reconnect_link", "sender", s.id, { ...(body.mode === "copy" ? { mode: "copy" } : {}), ...(method ? { connect_method: method } : {}) }, "user");
+      return json({ link, ...(body.mode === "copy" ? { relogin_url: link } : {}) });
     }
     case "disconnect": {
       // The connected account is removed on the connector side (it stops counting towards the plan); conversations, relations and
