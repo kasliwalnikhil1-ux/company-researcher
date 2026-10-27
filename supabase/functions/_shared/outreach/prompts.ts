@@ -42,7 +42,7 @@ Warnings (non-blocking) to look for: W_PITCH_FIRST_TOUCH (selling in the first m
 Errors (blocking): E_UNSAFE_CLAIM (impersonation, deceptive or prohibited content). Keep messages concise and specific to node ids.
 Emails MUST contain {{unsubscribe_link}} (anti-spam law and the app's own check require it). Never flag the unsubscribe link, an opt-out line or {{sender.signature}} as a link, pitch or problem, and never suggest removing them.`;
 
-export const WEEKLY_REPORT_SYSTEM = `You write a concise weekly performance report for one LinkedIn sender in markdown (≤ 250 words). Cover: volume vs caps, acceptance and reply rates, health score movement, notable rejections or disconnects, and 2-3 concrete recommendations. Be factual; use the numbers given.`;
+export const WEEKLY_REPORT_SYSTEM = `You write a concise weekly performance report for one LinkedIn sender in markdown (≤ 250 words). Cover: volume vs caps, acceptance and reply rates, health score movement, notable rejections or disconnects, and 2-3 concrete recommendations. Be factual; use the numbers given. Write any date the way people read it, like "27 Oct 2026", never "2026-10-27" or a raw timestamp.`;
 
 export const REPLY_DRAFT_SYSTEM = `You draft replies to inbound LinkedIn / email messages on behalf of a sender (a real person whose account it is).
 Rules:

@@ -13,7 +13,7 @@ import { unipile, UnipileError } from "./unipile.ts";
 import type { ExecResult } from "./execute.ts";
 import { encodeProfileEdit, toFormData, describeParts, sectionsForGroups, unwrittenFieldsOf, fidelityOf, ProfileSerialiserError, type ProfilePayload, type FieldGroup } from "./profile_serialiser.ts";
 import { tomorrowMorning } from "./enrich.ts";
-import { layout, button, esc, workspaceBranding, emailConfigured, type Branding } from "./notify.ts";
+import { layout, button, esc, emailDate, workspaceBranding, emailConfigured, type Branding } from "./notify.ts";
 import { sendHolderEmail } from "./email.ts";
 
 type Row = Record<string, any>;
@@ -347,7 +347,7 @@ export async function notifyOwnerOfChange(change: Row): Promise<{ recipients: st
   const subject = change.status === "failed" ? `A change to your LinkedIn profile failed` : `Your LinkedIn profile was updated (${(change.field_groups ?? []).map((g: string) => GROUP_LABEL[g] ?? g).join(", ")})`;
   void branding;
   const r = await sendHolderEmail({ sender_id: sender.id, type: "profile_change_applied", subject, width: 640,
-    body: `<p>${esc(sender.display_name ?? "Your LinkedIn profile")} was changed by ${who} on ${esc(new Date(change.applied_at ?? Date.now()).toUTCString())}.</p>${statusLine}${diffTable(change, (preRow?.data as ProfileDoc) ?? null)}` +
+    body: `<p>${esc(sender.display_name ?? "Your LinkedIn profile")} was changed by ${who} on ${esc(emailDate(change.applied_at ?? new Date().toISOString(), { time: true, tz: sender.timezone }))}.</p>${statusLine}${diffTable(change, (preRow?.data as ProfileDoc) ?? null)}` +
       (link ? `<p style="font-size:12px;color:#666;margin-top:14px">The revert link works for 30 days and needs no login. Fields LinkedIn does not report back (photo settings, custom link) are restored to the last value written through the platform.</p>` : "") +
       `<p style="font-size:12px;color:#666;margin-top:14px">You receive this message for every change made to your profile through the platform. It cannot be switched off.</p>`,
     action: link ? { label: "Revert this change", url: link } : null, idempotency_key: `profile_change_applied:${change.id}:${change.status}` });

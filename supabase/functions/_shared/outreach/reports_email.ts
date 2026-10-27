@@ -2,7 +2,7 @@
 // Every number printed here comes from a report RPC (outreach_report_*, outreach_sender_insights, outreach_dashboard):
 // nothing is counted or re-computed in TypeScript apart from the "vs previous period" difference of two RPC numbers.
 // The builders return the BODY only; notify.ts wraps it in the branded layout.
-import { esc, accentOf, button, type Branding } from "./notify.ts";
+import { esc, accentOf, button, emailDate, type Branding } from "./notify.ts";
 
 type Row = Record<string, any>;
 
@@ -54,7 +54,7 @@ function metricsTable(metrics: MetricRow[], totals: Row, previous?: Row | null, 
 
 function periodLine(period: Row | undefined | null): string {
   if (!period?.from) return "";
-  return `<p style="color:#666;font-size:13px;margin:0 0 12px">${esc(period.from)} to ${esc(period.to)}${period.timezone ? ` (${esc(period.timezone)})` : ""}${period.previous_from ? `, compared with ${esc(period.previous_from)} to ${esc(period.previous_to)}` : ""}</p>`;
+  return `<p style="color:#666;font-size:13px;margin:0 0 12px">${esc(emailDate(period.from))} to ${esc(emailDate(period.to))}${period.timezone ? ` (${esc(period.timezone)})` : ""}${period.previous_from ? `, compared with ${esc(emailDate(period.previous_from))} to ${esc(emailDate(period.previous_to))}` : ""}</p>`;
 }
 
 const SEVERITY: Record<string, { label: string; colour: string }> = {

@@ -26,6 +26,23 @@ export function esc(v: unknown): string {
   return String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/**
+ * A timestamp as people read it in an email: "28 Oct 2026" or, with time, "28 Oct 2026, 21:20 UTC" (in `tz`).
+ * Anything that is not a date (e.g. "the next health check") is returned as it is.
+ */
+export function emailDate(v: unknown, opts: { time?: boolean; tz?: string | null } = {}): string {
+  const d = new Date(String(v ?? ""));
+  if (v == null || v === "" || Number.isNaN(d.getTime())) return String(v ?? "");
+  const tz = opts.tz || "UTC";
+  const fmt = (timeZone: string) => {
+    const date = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone });
+    if (!opts.time) return date;
+    const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone });
+    return `${date}, ${time} ${timeZone === "UTC" ? "UTC" : `(${timeZone.replace(/_/g, " ")})`}`;
+  };
+  try { return fmt(tz); } catch { return fmt("UTC"); }
+}
+
 /** The workspace's branding plus its name. Never throws. */
 export async function workspaceBranding(workspaceId: string | null | undefined): Promise<Branding> {
   if (!workspaceId) return {};
@@ -213,7 +230,7 @@ export async function ownerDisconnectFooter(senderId: string, branding: Branding
  * the sender's alert recipients on the platform domain.
  */
 export async function notifySender(senderId: string, kind: NotifyKind, extra: Record<string, unknown> = {}): Promise<void> {
-  const { data: s } = await admin.from("outreach_senders").select("id, workspace_id, client_id, display_name, status, provider, unipile_account_id, alert_emails, auth_method").eq("id", senderId).maybeSingle();
+  const { data: s } = await admin.from("outreach_senders").select("id, workspace_id, client_id, display_name, status, provider, unipile_account_id, alert_emails, auth_method, timezone").eq("id", senderId).maybeSingle();
   if (!s) return;
   const branding = await workspaceBranding(s.workspace_id);
   const name = esc(s.display_name ?? "your account");
@@ -239,7 +256,7 @@ export async function notifySender(senderId: string, kind: NotifyKind, extra: Re
   switch (kind) {
     case "sender_paused":
       type = "sender_paused"; subject = `${plainName} paused: ${extra.reason ?? "safety"}`; idem = `sender_paused:${s.id}:${day}:${String(extra.reason ?? "")}`;
-      html = layout(`${name} has been paused`, `<p>Reason: <b>${esc(extra.reason ?? "health score below 50")}</b>.</p><p>Paused until ${esc(extra.until ?? "the next health check")}. Nothing will be sent from this sender in the meantime.</p><p><a href="${senderUrl}">Review sender health</a></p>`, branding);
+      html = layout(`${name} has been paused`, `<p>Reason: <b>${esc(extra.reason ?? "health score below 50")}</b>.</p><p>Paused until ${esc(extra.until ? emailDate(extra.until, { time: true, tz: s.timezone }) : "the next health check")}. Nothing will be sent from this sender in the meantime.</p><p><a href="${senderUrl}">Review sender health</a></p>`, branding);
       break;
     case "sender_error":
       type = "sender_error"; subject = `${plainName} is in error state`; idem = `sender_error:${s.id}:${day}`;

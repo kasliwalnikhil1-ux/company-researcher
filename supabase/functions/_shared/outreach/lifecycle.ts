@@ -7,7 +7,7 @@
 import { admin, log, rpc, flag, audit, emitEvent, WEB_ORIGIN } from "./supabase.ts";
 import { deleteConnectorAccount, processAccountDeletions } from "./disconnect.ts";
 import { unipile, unipileConfigured, UnipileError } from "./unipile.ts";
-import { layout, button, esc, workspaceBranding, brandName, ownerLink, ownerLinkPageUrl, ownerDisconnectFooter } from "./notify.ts";
+import { layout, button, esc, emailDate, workspaceBranding, brandName, ownerLink, ownerLinkPageUrl, ownerDisconnectFooter } from "./notify.ts";
 import { sendHolderEmail, sendTeamEmail, sendEmail as queueEmail } from "./email.ts";
 export { ownerLink, ownerLinkPageUrl, ownerDisconnectFooter };
 
@@ -112,7 +112,7 @@ export async function notifyEraseScheduled(senderId: string, at: string): Promis
   if (!s) return;
   const branding = await workspaceBranding(s.workspace_id);
   await sendHolderEmail({ sender_id: s.id, type: "sender_erase_notice", subject: `Conversations of ${String(s.display_name ?? "your account")} will be deleted`,
-    body: `<p>${esc(brandName(branding))} scheduled the deletion of every conversation and personal record of <b>${esc(s.display_name ?? "")}</b> for ${esc(new Date(at).toUTCString())}. Report numbers stay as counts only.</p><p>After that time it cannot be undone.</p>`,
+    body: `<p>${esc(brandName(branding))} scheduled the deletion of every conversation and personal record of <b>${esc(s.display_name ?? "")}</b> for ${esc(emailDate(at, { time: true }))}. Report numbers stay as counts only.</p><p>After that time it cannot be undone.</p>`,
     action: null, idempotency_key: `sender_erase_notice:${s.id}:${at}` });
 }
 

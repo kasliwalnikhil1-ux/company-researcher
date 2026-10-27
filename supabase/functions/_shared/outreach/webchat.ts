@@ -15,7 +15,7 @@
 import { admin, FUNCTIONS_BASE, log, rpc, SERVICE_ROLE_KEY, WEB_ORIGIN } from "./supabase.ts";
 import { hmacSha256Hex } from "./crypto.ts";
 import { unipile } from "./unipile.ts";
-import { brandName, esc, layout, sendEmail, workspaceBranding } from "./notify.ts";
+import { brandName, emailDate, esc, layout, sendEmail, workspaceBranding } from "./notify.ts";
 import { AI_BUSY_MESSAGE, llmCallDetailed, resolveLlm, geminiFetch, anthropicStreamFetch, logAiCall, type LlmConfig } from "./llm.ts";
 
 // ---------------------------------------------------------------------------
@@ -147,7 +147,7 @@ export async function resumeLink(inboxId: string, chatId: string, visitorId: str
 export function digestHtml(o: { brand: string; visitorName: string | null; messages: DueDigest["messages"]; resumeUrl: string; unsubscribeUrl: string; branding: Record<string, unknown> }): string {
   const rows = o.messages.map((m) => `
     <tr><td style="padding:10px 0;border-bottom:1px solid #eee">
-      <div style="font-size:12px;color:#666;margin-bottom:4px">${esc(m.sender_name ?? (m.sender_type === "bot" ? o.brand : "Team"))} · ${esc(new Date(m.sent_at).toUTCString().replace(/:\d\d GMT$/, " UTC"))}</div>
+      <div style="font-size:12px;color:#666;margin-bottom:4px">${esc(m.sender_name ?? (m.sender_type === "bot" ? o.brand : "Team"))} · ${esc(emailDate(m.sent_at, { time: true }))}</div>
       <div style="font-size:15px;line-height:1.5;white-space:pre-wrap">${esc(m.text)}</div>
     </td></tr>`).join("");
   const body = `
@@ -220,7 +220,7 @@ export async function sendTranscript(chatId: string, visitorId: string, kind: "t
   if (!t?.email) return false;
   const branding = await workspaceBranding(t.workspace_id);
   const brand = t.brand || brandName(branding);
-  const rows = (t.messages as any[]).map((m) => `<tr><td style="padding:8px 0;border-bottom:1px solid #eee"><div style="font-size:12px;color:#666">${esc(m.sender_type === "visitor" ? (t.visitor_name ?? "You") : (m.sender_name ?? brand))} · ${esc(new Date(m.sent_at).toUTCString())}</div><div style="white-space:pre-wrap">${esc(m.text)}</div></td></tr>`).join("");
+  const rows = (t.messages as any[]).map((m) => `<tr><td style="padding:8px 0;border-bottom:1px solid #eee"><div style="font-size:12px;color:#666">${esc(m.sender_type === "visitor" ? (t.visitor_name ?? "You") : (m.sender_name ?? brand))} · ${esc(emailDate(m.sent_at, { time: true }))}</div><div style="white-space:pre-wrap">${esc(m.text)}</div></td></tr>`).join("");
   const html = layout(`Your conversation with ${brand}`, `<p>Here is a copy of your conversation with ${esc(brand)}.</p><table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse">${rows}</table>`, branding as any, { audience: "client" });
   const text = (t.messages as any[]).map((m) => `${m.sender_type === "visitor" ? "You" : (m.sender_name ?? brand)}: ${m.text}`).join("\n");
   let ok = false, transport = "none", error: string | null = null;
