@@ -846,30 +846,44 @@ export function formatOnboardingCompanySummary(data: OnboardingDataForSummary | 
  */
 export function normalizeLinkedInUrl(input: string): string {
   if (!input || typeof input !== 'string') return '';
-  
+
   const trimmed = input.trim();
   if (!trimmed) return '';
-  
-  // If it already starts with http, return as-is (already complete)
+
+  // A complete URL: only put it in the canonical www.linkedin.com form (regional hosts, tracking params)
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-    return trimmed;
+    return canonicalLinkedInUrl(trimmed);
   }
-  
+
   // Remove leading slashes
   let path = trimmed.replace(/^\/+/, '');
-  
+
   // If it looks like a LinkedIn path (in/..., company/..., school/..., etc.)
   if (/^(in|company|school|showcase|groups)\//.test(path)) {
     return `https://www.linkedin.com/${path}`;
   }
-  
+
   // If it's www.linkedin.com/... without protocol
-  if (path.startsWith('www.linkedin.com') || path.startsWith('linkedin.com')) {
-    return `https://${path}`;
+  if (/^([a-z]{2,3}\.)?(www\.)?linkedin\.com/i.test(path)) {
+    return canonicalLinkedInUrl(`https://${path}`);
   }
-  
+
   // Assume it's a personal profile username
   return `https://www.linkedin.com/in/${path}`;
+}
+
+/**
+ * The one form every LinkedIn URL is stored and opened in: `https://www.linkedin.com/<path>`.
+ * Regional hosts (ae.linkedin.com, in.linkedin.com, uk.linkedin.com…) are the same profile and are replaced by www;
+ * the query string, fragment and trailing slash are dropped. Anything that is not a LinkedIn URL comes back unchanged
+ * (trimmed). Mirrors `crm_linkedin_url()` in migrations/crm/008_contact_links.sql.
+ */
+export function canonicalLinkedInUrl(input: string): string {
+  const t = (input ?? '').trim();
+  const m = /^(?:https?:\/\/)?(?:[a-z]{2,3}\.)?(?:www\.)?linkedin\.com\/(.*)$/i.exec(t);
+  if (!m) return t;
+  const path = m[1].split('?')[0].split('#')[0].replace(/\/+$/, '');
+  return `https://www.linkedin.com/${path}`;
 }
 
 /**

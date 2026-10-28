@@ -67,7 +67,12 @@ export default function CompanyPage() {
             <Badge tone="indigo">{c.icp_segment ?? 'unsegmented'}</Badge><Badge tone="gray">via {c.source_channel ?? '?'}</Badge>
           </div>
           <CompanyAboutBlock about={c.about} className="mt-1.5 max-w-3xl" />
-          {c.notes && <p className="mt-2 text-sm text-gray-700 whitespace-pre-wrap max-w-3xl bg-amber-50/60 border border-amber-100 rounded-md px-3 py-2">{c.notes}</p>}
+          {c.notes && (
+            <div className="mt-2 max-w-3xl bg-amber-50/60 border border-amber-100 rounded-md px-3 py-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-amber-700 mb-0.5">Notes</div>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{c.notes}</p>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="secondary" onClick={() => setActivityFor(null)}><MessageSquarePlus className="w-3.5 h-3.5" /> Log activity</Button>

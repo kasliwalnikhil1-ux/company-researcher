@@ -11,6 +11,7 @@ import { TimezonePicker } from '@/components/crm/TimezonePicker';
 import { convertWallClock, tzOffsetLabel, tzShort } from '@/lib/crm/timezones';
 import { inviteDescription, inviteTitle, type InviteVars } from '@/lib/crm/invite';
 import { useCrm } from '@/contexts/CrmContext';
+import { ResearchForEvent } from '@/components/crm/research';
 import { cn } from '@/lib/utils';
 import { Building2, Check, ExternalLink, Link2, MapPin, Pencil, RefreshCw, Star, Trash2, Unplug, Users, Video } from 'lucide-react';
 
@@ -27,23 +28,34 @@ export function colorMap(accounts: CalendarAccount[]): ColorOf {
 }
 
 // ---------------------------------------------------------------- accounts
-export function AccountChips({ accounts, selected, onToggle, colorOf, onManage }: { accounts: CalendarAccount[]; selected: Set<string>; onToggle: (id: string) => void; colorOf: ColorOf; onManage: (a: CalendarAccount) => void }) {
+// A Google account belongs to one CRM login. A view-only chip offers "This is mine": signing in to that Google account from
+// here moves it to the current login (crm-mcp finishConnect), for accounts connected from another login by mistake.
+export function AccountChips({ accounts, selected, onToggle, colorOf, onManage, onClaim }: { accounts: CalendarAccount[]; selected: Set<string>; onToggle: (id: string) => void; colorOf: ColorOf; onManage: (a: CalendarAccount) => void; onClaim: (email: string) => void }) {
+  const invalidate = useCalendarInvalidate();
+  const [busy, setBusy] = useState<string | null>(null);
+  const makeDefault = async (a: CalendarAccount) => {
+    setBusy(a.id);
+    try { await calendarApi.updateAccount(a.id, { is_default: true }); await invalidate(); } catch { /* the chip just stays as it was */ } finally { setBusy(null); }
+  };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {accounts.map((a) => {
         const c = colorOf(a.id); const on = selected.has(a.id);
         return (
           <div key={a.id} className={cn('group flex items-center rounded-full border text-xs transition-colors', on ? `${c.bg} ${c.border} ${c.text}` : 'bg-white border-gray-200 text-gray-400')}>
-            <button type="button" onClick={() => onToggle(a.id)} className="flex items-center gap-1.5 pl-2 pr-1.5 py-1" title={`${a.email}${a.mine ? '' : ` · ${a.member_name} (view only)`}${a.timezone ? ` · ${a.timezone}` : ''}`}>
+            <button type="button" onClick={() => onToggle(a.id)} className="flex items-center gap-1.5 pl-2 pr-1.5 py-1" title={`${a.email}${a.mine ? '' : ` · connected by ${a.member_name} (view only)`}${a.timezone ? ` · ${a.timezone}` : ''}`}>
               <span className={cn('w-2 h-2 rounded-full', on ? c.dot : 'bg-gray-300')} />
               <span className="font-medium">{a.label || a.email}</span>
               {a.label && <span className="opacity-70 hidden sm:inline">{a.email}</span>}
-              {!a.mine && <span className="opacity-70 inline-flex items-center gap-1">· <MemberAvatar userId={a.member_id} name={a.member_name} size="xs" />{a.member_name}</span>}
-              {a.mine && a.is_default && <Star className="w-3 h-3 fill-current opacity-70" aria-label="default" />}
+              {!a.mine && <span className="opacity-70">view only</span>}
               {a.auth_state !== 'ok' && <span className="text-red-600 font-medium">reconnect</span>}
               {!a.can_write && a.auth_state === 'ok' && <span className="text-amber-700">read-only</span>}
             </button>
+            {a.mine && (a.is_default
+              ? <span className="px-0.5 py-1" title="Your primary account: new meetings are booked here"><Star className="w-3 h-3 fill-current opacity-80" aria-label="primary" /></span>
+              : <button type="button" disabled={busy === a.id} onClick={() => makeDefault(a)} className="px-0.5 py-1 opacity-40 hover:opacity-100 disabled:opacity-30" title="Make this your primary account" aria-label={`Make ${a.email} primary`}><Star className={cn('w-3 h-3', busy === a.id && 'animate-pulse')} /></button>)}
             {a.mine && <button type="button" onClick={() => onManage(a)} className="pr-2 pl-0.5 py-1 opacity-50 hover:opacity-100" title="Manage this account" aria-label={`Manage ${a.email}`}><Pencil className="w-3 h-3" /></button>}
+            {!a.mine && <button type="button" onClick={() => onClaim(a.email)} className="pr-2 pl-0.5 py-1 opacity-50 hover:opacity-100" title={`This is mine: sign in to ${a.email} with Google to move it to your login`} aria-label={`Move ${a.email} to my login`}><Link2 className="w-3 h-3" /></button>}
           </div>
         );
       })}
@@ -58,7 +70,7 @@ export function AccountModal({ account, open, onClose, onReconnect }: { account:
   if (!account) return null;
   const run = async (what: string, fn: () => Promise<unknown>, close = false) => { setBusy(what); setError(null); try { await fn(); await invalidate(); if (close) onClose(); } catch (e) { setError(parseError(e).message); } finally { setBusy(null); } };
   return (
-    <Modal open={open} onClose={onClose} title={<span className="flex items-center gap-2">{account.email}{account.is_default && <Badge tone="indigo">default</Badge>}</span>} size="md"
+    <Modal open={open} onClose={onClose} title={<span className="flex items-center gap-2">{account.email}{account.is_default && <Badge tone="indigo">primary</Badge>}</span>} size="md"
       footer={<><Button variant="secondary" onClick={onClose}>Close</Button><Button loading={busy === 'save'} onClick={() => run('save', () => calendarApi.updateAccount(account.id, { label: label || null, aliases: aliases.split(',').map((s) => s.trim()).filter(Boolean) }), true)}>Save</Button></>}>
       <div className="space-y-3 text-sm">
         <div className="grid grid-cols-2 gap-3">
@@ -66,7 +78,7 @@ export function AccountModal({ account, open, onClose, onReconnect }: { account:
           <Input label="Other names (comma separated)" placeholder="kaptured, gmail" value={aliases} onChange={(e) => setAliases(e.target.value)} />
         </div>
         <div className="flex flex-wrap gap-2">
-          {!account.is_default && <Button size="sm" variant="secondary" loading={busy === 'default'} onClick={() => run('default', () => calendarApi.updateAccount(account.id, { is_default: true }))}><Star className="w-3.5 h-3.5" /> Make default</Button>}
+          {!account.is_default && <Button size="sm" variant="secondary" loading={busy === 'default'} onClick={() => run('default', () => calendarApi.updateAccount(account.id, { is_default: true }))}><Star className="w-3.5 h-3.5" /> Make primary</Button>}
           <Button size="sm" variant="secondary" loading={busy === 'refresh'} onClick={() => run('refresh', () => calendarApi.accounts(account.id))}><RefreshCw className="w-3.5 h-3.5" /> Refresh calendar list</Button>
           <Button size="sm" variant="secondary" onClick={() => onReconnect(account.email)}><Link2 className="w-3.5 h-3.5" /> Reconnect</Button>
           {!confirmDelete
@@ -324,7 +336,7 @@ export function EventModal({ open, onClose, event, draft, accounts, tz, colorOf,
   const Form = (
     <div className="grid grid-cols-2 gap-3">
       <div className="col-span-2"><Input label="Title" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={inviteTitle(settings, inviteVars('Naman Jain', 'Resourceplan')) || 'Aarushi <> Naman'} autoFocus /></div>
-      {mode === 'create' && <Select label="Google account" value={f.account_id} onChange={(e) => setF({ ...f, account_id: e.target.value, calendar: 'primary' })}>{mine.map((a) => <option key={a.id} value={a.id}>{a.email}{a.label ? ` (${a.label})` : ''}{a.is_default ? ' · default' : ''}</option>)}</Select>}
+      {mode === 'create' && <Select label="Google account" value={f.account_id} onChange={(e) => setF({ ...f, account_id: e.target.value, calendar: 'primary' })}>{mine.map((a) => <option key={a.id} value={a.id}>{a.email}{a.label ? ` (${a.label})` : ''}{a.is_default ? ' · primary' : ''}</option>)}</Select>}
       {mode === 'create' && <Select label="Calendar" value={f.calendar} onChange={(e) => setF({ ...f, calendar: e.target.value })}><option value="primary">Primary</option>{(acc?.calendars ?? []).filter((c) => !c.primary && (c.access_role === 'owner' || c.access_role === 'writer')).map((c) => <option key={c.id} value={c.id}>{c.summary}</option>)}</Select>}
       <Input label="Day" type="date" value={f.day} onChange={(e) => setF({ ...f, day: e.target.value })} />
       <div className="grid grid-cols-2 gap-2">
@@ -376,6 +388,7 @@ export function EventModal({ open, onClose, event, draft, accounts, tz, colorOf,
         </div>
       )}
       {e.description && <div className="text-gray-700 whitespace-pre-wrap text-[13px] border-l-2 border-gray-200 pl-2">{e.description}</div>}
+      <ResearchForEvent emails={e.attendees.map((a) => a.email)} meetingId={e.crm?.meeting_id} />
       <div className="rounded-md border border-gray-200 p-2.5 bg-gray-50/60">
         {e.crm ? (
           <div className="flex items-center gap-2 flex-wrap"><Building2 className="w-4 h-4 text-indigo-600" /><span>CRM meeting with</span><Link href={`/crm/companies/${e.crm.company_id}${e.crm.meeting_id ? `?meeting=${e.crm.meeting_id}` : ''}`} className="font-medium text-indigo-700 hover:underline">{e.crm.company ?? 'company'}</Link>{e.crm.contact && <span className="text-gray-500">· {e.crm.contact}</span>}{e.crm.status && <Badge tone={e.crm.status === 'held' ? 'green' : e.crm.status === 'no_show' ? 'red' : e.crm.status === 'cancelled' ? 'gray' : 'blue'}>{e.crm.status.replace('_', '-')}</Badge>}{e.crm.status === 'scheduled' && <Link href={`/crm/capture?meeting=${e.crm.meeting_id}`} className="text-xs text-indigo-600 hover:underline">capture</Link>}</div>

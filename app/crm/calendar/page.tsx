@@ -8,6 +8,7 @@ import { useCrm } from '@/contexts/CrmContext';
 import { parseError } from '@/lib/crm/api';
 import { calendarApi, dayIn, minutesIn, mondayOf, shiftDay, todayIn, useCalendarAccounts, useCalendarEvents, useCalendarInvalidate, type CalendarAccount, type CalendarEvent, type FreeSlot } from '@/lib/crm/calendar';
 import { AccountChips, AccountModal, Agenda, ConnectPasteModal, CrmOnlyModal, EventModal, FreeSlotsModal, TimeGrid, colorMap, rangeLabel, type CrmOnlyMeeting, type EventDraft } from '@/components/crm/calendar';
+import { ResearchPanel } from '@/components/crm/research';
 import { Button, EmptyState, ErrorBox, PageHeader, Spinner, useToast } from '@/components/crm/ui';
 import { TimezonePicker } from '@/components/crm/TimezonePicker';
 import { tzOffsetLabel, tzShort, useViewTimezone } from '@/lib/crm/timezones';
@@ -18,8 +19,11 @@ import { CalendarDays, CalendarPlus, ChevronLeft, ChevronRight, Link2, Search } 
 // default, India, US, UK or any IANA zone — remembered per browser); the server converts everything to it. Members
 // connect their own accounts (several allowed, one default); teammates' events are visible but only the owner
 // books/moves/cancels. CRM meetings that have no Google event yet appear as dashed blocks so they can be added in one click.
+// The Research view is the prospect-research skill's "what changed" table (components/crm/research.tsx) — it does not
+// need a Google account, so it renders before the connect gate; /crm/calendar?view=research opens it directly.
 
-type View = 'day' | 'week' | 'agenda';
+type View = 'day' | 'week' | 'agenda' | 'research';
+const VIEWS: View[] = ['day', 'week', 'agenda', 'research'];
 
 export default function CalendarPage() {
   const { timezone: teamTz, me } = useCrm();
@@ -29,7 +33,7 @@ export default function CalendarPage() {
   const invalidate = useCalendarInvalidate();
   const [timezone, setTimezone, tzReady] = useViewTimezone(teamTz);
 
-  const [view, setView] = useState<View>('week');
+  const [view, setView] = useState<View>(() => (search?.get('view') === 'research' ? 'research' : 'week'));
   const [anchor, setAnchor] = useState(() => todayIn(teamTz));
   const [calendars, setCalendars] = useState<'primary' | 'all'>('primary');
   const [selected, setSelected] = useState<Set<string> | null>(null);   // null = all accounts
@@ -48,7 +52,7 @@ export default function CalendarPage() {
   const colorOf = useMemo(() => colorMap(accounts), [accounts]);
 
   // range
-  const from = view === 'week' ? mondayOf(anchor) : view === 'day' ? anchor : anchor;
+  const from = view === 'week' ? mondayOf(anchor) : anchor;
   const to = view === 'week' ? shiftDay(from, 6) : view === 'day' ? anchor : shiftDay(anchor, 13);
   const days = useMemo(() => Array.from({ length: view === 'week' ? 7 : 1 }, (_, i) => shiftDay(from, i)), [from, view]);
   const activeIds = useMemo(() => (selected ? accounts.filter((a) => selected.has(a.id)) : accounts).map((a) => a.id), [accounts, selected]);
@@ -88,6 +92,11 @@ export default function CalendarPage() {
   };
 
   const go = (n: number) => setAnchor((a) => shiftDay(a, view === 'week' ? 7 * n : view === 'day' ? n : 14 * n));
+  const viewToggle = (
+    <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5 text-xs">
+      {VIEWS.map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2.5 py-1 rounded capitalize', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{v}</button>)}
+    </div>
+  );
   const newEvent = (day = anchor, startMin = 10 * 60) => { setEventFor(null); setDraft({ day, start_min: startMin }); };
   const pickSlot = (s: FreeSlot) => { setFreeOpen(false); setEventFor(null); setDraft({ day: s.day, start_min: minutesIn(s.start, timezone), duration_min: Math.min(60, Math.round((new Date(s.end).getTime() - new Date(s.start).getTime()) / 60000)) }); };
 
@@ -102,13 +111,18 @@ export default function CalendarPage() {
         actions={<div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" onClick={() => setFreeOpen(true)} disabled={mine.length === 0}><Search className="w-3.5 h-3.5" /> Find a slot</Button>
           <Button size="sm" onClick={() => newEvent()} disabled={mine.length === 0}><CalendarPlus className="w-3.5 h-3.5" /> New event</Button>
-          <Button variant={mine.length ? 'secondary' : 'primary'} size="sm" loading={connecting} onClick={() => connect(mine.length ? undefined : me?.email ?? undefined)} disabled={!configured}><Link2 className="w-3.5 h-3.5" /> {mine.length ? 'Connect another account' : 'Connect Google Calendar'}</Button>
+          <Button variant={mine.length ? 'secondary' : 'primary'} size="sm" loading={connecting} onClick={() => connect(mine.length ? undefined : me?.email ?? undefined)} disabled={!configured} title={me?.email ? `Adds the Google account to your CRM login ${me.email}` : undefined}><Link2 className="w-3.5 h-3.5" /> {mine.length ? 'Connect another account' : 'Connect Google Calendar'}</Button>
         </div>} />
 
       {!configured && <ErrorBox message="Google Calendar is not set up on the server yet. An admin runs scripts/crm-set-calendar-secrets.sh (docs/crm/SETUP.md → Google Calendar); everything else in the CRM works meanwhile." />}
       {err && <ErrorBox message={err.message} />}
 
-      {loading ? <div className="py-16 flex justify-center"><Spinner /></div> : accounts.length === 0 ? (
+      {view === 'research' ? (
+        <div className="flex-1 min-h-0 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">{viewToggle}<span className="text-xs text-gray-500">What the prospect-research skill found and did, newest run first. Rows that need a look are highlighted.</span></div>
+          <ResearchPanel className="flex-1" />
+        </div>
+      ) : loading ? <div className="py-16 flex justify-center"><Spinner /></div> : accounts.length === 0 ? (
         <EmptyState icon={<CalendarDays className="w-8 h-8" />} title="No Google Calendar connected yet" description="Connect your Google account (work, personal, or both). The team sees each other's meetings here; booking a CRM meeting then also creates the Google event with a Meet link and invites."
           action={configured ? <Button loading={connecting} onClick={() => connect(me?.email ?? undefined)}><Link2 className="w-4 h-4" /> Connect Google Calendar</Button> : undefined} />
       ) : (
@@ -121,12 +135,10 @@ export default function CalendarPage() {
               <span className="ml-1 text-sm font-semibold text-gray-900">{rangeLabel(from, to)}</span>
               {eventsQ.isFetching && <Spinner className="w-3.5 h-3.5 ml-1" />}
             </div>
-            <div className="inline-flex rounded-md border border-gray-200 bg-white p-0.5 text-xs">
-              {(['day', 'week', 'agenda'] as View[]).map((v) => <button key={v} type="button" onClick={() => setView(v)} className={cn('px-2.5 py-1 rounded capitalize', view === v ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>{v}</button>)}
-            </div>
+            {viewToggle}
             <TimezonePicker compact value={timezone} onChange={setTimezone} teamTz={teamTz} />
             <label className="flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" checked={calendars === 'all'} onChange={(e) => setCalendars(e.target.checked ? 'all' : 'primary')} /> all calendars (not just primary)</label>
-            <div className="ml-auto"><AccountChips accounts={accounts} selected={new Set(activeIds)} onToggle={(id) => setSelected((s) => { const n = new Set(s ?? accounts.map((a) => a.id)); if (n.has(id)) n.delete(id); else n.add(id); return n.size === accounts.length ? null : n; })} colorOf={colorOf} onManage={setManage} /></div>
+            <div className="ml-auto"><AccountChips accounts={accounts} selected={new Set(activeIds)} onToggle={(id) => setSelected((s) => { const n = new Set(s ?? accounts.map((a) => a.id)); if (n.has(id)) n.delete(id); else n.add(id); return n.size === accounts.length ? null : n; })} colorOf={colorOf} onManage={setManage} onClaim={(email) => connect(email)} /></div>
           </div>
 
           {eventsQ.data?.errors?.length ? <ErrorBox message={eventsQ.data.errors.map((e) => `${e.account}: ${e.message}`).join(' · ')} /> : null}

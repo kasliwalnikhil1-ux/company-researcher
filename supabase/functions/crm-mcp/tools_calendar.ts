@@ -17,10 +17,10 @@ const line = (e: cal.EventRow) => `${e.when} · ${e.title}${e.crm?.company ? ` [
 export function registerCalendar(server: McpServer, ctx: Ctx): void {
   tool(server, ctx, {
     name: "calendar_connect_link", title: "Connect a Google Calendar", cls: "read",
-    description: "Sign-in link to connect one of the connected user's Google accounts (work, personal, …) to the CRM. Give the user the URL exactly as returned plus the instructions. They open it, choose the account and allow every calendar permission; Google then sends the browser to an address starting with http://127.0.0.1:53682/ that will NOT load — that is expected. They copy that whole address from the address bar and paste it back to you; then call calendar_connect_finish with it. Call this when calendar tools answer E_CALENDAR_NOT_CONNECTED, E_CALENDAR_RECONNECT or E_CALENDAR_SCOPE. A member can connect several accounts; the first becomes their default.",
+    description: "Sign-in link to connect one of the connected user's Google accounts (work, personal, …) to the CRM. Give the user the URL exactly as returned plus the instructions. They open it, choose the account and allow every calendar permission; Google then sends the browser to an address starting with http://127.0.0.1:53682/ that will NOT load — that is expected. They copy that whole address from the address bar and paste it back to you; then call calendar_connect_finish with it. Call this when calendar tools answer E_CALENDAR_NOT_CONNECTED, E_CALENDAR_RECONNECT or E_CALENDAR_SCOPE. A member can connect several accounts; the first becomes their default. The account is attached to the CRM login this connector is signed in as (crm_login in the answer) — tell the user which login it goes to. A Google account belongs to one CRM login: connecting one that another login holds moves it to this login.",
     input: { hint: z.string().optional().describe("Email to preselect on Google's page") },
     annotations: { openWorldHint: true },
-  }, async (a) => cal.connectUrl(ctx, { hint: a.hint }));
+  }, async (a) => ({ ...await cal.connectUrl(ctx, { hint: a.hint }), crm_login: ctx.email }));
 
   tool(server, ctx, {
     name: "calendar_connect_finish", title: "Finish connecting a Google Calendar", cls: "write",
@@ -28,7 +28,7 @@ export function registerCalendar(server: McpServer, ctx: Ctx): void {
     input: { address: z.string().min(10).describe("The whole address from the browser's address bar") },
   }, async (a) => {
     const r = await cal.finishConnect(a.address, ctx);
-    return { ...r, return_to: undefined, summary: `Connected ${r.email}${r.is_default ? " (your default for booking)" : ""}: ${r.calendars} calendar(s)${r.can_write ? "" : ". READ-ONLY — booking will fail until it is reconnected with every permission"}${r.note ? `. ${r.note}` : ""}.` };
+    return { ...r, return_to: undefined, summary: `Connected ${r.email} to the CRM login ${ctx.email ?? r.crm_login}${r.is_default ? " (your default for booking)" : ""}: ${r.calendars} calendar(s)${r.can_write ? "" : ". READ-ONLY — booking will fail until it is reconnected with every permission"}${r.note ? `. ${r.note}` : ""}.` };
   });
 
   tool(server, ctx, {

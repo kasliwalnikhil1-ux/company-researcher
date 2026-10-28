@@ -276,7 +276,12 @@ function parseReturn(input: string | URLSearchParams): URLSearchParams {
   return params;
 }
 
-export interface Connected { email: string; calendars: number; can_write: boolean; is_default: boolean; return_to: string; warning?: string; note?: string }
+/** The sign-in email of a CRM login (what the member recognises, unlike a derived display name). */
+async function loginEmail(userId: string): Promise<string | null> {
+  try { const { data } = await admin.auth.admin.getUserById(userId); return data?.user?.email ?? null; } catch { return null; }
+}
+
+export interface Connected { email: string; calendars: number; can_write: boolean; is_default: boolean; return_to: string; crm_login: string | null; moved_from: string | null; warning?: string; note?: string }
 
 /** Finish a sign-in: verify the sealed state (and, when given, that the same member is finishing), exchange the code,
  *  learn which Google account signed in, pull its calendars and store the refresh token encrypted. */
@@ -304,16 +309,35 @@ export async function finishConnect(input: string | URLSearchParams, ctx?: Ctx |
   const { data: existing } = await admin.from("crm_calendar_accounts").select("id, email").eq("member_id", st.u);
   const rows = (existing ?? []) as Row[];
   const first = rows.filter((r) => r.email !== email).length === 0;
+  // One Google account belongs to one CRM login (migration 007): signing in to it proves ownership, so an account held by
+  // another login moves to this one — same row id, so meetings linked to its events stay linked.
+  const { data: held } = await admin.from("crm_calendar_accounts").select("id, member_id, is_default").eq("email", email).neq("member_id", st.u).maybeSingle();
+  let moved_from: string | null = null;
+  if (held) {
+    const h = held as Row;
+    moved_from = (await loginEmail(h.member_id)) ?? "another CRM login";
+    const { error: mvErr } = await admin.from("crm_calendar_accounts").update({ member_id: st.u, is_default: false }).eq("id", h.id);
+    if (mvErr) throw new Error(mvErr.message);
+    if (h.is_default) {
+      const { data: next } = await admin.from("crm_calendar_accounts").select("id").eq("member_id", h.member_id).order("connected_at").limit(1).maybeSingle();
+      if (next) await admin.from("crm_calendar_accounts").update({ is_default: true }).eq("id", (next as Row).id);
+    }
+  }
   const row = { member_id: st.u, email, scopes, calendars, timezone: primary?.timezone ?? null, refresh_token_enc: await encrypt(tok.refresh_token), auth_state: "ok", auth_error: null, updated_at: new Date().toISOString() };
   const { data: saved, error } = await admin.from("crm_calendar_accounts").upsert({ ...row, ...(first ? { is_default: true } : {}) }, { onConflict: "member_id,email" }).select("id, is_default").single();
   if (error) throw new Error(error.message);
   tokenCache.delete((saved as Row).id);
   const can_write = scopes.includes(WRITE_SCOPE);
-  log({ fn: "crm-mcp", calendar: "connect", status: "ok", member: st.u, calendars: calendars.length, write: can_write, via: st.ru === PASTE_REDIRECT ? "paste" : st.ru === CALLBACK_URL ? "web" : "loopback" });
+  const crm_login = ctx?.email ?? await loginEmail(st.u);
+  log({ fn: "crm-mcp", calendar: "connect", status: "ok", member: st.u, moved: !!held, calendars: calendars.length, write: can_write, via: st.ru === PASTE_REDIRECT ? "paste" : st.ru === CALLBACK_URL ? "web" : "loopback" });
+  const notes = [
+    st.h && String(st.h).toLowerCase() !== email ? `You asked to connect ${st.h} but ${email} signed in.` : null,
+    moved_from ? `It was connected under the CRM login ${moved_from} before; it now belongs to ${crm_login ?? "you"}.` : null,
+  ].filter(Boolean);
   return {
-    email, calendars: calendars.length, can_write, is_default: !!(saved as Row).is_default, return_to: st.r || DEFAULT_RETURN_TO,
+    email, calendars: calendars.length, can_write, is_default: !!(saved as Row).is_default, return_to: st.r || DEFAULT_RETURN_TO, crm_login, moved_from,
     warning: can_write ? undefined : "Connected READ-ONLY: booking will fail. Reconnect and tick every calendar permission.",
-    note: st.h && String(st.h).toLowerCase() !== email ? `You asked to connect ${st.h} but ${email} signed in.` : undefined,
+    note: notes.length ? notes.join(" ") : undefined,
   };
 }
 

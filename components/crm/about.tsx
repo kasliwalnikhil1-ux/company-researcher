@@ -1,7 +1,8 @@
 'use client';
 
 import { useLayoutEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
+import { ExternalLink } from 'lucide-react';
+import { canonicalLinkedInUrl, cn } from '@/lib/utils';
 import type { CompanyAbout, ContactAbout, PastOrg } from '@/lib/crm/types';
 import { Badge, Input, Textarea } from './ui';
 
@@ -21,6 +22,66 @@ const humanize = (k: string) => { const t = k.replace(/[_-]+/g, ' ').trim(); ret
 const isEmpty = (v: unknown) => v == null || v === '' || (Array.isArray(v) && v.length === 0) || (typeof v === 'object' && !Array.isArray(v) && Object.keys(v as object).length === 0);
 
 export function hasAbout(a: AnyAbout): boolean { return !!a && Object.keys(a).length > 0; }
+
+// ---------------------------------------------------------------- links
+
+/** A link saved on a profile — the research skill writes `about.links = [{url, label}]`; a bare URL string also counts. */
+export type ProfileLink = { url: string; label: string };
+const shortUrl = (u: string) => u.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, '');
+// Every link is opened in its canonical form: LinkedIn URLs always as www.linkedin.com/in/… (never ae./in./uk. hosts).
+const firstUrl = (vals: unknown[]) => { const u = vals.map(str).find((s): s is string => !!s && isUrl(s)); return u ? canonicalLinkedInUrl(u) : null; };
+
+/** Read one item of a list as a link, or null when it is not one. Objects are read by their values: the first URL is the
+ *  link, `label` / `title` / `name` (else the first other text, else the bare domain) is what it says. */
+function linkOf(v: unknown): ProfileLink | null {
+  if (typeof v === 'string') { const t = v.trim(); return isUrl(t) ? { url: canonicalLinkedInUrl(t), label: shortUrl(t) } : null; }
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const url = firstUrl([o.url, o.href, o.link]) ?? firstUrl(Object.values(o));
+  if (!url) return null;
+  const label = [o.label, o.title, o.name].map(str).find(Boolean) ?? Object.values(o).map(str).find((s) => s && !isUrl(s)) ?? shortUrl(url);
+  return { url, label };
+}
+
+/** A list made only of links (`about.links`, or any other key shaped the same way); null when any item is not a link. */
+const linkList = (v: unknown): ProfileLink[] | null => {
+  if (!Array.isArray(v) || !v.length) return null;
+  const out = v.map(linkOf);
+  return out.every((l): l is ProfileLink => !!l) ? out : null;
+};
+
+const dedupeLinks = (links: Array<ProfileLink | null | undefined>): ProfileLink[] => {
+  const seen = new Set<string>(); const out: ProfileLink[] = [];
+  for (const l of links) { if (!l) continue; const k = l.url.replace(/\/$/, '').toLowerCase(); if (seen.has(k)) continue; seen.add(k); out.push(l); }
+  return out;
+};
+
+/** Every link on a profile, deduplicated by URL: `about.links` first, then any other key that is a list of links. */
+export function profileLinks(about: AnyAbout): ProfileLink[] {
+  if (!about) return [];
+  const keys = ['links', ...Object.keys(about).filter((k) => k !== 'links')];
+  return dedupeLinks(keys.flatMap((k) => linkList(about[k]) ?? []));
+}
+
+/** A contact's links as one list: the LinkedIn column first, then everything saved on the profile (the same URL once). */
+export function contactLinks(c: { linkedin_url?: string | null; about?: AnyAbout }): ProfileLink[] {
+  const li = str(c.linkedin_url);
+  return dedupeLinks([li && isUrl(li) ? { url: canonicalLinkedInUrl(li), label: 'LinkedIn' } : null, ...profileLinks(c.about)]);
+}
+
+/** Links as small clickable chips, each opening in a new tab. Renders nothing for an empty list. */
+export function LinkChips({ links, className }: { links: ProfileLink[]; className?: string }) {
+  if (!links.length) return null;
+  return (
+    <div className={cn('flex flex-wrap gap-1', className)}>
+      {links.map((l) => (
+        <a key={l.url} href={l.url} target="_blank" rel="noreferrer" title={l.url} className="inline-flex items-center gap-1 max-w-full px-1.5 py-0.5 rounded bg-indigo-50 text-[11px] text-indigo-700 hover:bg-indigo-100 hover:underline">
+          <ExternalLink className="w-3 h-3 shrink-0" /><span className="truncate">{l.label}</span>
+        </a>
+      ))}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------- display
 
@@ -98,7 +159,7 @@ const fmtYears = (y: string | null) => (y ? y.replace(/\s*[–-]\s*$/, '–now')
 
 const SectionLabel = ({ children }: { children: React.ReactNode }) => <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">{children}</div>;
 
-type Entry = { title: string; sub?: string | null; when?: string | null };
+type Entry = { title: string; sub?: string | null; when?: string | null; href?: string | null };
 
 /** A titled vertical list: title + dates on one line, a muted line underneath. Long lists collapse to `limit`. */
 export function Timeline({ label, items, limit = 3, className }: { label: string; items: Entry[]; limit?: number; className?: string }) {
@@ -113,7 +174,9 @@ export function Timeline({ label, items, limit = 3, className }: { label: string
           <li key={i} className="relative pl-3">
             <span className="absolute -left-[3.5px] top-[5px] w-1.5 h-1.5 rounded-full bg-gray-400 ring-2 ring-white" />
             <div className="flex items-baseline justify-between gap-2 text-xs leading-snug">
-              <span className="font-medium text-gray-800 min-w-0">{e.title}</span>
+              {e.href
+                ? <a href={e.href} target="_blank" rel="noreferrer" title={e.href} className="font-medium text-indigo-700 hover:underline min-w-0 break-words">{e.title}</a>
+                : <span className="font-medium text-gray-800 min-w-0">{e.title}</span>}
               {e.when && <span className="shrink-0 text-[11px] text-gray-400 tabular-nums">{e.when}</span>}
             </div>
             {e.sub && <div className="text-[11px] text-gray-500 leading-snug">{e.sub}</div>}
@@ -129,7 +192,7 @@ const pastOrgEntries = (orgs: unknown): Entry[] =>
   (Array.isArray(orgs) ? (orgs as PastOrg[]) : []).flatMap((o) => {
     if (typeof o === 'string') return o.trim() ? [{ title: o.trim() }] : [];
     if (!o || typeof o !== 'object' || !str(o.org)) return [];
-    return [{ title: str(o.org)!, sub: str(o.role), when: fmtYears(str(o.years)) }];
+    return [{ title: str(o.org)!, sub: str(o.role), when: fmtYears(str(o.years)), href: firstUrl([o.url, o.href, o.link, o.linkedin_url, o.website]) }];
   });
 
 /** Past organisations as a small vertical timeline: org + years on one line, role underneath. */
@@ -140,20 +203,24 @@ export function Experience({ orgs, limit = 3, className }: { orgs: unknown; limi
 // ---- any other key, laid out by the shape of its value
 
 // An object in a list, read by its values, not its key names: the first date-like value ("2019", "2019–2023", "Jan 2020 – now")
-// goes on the right, the first other text is the title, everything else is the muted line underneath.
+// goes on the right, the first URL makes the title clickable, the first other text is the title, everything else is the
+// muted line underneath.
 const DATE_LIKE = /^(\w{3,9}\.?\s+)?\d{4}(\s*[–-]\s*((\w{3,9}\.?\s+)?\d{4}|present|now|current)?)?$/i;
 function objectEntry(o: Record<string, unknown>): Entry | null {
   const vals = Object.values(o).filter((v) => typeof v === 'string' || typeof v === 'number').map((v) => String(v).trim()).filter(Boolean);
   const when = vals.find((v) => DATE_LIKE.test(v)) ?? null;
-  const rest = vals.filter((v) => v !== when);
-  if (!rest.length) return when ? { title: when } : null;
-  return { title: rest[0], sub: rest.slice(1).join(' · ') || null, when: fmtYears(when) };
+  const rawHref = vals.find(isUrl) ?? null;
+  const href = rawHref ? canonicalLinkedInUrl(rawHref) : null;
+  const rest = vals.filter((v) => v !== when && v !== rawHref);
+  if (!rest.length) return href ? { title: shortUrl(href), href } : when ? { title: when } : null;
+  return { title: rest[0], sub: rest.slice(1).join(' · ') || null, when: fmtYears(when), href };
 }
 
 type Shape =
   | { kind: 'fact'; key: string; value: React.ReactNode }
   | { kind: 'text'; key: string; text: string }
   | { kind: 'chips'; key: string; items: string[] }
+  | { kind: 'links'; key: string; items: ProfileLink[] }
   | { kind: 'list'; key: string; items: Entry[] };
 
 function shapeOf(key: string, v: unknown): Shape | null {
@@ -165,10 +232,12 @@ function shapeOf(key: string, v: unknown): Shape | null {
     return t.length > 90 || t.includes('\n') ? { kind: 'text', key, text: t } : { kind: 'fact', key, value: t };
   }
   if (Array.isArray(v)) {
+    const links = linkList(v);
+    if (links) return { kind: 'links', key, items: links }; // `links` — or any list made only of links
     const strs = v.filter((x) => typeof x === 'string' || typeof x === 'number').map((x) => String(x).trim()).filter(Boolean);
     const objs = v.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) as Record<string, unknown>[];
     if (!objs.length && strs.every((x) => x.length <= 28 && !x.includes(','))) return { kind: 'chips', key, items: strs }; // languages, skills, interests
-    return { kind: 'list', key, items: [...strs.map((t) => ({ title: t })), ...objs.map(objectEntry).filter((x): x is Entry => !!x)] };
+    return { kind: 'list', key, items: [...strs.map((t) => (isUrl(t) ? { title: shortUrl(t), href: canonicalLinkedInUrl(t) } : { title: t })), ...objs.map(objectEntry).filter((x): x is Entry => !!x)] };
   }
   const entries = Object.entries(v as Record<string, unknown>).filter(([, x]) => !isEmpty(x));
   return { kind: 'list', key, items: entries.map(([k, x]) => ({ title: typeof x === 'object' ? flat(x as Record<string, unknown>) || JSON.stringify(x) : String(x), sub: humanize(k) })) };
@@ -184,6 +253,7 @@ export function ProfileExtras({ about, skip, full, className }: { about: AnyAbou
       {shapes.map((x) => {
         if (x.kind === 'list') return <Timeline key={x.key} label={humanize(x.key)} items={x.items} limit={full ? Infinity : undefined} />;
         if (x.kind === 'text') return <div key={x.key}><SectionLabel>{humanize(x.key)}</SectionLabel>{full ? <FullText text={x.text} /> : <ExpandableText text={x.text} lines={2} />}</div>;
+        if (x.kind === 'links') return <div key={x.key}><SectionLabel>{humanize(x.key)}</SectionLabel><LinkChips links={x.items} /></div>;
         if (x.kind === 'chips') return (
           <div key={x.key}>
             <SectionLabel>{humanize(x.key)}</SectionLabel>

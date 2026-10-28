@@ -1,7 +1,7 @@
 'use client';
 
 import { Clock, Linkedin, Mail, Pencil, Phone } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { canonicalLinkedInUrl, cn } from '@/lib/utils';
 import type { ContactAbout } from '@/lib/crm/types';
 import { Badge, Button, fmtTime } from './ui';
 import { ContactAboutBlock } from './about';
@@ -45,7 +45,7 @@ export function ContactCard({ contact: ct, onEdit, full, className }: { contact:
           </div>
           <div className="flex items-center gap-0.5 -mr-1 shrink-0">
             {ct.linkedin_url && (
-              <a href={ct.linkedin_url} target="_blank" rel="noreferrer" title="LinkedIn profile" className="p-1.5 rounded-md text-gray-400 hover:text-[#0a66c2] hover:bg-gray-50">
+              <a href={canonicalLinkedInUrl(ct.linkedin_url)} target="_blank" rel="noreferrer" title="LinkedIn profile" className="p-1.5 rounded-md text-gray-400 hover:text-[#0a66c2] hover:bg-gray-50">
                 <Linkedin className="w-3.5 h-3.5" />
               </a>
             )}

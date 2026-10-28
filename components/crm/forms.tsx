@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useCrm } from '@/contexts/CrmContext';
+import { normalizeLinkedInUrl } from '@/lib/utils';
 import { rpc, compact, parseError } from '@/lib/crm/api';
 import { useCrmInvalidate } from '@/lib/crm/queries';
 import { calendarApi, useCalendarAccounts } from '@/lib/crm/calendar';
@@ -214,7 +215,7 @@ export function ContactModal({ companyId, contact, open, onClose }: { companyId:
   const save = async () => {
     let aboutPatch;
     try { aboutPatch = contactAboutPatch(contact?.about, about); } catch (e) { setError((e as Error).message); return; }
-    const r = await write('upsert_contact', { p: compact({ id: contact?.id ?? undefined, company_id: companyId, name: f.name, role: f.role || null, email: f.email || null, phone: f.phone || null, linkedin_url: f.linkedin_url || null, timezone: f.timezone || null, is_primary: f.is_primary, about: aboutPatch }) });
+    const r = await write('upsert_contact', { p: compact({ id: contact?.id ?? undefined, company_id: companyId, name: f.name, role: f.role || null, email: f.email || null, phone: f.phone || null, linkedin_url: f.linkedin_url.trim() ? normalizeLinkedInUrl(f.linkedin_url) : null, timezone: f.timezone || null, is_primary: f.is_primary, about: aboutPatch }) });
     if (r) onClose();
   };
   return (

@@ -80,11 +80,11 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
   // ---------------------------------------------------------------- companies / contacts
   // `about` = an optional JSON profile shown in the app (company page, companies list, pipeline cards, standup). Display-only: nothing filters on it.
   // Merged key by key into what is stored; a key set to null is removed; about: null clears it.
-  const ABOUT_NOTE = "Merged into the stored profile key by key (send only what changed); a key set to null removes it; about: null clears it. Extra keys are kept and shown as-is. Only facts you actually found — never guess.";
+  const ABOUT_NOTE = "Merged into the stored profile key by key (send only what changed); a key set to null removes it; about: null clears it. Extra keys are kept and shown as-is. Only facts you actually found — never guess. Research facts belong here, never in notes (notes = the team's own remarks, shown in the amber Notes box on the company page).";
 
   tool(server, ctx, {
     name: "upsert_company", title: "Add or update a company", cls: "write",
-    description: "Create a company or update it (matched by id, then website domain, then exact name). ICP segment and source channel accept slug/label/id. Use append_notes to add to notes without replacing them. `about` is an optional profile of the company (a precise description under 10 words + its specific industry) shown across the app.",
+    description: "Create a company or update it (matched by id, then website domain, then exact name). ICP segment and source channel accept slug/label/id. notes = the team's own remarks (shown in the amber Notes box on the company page); use append_notes to add to them without replacing them — never put research findings there. `about` is an optional profile of the company (a precise description under 10 words + its specific industry, plus extra keys such as location or legal_entity) shown across the app. People named on the company's own site (founders, team) are NOT part of the company profile — add each as a contact with upsert_contact (role as the site states it).",
     input: {
       id: z.string().uuid().optional(), name: z.string().min(1).max(200).optional(), website: z.string().max(300).optional(), country: z.string().max(80).optional(),
       timezone: z.string().max(60).optional().describe("IANA, e.g. Asia/Dubai"), icp_segment: lookupRef("ICP segment"), source_channel: lookupRef("Source channel"),
@@ -99,7 +99,7 @@ export function registerCapture(server: McpServer, ctx: Ctx): void {
 
   tool(server, ctx, {
     name: "upsert_contact", title: "Add or update a contact", cls: "write",
-    description: "Create or update a person at a company (matched by id, then email, then company+name). company = id, domain or name. `about` is an optional profile of the person (a short summary + past organisations) shown on the company page and in the standup when they have a meeting.",
+    description: "Create or update a person at a company (matched by id, then email, then company+name). company = id, domain or name. `about` is an optional profile of the person (a short summary + past organisations + links) shown on the company page and in the standup when they have a meeting; research facts go there, never in notes. A brand or team inbox (info@, a gmail listed as the site's contact) is a contact named after the brand with no role.",
     input: {
       id: z.string().uuid().optional(), company: z.string().optional().describe("Company id, domain or name (required for a new contact)"), name: z.string().min(1).max(160).optional(),
       role: z.string().max(120).optional(), email: z.string().max(200).optional(), phone: z.string().max(40).optional(), linkedin_url: z.string().max(300).optional(),
