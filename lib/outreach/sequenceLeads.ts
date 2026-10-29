@@ -140,7 +140,8 @@ export interface AnalyticsStep {
   accepted_rate: number | null; read_rate: number | null; replied_rate: number | null; skipped_rate: number | null; failed_rate: number | null;
   leads_here: number;
 }
-export interface AnalyticsDay { day: string; planned: number; sent: number; snapshot: boolean }
+/** One workspace day of the Activity chart. The outcome counts arrived with migration 105 (absent = 0 on an older payload). */
+export interface AnalyticsDay { day: string; planned: number; sent: number; snapshot: boolean; accepted?: number; replied?: number; interested?: number; meetings?: number }
 export interface AnalyticsSender {
   id: string; name: string; provider: string; status: string; status_reason: string | null; in_pool: boolean;
   sent: number; invites: number; accepted: number; replied: number; failed: number; accepted_rate: number | null; replied_rate: number | null; limited: boolean; live: number;

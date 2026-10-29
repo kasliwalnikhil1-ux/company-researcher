@@ -898,7 +898,12 @@ export const sequencesRpc = {
         leads_here: enr.filter((e) => e.current_node_id === id && LIVE_SET.has(e.status)).length };
     }).sort((x, y) => (x.step_number ?? 9999) - (y.step_number ?? 9999));
     const days: Row[] = [];
-    for (let d = from; d <= to; d = addDays(d, 1)) days.push({ day: d, planned: acts.filter((x) => day(x.scheduled_for) === d && x.status !== 'cancelled').length, sent: acts.filter((x) => x.status === 'sent' && day(x.executed_at) === d).length, snapshot: false });
+    // 105: each day also carries what came back that day (the same events as the cards, so the days add up to them)
+    for (let d = from; d <= to; d = addDays(d, 1)) days.push({
+      day: d, planned: acts.filter((x) => day(x.scheduled_for) === d && x.status !== 'cancelled').length, sent: acts.filter((x) => x.status === 'sent' && day(x.executed_at) === d).length, snapshot: false,
+      accepted: accepted.filter((e) => day(lssOf(e)?.invite_accepted_at) === d).length, replied: replied.filter((e) => day(e.completed_at) === d).length,
+      interested: interested.filter((e) => day(e.completed_at) === d).length, meetings: meetings.filter((m) => day(m.at) === d).length,
+    });
     const td = days.find((x) => x.day === today); const gap = td && td.planned > 0 ? Math.round(((td.planned - td.sent) * 1000) / td.planned) / 10 : null;
     const pool = new Set<string>(s.sender_pool ?? []); for (const x of sentActs) pool.add(x.sender_id);
     const senders = [...pool].map((sid) => ctx.store.get('outreach_senders', sid)).filter((x): x is Row => !!x).map((sd) => {
@@ -922,7 +927,7 @@ export const sequencesRpc = {
       sequence: { id: s.id, name: s.name, status: s.status, head_version: s.head_version }, period: { from, to, timezone: 'UTC', default: !str(a.p_from) && !str(a.p_to) },
       first_run_at: first, empty: !first, cards, progress, steps,
       daily: { days, today, today_planned: td?.planned ?? 0, today_sent: td?.sent ?? 0, gap_pct: gap, gap_reason: gap !== null && gap > 20 ? (s.status === 'paused' ? 'The sequence is paused' : 'The day is not over: sends continue in each sender’s working hours') : null },
-      senders, team: [...team].map(([user_id, t]) => ({ user_id, name: memberName(ctx, user_id) ?? 'Teammate', ...t })), handoffs_untaken: untaken, definitions_version: 1,
+      senders, team: [...team].map(([user_id, t]) => ({ user_id, name: memberName(ctx, user_id) ?? 'Teammate', ...t })), handoffs_untaken: untaken, definitions_version: 2,
     };
   },
 

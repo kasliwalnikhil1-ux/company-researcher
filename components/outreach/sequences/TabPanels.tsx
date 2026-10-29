@@ -13,12 +13,17 @@ import SequenceSettingsPanel from './SequenceSettingsPanel';
 import { ASSIGNMENT_OPTIONS, type SetPoolResult } from './publishTypes';
 
 /** Scrollable page-like area under the tabs, shared by every non-canvas tab. */
-export function TabPage({ title, subtitle, wide, children }: { title: string; subtitle?: string; wide?: boolean; children: React.ReactNode }) {
+export function TabPage({ title, subtitle, wide, actions, children }: { title: string; subtitle?: string; wide?: boolean; /** Buttons on the right of the title row. */ actions?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div role="tabpanel" className="flex-1 min-h-0 overflow-y-auto">
       <div className={cn('mx-auto px-4 py-5 md:px-6', wide ? 'max-w-5xl' : 'max-w-2xl')}>
-        <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
-        {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+            {subtitle && <p className="text-sm text-gray-500 mt-0.5">{subtitle}</p>}
+          </div>
+          {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        </div>
         <div className="mt-4">{children}</div>
       </div>
     </div>

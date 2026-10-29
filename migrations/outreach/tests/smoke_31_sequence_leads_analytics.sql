@@ -194,6 +194,14 @@ begin
   select x into j2 from jsonb_array_elements(j->'steps') x where x->>'node_id' = 'n1';
   if (j2->>'accepted')::int = 1 then log := log || E'\nok   5g the Invite row shows the acceptance'; else fails := fails + 1; log := log || E'\nFAIL 5g ' || coalesce(j2::text, 'null'); end if;
   if jsonb_array_length(j#>'{daily,days}') = 30 and (select sum((x->>'sent')::int) from jsonb_array_elements(j#>'{daily,days}') x) >= 1 then log := log || E'\nok   5h planned vs sent: 30 days, sends counted'; else fails := fails + 1; log := log || E'\nFAIL 5h ' || (j->'daily')::text; end if;
+  -- 105: the days carry outcomes too, and they add up to the stat cards over the same window
+  if (select bool_and(x ? 'accepted' and x ? 'replied' and x ? 'interested' and x ? 'meetings') from jsonb_array_elements(j#>'{daily,days}') x)
+     and (select sum((x->>'accepted')::int) from jsonb_array_elements(j#>'{daily,days}') x) = (j#>>'{cards,accepted}')::int
+     and (select sum((x->>'replied')::int) from jsonb_array_elements(j#>'{daily,days}') x) = (j#>>'{cards,replied}')::int
+     and (select sum((x->>'interested')::int) from jsonb_array_elements(j#>'{daily,days}') x) = (j#>>'{cards,interested}')::int
+     and (select sum((x->>'meetings')::int) from jsonb_array_elements(j#>'{daily,days}') x) = (j#>>'{cards,meetings}')::int
+     and (j#>>'{cards,accepted}')::int >= 1
+  then log := log || E'\nok   5h2 activity by day: accepted / replied / interested / meetings per day add up to the cards'; else fails := fails + 1; log := log || E'\nFAIL 5h2 ' || (j->'daily')::text || ' cards ' || (j->'cards')::text; end if;
   select x into j2 from jsonb_array_elements(j->'senders') x where x->>'id' = s1::text;
   if j2->>'name' = 'Naman LI' and j2->>'status' = 'ok' and (j2->>'sent')::int >= 1 and (j2->>'in_pool')::boolean then log := log || E'\nok   5i the sender row: status, sends, in the pool'; else fails := fails + 1; log := log || E'\nFAIL 5i ' || coalesce(j2::text, 'null'); end if;
   select x into j2 from jsonb_array_elements(j->'team') x where x->>'user_id' = u_owner::text;

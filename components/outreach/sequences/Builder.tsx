@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { useRouter, useSearchParams } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, History as HistoryIcon } from 'lucide-react';
+import { AlertTriangle, History as HistoryIcon, UserPlus } from 'lucide-react';
 import { db } from '@/lib/outreach/backend';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { callFn, parseError, rpc } from '@/lib/outreach/api';
@@ -18,7 +18,7 @@ import { allowedNext } from './allowedNext';
 import NodeConfigPanel from './NodeConfigPanel';
 import TopBar, { BUILDER_TABS, type BuilderTab, type DraftIndicator, type StatusAction } from './TopBar';
 import { SendersTab, SettingsTab, TabPage } from './TabPanels';
-import EnrolPanel from './EnrolPanel';
+import EnrolDrawer from './EnrolDrawer';
 import VersionsPanel from './VersionsPanel';
 import ValidationBar from './ValidationBar';
 import { ConfirmModal, QaModal, UnsavedModal, type QaState } from './Modals';
@@ -37,7 +37,7 @@ import { WhyNotSendingDialog } from './WhyNotSendingDialog';
 import AutoEnrolRules from './AutoEnrolRules';
 import AiRepliesTab from './ai/AiRepliesTab';
 import SequenceAnalytics from './stats/SequenceAnalytics';
-import type { LeadsLink } from './leads/SequenceLeads';
+import SequenceLeads, { type LeadsLink } from './leads/SequenceLeads';
 
 const EMPTY: never[] = [];
 const NO_AI_VARIABLES: AiVariable[] = [];
@@ -139,6 +139,7 @@ export default function Builder({ id }: { id: string }) {
   }, []);
   // Analytics → Leads: a count opens the Leads tab on its filter (and the period's enrolled-in window)
   const [leadsLink, setLeadsLink] = useState<LeadsLink | null>(null);
+  const [enrolOpen, setEnrolOpen] = useState(false);
   const openLeads = useCallback((link: LeadsLink) => { setLeadsLink({ ...link, nonce: Date.now() }); setTab('leads'); }, [setTab]);
 
   // Load / reload the local draft from the server row. Local edits are never overwritten by a refetch.
@@ -532,8 +533,9 @@ export default function Builder({ id }: { id: string }) {
         )}
         {tab === 'settings' && <SettingsTab sequenceId={sequence.id} draft={draft} clients={clientsQ.data ?? []} readOnly={readOnly} publishMode={publishMode} onChange={patchDraft} />}
         {tab === 'leads' && (
-          <TabPage title="Leads" subtitle="Who is enrolled in this sequence and where each lead has got to. Add leads by enrolling them into this sequence." wide>
-            <EnrolPanel id={sequence.id} onOpenBuilder={() => setTab('steps')} link={leadsLink} />
+          <TabPage title="Leads" subtitle="Who is enrolled in this sequence and where each lead has got to." wide
+            actions={canWrite && sequence.status !== 'archived' ? <Button onClick={() => setEnrolOpen(true)}><UserPlus className="w-4 h-4" /> Enrol leads</Button> : null}>
+            <SequenceLeads sequence={sequence} canWrite={canWrite} link={leadsLink} onEnrol={canWrite && sequence.status !== 'archived' ? () => setEnrolOpen(true) : undefined} />
           </TabPage>
         )}
         {tab === 'versions' && (
@@ -585,6 +587,7 @@ export default function Builder({ id }: { id: string }) {
           metaLabels={publishMeta} onFocusNode={focusNode} onPublished={onPublished}
         />
         <WhyNotSendingDialog open={whyOpen} onClose={() => setWhyOpen(false)} sequenceId={sequence.id} />
+        <EnrolDrawer id={sequence.id} open={enrolOpen} onClose={() => setEnrolOpen(false)} onOpenBuilder={() => { setEnrolOpen(false); setTab('steps'); }} />
         <FailedLeadsDrawer
           open={!!failedView} onClose={() => setFailedView(null)} sequenceId={sequence.id} nodeId={failedView?.nodeId ?? null}
           nodeLabel={failedNode ? nodeTitle(failedNode) : undefined} initialKind={failedView?.kind ?? 'failed'} graph={live.graph} canWrite={canWrite}

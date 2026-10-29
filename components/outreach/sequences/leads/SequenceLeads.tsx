@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { useSearchParams } from '@/lib/outreach/nav';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, LogOut, Pause, Play, Search, X } from 'lucide-react';
+import { AlertTriangle, ChevronLeft, ChevronRight, ExternalLink, LogOut, Pause, Play, Search, UserPlus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
 import { parseError } from '@/lib/outreach/api';
@@ -90,7 +90,7 @@ function SnippetCell({ s }: { s: SequenceLeadRow['last_message'] }) {
 
 const tabBtn = (active: boolean) => cn('px-2.5 py-1 text-xs font-medium rounded-md whitespace-nowrap transition-colors', active ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-50');
 
-export default function SequenceLeads({ sequence, canWrite, link }: { sequence: Sequence; canWrite: boolean; link?: LeadsLink | null }) {
+export default function SequenceLeads({ sequence, canWrite, link, onEnrol }: { sequence: Sequence; canWrite: boolean; link?: LeadsLink | null; /** Opens the enrol drawer; offered when the sequence has no live leads. */ onEnrol?: () => void }) {
   const { workspace } = useWorkspace();
   const senders = useSenders(workspace?.id);
   const senderById = useMemo(() => new Map((senders.data ?? []).map((x) => [x.id, x])), [senders.data]);
@@ -118,6 +118,9 @@ export default function SequenceLeads({ sequence, canWrite, link }: { sequence: 
   const selectRun = useRef(0);
   const clearSelection = useCallback(() => { setSelected(new Set()); setAllMatching(false); }, []);
   const [seenLink, setSeenLink] = useState<LeadsLink | null | undefined>(link);
+  // a link from Analytics lands on this table, not on the enrol wizard above it: scroll it into view on mount and on every new link
+  const rootRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (link) rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, [link]);
   if (link !== seenLink) {   // a request from Analytics while mounted: apply it once (render-time state update, no effect needed)
     setSeenLink(link);
     if (link) { setFilterState(link.filter); setTeammate(link.teammate ?? null); setRange(link.from && link.to ? { from: link.from, to: link.to } : null); setPage(0); setView('list'); setSelected(new Set()); setAllMatching(false); }
@@ -236,25 +239,25 @@ export default function SequenceLeads({ sequence, canWrite, link }: { sequence: 
   const opt = LEAD_FILTER_BY_KEY[filter];
 
   return (
-    <Card title={view === 'failed' ? 'Failed and skipped leads' : <span>Enrolled leads <span className="text-gray-400 font-normal tabular-nums">({fmtCount(countOf(counts.data, 'all'))})</span></span>} actions={
-      <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5 text-xs" role="radiogroup" aria-label="Which view to show">
-        <button type="button" role="radio" aria-checked={view === 'list'} onClick={() => setView('list')} className={cn('px-3 py-1 rounded-md', view === 'list' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>Leads</button>
-        <button type="button" role="radio" aria-checked={view === 'failed'} onClick={() => setView('failed')} title="Why each lead failed or was skipped, with retry, skip and exit" className={cn('px-3 py-1 rounded-md', view === 'failed' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-gray-600 hover:bg-gray-50')}>Failed &amp; skipped{failedCount.data ? <span className="tabular-nums"> ({failedCount.data.toLocaleString()})</span> : null}</button>
-      </div>
-    }>
-      {view === 'failed' ? (
-        <FailedLeadsPanel sequenceId={sequence.id} kind={failedKind} onKindChange={setFailedKind} graph={sequence.graph} canWrite={canWrite} />
-      ) : (
+    <div ref={rootRef} className="scroll-mt-4">
+    <Card title={view === 'failed' ? 'Failed and skipped leads' : <span>Enrolled leads <span className="text-gray-400 font-normal tabular-nums">({fmtCount(countOf(counts.data, 'all'))})</span></span>}>
         <div className="space-y-3">
-          {/* one row: the five tabs, the full dropdown, the teammate sub-filter, the window chip, the search */}
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="inline-flex shrink-0 max-w-full overflow-x-auto [scrollbar-width:none] rounded-lg border border-gray-200 bg-white p-0.5" role="radiogroup" aria-label="Lead status">
-              {TAB_FILTERS.map((o) => (
-                <button key={o.key} type="button" role="radio" aria-checked={filter === o.key} title={o.help} onClick={() => setFilter(o.key)} className={tabBtn(filter === o.key)}>
-                  {o.label} <span className={cn('ml-0.5 tabular-nums', filter === o.key ? 'text-indigo-400' : 'text-gray-400')}>{fmtCount(countOf(counts.data, o.key))}</span>
-                </button>
-              ))}
+          {/* first row: the five status tabs + Failed & skipped, then (list view only) the full dropdown, the teammate sub-filter, the window chip */}
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <div className="inline-flex min-w-0 max-w-full overflow-x-auto [scrollbar-width:none] rounded-lg border border-gray-200 bg-white p-0.5" role="radiogroup" aria-label="Lead status">
+              {TAB_FILTERS.map((o) => {
+                const on = view === 'list' && filter === o.key;
+                return (
+                  <button key={o.key} type="button" role="radio" aria-checked={on} title={o.help} onClick={() => { setView('list'); setFilter(o.key); }} className={tabBtn(on)}>
+                    {o.label} <span className={cn('ml-0.5 tabular-nums', on ? 'text-indigo-400' : 'text-gray-400')}>{fmtCount(countOf(counts.data, o.key))}</span>
+                  </button>
+                );
+              })}
+              <button type="button" role="radio" aria-checked={view === 'failed'} title="Why each lead failed or was skipped, with retry, skip and exit" onClick={() => setView('failed')} className={tabBtn(view === 'failed')}>
+                Failed &amp; skipped <span className={cn('ml-0.5 tabular-nums', view === 'failed' ? 'text-indigo-400' : 'text-gray-400')}>{fmtCount(failedCount.data ?? undefined)}</span>
+              </button>
             </div>
+            {view === 'list' && <>
             <Select value={filter} onChange={(e) => setFilter(e.target.value as LeadFilter)} aria-label="Lead status (all options)" title={opt.help} className="!py-1 !text-xs w-auto shrink-0">
               {LEAD_FILTERS.filter((o) => o.group === 'top').map((o) => <option key={o.key} value={o.key}>{o.label} ({fmtCount(countOf(counts.data, o.key))})</option>)}
               {(['progress', 'ended'] as const).map((g) => (
@@ -275,11 +278,16 @@ export default function SequenceLeads({ sequence, canWrite, link }: { sequence: 
                 <button type="button" aria-label="Show every lead, whenever enrolled" onClick={() => { setRange(null); setPage(0); clearSelection(); }} className="rounded-full hover:bg-indigo-100 p-0.5"><X className="w-3 h-3" /></button>
               </span>
             )}
-            <label className="relative ml-auto w-40 shrink-0">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden />
-              <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search" aria-label="Search leads in this sequence" className="w-full pl-8 pr-2 py-1 text-xs rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-            </label>
+            </>}
           </div>
+          {view === 'failed' ? (
+            <FailedLeadsPanel sequenceId={sequence.id} kind={failedKind} onKindChange={setFailedKind} graph={sequence.graph} canWrite={canWrite} />
+          ) : (<>
+          {/* second row: the search, left aligned */}
+          <label className="relative block w-40 max-w-full">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" aria-hidden />
+            <input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)} placeholder="Search" aria-label="Search leads in this sequence" className="w-full pl-8 pr-2 py-1 text-xs rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          </label>
           {filter === 'stopped_by_teammate' && !teammate && c.stopped_by_system > 0 && (
             <p className="text-xs text-gray-500">{c.stopped_by_system.toLocaleString()} of these were stopped before teammates were recorded, or through the API.</p>
           )}
@@ -291,7 +299,8 @@ export default function SequenceLeads({ sequence, canWrite, link }: { sequence: 
 
           {pageQ.isLoading && !pageQ.data ? <Spinner /> : pageQ.error ? <ErrorBox message={parseError(pageQ.error).message} /> : rows.length === 0 ? (
             <EmptyState title={filter === 'live' && !search && !range ? 'No leads enrolled right now' : 'No leads here'}
-              description={filter === 'live' && !search && !range ? (canWrite ? 'No enrolled leads are live in this sequence. Choose leads above to enrol them.' : 'No enrolled leads are live in this sequence.') : `Nothing matches ${search ? 'this search' : 'this filter'}.`} />
+              description={filter === 'live' && !search && !range ? 'No enrolled leads are live in this sequence.' : `Nothing matches ${search ? 'this search' : 'this filter'}.`}
+              action={filter === 'live' && !search && !range && onEnrol ? <Button onClick={onEnrol}><UserPlus className="w-4 h-4" /> Enrol leads</Button> : undefined} />
           ) : (
             <div className={cn(pageQ.isPlaceholderData || pageQ.isFetching ? 'opacity-70 transition-opacity' : 'transition-opacity')}>
               <Table className="border-0">
@@ -372,12 +381,13 @@ export default function SequenceLeads({ sequence, canWrite, link }: { sequence: 
               </div>
             </div>
           )}
+          </>)}
         </div>
-      )}
 
       <ConfirmBulkModal action={pending?.action ?? null} count={pending?.count ?? 0} sequenceName={sequence.name} preview={preview} loading={false} onConfirm={run} onClose={() => { setPending(null); setPreview(null); }} />
       <UndoToast key={undo?.batchId ?? 'none'} state={undo} busy={undoBusy} onUndo={doUndo} onExpire={expireUndo} />
       {toast.node}
     </Card>
+    </div>
   );
 }
