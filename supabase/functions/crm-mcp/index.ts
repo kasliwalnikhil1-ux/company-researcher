@@ -147,7 +147,12 @@ app.get("/.well-known/oauth-protected-resource-chatgpt", () => new Response(JSON
 
 const mcpHandler = (prm: string) => async (c: import("npm:hono@4.9.7").Context) => {
   const t0 = Date.now();
-  const ctx = await buildCtx(c.req.header("authorization"));
+  let ctx: Awaited<ReturnType<typeof buildCtx>>;
+  try { ctx = await buildCtx(c.req.header("authorization")); } catch (e) {
+    // the auth service did not answer: say so instead of a bare 500 or a misleading "sign in again"
+    const msg = e instanceof Error ? e.message : String(e);
+    return new Response(JSON.stringify({ error: true, code: "E_AUTH_UNAVAILABLE", message: msg }), { status: 503, headers: { ...CORS_HEADERS, "content-type": "application/json", "retry-after": "5" } });
+  }
   if (!ctx) return unauthorized(prm);
 
   const server = buildServer(ctx);

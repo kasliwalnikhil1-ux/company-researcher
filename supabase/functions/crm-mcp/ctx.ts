@@ -71,19 +71,33 @@ export class McpError extends Error {
 // Auth
 // ---------------------------------------------------------------------------
 
+/**
+ * Resolve the caller from a member JWT. Returns null only when the auth server says the token is
+ * not valid any more (expired, or its session was deleted — e.g. a sign-out on another device —
+ * which PostgREST does not notice but GoTrue does). When the auth server itself cannot be reached
+ * this throws E_AUTH_UNAVAILABLE so callers do not report a healthy sign-in as "expired".
+ */
 export async function buildCtx(authHeader: string | undefined): Promise<Ctx | null> {
   const token = (authHeader ?? "").replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
   try {
-    const { data } = await admin.auth.getUser(token);
-    if (!data?.user?.id) return null;
+    const { data, error } = await admin.auth.getUser(token);
+    if (error || !data?.user?.id) {
+      const status = (error as { status?: number } | null)?.status;
+      log({ fn: "crm-mcp", warn: "token rejected", status, code: (error as { code?: string } | null)?.code, message: error?.message?.slice(0, 160) });
+      // 4xx = the token is bad. Anything else (network, 5xx, 429) = GoTrue trouble, not the member's session.
+      if (status != null && status >= 500 || status === 429 || (!status && error)) throw new McpError("E_AUTH_UNAVAILABLE", "Could not verify your sign-in right now; try again in a moment.");
+      return null;
+    }
     const user = createClient(SUPABASE_URL, ANON_KEY || SERVICE_ROLE_KEY, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false } });
-    const { data: crm, error } = await user.rpc("crm_context");
-    if (error) log({ fn: "crm-mcp", warn: "crm_context failed", error: error.message });
+    const { data: crm, error: ctxErr } = await user.rpc("crm_context");
+    if (ctxErr) log({ fn: "crm-mcp", warn: "crm_context failed", error: ctxErr.message });
     const c = (crm ?? { user_id: data.user.id, is_member: false, me: null, members: [], settings: {}, timezone: "Asia/Kolkata", stale_after_days: 14, stages: [], icp_segments: [], source_channels: [], activity_types: [], fx_rates: {} }) as CrmContext;
     return { userId: data.user.id, email: data.user.email ?? null, token, user, crm: c, isMember: !!c.is_member };
-  } catch {
-    return null;
+  } catch (e) {
+    if (e instanceof McpError) throw e;
+    log({ fn: "crm-mcp", warn: "buildCtx failed", error: e instanceof Error ? e.message : String(e) });
+    throw new McpError("E_AUTH_UNAVAILABLE", "Could not verify your sign-in right now; try again in a moment.");
   }
 }
 
@@ -119,6 +133,7 @@ export const untrusted = (source: string, t: string | null | undefined, max = 20
 
 const REMEDIES: Record<string, string> = {
   E_UNAUTHORIZED: "The connector session expired; reconnect the CapitalxAI Sales CRM connector.",
+  E_AUTH_UNAVAILABLE: "The sign-in could not be verified because the auth service did not answer. Retry once; if it persists, report it.",
   E_FORBIDDEN: "The signed-in account is not on the CRM team. A team member can add it in CRM → Settings → Team (or with add_team_member).",
   E_NOT_FOUND: "Check the id or name. Use search / crm_context to find the right company, contact, deal, member or lookup value.",
   E_PAYLOAD_INVALID: "Fix the arguments as described in `message` and retry.",

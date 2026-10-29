@@ -22,7 +22,7 @@ import * as cal from "./calendar.ts";
 
 type Row = Record<string, any>;
 const STATUS: Record<string, number> = {
-  E_UNAUTHORIZED: 401, E_FORBIDDEN: 403, E_NOT_FOUND: 404, E_PAYLOAD_INVALID: 400, E_MEETING_CANCELLED: 409,
+  E_UNAUTHORIZED: 401, E_AUTH_UNAVAILABLE: 503, E_FORBIDDEN: 403, E_NOT_FOUND: 404, E_PAYLOAD_INVALID: 400, E_MEETING_CANCELLED: 409,
   E_CALENDAR_NOT_CONFIGURED: 503, E_CALENDAR_NOT_CONNECTED: 409, E_CALENDAR_RECONNECT: 409, E_CALENDAR_SCOPE: 409, E_CALENDAR_READONLY: 403,
   E_GOOGLE: 502, E_GOOGLE_NETWORK: 502, E_GOOGLE_UNAUTHORIZED: 502,
 };
@@ -40,7 +40,7 @@ export function registerCalendarRoutes(app: Hono, cors: Record<string, string>):
       const t0 = Date.now();
       try {
         const ctx = await buildCtx(c.req.header("authorization"));
-        if (!ctx) throw new McpError("E_UNAUTHORIZED", "The session expired; sign in again.");
+        if (!ctx) throw new McpError("E_UNAUTHORIZED", "Your sign-in is no longer valid (expired, or signed out elsewhere); sign in again.");
         if (!ctx.isMember) throw new McpError("E_FORBIDDEN", "This account is not on the CRM team.");
         const body = (await c.req.json().catch(() => ({}))) as Row;
         const out = await handler(ctx, body);

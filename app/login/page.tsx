@@ -41,10 +41,13 @@ export default function Login() {
 
   // Already signed in: there is nothing to do here, go where a fresh sign-in would go
   // (a pending OAuth consent, else home; the home route sends a 2FA account to its challenge).
+  // ?next=/crm/calendar — where to return after a forced re-login (set by lib/crm/api.ts when a session ends server-side)
+  const nextParam = searchParams.get('next');
+  const safeNext = nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : null;
   useEffect(() => {
     if (!user) return;
-    router.replace(popPendingOAuthConsent() ?? '/');
-  }, [user, router]);
+    router.replace(popPendingOAuthConsent() ?? safeNext ?? '/');
+  }, [user, router, safeNext]);
 
   // Cursor blink
   useEffect(() => {
@@ -110,6 +113,8 @@ export default function Login() {
       setError('Authentication failed. Please try again.');
     } else if (errorParam === 'not_authorized') {
       setError('This email is not authorized to access the app. Please contact the administrator.');
+    } else if (errorParam === 'session_ended') {
+      setError('Your sign-in ended (signed out on another device, or the session was revoked). Please sign in again.');
     }
   }, [searchParams]);
 
@@ -129,7 +134,7 @@ export default function Login() {
           return;
         }
         // Finish a pending OAuth consent (e.g. Claude connector) instead of landing in the app.
-        router.push(popPendingOAuthConsent() ?? '/');
+        router.push(popPendingOAuthConsent() ?? safeNext ?? '/');
       } else {
         await signUp(email, password);
         setIsLogin(true);

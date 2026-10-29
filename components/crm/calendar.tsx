@@ -114,12 +114,19 @@ export function TimeGrid({ days, events, crmOnly, tz, colorOf, onEvent, onCrmOnl
   useEffect(() => { const t = setInterval(() => setNowMin(nowMinutesIn(tz)), 60_000); return () => clearInterval(t); }, [tz]);
   const scroller = useRef<HTMLDivElement>(null);
   const timed = events.filter((e) => !e.all_day), allDay = events.filter((e) => e.all_day);
-  // extend the visible hours when something falls outside 07–22
-  const lo = Math.min(MIN_HOUR, ...timed.map((e) => Math.floor(e.start_min / 60)), ...crmOnly.map((m) => Math.floor(m.start_min / 60)));
-  const hi = Math.max(MAX_HOUR, ...timed.map((e) => Math.ceil(e.end_min / 60)), ...crmOnly.map((m) => Math.ceil(m.end_min / 60)));
+  // extend the visible hours when something falls outside 07–22 — including the current time, so the "now" line
+  // (like Google Calendar's) is always on the grid when today is in view, even at 01:00.
+  const todayShown = days.includes(today);
+  const lo = Math.min(MIN_HOUR, ...(todayShown ? [Math.floor(nowMin / 60)] : []), ...timed.map((e) => Math.floor(e.start_min / 60)), ...crmOnly.map((m) => Math.floor(m.start_min / 60)));
+  const hi = Math.max(MAX_HOUR, ...(todayShown ? [Math.min(24, Math.floor(nowMin / 60) + 1)] : []), ...timed.map((e) => Math.ceil(e.end_min / 60)), ...crmOnly.map((m) => Math.ceil(m.end_min / 60)));
   const hours = Array.from({ length: hi - lo }, (_, i) => lo + i);
   const top = (min: number) => ((min - lo * 60) / 60) * HOUR_PX;
-  useEffect(() => { if (scroller.current) scroller.current.scrollTop = Math.max(0, top(Math.min(nowMin, 9 * 60)) - 40); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // open with the current time in the upper third of the viewport (Google Calendar does the same); 09:00 on other days
+  useEffect(() => {
+    const el = scroller.current; if (!el) return;
+    const target = todayShown ? top(nowMin) - el.clientHeight / 3 : top(9 * 60) - 40;
+    el.scrollTop = Math.max(0, target);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // side-by-side layout for overlapping events in a day
   const laid = useMemo(() => {
@@ -164,13 +171,14 @@ export function TimeGrid({ days, events, crmOnly, tz, colorOf, onEvent, onCrmOnl
       <div ref={scroller} className="flex-1 overflow-y-auto">
         <div className="grid relative" style={{ gridTemplateColumns: gridCols, height: hours.length * HOUR_PX }}>
           <div className="relative">
-            {hours.map((h) => <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-gray-400 tabular-nums" style={{ top: (h - lo) * HOUR_PX }}>{h === lo ? '' : `${String(h).padStart(2, '0')}:00`}</div>)}
+            {hours.map((h) => <div key={h} className={cn('absolute right-1.5 -translate-y-1/2 text-[10px] text-gray-400 tabular-nums', todayShown && Math.abs(h * 60 - nowMin) < 20 && 'invisible')} style={{ top: (h - lo) * HOUR_PX }}>{h === lo ? '' : `${String(h).padStart(2, '0')}:00`}</div>)}
+            {todayShown && nowMin >= lo * 60 && nowMin <= hi * 60 && <div className="absolute right-1.5 -translate-y-1/2 z-20 text-[10px] font-semibold text-red-600 tabular-nums bg-white px-0.5 rounded pointer-events-none" style={{ top: top(nowMin) }}>{hm(nowMin)}</div>}
           </div>
           {days.map((d) => (
             <div key={d} className={cn('relative border-l border-gray-100', d === today && 'bg-indigo-50/30')}>
               {hours.map((h) => <div key={h} className="absolute inset-x-0 border-t border-gray-100" style={{ top: (h - lo) * HOUR_PX }} onClick={() => onSlot(d, h * 60)} role="presentation" />)}
               {hours.map((h) => <div key={`${h}-half`} className="absolute inset-x-0 border-t border-dashed border-gray-50" style={{ top: (h - lo) * HOUR_PX + HOUR_PX / 2 }} onClick={() => onSlot(d, h * 60 + 30)} role="presentation" />)}
-              {d === today && nowMin >= lo * 60 && nowMin <= hi * 60 && <div className="absolute inset-x-0 z-20 pointer-events-none" style={{ top: top(nowMin) }}><div className="h-px bg-red-500" /><div className="w-2 h-2 rounded-full bg-red-500 -mt-1 -ml-1" /></div>}
+              {d === today && nowMin >= lo * 60 && nowMin <= hi * 60 && <div className="absolute inset-x-0 z-30 pointer-events-none" style={{ top: top(nowMin) }}><div className="h-0.5 -mt-px bg-red-500" /><div className="w-3 h-3 rounded-full bg-red-500 -mt-[7px] -ml-1.5" /></div>}
               {crmOnly.filter((m) => m.day === d).map((m) => (
                 <button key={m.meeting_id} type="button" onClick={() => onCrmOnly(m)} title={`${m.company_name}${m.contact_name ? ` · ${m.contact_name}` : ''} — CRM meeting with no Google Calendar event yet`}
                   className="absolute left-0.5 right-0.5 z-[5] rounded border border-dashed border-gray-400 bg-white/80 text-left px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-50 overflow-hidden"

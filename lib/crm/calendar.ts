@@ -1,8 +1,7 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/utils/supabase/client';
-import { CrmError } from './api';
+import { callFunction } from './api';
 
 // Google Calendar for the CRM team. The browser never talks to Google: crm-mcp holds the sign-ins (encrypted) and
 // proxies every call (supabase/functions/crm-mcp/calendar.ts — the same service the connector tools use).
@@ -25,15 +24,7 @@ export interface CalendarEvent {
 export type Notify = 'all' | 'externalOnly' | 'none';
 export interface FreeSlot { day: string; start: string; end: string; label: string }
 
-async function call<T = any>(op: string, body: Record<string, unknown> = {}): Promise<T> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new CrmError('Please sign in again', 'E_UNAUTHORIZED');
-  const r = await fetch(`${BASE}/${op}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.error) throw new CrmError(j.message ?? `Request failed (${r.status})`, j.code ?? 'E_UNKNOWN', j.remedy);
-  return j as T;
-}
+const call = <T = any>(op: string, body: Record<string, unknown> = {}) => callFunction<T>(BASE, op, body);
 
 export const calendarApi = {
   status: () => call<{ configured: boolean; client_kind: 'desktop' | 'web'; callback_url: string }>('status'),

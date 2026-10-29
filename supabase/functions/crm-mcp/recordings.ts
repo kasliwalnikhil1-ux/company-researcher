@@ -21,7 +21,7 @@ import { storedRecording, tempUpload, transcribeToMeeting } from "./transcribe.t
 type Row = Record<string, any>;
 type Auth = { kind: "member"; ctx: Ctx } | { kind: "ticket"; sha: string; meetingId: string };
 
-const STATUS: Record<string, number> = { E_UNAUTHORIZED: 401, E_FORBIDDEN: 403, E_NOT_FOUND: 404, E_PAYLOAD_INVALID: 400, E_TOO_LARGE: 413, E_STORAGE_NOT_CONFIGURED: 503, E_STORAGE: 502,
+const STATUS: Record<string, number> = { E_UNAUTHORIZED: 401, E_AUTH_UNAVAILABLE: 503, E_FORBIDDEN: 403, E_NOT_FOUND: 404, E_PAYLOAD_INVALID: 400, E_TOO_LARGE: 413, E_STORAGE_NOT_CONFIGURED: 503, E_STORAGE: 502,
   E_TRANSCRIPTION_NOT_CONFIGURED: 503, E_TRANSCRIPTION_FAILED: 502 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 class HttpError extends Error { code: string; constructor(code: string, message: string) { super(message); this.code = code; } }
@@ -36,7 +36,7 @@ async function authenticate(header: string | undefined): Promise<Auth> {
     return { kind: "ticket", sha, meetingId: (data as Row).meeting_id };
   }
   const ctx = await buildCtx(header);
-  if (!ctx) throw new HttpError("E_UNAUTHORIZED", "The session expired; sign in again.");
+  if (!ctx) throw new HttpError("E_UNAUTHORIZED", "Your sign-in is no longer valid (expired, or signed out elsewhere); sign in again.");
   if (!ctx.isMember) throw new HttpError("E_FORBIDDEN", "This account is not on the CRM team.");
   return { kind: "member", ctx };
 }

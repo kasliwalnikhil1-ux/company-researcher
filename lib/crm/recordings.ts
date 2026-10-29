@@ -1,7 +1,6 @@
 'use client';
 
-import { supabase } from '@/utils/supabase/client';
-import { CrmError } from './api';
+import { CrmError, callFunction } from './api';
 
 // Call audio lives in the studio's private Oracle bucket. The browser never holds the bucket key: crm-mcp hands out a
 // short-lived presigned URL, and the file goes straight from here to Oracle (the same routes the crm skill's script uses).
@@ -9,15 +8,7 @@ import { CrmError } from './api';
 const BASE = `${process.env.NEXT_PUBLIC_SUPABASE_URL || ''}/functions/v1/crm-mcp/recording`;
 export const MAX_RECORDING_MB = 300;
 
-async function call<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new CrmError('Please sign in again', 'E_UNAUTHORIZED');
-  const r = await fetch(`${BASE}/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok || j.error) throw new CrmError(j.message ?? `Request failed (${r.status})`, j.code ?? 'E_UNKNOWN');
-  return j as T;
-}
+const call = <T>(path: string, body: Record<string, unknown>) => callFunction<T>(BASE, path, body);
 
 /** Length of an audio file, read locally before upload. Best effort: undefined when the browser cannot decode it. */
 function mediaDuration(file: File): Promise<number | undefined> {

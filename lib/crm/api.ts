@@ -41,6 +41,52 @@ export function humanize(code: string): string {
   return map[code] ?? code;
 }
 
+/**
+ * POST to a crm-mcp edge-function route with the member's access token.
+ *
+ * PostgREST only checks the JWT signature and expiry, but crm-mcp verifies the token with the auth
+ * server, which also checks that the session still exists. A session can be deleted under a token
+ * that is still valid for hours (sign-out on another device, revoked by an admin), so the rest of
+ * the CRM keeps working while every calendar / recording call answers E_UNAUTHORIZED. When that
+ * happens we refresh the session once and retry; if the refresh fails too the sign-in is gone for
+ * good, so we end it locally and send the member to the login page instead of leaving a half-dead app.
+ */
+export async function callFunction<T = any>(base: string, op: string, body: Record<string, unknown> = {}): Promise<T> {
+  const { data } = await supabase.auth.getSession();
+  let token = data.session?.access_token;
+  if (!token) throw new CrmError('Please sign in again', 'E_UNAUTHORIZED');
+  const attempt = async (t: string) => {
+    const r = await fetch(`${base}/${op}`, { method: 'POST', headers: { Authorization: `Bearer ${t}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    return { r, j };
+  };
+  let { r, j } = await attempt(token);
+  if (r.status === 401 || j?.code === 'E_UNAUTHORIZED') {
+    const { data: refreshed, error } = await supabase.auth.refreshSession();
+    if (refreshed?.session?.access_token && !error) {
+      token = refreshed.session.access_token;
+      ({ r, j } = await attempt(token));
+    }
+    if (r.status === 401 || j?.code === 'E_UNAUTHORIZED') {
+      await endSession();
+      throw new CrmError('Your sign-in ended (signed out on another device, or the session was revoked). Please sign in again.', 'E_UNAUTHORIZED');
+    }
+  }
+  if (!r.ok || j.error) throw new CrmError(friendlyErrorText(j.message ?? `Request failed (${r.status})`), j.code ?? 'E_UNKNOWN', j.remedy);
+  return j as T;
+}
+
+let ending = false;
+async function endSession(): Promise<void> {
+  if (ending || typeof window === 'undefined') return;
+  ending = true;
+  try { await supabase.auth.signOut({ scope: 'local' }); } catch { /* the server already dropped it */ }
+  const next = window.location.pathname + window.location.search;
+  // a full navigation on purpose: the whole React tree (queries, CRM context) belongs to the dead session
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+  window.location.assign(`/login?error=session_ended&next=${encodeURIComponent(next)}`);
+}
+
 /** Call a crm_* SQL RPC (name without the `crm_` prefix). */
 export async function rpc<T = any>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   const { data, error } = await supabase.rpc(`crm_${name}` as any, args as any);
