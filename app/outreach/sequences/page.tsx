@@ -92,7 +92,7 @@ function RowMenu({ s, canManage, onDuplicate, onArchive, onDelete }: { s: Sequen
           <div ref={menuRef} role="menu" style={{ top: pos?.top ?? 0, left: pos?.left ?? 0, visibility: pos ? 'visible' : 'hidden' }}
             className="fixed z-50 w-44 bg-white border border-gray-200 rounded-lg shadow-lg py-1 text-sm">
             <Link href={`/outreach/sequences/${s.id}`} className={MENU_ITEM} role="menuitem" onClick={close}><ExternalLink className="w-4 h-4 flex-shrink-0" /> Open</Link>
-            <Link href={`/outreach/sequences/${s.id}?tab=results`} className={MENU_ITEM} role="menuitem" onClick={close}><GitBranch className="w-4 h-4 flex-shrink-0" /> Analytics</Link>
+            <Link href={`/outreach/sequences/${s.id}?tab=analytics`} className={MENU_ITEM} role="menuitem" onClick={close}><GitBranch className="w-4 h-4 flex-shrink-0" /> Analytics</Link>
             {canManage && <button type="button" onClick={() => { close(); onDuplicate(); }} className={MENU_ITEM} role="menuitem"><Copy className="w-4 h-4 flex-shrink-0" /> Duplicate</button>}
             {canManage && s.status !== 'archived' && <button type="button" onClick={() => { close(); onArchive(); }} className={MENU_ITEM} role="menuitem"><Archive className="w-4 h-4 flex-shrink-0" /> Archive</button>}
             {canManage && <button type="button" onClick={() => { close(); onDelete(); }} className={cn(MENU_ITEM, 'hover:bg-red-50 text-red-600')} role="menuitem"><Trash2 className="w-4 h-4 flex-shrink-0" /> Delete</button>}

@@ -10,6 +10,7 @@ import { Badge, EmptyState, Table, Td, Th, fmtDate } from '@/components/outreach
 import { csvFileName, downloadCsv, fmtInt, fmtRate } from '@/lib/outreach/reports';
 import { channelKeyLabel, channelLabel, useReportBlocks, useReportChannels, type ReportBlockRow, type ReportChannelRow } from '@/lib/outreach/channels';
 import { ACTION_LABELS } from '@/components/outreach/senders/helpers';
+import { ChannelLogo } from '@/components/outreach/senders/ProviderLogo';
 import { reasonText } from '@/lib/outreach/reasons';
 import { CountRate, DetailRow, ExportButton, MetricLabel, Refreshing, RetryError, Section, SortTh, TableSkeleton, useElementWidth, useSort } from './primitives';
 import type { TabProps } from './OverviewTab';
@@ -110,7 +111,7 @@ export default function ChannelsTab(props: TabProps) {
             </tr></thead>
             <tbody>{sorted.map((r) => (
               <tr key={r.channel} className="hover:bg-gray-50">
-                <Td className="font-medium text-gray-900">{channelKeyLabel(r.channel)}</Td>
+                <Td className="font-medium text-gray-900"><span className="inline-flex items-center gap-2 whitespace-nowrap"><ChannelLogo channel={r.channel} />{channelKeyLabel(r.channel)}</span></Td>
                 <Td className="text-right tabular-nums">{fmtInt(r.senders)}</Td>
                 <Td className="text-right tabular-nums">{fmtInt(r.actions)}</Td>
                 <Td className="text-right tabular-nums">{fmtInt(r.new_chats)}</Td>

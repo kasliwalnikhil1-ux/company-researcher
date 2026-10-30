@@ -60,3 +60,12 @@ export function ProviderLogo({ provider, className }: { provider: Provider; clas
   );
   return <Mail className={cn(c, 'text-gray-500')} aria-label="IMAP" />;
 }
+
+const CHANNEL_PROVIDERS: Record<string, Provider> = { linkedin: 'LINKEDIN', instagram: 'INSTAGRAM', whatsapp: 'WHATSAPP', webchat: 'WEBCHAT' };
+
+/** The mark for a report channel key (linkedin · instagram · whatsapp · webchat · email). Email spans mailboxes, so it gets a plain envelope. */
+export function ChannelLogo({ channel, className }: { channel: string; className?: string }) {
+  const p = CHANNEL_PROVIDERS[channel];
+  if (p) return <ProviderLogo provider={p} className={className} />;
+  return <Mail className={cn('w-4 h-4 shrink-0 text-gray-500', className)} aria-hidden />;
+}

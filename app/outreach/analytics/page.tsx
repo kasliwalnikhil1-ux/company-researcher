@@ -76,7 +76,7 @@ function ReportsPage() {
 
   return (
     <div>
-      <PageHeader title="Reports" subtitle="One set of numbers for the dashboard, the client portal, the connector and the API."
+      <PageHeader title="Analytics" subtitle="One set of numbers for the dashboard, the client portal, the connector and the API."
         actions={isManager ? <Button variant="secondary" onClick={() => setSchedulesOpen(true)}><CalendarClock className="w-4 h-4" /> Schedules</Button> : undefined} />
 
       <div className="bg-white border border-gray-200 rounded-xl px-4 py-3 mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">

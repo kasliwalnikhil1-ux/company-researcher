@@ -7,7 +7,7 @@ import { db } from '@/lib/outreach/backend';
 import { parseError, rpc } from '@/lib/outreach/api';
 import { LIVE_ENROLLMENT_STATUSES, type ActionType } from '@/lib/outreach/types';
 import type { LeadFilters } from '@/lib/outreach/queries';
-import { BULK_CHUNK, type AnalyticsLeadsPage, type BulkAction, type BulkPreview, type BulkResult, type LeadCounts, type LeadListQuery, type SequenceAnalytics, type SequenceLeadsPage, type UndoResult } from '@/lib/outreach/sequenceLeads';
+import { BULK_CHUNK, type BulkAction, type BulkPreview, type BulkResult, type LeadCounts, type LeadListQuery, type SequenceAnalytics, type SequenceLeadsPage, type UndoResult } from '@/lib/outreach/sequenceLeads';
 import type { AutoEnrolLogRow, AutoEnrolRule, FailedKind, FailedLeadRow, QueuedActionRow, VersionUsageRow, WhyNotSendingResult } from './publishTypes';
 
 export interface SequenceSummaryRow { sequence_id: string; live: number; completed: number; replied: number; sent: number; queued: number }
@@ -152,13 +152,17 @@ export function useFailedCount(sequenceId: string | null | undefined) {
   });
 }
 
-export const FAILED_PAGE = 200;
+/** Rows a page in the leads drawers (step chips, day chart, failed / skipped lists). */
+export const FAILED_PAGE = 25;
 
-export function useFailedLeads(sequenceId: string, nodeId: string | null, kind: FailedKind, page: number, enabled = true) {
+/** The leads behind a step chip or, with `range` (workspace days, inclusive), behind a day of the Activity by day chart (106). */
+export function useFailedLeads(sequenceId: string, nodeId: string | null, kind: FailedKind, page: number, enabled = true, range: EnrolledRange = null) {
   return useQuery({
-    queryKey: [...sqk.failedLeads(sequenceId, nodeId, kind), page],
+    queryKey: [...sqk.failedLeads(sequenceId, nodeId, kind), range?.from ?? '', range?.to ?? '', page],
     enabled: enabled && !!sequenceId,
-    queryFn: () => rpc<FailedLeadRow[]>('failed_leads', { p_sequence: sequenceId, p_node_id: nodeId, p_kind: kind, p_limit: FAILED_PAGE, p_offset: page * FAILED_PAGE }).then((r) => r ?? []),
+    // paging keeps the current page on screen (dimmed) while the next one loads
+    placeholderData: keepPreviousData,
+    queryFn: () => rpc<FailedLeadRow[]>('failed_leads', { p_sequence: sequenceId, p_node_id: nodeId, p_kind: kind, p_limit: FAILED_PAGE, p_offset: page * FAILED_PAGE, ...(range ? { p_from: range.from, p_to: range.to } : {}) }).then((r) => r ?? []),
   });
 }
 
@@ -273,15 +277,6 @@ export function useSequenceAnalytics(sequenceId: string | null | undefined, rang
     refetchInterval: 60000,
     placeholderData: keepPreviousData,
     queryFn: () => rpc<SequenceAnalytics>('sequence_analytics', { p_sequence: sequenceId, ...rangeArgs(range) }),
-  });
-}
-
-export function useSequenceAnalyticsLeads(sequenceId: string | null | undefined, range: EnrolledRange, page: number, search: string) {
-  return useQuery({
-    queryKey: ['outreach', 'reports', 'sequence_analytics_leads', sequenceId ?? '', range, page, search],
-    enabled: !!sequenceId,
-    placeholderData: keepPreviousData,
-    queryFn: () => rpc<AnalyticsLeadsPage>('sequence_analytics_leads', { p_sequence: sequenceId, ...rangeArgs(range), p_limit: SEQUENCE_LEADS_PAGE, p_offset: page * SEQUENCE_LEADS_PAGE, p_search: search || null }),
   });
 }
 

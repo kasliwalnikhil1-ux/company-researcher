@@ -83,7 +83,9 @@ export default function Builder({ id }: { id: string }) {
   const [publishOpen, setPublishOpen] = useState(false);
   const [whyOpen, setWhyOpen] = useState(false);
   // `?tab=` picks the section, so a reload and the old /enroll and /versions links land on the right tab.
-  const urlTab = useSearchParams().get('tab');
+  // `?tab=results` is the Analytics tab's old address.
+  const rawUrlTab = useSearchParams().get('tab');
+  const urlTab = rawUrlTab === 'results' ? 'analytics' : rawUrlTab;
   const [tab, setTabState] = useState<BuilderTab>(() => (isTab(urlTab) ? urlTab : 'steps'));
   const [seenUrlTab, setSeenUrlTab] = useState(urlTab);
   if (urlTab !== seenUrlTab) { setSeenUrlTab(urlTab); if (isTab(urlTab)) setTabState(urlTab); }
@@ -545,7 +547,7 @@ export default function Builder({ id }: { id: string }) {
           </TabPage>
         )}
         {tab === 'ai' && <AiRepliesTab sequenceId={sequence.id} />}
-        {tab === 'results' && (
+        {tab === 'analytics' && (
           <TabPage title="Analytics" subtitle="Where this sequence loses people: by step, by sender and by teammate, for the leads enrolled in a period. Every count opens the matching leads." wide>
             <SequenceAnalytics sequence={sequence} graph={live.graph} canPromote={canManage} onOpenLeads={openLeads} />
           </TabPage>

@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { ChevronDown, ChevronRight, Contact } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { reasonText } from '@/lib/outreach/reasons';
-import { Badge, Button, EmptyState, HealthBar, StatusPill, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
+import { useSenderLabels } from '@/lib/outreach/queries';
+import { Avatar, Badge, Button, EmptyState, HealthBar, StatusPill, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
 import { csvFileName, downloadCsv, fmtDay, fmtInt, fmtRate, totalsCsvColumns, useReportSender, useReportSenders, type DateRange, type SenderReport, type SenderRow } from '@/lib/outreach/reports';
 import { CountRate, DetailRow, ExportButton, MetricLabel, Refreshing, RetryError, Skeleton, SortTh, TableSkeleton, useElementWidth, useSort } from './primitives';
 import { MiniBar, SERIES, Sparkline } from './charts';
@@ -89,6 +90,8 @@ const ACCESSORS: Record<string, (r: SenderRow) => string | number | null> = {
 
 export default function SendersTab({ ws, client, range }: TabProps) {
   const q = useReportSenders({ ws, client, range });
+  const labels = useSenderLabels(ws);   // 092: photos for every sender, removed ones included
+  const photos = useMemo(() => new Map((labels.data ?? []).map((l) => [l.id, l.picture_url])), [labels.data]);
   const { sorted, sort, toggle } = useSort(q.data, { key: 'replies', dir: 'desc' }, ACCESSORS);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [includeRemoved, setIncludeRemoved] = useState(true);   // sender lifecycle: removed senders keep their numbers
@@ -130,9 +133,14 @@ export default function SendersTab({ ws, client, range }: TabProps) {
             <React.Fragment key={r.sender_id}>
               <tr className={cn('hover:bg-gray-50', isOpen && 'bg-gray-50')}>
                 <Td className="pr-0"><button type="button" onClick={() => flip(r.sender_id)} aria-expanded={isOpen} aria-label={`${isOpen ? 'Hide' : 'Show'} the trend for ${name}`} className="p-1 rounded hover:bg-gray-200 text-gray-500">{isOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}</button></Td>
-                <Td className="min-w-[200px]">
-                  <div className="flex items-center gap-2 flex-wrap"><button type="button" onClick={() => flip(r.sender_id)} className="font-medium text-gray-900 hover:underline text-left">{name}</button><StatusPill status={r.status} /></div>
-                  <div className="text-xs text-gray-500">{PROVIDERS[r.provider] ?? r.provider}</div>
+                <Td className="min-w-[240px]">
+                  <div className="flex items-center gap-2.5">
+                    <Avatar src={String(r.status) === 'erased' ? null : photos.get(r.sender_id)} name={r.name ?? name} size={8} />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap"><button type="button" onClick={() => flip(r.sender_id)} className="font-medium text-gray-900 hover:underline text-left">{name}</button><StatusPill status={r.status} /></div>
+                      <div className="text-xs text-gray-500">{PROVIDERS[r.provider] ?? r.provider}</div>
+                    </div>
+                  </div>
                 </Td>
                 <Td><HealthBar score={r.health} /><div className="text-xs text-gray-500 mt-0.5">Warm-up level {fmtInt(r.level)}</div></Td>
                 <Td className="text-right tabular-nums">{fmtInt(t.invites)}</Td>

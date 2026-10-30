@@ -122,7 +122,7 @@ export default function ClientsPage() {
                 <Td className="whitespace-nowrap">{fmtDate(c.created_at, false)}</Td>
                 <Td>
                   <div className="flex justify-end gap-1">
-                    <Link href={`/outreach/reports?client=${c.id}`} title="Open this client in reports"><Button size="sm" variant="ghost" aria-label="Open this client in reports"><BarChart3 className="w-4 h-4" /></Button></Link>
+                    <Link href={`/outreach/analytics?client=${c.id}`} title="Open this client in analytics"><Button size="sm" variant="ghost" aria-label="Open this client in analytics"><BarChart3 className="w-4 h-4" /></Button></Link>
                     <Link href={`/outreach/c/${c.id}`} title="Open the client portal"><Button size="sm" variant="ghost" aria-label="Open the client portal"><ExternalLink className="w-4 h-4" /></Button></Link>
                     <Button size="sm" variant="ghost" onClick={() => setEditing(c)} disabled={!canWrite} aria-label="Edit client"><Pencil className="w-4 h-4" /></Button>
                     <Button size="sm" variant="ghost" onClick={() => setDeleteTarget(c)} disabled={!canWrite} aria-label="Delete client"><Trash2 className="w-4 h-4 text-red-500" /></Button>

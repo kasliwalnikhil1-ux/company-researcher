@@ -138,8 +138,8 @@ function AbBlock({ test, stepLabel, canPromote }: { test: AbTest; stepLabel: str
  */
 export default function SequenceStepTables({ r, graph, sequenceId, sequenceName, range, canPromote, only }: {
   r: SequenceReport; graph: Graph | undefined | null; sequenceId: string; sequenceName: string; range: DateRange; canPromote: boolean;
-  /** 'ab': only the A/B test blocks (the sequence Analytics tab has its own step table). */
-  only?: 'ab';
+  /** 'ab': only the A/B test blocks (the sequence Analytics tab has its own step table); 'extras': everything but the step table (Reports → Sequences shows the Analytics tab's Steps table instead). */
+  only?: 'ab' | 'extras';
 }) {
   const steps = orderSteps(r.steps, graph); const maxSent = Math.max(0, ...steps.map((s) => s.sent));
   const stepName = (nodeId: string) => sentence(steps.find((s) => s.node_id === nodeId)?.label ?? nodeId);
@@ -162,7 +162,7 @@ export default function SequenceStepTables({ r, graph, sequenceId, sequenceName,
     <div className="space-y-5">
       {(r.best_step || r.worst_step) && <div className="grid grid-cols-1 md:grid-cols-2 gap-3">{r.best_step && <StepCallout kind="best" step={r.best_step} />}{r.worst_step && <StepCallout kind="worst" step={r.worst_step} />}</div>}
 
-      <div>
+      {only !== 'extras' && <div>
         <div className="flex items-center justify-between gap-2 mb-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Step by step</h4>
           <ExportButton onClick={exportSteps} disabled={!steps.length} />
@@ -183,7 +183,7 @@ export default function SequenceStepTables({ r, graph, sequenceId, sequenceName,
             ))}</tbody>
           </Table>
         )}
-      </div>
+      </div>}
 
       {r.ab_tests.length > 0 && (
         <div className="space-y-3">

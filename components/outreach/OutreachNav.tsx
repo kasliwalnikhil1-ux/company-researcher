@@ -25,7 +25,7 @@ export const OUTREACH_NAV: NavItem[] = [
   // AI hub: one home for every AI feature (its sections are tabs on the page). The badge counts what waits for this person (Needs you, "Mine").
   { href: '/outreach/ai', label: 'AI', icon: Sparkles, badge: 'ai_needs_you', writer: true },
   { href: '/outreach/websites', label: 'Website Agents', icon: Bot, writer: true },
-  { href: '/outreach/reports', label: 'Reports', icon: BarChart3 },
+  { href: '/outreach/analytics', label: 'Analytics', icon: BarChart3 },
   { href: '/outreach/clients', label: 'Clients', icon: Building2, manager: true },
   { href: '/outreach/billing', label: 'Billing', icon: CreditCard, owner: true },
   { href: '/outreach/settings/workspace', label: 'Settings', icon: Settings, prefix: '/outreach/settings', writer: true },

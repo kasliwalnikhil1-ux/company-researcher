@@ -2,6 +2,7 @@
 
 // Small pieces shared by the AI replies tab of the sequence builder.
 import { useEffect, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { parseError } from '@/lib/outreach/api';
@@ -29,8 +30,9 @@ export function Drawer({ open, onClose, title, subtitle, children, wide }: { ope
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
-  if (!open) return null;
-  return (
+  if (!open || typeof document === 'undefined') return null;
+  // Portalled to <body> so a sticky or z-indexed parent cannot trap it under the sidebar.
+  return createPortal(
     <div className="fixed inset-0 z-40 flex justify-end" data-outreach-drawer>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <aside role="dialog" aria-modal="true" className={cn('relative h-full w-full bg-white shadow-2xl flex flex-col', wide ? 'max-w-4xl' : 'max-w-2xl')}>
@@ -43,7 +45,8 @@ export function Drawer({ open, onClose, title, subtitle, children, wide }: { ope
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">{children}</div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -49,7 +49,7 @@ export const ROUTES: RouteEntry[] = [
   { file: 'ai-review/page.tsx', url: '/outreach/ai-review' },
   { file: 'websites/page.tsx', url: '/outreach/websites' },
   { file: 'websites/[id]/page.tsx', url: `/outreach/websites/${WEBCHAT.inbox}` },
-  { file: 'reports/page.tsx', url: '/outreach/reports' },
+  { file: 'analytics/page.tsx', url: '/outreach/analytics' },
   { file: 'clients/page.tsx', url: '/outreach/clients' },
   { file: 'c/page.tsx', url: '/outreach/c' },
   { file: 'c/[clientId]/page.tsx', url: `/outreach/c/${CLIENT.lumen}` },

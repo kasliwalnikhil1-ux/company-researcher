@@ -139,7 +139,7 @@ export function digestHtml(d: DigestInput, branding: Branding = {}): string {
   return `${periodLine(d.overview?.period)}
   ${metricsTable(TEAM_METRICS, d.overview?.totals ?? {}, d.overview?.previous ?? null, [d.cadence === "monthly" ? "This month" : "Last 7 days", "vs previous"])}
   ${attention}${seqTable}
-  <p style="margin-top:18px">${button(`${d.origin}/outreach/reports`, "Open reports", branding)}</p>
+  <p style="margin-top:18px">${button(`${d.origin}/outreach/analytics`, "Open analytics", branding)}</p>
   <p style="font-size:12px;color:#777">These are the same numbers the dashboard, the reports page, the connector and the API show. You can switch this email off in Reports.</p>`;
 }
 

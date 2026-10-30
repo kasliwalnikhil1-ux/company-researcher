@@ -43,7 +43,7 @@ export default function SafetySettingsPage() {
             </ul>
           </div>
           <p className="text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">“Attested at import” is the weakest basis. It records who attested and when, but nothing from the person themselves, so it is flagged amber everywhere it appears and the Consent report warns when more than 30% of the people contacted rely on it.</p>
-          <p className="text-xs text-gray-500">Anyone who replies with “stop”, “unsubscribe” or the like has their consent revoked and their number suppressed at once; live sequences on that channel exit. The <Link href="/outreach/reports?tab=consent" className="text-indigo-600 hover:underline">Consent report</Link> lists everyone contacted on WhatsApp with the basis and evidence, ready to export.</p>
+          <p className="text-xs text-gray-500">Anyone who replies with “stop”, “unsubscribe” or the like has their consent revoked and their number suppressed at once; live sequences on that channel exit. The <Link href="/outreach/analytics?tab=consent" className="text-indigo-600 hover:underline">Consent report</Link> lists everyone contacted on WhatsApp with the basis and evidence, ready to export.</p>
         </div>
       </Card>
 

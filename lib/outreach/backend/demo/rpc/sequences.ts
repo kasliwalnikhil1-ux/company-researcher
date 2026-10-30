@@ -521,29 +521,48 @@ export const sequencesRpc = {
     const limit = Math.min(Number(a.p_limit ?? 200) || 200, 500);
     const offset = Number(a.p_offset ?? 0) || 0;
     const node = str(a.p_node_id);
+    // 106: an optional day window (one date alone = that day), applied to each row's own moment
+    const from = str(a.p_from) ?? str(a.p_to); const to = str(a.p_to) ?? str(a.p_from);
+    if (from && to && from > to) demoError('E_PAYLOAD_INVALID', 'from/to must be dates with from <= to');
+    const finish = <T extends { at: string | null }>(rows: T[]): T[] => (from ? rows.filter((r) => inWindow(r.at, from, to)) : rows).slice(offset, offset + limit);
     const enr = new Map(store.t('outreach_enrollments').filter((e) => e.sequence_id === s.id).map((e) => [e.id, e]));
     const lead = (id: string) => store.get('outreach_leads', id);
     const sender = (id: string) => store.get('outreach_senders', id);
     if (a.p_kind === 'skipped') {
       const rows = store.t('outreach_actions').filter((x) => x.status === 'skipped' && x.enrollment_id && enr.has(x.enrollment_id) && (!node || x.node_id === node) && !x.payload?.prefetch && !x.payload?.subtask)
         .sort((x, y) => String(y.executed_at ?? '').localeCompare(String(x.executed_at ?? '')));
-      return rows.slice(offset, offset + limit).map((x) => {
+      return finish(rows.map((x) => {
         const e = enr.get(x.enrollment_id)!; const l = lead(e.lead_id); const sd = sender(x.sender_id);
-        return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: x.sender_id, sender_name: sd?.display_name ?? null, node_id: x.node_id, error_code: x.error_code ?? null, reason: reasonText(x.error_code), at: x.executed_at ?? null, recoverable: false };
-      }).filter((r) => r.lead_name !== undefined);
+        return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: x.sender_id, sender_name: sd?.display_name ?? null, node_id: x.node_id, error_code: x.error_code ?? null, reason: reasonText(x.error_code), at: (x.executed_at ?? null) as string | null, recoverable: false };
+      }).filter((r) => r.lead_name !== undefined));
     }
     // the other chips (098): the same rows sim/derived.ts counts for outreach_node_stats
     const kind = a.p_kind;
-    if (kind === 'queued' || kind === 'sent' || kind === 'accepted' || kind === 'replied') {
+    if (kind === 'queued' || kind === 'sent' || kind === 'accepted' || kind === 'replied' || kind === 'interested' || kind === 'meetings') {
       const row = (e: Row, senderId: string, nodeId: string | null, reason: string | null, at: string | null) => {
         const l = lead(e.lead_id);
         return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: senderId, sender_name: sender(senderId)?.display_name ?? null, node_id: nodeId, error_code: null, reason, at, recoverable: false };
       };
+      const firstReply = (e: Row) => { const m = chatMessages(ctx, e.lead_id, e.sender_id, 'in', '').pop(); return m ? String(m.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 200) || null : null; };
       let rows: ReturnType<typeof row>[];
       if (kind === 'queued') {
         rows = [...enr.values()].filter((e) => LIVE.includes(e.status) && e.current_node_id && (!node || e.current_node_id === node))
           .map((e) => row(e, e.sender_id, e.current_node_id, 'Waiting to send', e.wait_until ?? null))
           .sort((x, y) => String(x.at ?? '').localeCompare(String(y.at ?? '')));
+      } else if (kind === 'interested' || kind === 'meetings' || (kind === 'replied' && !node)) {
+        // 106: sequence-wide outcomes, the same events sequence_analytics counts per day (its facts stand-ins)
+        const chats = tbl(ctx, 'outreach_chats');
+        const replied = [...enr.values()].filter((e) => e.status === 'exited_replied');
+        if (kind === 'meetings') {
+          rows = tbl(ctx, 'outreach_lead_milestones').filter((m) => m.kind === 'meeting').flatMap((m) => {
+            const e = [...enr.values()].find((x) => x.lead_id === m.lead_id);
+            return e ? [row(e, e.sender_id, null, null, m.at ?? null)] : [];
+          });
+        } else {
+          const list = kind === 'replied' ? replied : replied.filter((e) => chats.some((c) => c.lead_id === e.lead_id && c.sender_id === e.sender_id && c.intent === 'interested'));
+          rows = list.map((e) => row(e, e.sender_id, null, firstReply(e), e.completed_at ?? null));
+        }
+        rows.sort((x, y) => String(y.at ?? '').localeCompare(String(x.at ?? '')));
       } else {
         const acts = store.t('outreach_actions').filter((x) => x.enrollment_id && enr.has(x.enrollment_id) && x.node_id && x.status === 'sent' && (!node || x.node_id === node));
         if (kind === 'sent') rows = acts.map((x) => row(enr.get(x.enrollment_id)!, x.sender_id, x.node_id, null, x.executed_at ?? null));
@@ -567,15 +586,15 @@ export const sequencesRpc = {
         }
         rows.sort((x, y) => String(y.at ?? '').localeCompare(String(x.at ?? '')));
       }
-      return rows.slice(offset, offset + limit);
+      return finish(rows);
     }
     const failedAction =(eid: string) => store.t('outreach_actions').filter((x) => x.enrollment_id === eid && x.status === 'failed').sort((x, y) => String(y.executed_at ?? '').localeCompare(String(x.executed_at ?? '')))[0];
     const rows = [...enr.values()].filter((e) => e.status === 'failed' && (!node || e.current_node_id === node)).sort((x, y) => String(y.completed_at ?? '').localeCompare(String(x.completed_at ?? '')));
-    return rows.slice(offset, offset + limit).map((e) => {
+    return finish(rows.map((e) => {
       const l = lead(e.lead_id); const sd = sender(e.sender_id); const fa = failedAction(e.id);
       const code = fa?.error_code ?? e.exit_reason ?? null;
-      return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: e.sender_id, sender_name: sd?.display_name ?? null, node_id: e.current_node_id, error_code: code, reason: reasonText(code), at: e.completed_at ?? null, recoverable: !!l && !(l.do_not_contact || l.unsubscribed) && (fa?.decision ?? '') !== 'mark_lead_invalid' };
-    });
+      return { enrollment_id: e.id, lead_id: e.lead_id, lead_name: l?.full_name ?? null, company: l?.company ?? null, sender_id: e.sender_id, sender_name: sd?.display_name ?? null, node_id: e.current_node_id, error_code: code, reason: reasonText(code), at: (e.completed_at ?? null) as string | null, recoverable: !!l && !(l.do_not_contact || l.unsubscribed) && (fa?.decision ?? '') !== 'mark_lead_invalid' };
+    }));
   },
 
   move_to_latest: (a, ctx) => {

@@ -11,10 +11,13 @@ import { Badge, Button, EmptyState, Table, Td, Th } from '@/components/outreach/
 import { csvFileName, downloadCsv, fmtInt, useReportSequence, useReportSequences, type DateRange, type SequenceRow } from '@/lib/outreach/reports';
 import { useSequence } from '@/lib/outreach/queries';
 import { acceptedTip, contactedTip, positiveTip, rateSortValue, repliedTip, type StatsChannel } from '@/lib/outreach/sequenceStats';
+import type { AnalyticsStep } from '@/lib/outreach/sequenceLeads';
+import { useSequenceAnalytics } from '@/components/outreach/sequences/hooks';
 import { ChannelGlyphs } from '@/components/outreach/sequences/stats/ChannelGlyphs';
 import { MetricCell } from '@/components/outreach/sequences/stats/MetricCell';
 import FunnelTiles from '@/components/outreach/sequences/stats/FunnelTiles';
 import ChannelBlocks from '@/components/outreach/sequences/stats/ChannelBlocks';
+import { ActivityByDayCard, StepTable } from '@/components/outreach/sequences/stats/SequenceAnalytics';
 import SequenceStepTables from './SequenceStepTables';
 import { DetailRow, ExportButton, MetricLabel, Refreshing, RetryError, Skeleton, SortTh, TableSkeleton, useElementWidth, useSort } from './primitives';
 import type { TabProps } from './OverviewTab';
@@ -25,22 +28,47 @@ const words = (s: string) => s.replace(/_/g, ' ');
 function SequenceDetail({ row, range, canPromote }: { row: SequenceRow; range: DateRange; canPromote: boolean }) {
   const q = useReportSequence(row.sequence_id, range);
   const seq = useSequence(row.sequence_id);
+  // the sequence page's Analytics tab, same window: its Steps table (with the copy each step sends) and Activity by day (with the leads behind each day)
+  const an = useSequenceAnalytics(row.sequence_id, range);
   if (q.isLoading) return <div className="space-y-2 py-2"><Skeleton className="h-4 w-56" /><Skeleton className="h-24 w-full" /></div>;
   if (q.isError) return <RetryError error={q.error} onRetry={() => q.refetch()} />;
   const r = q.data;
   if (!r) return null;
+  const graph = seq.data?.graph;
+  const exportSteps = () => downloadCsv<AnalyticsStep>(csvFileName('sequences', range, `${row.name}-steps`), [
+    { header: 'Step', value: (s) => (s.step_number ? `${s.step_number}. ` : '') + s.label }, { header: 'Type', value: (s) => words(s.type) }, { header: 'Sent', value: (s) => s.sent },
+    { header: 'Accepted', value: (s) => s.accepted }, { header: 'Accepted rate %', value: (s) => s.accepted_rate }, { header: 'Read', value: (s) => s.read }, { header: 'Read rate %', value: (s) => s.read_rate },
+    { header: 'Replied', value: (s) => s.replied }, { header: 'Replied rate %', value: (s) => s.replied_rate }, { header: 'Skipped', value: (s) => s.skipped }, { header: 'Failed', value: (s) => s.failed }, { header: 'Leads here now', value: (s) => s.leads_here },
+  ], an.data?.steps ?? []);
+  const analytics = (render: (a: NonNullable<typeof an.data>) => React.ReactNode) =>
+    an.isLoading && !an.data ? <Skeleton className="h-24 w-full" /> : an.isError ? <RetryError error={an.error} onRetry={() => an.refetch()} /> : an.data ? render(an.data) : null;
   return (
     <div className="space-y-5 py-1">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs text-gray-500">{fmtInt(r.live)} leads in progress · version {r.sequence.head_version}</div>
-        <Link href={`/outreach/sequences/${row.sequence_id}?tab=results`}><Button size="sm" variant="ghost">Open sequence</Button></Link>
+        <Link href={`/outreach/sequences/${row.sequence_id}?tab=analytics`}><Button size="sm" variant="ghost">Open sequence</Button></Link>
       </div>
       <FunnelTiles f={r.funnel} draft={row.status === 'draft'} other={r.replied_other_channel} />
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Steps</h4>
+            <p className="text-xs text-gray-500 mt-0.5">Each sending step in the period. Click a step to see what it sends. Accepted is for invitations and follows; read receipts for messages.</p>
+          </div>
+          <ExportButton onClick={exportSteps} disabled={!an.data?.steps.length} />
+        </div>
+        {analytics((a) => <StepTable steps={a.steps} graph={graph} />)}
+      </div>
+      <div>
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Activity by day</h4>
+        <p className="text-xs text-gray-500 mt-0.5 mb-2">Each day&apos;s bar stacks what went out and what came back that day. The grey bar behind is what the engine had planned. Click a day to see the people behind it.</p>
+        {analytics((a) => <ActivityByDayCard sequenceId={row.sequence_id} d={a.daily} graph={graph} />)}
+      </div>
       <div>
         <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">By channel</h4>
         <ChannelBlocks channels={r.channels} seenSince={r.seen_since} seenPartial={r.seen_partial} />
       </div>
-      <SequenceStepTables r={r} graph={seq.data?.graph} sequenceId={row.sequence_id} sequenceName={row.name} range={range} canPromote={canPromote} />
+      <SequenceStepTables r={r} graph={graph} sequenceId={row.sequence_id} sequenceName={row.name} range={range} canPromote={canPromote} only="extras" />
     </div>
   );
 }

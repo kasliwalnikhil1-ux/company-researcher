@@ -3,10 +3,10 @@
 // The sequence Analytics tab (PRD "Sequence lead filters, bulk unenroll & Analytics", feature 3): seven sections under
 // one date range (default: the last 7 days), every count of sections 1, 2 and 6 opening the Leads tab on the matching
 // filter. Below them, the per-channel blocks and A/B tests of the Results report for the same range.
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import Link from '@/lib/outreach/nav';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { AlertTriangle, Check, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, Sparkles, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { nodeVariants } from '@/lib/outreach/graph';
 import { useWorkspace } from '@/contexts/OutreachWorkspaceContext';
@@ -17,14 +17,15 @@ import { parseError } from '@/lib/outreach/api';
 import { periodFromString, periodRange, periodToString, type StatsPeriod } from '@/lib/outreach/sequenceStats';
 import { PROGRESS_SEGMENTS, type AnalyticsStep, type LeadFilter, type SequenceAnalytics as Analytics } from '@/lib/outreach/sequenceLeads';
 import type { Graph, GraphNode, MessageVariant, Sequence, SenderStatus } from '@/lib/outreach/types';
-import { Avatar, Badge, Button, EmptyState, ErrorBox, Spinner, StatusPill, Table, Td, Th, fmtDate } from '@/components/outreach/ui';
+import { Avatar, Badge, EmptyState, ErrorBox, Spinner, StatusPill, Table, Td, Th } from '@/components/outreach/ui';
 import { KpiTile, Section } from '@/components/outreach/reports/primitives';
 import { MiniBar } from '@/components/outreach/reports/charts';
 import SequenceStepTables from '@/components/outreach/reports/SequenceStepTables';
 import ChannelBlocks from './ChannelBlocks';
+import DayLeadsDrawer, { type DayKind } from './DayLeadsDrawer';
 import StatsPeriodPicker from './StatsPeriodPicker';
 import { MemberChip } from '@/components/outreach/members';
-import { SEQUENCE_LEADS_PAGE, useSequenceAnalytics, useSequenceAnalyticsLeads, type EnrolledRange } from '../hooks';
+import { useSequenceAnalytics, type EnrolledRange } from '../hooks';
 import type { LeadsLink } from '../leads/SequenceLeads';
 
 const KEY = (id: string) => `outreach-sequence-analytics-period-v2:${id}`;
@@ -132,7 +133,8 @@ function StepDetails({ copy }: { copy: StepCopy }) {
   );
 }
 
-function StepTable({ steps, graph }: { steps: AnalyticsStep[]; graph: Graph | null | undefined }) {
+/** The Steps table of the Analytics tab (and of Reports → Sequences): one row per sending step, expanding to the copy it sends. */
+export function StepTable({ steps, graph }: { steps: AnalyticsStep[]; graph: Graph | null | undefined }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const maxSent = Math.max(0, ...steps.map((s) => s.sent));
   if (!steps.length) return <p className="text-sm text-gray-500">This sequence has no sending steps yet.</p>;
@@ -207,10 +209,24 @@ const DAY_SERIES: Array<{ key: DayKey; label: string; color: string }> = [
 ];
 type DayPoint = Record<DayKey, number> & { day: string; planned: number; snapshot: boolean };
 
-/** One stacked bar a day (sent + what came back that day) over a grey ghost bar of what the engine had planned. */
-function ActivityByDay({ d }: { d: Analytics['daily'] }) {
+/** One stacked bar a day (sent + what came back that day) over a grey ghost bar of what the engine had planned. A bar opens its day's leads. */
+function ActivityByDay({ d, onOpenDay }: { d: Analytics['daily']; onOpenDay?: (day: string, kind: DayKind) => void }) {
   // clicking a legend label hides that series (the last visible one stays)
   const [hidden, setHidden] = useState<Set<'planned' | DayKey>>(() => new Set());
+  // a click on a segment names its series; the chart's own click (the slot around the bar) then opens the day on Sent
+  const handled = useRef(false);
+  const openSegment = (kind: DayKind) => (item: { payload?: DayPoint }) => {
+    const day = item?.payload?.day;
+    if (!day || !onOpenDay) return;
+    handled.current = true;
+    window.setTimeout(() => { handled.current = false; }, 0);
+    onOpenDay(day, kind);
+  };
+  const openSlot = (state: { activeLabel?: unknown }) => {
+    if (handled.current) return;
+    const day = typeof state?.activeLabel === 'string' ? state.activeLabel : null;
+    if (day && onOpenDay) onOpenDay(day, 'sent');
+  };
   const toggle = (k: 'planned' | DayKey) => setHidden((h) => {
     const n = new Set(h);
     if (n.has(k)) n.delete(k); else if (n.size < DAY_SERIES.length) n.add(k);
@@ -227,9 +243,9 @@ function ActivityByDay({ d }: { d: Analytics['daily'] }) {
   const gap = d.gap_pct;
   return (
     <div>
-      <div style={{ height: 240 }} role="img" aria-label="Sends and outcomes per day, stacked, over the actions planned for the day">
+      <div style={{ height: 240 }} role="img" aria-label="Sends and outcomes per day, stacked, over the actions planned for the day. Click a day to see its leads.">
         <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 600, height: 240 }}>
-          <BarChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap="22%">
+          <BarChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: 0 }} barCategoryGap="22%" cursor={onOpenDay ? 'pointer' : undefined} onClick={onOpenDay ? openSlot : undefined}>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="day" tickFormatter={(v: string) => fmtDay(v)} tick={TICK} tickLine={false} axisLine={{ stroke: GRID }} minTickGap={28} />
             {/* a second, hidden axis puts the planned bar on the same slot as the stack instead of beside it */}
@@ -246,11 +262,12 @@ function ActivityByDay({ d }: { d: Analytics['daily'] }) {
                     <div key={s.key} className="flex items-center justify-between gap-4 py-0.5"><span className="flex items-center gap-1.5 text-gray-600"><span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: s.color }} />{s.label}</span><span className={cn('font-medium tabular-nums', x[s.key] ? 'text-gray-900' : 'text-gray-400')}>{fmtInt(x[s.key])}</span></div>
                   ))}
                   {!x.snapshot && <div className="mt-1 pt-1 border-t border-gray-100 text-gray-500">Planned = actions scheduled that day</div>}
+                  {onOpenDay && <div className="mt-1 pt-1 border-t border-gray-100 text-indigo-700">Click to see who is behind this day</div>}
                 </div>
               );
             }} />
-            <Bar xAxisId="planned" dataKey="planned" name="Planned" fill={PLANNED_FILL} radius={[3, 3, 0, 0]} maxBarSize={36} isAnimationActive={false} hide={hidden.has('planned')} />
-            {DAY_SERIES.map((s) => <Bar key={s.key} dataKey={s.key} name={s.label} stackId="day" fill={s.color} stroke="#ffffff" strokeWidth={1} maxBarSize={26} isAnimationActive={false} hide={hidden.has(s.key)} />)}
+            <Bar xAxisId="planned" dataKey="planned" name="Planned" fill={PLANNED_FILL} radius={[3, 3, 0, 0]} maxBarSize={36} isAnimationActive={false} hide={hidden.has('planned')} onClick={onOpenDay ? openSegment('sent') : undefined} />
+            {DAY_SERIES.map((s) => <Bar key={s.key} dataKey={s.key} name={s.label} stackId="day" fill={s.color} stroke="#ffffff" strokeWidth={1} maxBarSize={26} isAnimationActive={false} hide={hidden.has(s.key)} onClick={onOpenDay ? openSegment(s.key) : undefined} />)}
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -265,63 +282,22 @@ function ActivityByDay({ d }: { d: Analytics['daily'] }) {
   );
 }
 
-function LeadTable({ sequenceId, range }: { sequenceId: string; range: EnrolledRange }) {
-  const { workspace } = useWorkspace();
-  const senders = useSenders(workspace?.id);
-  const senderById = useMemo(() => new Map((senders.data ?? []).map((x) => [x.id, x])), [senders.data]);
-  const [page, setPage] = useState(0);
-  const [search, setSearch] = useState('');
-  const [text, setText] = useState('');
-  const q = useSequenceAnalyticsLeads(sequenceId, range, page, search);
-  const rows = q.data?.rows ?? []; const total = q.data?.total ?? 0; const pageCount = Math.max(1, Math.ceil(total / SEQUENCE_LEADS_PAGE));
-  const tick = (at: string | null) => (at ? <span className="inline-flex items-center gap-1 text-green-700" title={fmtDate(at)}><Check className="w-3.5 h-3.5" /><span className="sr-only">yes</span></span> : <span className="text-gray-300">—</span>);
+/**
+ * The "Activity by day" chart with its leads drawer (migration 106): a click on a day's bar opens the people behind it,
+ * on the series clicked, and the drawer's own date field changes the day. Shared by the sequence Analytics tab and
+ * Reports → Sequences.
+ */
+export function ActivityByDayCard({ sequenceId, d, graph }: { sequenceId: string; d: Analytics['daily']; graph: Graph | null | undefined }) {
+  const [view, setView] = useState<{ day: string; kind: DayKind } | null>(null);
   return (
-    <div>
-      <form className="mb-3" onSubmit={(e) => { e.preventDefault(); setSearch(text.trim()); setPage(0); }}>
-        <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search by name or company" aria-label="Search leads" className="w-full max-w-xs px-3 py-1.5 text-sm rounded-lg border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-      </form>
-      {q.isLoading && !q.data ? <Spinner /> : q.error ? <ErrorBox message={parseError(q.error).message} /> : rows.length === 0 ? <p className="text-sm text-gray-500">No lead matches.</p> : (
-        <div className={q.isFetching ? 'opacity-70 transition-opacity' : ''}>
-          <Table>
-            <thead><tr><Th>Lead</Th><Th>Sender</Th><Th>Step reached</Th><Th>Accepted</Th><Th>Replied</Th><Th>Interested</Th><Th>Meeting</Th><Th>Enrolled</Th></tr></thead>
-            <tbody>{rows.map((r) => (
-              <tr key={r.id}>
-                <Td>
-                  {(() => {
-                    // Same cell as the Leads tab: the name opens the LinkedIn profile in a new tab, "Lead page" opens the lead.
-                    const url = r.lead?.public_identifier ? `https://www.linkedin.com/in/${r.lead.public_identifier}` : null;
-                    const name = r.lead?.full_name || r.lead?.public_identifier || 'Lead';
-                    return (
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Avatar src={r.lead?.picture_url} name={name} size={7} />
-                        <span className="min-w-0">
-                          {url
-                            ? <a href={url} target="_blank" rel="noopener noreferrer" title="Open the LinkedIn profile in a new tab" className="font-medium text-gray-900 hover:text-indigo-700 inline-flex items-center gap-1 max-w-[200px]"><span className="truncate">{name}</span><ExternalLink className="w-3 h-3 text-gray-400 flex-shrink-0" aria-hidden /></a>
-                            : <Link href={`/outreach/leads/${r.lead_id}`} className="font-medium text-gray-900 hover:text-indigo-700 block truncate max-w-[200px]">{name}</Link>}
-                          <span className="block text-xs text-gray-500 truncate max-w-[200px]">{r.lead?.company}{r.lead?.company && url ? ' · ' : ''}{url && <Link href={`/outreach/leads/${r.lead_id}`} className="hover:text-indigo-700">Lead page</Link>}</span>
-                        </span>
-                      </div>
-                    );
-                  })()}
-                </Td>
-                <Td className="text-gray-600 whitespace-nowrap">{r.sender?.display_name ? <span className="inline-flex items-center gap-2"><Avatar src={r.sender.id ? senderById.get(r.sender.id)?.picture_url : undefined} name={r.sender.display_name} size={6} />{r.sender.display_name}</span> : '—'}</Td>
-                <Td><div className="flex items-center gap-2 min-w-[120px]"><MiniBar value={r.step_reached} max={Math.max(1, r.step_total)} className="flex-1" /><span className="text-xs text-gray-600 whitespace-nowrap"><span className="tabular-nums">{r.step_reached}</span> of <span className="tabular-nums">{r.step_total}</span></span></div></Td>
-                <Td>{tick(r.accepted_at)}</Td><Td>{tick(r.replied_at)}</Td><Td>{tick(r.positive_at)}</Td><Td>{tick(r.meeting_at)}</Td>
-                <Td className="text-gray-500 whitespace-nowrap text-xs">{fmtDate(r.created_at, false)}</Td>
-              </tr>
-            ))}</tbody>
-          </Table>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-3 text-sm text-gray-600">
-            <span>Showing <span className="font-medium text-gray-900 tabular-nums">{total === 0 ? 0 : page * SEQUENCE_LEADS_PAGE + 1}–{Math.min(total, (page + 1) * SEQUENCE_LEADS_PAGE)}</span> of <span className="font-medium text-gray-900 tabular-nums">{total.toLocaleString()}</span></span>
-            <div className="flex items-center gap-1">
-              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}><ChevronLeft className="w-4 h-4" /> Prev</Button>
-              <span className="px-2">Page <span className="tabular-nums">{page + 1} / {pageCount}</span></span>
-              <Button variant="secondary" size="sm" onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} disabled={page >= pageCount - 1}>Next <ChevronRight className="w-4 h-4" /></Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+    <>
+      <ActivityByDay d={d} onOpenDay={(day, kind) => setView({ day, kind })} />
+      <DayLeadsDrawer
+        open={!!view} onClose={() => setView(null)} sequenceId={sequenceId} days={d.days} graph={graph}
+        day={view?.day ?? null} onDayChange={(day) => setView((v) => (v ? { ...v, day } : { day, kind: 'sent' }))}
+        kind={view?.kind ?? 'sent'} onKindChange={(kind) => setView((v) => (v ? { ...v, kind } : v))}
+      />
+    </>
   );
 }
 
@@ -374,8 +350,8 @@ export default function SequenceAnalytics({ sequence, graph, canPromote, onOpenL
           </Section>
 
           {/* 4. activity by day: one stacked bar a day over the planned ghost bar */}
-          <Section title="Activity by day" description="Each day's bar stacks what went out and what came back that day: sent, accepted, replied, interested, meetings. The grey bar behind is what the engine had planned.">
-            <ActivityByDay d={a.daily} />
+          <Section title="Activity by day" description="Each day's bar stacks what went out and what came back that day: sent, accepted, replied, interested, meetings. The grey bar behind is what the engine had planned. Click a day to see the people behind it.">
+            <ActivityByDayCard sequenceId={sequence.id} d={a.daily} graph={graph ?? sequence.graph} />
           </Section>
 
           {/* 5. the per-channel blocks and A/B tests of the Results report, same window */}
@@ -432,11 +408,6 @@ export default function SequenceAnalytics({ sequence, graph, canPromote, onOpenL
                 {a.handoffs_untaken > 0 && <p className="text-xs text-gray-600 mt-2 inline-flex items-center gap-1"><X className="w-3.5 h-3.5 text-amber-600" /> <button type="button" className="underline underline-offset-2 text-indigo-700" onClick={() => open('handoff')}>{fmtInt(a.handoffs_untaken)} handoff{a.handoffs_untaken === 1 ? '' : 's'}</button> nobody has answered yet.</p>}
               </>
             )}
-          </Section>
-
-          {/* 8. lead table */}
-          <Section title="Leads" description="Everyone enrolled in the period: how far they got and what they did.">
-            <LeadTable sequenceId={sequence.id} range={range} />
           </Section>
         </div>
       ) : null}

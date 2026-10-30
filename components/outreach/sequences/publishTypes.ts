@@ -71,7 +71,8 @@ export interface MoveToLatestResult { moved: number; kept_on_old_version: number
 export interface QueuedActionRow { action_id: string; lead_id: string | null; lead_name: string | null; sender_id: string; payload: Record<string, any> | null; scheduled_for: string; variant_id: string | null }
 
 /** The kinds rpc failed_leads lists: one per step chip on the canvas (098). `at` is when it is due for queued. */
-export type FailedKind = 'failed' | 'skipped' | 'queued' | 'sent' | 'accepted' | 'replied';
+/** The lists behind a step chip (098) and behind a day of the Activity by day chart (106: interested, meetings). */
+export type FailedKind = 'failed' | 'skipped' | 'queued' | 'sent' | 'accepted' | 'replied' | 'interested' | 'meetings';
 export interface FailedLeadRow {
   enrollment_id: string; lead_id: string; lead_name: string | null; company: string | null; sender_id: string; sender_name: string | null;
   /** failed / skipped: the plain reason; queued: 'Sending now' | 'Waiting to send'; replied: the reply text; otherwise null. */

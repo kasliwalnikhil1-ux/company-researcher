@@ -34,7 +34,7 @@ export const TOUR_STEPS: TourStep[] = [
   { route: `/outreach/inbox/${DEMO_TOUR_AI_CHAT_ID}`, element: '[data-tour="inbox-list"]', title: 'Every reply in one place', side: 'right', phone: { route: '/outreach/inbox', side: 'bottom' }, text: 'LinkedIn, email, WhatsApp, Instagram and your website chat all land in one inbox. Step in whenever you want.' },
   { route: `/outreach/websites/${DEMO_TOUR_WEBSITE_ID}?tab=design`, click: '[data-preview-view="chat"]', element: '[data-tour="widget-preview"]', title: 'Your website answers visitors', side: 'left', text: 'Add a chat to your website with one line of code, in your own colours and logo. AI answers visitors from your own pages and recommends the right products.' },
   { route: `/outreach/websites/${DEMO_TOUR_WEBSITE_ID}?tab=design`, click: '[data-preview-view="voice"]', element: '[data-tour="widget-preview"]', title: 'Visitors can talk to it too', side: 'left', text: 'One tap and a visitor speaks with an AI voice agent on your site, in their own language. Every call lands in your inbox with a summary and the recording.' },
-  { route: '/outreach/reports?tab=funnel', element: '[data-tour="funnel-path"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
+  { route: '/outreach/analytics?tab=funnel', element: '[data-tour="funnel-path"]', side: 'top', title: 'See the meetings it books', text: 'Track who accepted, replied, showed interest and booked a meeting, for every campaign.' },
 ];
 
 export type TourState = { kind: 'idle' } | { kind: 'step'; index: number } | { kind: 'done' } | { kind: 'skipped' };

@@ -105,6 +105,16 @@ html[data-demo-bar] .fixed.inset-0:not([class*="top-"]) {
   top: var(--demo-bar);
 }
 
+/* Recharts makes every chart's SVG focusable (keyboard tooltips): clicking or hovering a chart then drew the
+   browser's black focus outline around the whole plot. Arrow keys still move the tooltip; only the frame goes. */
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus,
+.recharts-surface:focus-visible,
+.recharts-wrapper *:focus {
+  outline: none;
+}
+
 :root {
   --background: var(--secondary-default);
   --accent: var(--brand-default);

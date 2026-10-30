@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, CheckCircle2, Circle, Crosshair, Loader2, Sparkles, X, XCircle } from 'lucide-react';
 import { Button, ErrorBox, Modal } from '@/components/outreach/ui';
 import { humanizeIssue, type GraphIssue } from '@/lib/outreach/graph';
@@ -170,8 +171,10 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('keydown', onKey); prev?.focus?.(); };
   }, [open]);
-  if (!open) return null;
-  return (
+  if (!open || typeof document === 'undefined') return null;
+  // Portalled to <body>: opened from inside a sticky or z-indexed box (Reports → Sequences detail rows), the drawer
+  // would stack inside that box and the sidebar would stay bright above the backdrop.
+  return createPortal(
     <div className="fixed inset-0 z-40 flex justify-end nokey" data-outreach-drawer>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div ref={panel} role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined} tabIndex={-1} className={`relative bg-white shadow-2xl w-full ${width} h-full flex flex-col focus:outline-none`}>
@@ -185,6 +188,7 @@ export function Drawer({ open, onClose, title, subtitle, children, footer, width
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="px-5 py-3 border-t border-gray-100 flex flex-wrap items-center justify-end gap-2">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -36,6 +36,15 @@ const KIND_COPY: Record<FailedKind, { hint: string; detail: string | null; when:
   replied: { hint: 'The first reply to this step. Open a lead to see the whole conversation.', detail: 'Reply', when: 'Replied', empty: 'No replies yet', emptyBody: 'No one has replied to this step.' },
   failed: { hint: 'To run a lead through again, enrol them again. The preview warns about leads already contacted.', detail: 'Reason', when: 'When', empty: 'No failed leads', emptyBody: 'Nothing needs recovering here.' },
   skipped: { hint: 'A skipped step needs no action. The lead moved on to the next step.', detail: 'Reason', when: 'When', empty: 'No skipped steps', emptyBody: 'No step was skipped here.' },
+  interested: { hint: 'These leads replied with interest. Open a lead to see the whole conversation.', detail: 'Reply', when: 'Replied', empty: 'No interested replies', emptyBody: 'No reply was classified as interested.' },
+  meetings: { hint: 'These leads booked a meeting.', detail: null, when: 'Booked', empty: 'No meetings', emptyBody: 'No meeting was booked.' },
+};
+/** The hint when the list is not tied to one step (the day drawer, the sequence-wide lists). */
+const WIDE_HINT: Partial<Record<FailedKind, string>> = {
+  queued: 'Waiting to go out. Each sender sends within their daily limits and working hours.',
+  sent: 'What went out to these leads, and from which step.',
+  accepted: 'These leads accepted the invitation.',
+  replied: 'The first reply from each lead. Open a lead to see the whole conversation.',
 };
 const STEP_KINDS: FailedKind[] = ['queued', 'sent', 'accepted', 'replied', 'failed', 'skipped'];
 const RECOVERY_KINDS: FailedKind[] = ['failed', 'skipped'];
@@ -62,9 +71,11 @@ interface PanelProps {
   /** Counts shown on the tabs when the caller already has them (canvas badges). Kinds at 0 are hidden. */
   counts?: Partial<Record<FailedKind, number>>;
   active?: boolean;
+  /** Only rows whose moment falls on these workspace days (inclusive): the leads behind a day of the Activity by day chart. */
+  range?: { from: string; to: string } | null;
 }
 
-export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange, kinds = RECOVERY_KINDS, graph, canWrite, counts, active = true }: PanelProps) {
+export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange, kinds = RECOVERY_KINDS, graph, canWrite, counts, active = true, range = null }: PanelProps) {
   const qc = useQueryClient();
   const toast = useToast();
   const [page, setPage] = useState(0);
@@ -72,8 +83,13 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
   const [confirm, setConfirm] = useState<RecoverAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<{ action: RecoverAction; result: RecoverResult; names: Record<string, string> } | null>(null);
-  const q = useFailedLeads(sequenceId, nodeId, kind, page, active);
+  const q = useFailedLeads(sequenceId, nodeId, kind, page, active, range);
   const rows = useMemo(() => q.data ?? [], [q.data]);
+  // sequence-wide lists name the step; the outcome lists (accepted, replied, interested, meetings) are not tied to one
+  const stepColumn = !nodeId && rows.some((r) => !!r.node_id);
+  // the chip / chart count names the total when the caller has it (counters can drift, so a full page still offers Next)
+  const total = counts?.[kind] != null ? Number(counts[kind]) : null;
+  const hasNext = rows.length === FAILED_PAGE;
   // the row RPC carries names only: the LinkedIn link and the pictures come from the leads and senders themselves
   const { workspace } = useWorkspace();
   const senders = useSenders(workspace?.id);
@@ -97,7 +113,7 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
   const copy = KIND_COPY[kind];
   const tabs = counts ? kinds.filter((k) => k === kind || Number(counts[k] ?? 0) > 0) : kinds;
 
-  useEffect(() => { setPage(0); setSelected(new Map()); setOutcome(null); }, [kind, nodeId, sequenceId]);
+  useEffect(() => { setPage(0); setSelected(new Map()); setOutcome(null); }, [kind, nodeId, sequenceId, range?.from, range?.to]);
 
   const pageIds = useMemo(() => rows.map((r) => r.enrollment_id), [rows]);
   const allOnPage = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
@@ -155,7 +171,7 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
         )}
       </div>
 
-      <p className="text-xs text-gray-500">{copy.hint}</p>
+      <p className="text-xs text-gray-500">{nodeId ? copy.hint : WIDE_HINT[kind] ?? copy.hint}</p>
 
       {outcome && outcome.result.refused.length > 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -174,7 +190,7 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
           <thead>
             <tr>
               {selectable && <Th className="w-8"><input type="checkbox" checked={allOnPage} onChange={togglePage} aria-label="Select all on this page" className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" /></Th>}
-              <Th>Lead</Th>{copy.detail && <Th>{copy.detail}</Th>}{!nodeId && <Th>Step</Th>}<Th>Sender</Th><Th>{copy.when}</Th>
+              <Th>Lead</Th>{copy.detail && <Th>{copy.detail}</Th>}{stepColumn && <Th>Step</Th>}<Th>Sender</Th><Th>{copy.when}</Th>
             </tr>
           </thead>
           <tbody>
@@ -202,13 +218,13 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
                   </Td>
                   {copy.detail && (
                     <Td>
-                      {kind === 'replied'
+                      {kind === 'replied' || kind === 'interested'
                         ? <span className="block text-gray-800 line-clamp-2 max-w-[280px]" title={r.reason ?? undefined}>{r.reason ?? <span className="text-gray-400">No text</span>}</span>
                         : <span className="block text-gray-800">{r.reason ?? '—'}</span>}
                       {kind === 'failed' && !r.recoverable && <Badge tone="gray" className="mt-0.5">Cannot be retried</Badge>}
                     </Td>
                   )}
-                  {!nodeId && <Td className="text-gray-600">{r.node_id ? nodeTitle(graph?.nodes[r.node_id]) : '—'}</Td>}
+                  {stepColumn && <Td className="text-gray-600">{r.node_id ? nodeTitle(graph?.nodes[r.node_id]) : '—'}</Td>}
                   <Td className="text-gray-600 whitespace-nowrap">
                     {(() => {
                       const s = senders.data?.find((x) => x.id === r.sender_id);
@@ -224,11 +240,11 @@ export function FailedLeadsPanel({ sequenceId, nodeId = null, kind, onKindChange
         </Table>
       )}
 
-      {(page > 0 || rows.length === FAILED_PAGE) && (
+      {(page > 0 || rows.length === FAILED_PAGE || (total !== null && total > FAILED_PAGE)) && rows.length > 0 && (
         <div className="flex items-center justify-end gap-2 text-xs text-gray-500">
-          <span className="tabular-nums">{fmtInt(page * FAILED_PAGE + 1)}–{fmtInt(page * FAILED_PAGE + rows.length)}</span>
+          <span className="tabular-nums">{fmtInt(page * FAILED_PAGE + 1)}–{fmtInt(page * FAILED_PAGE + rows.length)}{total !== null ? ` of ${fmtInt(total)}` : ''}</span>
           <Button size="sm" variant="secondary" disabled={page === 0 || q.isFetching} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label="Previous page"><ChevronLeft className="w-3.5 h-3.5" /></Button>
-          <Button size="sm" variant="secondary" disabled={rows.length < FAILED_PAGE || q.isFetching} onClick={() => setPage((p) => p + 1)} aria-label="Next page"><ChevronRight className="w-3.5 h-3.5" /></Button>
+          <Button size="sm" variant="secondary" disabled={!hasNext || q.isFetching} onClick={() => setPage((p) => p + 1)} aria-label="Next page"><ChevronRight className="w-3.5 h-3.5" /></Button>
         </div>
       )}
 

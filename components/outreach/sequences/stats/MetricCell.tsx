@@ -1,19 +1,18 @@
 'use client';
 
 // One result cell of the Sequences list (PRD §6.1 / §6.3). Every cell uses the same two slots so a column reads as a
-// column: the count (right-aligned) and the rate in a fixed-width slot beside it. "NA ⓘ" and the draft "—" sit in the
-// count slot, so they line up with the numbers above and below. "Pending" (Accepted only) is a quiet second line.
+// column: the count (right-aligned) and the rate in a fixed-width slot beside it. "NA" and the draft "—" start in the
+// count slot, so they line up with the numbers above and below; hovering NA says why. "Pending" (Accepted only) is a quiet second line.
 // Tooltips use the native `title` (the app restyles every title through GlobalTooltips).
 import React from 'react';
-import { Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { Rate } from '@/lib/outreach/reports';
 import { fmtInt, isSmallBase, SMALL_BASE_TIP } from '@/lib/outreach/sequenceStats';
 
 export function NotApplicable({ reason }: { reason: string }) {
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium text-gray-400 cursor-help" title={reason}>
-      NA <Info className="w-3.5 h-3.5" aria-hidden /><span className="sr-only">{reason}</span>
+    <span className="text-sm font-medium text-gray-400 cursor-help" title={reason}>
+      NA<span className="sr-only"> {reason}</span>
     </span>
   );
 }
@@ -45,6 +44,16 @@ export function MetricCell({ count, rate, denominator, pending, early, na, draft
 }) {
   const withRate = rate !== undefined;
   if (draft) return <Slots withRate={withRate} align={align} count={<Dash title="Not started" />} />;
+  // With a rate slot, "NA" starts where a one-digit count starts (a 1ch count slot it overflows to the right),
+  // so it lines up with the "0 —" / "1 50%" rows instead of sticking out to the left.
+  if (na && withRate) return (
+    <Slots
+      withRate
+      align={align}
+      title={na}
+      count={<span className="w-[1ch] text-sm font-semibold tabular-nums whitespace-nowrap"><NotApplicable reason={na} /></span>}
+    />
+  );
   if (na) return <Slots withRate={withRate} align={align} count={<NotApplicable reason={na} />} />;
 
   const small = withRate && isSmallBase(denominator);

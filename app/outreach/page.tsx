@@ -282,7 +282,7 @@ export default function OutreachDashboardPage() {
               </Card>
             </div>
             <div className="space-y-6">
-              <Card title="Last 7 days" actions={<Link href="/outreach/reports" className="text-xs text-indigo-600 hover:underline">Open reports</Link>}>
+              <Card title="Last 7 days" actions={<Link href="/outreach/analytics" className="text-xs text-indigo-600 hover:underline">Open analytics</Link>}>
                 <div className="grid grid-cols-2 gap-3">
                   {([
                     { metric: 'touches', label: 'Sent touches', value: fmtInt(w.touches), sub: `${fmtInt(w.invites)} invites` },

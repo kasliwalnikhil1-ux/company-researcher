@@ -20,6 +20,10 @@ const nextConfig = {
   env: {
     GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   },
+  // Reports was renamed Analytics: old bookmarks and links in emails already sent keep working (the query string is kept).
+  async redirects() {
+    return [{ source: '/outreach/reports', destination: '/outreach/analytics', permanent: true }];
+  },
   // The web chat widget runs on customers' sites, on every page view: its files must come from the browser's cache.
   // Later rules win for the same header, so the general rule comes first.
   async headers() {

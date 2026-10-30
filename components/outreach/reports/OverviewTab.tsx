@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { BarChart3 } from 'lucide-react';
 import { EmptyState, Table, Td, Th } from '@/components/outreach/ui';
+import { ChannelLogo } from '@/components/outreach/senders/ProviderLogo';
 import { countChange, csvFileName, downloadCsv, fmtDay, fmtInt, fmtRate, rateChange, useReportOverview, type DateRange, type OverviewReport, type SeriesPoint, type Totals } from '@/lib/outreach/reports';
 import { ChartSkeleton, ExportButton, KpiTile, MetricLabel, Refreshing, RetryError, Section, TilesSkeleton } from './primitives';
 import { SERIES, SeriesToggles, TimeSeriesChart, type SeriesKey } from './charts';
@@ -95,7 +96,7 @@ export default function OverviewTab({ ws, client, range }: TabProps) {
               </tr></thead>
               <tbody>{channelRows.map((c) => (
                 <tr key={c.key}>
-                  <Td className="font-medium text-gray-900">{c.label}</Td><Td className="text-right tabular-nums">{fmtInt(c.totals.touches)}</Td><Td className="text-right tabular-nums">{fmtInt(c.totals.invites)}</Td>
+                  <Td className="font-medium text-gray-900"><span className="inline-flex items-center gap-2 whitespace-nowrap"><ChannelLogo channel={c.key} />{c.label}</span></Td><Td className="text-right tabular-nums">{fmtInt(c.totals.touches)}</Td><Td className="text-right tabular-nums">{fmtInt(c.totals.invites)}</Td>
                   <Td className="text-right tabular-nums">{fmtInt(c.totals.accepted)}</Td><Td className="text-right tabular-nums">{fmtRate(c.totals.acceptance_rate)}</Td>
                   <Td className="text-right tabular-nums">{fmtInt(c.totals.replies)}</Td><Td className="text-right tabular-nums">{fmtRate(c.totals.reply_rate)}</Td>
                   <Td className="text-right tabular-nums">{fmtInt(c.totals.interested)}</Td><Td className="text-right tabular-nums">{fmtRate(c.totals.positive_reply_rate)}</Td>
