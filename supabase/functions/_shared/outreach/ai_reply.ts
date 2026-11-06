@@ -10,7 +10,7 @@ import { AI_LEAD_NOTES_SYSTEM, AI_COMPOSE_IMPROVE_SYSTEM, AI_COMPOSE_TRANSLATE_S
 import { deliverChatMessage } from "./reply.ts";
 import { classifyMessageById } from "./workers.ts";
 import { UnipileError } from "./unipile.ts";
-import { sendEmail, layout, button, esc, workspaceBranding, workspaceRecipients, emailConfigured } from "./notify.ts";
+import { sendEmail, layout, button, esc, workspaceBranding, workspaceRecipients, emailConfigured, type Branding } from "./notify.ts";
 import { sendHolderEmail, teamRecipients } from "./email.ts";
 import { computeSendAt, evaluateGates, floorPrecheck, minMode, nextWindowStart, parseCountry, validateDraft, factsOf, CLOSING, type Mode, type Schedule } from "./ai_reply_rules.ts";
 import {
@@ -745,6 +745,36 @@ async function notifyBreaker(it: Row): Promise<void> {
   }
 }
 
+/** Label on the left, count on the right, one line each. A zero is greyed so the eye lands on what happened. */
+function digestTable(rows: { label: string; hint?: string; n: unknown }[]): string {
+  const td = "padding:9px 0;border-bottom:1px solid #eee;font-size:14px;line-height:1.4;vertical-align:top";
+  return `<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;margin:4px 0 18px">${rows.map((r) => {
+    const v = Number(r.n ?? 0) || 0;
+    return `<tr><td style="${td}">${esc(r.label)}${r.hint ? `<div style="font-size:12px;color:#888">${esc(r.hint)}</div>` : ""}</td><td style="${td};text-align:right;white-space:nowrap;padding-left:16px;font-size:15px;font-weight:700;color:${v ? "#111" : "#bbb"}">${esc(v)}</td></tr>`;
+  }).join("")}</table>`;
+}
+
+/** The daily summary for owners and managers. Names match Settings → AI replies → Reports. */
+export function managerDigestHtml(w: Row, branding: Branding): string {
+  const counts = digestTable([
+    { label: "Sent on Auto", hint: "Replies the AI sent by itself", n: w.sent_ai },
+    { label: "AI drafts sent by your team", hint: "Drafts a teammate checked and sent", n: w.sent_draft },
+    { label: "Handed to a person", hint: "Replies the AI would not write", n: w.escalated },
+    { label: "Conversations handed off", hint: "The AI stopped replying; a person takes it from here", n: w.handed_off },
+    { label: "Cancelled", hint: "Replies a teammate stopped before they went out", n: w.cancelled },
+    { label: "No reply needed", hint: "Messages that did not need an answer", n: w.no_reply },
+  ]);
+  const why = (w.reasons ?? []).map((x: Row) => {
+    const text = REASON_TEXT[String(x.reason)] ?? String(x.reason ?? "other").replace(/_/g, " ");
+    return { label: text.charAt(0).toUpperCase() + text.slice(1), n: x.n };
+  });
+  const reasons = why.length ? `<p style="margin:0 0 2px;font-weight:600">Why replies were cancelled or handed to a person</p>${digestTable(why)}` : "";
+  const nDown = (w.downgrades ?? []).length;
+  const downs = nDown ? `<p style="margin:0 0 4px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px"><b>${nDown}</b> ${nDown === 1 ? "sequence was" : "sequences were"} switched back to Review.</p>` : "";
+  return layout("AI replies: last 24 hours",
+    `${counts}${reasons}${downs}<p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/activity?feature=reply`, "Open Activity", branding)}</p>`, branding, { audience: "team" });
+}
+
 async function sendManagerDigests(): Promise<number> {
   const rows = await rpc<Row[]>("ai_reply_digest_data", { p_kind: "manager", p_since: new Date(Date.now() - 24 * 3600_000).toISOString() });
   let n = 0;
@@ -752,11 +782,7 @@ async function sendManagerDigests(): Promise<number> {
     const to = await managerRecipients(w.workspace_id);
     if (!to.length) continue;
     const branding = await workspaceBranding(w.workspace_id);
-    const reasons = (w.reasons ?? []).map((x: Row) => `<li>${esc(String(x.reason ?? "other").replace(/_/g, " "))}: ${esc(x.n)}</li>`).join("");
-    const downs = (w.downgrades ?? []).length ? `<p><b>${(w.downgrades ?? []).length}</b> sequence(s) were switched back to Review.</p>` : "";
-    const html = layout("AI replies: last 24 hours",
-      `<p><b>${esc(w.sent_ai)}</b> sent on Auto · <b>${esc(w.sent_draft)}</b> AI drafts sent by your team · <b>${esc(w.handed_off ?? 0)}</b> handed off · <b>${esc(w.escalated)}</b> handed to a person · <b>${esc(w.cancelled)}</b> cancelled · <b>${esc(w.no_reply)}</b> needed no reply.</p>${reasons ? `<p>Why things were cancelled or handed over:</p><ul>${reasons}</ul>` : ""}${downs}
-       <p style="margin-top:18px">${button(`${WEB_ORIGIN}/outreach/ai/activity?feature=reply`, "Open Activity", branding)}</p>`, branding, { audience: "team" });
+    const html = managerDigestHtml(w, branding);
     for (const e of to) if (await sendEmail(e, "AI replies: daily summary", html, undefined, { branding, type: "manager_daily_digest", workspaceId: w.workspace_id, idempotencyKey: `manager_daily_digest:${w.workspace_id}:${new Date().toISOString().slice(0, 10)}:${e}` })) n++;
   }
   return n;
